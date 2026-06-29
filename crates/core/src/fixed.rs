@@ -173,6 +173,42 @@ impl Fixed {
     pub fn to_f64_lossy(self) -> f64 {
         self.0 as f64 / (1i64 << FRAC_BITS) as f64
     }
+
+    /// Sum the raw bits of a sequence in 128-bit space. Because the accumulation is
+    /// in `i128`, no intermediate grouping can overflow, so the result is identical
+    /// for any order or partition of the input, even when a prefix would overflow
+    /// `i64` while the total does not (audit C-05). This is the order-independent
+    /// reduction the determinism contract wants for a canonical sum over a large or
+    /// century-scale set; the `+` operator and the [`Sum`](core::iter::Sum) impl
+    /// panic on overflow by design and are for bounded quantities only.
+    #[inline]
+    pub fn sum_bits<I: IntoIterator<Item = Fixed>>(iter: I) -> i128 {
+        iter.into_iter().fold(0i128, |acc, x| acc + x.0 as i128)
+    }
+
+    /// Convert a 128-bit bit total back to `Fixed`, or `None` if it is out of range.
+    #[inline]
+    pub fn from_bits_i128(bits: i128) -> Option<Fixed> {
+        if bits < i64::MIN as i128 || bits > i64::MAX as i128 {
+            None
+        } else {
+            Some(Fixed(bits as i64))
+        }
+    }
+
+    /// Order-independent checked reduction: `None` if the total is out of range. The
+    /// result does not depend on how the input was partitioned across threads.
+    #[inline]
+    pub fn checked_sum<I: IntoIterator<Item = Fixed>>(iter: I) -> Option<Fixed> {
+        Fixed::from_bits_i128(Fixed::sum_bits(iter))
+    }
+
+    /// Order-independent saturating reduction, clamping the total into range.
+    #[inline]
+    pub fn saturating_sum<I: IntoIterator<Item = Fixed>>(iter: I) -> Fixed {
+        let bits = Fixed::sum_bits(iter).clamp(i64::MIN as i128, i64::MAX as i128);
+        Fixed(bits as i64)
+    }
 }
 
 impl Add for Fixed {
@@ -230,9 +266,13 @@ impl SubAssign for Fixed {
 }
 
 impl core::iter::Sum for Fixed {
-    /// A fixed-order fold. Because `Fixed` addition is exact and associative, the
-    /// total is independent of order, so a parallel partition that sums slices and
-    /// then sums the partials reproduces this result bit for bit.
+    /// A fixed-order fold over the `+` operator. Because `Fixed` addition is exact
+    /// and associative, the total is independent of order when every intermediate is
+    /// in range. It panics on overflow by design (fail-loud), and that panic is a
+    /// partial function of the grouping, so for a canonical reduction over a large
+    /// or century-scale set, where a prefix could overflow while the total does not,
+    /// use [`Fixed::sum_bits`] or [`Fixed::checked_sum`], which accumulate in 128-bit
+    /// space and are partition-independent (audit C-05).
     fn sum<I: Iterator<Item = Fixed>>(iter: I) -> Fixed {
         iter.fold(Fixed::ZERO, |a, b| a + b)
     }

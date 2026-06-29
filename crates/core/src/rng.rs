@@ -43,12 +43,37 @@ pub struct Rng {
 
 impl Rng {
     /// Derive a stream for one entity in one phase from the master seed.
+    ///
+    /// Observer-independence constraint: this is safe only when `id` is itself a
+    /// deterministic function of canonical, camera-independent coordinates, because
+    /// the whole stream is keyed on it. A [`StableId`] minted in allocation order
+    /// (the order entities happen to be promoted) is not such a coordinate: if the
+    /// camera or any view-time elaboration can influence promotion order, the stream
+    /// would change with it and the timeline would depend on the observer, which
+    /// Principle 10 forbids. When the keying coordinate is a tuple (seed, region,
+    /// canonical tick, triggering event, slot) rather than an allocation-order id,
+    /// use [`Rng::for_coords`] (design Part 11.2, Part 54).
     #[inline]
     pub fn for_entity(master_seed: u64, id: StableId, phase: u32) -> Self {
         let k = splitmix64(master_seed ^ id.0.rotate_left(17));
         Rng {
             key: splitmix64(k ^ ((phase as u64) << 1)),
         }
+    }
+
+    /// Derive a stream from an explicit, ordered list of canonical coordinates,
+    /// folded with the SplitMix64 finalizer. This is the observer-safe keying path:
+    /// when an entity's stream must be reproducible from its canonical coordinates
+    /// (master seed, region, tick, slot, and so on) rather than from an
+    /// allocation-order id, pass those coordinates here. The fold is order-sensitive,
+    /// so the coordinate tuple is part of the contract.
+    #[inline]
+    pub fn for_coords(master_seed: u64, coords: &[u64]) -> Self {
+        let mut key = splitmix64(master_seed);
+        for (i, &c) in coords.iter().enumerate() {
+            key = splitmix64(key ^ c.rotate_left((i as u32 % 63) + 1));
+        }
+        Rng { key }
     }
 
     /// Derive a stream from a raw key, for subsystems whose coordinate is not a
@@ -84,12 +109,14 @@ impl Rng {
         (((self.at(counter) as u128) * (n as u128)) >> 64) as u32
     }
 
-    /// A uniform integer in `[lo, hi)`. Panics if `lo >= hi`.
+    /// A uniform integer in `[lo, hi)`. Panics if `lo >= hi`. The addend is widened
+    /// to `i64` before the cast back, so a span wider than `i32::MAX` (for example
+    /// the full `i32` range) stays in bounds rather than overflowing.
     #[inline]
     pub fn range_i32(self, counter: u64, lo: i32, hi: i32) -> i32 {
         assert!(lo < hi, "empty range");
         let span = (hi as i64 - lo as i64) as u32;
-        lo + self.range_u32(counter, span) as i32
+        (lo as i64 + self.range_u32(counter, span) as i64) as i32
     }
 
     /// A fair coin.
@@ -103,6 +130,36 @@ impl Rng {
 mod tests {
     use super::*;
     use crate::id::StableId;
+
+    #[test]
+    fn range_i32_stays_in_bounds_over_a_wide_span() {
+        // Regression for the determinism audit C-02: a span wider than i32::MAX must
+        // not overflow the cast-and-add. The bounds below give a span of 4_000_000_000,
+        // beyond i32::MAX, which is exactly what overflowed the old narrow add.
+        let lo = -2_000_000_000;
+        let hi = 2_000_000_000;
+        let r = Rng::from_key(0x9999_AAAA);
+        for c in 0..20_000u64 {
+            let v = r.range_i32(c, lo, hi);
+            assert!(v >= lo && v < hi, "out of range: {v}");
+        }
+    }
+
+    #[test]
+    fn for_coords_is_deterministic_and_order_sensitive() {
+        // C-01 guardrail: a coordinate-keyed stream reproduces from its coordinates
+        // and depends on their order, so allocation order cannot leak in.
+        let a = Rng::for_coords(7, &[10, 20, 30]);
+        let b = Rng::for_coords(7, &[10, 20, 30]);
+        let c = Rng::for_coords(7, &[30, 20, 10]);
+        assert_eq!(a, b, "same coordinates reproduce the same stream");
+        assert_ne!(a, c, "reordered coordinates give a different stream");
+        assert_ne!(
+            a.at(0),
+            Rng::for_coords(8, &[10, 20, 30]).at(0),
+            "seed matters"
+        );
+    }
 
     #[test]
     fn draws_are_pure_functions_of_their_coordinate() {

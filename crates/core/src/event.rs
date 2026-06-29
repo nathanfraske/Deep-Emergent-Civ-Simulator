@@ -114,7 +114,13 @@ impl EventLog {
         let id = EventId(self.next);
         self.next += 1;
         e.id = id;
-        for s in e.referenced() {
+        // Index the event once per distinct entity it references. An entity that is
+        // both an actor and a subject (a self-directed act) must not be listed twice,
+        // or any multiplicity-based fold over history over-counts (audit C-09).
+        let mut refs: Vec<StableId> = e.referenced().collect();
+        refs.sort();
+        refs.dedup();
+        for s in refs {
             self.by_entity.entry(s).or_default().push(id);
         }
         self.events.push(e);
@@ -156,6 +162,20 @@ impl EventLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_directed_event_is_indexed_once() {
+        // Regression for the determinism audit C-09: when a StableId is both actor
+        // and subject, the provenance index must list the event once, not twice.
+        let mut log = EventLog::new();
+        log.append(Event::new(
+            1,
+            EventKindId(0),
+            vec![StableId(1)],
+            vec![StableId(1)],
+        ));
+        assert_eq!(log.history_of(StableId(1)).count(), 1);
+    }
 
     #[test]
     fn ids_are_dense_and_never_reused() {

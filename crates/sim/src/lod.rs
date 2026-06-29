@@ -118,6 +118,11 @@ impl TwoTierWorld {
     pub fn promote(&mut self, pool: PoolId, share: Fixed) -> StableId {
         let pi = self.pool_index(pool);
         assert!(self.pools[pi].count >= 1, "promoting from an empty pool");
+        assert!(share >= Fixed::ZERO, "a promoted share cannot be negative");
+        assert!(
+            self.pools[pi].wealth >= share,
+            "share exceeds the pool's wealth; the partition would go negative"
+        );
         self.pools[pi].count -= 1;
         self.pools[pi].wealth -= share;
 
@@ -150,35 +155,78 @@ impl TwoTierWorld {
         );
     }
 
-    /// Merge pool `b` into pool `a`, removing `b`. Conserves population and wealth.
+    /// Merge pool `b` into pool `a`, removing `b`. Conserves population and wealth,
+    /// and repoints any registry location that named `b` so a demoted entity's
+    /// reference does not dangle to a removed pool (audit C-06).
     pub fn merge_pools(&mut self, a: PoolId, b: PoolId) -> PoolId {
         let bi = self.pool_index(b);
         let moved = self.pools.remove(bi);
         let ai = self.pool_index(a);
         self.pools[ai].count += moved.count;
         self.pools[ai].wealth += moved.wealth;
+        self.reg.repoint_pool(b, a);
         a
     }
 
     /// Split a pool, moving `take_count` members and `take_wealth` into a new pool.
-    /// Conserves population and wealth.
+    /// Conserves population and wealth, and rejects a share that would drive the
+    /// source pool negative (audit C-07).
     pub fn split_pool(&mut self, src: PoolId, take_count: u32, take_wealth: Fixed) -> PoolId {
         let si = self.pool_index(src);
         assert!(
             self.pools[si].count >= take_count,
             "splitting more than the pool holds"
         );
+        assert!(
+            take_wealth >= Fixed::ZERO,
+            "a split share cannot be negative"
+        );
+        assert!(
+            self.pools[si].wealth >= take_wealth,
+            "split wealth exceeds the pool's wealth"
+        );
         self.pools[si].count -= take_count;
         self.pools[si].wealth -= take_wealth;
         self.add_pool(take_count, take_wealth)
     }
 
-    /// Whether every edge endpoint still resolves through the registry. A dangling
-    /// reference is the failure this guards against (design Part 58).
+    /// Partition a total into `n` exact integer shares (in fixed-point bits) with the
+    /// remainder assigned to the lowest-id share, the settled
+    /// `tier.partition_remainder_rule` (design Part 54). The shares sum to the total
+    /// exactly, so a partition conserves wealth bit for bit (audit C-07).
+    pub fn partition_lowest_id(total: Fixed, n: u32) -> Vec<Fixed> {
+        assert!(n >= 1, "cannot partition into zero shares");
+        let bits = total.to_bits();
+        let share = bits / n as i64;
+        let remainder = bits - share * n as i64;
+        (0..n)
+            .map(|i| {
+                let extra = if i == 0 { remainder } else { 0 };
+                Fixed::from_bits(share + extra)
+            })
+            .collect()
+    }
+
+    /// Whether the location named by a reference is still live: the id is tracked,
+    /// and a `Promoted` location has a matching individual while a `Pooled` location
+    /// names a pool that still exists. This is the strong form the weak
+    /// [`Registry::resolves`] does not provide (audit C-06).
+    fn location_valid(&self, id: StableId) -> bool {
+        match self.reg.locate(id) {
+            None => false,
+            Some(EntityLocation::Promoted(_)) => self.individuals.iter().any(|i| i.id == id),
+            Some(EntityLocation::Pooled { pool, .. }) => self.pools.iter().any(|p| p.id == pool),
+            Some(EntityLocation::Retired) => true,
+        }
+    }
+
+    /// Whether every edge endpoint still names a live location. A dangling reference,
+    /// including one to a pool removed by a merge, is the failure this guards against
+    /// (design Part 58).
     pub fn referential_integrity_ok(&self) -> bool {
         self.edges
             .iter()
-            .all(|(a, b)| self.reg.resolves(*a) && self.reg.resolves(*b))
+            .all(|(a, b)| self.location_valid(*a) && self.location_valid(*b))
     }
 }
 
@@ -191,6 +239,79 @@ impl Default for TwoTierWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic]
+    fn promote_beyond_pool_wealth_is_rejected() {
+        // Regression for the determinism audit C-07: a share larger than the pool
+        // holds would drive pool wealth negative and must be rejected.
+        let mut w = TwoTierWorld::new();
+        let p = w.add_pool(1, Fixed::from_int(1));
+        w.promote(p, Fixed::from_int(10_000));
+    }
+
+    #[test]
+    fn dangling_pool_location_is_detected() {
+        // Regression for the determinism audit C-06: a reference whose location
+        // names a pool that no longer exists must fail the integrity check, not pass
+        // merely because the id is still a key in the registry.
+        let mut w = TwoTierWorld::new();
+        let p = w.add_pool(1, Fixed::ZERO);
+        let x = w.promote(p, Fixed::ZERO);
+        w.add_edge(x, x);
+        w.reg.set_location(
+            x,
+            EntityLocation::Pooled {
+                pool: PoolId(999),
+                slot: 0,
+            },
+        );
+        assert!(
+            !w.referential_integrity_ok(),
+            "a Pooled reference to a non-existent pool must be caught"
+        );
+    }
+
+    #[test]
+    fn merge_repoints_pooled_locations_and_keeps_integrity() {
+        // C-06 green: after a merge, an edge to an entity demoted into the removed
+        // pool stays valid because its location is repointed to the survivor.
+        let mut w = TwoTierWorld::new();
+        let a = w.add_pool(1, Fixed::from_int(10));
+        let b = w.add_pool(1, Fixed::from_int(10));
+        let x = w.promote(b, Fixed::from_int(5));
+        w.demote(x, b);
+        let other = w.add_pool(1, Fixed::from_int(10));
+        let y = w.promote(other, Fixed::ZERO);
+        w.add_edge(y, x);
+
+        w.merge_pools(a, b);
+        assert!(
+            matches!(w.reg.locate(x), Some(EntityLocation::Pooled { pool, .. }) if pool == a),
+            "the demoted entity's location follows the merge"
+        );
+        assert!(
+            w.referential_integrity_ok(),
+            "no reference dangles after the merge"
+        );
+    }
+
+    #[test]
+    fn partition_lowest_id_is_exact_and_conserves() {
+        // C-07 green: the remainder goes to the lowest id and the shares sum exactly.
+        let shares = TwoTierWorld::partition_lowest_id(Fixed::from_int(10), 3);
+        assert_eq!(shares.len(), 3);
+        let total_bits: i128 = Fixed::sum_bits(shares.iter().copied());
+        assert_eq!(
+            total_bits,
+            Fixed::from_int(10).to_bits() as i128,
+            "shares sum to the total"
+        );
+        assert!(
+            shares[0] >= shares[1] && shares[1] == shares[2],
+            "remainder lands on the lowest id"
+        );
+    }
 
     #[test]
     fn promote_then_demote_conserves_locally() {

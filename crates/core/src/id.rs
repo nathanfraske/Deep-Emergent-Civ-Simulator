@@ -90,10 +90,26 @@ impl Registry {
         self.locations.get(&id).copied()
     }
 
-    /// Whether an id resolves to any recorded location. A reference is dangling
-    /// only if this returns false (the referencing-integrity invariant of Part 58).
+    /// Whether an id resolves to any recorded location. This is the weak form: it
+    /// confirms the id is tracked, not that the location it names is still live. A
+    /// two-tier subsystem that merges or removes pools should also check that a
+    /// `Pooled` location names a pool that still exists (see the two-tier world's
+    /// liveness check); use [`Registry::repoint_pool`] to keep such locations valid.
     pub fn resolves(&self, id: StableId) -> bool {
         self.locations.contains_key(&id)
+    }
+
+    /// Repoint every `Pooled` location from one pool to another, used when pools
+    /// merge so that a demoted entity's location does not name a pool that has been
+    /// removed (the referential-integrity invariant of Part 58).
+    pub fn repoint_pool(&mut self, from: PoolId, to: PoolId) {
+        for loc in self.locations.values_mut() {
+            if let EntityLocation::Pooled { pool, .. } = loc {
+                if *pool == from {
+                    *pool = to;
+                }
+            }
+        }
     }
 
     /// Number of ids the registry is tracking.

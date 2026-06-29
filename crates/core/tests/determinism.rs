@@ -137,4 +137,41 @@ fn parallel_fixed_reduction_matches_sequential() {
         sequential, parallel,
         "parallel partition changed the canonical sum"
     );
+
+    // The same reduction via the partition-safe primitive: partials in 128-bit bits,
+    // combined in 128-bit bits, must equal the sequential bit total exactly.
+    let seq_bits = Fixed::sum_bits(values.iter().copied());
+    let par_bits: i128 = values
+        .chunks(chunk)
+        .map(|sl| Fixed::sum_bits(sl.iter().copied()))
+        .sum();
+    assert_eq!(seq_bits, par_bits, "sum_bits is partition-independent");
+}
+
+#[test]
+fn order_independent_reduction_survives_intermediate_overflow() {
+    // Regression for the determinism audit C-05: a multiset whose total is in range
+    // but whose prefix is not. The naive Sum panics on the (ZERO + MAX) + 10 prefix
+    // (overflow checks are on in both profiles for this repo), and whether that path
+    // runs depends on the chunking, so it is a partition-dependent divergence.
+    // Fixed::sum_bits accumulates in i128 and is identical for any order or grouping.
+    let xs = [
+        Fixed::from_bits(i64::MAX),
+        Fixed::from_bits(10),
+        Fixed::from_bits(-10),
+    ];
+    let mut rev = xs;
+    rev.reverse();
+
+    let a = Fixed::sum_bits(xs);
+    let b = Fixed::sum_bits(rev);
+    let partitioned = Fixed::sum_bits([xs[0]]) + Fixed::sum_bits([xs[1], xs[2]]);
+    assert_eq!(a, b, "order does not change the bit total");
+    assert_eq!(a, partitioned, "grouping does not change the bit total");
+    assert_eq!(a, i64::MAX as i128, "the total is exactly i64::MAX bits");
+    assert_eq!(Fixed::from_bits_i128(a), Some(Fixed::from_bits(i64::MAX)));
+
+    // Demonstrate that the naive operator fold is the unsafe path on this input.
+    let naive = std::panic::catch_unwind(|| xs.iter().copied().sum::<Fixed>());
+    assert!(naive.is_err(), "naive Sum overflows on the bad prefix");
 }

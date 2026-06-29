@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: Determinism red/green audit and bedrock remediation
+
+**What was done.** Ran a fan-out red and green team audit of the determinism, reproducibility, conservation, referential integrity, and observer independence invariants across fifteen documented subsystems, as a background workflow (thirty-one agents). Each subsystem had a red agent construct concrete divergence or leak scenarios and a green agent adversarially verify each against the actual spec and code, then add what red missed. The consolidated report is in `audits/determinism-redteam-2026-06-29.md`. It returned ten confirmed findings, ten design-level gaps, and seven soundly defended attacks.
+
+**Confirmed bedrock defects, reproduced then fixed (red to green).** Each got a failing regression test first, then a fix. C-02: `Rng::range_i32` overflowed on a span wider than `i32::MAX`; the addend is now widened to `i64`. C-03: `quantize_unit` rounded the unit count then truncated the final division, contradicting its round-half-to-even contract; it now rounds the final placement half-to-even through a new integer helper. C-09: the event log double-indexed an id that was both actor and subject; `append` now deduplicates referenced ids. C-05 and C-04: a parallel `Fixed` reduction could panic in one chunking and succeed in another at an intermediate overflow; added `Fixed::sum_bits`, `checked_sum`, and `saturating_sum`, which accumulate in 128-bit space and are partition-independent, with the `+` operator and `Sum` documented as fail-loud and for bounded quantities, and the determinism harness extended with a near-overflow associativity case. C-06: merge and split left `Pooled` registry locations stale; `merge_pools` now repoints them through a new `Registry::repoint_pool`, and `referential_integrity_ok` checks location liveness rather than mere key presence. C-07: promote and split accepted arbitrary shares; they now reject negative or over-budget shares, and a `partition_lowest_id` helper implements the settled lowest-id remainder rule exactly.
+
+**Guardrail added.** C-01 (the most severe finding): an entity stream keyed on an allocation-order `StableId` would make promotion order, which the camera can influence, change canonical ids and the state hash, breaking observer independence. Added `Rng::for_coords` (an observer-safe coordinate-keyed stream) and documented the constraint on `Rng::for_entity`. The deeper fix, minting canonical ids from camera-independent coordinates, is design-level and surfaced for the owner.
+
+**Surfaced for the owner, not changed.** The design-level findings stay the owner's call: C-08 (stale camera-drives-promotion text in Parts 11.2 and 14.5 contradicting the governing Part 54), C-10 (EventId as a dense storage index versus Part 7.3 truncation), and ten proposed research flags from the gaps (canonical-walk ordering, command ordering, GPU bit-identity pinning, RNG coordinate keying, conserved-projection registration, reduction ordering, save schema versioning, harness coverage, the unit system, and language determinism). None were written into the maintained documents.
+
+**Where it stopped.** The full suite passes (sixty-seven tests plus the ignored Stage-14 steering placeholder), `cargo fmt` and `cargo clippy -D warnings` are clean, and the document verification stays clean. The maintained documents are unchanged, so the resolved and open counts hold.
+
+**Queued next.** The owner decides whether to apply the design-level findings: reconcile the stale promotion text against Part 54, resolve the EventId contradiction, and open any of the ten proposed research flags (which would edit `docs/audit.md` and `docs/design.md` and move the counts).
+
+---
+
 ## 2026-06-29: Repository standup from THE_BOOK
 
 **What was done.** Stood the project up as a buildable repository per the runbook. THE_BOOK.md was unbound into its parts with no change to content: the design document into `docs/design.md` (Parts 0 through 63), the audit and remediation log into `docs/audit.md`, and the eight standalone research papers into `docs/research/` verbatim, em dashes intact. The five memory and manual files (`CLAUDE.md`, `HANDOFFS.md`, `TODOS.md`, `AGENTIC_ADDENDUM.md`, `RUNBOOK.md`) are at the repository root. The Apache license was already present; added `NOTICE`, `README.md`, `.gitignore`, the Cargo workspace, and the pinned `rust-toolchain.toml`.

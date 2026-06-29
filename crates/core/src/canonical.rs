@@ -83,11 +83,31 @@ impl<T: Canonical> CanonicalCell<T> {
 /// (design Part 3.4).
 #[inline]
 pub fn quantize_unit(value: f64, units_per_one: i64) -> Fixed {
-    let scaled = (value * units_per_one as f64).round_ties_even();
-    // value * units_per_one is a count of fractional units; place it in the
-    // Q32.32 fractional field by dividing by units_per_one in fixed-point.
-    let bits = (scaled as i128 * (1i128 << FRAC_BITS)) / units_per_one as i128;
+    debug_assert!(units_per_one > 0, "units_per_one must be positive");
+    // Snap to the 1/units_per_one grid, then place that grid point into the Q32.32
+    // fractional field. Both steps round half-to-even, so the crossing honours its
+    // documented rounding rather than truncating toward zero (audit C-03).
+    let units = (value * units_per_one as f64).round_ties_even() as i128;
+    let bits = idiv_round_half_even(units << FRAC_BITS, units_per_one as i128);
     Fixed::from_bits(bits as i64)
+}
+
+/// Integer division rounded to nearest, ties to even, for a positive divisor.
+#[inline]
+fn idiv_round_half_even(num: i128, den: i128) -> i128 {
+    debug_assert!(den > 0);
+    let q = num.div_euclid(den); // floor toward negative infinity
+    let r = num.rem_euclid(den); // 0 <= r < den
+    let twice = r * 2;
+    if twice < den {
+        q
+    } else if twice > den {
+        q + 1
+    } else if q % 2 == 0 {
+        q
+    } else {
+        q + 1
+    }
 }
 
 /// The Part 3.4 example: a non-authoritative water depth in metres becomes
@@ -124,6 +144,15 @@ mod tests {
         for _ in 0..1000 {
             assert_eq!(quantize_depth_mm(3.5), 3500);
         }
+    }
+
+    #[test]
+    fn quantize_unit_rounds_half_to_even_not_toward_zero() {
+        // Regression for the determinism audit C-03: the final placement into the
+        // Q32.32 grid must round half-to-even, not truncate toward zero. The nearest
+        // Q32.32 bit to two thirds is 2_863_311_531; the truncating form gave
+        // 2_863_311_530.
+        assert_eq!(quantize_unit(2.0 / 3.0, 3).to_bits(), 2_863_311_531);
     }
 
     #[test]
