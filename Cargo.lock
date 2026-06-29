@@ -16,6 +16,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "civsim-units"
+version = "0.1.0"
+dependencies = [
+ "civsim-core",
+ "serde",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -36,10 +36,12 @@
 
 pub mod calibration;
 pub mod conservation;
+pub mod evidence;
 pub mod lod;
 pub mod substrate;
 
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
+pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use substrate::Substrate;
