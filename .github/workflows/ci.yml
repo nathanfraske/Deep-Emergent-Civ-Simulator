@@ -1,0 +1,48 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+#
+# Continuous integration: the verification suite on the documents and the full
+# Rust build, format, lint, and test on the engine. Both gate every push and pull
+# request (runbook section 1c).
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify-docs:
+    name: documents and prose customs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verification suite
+        run: bash scripts/verify.sh
+      - name: Standing reserved-values review queue
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          data = tomllib.load(open("calibration/reserved.toml", "rb"))
+          reserved = [
+              e for e in data.get("reserved", [])
+              if not (e.get("status") == "set" and str(e.get("value", "")).strip())
+          ]
+          print(f"{len(reserved)} reserved value(s) awaiting the owner's calibration:")
+          for e in reserved:
+              print(f"  - {e['id']}: {e['basis']}")
+          PY
+
+  rust:
+    name: build, format, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace

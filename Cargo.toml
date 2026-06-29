@@ -1,0 +1,20 @@
+# Workspace root. The crate split follows RUNBOOK section 1a: a determinism core
+# that is buildable and fully testable now, and a simulation crate built in
+# staged dependency order. The wider crate decomposition of design Part 59 is the
+# eventual target; the standup begins with these two.
+[workspace]
+members = ["crates/core", "crates/sim"]
+resolver = "2"
+
+[workspace.package]
+authors = ["Nathan M. Fraske"]
+license = "Apache-2.0"
+edition = "2021"
+version = "0.1.0"
+repository = "https://github.com/nathanfraske/deep-emergent-civ-simulator"
+rust-version = "1.94"
+
+[profile.release]
+# Determinism does not depend on optimization level, but reproducible release
+# builds are wanted; keep codegen settings explicit rather than implicit.
+overflow-checks = true

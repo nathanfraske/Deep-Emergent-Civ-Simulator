@@ -1,0 +1,6 @@
+# Pinned toolchain so builds are reproducible across machines, which matters for
+# a project whose whole premise is determinism (RUNBOOK section 1b).
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

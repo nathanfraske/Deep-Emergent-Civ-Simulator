@@ -1,0 +1,18 @@
+[package]
+name = "civsim-core"
+description = "Determinism bedrock for the Emergent Civilization Simulator: fixed-point math, counter-based RNG, stable ids, arenas, the event log, and the typed canonical-state boundary."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# The bedrock has no external dependencies on purpose. The determinism contract
+# is strongest when the foundation depends on nothing that could change a numeric
+# result across versions or platforms. std::thread carries the multi-thread
+# determinism harness, so no parallelism crate is needed here either.
+[dependencies]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"

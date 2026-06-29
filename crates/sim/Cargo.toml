@@ -1,0 +1,17 @@
+[package]
+name = "civsim-sim"
+description = "Staged simulation layer for the Emergent Civilization Simulator: the calibration manifest, the conserved-projection registry, the two-tier LOD model, and the substrate loaders. Behaviour gated on reserved values is held until the owner sets the numbers."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+# serde and toml are mature, stable crates (not the fast-moving GPU/ECS stack of
+# design Part 61), used only to parse the calibration manifest and the data-driven
+# substrate definitions. No floating point reaches canonical state through them.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

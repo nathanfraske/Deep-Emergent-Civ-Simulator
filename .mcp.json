@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${CLAUDE_PROJECT_DIR}"]
+    },
+    "projectops": {
+      "command": "python3",
+      "args": ["${CLAUDE_PROJECT_DIR}/tools/projectops_server.py"],
+      "env": { "REPO_ROOT": "${CLAUDE_PROJECT_DIR}" }
+    }
+  }
+}
