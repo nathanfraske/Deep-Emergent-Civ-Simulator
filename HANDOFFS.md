@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: Applied the design-level audit findings (owner-approved)
+
+**What was done.** On the owner's direction, the three design-level outcomes of the determinism audit were written into the maintained documents. C-08: the stale camera-drives-promotion text in Parts 6.2, 11.2, and 14.5 was reconciled to the governing Part 54 and the already-corrected Principles 6 and 10, so canonical promotion is significance-driven and a zoom requests a non-authoritative elaboration that never writes back. C-10: the EventId-dense-index versus Part 7.3 truncation conflict was recorded as Inconsistency 6 in the audit and noted at the Part 7.3 site. Ten determinism and reproducibility research flags were opened following the flagging workflow: a `> Needs research` blockquote at each site (R-RNG-COORD at 3.2, R-CANON-WALK and R-HARNESS-COVER at 3.5, R-CMD-ORDER at 4.3, R-GPU-CANON-PIN at 5.4, R-SAVE-SCHEMA at 7.3, R-LANG-DET at 33, R-UNITS-PIN at 55, R-REDUCE-ORDER at 57, R-PROJ-REGISTER at 58), a new Section 3 backlog subsection with ten counted bullets, and updates to audit Section 2, Section 7, and the Limitation note. TODOS gained the ten items and Inconsistency 6.
+
+**Counts.** Fourteen resolved, twenty-eight open (eighteen plus the ten new flags). The audit backlog grep reports twenty-eight. No item was resolved; these are new open flags, so the resolved count holds.
+
+**Verification.** The suite is clean: zero em dashes, zero banned adverbs, sixty-four gapless parts, balanced fences, records sequential, backlog count twenty-eight. The Rust workspace is untouched and still green.
+
+**Where it stopped.** The maintained documents now carry the audit's design-level outcomes. Ready to open the pull request for the standup, the audit, the bedrock remediation, and these design edits.
+
+**Queued next.** Owner sets the order on the ten new determinism-hardening items; they are best taken as the determinism, scheduling, and level-of-detail foundations are built. Inconsistency 6 is reconciled before event compaction is implemented.
+
+---
+
 ## 2026-06-29: Determinism red/green audit and bedrock remediation
 
 **What was done.** Ran a fan-out red and green team audit of the determinism, reproducibility, conservation, referential integrity, and observer independence invariants across fifteen documented subsystems, as a background workflow (thirty-one agents). Each subsystem had a red agent construct concrete divergence or leak scenarios and a green agent adversarially verify each against the actual spec and code, then add what red missed. The consolidated report is in `audits/determinism-redteam-2026-06-29.md`. It returned ten confirmed findings, ten design-level gaps, and seven soundly defended attacks.
