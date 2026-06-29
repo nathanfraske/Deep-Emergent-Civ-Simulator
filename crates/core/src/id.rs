@@ -22,6 +22,7 @@
 //! [`EntityHandle`], `hecs::Entity` in the full build) is fast but unstable across
 //! promotion and not suitable for serialization. The [`Registry`] bridges them.
 
+use crate::hash::StateHasher;
 use std::collections::HashMap;
 
 /// A process-wide, monotonically assigned id that names a conceptual entity (a
@@ -37,11 +38,11 @@ pub struct PoolId(pub u32);
 /// A live entity handle in the ECS. In the full build this is `hecs::Entity`; the
 /// bedrock keeps an opaque handle so the registry and the identity rules can be
 /// built and tested before the ECS crate is wired in.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct EntityHandle(pub u64);
 
 /// Where a [`StableId`] currently lives (design Part 2.1).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum EntityLocation {
     /// Currently a full ECS entity.
     Promoted(EntityHandle),
@@ -121,11 +122,121 @@ impl Registry {
     pub fn next_raw(&self) -> u64 {
         self.next_id
     }
+
+    /// Every tracked id and its location, in ascending `StableId` order. This is
+    /// the canonical-walk accessor: it is the only sanctioned way to iterate the
+    /// registry for a hash or a canonical fold, because the backing map's own
+    /// iteration order is a determinism trap (design Part 3.5, R-CANON-WALK).
+    pub fn entries_sorted(&self) -> Vec<(StableId, EntityLocation)> {
+        let mut v: Vec<(StableId, EntityLocation)> =
+            self.locations.iter().map(|(k, v)| (*k, *v)).collect();
+        v.sort_by_key(|(id, _)| *id);
+        v
+    }
+
+    /// Fold the registry into a state hash in canonical order: the high-water mark
+    /// first (so a reload that restores it cannot reuse an id), then each id and
+    /// location in ascending id order.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        h.write_u64(self.next_id);
+        for (id, loc) in self.entries_sorted() {
+            h.write_stable(id);
+            loc.hash_into(h);
+        }
+    }
+
+    /// Rebuild a registry from a snapshot, restoring the id high-water mark
+    /// authoritatively rather than inferring it from the live entries, so a reload
+    /// never reuses an id (the save half of the Part 58 foundation, R-SAVE-SCHEMA).
+    pub fn restore(
+        next_id: u64,
+        entries: impl IntoIterator<Item = (StableId, EntityLocation)>,
+    ) -> Self {
+        let mut locations = HashMap::new();
+        for (id, loc) in entries {
+            locations.insert(id, loc);
+        }
+        Registry { next_id, locations }
+    }
+}
+
+impl EntityLocation {
+    /// Fold a location into a state hash deterministically (a discriminant then the
+    /// fields), so a location participates in the canonical walk.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        match self {
+            EntityLocation::Promoted(handle) => {
+                h.write_u32(0);
+                h.write_u64(handle.0);
+            }
+            EntityLocation::Pooled { pool, slot } => {
+                h.write_u32(1);
+                h.write_u32(pool.0);
+                h.write_u32(*slot);
+            }
+            EntityLocation::Retired => {
+                h.write_u32(2);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::StateHasher;
+
+    #[test]
+    fn canonical_walk_is_insertion_order_independent() {
+        // R-CANON-WALK: the registry hash must not depend on the order locations
+        // were inserted, only on the sorted id order.
+        let entries = [
+            (StableId(2), EntityLocation::Promoted(EntityHandle(20))),
+            (
+                StableId(0),
+                EntityLocation::Pooled {
+                    pool: PoolId(1),
+                    slot: 3,
+                },
+            ),
+            (StableId(5), EntityLocation::Retired),
+            (StableId(1), EntityLocation::Promoted(EntityHandle(7))),
+        ];
+        let mut a = Registry::new();
+        for (id, loc) in entries {
+            a.set_location(id, loc);
+        }
+        let mut b = Registry::new();
+        for (id, loc) in entries.iter().rev() {
+            b.set_location(*id, *loc);
+        }
+        // entries_sorted is identical regardless of insertion order.
+        assert_eq!(a.entries_sorted(), b.entries_sorted());
+        // and so is the canonical hash (next_id matches here, both 0).
+        let mut ha = StateHasher::new();
+        a.hash_into(&mut ha);
+        let mut hb = StateHasher::new();
+        b.hash_into(&mut hb);
+        assert_eq!(ha.finish(), hb.finish());
+    }
+
+    #[test]
+    fn restore_carries_the_high_water_mark() {
+        // R-SAVE-SCHEMA: a restored registry keeps the next-id high-water mark, so a
+        // reload never reuses an id even when fewer ids are live than were minted.
+        let mut reg = Registry::new();
+        let _a = reg.mint();
+        let b = reg.mint();
+        let _c = reg.mint(); // next_id is now 3
+        reg.set_location(b, EntityLocation::Retired);
+
+        let restored = Registry::restore(reg.next_raw(), reg.entries_sorted());
+        let next = {
+            let mut r = restored;
+            r.mint()
+        };
+        assert_eq!(next, StableId(3), "restore preserves the high-water mark");
+    }
 
     #[test]
     fn ids_are_monotonic_and_unique() {
