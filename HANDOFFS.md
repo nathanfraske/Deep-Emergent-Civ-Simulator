@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: North-star R-DEEPTECH cluster red/green audit
+
+**What was done.** On the merged standup, ran a second fan-out audit (27 agents) across the four open R-DEEPTECH sub-questions (science, the discoverable physics substrate, emergent depth, deep-time scale), the composition non-templatedness proof, and the cross-disciplinary fields, attacking the two owner-named fears: that open-ended emergence quietly becomes authored, and that determinism fails at deep-time scale. The owner-supplied physics substrate guide is preserved at `docs/working/PHYSICS_SUBSTRATE_GUIDE.md` and was the grounding for the physics dimensions. The report is `audits/deeptech-northstar-2026-06-29.md`. Work is on branch `claude/deeptech-cluster-audit`, not merged.
+
+**Headline verdict.** All five areas are partly-reachable. The lower half of the climb (composition plus the cultural ratchet plus a small physics floor, giving functional convergence and divergence on simple-to-moderate artifacts) is reachable now on well-supported literature; the upper half (the emergent deterministic climb to the modern and far-future tier) is unsolved, bounded above all by emergent science (almost no precedent) sitting on an unsolved open-ended-evolution substrate and a physics substrate whose completeness is an asymmetric-risk authoring problem.
+
+**The two fears.** Both survive only with stated fixes at high residual risk. The deepest structural finding on Fear 1: the convergence audit's metric and the authored physics share one coordinate basis, so a steering leak inside the physics reads as physics-forced; the non-templatedness proof is a necessary screen, not a sufficiency proof, and certifies only artifact technologies. On Fear 2: content-addressing amplifies any one residual nondeterminism into an irreversible fork, the lift/restrict pair must commute on the composition-graph adjacency which has no sufficient statistic (the linkage-disequilibrium loss of Part 25), and a named non-associative combine sits unpinned on the resolved spine. The Fear 2 fixes map onto the determinism-hardening flags the prior audit already opened (R-REDUCE-ORDER, R-PROJ-REGISTER, R-UNITS-PIN, R-RNG-COORD, R-CANON-WALK, R-HARNESS-COVER), an independent corroboration.
+
+**Surfaced, not changed.** Twenty-one reserved owner decisions (each with a basis, no fabricated value, the physics catalogue not authored), thirteen claims-to-verify against primary sources, and thirteen recommendations. The maintained design and audit documents are unchanged; these are open research items and their resolution is the owner's call.
+
+**Where it stopped.** The report is committed and pushed to `claude/deeptech-cluster-audit`. No design-doc edits made.
+
+**Queued next.** Owner decides whether to sharpen the four R-DEEPTECH flag blockquotes and the non-templatedness test in the design with these sub-findings, queue the twenty-one reserved decisions, verify the thirteen claims, or hold the report as the record. The two cross-cutting recommendations most worth early action: lift the convergence audit from in-space clustering to a basis-independence and law-form-competition test, and resolve the upside-down depth audit discriminator.
+
+---
+
 ## 2026-06-29: Applied the design-level audit findings (owner-approved)
 
 **What was done.** On the owner's direction, the three design-level outcomes of the determinism audit were written into the maintained documents. C-08: the stale camera-drives-promotion text in Parts 6.2, 11.2, and 14.5 was reconciled to the governing Part 54 and the already-corrected Principles 6 and 10, so canonical promotion is significance-driven and a zoom requests a non-authoritative elaboration that never writes back. C-10: the EventId-dense-index versus Part 7.3 truncation conflict was recorded as Inconsistency 6 in the audit and noted at the Part 7.3 site. Ten determinism and reproducibility research flags were opened following the flagging workflow: a `> Needs research` blockquote at each site (R-RNG-COORD at 3.2, R-CANON-WALK and R-HARNESS-COVER at 3.5, R-CMD-ORDER at 4.3, R-GPU-CANON-PIN at 5.4, R-SAVE-SCHEMA at 7.3, R-LANG-DET at 33, R-UNITS-PIN at 55, R-REDUCE-ORDER at 57, R-PROJ-REGISTER at 58), a new Section 3 backlog subsection with ten counted bullets, and updates to audit Section 2, Section 7, and the Limitation note. TODOS gained the ten items and Inconsistency 6.
