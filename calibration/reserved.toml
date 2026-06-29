@@ -1,0 +1,436 @@
+# Calibration manifest (RUNBOOK section 4; design Principle 11).
+#
+# Every reserved value the resolved mechanisms need is one entry here, surfaced
+# from the design document rather than invented. A mechanism is fixed Rust; these
+# numbers are the owner's to set. While status = "reserved" the loader treats the
+# entry as a fail-loud sentinel: any system that reads it unset errors rather than
+# running on a fabricated default (crates/sim/src/calibration.rs).
+#
+# Each `basis` is copied from the matching "Decided and reserved" blockquote in
+# docs/design.md, condensed, so the manifest and the document say the same thing.
+# `source` points back to the mechanism so a reviewer can read the full context.
+#
+# This seeds the review queue for the nine resolved systems. More entries are added
+# as later systems are built and reach the numbers they need (RUNBOOK section 3,
+# step 6). No value here is decided by the agent; graduation to status = "set" is
+# the owner's, through the reserved-values panel.
+
+# --- R-EVIDENCE: belief formation from the world (Part 9, record 62.6) ---
+
+[[reserved]]
+id = "evidence.implication_weights"
+basis = "the weight-of-evidence of each observation type; a fresh corpse far heavier than a stale stain"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.commit_threshold"
+basis = "the intended balance of false conclusions against cold cases"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.runner_up_margin"
+basis = "the best-and-clearly-better margin separating a commit from an unknown"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.log_odds_clamp"
+basis = "the maximum admissible certainty"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.trace_decay_curves"
+basis = "real decay and fading timescales at the tick rate"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.absence_windows"
+basis = "the spread of death-in-absentia waiting periods mapped onto the prominence axis, scaled by visibility"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.concealment_suppression"
+basis = "the suppression factor on trace perceptibility, with its skill and time costs"
+status = "reserved"
+value = ""
+unit = "ratio"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.aggregate_diffusion_rate"
+basis = "the delayed knowledge-diffusion rate at the aggregate tier"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+[[reserved]]
+id = "evidence.knowledge_to_strength"
+basis = "the mapping from a pool knowledge level to a promoted mind belief strength"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 9 evidence engine; record 62.6; audit section 1f"
+
+# --- R-BEING-REP: personality representation (Part 20, record 62.2) ---
+
+[[reserved]]
+id = "being.heritable_fraction"
+basis = "the per-axis heritable fraction; the literature centres near one half but must not be fabricated into a constant"
+status = "reserved"
+value = ""
+unit = "fraction"
+source = "Part 20 being model; record 62.2; audit section 1a"
+
+[[reserved]]
+id = "being.plasticity_by_age"
+basis = "the plasticity-by-age curve so cumulative drift and rising rank-order stability match the Part 62.2 targets"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 20 being model; record 62.2; audit section 1a"
+
+[[reserved]]
+id = "being.maturity_targets"
+basis = "the maturity-target directions and magnitudes"
+status = "reserved"
+value = ""
+unit = "axis_units"
+source = "Part 20 being model; record 62.2; audit section 1a"
+
+[[reserved]]
+id = "being.life_event_impulse"
+basis = "the life-event impulse and self-change burst sizes"
+status = "reserved"
+value = ""
+unit = "axis_units"
+source = "Part 20 being model; record 62.2; audit section 1a"
+
+# --- R-VALUE-METRIC: value distance (Part 21, record 62.3) ---
+
+[[reserved]]
+id = "value_metric.axis_relationship_weights"
+basis = "the default compatibility and opposition weights on the axis relationships"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+[[reserved]]
+id = "value_metric.conflict_coefficient"
+basis = "the coefficient mapping value distance to conflict pressure"
+status = "reserved"
+value = ""
+unit = "coefficient"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+[[reserved]]
+id = "value_metric.enculturation_pull_rate"
+basis = "the enculturation pull rate, and whether the pull follows the geodesic or a straight line"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+[[reserved]]
+id = "value_metric.incommensurability_floor"
+basis = "the cross-race incommensurability floor"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+[[reserved]]
+id = "value_metric.etic_substrate_axes"
+basis = "the membership of the etic substrate axes themselves"
+status = "reserved"
+value = ""
+unit = "set"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+# --- R-GENOME: genetics and deep-time evolution (Part 25, record 62.5) ---
+
+[[reserved]]
+id = "genome.narrow_sense_heritability"
+basis = "the per-channel narrow-sense heritability; Part 20 already centres it near one half"
+status = "reserved"
+value = ""
+unit = "fraction"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+[[reserved]]
+id = "genome.loci_per_channel"
+basis = "the loci-per-channel counts"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+[[reserved]]
+id = "genome.mutation_rates"
+basis = "the point- and structural-mutation rates and the mutation step-size distribution"
+status = "reserved"
+value = ""
+unit = "per_locus_per_generation"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+[[reserved]]
+id = "genome.effective_population_size"
+basis = "the effective population size per pool"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+[[reserved]]
+id = "genome.speciation_thresholds"
+basis = "the speciation distance and incompatibility-count thresholds"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+[[reserved]]
+id = "genome.fertility_curve"
+basis = "the genetic-distance-to-fertility curve"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 25 genome model; record 62.5; audit section 1d"
+
+# --- R-AXIOM: axiomatic beliefs (Part 28, record 62.4) ---
+
+[[reserved]]
+id = "axiom.evidence_ring_capacity"
+basis = "the evidence-ring capacity"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+[[reserved]]
+id = "axiom.entrenchment_curve"
+basis = "the entrenchment-threshold curve and the accommodation step"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+[[reserved]]
+id = "axiom.calcification_rate"
+basis = "the calcification rate, its cap, and the brittleness under repeated challenge"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+[[reserved]]
+id = "axiom.conformity_prestige_strengths"
+basis = "the conformity and prestige strengths, and the fission and deviation thresholds"
+status = "reserved"
+value = ""
+unit = "strength"
+source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+[[reserved]]
+id = "axiom.group_aggregation_rule"
+basis = "how the hold fields aggregate to a group; a culture entrenchment likely derives from member variance rather than the mean"
+status = "reserved"
+value = ""
+unit = "rule"
+source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+# --- R-LANG: language and meaning (Part 33, record 62.7) ---
+
+[[reserved]]
+id = "lang.concept_thresholds"
+basis = "the discrimination and lexicalisation thresholds and the concept drift rate"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.phoneme_priors"
+basis = "the phoneme inventory sampling priors and implicational and dispersion tendencies, grounded in phonological typology"
+status = "reserved"
+value = ""
+unit = "prior"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.drift_operator_rates"
+basis = "the drift operator rates: sound change, lexical replacement, grammaticalisation, splitting, borrowing"
+status = "reserved"
+value = ""
+unit = "per_generation"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.distance_component_weights"
+basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.l2_acquisition"
+basis = "the second-language acquisition rate, aptitude range, and age-of-acquisition breakpoint after the late teens"
+status = "reserved"
+value = ""
+unit = "rate"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.writing_invention_threshold"
+basis = "the writing-invention pressure threshold, the script-type continuum weights, the literacy spread rate, and the record decay and provenance modifiers"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+[[reserved]]
+id = "lang.dawn_round_cap"
+basis = "the dawn dynamic round cap and anchor-set size; performance budget against emergence richness"
+status = "reserved"
+value = ""
+unit = "rounds"
+source = "Part 33 language system; record 62.7; audit section 1g"
+
+# --- R-INST: emergent institutions (Part 36, record 62.8) ---
+
+[[reserved]]
+id = "inst.function_substrate_axes"
+basis = "the membership of the institution-function substrate axes; force, the sacred, exchange, knowledge, and care a starting menu, exotic axes added per race"
+status = "reserved"
+value = ""
+unit = "set"
+source = "Part 36 institutions; record 62.8; audit section 1k"
+
+[[reserved]]
+id = "inst.similarity_feature_weights"
+basis = "the feature weights in the similarity and distance metrics; which features the owner treats as diagnostic of sameness"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 36 institutions; record 62.8; audit section 1k"
+
+[[reserved]]
+id = "inst.recognition_threshold"
+basis = "the intended trade between over-labelling a novel form and falling back to a generic description"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 36 institutions; record 62.8; audit section 1k"
+
+[[reserved]]
+id = "inst.crystallization_rates"
+basis = "the crystallization thresholds and rates by which a recurring coordination pattern becomes an institution; the hardest of these to set, calibrated against playtest cadence"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 36 institutions; record 62.8; audit section 1k"
+
+# --- R-DEEPTECH-COMPOSE: recursive technology composition (Part 41, record 62.10) ---
+
+[[reserved]]
+id = "compose.max_depth"
+basis = "the per-tick budget and the depth at which marginal proxy gain falls below noise; a determinism-and-performance bound, not a realism one"
+status = "reserved"
+value = ""
+unit = "levels"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+[[reserved]]
+id = "compose.viability_threshold"
+basis = "the failure boundary the material and physics data already define, such as pressure exceeding yield"
+status = "reserved"
+value = ""
+unit = "physics_units"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+[[reserved]]
+id = "compose.transmission_stability"
+basis = "the stability span and drift-similarity radius; set equal to the drift and loss rates the transmission subsystem already uses, for consistency"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+[[reserved]]
+id = "compose.reuse_compression_threshold"
+basis = "the description-length-decrease criterion, with the integer reuse count its cheap surrogate, calibrated so promoted-library growth fits the aggregate-tier memory budget"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+[[reserved]]
+id = "compose.interface_penalty_curve"
+basis = "the interface-mismatch penalty curve and adaptable range; the loss physics of the relevant interface axis and where an adapter becomes physically impossible"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+[[reserved]]
+id = "compose.emergent_proxy_weights"
+basis = "the physics substrate units and criticality for each aggregate quantity, not aesthetic tuning"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+# --- R-TIER-CONSIST: tier consistency (Part 54, record 62.9) ---
+
+[[reserved]]
+id = "tier.significance_thresholds"
+basis = "that canonically consequential events always promote while quiet drift never does, calibrated against whether anything that mattered ran at the wrong fidelity"
+status = "reserved"
+value = ""
+unit = "significance"
+source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+[[reserved]]
+id = "tier.decision_propensity"
+basis = "the decision-propensity threshold and accumulation rate for aggregate collective undertakings, matched to the detailed tier rate for comparable conditions"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+[[reserved]]
+id = "tier.belief_level_to_strength"
+basis = "the belief level-to-strength curve and per-mind dispersion so the population mean reconstructs the pool knowledge level within fixed-point tolerance"
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+[[reserved]]
+id = "tier.partition_remainder_rule"
+basis = "the resource and wealth partition remainder rule; settled as lowest-id, a one-line data choice if another fairness policy is wanted"
+status = "set"
+value = "lowest_id"
+unit = "rule"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-29"
+source = "Part 54 tier consistency; record 62.9; audit section 1j"

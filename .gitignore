@@ -1,0 +1,14 @@
+# Rust build output
+/target
+**/*.rs.bk
+
+# Cargo.lock is committed on purpose: reproducible builds are part of the
+# determinism contract, so the resolved dependency set is pinned in the tree.
+
+# Python (the projectops MCP server and tooling)
+__pycache__/
+*.pyc
+
+# Editor and OS noise
+.DS_Store
+*.swp
