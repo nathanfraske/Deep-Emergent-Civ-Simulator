@@ -343,11 +343,69 @@ source = "Part 33.5; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "langdet.incommensurability_ceiling"
-basis = "the no-shared-form distance ceiling and the per-cell one-sided-coverage contribution; the per-cell contribution set equal to the existing language-distance floor rather than a new constant, with an optional distinct cross-modality ceiling on the basis that cross-modal contact is a harder barrier than within-modality unintelligibility"
+basis = "the no-shared-form distance ceiling and the per-cell one-sided-coverage contribution; the per-cell contribution set equal to the existing language-distance floor rather than a new constant; the same no-shared-form ceiling applies to a cross-modality (form-disjoint) pair, so cross-modal difficulty emerges rather than being a separate authored constant (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground)"
 status = "reserved"
 value = ""
 unit = "distance"
 source = "Part 33.5; record 62.12; audit section 1n"
+
+# --- R-LANG-MODALITY: language across all modalities (Part 33.3, record 62.13) ---
+
+[[reserved]]
+id = "langmod.channel_registries"
+basis = "the channel-registry memberships (production modalities, reception senses, media) and each modality's feature dimensions and their value sets; basis the sensory-ecology channel record as a starting menu, the sign-phonology record for the manual modality, the articulatory record for the acoustic one; data per world"
+status = "reserved"
+value = ""
+unit = "registry"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.perceptual_geometry"
+basis = "the per-modality perceptual-distance geometry (dimensionality, confusability weights, simultaneous-vs-sequential flag) the dawn dispersion game settles over; basis each channel's cited confusability and capacity, dispersed to the same target separation as the acoustic modality, the contrast budget a read-out of cited physics and never a free expressivity weight, validated under the convergence audit's permuted-basis test"
+status = "reserved"
+value = ""
+unit = "granularity"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.capability_gates"
+basis = "the per-channel capability-query floors and feature-to-capability curves gating produce and perceive; basis the reserved anatomy interface (Parts 35, 25), the floor set equal to the wound model's function-loss threshold for consistency, the curve knee at the perceptual grading bands"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.acquisition_split"
+basis = "the split of the second-language acquisition increment into a comprehension track (perceive-bounded) and a production track (produce-capacity-bounded) and the rate ratio between them; basis the receptive-bilingual asymmetry, with the production track capped by channel capacity"
+status = "reserved"
+value = ""
+unit = "rate"
+source = "Part 33.6; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.blend_propensity"
+basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.6; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.dawn_cap_unitsize"
+basis = "the dawn round cap and anchor-set size as a modality-blind function of the coordinating-unit participant count; basis the existing performance-against-emergence budget, the same scaling for every modality so a small founding cohort and not the channel accounts for a thin language (the Steering Audit modality-swap invariant holds it modality-blind)"
+status = "reserved"
+value = ""
+unit = "rounds"
+source = "Part 33.9; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.mismatch_triggers"
+basis = "the channel-mismatch trigger thresholds for a homesign dawn (a coordinating unit sharing a producible-and-perceivable modality but holding no language in it) and for a modality-shift event (the cohort fraction that can no longer receive the ambient modality but can receive an alternative); basis the population-fraction-over-window form the engine already uses, the recency window reused from R-LANG-DET"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33.3; record 62.13; audit section 1o"
 
 # --- R-INST: emergent institutions (Part 36, record 62.8) ---
 

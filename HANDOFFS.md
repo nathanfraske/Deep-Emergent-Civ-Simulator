@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: R-LANG-MODALITY resolved (five-facet fan-out, three-skeptic verification)
+
+**What was done.** Resolved R-LANG-MODALITY by the owner's chosen method, a facet fan-out plus a steering-and-determinism verification pass, with the owner's scope choice that the representation resolve now and acquired injury-loss reserve against the open R-WOUND. Five parallel research facets (the channel substrate and taxonomy, the per-modality articulation model, per-being produce/perceive channels, cross-modal contact and learning, and emergence across modality), each literature-grounded, fed a synthesis that three skeptics then hardened (a closed-enum seam hunt, a Steering Audit, and a determinism non-reopen check).
+
+**The mechanism.** Modality is a first-class data property: four registries (production modalities, reception senses, feature dimensions with their value sets, and media), a channel a derived production-and-reception pairing over a shared medium (recognised not enumerated, the institution-kind move), a form primitive an integer-indexed canonical bundle of simultaneous feature values (so the R-LANG-DET scan and same-tick key hold), and per-being congenitally-ceilinged produce/perceive capabilities from the resolved genome and anatomy (congenital deafness falls out as a recessive phenotype; acquired loss a reserved one-directional clamp to R-WOUND). Cross-modal learning, the bi-modal interpreter and written-record bridges, code-blending, distortion, and the homesign-to-community and modality-shift emergence are compositions of the resolved machinery; the one new in-world event (modality migration) is disclosed as a future R-EVENT row.
+
+**What the verification changed.** Seam hunt: the medium join key became a fourth registry (taken inline on the owner's call) and a feature dimension's value set became data. Steering Audit (the load-bearing pass): the homesign dawn cap became a modality-blind function of coordinating-unit size (it had been reserved smaller for the modality path, which would author signed languages as thinner), and, auditing the prior resolution, the optional distinct cross-modality ceiling reserved in R-LANG-DET was retired so cross-modal difficulty emerges from form giving no help rather than from an authored constant; a new modality-swap invariant was added to the Steering Audit (Part 41). Determinism: the modality-migration event and tier-fired dawns were placed first in the within-generation phase order, and the code-blend two-stream event pinned to a channel-key-ordered serialization.
+
+**What changed in the documents.** Design Part 33.3: the R-LANG-MODALITY flag became the resolved mechanism plus a `Decided and reserved` blockquote; 33.4 phase order extended and the cross-modality ceiling retired (also in record 62.12 and reserved.toml); Part 41 Steering Audit gained the modality-swap invariant; record 62.13 added; Part 63 got a modality bibliography group (Bradbury and Vehrencamp, Partan and Marler, Crampton, Hockett, Goldsmith, Clements, Sandler and Lillo-Martin, Emmorey et al., Goldin-Meadow, Sandler et al.). Audit: Section 1o, Section 2 and 3 updated (R-LANG-MODALITY bullet rewritten to resolved), queue and limitation counts to seventeen resolved and twenty-six open. `calibration/reserved.toml`: seven new R-LANG-MODALITY entries with basis, plus the cross-modality-ceiling retirement note on the R-LANG-DET entry. TODOS and counts updated.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged. Queued next: R-LANG-TYPOLOGY and the nine determinism-hardening items are ready; the reserved-value ideation to stand up a calibrated prototype; R-WOUND (which would let acquired channel loss wire in); R-RELATION for the full social fabric.
+
+---
+
 ## 2026-06-30: R-LANG-DET resolved (deep session, two adversarial rounds), R-LANG-TYPOLOGY flagged, two explorations recorded
 
 **What was done.** Recorded the two uploaded exploration documents and resolved a research item.
