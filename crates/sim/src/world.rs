@@ -35,16 +35,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AccessObs, Mind, SharedBelief};
+use crate::axiom::IntrinsicBeliefs;
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
+use crate::genome::Genome;
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
+use crate::race::{BandSpec, Race};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
+use crate::value::RaceId;
 use civsim_core::{DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
@@ -290,6 +294,11 @@ pub struct World {
     reg: Registry,
     minds: BTreeMap<StableId, Mind>,
     place_of: BTreeMap<StableId, PlaceId>,
+    /// Per-being genome, the inheritance a member was seeded or born with (design Part 25).
+    /// Populated at the dawn by [`World::seed_dawn_populations`].
+    genomes: BTreeMap<StableId, Genome>,
+    /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
+    intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
     traces: Vec<Trace>,
     /// The data-driven decision definitions (drives, curves, actions). None until set.
     behaviour: Option<Behaviour>,
@@ -347,6 +356,8 @@ impl World {
             reg: Registry::new(),
             minds: BTreeMap::new(),
             place_of: BTreeMap::new(),
+            genomes: BTreeMap::new(),
+            intrinsic: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
             drive_levels: BTreeMap::new(),
@@ -576,9 +587,64 @@ impl World {
         id
     }
 
+    /// Seed the dawn of sentience: place proto-populations of each race onto the world (design
+    /// Part 28, the step that replaces the abstract civilization placement of the old worldgen
+    /// pass). For each band, for each member, a fresh id is minted, a genome is promoted from
+    /// the race's pool (Hardy-Weinberg sampling keyed by the new being's id, so members of a
+    /// band differ genetically, design 25.8), the member's mind is expressed from that genome
+    /// through the race's gene set ([`Mind::from_genome`], the cognition phenotype of Part
+    /// 25.6), its innate disposition is seeded from the race ([`crate::axiom::IntrinsicBeliefs`],
+    /// Part 28), and it is placed. Returns the seeded ids in seeding order. A band whose race
+    /// is not in `races` is skipped.
+    ///
+    /// This is the convergence point of the deep being model: the map, the genome, the value
+    /// substrate (Part 21), and the axiom kernel (Part 28) first run together here. It is
+    /// genesis-time and deterministic: the seeding order is fixed by the band list and the
+    /// member loop, so the minted ids and the genome draws keyed on them are reproducible from
+    /// the seed and the inputs alone (Principle 3); being genesis-time, the id-keyed draw is
+    /// not observer-influenced, so the Principle 10 caveat on allocation-order keying does not
+    /// bite here. At the dawn every member of a race shares the innate belief seed; per-member
+    /// divergence is the later inheritance and enculturation work. Cognition expressed from a
+    /// pool-promoted genome rides the race's environment baseline and the Mendelian dominance
+    /// deviations, since the quantitative breeding-value tier of the pool is a follow-on.
+    pub fn seed_dawn_populations(
+        &mut self,
+        races: &BTreeMap<RaceId, Race>,
+        bands: &[BandSpec],
+    ) -> Vec<StableId> {
+        let mut seeded = Vec::new();
+        for band in bands {
+            let Some(race) = races.get(&band.race) else {
+                continue;
+            };
+            for _ in 0..band.members {
+                let id = self.reg.mint();
+                let genome = race.pool.promote(self.seed, id.0, race.ploidy);
+                let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
+                self.minds.insert(id, mind);
+                self.genomes.insert(id, genome);
+                self.intrinsic.insert(id, race.intrinsic.clone());
+                self.place_of.insert(id, band.place);
+                seeded.push(id);
+            }
+        }
+        seeded
+    }
+
     /// A mind by id, for inspection.
     pub fn mind(&self, id: StableId) -> Option<&Mind> {
         self.minds.get(&id)
+    }
+
+    /// A being's genome by id, for inspection (populated at the dawn).
+    pub fn genome_of(&self, id: StableId) -> Option<&Genome> {
+        self.genomes.get(&id)
+    }
+
+    /// A being's intrinsic beliefs by id, for inspection (the innate disposition seeded at the
+    /// dawn).
+    pub fn intrinsic_of(&self, id: StableId) -> Option<&IntrinsicBeliefs> {
+        self.intrinsic.get(&id)
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition
