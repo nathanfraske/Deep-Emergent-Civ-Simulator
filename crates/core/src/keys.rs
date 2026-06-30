@@ -68,6 +68,9 @@ impl Phase {
     /// Sampling an explicit genome from a pool's frequencies on promotion (design 25.8),
     /// keyed on the new being's id.
     pub const PROMOTE: Phase = Phase(0x0A);
+    /// Drawing a child's bounded axiom-seed mutation on inheritance (design Part 28), keyed on
+    /// the child's id and the axiom axis so two axes of one child never collide.
+    pub const AXIOM_INHERIT: Phase = Phase(0x0B);
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);

@@ -51,16 +51,21 @@
 //!   and disconfirming tags, as the paper specifies); a recency-weighted-pressure hybrid is
 //!   reserved for the stress-test batch.
 //!
-//! Enculturation is now built on top of this brick: [`confidence_weighted_mean`] is the
-//! canonical group aggregate and [`enculturate`] is the Friedkin-Johnsen anchored average that
-//! moves a member toward its band's mean while anchoring it to its innate seed, wired over a
-//! band by [`crate::world::World::enculturate_band`].
+//! Built on top of this brick: enculturation ([`confidence_weighted_mean`] and
+//! [`enculturate`], the Friedkin-Johnsen anchored average, wired over a band by
+//! [`crate::world::World::enculturate_band`]); bounded-confidence schism
+//! ([`bounded_confidence_mean`] and [`confidence_weighted_variance`], wired by
+//! [`crate::world::World::enculturate_band_bounded`], [`crate::world::World::is_fissioning`],
+//! and [`crate::world::World::stance_clusters`]), which fractures a spread band into sects;
+//! and inheritance ([`inherit_seed`], the heritable-plus-encultured seed blend with a bounded
+//! counter-RNG mutation, wired by [`crate::world::World::inherit_child`]).
 //!
-//! Still deferred to later bricks (their dependencies are not built): bounded-confidence
-//! schism (whose prestige arm waits on a status system), inheritance (the heritable-plus-
-//! encultured seed blend, on a new keyed `Phase`), calcification of unchallenged axioms, and
-//! the two level-of-detail group regimes. The numeric calibrations are reserved owner values
-//! (the `axiom.*` manifest entries), supplied as data, never invented here.
+//! Still deferred to later bricks: the conformist and prestige transmission biases that
+//! sharpen schism (the prestige arm waits on a status system, and the conformist form for
+//! continuous opinions is a reserved fork), calcification of unchallenged axioms, the
+//! integer-Gaussian mutation shape (design 25.10), and the two level-of-detail group regimes.
+//! The numeric calibrations are reserved owner values (the `axiom.*` manifest entries),
+//! supplied as data, never invented here.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -228,6 +233,11 @@ impl EvidenceRing {
     /// Whether the ring is empty.
     pub fn is_empty(&self) -> bool {
         self.tags.is_empty()
+    }
+
+    /// The ring's capacity (so a child axiom can be given a fresh ring of the same size).
+    pub fn cap(&self) -> usize {
+        self.cap
     }
 }
 
@@ -598,6 +608,30 @@ pub fn confidence_weighted_variance(
     Some(Fixed::from_bits(var_bits as i64))
 }
 
+/// Inherit one axiom's innate seed for a child (design Part 28): the heritable-plus-encultured
+/// blend `h * parental_seed + (1 - h) * local_mean`, plus a bounded mutation in
+/// `[-mutation_spread, +mutation_spread]` derived from `unit_draw`, a counter-RNG sample in
+/// `[0, 1)` the caller keys on the child and the axis. The heritable term is the parent's own
+/// innate seed, the Friedkin-Johnsen prejudice the enculturation rule anchors to, so a child
+/// resembles both its parent and its local culture and varies by the mutation, closing the
+/// loop between inheritance and enculturation. A pure function of its inputs (the RNG draw is
+/// supplied), so it is bit-identical; the result is clamped to the bipolar range. The mutation
+/// is a bounded uniform draw; the integer-Gaussian shape of design 25.10 is the deferred
+/// refinement, the same reserved method the genome's continuous mutation waits on.
+pub fn inherit_seed(
+    parental_seed: Fixed,
+    local_mean: Fixed,
+    heritability: Fixed,
+    mutation_spread: Fixed,
+    unit_draw: Fixed,
+) -> Fixed {
+    let h = heritability.clamp(Fixed::ZERO, Fixed::ONE);
+    let blend = h.mul(parental_seed) + (Fixed::ONE - h).mul(local_mean);
+    // Map the unit draw in [0, 1) to a symmetric bounded mutation in [-spread, +spread].
+    let mutation = (unit_draw.mul(Fixed::from_int(2)) - Fixed::ONE).mul(mutation_spread);
+    (blend + mutation).clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -907,5 +941,61 @@ mod tests {
         // Mean 0.5, deviations +/-0.5, variance = 0.25.
         assert_eq!(v, Fixed::from_ratio(1, 4));
         assert_eq!(confidence_weighted_variance(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn inherit_seed_blends_parent_and_culture_with_a_bounded_mutation() {
+        let parent = Fixed::ZERO;
+        let culture = Fixed::ONE;
+        // No mutation (unit draw 0.5 maps to zero): h=0.5 blends to 0.5.
+        let mid = inherit_seed(
+            parent,
+            culture,
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 10),
+            Fixed::from_ratio(1, 2),
+        );
+        assert_eq!(mid, Fixed::from_ratio(1, 2));
+        // h=1 is pure parent, h=0 pure culture (zero-mutation draw).
+        assert_eq!(
+            inherit_seed(
+                parent,
+                culture,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_ratio(1, 2)
+            ),
+            parent
+        );
+        assert_eq!(
+            inherit_seed(
+                parent,
+                culture,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::from_ratio(1, 2)
+            ),
+            culture
+        );
+        // The unit draw at its extremes pushes the seed by at most the spread (within
+        // fixed-point rounding of the 0.1 spread): draw 1 -> +spread, draw 0 -> -spread.
+        let tol = Fixed::from_bits(4);
+        let spread = Fixed::from_ratio(1, 10);
+        let h = Fixed::from_ratio(1, 2); // heritability; with parent 0 and culture 1 the blend is 0.5
+        let expected = Fixed::from_ratio(1, 2);
+        let hi = inherit_seed(parent, culture, h, spread, Fixed::ONE);
+        assert!(
+            (hi - (expected + spread)).abs() <= tol,
+            "blend 0.5 plus the full +spread: {hi:?}"
+        );
+        let lo = inherit_seed(parent, culture, h, spread, Fixed::ZERO);
+        assert!(
+            (lo - (expected - spread)).abs() <= tol,
+            "blend 0.5 minus the full spread: {lo:?}"
+        );
+        assert!(
+            ((hi - expected) - (expected - lo)).abs() <= tol,
+            "the mutation is symmetric about the blend"
+        );
     }
 }

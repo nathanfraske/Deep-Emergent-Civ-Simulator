@@ -35,7 +35,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AccessObs, Mind, SharedBelief};
-use crate::axiom::{self, AxiomAxisId, IntrinsicBeliefs};
+use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::dialogue::{
@@ -788,6 +788,76 @@ impl World {
             last = Some(stance);
         }
         clusters
+    }
+
+    /// Produce a child by inheriting intrinsic beliefs from a parent and the local band (design
+    /// Part 28). A fresh id is minted; for each axiom the parent holds, the child's innate seed
+    /// (and its starting stance) is the heritable-plus-encultured blend of the parent's seed and
+    /// the band's local mean on that axis, plus a bounded mutation drawn by counter-RNG keyed on
+    /// the child's id and the axis ([`Phase::AXIOM_INHERIT`]), so a child resembles both its
+    /// parent and its local culture and varies by the mutation. The heritability and mutation
+    /// spread are reserved owner values supplied by the caller; the per-axis heritability of the
+    /// axiom registry is the refinement. The child copies the parent's epistemic stance and
+    /// value profile (their deeper inheritance is a follow-on), and each child axiom gets a
+    /// fresh empty evidence ring of the parent axiom's capacity. Returns the child's id, or
+    /// `None` if the parent holds no intrinsic beliefs.
+    ///
+    /// This is the intrinsic-belief half of a birth. The genome half (a genome from
+    /// `GeneticScheme::reproduce` and a mind from [`Mind::from_genome`]) and combining the two
+    /// into one birth are the integration follow-on, so the returned child carries beliefs but
+    /// no mind or genome yet. Deterministic: the draw is keyed on the child's canonical id, so
+    /// it is reproducible as long as birth order is a deterministic function of canonical state
+    /// (an observer-driven birth path would key on a birth-event coordinate instead, the
+    /// Principle 10 caveat).
+    pub fn inherit_child(
+        &mut self,
+        parent: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<StableId> {
+        let parent_beliefs = self.intrinsic.get(&parent)?.clone();
+        let child = self.reg.mint();
+        let mut child_axioms = Vec::with_capacity(parent_beliefs.axioms.len());
+        for pax in &parent_beliefs.axioms {
+            let local_mean = {
+                let pairs = band.iter().filter_map(|id| {
+                    let intr = self.intrinsic.get(id)?;
+                    let a = intr.axioms.iter().find(|a| a.axis == pax.axis)?;
+                    Some((a.stance, a.confidence))
+                });
+                axiom::confidence_weighted_mean(pairs).unwrap_or(pax.innate_seed)
+            };
+            let unit = DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
+                .rng(self.seed)
+                .unit_fixed(0);
+            let seed = axiom::inherit_seed(
+                pax.innate_seed,
+                local_mean,
+                heritability,
+                mutation_spread,
+                unit,
+            );
+            child_axioms.push(Axiom {
+                axis: pax.axis,
+                stance: seed,
+                strength: pax.strength,
+                confidence: pax.confidence,
+                entrenchment: pax.entrenchment,
+                salience: pax.salience,
+                stubbornness: pax.stubbornness,
+                innate_seed: seed,
+                evidence: EvidenceRing::new(pax.evidence.cap()),
+            });
+        }
+        let child_beliefs = IntrinsicBeliefs {
+            values: parent_beliefs.values.clone(),
+            axioms: child_axioms,
+            epistemic: parent_beliefs.epistemic.clone(),
+        };
+        self.intrinsic.insert(child, child_beliefs);
+        Some(child)
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition

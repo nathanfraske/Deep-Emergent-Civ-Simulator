@@ -69,9 +69,9 @@ pub mod world;
 pub use agent::{AccessObs, Mind, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
-    entrenchment_threshold, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId, AxiomAxisRegistry,
-    AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing, EvidenceTag,
-    IntrinsicBeliefs, SourceModeDef, SourceModeId,
+    entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId,
+    AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
+    EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
 };
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
