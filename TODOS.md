@@ -2,7 +2,7 @@
 
 The working view of the research backlog (audit Section 3) and the reserved-values queue. Updated every session: resolved items move to the resolved list, new flags are added, order is adjusted. Each open item is one bullet, identifier first, then the one-line question, then readiness and couplings, so the backlog tool reads it deterministically. The owner sets the order; the readiness tags are guidance.
 
-Counts: 19 resolved, 25 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
+Counts: 19 resolved, 34 open (the nine gaps-and-holes items added this session). Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
 
 The build plan toward the first end-to-end emergent slice (generated map, seeded bands, the naming game over the primes, emergent dialogue) is in `ROADMAP.md`. Its milestones:
 
@@ -55,6 +55,22 @@ The design-level seams the red and green audit found, where a determinism, conse
 - **R-SAVE-SCHEMA.** Versioned saves, restored id high-water marks, and a pinned on-disk layout. Site Part 7.3; couples to Parts 2, 40, 58.
 - **R-HARNESS-COVER.** Extend the determinism harness over phases, command buffers, gossip, mutation, a thread sweep, and save and replay. Site Part 3.5; couples to Parts 4, 7, 9, 11, 54.
 - **R-UNITS-PIN.** Pin the Part 55 unit system: scales, canonical direction, overflow policy, and exact round trips. Site Part 55; couples to Parts 3, 9, 40.
+
+## Gaps and holes cluster (traced from the gaps audit, in the open count)
+
+Nine gaps from the owner's `docs/working/GAPS_AND_HOLES.md`, traced against the actual parts by a three-scout fan-out and a verification pass, registered as counted backlog items in audit Section 3. Each is a research-and-audit brief: work its audit questions before its research, and it may be overturned on evidence. Buildable-now means a first brick could be built today against existing code; blocked names the missing substrate. None is built yet. The clear root blocker for the lifespan layer is that the engine has no clock-driven life-process loop (`World::tick` advances cognition only); R-AGING is its keystone.
+
+- **R-EMOTION.** Transient event-driven affect, decay and trauma, modulating decision, as a data-driven axis set. Confirmed gap, the most load-bearing. Buildable now (an affect-axis registry plus a per-mind affect vector modelled like an event-driven decaying drive over `decision.rs`). Audit first: separate layer vs drives/beliefs; the appraisal law must not encode a preferred reaction (steering). Couples to Parts 8, 20, 24.
+- **R-AGING.** Individual aging, senescence, mortality, and demography for sentients. Confirmed gap, the lifespan keystone. Blocked: no clock-driven life-process loop; the code `Pool` also lacks the age distribution the design's pools carry. Couples to Parts 20, 17, 25, 53, 54.
+- **R-REST.** Rest and sleep discharging the fatigue drive, and the circadian coupling. Underspecified. The rest-discharge brick is buildable now; the circadian half is blocked on the day-night system (R-CELESTIAL candidate). Couples to Part 20.
+- **R-SENSORIUM.** Spatial propagation of a stimulus so perception is set by physical reach, a sense a data-defined channel reader. Underspecified (the channel substrate of 33.3 is built; spatial propagation is the gap). A reach-radius attenuated-salience brick is buildable now; full physics propagation is blocked on the physics-substrate medium/field set. Couples to Parts 9, 6, 33, 35; R-WEATHER, R-COMMS.
+- **R-REPRO.** Mate choice, sexual selection, courtship, gestation, rearing. Underspecified. Mate-choice scoring is buildable now over value distance and axiom stances; gestation is blocked on the life-process loop (R-AGING) and the selection feedback is design-open. Couples to Parts 25, 53, 21, 28.
+- **R-CHILDHOOD.** An integrated, age-gated developmental schedule and the cross-generation carry/drift/loss of culture. Underspecified integration gap (Part 10 is the principal home; critical periods already in age-keyed plasticity; `enculturate`/`inherit_seed`/`birth` are built). Depends on R-AGING for the maturity clock, then mostly integration. Couples to Parts 10, 20, 28, 33, 23.
+- **R-JUSTICE.** The act-to-detection-to-judgment-to-sanction-to-deterrence loop. Underspecified (Part 36 norms carry sanction and enforcement; detection has a home in witnessing). Detection buildable now; judgment-to-sanction-to-deterrence blocked on the Part 36 institution code (unbuilt) and the decision layer. Couples to Part 36, Part 9, Parts 8, 37, 28.
+- **R-LIVELINESS.** Believable non-work daily life at the focus scale. Confirmed gap, cross-cutting. Individual non-work actions buildable now; the believable whole is blocked transitively on R-EMOTION, R-REST, and R-SENSORIUM. Couples to Parts 8, 42.
+- **R-TECTONICS.** A deterministic plate model causing mountains, ore, volcanoes, and earthquakes from boundary state. Confirmed gap, but demand-closure finds it an enrichment rather than load-bearing (assigned geology suffices for what is specified). A plate-field worldgen stage is buildable now; catastrophe coupling is blocked on R-CATASTROPHE. Couples to Parts 12, 26, 18, 25.
+
+---
 
 ## Recorded candidate explorations (not yet formally flagged, not in the open count)
 
