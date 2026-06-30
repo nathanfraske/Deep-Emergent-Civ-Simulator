@@ -39,6 +39,15 @@ No ecology code exists in `crates/` yet: no `Stock` type or logistic step, no `P
 
 Each fork lists its options, the dive's recommendation, and the basis. Group D forks have no safe default and are emergence-sensitive: they are the ones most in need of your judgment.
 
+### 4.0 Confirmed decisions (owner, 2026-06-30)
+
+- **F1 CLOSURE-DEPTH: hybrid.** Close topologically at seed time, then let Part 15 stock dynamics cull non-viable pools over early ticks and log the die-offs as history.
+- **F14 TOXIN-FLOOR: emerge from chemistry.** No mandatory Tier-0 toxin baseline on every organism; defensive chemistry arises from selection in each world, so no dominant-plant-defense ecology is authored in (Principle 9 upheld).
+- **F15 INTELLIGENCE-GATE: per-world data.** The mindless, plain-animal, and great-beast cut-points are calibration data each world profile sets, never hardcoded constants (Principle 11).
+- **F16 AXIOM-SEED-RADIATION: seed fresh at the dawn for now.** The pre-dawn epoch radiates flora and fauna only; sentient races are seeded fresh at the dawn with their intrinsic beliefs set then. Full sentient co-evolution (heritable axiom seeds radiating per lineage through the reserved `AXIOM_INHERIT` phase) is recorded as a future candidate exploration, not in scope for this dive.
+- The recommendation-bearing forks (F2, F3, F5, F6, F7, F8, F9, F10, F11, F12, F17) ride on the recommendations stated below unless the owner flags one on review of this doc.
+- The two no-recommendation forks take a provisional, ideology-aligned default to be confirmed at dive time: **F4 DECOMPOSER** defaults to demand-closure driven (no mandatory decomposer pathway; a `Carrion`-backed dead-biomass `Stock` is added only where a generated web needs one); **F13 AGG-CONSUMER-PROMOTION** defaults to a reduced pool-tier summary that expands to the full consumer vector on promotion, sampled from `(pool.seed, slot)`, matching the R-TIER-CONSIST lifting and restriction operators.
+
 ### A. Closure semantics (define the validator's shape and cost)
 
 - **F1 CLOSURE-DEPTH.** What counts as a closed food web: topological resolution only, steady-state energy and mass-balance feasibility, or a hybrid. Recommend the **hybrid** (topological closure at seed time, then let Part 15 stock dynamics cull non-viable pools over early ticks and log the die-offs as history). Basis: Part 15 collapse already culls over-drawn stocks and Part 17 extinction is permanent and logged, so the hybrid reuses existing machinery and turns infeasible founders into history rather than rejecting them.
