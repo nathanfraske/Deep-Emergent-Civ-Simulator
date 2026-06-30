@@ -33,6 +33,11 @@
 //! - [`substrate`]: data-driven substrate definitions with round-trip loading, the
 //!   schema-and-loader plumbing the runbook says is buildable now while the content
 //!   stays data.
+//! - [`topology`]: the spatial coordinate and topology layer (design Part 56), the first
+//!   brick of the generated map (roadmap M1): a [`topology::Coord3`] over the 2.5D
+//!   stacked model and a [`topology::TopologySpace`] trait every spatial system routes
+//!   through, with a [`topology::FlatBounded`] concrete space and an exact integer
+//!   squared distance so no float or square root enters canonical state.
 //! - [`tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
 //!   work). The evidence engine run recursively on whether a target believes a thing,
 //!   with a typed anti-projection guarantee (a nested frame admits only access evidence
@@ -58,6 +63,7 @@ pub mod language;
 pub mod lod;
 pub mod substrate;
 pub mod tom;
+pub mod topology;
 pub mod world;
 
 pub use agent::{AccessObs, Mind, SharedBelief};
@@ -76,4 +82,5 @@ pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
+pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
 pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
