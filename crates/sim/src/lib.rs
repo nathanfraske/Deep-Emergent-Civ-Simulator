@@ -53,6 +53,7 @@ pub mod agent;
 pub mod calibration;
 pub mod conservation;
 pub mod decision;
+pub mod dialogue;
 pub mod evidence;
 pub mod language;
 pub mod lod;
@@ -65,6 +66,10 @@ pub use agent::{AccessObs, Mind, SharedBelief};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use dialogue::{
+    ContentGateError, ContentRef, EffectSign, FelicityCond, ForceEffectDef, ForceEffectId,
+    ForceFloor, ForceKind, MoveKindDef, MoveKindId, MoveRegistry, ResolvedBand,
+};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
