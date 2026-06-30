@@ -50,6 +50,7 @@
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
 pub mod agent;
+pub mod axiom;
 pub mod calibration;
 pub mod conservation;
 pub mod decision;
@@ -65,6 +66,11 @@ pub mod value;
 pub mod world;
 
 pub use agent::{AccessObs, Mind, SharedBelief};
+pub use axiom::{
+    entrenchment_threshold, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId, AxiomAxisRegistry,
+    AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing, EvidenceTag,
+    IntrinsicBeliefs, SourceModeDef, SourceModeId,
+};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
