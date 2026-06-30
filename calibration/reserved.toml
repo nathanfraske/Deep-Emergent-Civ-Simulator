@@ -23,6 +23,16 @@
 # Tuneable levers: a value with status = "set" below is the owner's decision, recorded
 # with set_by and set_date. Set values stay tuneable levers, revisable later on the
 # owner's sign-off; they are calibrations, not constants frozen forever.
+#
+# Provisional by principle (owner's standing instruction): nothing chosen here is final,
+# and neither is any of the method forks surfaced alongside these numbers (the drift
+# sampler, the distance measure, the speciation rule, the pre-dawn tier, and their kin).
+# The working assumption is that a setting will not survive scale unchanged. Every dial
+# rides a sliding scale between fidelity and cost: where a system eats the compute budget
+# we tune its detail down (fewer loci, a coarser sampler, a shorter pre-dawn, an
+# approximation for an exact sum), and where there is headroom we add detail back. A value
+# set today is a hypothesis awaiting a playtest, not a commitment. The canonical scenarios
+# that exercise these dials at their extremes live in scenarios/ (docs/working/TEST_WORLDS.md).
 
 # --- R-EVIDENCE: belief formation from the world (Part 9, record 62.6) ---
 
