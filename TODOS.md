@@ -4,6 +4,14 @@ The working view of the research backlog (audit Section 3) and the reserved-valu
 
 Counts: 18 resolved, 26 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
 
+The build plan toward the first end-to-end emergent slice (generated map, seeded bands, the naming game over the primes, emergent dialogue) is in `ROADMAP.md`. Its milestones:
+
+- **M0: lock the determinism keying contract.** Resolve R-RNG-COORD (canonical tick in every draw coordinate, a phase and draw-site registry replacing the hand-assigned `PHASE_*` tags) and pin R-REDUCE-ORDER for the gossip-conflict apply and the weighted pick. The one genuine research item on the path.
+- **M1: a generated visual map (CPU, headless).** Topology module, a data-driven terrain and biome substrate, fixed-point worldgen, the chunk grid and quadtree, and a headless glyph frame. No research item (worldgen is unbuilt, not unresolved). Defer R-GPU-CANON-PIN, R-WEATHER, R-CATASTROPHE, R-SAVE-SCHEMA, R-UNITS-PIN.
+- **M2: seed bands at the dawn of sentience.** Being registries and a `Race` definition, the genome and genotype-to-phenotype map, the allele-frequency pool with Hardy-Weinberg promotion, intrinsic-belief seeding, the axiom and value update kernel, and `seed_dawn_populations` onto the map. Defer R-BUILD-PHYS; register the genome and axiom projections ahead of R-PROJ-REGISTER. Reserved axiom, genome, and value-metric calibrations are surfaced, set as dev fixtures, fail-loud under Calibrated.
+- **M3: the naming game over the primes.** Load the roughly sixty-five NSM primes as data, a thin concept-and-lemma representation, and the bounded once-per-culture dawn dynamic with the reserved `lang.dawn_round_cap`. Defer R-LANG-TYPOLOGY.
+- **M4: emergent dialogue (implement R-CONVERSE) and the loop.** The move and force registries, the content gate, move-as-event, the conversation query, speak-as-intent, the response loop, grounding as said-evidence (regression-tested first), repair, the LOD gate, the four determinism pins, and the two Steering Audit invariants. Defer the deliberation, persuasion, and negotiation couplings.
+
 ---
 
 ## Open, ready to take (substrate or pattern already resolved)
