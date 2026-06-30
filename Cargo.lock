@@ -7,6 +7,15 @@ name = "civsim-core"
 version = "0.1.0"
 
 [[package]]
+name = "civsim-physics"
+version = "0.1.0"
+dependencies = [
+ "civsim-core",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "civsim-sim"
 version = "0.1.0"
 dependencies = [

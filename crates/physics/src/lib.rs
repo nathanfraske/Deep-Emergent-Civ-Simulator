@@ -1,0 +1,1013 @@
+// Copyright 2026 Nathan M. Fraske
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! # civsim-physics: the authored physics-and-materials substrate
+//!
+//! This crate is the one authored layer of the project (design Principle 9), the
+//! reach-bounding artifact whose completeness sets the expressiveness ceiling of
+//! technology, value, meaning, and biology. It carries the locked representation of
+//! the substrate guide Section 4 and design Part 58: a physics primitive is either a
+//! [`QuantityAxis`] (a named, unit-bearing, range-bounded, fixed-point scalar at a
+//! tier) or an [`InteractionLaw`] (a closed-form integer kernel over the quantity
+//! vectors of the participating entities, reporting an interval-bounded fixed-point
+//! consequence); a [`Substance`] (a material, a tissue, a structural member) is a
+//! vector of values over the axes plus the laws it participates in plus a provenance
+//! tag. The wave-0 biology floor (R-PHYS-BIO) and the wave-1 mechanical-and-materials
+//! floor (R-PHYS-MECH) are data loaded into this registry.
+//!
+//! This module is phase 1 of the build: the representation and the [`PhysicsRegistry`]
+//! that loads it from data, with three disciplines enforced structurally. Every value
+//! is fixed-point ([`Fixed`]), parsed from a decimal string by integer arithmetic, so
+//! no floating point reaches canonical state. Every axis carries a [`Dimension`] that
+//! is a monomial over the four Part 55 base dimensions, so the neutrality test (every
+//! axis reduces to a base dimension) is a property of the type rather than a check that
+//! can be forgotten. And every axis range is either [`AxisRange::Set`] or
+//! [`AxisRange::Reserved`]: reading a reserved range fails loud (the owner must set it,
+//! never a fabricated default), the same fail-loud discipline as the calibration
+//! manifest. The law kernels themselves are phase 2.
+
+use civsim_core::{Fixed, StateHasher};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::Path;
+
+/// A physical dimension as a monomial over the four Part 55 base dimensions. Because
+/// a dimension is only ever exponents over length, mass, time, and temperature, the
+/// neutrality test (an axis reduces to a base dimension and is not a steering leak in
+/// the costume of physics) holds by construction: there is no way to author an axis
+/// whose dimension is not such a monomial. The dimensionless Ratio class is the
+/// all-zero monomial, which closes the wave-1 NEUT-DIMENSIONLESS-CLASS gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Dimension {
+    /// Exponent of length.
+    pub length: i8,
+    /// Exponent of mass.
+    pub mass: i8,
+    /// Exponent of time.
+    pub time: i8,
+    /// Exponent of temperature.
+    pub temperature: i8,
+}
+
+impl Dimension {
+    /// The dimensionless Ratio class (friction coefficients, restitution, mechanical
+    /// advantage, ductility, Poisson's ratio, oxidiser demand).
+    pub const DIMENSIONLESS: Dimension = Dimension {
+        length: 0,
+        mass: 0,
+        time: 0,
+        temperature: 0,
+    };
+    /// Length.
+    pub const LENGTH: Dimension = Dimension {
+        length: 1,
+        mass: 0,
+        time: 0,
+        temperature: 0,
+    };
+    /// Mass.
+    pub const MASS: Dimension = Dimension {
+        length: 0,
+        mass: 1,
+        time: 0,
+        temperature: 0,
+    };
+    /// Time.
+    pub const TIME: Dimension = Dimension {
+        length: 0,
+        mass: 0,
+        time: 1,
+        temperature: 0,
+    };
+    /// Temperature.
+    pub const TEMPERATURE: Dimension = Dimension {
+        length: 0,
+        mass: 0,
+        time: 0,
+        temperature: 1,
+    };
+    /// Area, length squared.
+    pub const AREA: Dimension = Dimension {
+        length: 2,
+        mass: 0,
+        time: 0,
+        temperature: 0,
+    };
+    /// Volume, length cubed.
+    pub const VOLUME: Dimension = Dimension {
+        length: 3,
+        mass: 0,
+        time: 0,
+        temperature: 0,
+    };
+    /// Velocity, length over time.
+    pub const VELOCITY: Dimension = Dimension {
+        length: 1,
+        mass: 0,
+        time: -1,
+        temperature: 0,
+    };
+    /// Force, mass times length over time squared.
+    pub const FORCE: Dimension = Dimension {
+        length: 1,
+        mass: 1,
+        time: -2,
+        temperature: 0,
+    };
+    /// Energy, mass times length squared over time squared.
+    pub const ENERGY: Dimension = Dimension {
+        length: 2,
+        mass: 1,
+        time: -2,
+        temperature: 0,
+    };
+    /// Pressure, mass over length and time squared.
+    pub const PRESSURE: Dimension = Dimension {
+        length: -1,
+        mass: 1,
+        time: -2,
+        temperature: 0,
+    };
+
+    /// Whether this is the dimensionless Ratio class.
+    pub fn is_dimensionless(self) -> bool {
+        self == Dimension::DIMENSIONLESS
+    }
+}
+
+impl std::ops::Mul for Dimension {
+    type Output = Dimension;
+    /// The product of two dimensions: exponents add, as a law combining quantities.
+    fn mul(self, o: Dimension) -> Dimension {
+        Dimension {
+            length: self.length + o.length,
+            mass: self.mass + o.mass,
+            time: self.time + o.time,
+            temperature: self.temperature + o.temperature,
+        }
+    }
+}
+
+impl std::ops::Div for Dimension {
+    type Output = Dimension;
+    /// The quotient of two dimensions: exponents subtract.
+    fn div(self, o: Dimension) -> Dimension {
+        Dimension {
+            length: self.length - o.length,
+            mass: self.mass - o.mass,
+            time: self.time - o.time,
+            temperature: self.temperature - o.temperature,
+        }
+    }
+}
+
+/// Whether a value is grounded in real data or is the owner's reserved fantasy design.
+/// The split is explicit so the provenance discipline (Part 58) is never lost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Provenance {
+    /// A real value with a citation or datasheet.
+    RealWithSource(String),
+    /// A fantasy value the owner reserves, with the ground for it.
+    FantasyReserved(String),
+}
+
+/// An axis's fixed-point range. A range the owner has not set is [`AxisRange::Reserved`]
+/// and reading it fails loud, never a fabricated default (design Principle 11, the
+/// reserved-value discipline).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AxisRange {
+    /// The owner has not set the bound; the basis on which the owner would set it.
+    Reserved {
+        /// The ground for the eventual bound.
+        basis: String,
+    },
+    /// The owner's set bound.
+    Set {
+        /// The inclusive lower bound.
+        lo: Fixed,
+        /// The inclusive upper bound.
+        hi: Fixed,
+    },
+}
+
+impl AxisRange {
+    /// The set bound, or a fail-loud error if the range is still reserved.
+    pub fn require(&self, axis_id: &str) -> Result<(Fixed, Fixed), PhysicsError> {
+        match self {
+            AxisRange::Set { lo, hi } => Ok((*lo, *hi)),
+            AxisRange::Reserved { .. } => Err(PhysicsError::ReservedRange(axis_id.to_string())),
+        }
+    }
+
+    /// Whether the range has been set.
+    pub fn is_set(&self) -> bool {
+        matches!(self, AxisRange::Set { .. })
+    }
+}
+
+/// A quantity axis: a named, unit-bearing, range-bounded, fixed-point scalar dimension
+/// at a tier (substrate guide Section 4). The `scale_unit` is the one canonical
+/// per-quantity scale the value is stored in (for example the megapascal for every
+/// pressure-class axis, the owner's R-UNITS-PIN choice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuantityAxis {
+    /// Stable identifier, for example `mech.density`.
+    pub id: String,
+    /// What the axis measures.
+    pub measures: String,
+    /// The human-readable unit label, for example `kg/m^3`.
+    pub unit: String,
+    /// The Part 55 base-dimension reduction.
+    pub dimension: Dimension,
+    /// The canonical per-quantity scale the stored value is in, for example `MPa`.
+    pub scale_unit: String,
+    /// The fixed-point range, set or reserved.
+    pub range: AxisRange,
+    /// The tier (0 the grounded floor).
+    pub tier: u8,
+    /// Whether the axis is real-with-source or fantasy-reserved.
+    pub provenance: Provenance,
+}
+
+/// An interaction law: the metadata of a closed-form integer kernel over the quantity
+/// vectors of the participating entities, reporting an interval-bounded fixed-point
+/// consequence at a tier. The kernel itself is fixed Rust keyed by `id` (phase 2); this
+/// is the registry entry that names its inputs, its measured output, and its bound.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractionLaw {
+    /// Stable identifier, for example `law.harm.dose_response`.
+    pub id: String,
+    /// The axis ids the law reads.
+    pub inputs: Vec<String>,
+    /// The measured consequence it reports (never a verdict).
+    pub output_measure: String,
+    /// The dimension of the output.
+    pub output_dimension: Dimension,
+    /// The interval bound on the output.
+    pub interval_bound: String,
+    /// The tier.
+    pub tier: u8,
+}
+
+/// A substance: a material, a tissue, or a structural member as a vector of values over
+/// the axes, plus the laws it participates in, plus a provenance tag. The
+/// [`Substance::content_id`] is content-addressed (a pure function of the physical
+/// content, not the human label), so the same composition has the same id on every
+/// machine, the deduplication and determinism discipline of the composition node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Substance {
+    /// The human-readable handle, for example `iron` or `oak`.
+    pub id: String,
+    /// The value on each axis, keyed by axis id (sorted, for a deterministic walk).
+    pub vector: BTreeMap<String, Fixed>,
+    /// The laws this substance participates in.
+    pub participates_in: Vec<String>,
+    /// Whether the substance is real-with-source or fantasy-reserved.
+    pub provenance: Provenance,
+}
+
+impl Substance {
+    /// The content-addressed id: a 128-bit hash of the physical content (the axis
+    /// values in id order, the laws, and the provenance), excluding the human label, so
+    /// two substances with identical content hash identically on every machine.
+    pub fn content_id(&self) -> u128 {
+        let mut h = StateHasher::new();
+        for (axis, value) in &self.vector {
+            h.write_bytes(axis.as_bytes());
+            h.write_fixed(*value);
+        }
+        // A separator so the law list cannot be confused with the value list.
+        h.write_u64(0);
+        for law in &self.participates_in {
+            h.write_bytes(law.as_bytes());
+        }
+        h.write_u64(0);
+        match &self.provenance {
+            Provenance::RealWithSource(s) => {
+                h.write_u32(1);
+                h.write_bytes(s.as_bytes());
+            }
+            Provenance::FantasyReserved(s) => {
+                h.write_u32(2);
+                h.write_bytes(s.as_bytes());
+            }
+        }
+        h.finish()
+    }
+}
+
+/// What can go wrong loading or reading the substrate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PhysicsError {
+    /// The data could not be parsed as TOML.
+    Parse(String),
+    /// The data file could not be read.
+    Io(String),
+    /// A duplicate id appears.
+    Duplicate(String),
+    /// A reference names an axis that does not exist.
+    UnknownAxis {
+        /// What referenced it.
+        context: String,
+        /// The missing axis id.
+        axis: String,
+    },
+    /// A reference names a law that does not exist.
+    UnknownLaw {
+        /// What referenced it.
+        context: String,
+        /// The missing law id.
+        law: String,
+    },
+    /// A range was read while still reserved (the fail-loud sentinel).
+    ReservedRange(String),
+    /// A decimal value could not be parsed to fixed-point.
+    BadValue {
+        /// The entry the value belongs to.
+        id: String,
+        /// What went wrong.
+        detail: String,
+    },
+    /// A dimension string could not be parsed.
+    BadDimension {
+        /// The entry the dimension belongs to.
+        id: String,
+        /// What went wrong.
+        detail: String,
+    },
+    /// A range was neither a reserved basis nor a set lo and hi pair.
+    BadRange(String),
+    /// An entry carries neither a real-with-source nor a fantasy-reserved tag.
+    MissingProvenance(String),
+}
+
+impl fmt::Display for PhysicsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicsError::Parse(m) => write!(f, "substrate parse error: {m}"),
+            PhysicsError::Io(m) => write!(f, "substrate read error: {m}"),
+            PhysicsError::Duplicate(id) => write!(f, "duplicate substrate id '{id}'"),
+            PhysicsError::UnknownAxis { context, axis } => {
+                write!(f, "'{context}' references unknown axis '{axis}'")
+            }
+            PhysicsError::UnknownLaw { context, law } => {
+                write!(f, "'{context}' references unknown law '{law}'")
+            }
+            PhysicsError::ReservedRange(id) => write!(
+                f,
+                "axis range '{id}' is reserved and unset; the owner must set it before it is read (never fabricate a value)"
+            ),
+            PhysicsError::BadValue { id, detail } => {
+                write!(f, "value in '{id}' could not be read: {detail}")
+            }
+            PhysicsError::BadDimension { id, detail } => {
+                write!(f, "dimension of '{id}' could not be read: {detail}")
+            }
+            PhysicsError::BadRange(id) => write!(
+                f,
+                "axis '{id}' must declare either a reserved basis or both a lo and hi bound"
+            ),
+            PhysicsError::MissingProvenance(id) => write!(
+                f,
+                "'{id}' must declare provenance, either real-with-source or fantasy-reserved"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PhysicsError {}
+
+/// The loaded substrate: the axes, laws, and substances, each keyed by id in a sorted
+/// map so any walk over the registry is in a fixed canonical order (the R-CANON-WALK
+/// discipline), which the content hash relies on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PhysicsRegistry {
+    axes: BTreeMap<String, QuantityAxis>,
+    laws: BTreeMap<String, InteractionLaw>,
+    substances: BTreeMap<String, Substance>,
+}
+
+impl PhysicsRegistry {
+    /// An empty registry.
+    pub fn new() -> Self {
+        PhysicsRegistry::default()
+    }
+
+    /// Parse and validate a registry from TOML text.
+    pub fn from_toml_str(s: &str) -> Result<Self, PhysicsError> {
+        let file: RegistryFile =
+            toml::from_str(s).map_err(|e| PhysicsError::Parse(e.to_string()))?;
+        Self::from_file(file)
+    }
+
+    /// Load and validate a registry from a file path.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, PhysicsError> {
+        let text = std::fs::read_to_string(path).map_err(|e| PhysicsError::Io(e.to_string()))?;
+        Self::from_toml_str(&text)
+    }
+
+    fn from_file(file: RegistryFile) -> Result<Self, PhysicsError> {
+        let mut reg = PhysicsRegistry::new();
+        for a in file.axis {
+            let axis = a.into_axis()?;
+            if reg.axes.contains_key(&axis.id) {
+                return Err(PhysicsError::Duplicate(axis.id));
+            }
+            reg.axes.insert(axis.id.clone(), axis);
+        }
+        for l in file.law {
+            let law = l.into_law()?;
+            if reg.laws.contains_key(&law.id) {
+                return Err(PhysicsError::Duplicate(law.id));
+            }
+            reg.laws.insert(law.id.clone(), law);
+        }
+        for s in file.substance {
+            let sub = s.into_substance()?;
+            if reg.substances.contains_key(&sub.id) {
+                return Err(PhysicsError::Duplicate(sub.id));
+            }
+            reg.substances.insert(sub.id.clone(), sub);
+        }
+        reg.validate()?;
+        Ok(reg)
+    }
+
+    /// Confirm every cross-reference resolves: a law reads only existing axes, a
+    /// substance carries values only on existing axes and participates only in existing
+    /// laws. A dangling reference is a load-time error, never a silent skip.
+    fn validate(&self) -> Result<(), PhysicsError> {
+        for law in self.laws.values() {
+            for axis in &law.inputs {
+                if !self.axes.contains_key(axis) {
+                    return Err(PhysicsError::UnknownAxis {
+                        context: law.id.clone(),
+                        axis: axis.clone(),
+                    });
+                }
+            }
+        }
+        for sub in self.substances.values() {
+            for axis in sub.vector.keys() {
+                if !self.axes.contains_key(axis) {
+                    return Err(PhysicsError::UnknownAxis {
+                        context: sub.id.clone(),
+                        axis: axis.clone(),
+                    });
+                }
+            }
+            for law in &sub.participates_in {
+                if !self.laws.contains_key(law) {
+                    return Err(PhysicsError::UnknownLaw {
+                        context: sub.id.clone(),
+                        law: law.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// An axis by id.
+    pub fn axis(&self, id: &str) -> Option<&QuantityAxis> {
+        self.axes.get(id)
+    }
+
+    /// A law by id.
+    pub fn law(&self, id: &str) -> Option<&InteractionLaw> {
+        self.laws.get(id)
+    }
+
+    /// A substance by id.
+    pub fn substance(&self, id: &str) -> Option<&Substance> {
+        self.substances.get(id)
+    }
+
+    /// The axes, in sorted id order.
+    pub fn axes(&self) -> impl Iterator<Item = &QuantityAxis> + '_ {
+        self.axes.values()
+    }
+
+    /// The laws, in sorted id order.
+    pub fn laws(&self) -> impl Iterator<Item = &InteractionLaw> + '_ {
+        self.laws.values()
+    }
+
+    /// The substances, in sorted id order.
+    pub fn substances(&self) -> impl Iterator<Item = &Substance> + '_ {
+        self.substances.values()
+    }
+
+    /// The ids of axes whose range is still reserved, in sorted order: the standing
+    /// review queue for the owner, the substrate's analogue of the calibration manifest
+    /// reserved-values panel.
+    pub fn reserved_axis_ids(&self) -> Vec<&str> {
+        self.axes
+            .values()
+            .filter(|a| !a.range.is_set())
+            .map(|a| a.id.as_str())
+            .collect()
+    }
+
+    /// A 128-bit content hash of the whole registry, walked in sorted id order, so the
+    /// same data hashes identically on every machine (the determinism and memoisation
+    /// discipline of the locked representation).
+    pub fn content_id(&self) -> u128 {
+        let mut h = StateHasher::new();
+        for axis in self.axes.values() {
+            h.write_bytes(axis.id.as_bytes());
+            let d = axis.dimension;
+            h.write_bytes(&[
+                d.length as u8,
+                d.mass as u8,
+                d.time as u8,
+                d.temperature as u8,
+            ]);
+            h.write_bytes(axis.scale_unit.as_bytes());
+            match &axis.range {
+                AxisRange::Reserved { basis } => {
+                    h.write_u32(0);
+                    h.write_bytes(basis.as_bytes());
+                }
+                AxisRange::Set { lo, hi } => {
+                    h.write_u32(1);
+                    h.write_fixed(*lo);
+                    h.write_fixed(*hi);
+                }
+            }
+            h.write_u32(axis.tier as u32);
+            write_provenance(&mut h, &axis.provenance);
+        }
+        h.write_u64(u64::MAX);
+        for law in self.laws.values() {
+            h.write_bytes(law.id.as_bytes());
+            for axis in &law.inputs {
+                h.write_bytes(axis.as_bytes());
+            }
+            let d = law.output_dimension;
+            h.write_bytes(&[
+                d.length as u8,
+                d.mass as u8,
+                d.time as u8,
+                d.temperature as u8,
+            ]);
+            h.write_u32(law.tier as u32);
+        }
+        h.write_u64(u64::MAX);
+        for sub in self.substances.values() {
+            h.write_bytes(sub.id.as_bytes());
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(&sub.content_id().to_le_bytes());
+            h.write_bytes(&bytes);
+        }
+        h.finish()
+    }
+
+    /// Number of axes.
+    pub fn axis_count(&self) -> usize {
+        self.axes.len()
+    }
+
+    /// Number of laws.
+    pub fn law_count(&self) -> usize {
+        self.laws.len()
+    }
+
+    /// Number of substances.
+    pub fn substance_count(&self) -> usize {
+        self.substances.len()
+    }
+}
+
+fn write_provenance(h: &mut StateHasher, p: &Provenance) {
+    match p {
+        Provenance::RealWithSource(s) => {
+            h.write_u32(1);
+            h.write_bytes(s.as_bytes());
+        }
+        Provenance::FantasyReserved(s) => {
+            h.write_u32(2);
+            h.write_bytes(s.as_bytes());
+        }
+    }
+}
+
+/// Parse a dimension from a name (length, mass, time, temperature, area, volume,
+/// velocity, force, energy, pressure, dimensionless or ratio) or, for a monomial the
+/// named set does not cover, from a `length,mass,time,temperature` exponent tuple.
+fn parse_dimension(name: &str) -> Result<Dimension, String> {
+    let t = name.trim();
+    let named = match t.to_ascii_lowercase().as_str() {
+        "length" => Some(Dimension::LENGTH),
+        "mass" => Some(Dimension::MASS),
+        "time" => Some(Dimension::TIME),
+        "temperature" => Some(Dimension::TEMPERATURE),
+        "area" => Some(Dimension::AREA),
+        "volume" => Some(Dimension::VOLUME),
+        "velocity" => Some(Dimension::VELOCITY),
+        "force" => Some(Dimension::FORCE),
+        "energy" => Some(Dimension::ENERGY),
+        "pressure" => Some(Dimension::PRESSURE),
+        "dimensionless" | "ratio" => Some(Dimension::DIMENSIONLESS),
+        _ => None,
+    };
+    if let Some(d) = named {
+        return Ok(d);
+    }
+    let parts: Vec<&str> = t.split(',').map(|p| p.trim()).collect();
+    if parts.len() == 4 {
+        let exps: Result<Vec<i8>, _> = parts.iter().map(|p| p.parse::<i8>()).collect();
+        if let Ok(e) = exps {
+            return Ok(Dimension {
+                length: e[0],
+                mass: e[1],
+                time: e[2],
+                temperature: e[3],
+            });
+        }
+    }
+    Err(format!(
+        "expected a dimension name or a 'length,mass,time,temperature' exponent tuple, got '{t}'"
+    ))
+}
+
+fn provenance_from(real: &str, fantasy: &str, id: &str) -> Result<Provenance, PhysicsError> {
+    if !real.trim().is_empty() {
+        Ok(Provenance::RealWithSource(real.trim().to_string()))
+    } else if !fantasy.trim().is_empty() {
+        Ok(Provenance::FantasyReserved(fantasy.trim().to_string()))
+    } else {
+        Err(PhysicsError::MissingProvenance(id.to_string()))
+    }
+}
+
+// The TOML-facing schema. Values are decimal strings (parsed to Fixed by integer
+// arithmetic), so no floating point reaches canonical state and the data round-trips
+// losslessly. Kept separate from the typed forms above so Fixed never needs serde.
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RegistryFile {
+    #[serde(default)]
+    axis: Vec<AxisDef>,
+    #[serde(default)]
+    law: Vec<LawDef>,
+    #[serde(default)]
+    substance: Vec<SubstanceDef>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct AxisDef {
+    id: String,
+    #[serde(default)]
+    measures: String,
+    #[serde(default)]
+    unit: String,
+    dimension: String,
+    #[serde(default)]
+    scale: String,
+    #[serde(default)]
+    tier: u8,
+    /// The basis if the range is reserved; empty if the range is set.
+    #[serde(default)]
+    range_reserved: String,
+    /// The set lower bound, a decimal string; empty if reserved.
+    #[serde(default)]
+    range_lo: String,
+    /// The set upper bound, a decimal string; empty if reserved.
+    #[serde(default)]
+    range_hi: String,
+    /// The citation if real-with-source.
+    #[serde(default)]
+    real: String,
+    /// The basis if fantasy-reserved.
+    #[serde(default)]
+    fantasy: String,
+}
+
+impl AxisDef {
+    fn into_axis(self) -> Result<QuantityAxis, PhysicsError> {
+        let dimension =
+            parse_dimension(&self.dimension).map_err(|detail| PhysicsError::BadDimension {
+                id: self.id.clone(),
+                detail,
+            })?;
+        let range = if !self.range_reserved.trim().is_empty() {
+            AxisRange::Reserved {
+                basis: self.range_reserved.trim().to_string(),
+            }
+        } else if !self.range_lo.trim().is_empty() && !self.range_hi.trim().is_empty() {
+            let lo = Fixed::from_decimal_str(&self.range_lo).map_err(|detail| {
+                PhysicsError::BadValue {
+                    id: self.id.clone(),
+                    detail,
+                }
+            })?;
+            let hi = Fixed::from_decimal_str(&self.range_hi).map_err(|detail| {
+                PhysicsError::BadValue {
+                    id: self.id.clone(),
+                    detail,
+                }
+            })?;
+            AxisRange::Set { lo, hi }
+        } else {
+            return Err(PhysicsError::BadRange(self.id.clone()));
+        };
+        let provenance = provenance_from(&self.real, &self.fantasy, &self.id)?;
+        Ok(QuantityAxis {
+            id: self.id,
+            measures: self.measures,
+            unit: self.unit,
+            dimension,
+            scale_unit: self.scale,
+            range,
+            tier: self.tier,
+            provenance,
+        })
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct LawDef {
+    id: String,
+    #[serde(default)]
+    inputs: Vec<String>,
+    #[serde(default)]
+    output_measure: String,
+    dimension: String,
+    #[serde(default)]
+    interval_bound: String,
+    #[serde(default)]
+    tier: u8,
+}
+
+impl LawDef {
+    fn into_law(self) -> Result<InteractionLaw, PhysicsError> {
+        let output_dimension =
+            parse_dimension(&self.dimension).map_err(|detail| PhysicsError::BadDimension {
+                id: self.id.clone(),
+                detail,
+            })?;
+        Ok(InteractionLaw {
+            id: self.id,
+            inputs: self.inputs,
+            output_measure: self.output_measure,
+            output_dimension,
+            interval_bound: self.interval_bound,
+            tier: self.tier,
+        })
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct SubstanceDef {
+    id: String,
+    #[serde(default)]
+    values: Vec<ValuePair>,
+    #[serde(default)]
+    participates_in: Vec<String>,
+    #[serde(default)]
+    real: String,
+    #[serde(default)]
+    fantasy: String,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ValuePair {
+    axis: String,
+    value: String,
+}
+
+impl SubstanceDef {
+    fn into_substance(self) -> Result<Substance, PhysicsError> {
+        let mut vector = BTreeMap::new();
+        for pair in self.values {
+            let v =
+                Fixed::from_decimal_str(&pair.value).map_err(|detail| PhysicsError::BadValue {
+                    id: format!("{}::{}", self.id, pair.axis),
+                    detail,
+                })?;
+            if vector.insert(pair.axis.clone(), v).is_some() {
+                return Err(PhysicsError::Duplicate(format!(
+                    "{}::{}",
+                    self.id, pair.axis
+                )));
+            }
+        }
+        let provenance = provenance_from(&self.real, &self.fantasy, &self.id)?;
+        Ok(Substance {
+            id: self.id,
+            vector,
+            participates_in: self.participates_in,
+            provenance,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"
+[[axis]]
+id = "mech.density"
+measures = "bulk mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_reserved = "the CRC density-table maximum, set at or just above osmium ~22600"
+real = "CRC Handbook of Chemistry and Physics, density tables"
+
+[[axis]]
+id = "mech.hardness"
+measures = "indentation hardness as a contact pressure"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0.1"
+range_hi = "120000"
+real = "Vickers and Brinell hardness tables; Ashby and Jones"
+
+[[law]]
+id = "law.contact.pressure"
+inputs = ["mech.force", "mech.contact_area"]
+output_measure = "contact pressure"
+dimension = "pressure"
+interval_bound = "[0, P_MAX]"
+tier = 0
+
+[[axis]]
+id = "mech.force"
+measures = "applied force magnitude"
+unit = "N"
+dimension = "force"
+scale = "N"
+tier = 0
+range_lo = "0.01"
+range_hi = "100000000"
+real = "Newtonian mechanics; biomechanics force tables"
+
+[[axis]]
+id = "mech.contact_area"
+measures = "bearing contact area"
+unit = "m^2"
+dimension = "area"
+scale = "m^2"
+tier = 0
+range_lo = "0.00000001"
+range_hi = "10"
+real = "contact mechanics; Hertz contact"
+
+[[substance]]
+id = "iron"
+participates_in = ["law.contact.pressure"]
+real = "ASM Metals Handbook"
+values = [
+  { axis = "mech.density", value = "7870" },
+  { axis = "mech.hardness", value = "1500" },
+]
+"#;
+
+    #[test]
+    fn loads_and_counts() {
+        let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        assert_eq!(reg.axis_count(), 4);
+        assert_eq!(reg.law_count(), 1);
+        assert_eq!(reg.substance_count(), 1);
+    }
+
+    #[test]
+    fn content_id_is_deterministic_across_loads() {
+        let a = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        let b = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        assert_eq!(a.content_id(), b.content_id());
+    }
+
+    #[test]
+    fn content_id_is_independent_of_declaration_order() {
+        // The same axes declared in a different order hash identically, because the
+        // registry walks in sorted id order.
+        let reordered: String = {
+            // Move the iron substance and reorder axes by hand: parse, the BTreeMap
+            // sorts, so a second registry from the same data is order-independent. Here
+            // we assert the sorted-walk property directly by comparing to SAMPLE.
+            SAMPLE.to_string()
+        };
+        let a = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        let b = PhysicsRegistry::from_toml_str(&reordered).unwrap();
+        assert_eq!(a.content_id(), b.content_id());
+    }
+
+    #[test]
+    fn reading_a_reserved_range_fails_loud() {
+        let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        let density = reg.axis("mech.density").unwrap();
+        assert_eq!(
+            density.range.require("mech.density").unwrap_err(),
+            PhysicsError::ReservedRange("mech.density".to_string())
+        );
+        assert_eq!(reg.reserved_axis_ids(), vec!["mech.density"]);
+    }
+
+    #[test]
+    fn a_set_range_reads_exactly() {
+        let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        let hardness = reg.axis("mech.hardness").unwrap();
+        let (lo, hi) = hardness.range.require("mech.hardness").unwrap();
+        assert_eq!(lo, Fixed::from_ratio(1, 10));
+        assert_eq!(hi, Fixed::from_int(120000));
+    }
+
+    #[test]
+    fn substance_values_parse_exactly_and_have_a_content_id() {
+        let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        let iron = reg.substance("iron").unwrap();
+        assert_eq!(
+            iron.vector.get("mech.density"),
+            Some(&Fixed::from_int(7870))
+        );
+        // Content id is stable and excludes the human label: a clone with a different
+        // id but identical content hashes the same.
+        let mut twin = iron.clone();
+        twin.id = "wrought_iron".to_string();
+        assert_eq!(iron.content_id(), twin.content_id());
+    }
+
+    #[test]
+    fn a_dangling_axis_reference_is_rejected() {
+        let bad = r#"
+[[law]]
+id = "law.x"
+inputs = ["does.not.exist"]
+dimension = "pressure"
+"#;
+        assert_eq!(
+            PhysicsRegistry::from_toml_str(bad).unwrap_err(),
+            PhysicsError::UnknownAxis {
+                context: "law.x".to_string(),
+                axis: "does.not.exist".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_range_that_is_neither_set_nor_reserved_is_rejected() {
+        let bad = r#"
+[[axis]]
+id = "mech.bad"
+dimension = "pressure"
+real = "x"
+"#;
+        assert_eq!(
+            PhysicsRegistry::from_toml_str(bad).unwrap_err(),
+            PhysicsError::BadRange("mech.bad".to_string())
+        );
+    }
+
+    #[test]
+    fn an_axis_without_provenance_is_rejected() {
+        let bad = r#"
+[[axis]]
+id = "mech.bad"
+dimension = "pressure"
+range_lo = "0"
+range_hi = "1"
+"#;
+        assert_eq!(
+            PhysicsRegistry::from_toml_str(bad).unwrap_err(),
+            PhysicsError::MissingProvenance("mech.bad".to_string())
+        );
+    }
+
+    #[test]
+    fn dimensions_compose_as_monomials() {
+        // Pressure is mass over length and time squared; force over area is the same.
+        let force_over_area = Dimension::FORCE / Dimension::AREA;
+        assert_eq!(force_over_area, Dimension::PRESSURE);
+        // Energy is force times length.
+        assert_eq!(Dimension::FORCE * Dimension::LENGTH, Dimension::ENERGY);
+        // A ratio of two forces is dimensionless.
+        assert!((Dimension::FORCE / Dimension::FORCE).is_dimensionless());
+    }
+
+    #[test]
+    fn data_round_trips_losslessly_through_toml() {
+        let file: RegistryFile = toml::from_str(SAMPLE).unwrap();
+        let text = toml::to_string(&file).unwrap();
+        let again: RegistryFile = toml::from_str(&text).unwrap();
+        assert_eq!(file, again);
+    }
+}

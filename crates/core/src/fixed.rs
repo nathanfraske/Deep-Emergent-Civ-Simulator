@@ -88,6 +88,54 @@ impl Fixed {
         Fixed((((num as i128) << FRAC_BITS) / (den as i128)) as i64)
     }
 
+    /// Parse a decimal string into `Fixed` using only integer arithmetic, so the
+    /// conversion is exact to the fixed-point grid and identical on every machine;
+    /// floating point is never touched. This is the canonical text-to-`Fixed` reader
+    /// the calibration manifest and the data-driven substrate loaders both use, so a
+    /// datasheet value or a reserved number reaches canonical state losslessly.
+    pub fn from_decimal_str(s: &str) -> Result<Fixed, String> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err("empty value".to_string());
+        }
+        let (neg, body) = match s.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, s.strip_prefix('+').unwrap_or(s)),
+        };
+        let (int_str, frac_str) = match body.split_once('.') {
+            Some((a, b)) => (a, b),
+            None => (body, ""),
+        };
+        if frac_str.len() > 30 {
+            return Err("too many fractional digits".to_string());
+        }
+        let int_val: i128 = if int_str.is_empty() {
+            0
+        } else {
+            int_str
+                .parse::<i128>()
+                .map_err(|e| format!("bad integer part: {e}"))?
+        };
+        let mut bits: i128 = int_val << FRAC_BITS;
+        if !frac_str.is_empty() {
+            let digits: i128 = frac_str
+                .parse::<i128>()
+                .map_err(|e| format!("bad fractional part: {e}"))?;
+            let mut den: i128 = 1;
+            for _ in 0..frac_str.len() {
+                den *= 10;
+            }
+            bits += (digits << FRAC_BITS) / den;
+        }
+        if neg {
+            bits = -bits;
+        }
+        if bits < i64::MIN as i128 || bits > i64::MAX as i128 {
+            return Err("value out of Q32.32 range".to_string());
+        }
+        Ok(Fixed(bits as i64))
+    }
+
     /// Fixed-point multiply, the Part 3.1 `fx_mul`: a 128-bit intermediate then a
     /// shift back. The final narrowing cast wraps on overflow (deterministically);
     /// use [`Fixed::checked_mul`] where overflow is possible.
