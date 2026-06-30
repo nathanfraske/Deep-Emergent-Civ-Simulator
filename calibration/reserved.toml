@@ -14,6 +14,15 @@
 # as later systems are built and reach the numbers they need (RUNBOOK section 3,
 # step 6). No value here is decided by the agent; graduation to status = "set" is
 # the owner's, through the reserved-values panel.
+#
+# Unit convention: every value with unit = "log_odds" is in natural log-odds (nats),
+# where a total L maps to probability p = 1 / (1 + e^-L). This is the occupancy-grid /
+# Probabilistic Robotics convention the evidence engine inherits (Elfes 1989; Thrun,
+# Burgard, Fox 2005).
+#
+# Tuneable levers: a value with status = "set" below is the owner's decision, recorded
+# with set_by and set_date. Set values stay tuneable levers, revisable later on the
+# owner's sign-off; they are calibrations, not constants frozen forever.
 
 # --- R-EVIDENCE: belief formation from the world (Part 9, record 62.6) ---
 
@@ -27,25 +36,31 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.commit_threshold"
-basis = "the intended balance of false conclusions against cold cases"
-status = "reserved"
-value = ""
+basis = "the intended balance of false conclusions against cold cases; in nats, ~3 commits at about 95% posterior confidence (sigma(3)=0.95; Wald 1945 sequential threshold for a 5% false-commit rate)"
+status = "set"
+value = "3"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.runner_up_margin"
-basis = "the best-and-clearly-better margin separating a commit from an unknown"
-status = "reserved"
-value = ""
+basis = "the best-and-clearly-better margin separating a commit from an unknown; in nats, 2 is about 7:1 odds of the leader over the runner-up (inference to the best explanation, Lipton 2004; Harman 1965)"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.log_odds_clamp"
-basis = "the maximum admissible certainty"
-status = "reserved"
-value = ""
+basis = "the maximum admissible certainty; in nats, 7 caps certainty at about p=0.999, near-certain but defeasible (Part 9), avoiding the overconfidence Thrun, Burgard, Fox 2005 clamp against"
+status = "set"
+value = "7"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
@@ -538,73 +553,91 @@ source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
 [[reserved]]
 id = "tom.access_weight.witnessed"
-basis = "the weight-of-evidence that a target witnessed a trace; must be set strictly above told and said so a witnessed access out-ranks a contrary assertion and lies are seen through"
-status = "reserved"
-value = ""
+basis = "the weight-of-evidence that a target witnessed a trace; must be set strictly above told and said so a witnessed access out-ranks a contrary assertion and lies are seen through; weight of evidence in nats (Good 1950; Jaynes 2003); >= the meta commit threshold so one clear witnessing attributes a belief"
+status = "set"
+value = "5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.access_weight.told"
-basis = "the weight that a target was told a value, trust- and hop-scaled; below witnessed"
-status = "reserved"
-value = ""
+basis = "the weight that a target was told a value, trust- and hop-scaled; below witnessed; set to the meta commit threshold so one clear telling attributes a belief"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.access_weight.said"
-basis = "the weight of a target's own utterance, the channel deception attacks, lie-discounted; below witnessed"
-status = "reserved"
-value = ""
+basis = "the weight of a target's own utterance, the channel deception attacks, lie-discounted; below witnessed and below the meta commit threshold, so a bare assertion alone does not fix a model of another's belief"
+status = "set"
+value = "3"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.access_weight.reachable"
 basis = "the weak weight that an accessible fact gets, with an inaccessible one negative toward unknown or the stale value"
-status = "reserved"
-value = ""
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.access_weight.absence"
-basis = "the negative weight of seeing a target NOT have access, the engine that keeps a false belief stable in Sally-Anne"
-status = "reserved"
-value = ""
+basis = "the negative weight of seeing a target NOT have access, the engine that keeps a false belief stable in Sally-Anne; magnitude, applied negatively in the mechanism; matched to the witnessed weight so an absence offsets a prior access"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.access_weight.denied"
-basis = "the negative weight of having starved a target of an input (meta-concealment)"
-status = "reserved"
-value = ""
+basis = "the negative weight of having starved a target of an input (meta-concealment); magnitude, applied negatively in the mechanism"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.meta_commit_threshold"
-basis = "the total a modelled belief must reach to commit; the balance of over-attributing a belief the target does not hold against leaving it unknown, plausibly wider than the first-order threshold because second-order evidence is noisier"
-status = "reserved"
-value = ""
+basis = "the total a modelled belief must reach to commit; the balance of over-attributing a belief the target does not hold against leaving it unknown, plausibly wider than the first-order threshold because second-order evidence is noisier; in nats, 4 is about 98% confidence"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.meta_runner_up_margin"
 basis = "the lead over the runner-up a modelled belief must hold; set so the false-belief and deception battery commits rather than merely failing to match projection"
-status = "reserved"
-value = ""
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "tom.meta_log_odds_clamp"
-basis = "the maximum admissible certainty about another mind, no higher than the first-order clamp, since one cannot know another's mind better than one's own world"
-status = "reserved"
-value = ""
+basis = "the maximum admissible certainty about another mind, no higher than the first-order clamp, since one cannot know another's mind better than one's own world; in nats, 6 (below the first-order 7)"
+status = "set"
+value = "6"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
@@ -614,25 +647,31 @@ source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
 [[reserved]]
 id = "gossip.told_weight"
-basis = "the belief weight a heard assertion carries before trust scaling, relative to a witnessed observation (lighter than first-hand)"
-status = "reserved"
-value = ""
+basis = "the belief weight a heard assertion carries before trust scaling, relative to a witnessed observation (lighter than first-hand); in nats, 2 moves belief but does not commit alone"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9.5 gossip loop; audit section"
 
 [[reserved]]
 id = "gossip.trust_baseline"
-basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight"
-status = "reserved"
-value = ""
+basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight; 0.5, the share senders entrust a stranger in the investment/trust game (Berg, Dickhaut, McCabe 1995)"
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 9.5 gossip loop; Part 37 trust"
 
 [[reserved]]
 id = "gossip.trust_penalty"
-basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter"
-status = "reserved"
-value = ""
+basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter; 0.5 halves trust on a caught lie, consistent with the asymmetry that trust is destroyed faster than built (Slovic 1993)"
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 9.5 gossip loop; Part 37 trust"
 
@@ -640,8 +679,10 @@ source = "Part 9.5 gossip loop; Part 37 trust"
 
 [[reserved]]
 id = "language.innovation_rate"
-basis = "the per-interaction probability a speaker coins a fresh word form instead of reusing its own, the seed of lexical drift and dialect split"
-status = "reserved"
-value = ""
+basis = "the per-interaction probability a speaker coins a fresh word form instead of reusing its own, the seed of lexical drift and dialect split; 0.02, well below the alignment rate so a band converges while drift seeds between isolated bands (naming-game convergence, Baronchelli et al. 2006; Steels)"
+status = "set"
+value = "0.02"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "probability"
 source = "Part 33 procedural language; record 62.6"

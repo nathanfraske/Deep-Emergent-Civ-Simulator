@@ -36,6 +36,10 @@ const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../calibration/profiles/dev-fixtures.toml"
 );
+const RESERVED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../calibration/reserved.toml"
+);
 
 const LOCATION: AttrKindId = AttrKindId(0);
 const RIVER: u32 = 10;
@@ -90,10 +94,10 @@ fn behaviour() -> Behaviour {
     }
 }
 
-fn dawn_band(seed: u64) -> (World, Vec<StableId>) {
-    let manifest = CalibrationManifest::load(FIXTURES).expect("fixtures load");
-    let mut w = World::from_manifest(&manifest, &channels(), Profile::Development)
-        .expect("development world builds")
+fn dawn_band(seed: u64, path: &str, profile: Profile) -> (World, Vec<StableId>) {
+    let manifest = CalibrationManifest::load(path).expect("manifest loads");
+    let mut w = World::from_manifest(&manifest, &channels(), profile)
+        .expect("world builds from manifest")
         .with_seed(seed);
     w.set_behaviour(behaviour());
     w.set_language(LanguageParams::from_manifest(&manifest).expect("language fixture"));
@@ -126,7 +130,7 @@ fn dawn_band(seed: u64) -> (World, Vec<StableId>) {
 
 #[test]
 fn the_dawn_band_lives_and_replays() {
-    let (mut w, band) = dawn_band(0xDA7);
+    let (mut w, band) = dawn_band(0xDA7, FIXTURES, Profile::Development);
     for _ in 0..40 {
         w.tick(&[]);
     }
@@ -154,7 +158,7 @@ fn the_dawn_band_lives_and_replays() {
     }
 
     // Determinism: a fresh run of the same scene reproduces the same world exactly.
-    let (mut w2, _) = dawn_band(0xDA7);
+    let (mut w2, _) = dawn_band(0xDA7, FIXTURES, Profile::Development);
     for _ in 0..40 {
         w2.tick(&[]);
     }
@@ -165,7 +169,7 @@ fn the_dawn_band_lives_and_replays() {
     );
 
     // A different seed yields a different history.
-    let (mut w3, _) = dawn_band(0x999);
+    let (mut w3, _) = dawn_band(0x999, FIXTURES, Profile::Development);
     for _ in 0..40 {
         w3.tick(&[]);
     }
@@ -173,5 +177,50 @@ fn the_dawn_band_lives_and_replays() {
         w.state_hash(),
         w3.state_hash(),
         "a different seed gives a different world"
+    );
+}
+
+#[test]
+fn the_dawn_band_lives_under_the_calibrated_manifest() {
+    // The confirm: the band runs on the owner's set values from the authoritative
+    // manifest under Calibrated, not the dev fixtures, so the cognition, gossip, and
+    // language calibrations are exercised on the real numbers. The scene content (the
+    // behaviour, the phonology pool, the trace) is test scaffolding, not reserved
+    // values; only the owner's calibrations come from the manifest.
+    let (mut w, band) = dawn_band(0xDA7, RESERVED, Profile::Calibrated);
+    for _ in 0..40 {
+        w.tick(&[]);
+    }
+
+    let bp = *w.belief_params();
+    let believers = band
+        .iter()
+        .filter(|&&m| w.mind(m).unwrap().belief(StableId(99), LOCATION, &bp) == Some(RIVER))
+        .count();
+    assert_eq!(
+        believers,
+        band.len(),
+        "the calibrated band all come to believe the river"
+    );
+
+    let c = ConceptId(1);
+    let word = w.word_for(band[0], c);
+    assert!(word.is_some(), "the calibrated band coined a word");
+    for &m in &band {
+        assert_eq!(
+            w.word_for(m, c),
+            word,
+            "the calibrated band converged on one shared word"
+        );
+    }
+
+    let (mut w2, _) = dawn_band(0xDA7, RESERVED, Profile::Calibrated);
+    for _ in 0..40 {
+        w2.tick(&[]);
+    }
+    assert_eq!(
+        w.state_hash(),
+        w2.state_hash(),
+        "the calibrated run replays bit for bit"
     );
 }

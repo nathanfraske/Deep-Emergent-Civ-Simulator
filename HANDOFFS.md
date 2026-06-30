@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: First calibration slice set and confirmed (the prototype runs on the owner's numbers)
+
+**What was done.** Worked through the reserved-value panel for the slice the Dawn Band prototype consumes, set-then-confirm. I brought cited recommendations; the owner accepted them and denoted all set values as tuneable levers revisable on his sign-off. First a convention fix: the log-odds unit is pinned to natural log-odds (nats), recorded in the manifest header, since the engine never fixed the base and the numbers were meaningless without it (this also exposed the fixture clamp of 50 as p approximately 1 minus 1e-22, overconfident; set to 7, p approximately 0.999).
+
+**Values set (16, with set_by/set_date in `calibration/reserved.toml`).** First-order belief: clamp 7, commit_threshold 3 (sigma(3) approximately 0.95; Wald 1945), runner_up_margin 2 (about 7:1; Lipton 2004). ToM meta: clamp 6, commit_threshold 4, runner_up_margin 2. Access weights (weight of evidence, Good 1950; Jaynes 2003): witnessed 5, told 4, said 3, reachable 2, absence 4, denied 4. Gossip: told_weight 2, trust_baseline 0.5 (Berg, Dickhaut, McCabe 1995), trust_penalty 0.5 (Slovic 1993 asymmetry). Language: innovation_rate 0.02 (naming-game convergence, Baronchelli et al. 2006).
+
+**What the confirm caught.** The set-then-confirm loop worked as intended. The first run failed at modeled_belief: my own recommended access weights (witnessed 3, told 2) sat below the meta commit threshold (4), so no single access observation could attribute a belief and both the false-belief and lie-detection competences failed. The owner signed off the fix (raise the access weights so a clear access clears the meta threshold, keeping it wider than the first-order threshold): witnessed 5, told 4, said 3, absence/denied 4. Re-run is green.
+
+**The confirm harness.** `crates/sim/tests/world_tick.rs` now runs the scripted false-belief scene from the authoritative manifest under Calibrated (cognition + access weights) and keeps a fail-loud test pointed at a still-reserved id; `crates/sim/tests/dawn_band.rs` adds a calibrated-manifest run of the Dawn Band (gossip + language + determinism). Both build the world from the owner's numbers and replay bit for bit. Full workspace green (150-plus tests), fmt and clippy clean. Audit Section 6a records the calibration log; the design reserved blockquotes (basis) and the manifest (set/reserved) stay in step.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged. The prototype now runs end to end on the owner's calibrated numbers under the Calibrated profile. Queued next: deepen the engine (implement the R-LANG-DET form substrate and R-LANG-MODALITY channel substrate so language is real) or broaden the scene (movement, real resources, a gossip-only belief-spread scene that isolates the trust/told-weight levers); R-LANG-TYPOLOGY and the nine determinism-hardening items remain ready; R-WOUND would let acquired channel loss wire in.
+
+---
+
 ## 2026-06-30: R-LANG-MODALITY resolved (five-facet fan-out, three-skeptic verification)
 
 **What was done.** Resolved R-LANG-MODALITY by the owner's chosen method, a facet fan-out plus a steering-and-determinism verification pass, with the owner's scope choice that the representation resolve now and acquired injury-loss reserve against the open R-WOUND. Five parallel research facets (the channel substrate and taxonomy, the per-modality articulation model, per-being produce/perceive channels, cross-modal contact and learning, and emergence across modality), each literature-grounded, fed a synthesis that three skeptics then hardened (a closed-enum seam hunt, a Steering Audit, and a determinism non-reopen check).

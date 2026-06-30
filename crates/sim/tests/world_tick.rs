@@ -14,9 +14,10 @@
 
 //! The runtime spine driven from the manifest path (RUNBOOK section 3). A world of
 //! minds is built from the development fixtures profile, run through a scripted
-//! multi-tick scene, and checked for replay determinism. A second test proves the
-//! authoritative manifest (everything reserved) refuses to start a calibrated world, so
-//! production never runs on an unset number.
+//! multi-tick scene, and checked for replay determinism. A second test runs the same
+//! scene under the now-calibrated authoritative manifest, and a third proves the
+//! fail-loud gate still refuses a system whose required value is reserved, so production
+//! never runs on an unset number.
 
 use civsim_core::{Fixed, StableId};
 use civsim_sim::agent::AccessObs;
@@ -100,10 +101,10 @@ fn model(
 }
 
 // Run the scripted scene and return the world's per-tick state hashes.
-fn run_scene() -> Vec<u128> {
-    let manifest = CalibrationManifest::load(FIXTURES).expect("dev fixtures load");
-    let mut w = World::from_manifest(&manifest, &channels(), Profile::Development)
-        .expect("development world builds from fixtures");
+fn run_scene(path: &str, profile: Profile) -> Vec<u128> {
+    let manifest = CalibrationManifest::load(path).expect("manifest loads");
+    let mut w =
+        World::from_manifest(&manifest, &channels(), profile).expect("world builds from manifest");
 
     let anna = w.spawn(Fixed::ONE);
     let boris = w.spawn(Fixed::ONE);
@@ -157,8 +158,8 @@ fn run_scene() -> Vec<u128> {
 
 #[test]
 fn the_manifest_driven_scene_replays_deterministically() {
-    let a = run_scene();
-    let b = run_scene();
+    let a = run_scene(FIXTURES, Profile::Development);
+    let b = run_scene(FIXTURES, Profile::Development);
     assert_eq!(a, b, "the same scene reproduces the same per-tick hashes");
     assert_eq!(a.len(), 3);
     // The world changes from tick to tick (it is not stuck).
@@ -167,11 +168,23 @@ fn the_manifest_driven_scene_replays_deterministically() {
 }
 
 #[test]
-fn the_authoritative_manifest_refuses_a_calibrated_world() {
+fn the_authoritative_manifest_runs_the_calibrated_prototype() {
+    // The prototype slice of reserved values is now set, so the authoritative manifest
+    // builds and the cognition scene plays out under the owner's calibrated numbers,
+    // replaying deterministically.
+    let a = run_scene(RESERVED, Profile::Calibrated);
+    let b = run_scene(RESERVED, Profile::Calibrated);
+    assert_eq!(a, b, "the calibrated scene replays deterministically");
+}
+
+#[test]
+fn the_fail_loud_gate_still_refuses_a_reserved_system() {
+    // A system whose required value is still reserved must refuse under Calibrated, so
+    // the fail-loud guarantee holds for everything not yet calibrated.
     let manifest = CalibrationManifest::load(RESERVED).expect("reserved manifest loads");
-    let built = World::from_manifest(&manifest, &channels(), Profile::Calibrated);
+    let gate = manifest.gate(Profile::Calibrated, &["langdet.salience_decay_rate"]);
     assert!(
-        built.is_err(),
-        "production must fail loud while the cognition values are reserved"
+        gate.is_err(),
+        "an uncalibrated system must still fail loud under Calibrated"
     );
 }
