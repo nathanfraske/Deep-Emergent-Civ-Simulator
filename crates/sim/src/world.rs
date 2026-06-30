@@ -1035,14 +1035,30 @@ impl World {
                     },
                 });
                 // The answer: if the asked peer holds the belief, it tells it back, and the
-                // asker grounds it. The asker has no model of the answerer on this question
-                // (it asked because it did not know), so there is no deception verdict here.
+                // asker grounds it under the same sincerity frame the INFORM path uses. The
+                // asker usually has no model of the answerer on this question (it asked
+                // because it did not know), so the verdict is usually false; but if it does
+                // hold an access-built model that out-ranks the answer, the answer is seen
+                // through as a lie exactly as a volunteered assertion would be (Part 37,
+                // Part 9.5), rather than being trusted blindly.
                 if let Some(answer) = self
                     .minds
                     .get(&listener)
                     .and_then(|m| m.shared_belief(subject, attr, &self.belief_params))
                 {
                     if assertion_lands(listener, speaker) {
+                        let deception = self
+                            .minds
+                            .get(&speaker)
+                            .map(|m| {
+                                m.detects_lie(
+                                    listener,
+                                    answer.attr,
+                                    answer.value,
+                                    &self.meta_params,
+                                )
+                            })
+                            .unwrap_or(false);
                         let trust = self
                             .trust
                             .get(&(speaker, listener))
@@ -1063,7 +1079,7 @@ impl World {
                                 listener: speaker,
                                 speaker: listener,
                                 shared: answer,
-                                deception: false,
+                                deception,
                                 trust,
                             },
                         });
@@ -1387,9 +1403,21 @@ impl World {
         }
     }
 
-    /// A canonical 128-bit hash of the whole world: the clock, the id registry, the
-    /// event log length, then every mind in id order. A pure function of canonical
-    /// state, so a replay reproduces it bit for bit.
+    /// A canonical 128-bit hash of the world's *outcome* state: the clock, the id
+    /// registry, the event-log length, then every mind, trace, trust edge, lexicon, and
+    /// lineage in id order. A pure function of that state, so a replay reproduces it bit
+    /// for bit.
+    ///
+    /// Deliberate boundary: this folds the *outcomes* of dialogue (the belief, trust, and
+    /// theory-of-mind state moves produce) but NOT the move log's content (only its
+    /// length) and NOT the dialogue substrate, the promoted set, or the other static
+    /// inputs (the behaviour, gossip, channel, and weight config). That is required, not an
+    /// oversight: the Part 41 Steering Audit invariants assert that permuting the move-kind
+    /// and force-effect labels (content-blindness) and swapping an equal-capacity channel
+    /// leave this hash invariant, and both the move-kind id and the channel id live in the
+    /// move payload, so folding the move log or the substrate here would break those
+    /// invariants. The move sequence is hashed separately by [`World::event_log_hash`] for
+    /// replay integrity. Do not fold the substrate or the move payload into this hash.
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
@@ -1469,6 +1497,33 @@ impl World {
         for (mind, lang) in &self.lang_of {
             h.write_stable(*mind);
             h.write_u32(lang.0);
+        }
+        h.finish()
+    }
+
+    /// A canonical 128-bit hash of the move sequence: every logged event in append order,
+    /// folding its tick, kind, actors, subjects, and payload bytes. This is the integrity
+    /// hash for the move log, kept separate from [`World::state_hash`] precisely because it
+    /// is *not* content-blind (it folds the move-kind and channel ids), so it must never be
+    /// used in the Steering Audit invariants. A same-seed, same-setup replay reproduces the
+    /// move log byte for byte, so this catches a divergence in the move sequence that the
+    /// outcome hash could miss (different moves that happen to net to the same belief state).
+    pub fn event_log_hash(&self) -> u128 {
+        let mut h = StateHasher::new();
+        h.write_u64(self.events.len() as u64);
+        for e in self.events.iter() {
+            h.write_u64(e.id.0);
+            h.write_u64(e.tick);
+            h.write_u32(e.kind.0);
+            h.write_u64(e.actors.len() as u64);
+            for a in &e.actors {
+                h.write_stable(*a);
+            }
+            h.write_u64(e.subjects.len() as u64);
+            for s in &e.subjects {
+                h.write_stable(*s);
+            }
+            h.write_bytes(&e.payload);
         }
         h.finish()
     }
@@ -2282,6 +2337,54 @@ name = "said"
     }
 
     #[test]
+    fn an_answer_that_conflicts_with_the_askers_model_is_seen_through() {
+        // A seeker wonders where the herd ranges and cannot answer, but has witnessed that
+        // the answerer's access points north. The answerer answers south; the seeker runs
+        // the same sincerity frame on the answer as on a volunteered assertion, sees it
+        // conflicts with its model, and refuses it rather than grounding it blindly.
+        let mut w = dialogue_world();
+        let seeker = w.spawn(Fixed::ONE);
+        let answerer = w.spawn(Fixed::ONE);
+        w.set_place(seeker, 1);
+        w.set_place(answerer, 1);
+        w.promote(seeker);
+        w.promote(answerer);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0));
+        // One tick: the seeker asks, the answerer answers 20, and the verdict is judged
+        // against the witnessed model (10) frozen at the start of the tick. (Over many
+        // ticks repeated said-evidence would erode that one witnessed observation, the
+        // defeasible-inference dynamic, so the seen-through guarantee is checked here on the
+        // turn the answer is given, as the design's phase-frozen snapshot intends.)
+        w.tick(&[
+            // The answerer comes to believe 20 (south), so that is what it will answer.
+            observe_for(answerer, 20),
+            // The seeker witnessed the answerer's access pointing at 10 (north).
+            TickInput {
+                mind: seeker,
+                ordinal: 0,
+                stim: Stimulus::Model {
+                    target: answerer,
+                    attr: AttrKindId(0),
+                    hyps: vec![10, 20],
+                    obs: AccessObs {
+                        channel: WITNESSED,
+                        toward: 10,
+                        from: seeker,
+                    },
+                },
+            },
+        ]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(seeker)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the seeker refused the answer that conflicts with what it witnessed"
+        );
+    }
+
+    #[test]
     fn a_logged_conversation_replays_deterministically() {
         let build = || {
             let mut w = dialogue_world();
@@ -2295,12 +2398,13 @@ name = "said"
             for _ in 0..4 {
                 w.tick(&[]);
             }
-            w.state_hash()
+            // Both the outcome hash and the move-log integrity hash must replay.
+            (w.state_hash(), w.event_log_hash())
         };
         assert_eq!(
             build(),
             build(),
-            "the logged conversation replays bit for bit"
+            "the logged conversation replays bit for bit, outcomes and move log alike"
         );
     }
 }

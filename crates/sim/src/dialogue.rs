@@ -745,13 +745,13 @@ impl<'a> Cursor<'a> {
     }
 
     fn u32(&mut self) -> Option<u32> {
-        self.take(4)
-            .map(|b| u32::from_be_bytes(b.try_into().unwrap()))
+        let arr: [u8; 4] = self.take(4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(arr))
     }
 
     fn u64(&mut self) -> Option<u64> {
-        self.take(8)
-            .map(|b| u64::from_be_bytes(b.try_into().unwrap()))
+        let arr: [u8; 8] = self.take(8)?.try_into().ok()?;
+        Some(u64::from_be_bytes(arr))
     }
 }
 
