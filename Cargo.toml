@@ -1,9 +1,10 @@
-# Workspace root. The crate split follows RUNBOOK section 1a: a determinism core
-# that is buildable and fully testable now, and a simulation crate built in
-# staged dependency order. The wider crate decomposition of design Part 59 is the
-# eventual target; the standup begins with these two.
+# Workspace root. The crate split follows RUNBOOK section 1a and grows toward the
+# wider decomposition of design Part 59: a determinism core buildable and fully
+# testable now, the unit and dimension system, a simulation crate built in staged
+# dependency order, and the spatial and worldgen layer (crates/world, roadmap M1)
+# the simulation will sit on.
 [workspace]
-members = ["crates/core", "crates/units", "crates/sim"]
+members = ["crates/core", "crates/units", "crates/sim", "crates/world"]
 resolver = "2"
 
 [workspace.package]

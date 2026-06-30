@@ -1,0 +1,40 @@
+# Confluence: grounded reality with abundant magic. The blend of Mirror and Arcanum, and
+# the headline target: a world both lawful and enchanted. See docs/working/TEST_WORLDS.md.
+# Directions are tokens; magnitudes stay reserved.
+
+[scenario]
+id = "confluence"
+name = "Confluence"
+summary = "Our physics and a believable biology and races, with a potent magical layer running alongside rather than replacing them; the couplings are what is tested."
+grounding = "real"
+
+[races]
+count = "several"
+diversity = "moderate"
+magical_mix = true              # a mix of magically disposed and non-magical peoples
+
+[magic]
+laws = true
+potency = "high"                # becomes reserved MagicLaws ids as Part 34 is built
+cost = "real"                   # consequential costs: magic is lawful, not free
+limit_looseness = "moderate"
+affinity_fraction = "some"      # a subset of races carry the imbued magic-affinity channel
+affinity_weight = "moderate_to_high"
+
+[dials]
+# The grounded settings of Mirror, run together with a present-and-potent MagicLaws.
+"genome.mutation_rates" = "real"
+"genome.point_mutation_rate" = "real"
+"genome.mutation_step" = "real"
+"genome.selection_scaling" = "real"
+"genome.effective_population_size" = "real"
+"genome.speciation_distance" = "real"
+"genome.speciation_incompatibilities" = "real"
+"language.sound_change_rate" = "real"
+"lang.drift_operator_rates" = "real"
+"language.innovation_rate" = "real"
+"axiom.calcification_rate" = "real"
+"axiom.conformity_prestige_strengths" = "real"
+"value_metric.conflict_coefficient" = "real"
+"being.life_event_impulse" = "real"
+"biosphere.predawn_generations" = "real"

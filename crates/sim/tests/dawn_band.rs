@@ -118,6 +118,7 @@ fn dawn_band(seed: u64, path: &str, profile: Profile) -> (World, Vec<StableId>) 
     w.emit_trace(Trace {
         id: StableId(900),
         place: HERE,
+        channel: civsim_sim::SenseChannelId::DEFAULT,
         subject: StableId(99),
         attr: LOCATION,
         hyps: vec![RIVER, CAMP],
@@ -132,8 +133,18 @@ fn dawn_band(seed: u64, path: &str, profile: Profile) -> (World, Vec<StableId>) 
 #[test]
 fn the_dawn_band_lives_and_replays() {
     let (mut w, band) = dawn_band(0xDA7, FIXTURES, Profile::Development);
+    // With a live innovation rate the band's consensus is punctuated: it reaches one
+    // shared word, then an occasional fresh coinage splits it and it re-converges. So we
+    // check that consensus is reached during the run rather than that it holds at the
+    // final tick, which would be a coin flip on whether an innovation had just fired.
+    let c = ConceptId(1);
+    let mut converged = false;
     for _ in 0..40 {
         w.tick(&[]);
+        let w0 = w.word_for(band[0], c);
+        if w0.is_some() && band.iter().all(|&m| w.word_for(m, c) == w0) {
+            converged = true;
+        }
     }
 
     let bp = *w.belief_params();
@@ -150,13 +161,12 @@ fn the_dawn_band_lives_and_replays() {
         assert!(w.last_action(m).is_some(), "every agent acted");
     }
 
-    // Language: the band converged on one shared word for the concept.
-    let c = ConceptId(1);
-    let word = w.word_for(band[0], c);
-    assert!(word.is_some(), "the band coined a word");
-    for &m in &band {
-        assert_eq!(w.word_for(m, c), word, "the band shares one word");
-    }
+    // Language: the band coined a word and reached a shared convention during the run.
+    assert!(w.word_for(band[0], c).is_some(), "the band coined a word");
+    assert!(
+        converged,
+        "the band reached one shared word during the run (the naming game converges)"
+    );
 
     // Determinism: a fresh run of the same scene reproduces the same world exactly.
     let (mut w2, _) = dawn_band(0xDA7, FIXTURES, Profile::Development);
@@ -189,8 +199,14 @@ fn the_dawn_band_lives_under_the_calibrated_manifest() {
     // behaviour, the phonology pool, the trace) is test scaffolding, not reserved
     // values; only the owner's calibrations come from the manifest.
     let (mut w, band) = dawn_band(0xDA7, RESERVED, Profile::Calibrated);
+    let c = ConceptId(1);
+    let mut converged = false;
     for _ in 0..40 {
         w.tick(&[]);
+        let w0 = w.word_for(band[0], c);
+        if w0.is_some() && band.iter().all(|&m| w.word_for(m, c) == w0) {
+            converged = true;
+        }
     }
 
     let bp = *w.belief_params();
@@ -204,16 +220,14 @@ fn the_dawn_band_lives_under_the_calibrated_manifest() {
         "the calibrated band all come to believe the river"
     );
 
-    let c = ConceptId(1);
-    let word = w.word_for(band[0], c);
-    assert!(word.is_some(), "the calibrated band coined a word");
-    for &m in &band {
-        assert_eq!(
-            w.word_for(m, c),
-            word,
-            "the calibrated band converged on one shared word"
-        );
-    }
+    assert!(
+        w.word_for(band[0], c).is_some(),
+        "the calibrated band coined a word"
+    );
+    assert!(
+        converged,
+        "the calibrated band reached one shared word during the run"
+    );
 
     let (mut w2, _) = dawn_band(0xDA7, RESERVED, Profile::Calibrated);
     for _ in 0..40 {

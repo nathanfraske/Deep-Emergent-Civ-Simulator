@@ -15,3 +15,9 @@ civsim-core = { path = "../core" }
 # substrate definitions. No floating point reaches canonical state through them.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[dev-dependencies]
+# The spatial and worldgen layer, used by the dawn-world example to place a band on a
+# generated map. The library will take this as a regular dependency at the deep M2
+# placement step (when a place becomes a map coordinate); for now only examples need it.
+civsim-world = { path = "../world" }

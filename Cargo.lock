@@ -11,6 +11,7 @@ name = "civsim-sim"
 version = "0.1.0"
 dependencies = [
  "civsim-core",
+ "civsim-world",
  "serde",
  "toml",
 ]
@@ -21,6 +22,15 @@ version = "0.1.0"
 dependencies = [
  "civsim-core",
  "serde",
+]
+
+[[package]]
+name = "civsim-world"
+version = "0.1.0"
+dependencies = [
+ "civsim-core",
+ "serde",
+ "toml",
 ]
 
 [[package]]

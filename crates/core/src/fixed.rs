@@ -154,6 +154,21 @@ impl Fixed {
         Fixed(self.0.abs())
     }
 
+    /// The non-negative square root, exact to the last fixed-point bit and deterministic.
+    /// Computed by an integer square root over the 128-bit radicand `bits << FRAC_BITS`
+    /// (since `sqrt(b / 2^F) * 2^F = isqrt(b * 2^F)`), so there is no float and the result
+    /// is identical on every machine and thread count. A negative input has no real root and
+    /// returns [`Fixed::ZERO`]; callers that can pass a negative (rather than a sum of
+    /// squares, which cannot) should guard first.
+    #[inline]
+    pub fn sqrt(self) -> Fixed {
+        if self.0 <= 0 {
+            return Fixed::ZERO;
+        }
+        let radicand = (self.0 as u128) << FRAC_BITS;
+        Fixed(radicand.isqrt() as i64)
+    }
+
     /// Clamp into `[lo, hi]`.
     #[inline]
     pub fn clamp(self, lo: Fixed, hi: Fixed) -> Fixed {
@@ -329,6 +344,30 @@ mod tests {
         assert!(
             diff <= Fixed::from_bits(8),
             "reconstruction within tolerance: {diff:?}"
+        );
+    }
+
+    #[test]
+    fn sqrt_is_exact_on_squares_and_deterministic() {
+        // Perfect squares come back exactly.
+        assert_eq!(Fixed::from_int(4).sqrt(), Fixed::from_int(2));
+        assert_eq!(Fixed::from_int(9).sqrt(), Fixed::from_int(3));
+        assert_eq!(Fixed::ONE.sqrt(), Fixed::ONE);
+        assert_eq!(Fixed::ZERO.sqrt(), Fixed::ZERO);
+        // sqrt(2) squares back to within fixed-point tolerance, and is the floored root.
+        let r = Fixed::from_int(2).sqrt();
+        let sq = r.mul(r);
+        assert!((sq - Fixed::from_int(2)).abs() <= Fixed::from_bits(1 << 17));
+        assert!(
+            sq <= Fixed::from_int(2),
+            "isqrt floors, so the square does not exceed 2"
+        );
+        // A negative input has no real root and returns zero (guarded, not a panic).
+        assert_eq!(Fixed::from_int(-5).sqrt(), Fixed::ZERO);
+        // Deterministic: the same input gives the same bits every call.
+        assert_eq!(
+            Fixed::from_ratio(7, 3).sqrt(),
+            Fixed::from_ratio(7, 3).sqrt()
         );
     }
 

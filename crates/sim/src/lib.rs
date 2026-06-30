@@ -49,31 +49,67 @@
 //!   command scheduler is held for its open determinism design (R-CMD-ORDER,
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
+pub mod affect;
 pub mod agent;
+pub mod axiom;
 pub mod calibration;
 pub mod conservation;
 pub mod decision;
+pub mod dialogue;
 pub mod evidence;
+pub mod genome;
 pub mod language;
 pub mod lod;
+pub mod primes;
+pub mod race;
+pub mod scenario;
+pub mod sensorium;
 pub mod substrate;
 pub mod tom;
+pub mod value;
 pub mod world;
 
+pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
 pub use agent::{AccessObs, Mind, SharedBelief};
+pub use axiom::{
+    bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
+    entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId,
+    AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
+    EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
+};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use dialogue::{
+    conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
+    ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
+    MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
+};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use genome::{
+    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, DominanceKind, DominanceMode,
+    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype,
+    HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable,
+    LifeHistoryChannel, LinkageGroup, ReproductionMode, SchemeId, TraitId,
+};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
     FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
     Word,
 };
 pub use lod::{Individual, Pool, TwoTierWorld};
+pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
+pub use race::{BandSpec, Race};
+pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
+pub use sensorium::{SenseChannelId, Sensorium};
 pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use value::{
+    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
+    EmicProjection, EticAxisId, EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId,
+    RaceProjection, StructureKind, ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};

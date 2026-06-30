@@ -358,6 +358,28 @@ impl Lexicon {
         self.by_concept.iter()
     }
 
+    /// Render an ordered sequence of concepts as this mind's coined words, joined by
+    /// spaces, so a thought can be shown in the band's own emergent language rather than
+    /// an English gist (design 33.2). A concept the mind has no word for yet renders as the
+    /// `unknown` placeholder. This is the legibility layer over the naming game: it reads
+    /// the words a culture coined and never invents one, so it never enters canon.
+    pub fn utterance(
+        &self,
+        concepts: &[ConceptId],
+        substrate: &ArticulationSubstrate,
+        unknown: &str,
+    ) -> String {
+        concepts
+            .iter()
+            .map(|c| {
+                self.word_for(*c)
+                    .map(|w| substrate.render(w))
+                    .unwrap_or_else(|| unknown.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// How many concepts this mind has a word for.
     pub fn len(&self) -> usize {
         self.by_concept.len()
@@ -598,6 +620,27 @@ mod tests {
             "the form renders to a surface string: {rendered}"
         );
         assert!(w1.len() >= 2 && w1.len() <= 3, "the length is in range");
+    }
+
+    #[test]
+    fn an_utterance_renders_a_thought_in_coined_words() {
+        let (substrate, forms) = ArticulationSubstrate::syllabic(
+            ["ka", "lo", "mi", "tu", "ne", "sa"].map(String::from),
+            2,
+            3,
+        );
+        let mut lex = Lexicon::new();
+        let a = forms.coin(Rng::for_coords(1, &[1]));
+        let b = forms.coin(Rng::for_coords(1, &[2]));
+        lex.adopt(ConceptId(10), a.clone());
+        lex.adopt(ConceptId(20), b.clone());
+        // A two-concept thought renders as the two coined words joined.
+        let said = lex.utterance(&[ConceptId(10), ConceptId(20)], &substrate, "?");
+        let expected = format!("{} {}", substrate.render(&a), substrate.render(&b));
+        assert_eq!(said, expected);
+        // A concept with no coined word yet shows the placeholder, never an invented word.
+        let gap = lex.utterance(&[ConceptId(10), ConceptId(99)], &substrate, "?");
+        assert_eq!(gap, format!("{} ?", substrate.render(&a)));
     }
 
     #[test]

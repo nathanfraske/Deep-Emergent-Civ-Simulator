@@ -1,0 +1,17 @@
+[package]
+name = "civsim-world"
+description = "The spatial and worldgen layer for the Emergent Civilization Simulator: the coordinate and topology model, the data-driven terrain and biome substrate, deterministic fixed-point worldgen, the chunk grid and quadtree, and the headless glyph view (design Parts 6, 12, 14, 56)."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+# serde and toml parse the data-driven terrain and biome substrate, the same mature,
+# stable pair the simulation crate uses for its manifests. No floating point reaches
+# canonical state through them; worldgen fields stay fixed-point integer.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

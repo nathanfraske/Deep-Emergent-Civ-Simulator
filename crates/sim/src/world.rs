@@ -32,46 +32,82 @@
 //! uses a clearly-labelled fixtures profile, never the authoritative manifest's unset
 //! entries.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
+use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
-use crate::decision::{ActionId, Behaviour, DriveId};
+use crate::decision::{ActionId, Behaviour, Curve, DriveId};
+use crate::dialogue::{
+    ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
+};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
+use crate::genome::Genome;
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
+use crate::race::{BandSpec, Race};
+use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
+use crate::value::RaceId;
+use civsim_core::{DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
 /// place id, which is what lets one perceive a trace or talk to another. The full
 /// spatial hierarchy (design Part 6) refines this later.
 pub type PlaceId = u32;
 
-/// The RNG phase tag for a perception roll, namespacing it apart from other draws (a
-/// placeholder until the phase registry of R-RNG-COORD pins the namespace).
-const PHASE_PERCEPTION: u64 = 0x9001;
-
-/// The RNG phase tag for choosing a gossip listener.
-const PHASE_GOSSIP: u64 = 0x9002;
-
-/// The RNG phase tag for choosing a naming-game partner and concept.
-const PHASE_LANGUAGE: u64 = 0x9003;
-
-/// The RNG phase tag for the innovation roll (whether to coin a fresh word).
-const PHASE_INNOVATE: u64 = 0x9004;
-
-/// The RNG phase tag for minting a fresh word form.
-const PHASE_COIN: u64 = 0x9005;
-
-/// The RNG phase tag for a lineage innovating a regular form change (drift).
-const PHASE_DRIFT: u64 = 0x9006;
-
 /// The conventional access channel name a spoken belief travels through, used by the
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
 /// no such channel, the model update is skipped (the first-order belief still passes).
 const SAID_CHANNEL: &str = "said";
+
+/// The CONVERSE-phase draw slot for choosing a move's addressee, namespaced so it cannot
+/// collide with a future move-scoped draw on counter zero (the R-RNG-COORD slot rule).
+const SLOT_ADDRESSEE: u32 = 0;
+
+/// Read a felicity dimension from the world state the engine already carries (design Part
+/// 9.5). The dialogue step gates a move on these readings; a dimension the world does not
+/// yet model (an institutional role, a value distance, a channel reach) reads as `None`,
+/// so a condition over it misfires until the subsystem that carries it is built, never on
+/// a fabricated value. Trust is the one dimension modelled today.
+fn felicity_reading(
+    dim: &str,
+    trust: &BTreeMap<(StableId, StableId), Fixed>,
+    listener: StableId,
+    speaker: StableId,
+) -> Option<Fixed> {
+    match dim {
+        "trust" => trust.get(&(listener, speaker)).copied(),
+        _ => None,
+    }
+}
+
+/// Build an assertion move from a speaker to one listener, carrying a belief question as
+/// its content. The ordinal and in-reply-to are filled in the write pass.
+fn assertion_move(
+    force: MoveKindId,
+    speaker: StableId,
+    listener: StableId,
+    shared: &SharedBelief,
+    channel: crate::tom::AccessChannelId,
+    tick: u64,
+) -> Move {
+    Move {
+        force,
+        speaker,
+        addressees: vec![listener],
+        content: ContentRef::Belief {
+            subject: shared.subject,
+            attr: shared.attr,
+        },
+        in_reply_to: None,
+        channel,
+        tick,
+        ordinal: 0,
+    }
+}
 
 /// The reserved calibrations the gossip loop needs. Read from the manifest; until set,
 /// reading them fails loud rather than running on a fabricated default.
@@ -152,6 +188,11 @@ pub struct Trace {
     pub id: StableId,
     /// Where it sits; only co-located minds can perceive it.
     pub place: PlaceId,
+    /// The physical channel this trace travels on (the R-SENSORIUM channel gate). A being
+    /// perceives it only if its sensorium reads this channel; a being with no installed
+    /// sensorium reads every channel, so a trace on [`SenseChannelId::DEFAULT`] is perceived
+    /// by everyone co-located, the back-compatible default.
+    pub channel: SenseChannelId,
     /// The subject the implied belief is about.
     pub subject: StableId,
     /// The attribute the implied belief is about.
@@ -190,6 +231,69 @@ struct PerceptionHit {
     from: StableId,
 }
 
+/// The installed modelled-dialogue substrate (design Part 9.5): the move registry, the
+/// etic force floor, and the resolved felicity bands. Content-gated at install, so a
+/// malformed substrate fails loud rather than running. None until set, and the dialogue
+/// step is then a no-op; the one-pass gossip loop is the fallback for everyone the move
+/// log does not cover.
+struct DialogueConfig {
+    registry: MoveRegistry,
+    floor: ForceFloor,
+    /// Resolved felicity band bounds, keyed by band name. Empty until the owner sets the
+    /// reserved bounds; a felicity condition whose band is unresolved misfires (the move
+    /// lands as a bare attempt), so no fabricated default is ever used.
+    bands: BTreeMap<String, ResolvedBand>,
+}
+
+/// One recorded dialogue move gathered in the converse read pass and appended to the log
+/// in a second pass, so the read walk stays pure (the shape the perception and gossip
+/// steps already use).
+struct PendingMove {
+    mv: Move,
+    /// The move this one answers, by its index in the same tick's pending list, so the
+    /// in-reply-to event id can be filled once the answered move has been appended.
+    answers: Option<usize>,
+    /// Whether this move's content should point at the move it answers (true for an
+    /// acceptance or refusal, which are about the prior move; false for an answer to a
+    /// question, which carries its own belief content).
+    reply_as_prior: bool,
+    /// The first-order and theory-of-mind effects to apply when the move lands.
+    effect: MoveEffect,
+}
+
+/// What a recorded move does to canonical state when it lands, drawn from the etic force
+/// floor (design Part 9.5). Each variant is a call into a mechanism the engine already
+/// has; the converse step composes them, authoring no new behaviour.
+enum MoveEffect {
+    /// A move whose felicity conditions failed: it is recorded as a bare attempt but
+    /// lands no force (the Austin misfire made structural).
+    Misfire,
+    /// A told-evidence assertion: the listener integrates the belief (gated by the
+    /// deception verdict) and models the speaker as having said it.
+    Assert {
+        listener: StableId,
+        speaker: StableId,
+        shared: SharedBelief,
+        deception: bool,
+        trust: Fixed,
+    },
+    /// An uptake: the original speaker models the listener's response as said evidence
+    /// about whether the listener took up the claim (positive) or not (negative).
+    Uptake {
+        speaker: StableId,
+        listener: StableId,
+        shared: SharedBelief,
+        sign: EffectSign,
+    },
+    /// A question: it seeds the inquiry goal in the hearer (design 9.13), so being asked
+    /// makes the hearer wonder the question too. It moves no belief.
+    Inquire {
+        hearer: StableId,
+        subject: StableId,
+        attr: AttrKindId,
+    },
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
@@ -197,6 +301,18 @@ pub struct World {
     reg: Registry,
     minds: BTreeMap<StableId, Mind>,
     place_of: BTreeMap<StableId, PlaceId>,
+    /// Per-being genome, the inheritance a member was seeded or born with (design Part 25).
+    /// Populated at the dawn by [`World::seed_dawn_populations`].
+    genomes: BTreeMap<StableId, Genome>,
+    /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
+    intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
+    /// Per-being transient affect, the event-driven emotional state (the R-EMOTION gap).
+    affect: BTreeMap<StableId, AffectState>,
+    /// Per-being age in life-cadence ticks, for the aging-and-mortality loop (the R-AGING gap).
+    ages: BTreeMap<StableId, u32>,
+    /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
+    /// with no entry reads every channel, so perception is gated only where a sensorium is set.
+    sensorium: BTreeMap<StableId, Sensorium>,
     traces: Vec<Trace>,
     /// The data-driven decision definitions (drives, curves, actions). None until set.
     behaviour: Option<Behaviour>,
@@ -208,6 +324,12 @@ pub struct World {
     channels: AccessChannelRegistry,
     /// The gossip calibrations. None until set; gossip is then a no-op.
     gossip: Option<GossipParams>,
+    /// The installed dialogue substrate. None until set; the dialogue step is then a no-op.
+    dialogue: Option<DialogueConfig>,
+    /// The minds promoted to move-by-move dialogue (design Part 54). The dialogue step runs
+    /// only for a promoted speaker, and the gossip fallback skips it; empty means nobody is
+    /// promoted, so dialogue is inert and gossip covers everyone.
+    promoted: BTreeSet<StableId>,
     /// Per-pair trust, keyed (listener, speaker): a 0..1 multiplier on a heard weight.
     trust: BTreeMap<(StableId, StableId), Fixed>,
     /// Per-mind lexicons (concept to word).
@@ -248,12 +370,19 @@ impl World {
             reg: Registry::new(),
             minds: BTreeMap::new(),
             place_of: BTreeMap::new(),
+            genomes: BTreeMap::new(),
+            intrinsic: BTreeMap::new(),
+            affect: BTreeMap::new(),
+            ages: BTreeMap::new(),
+            sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
             drive_levels: BTreeMap::new(),
             last_action: BTreeMap::new(),
             channels: AccessChannelRegistry::default(),
             gossip: None,
+            dialogue: None,
+            promoted: BTreeSet::new(),
             trust: BTreeMap::new(),
             lexicons: BTreeMap::new(),
             concepts: Vec::new(),
@@ -320,6 +449,71 @@ impl World {
         self.gossip = Some(params);
     }
 
+    /// Install the modelled-dialogue substrate (the move registry and the etic force
+    /// floor). Content-gated at install: a malformed substrate is refused rather than run
+    /// (design Part 9.5, Part 41). The dialogue step stays a no-op until both this and the
+    /// gossip calibrations are set and some minds are promoted, since a move's magnitude
+    /// reuses the reserved gossip told-weight. The felicity bands start empty; set them
+    /// with [`World::set_felicity_band`] once the owner's reserved bounds are known.
+    pub fn set_dialogue(
+        &mut self,
+        registry: MoveRegistry,
+        floor: ForceFloor,
+    ) -> Result<(), crate::dialogue::ContentGateError> {
+        registry.content_gate(&floor)?;
+        self.dialogue = Some(DialogueConfig {
+            registry,
+            floor,
+            bands: BTreeMap::new(),
+        });
+        Ok(())
+    }
+
+    /// Supply a resolved felicity band (the owner's reserved bounds for one band key). A
+    /// felicity condition whose band is not supplied misfires, so this never invents a
+    /// default; it is the route by which a set reserved value reaches the dialogue gate.
+    pub fn set_felicity_band(&mut self, band: impl Into<String>, bounds: ResolvedBand) {
+        if let Some(d) = &mut self.dialogue {
+            d.bands.insert(band.into(), bounds);
+        }
+    }
+
+    /// Promote a mind to move-by-move dialogue (design Part 54). A promoted speaker runs
+    /// the dialogue step and is skipped by the one-pass gossip fallback, so it is not
+    /// double-counted. Promotion is the significance gate; the per-tick budget and the
+    /// promotion thresholds are reserved owner values, so a tool promotes explicitly.
+    pub fn promote(&mut self, mind: StableId) {
+        self.promoted.insert(mind);
+    }
+
+    /// Whether a mind is promoted to move-by-move dialogue.
+    pub fn is_promoted(&self, mind: StableId) -> bool {
+        self.promoted.contains(&mind)
+    }
+
+    /// Seed an open question a mind is motivated to resolve (an inquiry goal of design
+    /// 9.13). A being that wonders a question it cannot answer will ask a co-located peer
+    /// in the dialogue step; the answer, if a peer holds it, grounds back. Being asked
+    /// seeds the same goal in the hearer, so curiosity spreads through a conversation.
+    pub fn set_wondering(&mut self, mind: StableId, subject: StableId, attr: AttrKindId) {
+        if let Some(m) = self.minds.get_mut(&mind) {
+            m.wonder(subject, attr);
+        }
+    }
+
+    /// Whether a mind still has this question open: it is curious about it and has not yet
+    /// committed a belief, so it would ask. Once it learns the answer the question is no
+    /// longer open, so this returns false even though the curiosity was once registered.
+    pub fn is_wondering(&self, mind: StableId, subject: StableId, attr: AttrKindId) -> bool {
+        self.minds
+            .get(&mind)
+            .map(|m| {
+                m.is_wondering(subject, attr)
+                    && m.belief(subject, attr, &self.belief_params).is_none()
+            })
+            .unwrap_or(false)
+    }
+
     /// The trust a listener extends to a speaker, if any has been recorded.
     pub fn trust(&self, listener: StableId, speaker: StableId) -> Option<Fixed> {
         self.trust.get(&(listener, speaker)).copied()
@@ -381,6 +575,12 @@ impl World {
         self.lexicons.get(&mind)?.word_for(concept).cloned()
     }
 
+    /// A mind's lexicon, for rendering a thought in its coined words (the legibility layer
+    /// over the naming game). `None` if the mind has coined nothing yet.
+    pub fn lexicon(&self, mind: StableId) -> Option<&Lexicon> {
+        self.lexicons.get(&mind)
+    }
+
     /// The current tick.
     pub fn clock(&self) -> u64 {
         self.clock
@@ -404,9 +604,539 @@ impl World {
         id
     }
 
+    /// Seed the dawn of sentience: place proto-populations of each race onto the world (design
+    /// Part 28, the step that replaces the abstract civilization placement of the old worldgen
+    /// pass). For each band, for each member, a fresh id is minted, a genome is promoted from
+    /// the race's pool (Hardy-Weinberg sampling keyed by the new being's id, so members of a
+    /// band differ genetically, design 25.8), the member's mind is expressed from that genome
+    /// through the race's gene set ([`Mind::from_genome`], the cognition phenotype of Part
+    /// 25.6), its innate disposition is seeded from the race ([`crate::axiom::IntrinsicBeliefs`],
+    /// Part 28), and it is placed. Returns the seeded ids in seeding order. A band whose race
+    /// is not in `races` is skipped.
+    ///
+    /// This is the convergence point of the deep being model: the map, the genome, the value
+    /// substrate (Part 21), and the axiom kernel (Part 28) first run together here. It is
+    /// genesis-time and deterministic: the seeding order is fixed by the band list and the
+    /// member loop, so the minted ids and the genome draws keyed on them are reproducible from
+    /// the seed and the inputs alone (Principle 3); being genesis-time, the id-keyed draw is
+    /// not observer-influenced, so the Principle 10 caveat on allocation-order keying does not
+    /// bite here. At the dawn every member of a race shares the innate belief seed; per-member
+    /// divergence is the later inheritance and enculturation work. Cognition expressed from a
+    /// pool-promoted genome rides the race's environment baseline and the Mendelian dominance
+    /// deviations, since the quantitative breeding-value tier of the pool is a follow-on.
+    pub fn seed_dawn_populations(
+        &mut self,
+        races: &BTreeMap<RaceId, Race>,
+        bands: &[BandSpec],
+    ) -> Vec<StableId> {
+        let mut seeded = Vec::new();
+        for band in bands {
+            let Some(race) = races.get(&band.race) else {
+                continue;
+            };
+            for _ in 0..band.members {
+                let id = self.reg.mint();
+                let genome = race.pool.promote(self.seed, id.0, race.ploidy());
+                let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
+                self.minds.insert(id, mind);
+                self.genomes.insert(id, genome);
+                self.intrinsic.insert(id, race.intrinsic.clone());
+                self.place_of.insert(id, band.place);
+                self.ages.insert(id, 0);
+                seeded.push(id);
+            }
+        }
+        seeded
+    }
+
     /// A mind by id, for inspection.
     pub fn mind(&self, id: StableId) -> Option<&Mind> {
         self.minds.get(&id)
+    }
+
+    /// A being's genome by id, for inspection (populated at the dawn).
+    pub fn genome_of(&self, id: StableId) -> Option<&Genome> {
+        self.genomes.get(&id)
+    }
+
+    /// A being's intrinsic beliefs by id, for inspection (the innate disposition seeded at the
+    /// dawn).
+    pub fn intrinsic_of(&self, id: StableId) -> Option<&IntrinsicBeliefs> {
+        self.intrinsic.get(&id)
+    }
+
+    /// Set a being's intrinsic beliefs (used by the dawn seeding, by later inheritance, and by
+    /// tools and tests). The being need not already hold beliefs.
+    pub fn set_intrinsic(&mut self, id: StableId, beliefs: IntrinsicBeliefs) {
+        self.intrinsic.insert(id, beliefs);
+    }
+
+    /// Run one round of enculturation over a band on one axiom axis (design Part 28): each
+    /// member moves its stance toward the band's confidence-weighted mean stance, anchored to
+    /// its own innate seed by its effective stubbornness (the Friedkin-Johnsen rule). The mean
+    /// is computed once from the members' pre-update stances (a synchronous update), in a
+    /// canonical 128-bit order-independent reduction, so the round is bit-identical regardless
+    /// of member order or thread count. A member that does not hold the axis is left untouched
+    /// and does not enter the mean; if no member holds it (zero confidence), the round is a
+    /// no-op. This is not a culture-level kernel firing: the band's profile is the derived
+    /// aggregate of its members, and only members move. The bounded-confidence neighbour
+    /// selection and the conformist and prestige biases (which sharpen this into schism) are
+    /// the deferred next brick; this is the plain anchored average.
+    pub fn enculturate_band(&mut self, members: &[StableId], axis: AxiomAxisId) {
+        let mean = {
+            let pairs = members.iter().filter_map(|id| {
+                let intr = self.intrinsic.get(id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((ax.stance, ax.confidence))
+            });
+            match axiom::confidence_weighted_mean(pairs) {
+                Some(m) => m,
+                None => return,
+            }
+        };
+        for id in members {
+            if let Some(intr) = self.intrinsic.get_mut(id) {
+                let IntrinsicBeliefs {
+                    axioms, epistemic, ..
+                } = intr;
+                if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
+                }
+            }
+        }
+    }
+
+    /// Run one bounded-confidence enculturation round over a band on one axiom axis (design
+    /// Part 28, the schism mechanism). Each member moves toward the confidence-weighted mean of
+    /// only those members within the reserved confidence band `epsilon` of its own stance, then
+    /// anchors to its innate seed by its effective stubbornness. Members far apart admit none of
+    /// each other, so the band fractures into clusters (sects) rather than pulling to one mean,
+    /// which is what produces schism. The round is synchronous (every member reads the same
+    /// pre-update snapshot, the Hegselmann-Krause form) and order-independent, so it replays bit
+    /// for bit. A member outside everyone's band moves only toward its own seed. The conformist
+    /// and prestige transmission biases that further sharpen this are the deferred refinement;
+    /// the prestige arm in particular waits on a status system.
+    pub fn enculturate_band_bounded(
+        &mut self,
+        members: &[StableId],
+        axis: AxiomAxisId,
+        epsilon: Fixed,
+    ) {
+        let snapshot: Vec<(StableId, Fixed, Fixed)> = members
+            .iter()
+            .filter_map(|&id| {
+                let intr = self.intrinsic.get(&id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((id, ax.stance, ax.confidence))
+            })
+            .collect();
+        for &id in members {
+            let Some(&(_, my_stance, _)) = snapshot.iter().find(|(sid, _, _)| *sid == id) else {
+                continue;
+            };
+            let neighbours = snapshot.iter().map(|&(_, s, c)| (s, c));
+            let Some(mean) = axiom::bounded_confidence_mean(my_stance, neighbours, epsilon) else {
+                continue;
+            };
+            if let Some(intr) = self.intrinsic.get_mut(&id) {
+                let IntrinsicBeliefs {
+                    axioms, epistemic, ..
+                } = intr;
+                if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
+                }
+            }
+        }
+    }
+
+    /// The confidence-weighted variance of a band's stances on one axiom axis, the fission
+    /// signal (design Part 28): a wide spread on a central axiom is a group splitting. `None`
+    /// if no member holds the axis.
+    pub fn axiom_variance(&self, members: &[StableId], axis: AxiomAxisId) -> Option<Fixed> {
+        let pairs = members.iter().filter_map(|id| {
+            let intr = self.intrinsic.get(id)?;
+            let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+            Some((ax.stance, ax.confidence))
+        });
+        axiom::confidence_weighted_variance(pairs)
+    }
+
+    /// Whether a band is fissioning on an axiom axis: its stance variance has reached the
+    /// reserved fission threshold (design Part 28). A no-op axis (no holders) is not fissioning.
+    pub fn is_fissioning(&self, members: &[StableId], axis: AxiomAxisId, threshold: Fixed) -> bool {
+        self.axiom_variance(members, axis)
+            .is_some_and(|v| v >= threshold)
+    }
+
+    /// The sects a band falls into on one axiom axis: the bounded-confidence clusters at band
+    /// width `epsilon` (design Part 28). In one dimension these are the maximal runs of stances
+    /// whose consecutive gaps do not exceed `epsilon`, which are exactly the connected
+    /// components of the within-band influence graph. Members are gathered for the axis, sorted
+    /// canonically by stance then id, and split where a gap exceeds the band, so the partition
+    /// is deterministic. A band that has not fractured returns a single cluster.
+    pub fn stance_clusters(
+        &self,
+        members: &[StableId],
+        axis: AxiomAxisId,
+        epsilon: Fixed,
+    ) -> Vec<Vec<StableId>> {
+        let mut pairs: Vec<(Fixed, StableId)> = members
+            .iter()
+            .filter_map(|&id| {
+                let intr = self.intrinsic.get(&id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((ax.stance, id))
+            })
+            .collect();
+        pairs.sort();
+        let mut clusters: Vec<Vec<StableId>> = Vec::new();
+        let mut last: Option<Fixed> = None;
+        for (stance, id) in pairs {
+            let start_new = match last {
+                Some(prev) => (stance - prev).abs() > epsilon,
+                None => true,
+            };
+            if start_new {
+                clusters.push(vec![id]);
+            } else if let Some(c) = clusters.last_mut() {
+                c.push(id);
+            }
+            last = Some(stance);
+        }
+        clusters
+    }
+
+    /// Produce a child by inheriting intrinsic beliefs from a parent and the local band (design
+    /// Part 28). A fresh id is minted; for each axiom the parent holds, the child's innate seed
+    /// (and its starting stance) is the heritable-plus-encultured blend of the parent's seed and
+    /// the band's local mean on that axis, plus a bounded mutation drawn by counter-RNG keyed on
+    /// the child's id and the axis ([`Phase::AXIOM_INHERIT`]), so a child resembles both its
+    /// parent and its local culture and varies by the mutation. The heritability and mutation
+    /// spread are reserved owner values supplied by the caller; the per-axis heritability of the
+    /// axiom registry is the refinement. The child copies the parent's epistemic stance and
+    /// value profile (their deeper inheritance is a follow-on), and each child axiom gets a
+    /// fresh empty evidence ring of the parent axiom's capacity. Returns the child's id, or
+    /// `None` if the parent holds no intrinsic beliefs.
+    ///
+    /// This is the intrinsic-belief half of a birth. The genome half (a genome from
+    /// `GeneticScheme::reproduce` and a mind from [`Mind::from_genome`]) and combining the two
+    /// into one birth are the integration follow-on, so the returned child carries beliefs but
+    /// no mind or genome yet. Deterministic: the draw is keyed on the child's canonical id, so
+    /// it is reproducible as long as birth order is a deterministic function of canonical state
+    /// (an observer-driven birth path would key on a birth-event coordinate instead, the
+    /// Principle 10 caveat).
+    pub fn inherit_child(
+        &mut self,
+        parent: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<StableId> {
+        let child = self.reg.mint();
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+        )?;
+        self.intrinsic.insert(child, beliefs);
+        Some(child)
+    }
+
+    /// The intrinsic beliefs a child of `parent` inherits, keyed on the already-minted
+    /// `child` id (design Part 28). Shared by [`World::inherit_child`] and [`World::birth`]: for
+    /// each axiom the parent holds, the child's innate seed (and starting stance) is the
+    /// heritable-plus-encultured blend of the parent's seed and the band's local mean plus a
+    /// bounded mutation drawn under [`Phase::AXIOM_INHERIT`] keyed on the child and the axis;
+    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings.
+    /// `None` if the parent holds no intrinsic beliefs.
+    fn inherited_beliefs(
+        &self,
+        child: StableId,
+        parent: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<IntrinsicBeliefs> {
+        let parent_beliefs = self.intrinsic.get(&parent)?;
+        let mut child_axioms = Vec::with_capacity(parent_beliefs.axioms.len());
+        for pax in &parent_beliefs.axioms {
+            let local_mean = {
+                let pairs = band.iter().filter_map(|id| {
+                    let intr = self.intrinsic.get(id)?;
+                    let a = intr.axioms.iter().find(|a| a.axis == pax.axis)?;
+                    Some((a.stance, a.confidence))
+                });
+                axiom::confidence_weighted_mean(pairs).unwrap_or(pax.innate_seed)
+            };
+            let unit = DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
+                .rng(self.seed)
+                .unit_fixed(0);
+            let seed = axiom::inherit_seed(
+                pax.innate_seed,
+                local_mean,
+                heritability,
+                mutation_spread,
+                unit,
+            );
+            child_axioms.push(Axiom {
+                axis: pax.axis,
+                stance: seed,
+                strength: pax.strength,
+                confidence: pax.confidence,
+                entrenchment: pax.entrenchment,
+                salience: pax.salience,
+                stubbornness: pax.stubbornness,
+                innate_seed: seed,
+                evidence: EvidenceRing::new(pax.evidence.cap()),
+            });
+        }
+        Some(IntrinsicBeliefs {
+            values: parent_beliefs.values.clone(),
+            axioms: child_axioms,
+            epistemic: parent_beliefs.epistemic.clone(),
+        })
+    }
+
+    /// A full birth: a child of two parents that inherits both halves of its being (design
+    /// Parts 25 and 28), the integration point where the genome and the axiom kernel meet. The
+    /// child's genome is recombined from the two parents' genomes under the race's genetic
+    /// scheme (`GeneticScheme::reproduce`, keyed under [`Phase::REPRODUCE`] on the parents and
+    /// the generation), its mind is expressed from that genome through the race's gene set
+    /// ([`Mind::from_genome`]), and its intrinsic beliefs are inherited from the first parent
+    /// and the local band (the heritable-plus-encultured blend). The child is registered with a
+    /// genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id, or
+    /// `None` if either parent has no genome or the first parent has no beliefs.
+    ///
+    /// Deterministic and reproducible from the seed and the inputs: the genome draws key on the
+    /// parents and the generation, the belief mutation keys on the child id and the axis. The
+    /// Principle 10 caveat on the child-id keying of the belief draw stands as for
+    /// [`World::inherit_child`]: it is safe while birth order is a deterministic function of
+    /// canonical state. The genetic scheme's reproduction mode chooses sexual recombination,
+    /// haploid, or clonal; a single-parent mode ignores the second parent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn birth(
+        &mut self,
+        race: &Race,
+        parent_a: StableId,
+        parent_b: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<StableId> {
+        let genome_a = self.genomes.get(&parent_a)?.clone();
+        let genome_b = self.genomes.get(&parent_b)?.clone();
+        let child = self.reg.mint();
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent_a,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+        )?;
+        let child_genome = race.scheme.reproduce(
+            &genome_a,
+            parent_a.0,
+            &genome_b,
+            parent_b.0,
+            race.genes.genes.len(),
+            self.seed,
+            generation,
+        );
+        let mind = Mind::from_genome(child, &race.genes, &child_genome, race.environment);
+        self.minds.insert(child, mind);
+        self.genomes.insert(child, child_genome);
+        self.intrinsic.insert(child, beliefs);
+        self.ages.insert(child, 0);
+        Some(child)
+    }
+
+    /// A quiet-phase calcification pass over a band on one axiom axis (design Part 28): each
+    /// member's axiom on that axis that went unchallenged this phase gains entrenchment toward
+    /// the reserved cap, so an unchallenged conviction hardens across the people. The rate (the
+    /// per-axis `calcify` datum) and the cap are reserved owner values. Members not holding the
+    /// axis are skipped. Calcification raises the entrenchment gate, so a calcified band resists
+    /// the enculturation and challenge it would once have yielded to, the labile-to-calcified
+    /// transition over deep time.
+    pub fn calcify_band(&mut self, members: &[StableId], axis: AxiomAxisId, rate: i32, cap: i32) {
+        for id in members {
+            if let Some(intr) = self.intrinsic.get_mut(id) {
+                if let Some(ax) = intr.axioms.iter_mut().find(|a| a.axis == axis) {
+                    ax.calcify(rate, cap);
+                }
+            }
+        }
+    }
+
+    // --- Affect: the transient, event-driven emotional layer (the R-EMOTION gap) ---
+
+    /// A being's transient affective state, if it has one (for inspection).
+    pub fn affect_of(&self, id: StableId) -> Option<&AffectState> {
+        self.affect.get(&id)
+    }
+
+    /// A being's current felt level on one affect axis (zero if the being has no affect
+    /// state or has never touched the axis).
+    pub fn affect_level(&self, id: StableId, axis: AffectAxisId) -> Fixed {
+        self.affect
+            .get(&id)
+            .map(|a| a.level(axis))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Install a being's affective state (its baselines and any current values). A being's
+    /// affect axes and baselines are properly derived from its race and genome; this is the
+    /// route by which a tool, a test, or that later derivation sets them.
+    pub fn set_affect(&mut self, id: StableId, state: AffectState) {
+        self.affect.insert(id, state);
+    }
+
+    /// Appraise a change in one of a being's drives into affect and apply it (design Part 40,
+    /// the derived-appraisal half of R-EMOTION). The race's [`AppraisalBinding`] maps the drive
+    /// change to a signed delta on an affect axis (the gain and the relief sign are data), and
+    /// the delta lands on the being's affect state, clamped to range. The being's affect state
+    /// is created at the zero baseline if it had none. Returns the applied `(axis, delta)`, or
+    /// `None` if the race does not appraise that drive. Nothing is invented: the magnitude is the
+    /// measured drive change times the reserved gain the binding carries, so the engine authors
+    /// no event-to-emotion reaction.
+    pub fn appraise(
+        &mut self,
+        id: StableId,
+        drive: DriveId,
+        drive_change: Fixed,
+        binding: &AppraisalBinding,
+    ) -> Option<(AffectAxisId, Fixed)> {
+        let (axis, delta) = binding.delta(drive, drive_change)?;
+        self.affect.entry(id).or_default().apply(axis, delta);
+        Some((axis, delta))
+    }
+
+    /// Relax one being's transient affect toward its baseline by `rate` (the deterministic
+    /// fade between events; design Part 40). The rate is a reserved owner value. A no-op for a
+    /// being with no affect state.
+    pub fn decay_affect(&mut self, id: StableId, rate: Fixed) {
+        if let Some(a) = self.affect.get_mut(&id) {
+            a.decay(rate);
+        }
+    }
+
+    /// Harden one being's baseline on an affect axis under a sustained strong feeling (trauma;
+    /// design Part 40): if the deviation from baseline exceeds `threshold`, the baseline drifts
+    /// toward the current feeling by `fraction` of the excess, leaving a residue ordinary decay
+    /// no longer erases. The threshold and fraction are reserved owner values. Returns whether
+    /// the baseline moved; a no-op (false) for a being with no affect state.
+    pub fn harden_affect(
+        &mut self,
+        id: StableId,
+        axis: AffectAxisId,
+        threshold: Fixed,
+        fraction: Fixed,
+    ) -> bool {
+        self.affect
+            .get_mut(&id)
+            .map(|a| a.harden(axis, threshold, fraction))
+            .unwrap_or(false)
+    }
+
+    // --- Aging and mortality: the clock-driven life-process loop (the R-AGING gap) ---
+
+    /// A being's age in life-cadence steps, if tracked (seeded at the dawn and at birth).
+    pub fn age_of(&self, id: StableId) -> Option<u32> {
+        self.ages.get(&id).copied()
+    }
+
+    /// Set a being's age (used by the dawn seeding for a founding cohort that is not newborn,
+    /// and by tools and tests).
+    pub fn set_age(&mut self, id: StableId, age: u32) {
+        self.ages.insert(id, age);
+    }
+
+    /// Advance every tracked being's age by one life-cadence step (design Part 20). This is the
+    /// life-process beat the gap names: the caller runs it once per life cadence (the cadence
+    /// period in ticks is a reserved owner value, so wiring it into [`World::tick`] on a fixed
+    /// period waits on that value, never a fabricated one). Aging is saturating, so a long-lived
+    /// being's age never wraps.
+    pub fn age_step(&mut self) {
+        for age in self.ages.values_mut() {
+            *age = age.saturating_add(1);
+        }
+    }
+
+    /// Run one mortality pass over every tracked being against an age-hazard curve (design Part
+    /// 20, the R-AGING life-process loop). For each being in id order, the curve maps its age to
+    /// a per-cadence death probability (a rising-hazard curve is the data-driven default, owner
+    /// supplied as `hazard`), and a counter-RNG roll keyed on the being and its age under
+    /// [`Phase::MORTALITY`] decides whether it dies this cadence. The dead are removed (their
+    /// per-being state pruned) and their ids returned in id order. Deterministic and
+    /// observer-independent: the roll is a pure function of the seed, the being's canonical id,
+    /// and its age, so a being faces the same hazard on the same age on replay and the pass is
+    /// independent of thread count. The curve is evaluated in the owner's age units (age as a
+    /// whole-number [`Fixed`]); the cadence period and the curve shape are reserved owner values.
+    pub fn apply_mortality(&mut self, hazard: &Curve) -> Vec<StableId> {
+        let dead: Vec<StableId> = self
+            .ages
+            .iter()
+            .filter_map(|(&id, &age)| {
+                let chance = hazard
+                    .eval(Fixed::from_int(age as i32))
+                    .clamp(Fixed::ZERO, Fixed::ONE);
+                let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                (roll < chance).then_some(id)
+            })
+            .collect();
+        for id in &dead {
+            self.remove_being(*id);
+        }
+        dead
+    }
+
+    /// Remove a being from the world, pruning every per-being map it appears in (the death and
+    /// out-migration primitive of design Part 20). Minds, placement, genome, intrinsic beliefs,
+    /// affect, age, sensorium, drives, the last action, lexicon, language assignment, the
+    /// promoted set, and every trust edge naming the being are all dropped, so no dangling
+    /// reference to a departed being survives (referential integrity, design Part 58). Idempotent:
+    /// removing an unknown being is a no-op.
+    pub fn remove_being(&mut self, id: StableId) {
+        self.minds.remove(&id);
+        self.place_of.remove(&id);
+        self.genomes.remove(&id);
+        self.intrinsic.remove(&id);
+        self.affect.remove(&id);
+        self.ages.remove(&id);
+        self.sensorium.remove(&id);
+        self.drive_levels.remove(&id);
+        self.last_action.remove(&id);
+        self.lexicons.remove(&id);
+        self.lang_of.remove(&id);
+        self.promoted.remove(&id);
+        self.trust
+            .retain(|(listener, speaker), _| *listener != id && *speaker != id);
+    }
+
+    // --- Sensorium: the channel gate over perception (the R-SENSORIUM gap) ---
+
+    /// Install a being's sensorium, the channels it can perceive and its acuity on each (design
+    /// Part 33.3, the R-SENSORIUM channel gate). Until a sensorium is installed a being reads
+    /// every channel at full channel acuity, so perception is gated only where a sensorium is
+    /// declared. A being's sensorium is properly derived from its genome and anatomy; this is
+    /// the route by which that derivation, a tool, or a test sets it.
+    pub fn set_sensorium(&mut self, id: StableId, sensorium: Sensorium) {
+        self.sensorium.insert(id, sensorium);
+    }
+
+    /// A being's sensorium, if one has been installed (for inspection).
+    pub fn sensorium_of(&self, id: StableId) -> Option<&Sensorium> {
+        self.sensorium.get(&id)
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition
@@ -502,6 +1232,7 @@ impl World {
         }
         self.perceive();
         self.decide();
+        self.converse();
         self.gossip();
         self.converse_language();
         self.drift_languages();
@@ -540,18 +1271,16 @@ impl World {
             if listeners.is_empty() {
                 continue;
             }
-            let pair = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_LANGUAGE]);
+            let pair = DrawKey::entity(speaker.0, self.clock, Phase::LANGUAGE).rng(self.seed);
             let listener = listeners[pair.range_u32(0, listeners.len() as u32) as usize];
             let concept = self.concepts[pair.range_u32(1, self.concepts.len() as u32) as usize];
             let existing: Option<Word> = self
                 .lexicons
                 .get(&speaker)
                 .and_then(|lex| lex.word_for(concept).cloned());
-            let innovate = Rng::for_coords(
-                self.seed,
-                &[speaker.0, concept.0 as u64, self.clock, PHASE_INNOVATE],
-            )
-            .unit_fixed(0)
+            let innovate = DrawKey::pair(speaker.0, concept.0 as u64, self.clock, Phase::INNOVATE)
+                .rng(self.seed)
+                .unit_fixed(0)
                 < lp.innovation_rate;
             let word = match existing {
                 Some(w) if !innovate => w,
@@ -564,10 +1293,10 @@ impl World {
                         Some(l) if !l.form_system().is_empty() => l.form_system(),
                         _ => continue,
                     };
-                    fs.coin(Rng::for_coords(
-                        self.seed,
-                        &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
-                    ))
+                    fs.coin(
+                        DrawKey::pair(speaker.0, concept.0 as u64, self.clock, Phase::COIN)
+                            .rng(self.seed),
+                    )
                 }
             };
             self.lexicons
@@ -601,7 +1330,7 @@ impl World {
         let generation = self.clock / params.generation_ticks;
         let lang_ids: Vec<LangId> = self.languages.keys().copied().collect();
         for lang_id in lang_ids {
-            let rng = Rng::for_coords(self.seed, &[lang_id.0 as u64, generation, PHASE_DRIFT]);
+            let rng = DrawKey::entity(lang_id.0 as u64, generation, Phase::DRIFT).rng(self.seed);
             let new_rules = match self.languages.get_mut(&lang_id) {
                 Some(l) => l.innovate(rng, &params),
                 None => continue,
@@ -632,6 +1361,417 @@ impl World {
         }
     }
 
+    /// The dialogue step (design Part 9.5): the promoted-tier refinement of the gossip
+    /// loop. For each promoted, co-located speaker (id order) with a committed belief, it
+    /// records an assertion move as a canonical event, then the addressee's response move
+    /// (an acceptance, or a refusal if the addressee sees the assertion as a lie), and
+    /// applies their forces through mechanisms the engine already has: a told-evidence
+    /// integration gated by the deception verdict (the same magnitude gossip uses), and
+    /// the speaker's theory-of-mind co-update from the response. Grounding is said
+    /// evidence into the existing first-order and second-order channels with no new
+    /// common-ground prior, so two parties who merely accept a thing in talk never
+    /// manufacture co-witnessed common ground. A two-pass shape gathers the moves in a
+    /// pure read walk, then appends them and applies their effects. Deterministic:
+    /// speakers in id order, the addressee chosen by counter RNG on the CONVERSE phase,
+    /// move ordinals assigned in walk order. A no-op until the dialogue substrate and the
+    /// gossip calibrations are set, the said channel exists, and some minds are promoted.
+    ///
+    /// This is the serial form. The four determinism pins the design states for the
+    /// parallel form (per-draw-site slots, the union gossip partition, the phase-frozen
+    /// verdict, the barrier-ordered move-kind mint) belong to the parallel scheduler and
+    /// its open cluster (R-CMD-ORDER, R-REDUCE-ORDER); on this serial tick the id-ordered
+    /// walk and the resolved draw keying give determinism directly.
+    fn converse(&mut self) {
+        let gp = match self.gossip {
+            Some(g) => g,
+            None => return,
+        };
+        if self.dialogue.is_none() || self.promoted.is_empty() {
+            return;
+        }
+        let said_channel = match self.channels.by_name(SAID_CHANNEL).map(|c| c.id) {
+            Some(c) => c,
+            None => return,
+        };
+
+        // Read pass: borrow the substrate and the minds immutably, produce owned moves.
+        let pending: Vec<PendingMove> = {
+            let cfg = self.dialogue.as_ref().unwrap();
+            let assert_kind =
+                match cfg
+                    .registry
+                    .first_realizing(&cfg.floor, ForceKind::TellEvidence, None)
+                {
+                    Some(k) => k,
+                    None => return,
+                };
+            let accept_kind = cfg.registry.first_realizing(
+                &cfg.floor,
+                ForceKind::RegisterUptake,
+                Some(EffectSign::Positive),
+            );
+            let refuse_kind = cfg.registry.first_realizing(
+                &cfg.floor,
+                ForceKind::RegisterUptake,
+                Some(EffectSign::Negative),
+            );
+            let inquiry_kind =
+                cfg.registry
+                    .first_realizing(&cfg.floor, ForceKind::RaiseInquiry, None);
+            let assert_def = cfg.registry.move_kind(assert_kind).unwrap();
+            // A closure: does an assertion-kind move from `speaker` to `listener` land,
+            // given the felicity reading the world carries? (No felicity in the common case.)
+            let assertion_lands = |speaker: StableId, listener: StableId| -> bool {
+                assert_def.felicitous(
+                    |dim| felicity_reading(dim, &self.trust, listener, speaker),
+                    |band| cfg.bands.get(band).copied(),
+                )
+            };
+
+            let ids: Vec<StableId> = self.minds.keys().copied().collect();
+            let mut pending: Vec<PendingMove> = Vec::new();
+            for &speaker in &ids {
+                if !self.promoted.contains(&speaker) {
+                    continue;
+                }
+                let place = match self.place_of.get(&speaker) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                // Move-by-move dialogue needs a promoted partner; demoted neighbours are
+                // covered by the one-pass gossip fallback instead.
+                let peers: Vec<StableId> = ids
+                    .iter()
+                    .copied()
+                    .filter(|l| {
+                        *l != speaker
+                            && self.promoted.contains(l)
+                            && self.place_of.get(l) == Some(&place)
+                    })
+                    .collect();
+                if peers.is_empty() {
+                    continue;
+                }
+                let mind = match self.minds.get(&speaker) {
+                    Some(m) => m,
+                    None => continue,
+                };
+
+                // INFORM: a committed belief that some peer does not, in the speaker's own
+                // model, already hold. Modelling the peer is the redundancy gate: the
+                // speaker stops telling a peer once its model of that peer (built from the
+                // peer's said acceptances) commits to the value, so the talk converges.
+                let mut informed = false;
+                for shared in mind.committed_beliefs(&self.belief_params) {
+                    let lacking: Vec<StableId> = peers
+                        .iter()
+                        .copied()
+                        .filter(|l| {
+                            mind.modeled_belief(*l, shared.attr, &self.meta_params)
+                                != Some(shared.value)
+                        })
+                        .collect();
+                    if lacking.is_empty() {
+                        continue;
+                    }
+                    let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
+                        .slot(SLOT_ADDRESSEE)
+                        .rng(self.seed)
+                        .range_u32(0, lacking.len() as u32) as usize;
+                    let listener = lacking[idx];
+                    let lands = assertion_lands(speaker, listener);
+                    let deception = self
+                        .minds
+                        .get(&listener)
+                        .map(|m| {
+                            m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params)
+                        })
+                        .unwrap_or(false);
+                    let trust = self
+                        .trust
+                        .get(&(listener, speaker))
+                        .copied()
+                        .unwrap_or(gp.trust_baseline);
+                    let assertion_idx = pending.len();
+                    pending.push(PendingMove {
+                        mv: assertion_move(
+                            assert_kind,
+                            speaker,
+                            listener,
+                            &shared,
+                            said_channel,
+                            self.clock,
+                        ),
+                        answers: None,
+                        reply_as_prior: false,
+                        effect: if lands {
+                            MoveEffect::Assert {
+                                listener,
+                                speaker,
+                                shared: shared.clone(),
+                                deception,
+                                trust,
+                            }
+                        } else {
+                            MoveEffect::Misfire
+                        },
+                    });
+                    if lands {
+                        let (resp_kind, sign) = if deception {
+                            (refuse_kind, EffectSign::Negative)
+                        } else {
+                            (accept_kind, EffectSign::Positive)
+                        };
+                        if let Some(rk) = resp_kind {
+                            pending.push(PendingMove {
+                                mv: Move {
+                                    force: rk,
+                                    speaker: listener,
+                                    addressees: vec![speaker],
+                                    content: ContentRef::Belief {
+                                        subject: shared.subject,
+                                        attr: shared.attr,
+                                    },
+                                    in_reply_to: None,
+                                    channel: said_channel,
+                                    tick: self.clock,
+                                    ordinal: 0,
+                                },
+                                answers: Some(assertion_idx),
+                                reply_as_prior: true,
+                                effect: MoveEffect::Uptake {
+                                    speaker,
+                                    listener,
+                                    shared: shared.clone(),
+                                    sign,
+                                },
+                            });
+                        }
+                    }
+                    informed = true;
+                    break;
+                }
+                if informed {
+                    continue;
+                }
+
+                // INQUIRE: an open question the speaker wonders about but cannot answer. It
+                // asks a peer; the question seeds the inquiry goal in that peer, and if the
+                // peer holds the answer it tells it back, which the asker grounds.
+                let inquiry_kind = match inquiry_kind {
+                    Some(k) => k,
+                    None => continue,
+                };
+                let open = mind.open_questions(&self.belief_params);
+                let (subject, attr) = match open.first() {
+                    Some(q) => *q,
+                    None => continue,
+                };
+                let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
+                    .slot(SLOT_ADDRESSEE)
+                    .rng(self.seed)
+                    .range_u32(0, peers.len() as u32) as usize;
+                let listener = peers[idx];
+                let question_idx = pending.len();
+                pending.push(PendingMove {
+                    mv: Move {
+                        force: inquiry_kind,
+                        speaker,
+                        addressees: vec![listener],
+                        content: ContentRef::Inquiry { subject, attr },
+                        in_reply_to: None,
+                        channel: said_channel,
+                        tick: self.clock,
+                        ordinal: 0,
+                    },
+                    answers: None,
+                    reply_as_prior: false,
+                    effect: MoveEffect::Inquire {
+                        hearer: listener,
+                        subject,
+                        attr,
+                    },
+                });
+                // The answer: if the asked peer holds the belief, it tells it back, and the
+                // asker grounds it under the same sincerity frame the INFORM path uses. The
+                // asker usually has no model of the answerer on this question (it asked
+                // because it did not know), so the verdict is usually false; but if it does
+                // hold an access-built model that out-ranks the answer, the answer is seen
+                // through as a lie exactly as a volunteered assertion would be (Part 37,
+                // Part 9.5), rather than being trusted blindly.
+                if let Some(answer) = self
+                    .minds
+                    .get(&listener)
+                    .and_then(|m| m.shared_belief(subject, attr, &self.belief_params))
+                {
+                    if assertion_lands(listener, speaker) {
+                        let deception = self
+                            .minds
+                            .get(&speaker)
+                            .map(|m| {
+                                m.detects_lie(
+                                    listener,
+                                    answer.attr,
+                                    answer.value,
+                                    &self.meta_params,
+                                )
+                            })
+                            .unwrap_or(false);
+                        let trust = self
+                            .trust
+                            .get(&(speaker, listener))
+                            .copied()
+                            .unwrap_or(gp.trust_baseline);
+                        pending.push(PendingMove {
+                            mv: assertion_move(
+                                assert_kind,
+                                listener,
+                                speaker,
+                                &answer,
+                                said_channel,
+                                self.clock,
+                            ),
+                            answers: Some(question_idx),
+                            reply_as_prior: false,
+                            effect: MoveEffect::Assert {
+                                listener: speaker,
+                                speaker: listener,
+                                shared: answer,
+                                deception,
+                                trust,
+                            },
+                        });
+                    }
+                }
+            }
+            pending
+        };
+
+        // Write pass: append the moves (filling in-reply-to) and apply their effects. The
+        // substrate borrow is released, so the &mut self effect helpers are free to run.
+        let mut appended: Vec<EventId> = Vec::with_capacity(pending.len());
+        for (ordinal, mut pm) in pending.into_iter().enumerate() {
+            if let Some(ans) = pm.answers {
+                let target = appended[ans];
+                pm.mv.in_reply_to = Some(target);
+                if pm.reply_as_prior {
+                    pm.mv.content = ContentRef::PriorMove { event: target };
+                }
+            }
+            pm.mv.ordinal = ordinal as u32;
+            let id = self.events.append(pm.mv.to_event());
+            appended.push(id);
+            match pm.effect {
+                MoveEffect::Misfire => {}
+                MoveEffect::Assert {
+                    listener,
+                    speaker,
+                    shared,
+                    deception,
+                    trust,
+                } => {
+                    self.apply_assertion(
+                        said_channel,
+                        listener,
+                        speaker,
+                        shared,
+                        deception,
+                        trust,
+                        gp,
+                    );
+                }
+                MoveEffect::Uptake {
+                    speaker,
+                    listener,
+                    shared,
+                    sign,
+                } => {
+                    // The response is access evidence about whether the listener took up
+                    // the claim. A positive uptake models the listener as having said it
+                    // (admitted under the anti-projection rule as access about the
+                    // listener); a refusal records the move and moves no first-order belief.
+                    if sign == EffectSign::Positive {
+                        let weights = &self.weights;
+                        if let Some(spk) = self.minds.get_mut(&speaker) {
+                            let _ = spk.model(
+                                weights,
+                                listener,
+                                shared.attr,
+                                shared.hyps.iter().copied(),
+                                AccessObs {
+                                    channel: said_channel,
+                                    toward: shared.value,
+                                    from: listener,
+                                },
+                            );
+                        }
+                    }
+                }
+                MoveEffect::Inquire {
+                    hearer,
+                    subject,
+                    attr,
+                } => {
+                    // Being asked seeds the inquiry goal in the hearer (design 9.13).
+                    if let Some(h) = self.minds.get_mut(&hearer) {
+                        h.wonder(subject, attr);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply a landed told-evidence assertion: the listener models the speaker as having
+    /// said the claim (the said channel), and either integrates the belief at the
+    /// trust-scaled told-weight or, on a seen-through lie, lowers trust and refuses it.
+    /// This is the gossip integration reused at the promoted tier, so a move delivers
+    /// exactly the magnitude the one-pass loop would (design Part 9.5).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_assertion(
+        &mut self,
+        channel: crate::tom::AccessChannelId,
+        listener: StableId,
+        speaker: StableId,
+        shared: SharedBelief,
+        deception: bool,
+        trust: Fixed,
+        gp: GossipParams,
+    ) {
+        {
+            let weights = &self.weights;
+            if let Some(l) = self.minds.get_mut(&listener) {
+                let _ = l.model(
+                    weights,
+                    speaker,
+                    shared.attr,
+                    shared.hyps.iter().copied(),
+                    AccessObs {
+                        channel,
+                        toward: shared.value,
+                        from: speaker,
+                    },
+                );
+            }
+        }
+        if deception {
+            let lowered = (trust - gp.trust_penalty).clamp(Fixed::ZERO, Fixed::ONE);
+            self.trust.insert((listener, speaker), lowered);
+        } else {
+            let w = gp.told_weight.mul(trust);
+            if let Some(l) = self.minds.get_mut(&listener) {
+                l.consider(
+                    shared.subject,
+                    shared.attr,
+                    shared.hyps.iter().copied(),
+                    shared.value,
+                    w,
+                    speaker,
+                );
+            }
+            self.trust.entry((listener, speaker)).or_insert(trust);
+        }
+    }
+
     /// The transmission step (design 9.5): each co-located speaker shares one belief with
     /// one co-located listener chosen by counter-based RNG. The listener updates its model
     /// of the speaker (the speaker said it) and, if it does not see the assertion as a lie,
@@ -648,6 +1788,11 @@ impl World {
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut out = Vec::new();
             for &speaker in &ids {
+                // A promoted speaker runs the move-by-move dialogue step instead, so the
+                // one-pass fallback must not also transmit for it (no double-counting).
+                if self.promoted.contains(&speaker) {
+                    continue;
+                }
                 let place = match self.place_of.get(&speaker) {
                     Some(p) => *p,
                     None => continue,
@@ -668,7 +1813,8 @@ impl World {
                     Some(s) => s,
                     None => continue,
                 };
-                let idx = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_GOSSIP])
+                let idx = DrawKey::entity(speaker.0, self.clock, Phase::GOSSIP)
+                    .rng(self.seed)
                     .range_u32(0, listeners.len() as u32) as usize;
                 let listener = listeners[idx];
                 let deception = self
@@ -782,12 +1928,22 @@ impl World {
                     if self.place_of.get(mind_id) != Some(&t.place) {
                         continue;
                     }
-                    let chance = t.salience.mul(mind.acuity).clamp(Fixed::ZERO, Fixed::ONE);
-                    let roll = Rng::for_coords(
-                        self.seed,
-                        &[t.id.0, mind_id.0, self.clock, PHASE_PERCEPTION],
-                    )
-                    .unit_fixed(0);
+                    // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives
+                    // the trace only on a channel it reads, and its channel acuity scales the
+                    // roll; a being with no sensorium reads every channel at full acuity, so the
+                    // place-based perception of every existing world is unchanged.
+                    let channel_acuity = match self.sensorium.get(mind_id) {
+                        Some(s) => match s.reads(t.channel) {
+                            Some(a) => a,
+                            None => continue,
+                        },
+                        None => Fixed::ONE,
+                    };
+                    let acuity = mind.acuity.mul(channel_acuity);
+                    let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
+                    let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
+                        .rng(self.seed)
+                        .unit_fixed(0);
                     if roll < chance {
                         out.push(PerceptionHit {
                             mind: *mind_id,
@@ -817,9 +1973,21 @@ impl World {
         }
     }
 
-    /// A canonical 128-bit hash of the whole world: the clock, the id registry, the
-    /// event log length, then every mind in id order. A pure function of canonical
-    /// state, so a replay reproduces it bit for bit.
+    /// A canonical 128-bit hash of the world's *outcome* state: the clock, the id
+    /// registry, the event-log length, then every mind, trace, trust edge, lexicon, and
+    /// lineage in id order. A pure function of that state, so a replay reproduces it bit
+    /// for bit.
+    ///
+    /// Deliberate boundary: this folds the *outcomes* of dialogue (the belief, trust, and
+    /// theory-of-mind state moves produce) but NOT the move log's content (only its
+    /// length) and NOT the dialogue substrate, the promoted set, or the other static
+    /// inputs (the behaviour, gossip, channel, and weight config). That is required, not an
+    /// oversight: the Part 41 Steering Audit invariants assert that permuting the move-kind
+    /// and force-effect labels (content-blindness) and swapping an equal-capacity channel
+    /// leave this hash invariant, and both the move-kind id and the channel id live in the
+    /// move payload, so folding the move log or the substrate here would break those
+    /// invariants. The move sequence is hashed separately by [`World::event_log_hash`] for
+    /// replay integrity. Do not fold the substrate or the move payload into this hash.
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
@@ -852,6 +2020,7 @@ impl World {
         for t in traces {
             h.write_stable(t.id);
             h.write_u32(t.place);
+            h.write_u32(t.channel.0);
             h.write_stable(t.subject);
             h.write_u32(t.attr.0);
             for v in &t.hyps {
@@ -899,6 +2068,33 @@ impl World {
         for (mind, lang) in &self.lang_of {
             h.write_stable(*mind);
             h.write_u32(lang.0);
+        }
+        h.finish()
+    }
+
+    /// A canonical 128-bit hash of the move sequence: every logged event in append order,
+    /// folding its tick, kind, actors, subjects, and payload bytes. This is the integrity
+    /// hash for the move log, kept separate from [`World::state_hash`] precisely because it
+    /// is *not* content-blind (it folds the move-kind and channel ids), so it must never be
+    /// used in the Steering Audit invariants. A same-seed, same-setup replay reproduces the
+    /// move log byte for byte, so this catches a divergence in the move sequence that the
+    /// outcome hash could miss (different moves that happen to net to the same belief state).
+    pub fn event_log_hash(&self) -> u128 {
+        let mut h = StateHasher::new();
+        h.write_u64(self.events.len() as u64);
+        for e in self.events.iter() {
+            h.write_u64(e.id.0);
+            h.write_u64(e.tick);
+            h.write_u32(e.kind.0);
+            h.write_u64(e.actors.len() as u64);
+            for a in &e.actors {
+                h.write_stable(*a);
+            }
+            h.write_u64(e.subjects.len() as u64);
+            for s in &e.subjects {
+                h.write_stable(*s);
+            }
+            h.write_bytes(&e.payload);
         }
         h.finish()
     }
@@ -1009,6 +2205,7 @@ source = "Part 9"
         Trace {
             id: StableId(500),
             place,
+            channel: SenseChannelId::DEFAULT,
             subject: StableId(99),
             attr: AttrKindId(0),
             hyps: vec![10, 20],
@@ -1342,5 +2539,631 @@ name = "said"
             w.state_hash()
         };
         assert_eq!(build(), build(), "the naming game replays bit for bit");
+    }
+
+    // --- Modelled dialogue (the promoted-tier converse step, design Part 9.5) ---
+
+    fn dialogue_substrate(
+        felicity_on_assert: bool,
+    ) -> (crate::dialogue::MoveRegistry, crate::dialogue::ForceFloor) {
+        use crate::dialogue::{
+            EffectSign, FelicityCond, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind,
+            MoveKindDef, MoveKindId, MoveRegistry,
+        };
+        let floor = ForceFloor {
+            effects: vec![
+                ForceEffectDef {
+                    id: ForceEffectId(1),
+                    kind: ForceKind::TellEvidence,
+                    sign: EffectSign::Neutral,
+                    name: "assert".to_string(),
+                },
+                ForceEffectDef {
+                    id: ForceEffectId(2),
+                    kind: ForceKind::RegisterUptake,
+                    sign: EffectSign::Positive,
+                    name: "accept".to_string(),
+                },
+                ForceEffectDef {
+                    id: ForceEffectId(3),
+                    kind: ForceKind::RegisterUptake,
+                    sign: EffectSign::Negative,
+                    name: "refuse".to_string(),
+                },
+                ForceEffectDef {
+                    id: ForceEffectId(4),
+                    kind: ForceKind::RaiseInquiry,
+                    sign: EffectSign::Neutral,
+                    name: "ask".to_string(),
+                },
+            ],
+        };
+        let assert_felicity = if felicity_on_assert {
+            vec![FelicityCond {
+                dimension: "role.command".to_string(),
+                band: "felicity.assert.role".to_string(),
+            }]
+        } else {
+            vec![]
+        };
+        let registry = MoveRegistry {
+            moves: vec![
+                MoveKindDef {
+                    id: MoveKindId(1),
+                    name: "assertion".to_string(),
+                    force: vec![ForceEffectId(1)],
+                    expects: vec![MoveKindId(2), MoveKindId(3)],
+                    sincerity_judged: true,
+                    felicity: assert_felicity,
+                    gloss: "tells that".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(2),
+                    name: "acceptance".to_string(),
+                    force: vec![ForceEffectId(2)],
+                    expects: vec![],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "agrees".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(3),
+                    name: "refusal".to_string(),
+                    force: vec![ForceEffectId(3)],
+                    expects: vec![],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "declines".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(4),
+                    name: "question".to_string(),
+                    force: vec![ForceEffectId(4)],
+                    expects: vec![MoveKindId(1)],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "asks".to_string(),
+                },
+            ],
+        };
+        (registry, floor)
+    }
+
+    fn dialogue_world() -> World {
+        let mut w = gossip_world();
+        let (reg, floor) = dialogue_substrate(false);
+        w.set_dialogue(reg, floor).unwrap();
+        w
+    }
+
+    #[test]
+    fn a_promoted_pair_holds_a_conversation_in_the_log() {
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        // The speaker observes 10; the dialogue step asserts it and the listener accepts.
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the asserted belief reached the addressee"
+        );
+        // The move log holds the assertion and the acceptance, one reassembled conversation.
+        let first = w
+            .events()
+            .iter()
+            .next()
+            .map(|e| e.id)
+            .expect("a move logged");
+        let conv = crate::dialogue::conversation_of(w.events(), first, 10).unwrap();
+        assert_eq!(conv.event_ids.len(), 2, "an assertion and its acceptance");
+        assert_eq!(conv.participants, vec![speaker, listener]);
+        // The acceptance answers the assertion (the in-reply-to adjacency).
+        let reply = Move::from_event(w.events().get(conv.event_ids[1])).unwrap();
+        assert_eq!(reply.in_reply_to, Some(conv.event_ids[0]));
+    }
+
+    #[test]
+    fn gossip_skips_a_promoted_speaker() {
+        // A promoted speaker with no promoted partner present must not fall back to the
+        // one-pass gossip transmission (the dialogue step handles it, and it needs a
+        // promoted partner). So a lone promoted speaker neither gossips nor logs a move.
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE); // not promoted
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "a promoted speaker does not also gossip"
+        );
+        assert_eq!(
+            w.events().len(),
+            0,
+            "no move logged without a promoted partner"
+        );
+    }
+
+    #[test]
+    fn a_seen_through_lie_in_dialogue_yields_a_refusal_and_no_belief() {
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        // Speaker comes to believe 10; listener witnessed the speaker actually has access
+        // to 20, so the listener sees the assertion as a lie and refuses it.
+        w.tick(&[
+            observe_for(speaker, 10),
+            TickInput {
+                mind: listener,
+                ordinal: 0,
+                stim: Stimulus::Model {
+                    target: speaker,
+                    attr: AttrKindId(0),
+                    hyps: vec![10, 20],
+                    obs: AccessObs {
+                        channel: WITNESSED,
+                        toward: 20,
+                        from: listener,
+                    },
+                },
+            },
+        ]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the listener refused the lie"
+        );
+        assert_eq!(
+            w.trust(listener, speaker),
+            Some(Fixed::from_ratio(1, 2)),
+            "trust dropped by the penalty"
+        );
+        // The response move is a refusal (move kind 3), pointing back at the assertion.
+        let reply = Move::from_event(w.events().get(EventId(1))).unwrap();
+        assert_eq!(
+            reply.force,
+            crate::dialogue::MoveKindId(3),
+            "the reply is a refusal"
+        );
+        assert_eq!(reply.in_reply_to, Some(EventId(0)));
+    }
+
+    #[test]
+    fn an_infelicitous_move_misfires_as_a_bare_attempt() {
+        let mut w = gossip_world();
+        let (reg, floor) = dialogue_substrate(true); // the assertion is gated by a role
+        w.set_dialogue(reg, floor).unwrap();
+        // Resolve the role band, so the misfire is due to the unmodelled role dimension
+        // (it reads as absent and fails closed), not an unset band.
+        w.set_felicity_band(
+            "felicity.assert.role",
+            ResolvedBand {
+                lo: Fixed::ONE,
+                hi: Fixed::from_int(10),
+            },
+        );
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "a misfired assertion lands no force"
+        );
+        assert_eq!(
+            w.events().len(),
+            1,
+            "the bare attempt is logged, with no response"
+        );
+    }
+
+    #[test]
+    fn grounding_accumulates_as_said_evidence() {
+        // Grounding is the second-order model approaching agreement through said evidence,
+        // with no common-ground prior: the speaker comes to model the listener as holding
+        // the claim purely from the listener's acceptances over the said channel (the two
+        // share no witnessed access to each other's beliefs), so the convergence is
+        // defeasible said evidence a deception probe can tell from co-witnessing.
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        w.tick(&[observe_for(speaker, 10)]);
+        for _ in 0..3 {
+            w.tick(&[]);
+        }
+        let mp = *w.meta_params();
+        assert_eq!(
+            w.mind(speaker)
+                .unwrap()
+                .modeled_belief(listener, AttrKindId(0), &mp),
+            Some(10),
+            "the speaker models the listener as having taken up the claim"
+        );
+    }
+
+    #[test]
+    fn a_curious_being_asks_and_is_answered() {
+        // One member knows where the water is; the other wonders but cannot answer, so it
+        // asks, and the knower's answer grounds into it.
+        let mut w = dialogue_world();
+        let knower = w.spawn(Fixed::ONE);
+        let seeker = w.spawn(Fixed::ONE);
+        w.set_place(knower, 1);
+        w.set_place(seeker, 1);
+        w.promote(knower);
+        w.promote(seeker);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0)); // the seeker is curious first
+        assert!(w.is_wondering(seeker, StableId(99), AttrKindId(0)));
+        w.tick(&[observe_for(knower, 10)]); // the knower commits the value, the seeker asks
+        for _ in 0..4 {
+            w.tick(&[]);
+        }
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(seeker)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the seeker learned the answer"
+        );
+        assert!(
+            !w.is_wondering(seeker, StableId(99), AttrKindId(0)),
+            "having learned, the seeker stops wondering"
+        );
+        // A question move was logged: the seeker actually asked, it did not only overhear.
+        let asked = w
+            .events()
+            .iter()
+            .filter_map(Move::from_event)
+            .any(|m| matches!(m.content, ContentRef::Inquiry { .. }));
+        assert!(asked, "the seeker raised a question");
+    }
+
+    #[test]
+    fn being_asked_seeds_the_inquiry_goal_in_the_hearer() {
+        // A seeker asks a peer who also does not know; the question seeds the goal, so the
+        // hearer comes to wonder it too (curiosity spreads, design 9.13).
+        let mut w = dialogue_world();
+        let seeker = w.spawn(Fixed::ONE);
+        let peer = w.spawn(Fixed::ONE);
+        w.set_place(seeker, 1);
+        w.set_place(peer, 1);
+        w.promote(seeker);
+        w.promote(peer);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0));
+        w.tick(&[]);
+        assert!(
+            w.is_wondering(peer, StableId(99), AttrKindId(0)),
+            "being asked makes the hearer wonder the question too"
+        );
+    }
+
+    #[test]
+    fn redundancy_suppression_quiets_the_talk() {
+        // Once each party models the other as holding the claim, there is nothing left to
+        // tell and no open question, so the conversation falls silent rather than looping.
+        let mut w = dialogue_world();
+        let a = w.spawn(Fixed::ONE);
+        let b = w.spawn(Fixed::ONE);
+        w.set_place(a, 1);
+        w.set_place(b, 1);
+        w.promote(a);
+        w.promote(b);
+        w.tick(&[observe_for(a, 10)]);
+        let mut prev = w.events().len();
+        let mut quiet_streak = 0;
+        for _ in 0..30 {
+            w.tick(&[]);
+            let now = w.events().len();
+            if now == prev {
+                quiet_streak += 1;
+            } else {
+                quiet_streak = 0;
+            }
+            prev = now;
+            if quiet_streak >= 3 {
+                break;
+            }
+        }
+        assert!(
+            quiet_streak >= 3,
+            "the conversation falls silent once everyone is modelled as knowing"
+        );
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(b).unwrap().belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the belief still spread before the talk quieted"
+        );
+    }
+
+    #[test]
+    fn an_answer_that_conflicts_with_the_askers_model_is_seen_through() {
+        // A seeker wonders where the herd ranges and cannot answer, but has witnessed that
+        // the answerer's access points north. The answerer answers south; the seeker runs
+        // the same sincerity frame on the answer as on a volunteered assertion, sees it
+        // conflicts with its model, and refuses it rather than grounding it blindly.
+        let mut w = dialogue_world();
+        let seeker = w.spawn(Fixed::ONE);
+        let answerer = w.spawn(Fixed::ONE);
+        w.set_place(seeker, 1);
+        w.set_place(answerer, 1);
+        w.promote(seeker);
+        w.promote(answerer);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0));
+        // One tick: the seeker asks, the answerer answers 20, and the verdict is judged
+        // against the witnessed model (10) frozen at the start of the tick. (Over many
+        // ticks repeated said-evidence would erode that one witnessed observation, the
+        // defeasible-inference dynamic, so the seen-through guarantee is checked here on the
+        // turn the answer is given, as the design's phase-frozen snapshot intends.)
+        w.tick(&[
+            // The answerer comes to believe 20 (south), so that is what it will answer.
+            observe_for(answerer, 20),
+            // The seeker witnessed the answerer's access pointing at 10 (north).
+            TickInput {
+                mind: seeker,
+                ordinal: 0,
+                stim: Stimulus::Model {
+                    target: answerer,
+                    attr: AttrKindId(0),
+                    hyps: vec![10, 20],
+                    obs: AccessObs {
+                        channel: WITNESSED,
+                        toward: 10,
+                        from: seeker,
+                    },
+                },
+            },
+        ]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(seeker)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the seeker refused the answer that conflicts with what it witnessed"
+        );
+    }
+
+    #[test]
+    fn a_logged_conversation_replays_deterministically() {
+        let build = || {
+            let mut w = dialogue_world();
+            let s = w.spawn(Fixed::ONE);
+            let l = w.spawn(Fixed::ONE);
+            w.set_place(s, 1);
+            w.set_place(l, 1);
+            w.promote(s);
+            w.promote(l);
+            w.tick(&[observe_for(s, 10)]);
+            for _ in 0..4 {
+                w.tick(&[]);
+            }
+            // Both the outcome hash and the move-log integrity hash must replay.
+            (w.state_hash(), w.event_log_hash())
+        };
+        assert_eq!(
+            build(),
+            build(),
+            "the logged conversation replays bit for bit, outcomes and move log alike"
+        );
+    }
+
+    // --- Affect: the transient emotional layer wired through the world (R-EMOTION) ---
+
+    #[test]
+    fn a_world_appraises_a_drive_change_into_a_beings_affect() {
+        use crate::affect::DriveAppraisal;
+        const JOY: AffectAxisId = AffectAxisId(0);
+        let hunger = DriveId(0);
+        let mut w = world();
+        let being = w.spawn(Fixed::ONE);
+        let mut binding = AppraisalBinding::new();
+        // Relief from hunger reads positive on joy, gain 2.
+        binding.bind(
+            hunger,
+            DriveAppraisal {
+                axis: JOY,
+                gain: Fixed::from_int(2),
+                relief_positive: true,
+            },
+        );
+        // Hunger fell by 0.25 (relieved): joy rises by 0.25 * 2 = 0.5, landing on the being.
+        let applied = w.appraise(
+            being,
+            hunger,
+            Fixed::ZERO - Fixed::from_ratio(1, 4),
+            &binding,
+        );
+        assert_eq!(applied, Some((JOY, Fixed::from_ratio(1, 2))));
+        assert_eq!(w.affect_level(being, JOY), Fixed::from_ratio(1, 2));
+        // An unbound drive does not appraise and leaves affect untouched.
+        assert_eq!(w.appraise(being, DriveId(9), Fixed::ONE, &binding), None);
+        // Affect relaxes toward its baseline.
+        w.decay_affect(being, Fixed::ONE);
+        assert_eq!(
+            w.affect_level(being, JOY),
+            Fixed::ZERO,
+            "decayed to baseline"
+        );
+    }
+
+    #[test]
+    fn a_strong_feeling_hardens_a_beings_baseline_through_the_world() {
+        const DREAD: AffectAxisId = AffectAxisId(1);
+        let mut w = world();
+        let being = w.spawn(Fixed::ONE);
+        let mut state = AffectState::new();
+        state.apply(DREAD, Fixed::ONE);
+        w.set_affect(being, state);
+        // Below threshold: no hardening.
+        assert!(!w.harden_affect(being, DREAD, Fixed::from_int(2), Fixed::from_ratio(1, 2)));
+        // Above threshold: half the excess becomes the new baseline, and decay no longer
+        // returns all the way to zero (the persistent residue of trauma).
+        assert!(w.harden_affect(
+            being,
+            DREAD,
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 2)
+        ));
+        w.decay_affect(being, Fixed::ONE);
+        assert_eq!(w.affect_level(being, DREAD), Fixed::from_ratio(1, 2));
+    }
+
+    // --- Sensorium: the channel gate over perception (R-SENSORIUM) ---
+
+    fn channel_trace(id: u64, place: PlaceId, channel: SenseChannelId, subject: u64) -> Trace {
+        Trace {
+            id: StableId(id),
+            place,
+            channel,
+            subject: StableId(subject),
+            attr: AttrKindId(0),
+            hyps: vec![10, 20],
+            value: 10,
+            salience: Fixed::ONE,
+            weight: Fixed::from_int(5),
+            from: StableId(id),
+        }
+    }
+
+    #[test]
+    fn a_being_perceives_only_on_channels_its_sensorium_reads() {
+        const SIGHT: SenseChannelId = SenseChannelId(1);
+        const SCENT: SenseChannelId = SenseChannelId(2);
+        let mut w = world().with_seed(0x5E45E);
+        let anna = w.spawn(Fixed::ONE);
+        w.set_place(anna, 1);
+        // Anna reads sight but is blind to scent.
+        w.set_sensorium(anna, Sensorium::with([(SIGHT, Fixed::ONE)]));
+        // A sight trace about subject 70 and a scent trace about subject 80, both co-located
+        // and fully salient.
+        w.emit_trace(channel_trace(500, 1, SIGHT, 70));
+        w.emit_trace(channel_trace(501, 1, SCENT, 80));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(70), AttrKindId(0), &bp),
+            Some(10),
+            "the sight trace was perceived"
+        );
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(80), AttrKindId(0), &bp),
+            None,
+            "the scent trace was missed: the being is blind to that channel"
+        );
+    }
+
+    #[test]
+    fn a_being_with_no_sensorium_reads_every_channel() {
+        // Back-compatibility: a being that has never been given a sensorium perceives a trace
+        // on any channel exactly as before the channel gate existed.
+        const MANA: SenseChannelId = SenseChannelId(7);
+        let mut w = world().with_seed(0xBEEF);
+        let anna = w.spawn(Fixed::ONE);
+        w.set_place(anna, 1);
+        w.emit_trace(channel_trace(500, 1, MANA, 70));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(70), AttrKindId(0), &bp),
+            Some(10),
+            "a being with no sensorium reads every channel"
+        );
+    }
+
+    // --- Aging and mortality: the life-process loop (R-AGING) ---
+
+    fn rising_hazard() -> Curve {
+        // A simple rising hazard: certain survival at age 0, certain death by age 100. The shape
+        // is the data-driven default; the owner sets the real curve.
+        Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(100), Fixed::ONE),
+        ])
+    }
+
+    #[test]
+    fn an_old_being_dies_and_a_young_one_survives() {
+        let mut w = world().with_seed(0xA6E);
+        let young = w.spawn(Fixed::ONE);
+        let old = w.spawn(Fixed::ONE);
+        w.set_age(young, 0);
+        w.set_age(old, 100);
+        // Give the old being some state to confirm the prune reaches every map.
+        w.set_place(old, 3);
+        w.set_sensorium(old, Sensorium::with([(SenseChannelId(1), Fixed::ONE)]));
+        let dead = w.apply_mortality(&rising_hazard());
+        assert_eq!(dead, vec![old], "the old being died, the young one did not");
+        assert!(w.mind(old).is_none(), "the dead being's mind was pruned");
+        assert!(w.age_of(old).is_none(), "its age was pruned");
+        assert!(w.place_of(old).is_none(), "its placement was pruned");
+        assert!(w.sensorium_of(old).is_none(), "its sensorium was pruned");
+        assert!(w.mind(young).is_some(), "the survivor is untouched");
+        assert_eq!(w.population(), 1);
+    }
+
+    #[test]
+    fn age_step_advances_every_being() {
+        let mut w = world();
+        let a = w.spawn(Fixed::ONE);
+        let b = w.spawn(Fixed::ONE);
+        w.set_age(a, 4);
+        w.set_age(b, 9);
+        w.age_step();
+        assert_eq!(w.age_of(a), Some(5));
+        assert_eq!(w.age_of(b), Some(10));
+    }
+
+    #[test]
+    fn mortality_replays_deterministically() {
+        // A middling hazard exercises the stochastic path; the same seed must kill the same
+        // beings on the same ages every run.
+        let build = || {
+            let mut w = world().with_seed(0xD1CE);
+            let ids: Vec<StableId> = (0..8).map(|_| w.spawn(Fixed::ONE)).collect();
+            for (k, &id) in ids.iter().enumerate() {
+                w.set_age(id, 40 + k as u32); // a spread of ages around the half-hazard region
+            }
+            w.apply_mortality(&rising_hazard())
+        };
+        assert_eq!(build(), build(), "the same beings die on replay");
     }
 }
