@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Deepen language, increment A (structured form substrate, modality-generic)
+
+**What was done.** Began deepening the engine toward the resolved R-LANG-DET and R-LANG-MODALITY designs. Increment A replaces the opaque character-pool string with a structured, data-defined articulation substrate, so a word is real form rather than a placeholder token. `crates/sim/src/language.rs` rewritten:
+- A word is a `Word` (a production modality plus a `Vec<FormSegment>`), and a `FormSegment` is a canonical bundle of simultaneous feature values over a modality's dimensions, stored sorted by feature-dimension id with one value per dimension (the R-LANG-DET canonicalisation, so two machines build a bit-identical primitive). The sequential axis is the segment vector, walked left to right; the simultaneous axis is the in-segment bundle, order-free by sorting. This is the segment-as-bundle representation from record 62.13, carrying spoken (thin bundles), signed (thick bundles), and exotic channels by data.
+- `ArticulationSubstrate` is the data registry of production modalities, feature dimensions, and their contrastive values (each value carrying a gloss lemma for rendering, the one sanctioned hardcoding of 33.2); `render` produces the surface string deterministically. `FormSystem` is a culture's modality plus producible-primitive inventory plus length range; `coin` samples a structured form by counter-RNG, replacing `CharacterPool::coin`. A `syllabic` convenience builds a one-dimension substrate from surface tokens so dev and tests have a concrete renderable language.
+
+**Integration.** `world.rs` now holds `form_system: Option<FormSystem>` (was `phonology: Option<CharacterPool>`), `set_form_system` (was `set_phonology`), the naming-game phase coins structured forms, and `state_hash` folds the word's modality and its segments' integer feature ids (was the string bytes), so determinism holds. `lib.rs` re-exports the new types. The narrated example threads the substrate to render; it prints emergent words like "katuka" (a three-primitive form) converging across the band and replaying identically.
+
+**Verification.** Full workspace green (language.rs unit tests cover canonical-bundle order-independence, deterministic renderable coining, and divergent inventories; both Dawn Band tests, fixtures and calibrated-manifest, still pass with structured forms; the world language test still shows two isolated bands diverging). fmt and clippy clean. No new reserved values: the substrate is data, supplied as a dev fixture exactly as the character pool was, with the authoritative langmod/langdet entries still reserved.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged. Next deepening increment (B): regular form change (drift over generations as feature rewrites in innovation-index order with the same-tick canonical key and the within-generation phase order), so words drift and split into families over time, the R-LANG-DET core. Then movement (Part 6 spatial layer, the band moving across places, a gossip-only belief-spread scene that isolates the trust and told-weight levers). R-LANG-TYPOLOGY, the nine determinism-hardening items, and R-WOUND remain ready.
+
+---
+
 ## 2026-06-30: First calibration slice set and confirmed (the prototype runs on the owner's numbers)
 
 **What was done.** Worked through the reserved-value panel for the slice the Dawn Band prototype consumes, set-then-confirm. I brought cited recommendations; the owner accepted them and denoted all set values as tuneable levers revisable on his sign-off. First a convention fix: the log-odds unit is pinned to natural log-odds (nats), recorded in the manifest header, since the engine never fixed the base and the numbers were meaningless without it (this also exposed the fixture clamp of 50 as p approximately 1 minus 1e-22, overconfident; set to 7, p approximately 0.999).

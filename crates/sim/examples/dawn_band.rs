@@ -26,7 +26,7 @@ use civsim_sim::decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId,
 };
 use civsim_sim::evidence::AttrKindId;
-use civsim_sim::language::{CharacterPool, ConceptId, LanguageParams};
+use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::world::{Trace, World};
 
@@ -84,20 +84,22 @@ fn behaviour() -> Behaviour {
     }
 }
 
-fn build(seed: u64) -> (World, Vec<StableId>) {
+fn build(seed: u64) -> (World, Vec<StableId>, ArticulationSubstrate) {
     let manifest = CalibrationManifest::load(FIXTURES).expect("fixtures load");
     let mut w = World::from_manifest(&manifest, &channels(), Profile::Development)
         .expect("world builds")
         .with_seed(seed);
     w.set_behaviour(behaviour());
     w.set_language(LanguageParams::from_manifest(&manifest).unwrap());
-    // A placeholder character pool (a dev fixture, not an authored phonetic inventory):
-    // words for a concept are built by sampling these syllables.
-    w.set_phonology(CharacterPool::new(
+    // A placeholder articulation system (a dev fixture, not an authored phonetic inventory):
+    // words for a concept are built by sampling these syllable primitives, and rendered to a
+    // surface string through the substrate.
+    let (substrate, forms) = ArticulationSubstrate::syllabic(
         ["ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo", "ha", "du"].map(String::from),
         2,
         3,
-    ));
+    );
+    w.set_form_system(forms);
     w.set_concepts([CONCEPT]);
     let band: Vec<StableId> = (0..5).map(|_| w.spawn(Fixed::ONE)).collect();
     for &m in &band {
@@ -114,7 +116,7 @@ fn build(seed: u64) -> (World, Vec<StableId>) {
         weight: Fixed::from_int(5),
         from: StableId(900),
     });
-    (w, band)
+    (w, band, substrate)
 }
 
 fn belief_str(w: &World, m: StableId) -> &'static str {
@@ -126,9 +128,9 @@ fn belief_str(w: &World, m: StableId) -> &'static str {
     }
 }
 
-fn word_str(w: &World, m: StableId) -> String {
+fn word_str(w: &World, sub: &ArticulationSubstrate, m: StableId) -> String {
     match w.word_for(m, CONCEPT) {
-        Some(word) => word.0,
+        Some(word) => sub.render(&word),
         None => "-".to_string(),
     }
 }
@@ -142,7 +144,7 @@ fn action_str(w: &World, m: StableId) -> &'static str {
     }
 }
 
-fn snapshot(w: &World, band: &[StableId], label: &str) {
+fn snapshot(w: &World, sub: &ArticulationSubstrate, band: &[StableId], label: &str) {
     println!("\n-- {label} (tick {}) --", w.clock());
     println!("    name    belief   word   doing");
     for (i, &m) in band.iter().enumerate() {
@@ -150,7 +152,7 @@ fn snapshot(w: &World, band: &[StableId], label: &str) {
             "    {:<6}  {}   {:<6}   {}",
             NAMES[i],
             belief_str(w, m),
-            word_str(w, m),
+            word_str(w, sub, m),
             action_str(w, m)
         );
     }
@@ -163,11 +165,11 @@ fn believers(w: &World, band: &[StableId]) -> usize {
         .count()
 }
 
-fn distinct_words(w: &World, band: &[StableId]) -> usize {
+fn distinct_words(w: &World, sub: &ArticulationSubstrate, band: &[StableId]) -> usize {
     let mut words: Vec<String> = band
         .iter()
         .filter_map(|&m| w.word_for(m, CONCEPT))
-        .map(|x| x.0)
+        .map(|word| sub.render(&word))
         .collect();
     words.sort();
     words.dedup();
@@ -176,13 +178,13 @@ fn distinct_words(w: &World, band: &[StableId]) -> usize {
 
 fn main() {
     let seed = 0xDA7;
-    let (mut w, band) = build(seed);
+    let (mut w, band, substrate) = build(seed);
 
     println!("The Dawn Band: five minds at one place, seed {seed:#x}.");
     println!(
         "A trace says the quarry is at the river. Watch the news, the word, and the work spread."
     );
-    snapshot(&w, &band, "before any tick");
+    snapshot(&w, &substrate, &band, "before any tick");
 
     for tick in 1..=40u32 {
         w.tick(&[]);
@@ -191,16 +193,16 @@ fn main() {
             "tick {:>2}: believe-river {}/5, distinct words {}, foraging {}/5",
             tick,
             believers(&w, &band),
-            distinct_words(&w, &band),
+            distinct_words(&w, &substrate, &band),
             band.iter()
                 .filter(|&&m| w.last_action(m) == Some(ActionId(0)))
                 .count(),
         );
         if tick == 1 || tick == 5 || tick == 15 {
-            snapshot(&w, &band, "snapshot");
+            snapshot(&w, &substrate, &band, "snapshot");
         }
     }
-    snapshot(&w, &band, "final");
+    snapshot(&w, &substrate, &band, "final");
 
     println!("\nOutcome:");
     println!(
@@ -209,16 +211,16 @@ fn main() {
     );
     println!(
         "  the band settled on a single shared word for the concept: {} (word {})",
-        distinct_words(&w, &band) == 1,
-        word_str(&w, band[0])
+        distinct_words(&w, &substrate, &band) == 1,
+        word_str(&w, &substrate, band[0])
     );
 
     // Determinism, shown rather than asserted: the same seed reproduces the same world.
-    let (mut again, _) = build(seed);
+    let (mut again, _, _) = build(seed);
     for _ in 0..40 {
         again.tick(&[]);
     }
-    let (mut other, _) = build(0x999);
+    let (mut other, _, _) = build(0x999);
     for _ in 0..40 {
         other.tick(&[]);
     }

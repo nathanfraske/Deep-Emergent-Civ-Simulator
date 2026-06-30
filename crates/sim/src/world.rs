@@ -38,7 +38,7 @@ use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::language::{CharacterPool, ConceptId, LanguageParams, Lexicon, Word};
+use crate::language::{ConceptId, FormSystem, LanguageParams, Lexicon, Word};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
 
@@ -209,9 +209,9 @@ pub struct World {
     lexicons: BTreeMap<StableId, Lexicon>,
     /// The concepts a band coordinates words for (data).
     concepts: Vec<ConceptId>,
-    /// The character pool words are built from (data). None until set; the naming game is
-    /// then a no-op.
-    phonology: Option<CharacterPool>,
+    /// The articulation system words are built from (data). None until set; the naming game
+    /// is then a no-op.
+    form_system: Option<FormSystem>,
     /// The language calibration. None until set; the naming game is then a no-op.
     language: Option<LanguageParams>,
     events: EventLog,
@@ -246,7 +246,7 @@ impl World {
             trust: BTreeMap::new(),
             lexicons: BTreeMap::new(),
             concepts: Vec::new(),
-            phonology: None,
+            form_system: None,
             language: None,
             events: EventLog::new(),
             belief_params,
@@ -322,10 +322,10 @@ impl World {
         self.language = Some(params);
     }
 
-    /// Install the character pool words are built from (data; each culture can have its
-    /// own). Until set, the naming game is a no-op.
-    pub fn set_phonology(&mut self, pool: CharacterPool) {
-        self.phonology = Some(pool);
+    /// Install the articulation system words are built from (data; each culture can have its
+    /// own modality and inventory). Until set, the naming game is a no-op.
+    pub fn set_form_system(&mut self, fs: FormSystem) {
+        self.form_system = Some(fs);
     }
 
     /// The word a mind uses for a concept, if it has settled on one.
@@ -470,7 +470,7 @@ impl World {
             Some(l) => l,
             None => return,
         };
-        let pool = match self.phonology.as_ref() {
+        let pool = match self.form_system.as_ref() {
             Some(p) if !p.is_empty() => p,
             _ => return,
         };
@@ -767,8 +767,15 @@ impl World {
             h.write_stable(*mind);
             for (concept, word) in lex.entries() {
                 h.write_u32(concept.0);
-                h.write_u64(word.0.len() as u64);
-                h.write_bytes(word.0.as_bytes());
+                h.write_u32(word.modality().0);
+                h.write_u64(word.len() as u64);
+                for seg in word.segments() {
+                    h.write_u64(seg.features().len() as u64);
+                    for (dim, val) in seg.features() {
+                        h.write_u32(dim.0);
+                        h.write_u32(val.0);
+                    }
+                }
             }
         }
         h.finish()
@@ -1154,14 +1161,15 @@ name = "said"
     }
 
     fn language_world() -> World {
-        use crate::language::{CharacterPool, LanguageParams};
+        use crate::language::{ArticulationSubstrate, LanguageParams};
         let mut w = World::new(params(), params(), AccessWeights::from_pairs([])).with_seed(0xABBA);
         w.set_concepts([ConceptId(1)]);
-        w.set_phonology(CharacterPool::new(
+        let (_substrate, forms) = ArticulationSubstrate::syllabic(
             ["ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo"].map(String::from),
             2,
             3,
-        ));
+        );
+        w.set_form_system(forms);
         // Innovation off, so a band converges cleanly to one coined word.
         w.set_language(LanguageParams {
             innovation_rate: Fixed::ZERO,
