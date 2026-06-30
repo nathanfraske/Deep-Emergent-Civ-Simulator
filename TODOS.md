@@ -2,13 +2,12 @@
 
 The working view of the research backlog (audit Section 3) and the reserved-values queue. Updated every session: resolved items move to the resolved list, new flags are added, order is adjusted. Each open item is one bullet, identifier first, then the one-line question, then readiness and couplings, so the backlog tool reads it deterministically. The owner sets the order; the readiness tags are guidance.
 
-Counts: 14 resolved, 28 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
+Counts: 15 resolved, 27 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
 
 ---
 
 ## Open, ready to take (substrate or pattern already resolved)
 
-- **R-TOM-UPDATE.** How the nested mental model is populated from second-order evidence so it diverges from projection, and what is assumed at the depth bound. Ready: substrate is the resolved evidence engine (R-EVIDENCE) applied recursively to whether a target believes a thing. Couples to Parts 9, 21, 25, 28, 37, 54.
 - **R-INFRA.** The etic-and-emic question applied to the buildings institutions inhabit (infrastructure). Ready: reuses the etic-and-emic substrate pattern resolved for institutions (R-INST). Couples to Parts 36, 46.
 - **R-LANG-MODALITY.** Generalizing the language system to signed and non-vocal modalities. Ready: extends the resolved language-and-meaning cluster. Couples to Part 33.
 - **R-WOUND.** Emergent wound representation without an authored wound enum. Ready: pairs with R-FLUID; both sit in Part 35. Couples to Part 35.
@@ -64,6 +63,6 @@ The numbers the resolved mechanisms need are surfaced, not invented, and are the
 
 ---
 
-## Resolved (14)
+## Resolved (15)
 
-R-BEING-REP, R-VALUE-METRIC, R-AXIOM, R-GENOME, the six language-and-meaning items (R-LANG-CONCEPT, R-LANG-DISTANCE, R-LANG-LEARN, R-LANG-DISTORT, R-LANG-WRITING, R-LANG-GEN), R-EVIDENCE, R-INST, R-TIER-CONSIST, R-DEEPTECH-COMPOSE. Each has a mechanism in the design document, a record in Part 62, a bibliography group in Part 63, and a consolidation block in audit Section 1, with its calibrations reserved.
+R-BEING-REP, R-VALUE-METRIC, R-AXIOM, R-GENOME, the six language-and-meaning items (R-LANG-CONCEPT, R-LANG-DISTANCE, R-LANG-LEARN, R-LANG-DISTORT, R-LANG-WRITING, R-LANG-GEN), R-EVIDENCE, R-INST, R-TIER-CONSIST, R-DEEPTECH-COMPOSE, R-TOM-UPDATE. Each has a mechanism in the design document, a record in Part 62, a bibliography group in Part 63, and a consolidation block in audit Section 1, with its calibrations reserved. R-TOM-UPDATE resolved 2026-06-29: the recursive theory-of-mind update is the evidence engine run recursively on whether a target believes a thing, fed only by access evidence (a data registry, not a closed enum) so it diverges from projection (Part 37, record 62.11).
