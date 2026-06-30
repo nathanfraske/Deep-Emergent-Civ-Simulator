@@ -30,12 +30,14 @@
 //! institution-function substrate, the value substrate, and the semantic substrate:
 //!
 //! - The etic force floor ([`ForceFloor`]) is the small menu of primitive effects a move
-//!   can fire. Its membership is data (a starting menu, not a fixed fact), and each entry
-//!   names a [`ForceKind`], the engine affordance it realises. [`ForceKind`] is a fixed
-//!   mechanism enum exactly as [`crate::tom::EvidenceOrder`] is: it is the affordance
-//!   discriminator, not a catalogue of world content, because each variant is a call into
-//!   a mechanism the engine already has (a told-evidence facet 9.5, an inquiry goal 9.13,
-//!   a naming-game form proposal 33.9, an uptake, a conditional intent 37, a contact). A
+//!   can fire. Its *entries* are data (which primitives a world includes, and in what
+//!   order), but each entry names a [`ForceKind`], and the *kinds* are a fixed mechanism
+//!   enum, exactly the two-layer shape [`crate::tom`] uses (the [`crate::tom::EvidenceOrder`]
+//!   discriminator beside the data `AccessChannelRegistry`). [`ForceKind`] is the affordance
+//!   discriminator, not a catalogue of world content, because each variant is a call into a
+//!   mechanism the engine already has (a told-evidence facet 9.5, an inquiry goal 9.13, a
+//!   naming-game form proposal 33.9, an uptake, a conditional intent 37, a contact); the
+//!   kinds grow only when the engine resolves a new mechanism, never from world data. A
 //!   move adds no new authored behaviour; it composes affordances the engine already owns.
 //! - The dialogue-move registry ([`MoveRegistry`]) is the recognised move kinds. A
 //!   [`MoveKindDef`] is a recurring bundle of force effects a community comes to recognise

@@ -4,6 +4,24 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Faithfulness and steering audit of the implemented engine, and R-BIOSPHERE candidate
+
+**The audit.** Ran four independent skeptical reviewers (the Agent fan-out, not a workflow) over the implemented code (core, world, sim), one lens each: steering (P9/P8/P11), determinism (P3), never-fabricate, and faithfulness to the resolved design. Then verified every surviving finding against the code myself before acting, since I wrote the code. Headline: the engine is faithful and clean. No CRITICAL or MAJOR steering, fabrication, or determinism-of-computation defects. The content gate has real teeth (no magnitude field exists to smuggle an outcome), move magnitudes come from the reserved `gossip.*` values not the substrate, felicity gates rather than weights, the anti-projection rule and clamp-at-read hold, the two Part 41 invariants are real passing tests, and the worldgen/biome/move starters are all labelled fixtures.
+
+**What the verification corrected (the prime directive paying off).** The determinism reviewer's two MAJOR findings were to fold the move log and the dialogue substrate into `state_hash`. Verified that this would BREAK both Part 41 invariants: content-blindness asserts permuted move-kind ids hash equal, and channel-swap asserts different channel ids hash equal, and both ids live in the move payload. So `state_hash` is deliberately an outcome-state hash. Documented that boundary at the function so it is not "fixed" wrongly later, and added a separate `World::event_log_hash` for move-sequence replay integrity (used in the replay tests, never in the invariants).
+
+**The one real behavioural catch (fixed).** Faithfulness finding: the inquiry-answer leg hard-coded the deception verdict to `false`, bypassing the Part 37 sincerity frame, so an answer that conflicts with the asker's witnessed model of the answerer was grounded blindly. Now the asker judges an answer exactly as the INFORM path does (`detects_lie`), so it is seen through. New test `an_answer_that_conflicts_with_the_askers_model_is_seen_through`.
+
+**Other fixes.** The payload `Cursor`'s `u32`/`u64` reads are total by construction now (no `try_into().unwrap()`). Two doc-precision fixes: the `ForceKind` "starting menu" prose now distinguishes data entries from fixed kinds, and `primes.rs` cites 33.1/33.9 for the prime inventory and reserves the 33.2 "one sanctioned hardcoding" for the lemma.
+
+**Deferred follow-ups (latent or policy-bound, tracked in TODOS).** First-order `EvidenceRef` is not channel-tagged (latent: the load-bearing guarantee holds via the nested frame; tagging touches the hot path broadly). Drift applies form-change rules in vector order (fine while one rule per generation; sort when multi-rule). The dialogue reserved values (felicity bands, uptake step, budget, promotion thresholds) are surfaced in design record 62.14 but not yet in `reserved.toml`, which is consistent with the manifest's policy of adding entries as the sub-features are built. `World::from_manifest`'s Calibrated gate covers the nine cognition/gossip keys but not language/dialogue (those fail loud per-subsystem at install).
+
+**R-BIOSPHERE candidate recorded.** Stored the owner's biosphere-generation guide verbatim at `docs/working/BIOSPHERE_GENERATION_GUIDE.md` and registered it as a candidate exploration in TODOS (not in the open count): species as generated points over trait axes with food-web-closure and biome-fit validation then deep-time diversification, and edibility/nutrition/toxicity/medicine as a measured relation between an organism's composition and a consumer's physiology rather than a stored flag. It directly informs Track 1.
+
+**Where it stopped.** All committed to `claude/determinism-keying-and-map` and pushed; full workspace green, fmt/clippy/rustdoc clean, both Steering Audit invariants hold. Research counts unchanged at 19 resolved and 25 open. The four next-direction tracks are queued (Track 1 living world, Track 2 deep being model, Track 3 emergent concepts, Track 4 group dialogue and meetings); the owner chose to start Track 1 after this audit. The R-BIOSPHERE candidate is the design vehicle for the ecology and edibility part of Track 1.
+
+---
+
 ## 2026-06-30: Conversation refinements (inquiry, redundancy suppression, coined words)
 
 Three improvements to the dialogue scene, on the owner's pick, before resuming deep M2.

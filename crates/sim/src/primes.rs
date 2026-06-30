@@ -20,13 +20,17 @@
 //! every documented language lexicalises, which is why they are the right universal floor
 //! for a culture's first words.
 //!
-//! Each prime carries an English gloss lemma. That lemma is the one sanctioned hardcoding
-//! of 33.2: it is justified because the prime set is finite, universal, and mechanism
-//! rather than world content, and it never feeds an agent's reasoning, only the
-//! deterministic English gist the renderer shows. The concept ids and lemmas here are a
-//! starting inventory authored once; a data-file loader is the next increment, and the
-//! concept-as-substrate-region grounding (so primes drift, split, and merge) is a later
-//! one. The words a culture coins for these meanings remain fully emergent.
+//! The prime concept inventory is the NSM anchor set the dawn dynamic coordinates first
+//! (33.1, 33.9): a finite, universal, authored set of salient meanings, the innate
+//! semantic content the substrate is grounded in. Each prime also carries an English gloss
+//! lemma; the per-axis authored lemma is the "one sanctioned hardcoding" 33.2 names, and
+//! the same justification applies here: the lemma is mechanism rather than world content,
+//! it never feeds an agent's reasoning, and it surfaces only in the deterministic English
+//! gist the renderer shows (every `nsm_gloss` caller is an example or test, never a
+//! canonical path). The concept ids and lemmas here are a starting inventory authored once;
+//! a data-file loader is the next increment, and the concept-as-substrate-region grounding
+//! (so primes drift, split, and merge) is a later one. The words a culture coins for these
+//! meanings remain fully emergent.
 
 use crate::language::ConceptId;
 

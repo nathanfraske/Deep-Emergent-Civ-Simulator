@@ -66,6 +66,17 @@ Three exploration documents the owner asked to record now and queue for later. T
 
 ---
 
+## Audit follow-ups (deferred, from the engine faithfulness/steering audit)
+
+The four-reviewer audit of the implemented engine found it faithful and clean (no fabricated values, the content gate has real teeth, both Part 41 invariants hold). These are the deferred, latent, or policy-bound follow-ups it surfaced, none a live defect.
+
+- **First-order facet channel tag.** First-order `EvidenceRef` does not record the access channel, so a said-derived facet is indistinguishable from a co-witnessed one in the first-order store (design 9.5 names this tagging). Latent: the load-bearing grounding guarantee holds via the channel-aware nested frame, and no common-ground store exists. Deferred because threading the channel through `consider`/`add_evidence` touches the perception, gossip, and dialogue paths broadly; take it when a consumer needs first-order provenance.
+- **Drift multi-rule ordering.** `drift_languages` applies form-change rules in vector order; faithful while `innovate` emits one rule per generation (the current cap). When multi-rule generations are enabled, sort the rules by the canonical content key (dim, from, to) before applying, per design 33.4.
+- **Dialogue reserved-value manifest seeding.** The dialogue reserved values (felicity bands, uptake step, inquiry salience, contact touch, contiguity window, repair distance, budget, promotion thresholds, demotion hysteresis, speaking-versus-acting arbitration) are surfaced in design record 62.14 but not yet in `reserved.toml`. Consistent with the manifest policy of adding entries as the sub-features are built; seed each when its mechanism lands.
+- **Calibrated-gate coverage.** `World::from_manifest`'s `Calibrated` gate lists only the nine `evidence.*`/`tom.*`/`gossip.*` keys; language, drift, and dialogue are gated by being inert until installed and fail loud per-subsystem at install. Extend the top-level `required` list when those subsystems become part of the production wiring.
+
+---
+
 ## Reserved-values queue
 
 The numbers the resolved mechanisms need are surfaced, not invented, and are the owner's to set. The queue is the set of `status = "reserved"` entries in `calibration/reserved.toml` (see the runbook). Each carries its basis and a pointer to its mechanism. Work them through the reserved-values panel; set on the stated basis, validate against the stated target, then graduate the entry to `set` and annotate the matching reserved list in `docs/design.md`. No reserved value is decided by the agent.
