@@ -398,6 +398,30 @@ impl MoveRegistry {
         self.moves.iter().find(|m| m.id == id)
     }
 
+    /// The first move kind whose force bundle realises the given affordance (and the given
+    /// sign, when one is required), in registry order. This is how the engine picks a move
+    /// to carry an intent: by the affordance it realises, never by its label, which is what
+    /// keeps move selection content-blind (the Part 41 invariant). Returns `None` if no
+    /// move kind in the registry realises the affordance. A move kind whose force names an
+    /// effect absent from the floor is skipped rather than matched, so an ungated registry
+    /// still selects safely; run [`MoveRegistry::content_gate`] at load to refuse such data.
+    pub fn first_realizing(
+        &self,
+        floor: &ForceFloor,
+        kind: ForceKind,
+        sign: Option<EffectSign>,
+    ) -> Option<MoveKindId> {
+        self.moves
+            .iter()
+            .find(|m| {
+                m.force.iter().any(|fid| match floor.effect(*fid) {
+                    Some(def) => def.kind == kind && sign.is_none_or(|s| def.sign == s),
+                    None => false,
+                })
+            })
+            .map(|m| m.id)
+    }
+
     /// The content gate (design Part 9.5, Part 41). Classifies every move kind and
     /// felicity condition as an affordance or an outcome and refuses any that would set a
     /// graded persuasion or fidelity weight; because the substrate provides no field for a
@@ -1105,6 +1129,27 @@ source = "Part 9.5"
         ] {
             assert!(k.is_affordance());
         }
+    }
+
+    #[test]
+    fn first_realizing_selects_by_affordance_and_sign() {
+        let (reg, fl) = (registry(), floor());
+        // The assertion is the move that realises TellEvidence.
+        assert_eq!(
+            reg.first_realizing(&fl, ForceKind::TellEvidence, None),
+            Some(MoveKindId(1))
+        );
+        // Sign discriminates acceptance (positive uptake) from refusal (negative).
+        assert_eq!(
+            reg.first_realizing(&fl, ForceKind::RegisterUptake, Some(EffectSign::Positive)),
+            Some(MoveKindId(3))
+        );
+        assert_eq!(
+            reg.first_realizing(&fl, ForceKind::RegisterUptake, Some(EffectSign::Negative)),
+            Some(MoveKindId(4))
+        );
+        // No move realises a contact in this starter repertoire.
+        assert_eq!(reg.first_realizing(&fl, ForceKind::OpenContact, None), None);
     }
 
     fn assertion(

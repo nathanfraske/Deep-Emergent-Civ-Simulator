@@ -55,6 +55,10 @@ impl Phase {
     pub const COIN: Phase = Phase(0x05);
     /// A lineage innovating a regular form change (drift).
     pub const DRIFT: Phase = Phase(0x06);
+    /// A modelled-dialogue draw (choosing an addressee, breaking a move-kind tie). Move-
+    /// scoped draws are keyed without the addressee, addressee-scoped draws with it, each
+    /// on its own slot (the determinism pins of Part 9.5).
+    pub const CONVERSE: Phase = Phase(0x07);
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);

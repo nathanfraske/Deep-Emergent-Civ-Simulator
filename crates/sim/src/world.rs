@@ -32,17 +32,20 @@
 //! uses a clearly-labelled fixtures profile, never the authoritative manifest's unset
 //! entries.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
+use crate::dialogue::{
+    ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveRegistry, ResolvedBand,
+};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use civsim_core::{DrawKey, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
+use civsim_core::{DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
 /// place id, which is what lets one perceive a trace or talk to another. The full
@@ -53,6 +56,27 @@ pub type PlaceId = u32;
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
 /// no such channel, the model update is skipped (the first-order belief still passes).
 const SAID_CHANNEL: &str = "said";
+
+/// The CONVERSE-phase draw slot for choosing a move's addressee, namespaced so it cannot
+/// collide with a future move-scoped draw on counter zero (the R-RNG-COORD slot rule).
+const SLOT_ADDRESSEE: u32 = 0;
+
+/// Read a felicity dimension from the world state the engine already carries (design Part
+/// 9.5). The dialogue step gates a move on these readings; a dimension the world does not
+/// yet model (an institutional role, a value distance, a channel reach) reads as `None`,
+/// so a condition over it misfires until the subsystem that carries it is built, never on
+/// a fabricated value. Trust is the one dimension modelled today.
+fn felicity_reading(
+    dim: &str,
+    trust: &BTreeMap<(StableId, StableId), Fixed>,
+    listener: StableId,
+    speaker: StableId,
+) -> Option<Fixed> {
+    match dim {
+        "trust" => trust.get(&(listener, speaker)).copied(),
+        _ => None,
+    }
+}
 
 /// The reserved calibrations the gossip loop needs. Read from the manifest; until set,
 /// reading them fails loud rather than running on a fabricated default.
@@ -171,6 +195,58 @@ struct PerceptionHit {
     from: StableId,
 }
 
+/// The installed modelled-dialogue substrate (design Part 9.5): the move registry, the
+/// etic force floor, and the resolved felicity bands. Content-gated at install, so a
+/// malformed substrate fails loud rather than running. None until set, and the dialogue
+/// step is then a no-op; the one-pass gossip loop is the fallback for everyone the move
+/// log does not cover.
+struct DialogueConfig {
+    registry: MoveRegistry,
+    floor: ForceFloor,
+    /// Resolved felicity band bounds, keyed by band name. Empty until the owner sets the
+    /// reserved bounds; a felicity condition whose band is unresolved misfires (the move
+    /// lands as a bare attempt), so no fabricated default is ever used.
+    bands: BTreeMap<String, ResolvedBand>,
+}
+
+/// One recorded dialogue move gathered in the converse read pass and appended to the log
+/// in a second pass, so the read walk stays pure (the shape the perception and gossip
+/// steps already use).
+struct PendingMove {
+    mv: Move,
+    /// The assertion this move answers, by its index in the same tick's pending list, so
+    /// the in-reply-to event id can be filled once the answered move has been appended.
+    answers: Option<usize>,
+    /// The first-order and theory-of-mind effects to apply when the move lands.
+    effect: MoveEffect,
+}
+
+/// What a recorded move does to canonical state when it lands, drawn from the etic force
+/// floor (design Part 9.5). Each variant is a call into a mechanism the engine already
+/// has; the converse step composes them, authoring no new behaviour.
+enum MoveEffect {
+    /// A move whose felicity conditions failed: it is recorded as a bare attempt but
+    /// lands no force (the Austin misfire made structural).
+    Misfire,
+    /// A told-evidence assertion: the listener integrates the belief (gated by the
+    /// deception verdict) and models the speaker as having said it.
+    Assert {
+        listener: StableId,
+        speaker: StableId,
+        shared: SharedBelief,
+        deception: bool,
+        trust: Fixed,
+    },
+    /// An uptake: the original speaker models the listener's response as said evidence
+    /// about whether the listener took up the claim (positive) or not (negative).
+    Uptake {
+        speaker: StableId,
+        listener: StableId,
+        shared: SharedBelief,
+        sign: EffectSign,
+    },
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
@@ -189,6 +265,12 @@ pub struct World {
     channels: AccessChannelRegistry,
     /// The gossip calibrations. None until set; gossip is then a no-op.
     gossip: Option<GossipParams>,
+    /// The installed dialogue substrate. None until set; the dialogue step is then a no-op.
+    dialogue: Option<DialogueConfig>,
+    /// The minds promoted to move-by-move dialogue (design Part 54). The dialogue step runs
+    /// only for a promoted speaker, and the gossip fallback skips it; empty means nobody is
+    /// promoted, so dialogue is inert and gossip covers everyone.
+    promoted: BTreeSet<StableId>,
     /// Per-pair trust, keyed (listener, speaker): a 0..1 multiplier on a heard weight.
     trust: BTreeMap<(StableId, StableId), Fixed>,
     /// Per-mind lexicons (concept to word).
@@ -235,6 +317,8 @@ impl World {
             last_action: BTreeMap::new(),
             channels: AccessChannelRegistry::default(),
             gossip: None,
+            dialogue: None,
+            promoted: BTreeSet::new(),
             trust: BTreeMap::new(),
             lexicons: BTreeMap::new(),
             concepts: Vec::new(),
@@ -299,6 +383,48 @@ impl World {
     /// Install the gossip calibrations. Until set, the gossip step is a no-op.
     pub fn set_gossip(&mut self, params: GossipParams) {
         self.gossip = Some(params);
+    }
+
+    /// Install the modelled-dialogue substrate (the move registry and the etic force
+    /// floor). Content-gated at install: a malformed substrate is refused rather than run
+    /// (design Part 9.5, Part 41). The dialogue step stays a no-op until both this and the
+    /// gossip calibrations are set and some minds are promoted, since a move's magnitude
+    /// reuses the reserved gossip told-weight. The felicity bands start empty; set them
+    /// with [`World::set_felicity_band`] once the owner's reserved bounds are known.
+    pub fn set_dialogue(
+        &mut self,
+        registry: MoveRegistry,
+        floor: ForceFloor,
+    ) -> Result<(), crate::dialogue::ContentGateError> {
+        registry.content_gate(&floor)?;
+        self.dialogue = Some(DialogueConfig {
+            registry,
+            floor,
+            bands: BTreeMap::new(),
+        });
+        Ok(())
+    }
+
+    /// Supply a resolved felicity band (the owner's reserved bounds for one band key). A
+    /// felicity condition whose band is not supplied misfires, so this never invents a
+    /// default; it is the route by which a set reserved value reaches the dialogue gate.
+    pub fn set_felicity_band(&mut self, band: impl Into<String>, bounds: ResolvedBand) {
+        if let Some(d) = &mut self.dialogue {
+            d.bands.insert(band.into(), bounds);
+        }
+    }
+
+    /// Promote a mind to move-by-move dialogue (design Part 54). A promoted speaker runs
+    /// the dialogue step and is skipped by the one-pass gossip fallback, so it is not
+    /// double-counted. Promotion is the significance gate; the per-tick budget and the
+    /// promotion thresholds are reserved owner values, so a tool promotes explicitly.
+    pub fn promote(&mut self, mind: StableId) {
+        self.promoted.insert(mind);
+    }
+
+    /// Whether a mind is promoted to move-by-move dialogue.
+    pub fn is_promoted(&self, mind: StableId) -> bool {
+        self.promoted.contains(&mind)
     }
 
     /// The trust a listener extends to a speaker, if any has been recorded.
@@ -483,6 +609,7 @@ impl World {
         }
         self.perceive();
         self.decide();
+        self.converse();
         self.gossip();
         self.converse_language();
         self.drift_languages();
@@ -611,6 +738,292 @@ impl World {
         }
     }
 
+    /// The dialogue step (design Part 9.5): the promoted-tier refinement of the gossip
+    /// loop. For each promoted, co-located speaker (id order) with a committed belief, it
+    /// records an assertion move as a canonical event, then the addressee's response move
+    /// (an acceptance, or a refusal if the addressee sees the assertion as a lie), and
+    /// applies their forces through mechanisms the engine already has: a told-evidence
+    /// integration gated by the deception verdict (the same magnitude gossip uses), and
+    /// the speaker's theory-of-mind co-update from the response. Grounding is said
+    /// evidence into the existing first-order and second-order channels with no new
+    /// common-ground prior, so two parties who merely accept a thing in talk never
+    /// manufacture co-witnessed common ground. A two-pass shape gathers the moves in a
+    /// pure read walk, then appends them and applies their effects. Deterministic:
+    /// speakers in id order, the addressee chosen by counter RNG on the CONVERSE phase,
+    /// move ordinals assigned in walk order. A no-op until the dialogue substrate and the
+    /// gossip calibrations are set, the said channel exists, and some minds are promoted.
+    ///
+    /// This is the serial form. The four determinism pins the design states for the
+    /// parallel form (per-draw-site slots, the union gossip partition, the phase-frozen
+    /// verdict, the barrier-ordered move-kind mint) belong to the parallel scheduler and
+    /// its open cluster (R-CMD-ORDER, R-REDUCE-ORDER); on this serial tick the id-ordered
+    /// walk and the resolved draw keying give determinism directly.
+    fn converse(&mut self) {
+        let gp = match self.gossip {
+            Some(g) => g,
+            None => return,
+        };
+        if self.dialogue.is_none() || self.promoted.is_empty() {
+            return;
+        }
+        let said_channel = match self.channels.by_name(SAID_CHANNEL).map(|c| c.id) {
+            Some(c) => c,
+            None => return,
+        };
+
+        // Read pass: borrow the substrate and the minds immutably, produce owned moves.
+        let pending: Vec<PendingMove> = {
+            let cfg = self.dialogue.as_ref().unwrap();
+            let assert_kind =
+                match cfg
+                    .registry
+                    .first_realizing(&cfg.floor, ForceKind::TellEvidence, None)
+                {
+                    Some(k) => k,
+                    None => return,
+                };
+            let accept_kind = cfg.registry.first_realizing(
+                &cfg.floor,
+                ForceKind::RegisterUptake,
+                Some(EffectSign::Positive),
+            );
+            let refuse_kind = cfg.registry.first_realizing(
+                &cfg.floor,
+                ForceKind::RegisterUptake,
+                Some(EffectSign::Negative),
+            );
+            let assert_def = cfg.registry.move_kind(assert_kind).unwrap();
+
+            let ids: Vec<StableId> = self.minds.keys().copied().collect();
+            let mut pending: Vec<PendingMove> = Vec::new();
+            for &speaker in &ids {
+                if !self.promoted.contains(&speaker) {
+                    continue;
+                }
+                let place = match self.place_of.get(&speaker) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                // Move-by-move dialogue needs a promoted partner; demoted neighbours are
+                // covered by the one-pass gossip fallback instead.
+                let listeners: Vec<StableId> = ids
+                    .iter()
+                    .copied()
+                    .filter(|l| {
+                        *l != speaker
+                            && self.promoted.contains(l)
+                            && self.place_of.get(l) == Some(&place)
+                    })
+                    .collect();
+                if listeners.is_empty() {
+                    continue;
+                }
+                let shared = match self
+                    .minds
+                    .get(&speaker)
+                    .and_then(|m| m.first_committed(&self.belief_params))
+                {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
+                    .slot(SLOT_ADDRESSEE)
+                    .rng(self.seed)
+                    .range_u32(0, listeners.len() as u32) as usize;
+                let listener = listeners[idx];
+                let felicitous = assert_def.felicitous(
+                    |dim| felicity_reading(dim, &self.trust, listener, speaker),
+                    |band| cfg.bands.get(band).copied(),
+                );
+                let deception = self
+                    .minds
+                    .get(&listener)
+                    .map(|m| m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params))
+                    .unwrap_or(false);
+                let trust = self
+                    .trust
+                    .get(&(listener, speaker))
+                    .copied()
+                    .unwrap_or(gp.trust_baseline);
+
+                let assertion_idx = pending.len();
+                pending.push(PendingMove {
+                    mv: Move {
+                        force: assert_kind,
+                        speaker,
+                        addressees: vec![listener],
+                        content: ContentRef::Belief {
+                            subject: shared.subject,
+                            attr: shared.attr,
+                        },
+                        in_reply_to: None,
+                        channel: said_channel,
+                        tick: self.clock,
+                        ordinal: 0,
+                    },
+                    answers: None,
+                    effect: if felicitous {
+                        MoveEffect::Assert {
+                            listener,
+                            speaker,
+                            shared: shared.clone(),
+                            deception,
+                            trust,
+                        }
+                    } else {
+                        MoveEffect::Misfire
+                    },
+                });
+                // A felicitous assertion draws a response; a misfire stands as a bare attempt.
+                if felicitous {
+                    let (resp_kind, sign) = if deception {
+                        (refuse_kind, EffectSign::Negative)
+                    } else {
+                        (accept_kind, EffectSign::Positive)
+                    };
+                    if let Some(rk) = resp_kind {
+                        pending.push(PendingMove {
+                            mv: Move {
+                                force: rk,
+                                speaker: listener,
+                                addressees: vec![speaker],
+                                // Patched to point at the assertion once it has an id.
+                                content: ContentRef::Belief {
+                                    subject: shared.subject,
+                                    attr: shared.attr,
+                                },
+                                in_reply_to: None,
+                                channel: said_channel,
+                                tick: self.clock,
+                                ordinal: 0,
+                            },
+                            answers: Some(assertion_idx),
+                            effect: MoveEffect::Uptake {
+                                speaker,
+                                listener,
+                                shared: shared.clone(),
+                                sign,
+                            },
+                        });
+                    }
+                }
+            }
+            pending
+        };
+
+        // Write pass: append the moves (filling in-reply-to) and apply their effects. The
+        // substrate borrow is released, so the &mut self effect helpers are free to run.
+        let mut appended: Vec<EventId> = Vec::with_capacity(pending.len());
+        for (ordinal, mut pm) in pending.into_iter().enumerate() {
+            if let Some(ans) = pm.answers {
+                let target = appended[ans];
+                pm.mv.in_reply_to = Some(target);
+                pm.mv.content = ContentRef::PriorMove { event: target };
+            }
+            pm.mv.ordinal = ordinal as u32;
+            let id = self.events.append(pm.mv.to_event());
+            appended.push(id);
+            match pm.effect {
+                MoveEffect::Misfire => {}
+                MoveEffect::Assert {
+                    listener,
+                    speaker,
+                    shared,
+                    deception,
+                    trust,
+                } => {
+                    self.apply_assertion(
+                        said_channel,
+                        listener,
+                        speaker,
+                        shared,
+                        deception,
+                        trust,
+                        gp,
+                    );
+                }
+                MoveEffect::Uptake {
+                    speaker,
+                    listener,
+                    shared,
+                    sign,
+                } => {
+                    // The response is access evidence about whether the listener took up
+                    // the claim. A positive uptake models the listener as having said it
+                    // (admitted under the anti-projection rule as access about the
+                    // listener); a refusal records the move and moves no first-order belief.
+                    if sign == EffectSign::Positive {
+                        let weights = &self.weights;
+                        if let Some(spk) = self.minds.get_mut(&speaker) {
+                            let _ = spk.model(
+                                weights,
+                                listener,
+                                shared.attr,
+                                shared.hyps.iter().copied(),
+                                AccessObs {
+                                    channel: said_channel,
+                                    toward: shared.value,
+                                    from: listener,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply a landed told-evidence assertion: the listener models the speaker as having
+    /// said the claim (the said channel), and either integrates the belief at the
+    /// trust-scaled told-weight or, on a seen-through lie, lowers trust and refuses it.
+    /// This is the gossip integration reused at the promoted tier, so a move delivers
+    /// exactly the magnitude the one-pass loop would (design Part 9.5).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_assertion(
+        &mut self,
+        channel: crate::tom::AccessChannelId,
+        listener: StableId,
+        speaker: StableId,
+        shared: SharedBelief,
+        deception: bool,
+        trust: Fixed,
+        gp: GossipParams,
+    ) {
+        {
+            let weights = &self.weights;
+            if let Some(l) = self.minds.get_mut(&listener) {
+                let _ = l.model(
+                    weights,
+                    speaker,
+                    shared.attr,
+                    shared.hyps.iter().copied(),
+                    AccessObs {
+                        channel,
+                        toward: shared.value,
+                        from: speaker,
+                    },
+                );
+            }
+        }
+        if deception {
+            let lowered = (trust - gp.trust_penalty).clamp(Fixed::ZERO, Fixed::ONE);
+            self.trust.insert((listener, speaker), lowered);
+        } else {
+            let w = gp.told_weight.mul(trust);
+            if let Some(l) = self.minds.get_mut(&listener) {
+                l.consider(
+                    shared.subject,
+                    shared.attr,
+                    shared.hyps.iter().copied(),
+                    shared.value,
+                    w,
+                    speaker,
+                );
+            }
+            self.trust.entry((listener, speaker)).or_insert(trust);
+        }
+    }
+
     /// The transmission step (design 9.5): each co-located speaker shares one belief with
     /// one co-located listener chosen by counter-based RNG. The listener updates its model
     /// of the speaker (the speaker said it) and, if it does not see the assertion as a lie,
@@ -627,6 +1040,11 @@ impl World {
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut out = Vec::new();
             for &speaker in &ids {
+                // A promoted speaker runs the move-by-move dialogue step instead, so the
+                // one-pass fallback must not also transmit for it (no double-counting).
+                if self.promoted.contains(&speaker) {
+                    continue;
+                }
                 let place = match self.place_of.get(&speaker) {
                     Some(p) => *p,
                     None => continue,
@@ -1320,5 +1738,284 @@ name = "said"
             w.state_hash()
         };
         assert_eq!(build(), build(), "the naming game replays bit for bit");
+    }
+
+    // --- Modelled dialogue (the promoted-tier converse step, design Part 9.5) ---
+
+    fn dialogue_substrate(
+        felicity_on_assert: bool,
+    ) -> (crate::dialogue::MoveRegistry, crate::dialogue::ForceFloor) {
+        use crate::dialogue::{
+            EffectSign, FelicityCond, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind,
+            MoveKindDef, MoveKindId, MoveRegistry,
+        };
+        let floor = ForceFloor {
+            effects: vec![
+                ForceEffectDef {
+                    id: ForceEffectId(1),
+                    kind: ForceKind::TellEvidence,
+                    sign: EffectSign::Neutral,
+                    name: "assert".to_string(),
+                },
+                ForceEffectDef {
+                    id: ForceEffectId(2),
+                    kind: ForceKind::RegisterUptake,
+                    sign: EffectSign::Positive,
+                    name: "accept".to_string(),
+                },
+                ForceEffectDef {
+                    id: ForceEffectId(3),
+                    kind: ForceKind::RegisterUptake,
+                    sign: EffectSign::Negative,
+                    name: "refuse".to_string(),
+                },
+            ],
+        };
+        let assert_felicity = if felicity_on_assert {
+            vec![FelicityCond {
+                dimension: "role.command".to_string(),
+                band: "felicity.assert.role".to_string(),
+            }]
+        } else {
+            vec![]
+        };
+        let registry = MoveRegistry {
+            moves: vec![
+                MoveKindDef {
+                    id: MoveKindId(1),
+                    name: "assertion".to_string(),
+                    force: vec![ForceEffectId(1)],
+                    expects: vec![MoveKindId(2), MoveKindId(3)],
+                    sincerity_judged: true,
+                    felicity: assert_felicity,
+                    gloss: "tells that".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(2),
+                    name: "acceptance".to_string(),
+                    force: vec![ForceEffectId(2)],
+                    expects: vec![],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "agrees".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(3),
+                    name: "refusal".to_string(),
+                    force: vec![ForceEffectId(3)],
+                    expects: vec![],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "declines".to_string(),
+                },
+            ],
+        };
+        (registry, floor)
+    }
+
+    fn dialogue_world() -> World {
+        let mut w = gossip_world();
+        let (reg, floor) = dialogue_substrate(false);
+        w.set_dialogue(reg, floor).unwrap();
+        w
+    }
+
+    #[test]
+    fn a_promoted_pair_holds_a_conversation_in_the_log() {
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        // The speaker observes 10; the dialogue step asserts it and the listener accepts.
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the asserted belief reached the addressee"
+        );
+        // The move log holds the assertion and the acceptance, one reassembled conversation.
+        let first = w
+            .events()
+            .iter()
+            .next()
+            .map(|e| e.id)
+            .expect("a move logged");
+        let conv = crate::dialogue::conversation_of(w.events(), first, 10).unwrap();
+        assert_eq!(conv.event_ids.len(), 2, "an assertion and its acceptance");
+        assert_eq!(conv.participants, vec![speaker, listener]);
+        // The acceptance answers the assertion (the in-reply-to adjacency).
+        let reply = Move::from_event(w.events().get(conv.event_ids[1])).unwrap();
+        assert_eq!(reply.in_reply_to, Some(conv.event_ids[0]));
+    }
+
+    #[test]
+    fn gossip_skips_a_promoted_speaker() {
+        // A promoted speaker with no promoted partner present must not fall back to the
+        // one-pass gossip transmission (the dialogue step handles it, and it needs a
+        // promoted partner). So a lone promoted speaker neither gossips nor logs a move.
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE); // not promoted
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "a promoted speaker does not also gossip"
+        );
+        assert_eq!(
+            w.events().len(),
+            0,
+            "no move logged without a promoted partner"
+        );
+    }
+
+    #[test]
+    fn a_seen_through_lie_in_dialogue_yields_a_refusal_and_no_belief() {
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        // Speaker comes to believe 10; listener witnessed the speaker actually has access
+        // to 20, so the listener sees the assertion as a lie and refuses it.
+        w.tick(&[
+            observe_for(speaker, 10),
+            TickInput {
+                mind: listener,
+                ordinal: 0,
+                stim: Stimulus::Model {
+                    target: speaker,
+                    attr: AttrKindId(0),
+                    hyps: vec![10, 20],
+                    obs: AccessObs {
+                        channel: WITNESSED,
+                        toward: 20,
+                        from: listener,
+                    },
+                },
+            },
+        ]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the listener refused the lie"
+        );
+        assert_eq!(
+            w.trust(listener, speaker),
+            Some(Fixed::from_ratio(1, 2)),
+            "trust dropped by the penalty"
+        );
+        // The response move is a refusal (move kind 3), pointing back at the assertion.
+        let reply = Move::from_event(w.events().get(EventId(1))).unwrap();
+        assert_eq!(
+            reply.force,
+            crate::dialogue::MoveKindId(3),
+            "the reply is a refusal"
+        );
+        assert_eq!(reply.in_reply_to, Some(EventId(0)));
+    }
+
+    #[test]
+    fn an_infelicitous_move_misfires_as_a_bare_attempt() {
+        let mut w = gossip_world();
+        let (reg, floor) = dialogue_substrate(true); // the assertion is gated by a role
+        w.set_dialogue(reg, floor).unwrap();
+        // Resolve the role band, so the misfire is due to the unmodelled role dimension
+        // (it reads as absent and fails closed), not an unset band.
+        w.set_felicity_band(
+            "felicity.assert.role",
+            ResolvedBand {
+                lo: Fixed::ONE,
+                hi: Fixed::from_int(10),
+            },
+        );
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "a misfired assertion lands no force"
+        );
+        assert_eq!(
+            w.events().len(),
+            1,
+            "the bare attempt is logged, with no response"
+        );
+    }
+
+    #[test]
+    fn grounding_accumulates_as_said_evidence() {
+        // Grounding is the second-order model approaching agreement through said evidence,
+        // with no common-ground prior: the speaker comes to model the listener as holding
+        // the claim purely from the listener's acceptances over the said channel (the two
+        // share no witnessed access to each other's beliefs), so the convergence is
+        // defeasible said evidence a deception probe can tell from co-witnessing.
+        let mut w = dialogue_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        w.promote(speaker);
+        w.promote(listener);
+        w.tick(&[observe_for(speaker, 10)]);
+        for _ in 0..3 {
+            w.tick(&[]);
+        }
+        let mp = *w.meta_params();
+        assert_eq!(
+            w.mind(speaker)
+                .unwrap()
+                .modeled_belief(listener, AttrKindId(0), &mp),
+            Some(10),
+            "the speaker models the listener as having taken up the claim"
+        );
+    }
+
+    #[test]
+    fn a_logged_conversation_replays_deterministically() {
+        let build = || {
+            let mut w = dialogue_world();
+            let s = w.spawn(Fixed::ONE);
+            let l = w.spawn(Fixed::ONE);
+            w.set_place(s, 1);
+            w.set_place(l, 1);
+            w.promote(s);
+            w.promote(l);
+            w.tick(&[observe_for(s, 10)]);
+            for _ in 0..4 {
+                w.tick(&[]);
+            }
+            w.state_hash()
+        };
+        assert_eq!(
+            build(),
+            build(),
+            "the logged conversation replays bit for bit"
+        );
     }
 }
