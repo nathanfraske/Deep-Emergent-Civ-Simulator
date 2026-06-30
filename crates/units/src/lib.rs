@@ -259,8 +259,13 @@ impl AbsoluteQuantity {
     }
 
     /// Add two magnitudes of the same quantity, applying that quantity's overflow
-    /// policy. Both saturate and wrap are deterministic and order-independent for a
-    /// pairwise add. Panics on a quantity mismatch, which is a dimensional error.
+    /// policy. A single pairwise add is deterministic. Note that a fold of `add` over a
+    /// sequence is NOT order-independent under `Saturate`, because saturating addition
+    /// is commutative but not associative (`(MAX + 1) - 1` saturates to `MAX - 1`,
+    /// while `(MAX - 1) + 1` reaches `MAX`). To reduce a set of magnitudes use
+    /// [`AbsoluteQuantity::sum`], which accumulates exactly and applies the policy once
+    /// at read, so the canonical path stays order-independent. Panics on a quantity
+    /// mismatch, which is a dimensional error.
     pub fn add(self, other: AbsoluteQuantity, reg: &QuantityRegistry) -> AbsoluteQuantity {
         assert_eq!(
             self.quantity, other.quantity,
@@ -275,6 +280,41 @@ impl AbsoluteQuantity {
             quantity: self.quantity,
             bits,
         }
+    }
+
+    /// Reduce a sequence of magnitudes of one quantity to a single magnitude,
+    /// accumulating exactly in 128-bit space and applying the quantity's overflow
+    /// policy once, at read. The result is therefore independent of the order the
+    /// magnitudes arrive in, which is what a fold of [`AbsoluteQuantity::add`] cannot
+    /// guarantee under `Saturate`, and it is the canonical reduction the determinism
+    /// harness relies on (the clamp-at-read discipline of the evidence engine and the
+    /// order-independent reductions of design Part 57, R-REDUCE-ORDER). An empty input
+    /// is the zero magnitude of the quantity. Panics on a quantity mismatch.
+    ///
+    /// The 128-bit accumulator holds the exact sum of any realistic number of `i64`
+    /// terms (over 18 quintillion of them before it could overflow), so the only
+    /// rounding is the single policy step at the end.
+    pub fn sum(
+        quantity: u32,
+        items: impl IntoIterator<Item = AbsoluteQuantity>,
+        reg: &QuantityRegistry,
+    ) -> AbsoluteQuantity {
+        let def = reg.get(quantity).expect("unknown quantity");
+        let mut acc: i128 = 0;
+        for it in items {
+            assert_eq!(
+                it.quantity, quantity,
+                "cannot sum magnitudes of different quantities"
+            );
+            acc += it.bits as i128;
+        }
+        let bits = match def.overflow {
+            // Clamp once, at read: the exact total is order-independent, so its clamp is.
+            OverflowPolicy::Saturate => acc.clamp(i64::MIN as i128, i64::MAX as i128) as i64,
+            // The wrapped total is the low 64 bits of the exact sum, also order-independent.
+            OverflowPolicy::Wrap => acc as i64,
+        };
+        AbsoluteQuantity { quantity, bits }
     }
 
     /// Convert to another quantity of the same dimension, rescaling the magnitude

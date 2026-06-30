@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: Determinism harness coverage for the cognition and unit layers, and an order-independence fix in units
+
+**What was done.** Brought the three engine increments under determinism tests (R-HARNESS-COVER, R-REDUCE-ORDER) on `claude/engine-foundations`. Testing the units crate surfaced a real seam: `AbsoluteQuantity::add` is order-dependent when folded over a set under the Saturate policy, because saturating addition is commutative but not associative (`(MAX + 1) - 1` saturates to `MAX - 1` while `(MAX - 1) + 1` reaches `MAX`), and the crate had no order-independent reduction. Fixed by adding `AbsoluteQuantity::sum`, which accumulates exactly in 128-bit space and applies the overflow policy once at read, the same clamp-at-read discipline the evidence engine uses, and the `add` doc now names the non-associativity and points to `sum`.
+
+**Tests added.** `crates/units/tests/determinism.rs` demonstrates the order-dependence of the naive fold so the hazard is on record, then proves `sum` is order-independent under both Saturate and Wrap, matches the exact clamped total, and is thread-count invariant under a parallel coordinate-keyed gather then a canonical reduction, by state hash. `crates/sim/tests/cognition_determinism.rs` proves the evidence engine and the theory-of-mind nested frame commit and hash identically across evidence reorderings and across thread counts, and that the anti-projection guarantee holds as a harness assertion: a flood of refused world evidence leaves a nested belief bit-identical.
+
+**Self-audit.** The only non-test change is `units::sum`: integer 128-bit accumulate, clamp or wrap at read, no floating point, deterministic. Full workspace green: tests pass, `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` clean.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged.
+
+**Queued next.** Wire the remaining Part 37 reserved values as their consumers are built, and extend the harness to real tick phases and the gossip partition as those systems land.
+
+---
+
 ## 2026-06-29: Engine branch: theory-of-mind nested-inference layer
 
 **What was done.** On `claude/engine-foundations` (now carrying the merged R-TOM-UPDATE resolution from main), implemented the recursive theory-of-mind layer as the next buildable increment per RUNBOOK section 2, which lists theory-of-mind structure as a resolved mechanism buildable now with structural and determinism tests while tuned behaviour waits on the numbers. The layer is `crates/sim/src/tom.rs`: the evidence engine (Part 9.10) run recursively on whether a target believes a thing, with a recursion-level `EvidenceOrder` tag (world, or access of a named mind), a data-driven `AccessChannelRegistry` sibling to the trace-kind registry (no closed enum), reserved per-channel weights and meta thresholds read fail-loud from the manifest, the typed anti-projection guarantee (`NestedFrame::admit` refuses world evidence and access about another mind), and `detects_deception` for the seen-through-lie verdict. The standing false-belief and deception battery is `crates/sim/tests/tom_battery.rs`, run through the public API as a CI gate: classic transfer (Sally-Anne) diverging from projection, the true-belief control against over-correction, unexpected-contents, lie-believed-then-seen-through, and a depth-two second-order case, each asserting committed integer argmaxes. The nine `tom.*` reserved values (six channel weights and the meta clamp, threshold, and margin) are added to `calibration/reserved.toml`, fail-loud.
