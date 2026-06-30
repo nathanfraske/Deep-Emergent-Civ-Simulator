@@ -84,7 +84,7 @@ impl TileMap {
         let mut tiles = Vec::with_capacity(w * h);
         for y in 0..topo.height {
             for x in 0..topo.width {
-                let (xi, yi) = (x as i32, y as i32);
+                let (xi, yi) = (x, y);
                 let elevation = fractal(
                     seed,
                     xi,
@@ -177,8 +177,8 @@ impl TileMap {
 
 /// Blend a latitude gradient (warm at the equator row, cold at the poles) with temperature
 /// noise, in `[0, ONE]`.
-fn blend_latitude(y: i32, height: i16, noise: Fixed, weight: Fixed) -> Fixed {
-    let h = height as i32;
+fn blend_latitude(y: i32, height: i32, noise: Fixed, weight: Fixed) -> Fixed {
+    let h = height;
     let mid = h / 2;
     let lat = if mid > 0 {
         let dist = (y - mid).abs();
@@ -228,8 +228,8 @@ mod tests {
     fn a_generated_world_has_a_mix_of_biomes() {
         let m = gen(0xEA27);
         let mut seen = std::collections::BTreeSet::new();
-        for y in 0..24i16 {
-            for x in 0..48i16 {
+        for y in 0..24i32 {
+            for x in 0..48i32 {
                 seen.insert(m.tile(Coord3::ground(x, y)).unwrap().biome);
             }
         }

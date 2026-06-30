@@ -24,34 +24,42 @@
 //! question off this path): it is a comparison key, not a rendered length.
 
 /// A world coordinate over the 2.5D stacked model (Part 56): x and y on the plane, z the
-/// stacked layer. An `i16` per axis is ample for a tile world and keeps a coordinate
-/// small and cheap to hash.
+/// stacked layer. An `i32` per axis (design Part 56) gives a large-scale world room to
+/// grow (about plus or minus two billion tiles per axis) while staying a small, cheap
+/// coordinate.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct Coord3 {
-    pub x: i16,
-    pub y: i16,
-    pub z: i16,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
 }
 
 impl Coord3 {
     /// A coordinate at `(x, y, z)`.
     #[inline]
-    pub const fn new(x: i16, y: i16, z: i16) -> Self {
+    pub const fn new(x: i32, y: i32, z: i32) -> Self {
         Coord3 { x, y, z }
     }
 
     /// A coordinate on the ground layer (z = 0).
     #[inline]
-    pub const fn ground(x: i16, y: i16) -> Self {
+    pub const fn ground(x: i32, y: i32) -> Self {
         Coord3 { x, y, z: 0 }
     }
 
-    /// A stable fold of this coordinate into a single value, so a cell can serve as a
-    /// locus or region in a [`civsim_core::DrawKey`] (the canonical draw-keying schema).
-    /// The fold packs the three axes without loss, so distinct cells fold distinctly.
+    /// A deterministic, well-distributed fold of this coordinate into a single value, so a
+    /// cell can serve as a locus or region in a [`civsim_core::DrawKey`] (the canonical
+    /// draw-keying schema). With `i32` axes a lossless 64-bit pack is impossible, so this
+    /// mixes the three axes by FNV-1a instead: distinct cells fold to distinct keys with
+    /// overwhelming probability, which is what a draw-key locus needs (it is a hash
+    /// coordinate, not a stored length).
     #[inline]
     pub const fn key(self) -> u64 {
-        ((self.x as u16 as u64) << 32) | ((self.y as u16 as u64) << 16) | (self.z as u16 as u64)
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        h = (h ^ (self.x as u32 as u64)).wrapping_mul(0x0000_0100_0000_01b3);
+        h = (h ^ (self.y as u32 as u64)).wrapping_mul(0x0000_0100_0000_01b3);
+        h = (h ^ (self.z as u32 as u64)).wrapping_mul(0x0000_0100_0000_01b3);
+        h
     }
 }
 
@@ -89,15 +97,15 @@ pub trait TopologySpace {
 /// needs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FlatBounded {
-    pub width: i16,
-    pub height: i16,
-    pub layers: i16,
+    pub width: i32,
+    pub height: i32,
+    pub layers: i32,
 }
 
 impl FlatBounded {
     /// A flat bounded world of `width` by `height` tiles over `layers` stacked planes.
     #[inline]
-    pub const fn new(width: i16, height: i16, layers: i16) -> Self {
+    pub const fn new(width: i32, height: i32, layers: i32) -> Self {
         FlatBounded {
             width,
             height,
@@ -130,21 +138,20 @@ impl TopologySpace for FlatBounded {
     fn neighbours(&self, c: Coord3) -> Vec<Coord3> {
         let mut out = Vec::with_capacity(8);
         // Row-then-column walk gives a fixed, canonical order (no hash, no thread order).
-        for dy in -1i32..=1 {
-            for dx in -1i32..=1 {
+        for dy in -1i64..=1 {
+            for dx in -1i64..=1 {
                 if dx == 0 && dy == 0 {
                     continue;
                 }
-                // Compute in i32 so an i16 edge cell does not overflow before the bounds test.
-                let nx = c.x as i32 + dx;
-                let ny = c.y as i32 + dy;
-                let n = Coord3::new(nx as i16, ny as i16, c.z);
-                if (0..self.width as i32).contains(&nx)
-                    && (0..self.height as i32).contains(&ny)
+                // Compute in i64 so an i32 edge cell does not overflow before the bounds test.
+                let nx = c.x as i64 + dx;
+                let ny = c.y as i64 + dy;
+                if (0..self.width as i64).contains(&nx)
+                    && (0..self.height as i64).contains(&ny)
                     && c.z >= 0
                     && c.z < self.layers
                 {
-                    out.push(n);
+                    out.push(Coord3::new(nx as i32, ny as i32, c.z));
                 }
             }
         }
@@ -153,9 +160,11 @@ impl TopologySpace for FlatBounded {
 
     #[inline]
     fn distance2(&self, a: Coord3, b: Coord3) -> i64 {
-        let dx = a.x as i64 - b.x as i64;
-        let dy = a.y as i64 - b.y as i64;
-        dx * dx + dy * dy
+        // Compute in i128 so an i32-scale separation cannot overflow, then saturate to the
+        // i64 comparison key (a far separation stays far); no float, no square root.
+        let dx = a.x as i128 - b.x as i128;
+        let dy = a.y as i128 - b.y as i128;
+        (dx * dx + dy * dy).min(i64::MAX as i128) as i64
     }
 }
 
@@ -212,9 +221,10 @@ mod tests {
 
     #[test]
     fn edge_neighbours_do_not_overflow() {
-        // An i16 max-edge cell must not overflow when its neighbour is computed.
-        let w = FlatBounded::new(i16::MAX, i16::MAX, 1);
-        let c = Coord3::ground(i16::MAX - 1, i16::MAX - 1);
+        // An i32 max-edge cell must not overflow when its neighbour is computed (the i64
+        // compute in neighbours is what guards this).
+        let w = FlatBounded::new(i32::MAX, i32::MAX, 1);
+        let c = Coord3::ground(i32::MAX - 1, i32::MAX - 1);
         let n = w.neighbours(c);
         assert!(n.iter().all(|&c| w.contains(c)));
     }
