@@ -55,6 +55,7 @@ pub mod conservation;
 pub mod decision;
 pub mod dialogue;
 pub mod evidence;
+pub mod genome;
 pub mod language;
 pub mod lod;
 pub mod primes;
@@ -72,6 +73,11 @@ pub use dialogue::{
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use genome::{
+    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, DominanceKind, DominanceMode,
+    GeneDef, GeneEffect, GeneId, GeneSet, Genome, Haplotype, ImbuedChannel, LifeHistoryChannel,
+    SchemeId, TraitId,
+};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
     FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
