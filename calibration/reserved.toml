@@ -434,3 +434,84 @@ unit = "rule"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-29"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+# --- R-TOM-UPDATE: recursive theory of mind (Part 37, record 62.11) ---
+# The access-channel set is data (the registry in crates/sim/src/tom.rs); these are the
+# weights and meta thresholds the nested update reads. The hard constraint from the
+# blockquote: the witnessed weight must be set strictly above the told and said weights,
+# and no meta-observation weight above the same observation taken first-hand. The
+# remaining reserved values in the Part 37 blockquote (lie-discount, common-ground
+# prior, projection-fallback, depth bound, level-of-detail policy, conserved projection,
+# meta-facet decay, trust update) are added here as their consumers are built.
+
+[[reserved]]
+id = "tom.access_weight.witnessed"
+basis = "the weight-of-evidence that a target witnessed a trace; must be set strictly above told and said so a witnessed access out-ranks a contrary assertion and lies are seen through"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.told"
+basis = "the weight that a target was told a value, trust- and hop-scaled; below witnessed"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.said"
+basis = "the weight of a target's own utterance, the channel deception attacks, lie-discounted; below witnessed"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "the weak weight that an accessible fact gets, with an inaccessible one negative toward unknown or the stale value"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.absence"
+basis = "the negative weight of seeing a target NOT have access, the engine that keeps a false belief stable in Sally-Anne"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "the negative weight of having starved a target of an input (meta-concealment)"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_commit_threshold"
+basis = "the total a modelled belief must reach to commit; the balance of over-attributing a belief the target does not hold against leaving it unknown, plausibly wider than the first-order threshold because second-order evidence is noisier"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_runner_up_margin"
+basis = "the lead over the runner-up a modelled belief must hold; set so the false-belief and deception battery commits rather than merely failing to match projection"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_log_odds_clamp"
+basis = "the maximum admissible certainty about another mind, no higher than the first-order clamp, since one cannot know another's mind better than one's own world"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"

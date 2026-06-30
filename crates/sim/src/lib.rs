@@ -33,15 +33,25 @@
 //! - [`substrate`]: data-driven substrate definitions with round-trip loading, the
 //!   schema-and-loader plumbing the runbook says is buildable now while the content
 //!   stays data.
+//! - [`tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
+//!   work). The evidence engine run recursively on whether a target believes a thing,
+//!   with a typed anti-projection guarantee (a nested frame admits only access evidence
+//!   about its target) and a data-driven access-channel registry, so a false belief
+//!   and a seen-through lie come from one mechanism without a closed enum of evidence.
 
 pub mod calibration;
 pub mod conservation;
 pub mod evidence;
 pub mod lod;
 pub mod substrate;
+pub mod tom;
 
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use substrate::Substrate;
+pub use tom::{
+    detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
+    EvidenceOrder, NestedFrame, ProjectionRejected,
+};
