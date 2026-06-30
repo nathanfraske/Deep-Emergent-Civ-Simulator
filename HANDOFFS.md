@@ -4,6 +4,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Record the roadmap, ship R-CONVERSE, and start the build (M0 done, M1 begun)
+
+**Roadmap and PR.** Recorded `ROADMAP.md` (the path to the first end-to-end emergent slice: a generated map, seeded bands, the naming game over the primes, emergent dialogue; milestones M0 through M4) and mirrored it in TODOS. Opened and merged PR #5 (the R-CONVERSE resolution and the roadmap) into main, CI green. Branched `claude/determinism-keying-and-map` off the consolidated main for the build.
+
+**M0 done: R-RNG-COORD resolved (code and docs).** Implemented the canonical draw-keying schema in `crates/core/src/keys.rs`: a registered `Phase` set (assigned once, replacing the six hand-written `PHASE_*` magic numbers in `world.rs`), a `DrawKey` folding a uniform coordinate (region, primary locus, secondary locus, tick, phase, slot) with the tick always present and a per-phase slot so two draw sites cannot collide on counter zero, and an `ABSENT` degrade sentinel. Migrated all six simulation draw sites to it. The keying change shifted the specific streams (determinism preserved), so the dawn-band convergence assertions were made robust: they check that consensus is reached during the run rather than at one fixed tick (a live innovation rate makes the latter a coin flip). Consolidated as a resolved research item: Part 3.2 mechanism plus the Decided-and-reserved blockquote, record 62.15, audit Section 1 block 1q, the Section 3 bullet to resolved form, Section 2, the queue, and the limitation updated, counts to 19 resolved and 25 open. No calibration is reserved (the phase and slot numbers are engine mechanics, the RNG-core exemption). Honest limits: the camera-independent-id requirement rides R-CMD-ORDER and Part 54, and the reduction order of combines consuming these draws is R-REDUCE-ORDER.
+
+**M1 begun: the spatial layer.** Added `crates/sim/src/topology.rs`: `Coord3` over the 2.5D stacked model, the `TopologySpace` trait (contains, normalize, neighbours, distance2), and the `FlatBounded` concrete space, with exact integer squared distance (no float, no square root) and `Coord3::key` folding a cell into a `DrawKey` locus so the spatial layer plugs straight into the M0 keying. Tested (bounds, neighbour counts by position, the pinned row-major order, edge-overflow safety, exact symmetric distance, the cell key). This is the foundation the worldgen, chunk grid, and glyph view build on.
+
+**Where it stopped.** All committed to `claude/determinism-keying-and-map`, not merged; full workspace green, fmt and clippy clean. Next in M1: the data-driven terrain and biome substrate, fixed-point worldgen pass one (noise to elevation to climate to biome), the chunk grid and quadtree, and a headless glyph frame; then M2 (seed bands) and M3 (the prime naming game). One open layout decision for the heavier map pieces: whether worldgen and rendering live in `crates/sim` or a new `crates/world`. R-REDUCE-ORDER (the M0 companion) and the other seven determinism-cluster items remain open.
+
+---
+
 ## 2026-06-30: Merge to main, branch for new work, and resolve R-CONVERSE (modelled dialogue)
 
 **Consolidation.** Merged PR #4 (the full engine-foundations line: deterministic core, the Dawn Band prototype, emergent language, calibration, increments A and B, the R-CONVERSE flag) into main, CI green, after correcting the PR's stale title and body so the record is honest. Branched `claude/converse-dialogue` from the consolidated main for the new work. The other branches (engine-foundations now merged, tom-update-audit, ground-truth-analysis-setup-pjux91, deeptech-cluster-audit) are all merged or stale and safe to delete.
