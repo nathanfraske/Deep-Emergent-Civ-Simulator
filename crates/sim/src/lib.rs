@@ -56,6 +56,7 @@ pub mod decision;
 pub mod evidence;
 pub mod language;
 pub mod lod;
+pub mod primes;
 pub mod substrate;
 pub mod tom;
 pub mod world;
@@ -71,6 +72,7 @@ pub use language::{
     Word,
 };
 pub use lod::{Individual, Pool, TwoTierWorld};
+pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
