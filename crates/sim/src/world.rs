@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 
 use crate::agent::{AccessObs, Mind};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
+use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
@@ -141,6 +142,12 @@ pub struct World {
     minds: BTreeMap<StableId, Mind>,
     place_of: BTreeMap<StableId, PlaceId>,
     traces: Vec<Trace>,
+    /// The data-driven decision definitions (drives, curves, actions). None until set.
+    behaviour: Option<Behaviour>,
+    /// Per-mind drive levels, in the unit interval.
+    drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
+    /// The action each mind chose on the last tick, for inspection.
+    last_action: BTreeMap<StableId, ActionId>,
     events: EventLog,
     /// The first-order belief calibrations (the `evidence.*` reserved values).
     belief_params: InferenceParams,
@@ -165,6 +172,9 @@ impl World {
             minds: BTreeMap::new(),
             place_of: BTreeMap::new(),
             traces: Vec::new(),
+            behaviour: None,
+            drive_levels: BTreeMap::new(),
+            last_action: BTreeMap::new(),
             events: EventLog::new(),
             belief_params,
             meta_params,
@@ -256,6 +266,22 @@ impl World {
         self.traces.len()
     }
 
+    /// Install the data-driven decision definitions. Until this is set, the decide phase
+    /// is a no-op and minds only perceive and reason; with it, minds choose actions.
+    pub fn set_behaviour(&mut self, behaviour: Behaviour) {
+        self.behaviour = Some(behaviour);
+    }
+
+    /// A mind's current level of a drive, or `None` if it has none.
+    pub fn drive_level(&self, mind: StableId, drive: DriveId) -> Option<Fixed> {
+        self.drive_levels.get(&mind)?.get(&drive).copied()
+    }
+
+    /// The action a mind chose on the last tick, if it has chosen.
+    pub fn last_action(&self, mind: StableId) -> Option<ActionId> {
+        self.last_action.get(&mind).copied()
+    }
+
     /// The belief calibrations the world reasons under.
     pub fn belief_params(&self) -> &InferenceParams {
         &self.belief_params
@@ -309,6 +335,44 @@ impl World {
             }
         }
         self.perceive();
+        self.decide();
+    }
+
+    /// The decision step (design Part 8): each mind's drives rise, then it scores its
+    /// actions and takes the highest, which reduces the drives that action satisfies. A
+    /// no-op until a [`Behaviour`] is installed. Minds are walked in id order, and the
+    /// choice is a deterministic argmax (lowest action id breaks ties), so it is
+    /// bit-identical on replay. The behaviour is moved out for the pass so the per-mind
+    /// drive maps can be borrowed mutably without conflict, then restored.
+    fn decide(&mut self) {
+        let behaviour = std::mem::take(&mut self.behaviour);
+        if let Some(b) = &behaviour {
+            let ids: Vec<StableId> = self.minds.keys().copied().collect();
+            for id in ids {
+                let levels = self.drive_levels.entry(id).or_default();
+                for d in &b.drives {
+                    let lvl = levels.entry(d.id).or_insert(Fixed::ZERO);
+                    *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
+                }
+                if let Some(chosen) = b.choose(levels) {
+                    self.last_action.insert(id, chosen);
+                    if let Some(act) = b.action(chosen) {
+                        for satisfied in &act.satisfies {
+                            let amount = b
+                                .drives
+                                .iter()
+                                .find(|d| d.id == *satisfied)
+                                .map(|d| d.satisfy_amount)
+                                .unwrap_or(Fixed::ZERO);
+                            if let Some(lvl) = levels.get_mut(satisfied) {
+                                *lvl = (*lvl - amount).clamp(Fixed::ZERO, Fixed::ONE);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.behaviour = behaviour;
     }
 
     /// The perception step (design Part 9.9): each co-located mind rolls against each
@@ -382,6 +446,14 @@ impl World {
             let mh = mind.state_hash(&self.belief_params, &self.meta_params);
             h.write_u64(mh as u64);
             h.write_u64((mh >> 64) as u64);
+            // The mind's drive levels in drive-id order, then its last action.
+            if let Some(levels) = self.drive_levels.get(id) {
+                for (drive, level) in levels {
+                    h.write_u32(drive.0);
+                    h.write_fixed(*level);
+                }
+            }
+            h.write_u32(self.last_action.get(id).map(|a| a.0).unwrap_or(u32::MAX));
         }
         // Active traces, in id order.
         let mut traces: Vec<&Trace> = self.traces.iter().collect();
@@ -571,5 +643,74 @@ source = "Part 9"
             w.state_hash()
         };
         assert_eq!(build(), build());
+    }
+
+    fn behaviour() -> crate::decision::Behaviour {
+        use crate::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
+        let hunger = DriveId(0);
+        let fatigue = DriveId(1);
+        let ramp = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
+        Behaviour {
+            drives: vec![
+                DriveDef {
+                    id: hunger,
+                    rise_per_tick: Fixed::from_ratio(3, 10),
+                    satisfy_amount: Fixed::from_ratio(1, 2),
+                },
+                DriveDef {
+                    id: fatigue,
+                    rise_per_tick: Fixed::from_ratio(1, 10),
+                    satisfy_amount: Fixed::from_ratio(1, 2),
+                },
+            ],
+            curves: vec![ramp],
+            actions: vec![
+                ActionDef {
+                    id: ActionId(0), // forage
+                    weight: Fixed::ONE,
+                    considerations: vec![Consideration {
+                        drive: hunger,
+                        curve: 0,
+                    }],
+                    satisfies: vec![hunger],
+                },
+                ActionDef {
+                    id: ActionId(1), // rest
+                    weight: Fixed::ONE,
+                    considerations: vec![Consideration {
+                        drive: fatigue,
+                        curve: 0,
+                    }],
+                    satisfies: vec![fatigue],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_hungry_agent_forages() {
+        let mut w = world();
+        w.set_behaviour(behaviour());
+        let a = w.spawn(Fixed::ONE);
+        w.tick(&[]);
+        // Hunger rises faster than fatigue, so forage outscores rest.
+        assert_eq!(w.last_action(a), Some(ActionId(0)), "the agent forages");
+        // Foraging reduced hunger below its post-rise level.
+        assert_eq!(w.drive_level(a, DriveId(0)), Some(Fixed::ZERO));
+    }
+
+    #[test]
+    fn the_decision_loop_replays_deterministically() {
+        let build = || {
+            let mut w = world().with_seed(0x1234);
+            w.set_behaviour(behaviour());
+            let _a = w.spawn(Fixed::ONE);
+            let _b = w.spawn(Fixed::from_ratio(1, 2));
+            for _ in 0..5 {
+                w.tick(&[]);
+            }
+            w.state_hash()
+        };
+        assert_eq!(build(), build(), "the decision loop is reproducible");
     }
 }

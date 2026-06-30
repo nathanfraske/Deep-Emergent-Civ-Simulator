@@ -52,6 +52,7 @@
 pub mod agent;
 pub mod calibration;
 pub mod conservation;
+pub mod decision;
 pub mod evidence;
 pub mod lod;
 pub mod substrate;
@@ -61,6 +62,7 @@ pub mod world;
 pub use agent::{AccessObs, Mind};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
+pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use substrate::Substrate;
