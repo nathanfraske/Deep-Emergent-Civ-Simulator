@@ -33,13 +33,47 @@
 //! - [`substrate`]: data-driven substrate definitions with round-trip loading, the
 //!   schema-and-loader plumbing the runbook says is buildable now while the content
 //!   stays data.
+//! - [`tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
+//!   work). The evidence engine run recursively on whether a target believes a thing,
+//!   with a typed anti-projection guarantee (a nested frame admits only access evidence
+//!   about its target) and a data-driven access-channel registry, so a false belief
+//!   and a seen-through lie come from one mechanism without a closed enum of evidence.
+//! - [`agent`]: a minimal [`agent::Mind`] composing belief and theory of mind into the
+//!   epistemic core of an agent: it perceives, forms and revises beliefs, models other
+//!   minds, is deceived, and sees lies through, all deterministically. It does not yet
+//!   decide or act (design Part 8); that half is gated on the systems and reserved
+//!   numbers the gating notes name.
+//! - [`world`]: the runtime spine (design Parts 4, 57). A [`world::World`] owns the
+//!   minds, the event log, a clock, and the calibrations, and a serial deterministic
+//!   tick applies a batch of stimuli to the minds in one canonical order. The parallel
+//!   command scheduler is held for its open determinism design (R-CMD-ORDER,
+//!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
+pub mod agent;
 pub mod calibration;
 pub mod conservation;
+pub mod decision;
+pub mod evidence;
+pub mod language;
 pub mod lod;
 pub mod substrate;
+pub mod tom;
+pub mod world;
 
+pub use agent::{AccessObs, Mind, SharedBelief};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
+pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use language::{
+    ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
+    FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
+    Word,
+};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use substrate::Substrate;
+pub use tom::{
+    detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
+    EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};

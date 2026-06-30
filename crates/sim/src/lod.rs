@@ -24,7 +24,8 @@
 //! The behaviour here (who promotes when, how wealth is apportioned) is not the
 //! point and is not calibrated; the point is that the structural invariants hold.
 
-use civsim_core::{EntityHandle, EntityLocation, Fixed, PoolId, Registry, StableId};
+use civsim_core::{EntityHandle, EntityLocation, Fixed, PoolId, Registry, StableId, StateHasher};
+use serde::{Deserialize, Serialize};
 
 /// A promoted, fully represented entity holding some wealth.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -228,6 +229,203 @@ impl TwoTierWorld {
             .iter()
             .all(|(a, b)| self.location_valid(*a) && self.location_valid(*b))
     }
+
+    /// A deterministic hash of the whole two-tier world, walked in canonical order
+    /// (individuals and pools by ascending id, edges sorted, then the registry in
+    /// id order). Built only through the sorted accessors, never hash-map order, so
+    /// it is bit-identical across runs and machines (design Part 3.5, R-CANON-WALK).
+    pub fn state_hash(&self) -> u128 {
+        let mut h = StateHasher::new();
+        let mut inds: Vec<&Individual> = self.individuals.iter().collect();
+        inds.sort_by_key(|i| i.id);
+        for i in inds {
+            h.write_stable(i.id);
+            h.write_fixed(i.wealth);
+        }
+        let mut pools: Vec<&Pool> = self.pools.iter().collect();
+        pools.sort_by_key(|p| p.id.0);
+        for p in pools {
+            h.write_u32(p.id.0);
+            h.write_u32(p.count);
+            h.write_fixed(p.wealth);
+        }
+        let mut edges = self.edges.clone();
+        edges.sort();
+        for (a, b) in edges {
+            h.write_stable(a);
+            h.write_stable(b);
+        }
+        self.reg.hash_into(&mut h);
+        h.finish()
+    }
+
+    /// Capture the full canonical state as a serializable snapshot, including the id
+    /// high-water marks, so a reload reproduces the world exactly and never reuses an
+    /// id (R-SAVE-SCHEMA groundwork). Wealth is stored as fixed-point bits so no
+    /// float enters the saved state.
+    pub fn to_snapshot(&self) -> WorldSnapshot {
+        WorldSnapshot {
+            schema_version: WorldSnapshot::VERSION,
+            next_id: self.reg.next_raw(),
+            next_pool: self.next_pool,
+            next_handle: self.next_handle,
+            individuals: self
+                .individuals
+                .iter()
+                .map(|i| IndRepr {
+                    id: i.id.0,
+                    wealth_bits: i.wealth.to_bits(),
+                })
+                .collect(),
+            pools: self
+                .pools
+                .iter()
+                .map(|p| PoolRepr {
+                    id: p.id.0,
+                    count: p.count,
+                    wealth_bits: p.wealth.to_bits(),
+                })
+                .collect(),
+            edges: self
+                .edges
+                .iter()
+                .map(|(a, b)| EdgeRepr { a: a.0, b: b.0 })
+                .collect(),
+            locations: self
+                .reg
+                .entries_sorted()
+                .into_iter()
+                .map(LocRepr::from_location)
+                .collect(),
+        }
+    }
+
+    /// Rebuild a world from a snapshot. Restores the id high-water marks
+    /// authoritatively from the snapshot rather than inferring them from the live
+    /// entries.
+    pub fn from_snapshot(s: &WorldSnapshot) -> Self {
+        let reg = Registry::restore(s.next_id, s.locations.iter().map(LocRepr::to_location));
+        TwoTierWorld {
+            reg,
+            individuals: s
+                .individuals
+                .iter()
+                .map(|i| Individual {
+                    id: StableId(i.id),
+                    wealth: Fixed::from_bits(i.wealth_bits),
+                })
+                .collect(),
+            pools: s
+                .pools
+                .iter()
+                .map(|p| Pool {
+                    id: PoolId(p.id),
+                    count: p.count,
+                    wealth: Fixed::from_bits(p.wealth_bits),
+                })
+                .collect(),
+            edges: s
+                .edges
+                .iter()
+                .map(|e| (StableId(e.a), StableId(e.b)))
+                .collect(),
+            next_pool: s.next_pool,
+            next_handle: s.next_handle,
+        }
+    }
+}
+
+/// A serializable snapshot of a two-tier world. Carries an explicit schema version
+/// and the id high-water marks (R-SAVE-SCHEMA). The full rkyv and bincode wiring of
+/// design Part 7.3 is the remaining work; this captures the canonical state losslessly.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldSnapshot {
+    pub schema_version: u32,
+    pub next_id: u64,
+    pub next_pool: u32,
+    pub next_handle: u64,
+    pub individuals: Vec<IndRepr>,
+    pub pools: Vec<PoolRepr>,
+    pub edges: Vec<EdgeRepr>,
+    pub locations: Vec<LocRepr>,
+}
+
+impl WorldSnapshot {
+    /// The current snapshot schema version.
+    pub const VERSION: u32 = 1;
+}
+
+/// A promoted individual in a snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndRepr {
+    pub id: u64,
+    pub wealth_bits: i64,
+}
+
+/// An aggregate pool in a snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PoolRepr {
+    pub id: u32,
+    pub count: u32,
+    pub wealth_bits: i64,
+}
+
+/// A relationship edge in a snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EdgeRepr {
+    pub a: u64,
+    pub b: u64,
+}
+
+/// A registry location entry in a snapshot. `kind` is 0 promoted, 1 pooled, 2 retired.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocRepr {
+    pub id: u64,
+    pub kind: u8,
+    pub handle: u64,
+    pub pool: u32,
+    pub slot: u32,
+}
+
+impl LocRepr {
+    fn from_location(entry: (StableId, EntityLocation)) -> Self {
+        let (id, loc) = entry;
+        match loc {
+            EntityLocation::Promoted(h) => LocRepr {
+                id: id.0,
+                kind: 0,
+                handle: h.0,
+                pool: 0,
+                slot: 0,
+            },
+            EntityLocation::Pooled { pool, slot } => LocRepr {
+                id: id.0,
+                kind: 1,
+                handle: 0,
+                pool: pool.0,
+                slot,
+            },
+            EntityLocation::Retired => LocRepr {
+                id: id.0,
+                kind: 2,
+                handle: 0,
+                pool: 0,
+                slot: 0,
+            },
+        }
+    }
+
+    fn to_location(&self) -> (StableId, EntityLocation) {
+        let loc = match self.kind {
+            0 => EntityLocation::Promoted(EntityHandle(self.handle)),
+            1 => EntityLocation::Pooled {
+                pool: PoolId(self.pool),
+                slot: self.slot,
+            },
+            _ => EntityLocation::Retired,
+        };
+        (StableId(self.id), loc)
+    }
 }
 
 impl Default for TwoTierWorld {
@@ -239,6 +437,37 @@ impl Default for TwoTierWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_toml_round_trip_preserves_state() {
+        // R-SAVE-SCHEMA: the canonical state survives a real serialize and parse
+        // through a format, and the rebuilt world hashes identically.
+        let mut w = TwoTierWorld::new();
+        let pa = w.add_pool(8, Fixed::from_int(80));
+        let pb = w.add_pool(4, Fixed::from_int(40));
+        let x = w.promote(pa, Fixed::from_int(5));
+        let y = w.promote(pb, Fixed::from_int(3));
+        w.add_edge(x, y);
+        w.demote(x, pb);
+        let before = w.state_hash();
+
+        let snap = w.to_snapshot();
+        let text = toml::to_string(&snap).expect("snapshot serializes");
+        let parsed: WorldSnapshot = toml::from_str(&text).expect("snapshot parses");
+        assert_eq!(parsed, snap, "the snapshot survives the format round trip");
+        let restored = TwoTierWorld::from_snapshot(&parsed);
+        assert_eq!(
+            restored.state_hash(),
+            before,
+            "restored world hashes identically"
+        );
+        assert!(restored.referential_integrity_ok());
+        assert_eq!(
+            restored.reg.next_raw(),
+            w.reg.next_raw(),
+            "high-water mark restored"
+        );
+    }
 
     #[test]
     #[should_panic]

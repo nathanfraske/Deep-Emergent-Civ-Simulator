@@ -3,7 +3,7 @@
 # staged dependency order. The wider crate decomposition of design Part 59 is the
 # eventual target; the standup begins with these two.
 [workspace]
-members = ["crates/core", "crates/sim"]
+members = ["crates/core", "crates/units", "crates/sim"]
 resolver = "2"
 
 [workspace.package]

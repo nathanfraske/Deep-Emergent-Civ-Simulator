@@ -14,6 +14,15 @@
 # as later systems are built and reach the numbers they need (RUNBOOK section 3,
 # step 6). No value here is decided by the agent; graduation to status = "set" is
 # the owner's, through the reserved-values panel.
+#
+# Unit convention: every value with unit = "log_odds" is in natural log-odds (nats),
+# where a total L maps to probability p = 1 / (1 + e^-L). This is the occupancy-grid /
+# Probabilistic Robotics convention the evidence engine inherits (Elfes 1989; Thrun,
+# Burgard, Fox 2005).
+#
+# Tuneable levers: a value with status = "set" below is the owner's decision, recorded
+# with set_by and set_date. Set values stay tuneable levers, revisable later on the
+# owner's sign-off; they are calibrations, not constants frozen forever.
 
 # --- R-EVIDENCE: belief formation from the world (Part 9, record 62.6) ---
 
@@ -27,25 +36,31 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.commit_threshold"
-basis = "the intended balance of false conclusions against cold cases"
-status = "reserved"
-value = ""
+basis = "the intended balance of false conclusions against cold cases; in nats, ~3 commits at about 95% posterior confidence (sigma(3)=0.95; Wald 1945 sequential threshold for a 5% false-commit rate)"
+status = "set"
+value = "3"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.runner_up_margin"
-basis = "the best-and-clearly-better margin separating a commit from an unknown"
-status = "reserved"
-value = ""
+basis = "the best-and-clearly-better margin separating a commit from an unknown; in nats, 2 is about 7:1 odds of the leader over the runner-up (inference to the best explanation, Lipton 2004; Harman 1965)"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.log_odds_clamp"
-basis = "the maximum admissible certainty"
-status = "reserved"
-value = ""
+basis = "the maximum admissible certainty; in nats, 7 caps certainty at about p=0.999, near-certain but defeasible (Part 9), avoiding the overconfidence Thrun, Burgard, Fox 2005 clamp against"
+status = "set"
+value = "7"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
@@ -285,11 +300,11 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.distance_component_weights"
-basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement"
+basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement; normalised to sum to exactly one by deterministic residual absorption into the lexical component (R-LANG-DET)"
 status = "reserved"
 value = ""
 unit = "weight"
-source = "Part 33 language system; record 62.7; audit section 1g"
+source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET record 62.12"
 
 [[reserved]]
 id = "lang.l2_acquisition"
@@ -314,6 +329,98 @@ status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
+
+# --- R-LANG-DET: order-sensitive language procedures pinned (Part 33, record 62.12) ---
+
+[[reserved]]
+id = "langdet.salience_decay_rate"
+basis = "the concept-salience leaky-accumulator decay rate; basis the usage-recency half-life, with a hard lower bound so the usage term cannot underflow to zero (decay_bits >= ceil(2^32 / usage_max_bits)), and the concept-merge threshold required to sit above the salience scale's resolution floor"
+status = "reserved"
+value = ""
+unit = "rate"
+source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.usage_recency_window"
+basis = "the recency window over which concept usage is taken as a normalised rate in [0,1]; basis the recency window the retention record uses"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.substrate_quantization"
+basis = "the shared-semantic-substrate quantisation granularity; basis the coarsest grid that keeps distinct concept regions separable, consistent with the Part 21 ground-metric granularity; one knob reused for the distance walk, the walk key, and the correspondence tie window"
+status = "reserved"
+value = ""
+unit = "granularity"
+source = "Part 33.5; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.incommensurability_ceiling"
+basis = "the no-shared-form distance ceiling and the per-cell one-sided-coverage contribution; the per-cell contribution set equal to the existing language-distance floor rather than a new constant; the same no-shared-form ceiling applies to a cross-modality (form-disjoint) pair, so cross-modal difficulty emerges rather than being a separate authored constant (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground)"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 33.5; record 62.12; audit section 1n"
+
+# --- R-LANG-MODALITY: language across all modalities (Part 33.3, record 62.13) ---
+
+[[reserved]]
+id = "langmod.channel_registries"
+basis = "the channel-registry memberships (production modalities, reception senses, media) and each modality's feature dimensions and their value sets; basis the sensory-ecology channel record as a starting menu, the sign-phonology record for the manual modality, the articulatory record for the acoustic one; data per world"
+status = "reserved"
+value = ""
+unit = "registry"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.perceptual_geometry"
+basis = "the per-modality perceptual-distance geometry (dimensionality, confusability weights, simultaneous-vs-sequential flag) the dawn dispersion game settles over; basis each channel's cited confusability and capacity, dispersed to the same target separation as the acoustic modality, the contrast budget a read-out of cited physics and never a free expressivity weight, validated under the convergence audit's permuted-basis test"
+status = "reserved"
+value = ""
+unit = "granularity"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.capability_gates"
+basis = "the per-channel capability-query floors and feature-to-capability curves gating produce and perceive; basis the reserved anatomy interface (Parts 35, 25), the floor set equal to the wound model's function-loss threshold for consistency, the curve knee at the perceptual grading bands"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33.3; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.acquisition_split"
+basis = "the split of the second-language acquisition increment into a comprehension track (perceive-bounded) and a production track (produce-capacity-bounded) and the rate ratio between them; basis the receptive-bilingual asymmetry, with the production track capped by channel capacity"
+status = "reserved"
+value = ""
+unit = "rate"
+source = "Part 33.6; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.blend_propensity"
+basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.6; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.dawn_cap_unitsize"
+basis = "the dawn round cap and anchor-set size as a modality-blind function of the coordinating-unit participant count; basis the existing performance-against-emergence budget, the same scaling for every modality so a small founding cohort and not the channel accounts for a thin language (the Steering Audit modality-swap invariant holds it modality-blind)"
+status = "reserved"
+value = ""
+unit = "rounds"
+source = "Part 33.9; record 62.13; audit section 1o"
+
+[[reserved]]
+id = "langmod.mismatch_triggers"
+basis = "the channel-mismatch trigger thresholds for a homesign dawn (a coordinating unit sharing a producible-and-perceivable modality but holding no language in it) and for a modality-shift event (the cohort fraction that can no longer receive the ambient modality but can receive an alternative); basis the population-fraction-over-window form the engine already uses, the recency window reused from R-LANG-DET"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33.3; record 62.13; audit section 1o"
 
 # --- R-INST: emergent institutions (Part 36, record 62.8) ---
 
@@ -434,3 +541,164 @@ unit = "rule"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-29"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+# --- R-TOM-UPDATE: recursive theory of mind (Part 37, record 62.11) ---
+# The access-channel set is data (the registry in crates/sim/src/tom.rs); these are the
+# weights and meta thresholds the nested update reads. The hard constraint from the
+# blockquote: the witnessed weight must be set strictly above the told and said weights,
+# and no meta-observation weight above the same observation taken first-hand. The
+# remaining reserved values in the Part 37 blockquote (lie-discount, common-ground
+# prior, projection-fallback, depth bound, level-of-detail policy, conserved projection,
+# meta-facet decay, trust update) are added here as their consumers are built.
+
+[[reserved]]
+id = "tom.access_weight.witnessed"
+basis = "the weight-of-evidence that a target witnessed a trace; must be set strictly above told and said so a witnessed access out-ranks a contrary assertion and lies are seen through; weight of evidence in nats (Good 1950; Jaynes 2003); >= the meta commit threshold so one clear witnessing attributes a belief"
+status = "set"
+value = "5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.told"
+basis = "the weight that a target was told a value, trust- and hop-scaled; below witnessed; set to the meta commit threshold so one clear telling attributes a belief"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.said"
+basis = "the weight of a target's own utterance, the channel deception attacks, lie-discounted; below witnessed and below the meta commit threshold, so a bare assertion alone does not fix a model of another's belief"
+status = "set"
+value = "3"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "the weak weight that an accessible fact gets, with an inaccessible one negative toward unknown or the stale value"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.absence"
+basis = "the negative weight of seeing a target NOT have access, the engine that keeps a false belief stable in Sally-Anne; magnitude, applied negatively in the mechanism; matched to the witnessed weight so an absence offsets a prior access"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "the negative weight of having starved a target of an input (meta-concealment); magnitude, applied negatively in the mechanism"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_commit_threshold"
+basis = "the total a modelled belief must reach to commit; the balance of over-attributing a belief the target does not hold against leaving it unknown, plausibly wider than the first-order threshold because second-order evidence is noisier; in nats, 4 is about 98% confidence"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_runner_up_margin"
+basis = "the lead over the runner-up a modelled belief must hold; set so the false-belief and deception battery commits rather than merely failing to match projection"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+[[reserved]]
+id = "tom.meta_log_odds_clamp"
+basis = "the maximum admissible certainty about another mind, no higher than the first-order clamp, since one cannot know another's mind better than one's own world; in nats, 6 (below the first-order 7)"
+status = "set"
+value = "6"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+# --- gossip and trust (Part 9.5, Part 37) ---
+# The told-weight and trust dynamics of transmission. Added as the gossip loop reached
+# them; reserved until the owner sets them.
+
+[[reserved]]
+id = "gossip.told_weight"
+basis = "the belief weight a heard assertion carries before trust scaling, relative to a witnessed observation (lighter than first-hand); in nats, 2 moves belief but does not commit alone"
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "log_odds"
+source = "Part 9.5 gossip loop; audit section"
+
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight; 0.5, the share senders entrust a stranger in the investment/trust game (Berg, Dickhaut, McCabe 1995)"
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "fraction"
+source = "Part 9.5 gossip loop; Part 37 trust"
+
+[[reserved]]
+id = "gossip.trust_penalty"
+basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter; 0.5 halves trust on a caught lie, consistent with the asymmetry that trust is destroyed faster than built (Slovic 1993)"
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "fraction"
+source = "Part 9.5 gossip loop; Part 37 trust"
+
+# --- language: the naming game (Part 33) ---
+
+[[reserved]]
+id = "language.innovation_rate"
+basis = "the per-interaction probability a speaker coins a fresh word form instead of reusing its own, the seed of lexical drift and dialect split; 0.02, well below the alignment rate so a band converges while drift seeds between isolated bands (naming-game convergence, Baronchelli et al. 2006; Steels)"
+status = "set"
+value = "0.02"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
+unit = "probability"
+source = "Part 33 procedural language; record 62.6"
+
+[[reserved]]
+id = "language.sound_change_rate"
+basis = "the per-generation probability a lineage innovates one regular form change, the drift operator rate of 33.4; basis the attested pace of regular sound change in the historical record, set so a lineage drifts over many generations rather than every one"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.4 drift; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "language.generation_ticks"
+basis = "how many ticks make one generation, the drift cadence; basis the world's tick-to-year scale and the generation length of the modelled beings, so drift runs once a generation rather than once a tick"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 33.4 drift; record 62.12; audit section 1n"

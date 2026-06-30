@@ -1,0 +1,172 @@
+# ============================================================================
+# DEVELOPMENT FIXTURES, NOT THE OWNER'S CALIBRATION. DO NOT TREAT AS DECIDED.
+# ============================================================================
+#
+# These are placeholder numbers that exist only so the engine can RUN in
+# development and tests before the real calibrations are set. They are NOT the
+# owner's values and carry no authority. The authoritative manifest is
+# calibration/reserved.toml, where every one of these is status = "reserved" and
+# fails loud until Nathan M. Fraske sets it through the reserved-values review.
+#
+# A production run uses Profile::Calibrated against reserved.toml and refuses to
+# start while anything it needs is reserved. A development run may load this file
+# under Profile::Development to exercise the mechanisms end to end. When a value
+# here matters to behaviour, it is the signal to take that reserved item to the
+# owner, not to keep the fixture. Nothing in this file graduates a reserved value;
+# the two files are kept deliberately separate so a fixture is never mistaken for
+# a decision.
+#
+# Phase 1 needs only the cognition calibrations (the evidence engine and theory of
+# mind). More fixtures are added here as later phases reach the numbers they need.
+
+# --- evidence engine (Part 9.10) ---
+
+[[reserved]]
+id = "evidence.log_odds_clamp"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "50"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+[[reserved]]
+id = "evidence.commit_threshold"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+[[reserved]]
+id = "evidence.runner_up_margin"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+# --- recursive theory of mind (Part 37) ---
+
+[[reserved]]
+id = "tom.meta_log_odds_clamp"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "50"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.meta_commit_threshold"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.meta_runner_up_margin"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.witnessed"
+basis = "FIXTURE placeholder; the hard constraint witnessed > told, said is honoured"
+status = "set"
+value = "4"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.told"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.said"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.absence"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+# --- gossip and trust (Phase 4), FIXTURE placeholders ---
+
+[[reserved]]
+id = "gossip.told_weight"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_penalty"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.5"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"
+
+# --- language (Phase 5), FIXTURE placeholder ---
+
+[[reserved]]
+id = "language.innovation_rate"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.05"
+unit = "probability"
+source = "dev fixture for Part 33 language"
+
+[[reserved]]
+id = "language.sound_change_rate"
+basis = "FIXTURE placeholder, not the owner's value; cranked high so drift is visible in a short demo run, far faster than a real language changes"
+status = "set"
+value = "1.0"
+unit = "probability"
+source = "dev fixture for Part 33.4 drift"
+
+[[reserved]]
+id = "language.generation_ticks"
+basis = "FIXTURE placeholder, not the owner's value; a short generation so several form changes land in a 40-tick demo"
+status = "set"
+value = "4"
+unit = "ticks"
+source = "dev fixture for Part 33.4 drift"
