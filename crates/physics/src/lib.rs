@@ -37,6 +37,8 @@
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
 
+pub mod laws;
+
 use civsim_core::{Fixed, StateHasher};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
