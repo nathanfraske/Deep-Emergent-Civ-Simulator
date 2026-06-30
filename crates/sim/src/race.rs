@@ -32,7 +32,7 @@
 use civsim_core::Fixed;
 
 use crate::axiom::IntrinsicBeliefs;
-use crate::genome::{GenePool, GeneSet};
+use crate::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
 use crate::value::RaceId;
 use crate::world::PlaceId;
 
@@ -48,9 +48,10 @@ pub struct Race {
     /// The aggregate allele-frequency pool a dawn member is sampled from (Hardy-Weinberg
     /// promotion, design 25.8), so members of a band differ genetically from one draw rule.
     pub pool: GenePool,
-    /// The ploidy a member is promoted at (two for a sexual diploid race, one for a haploid or
-    /// clonal one), matching the race's reproduction mode.
-    pub ploidy: usize,
+    /// The genetic scheme the race reproduces under (design 25.2): the reproduction mode, the
+    /// linkage map, and the mutation rate. Births read it; the ploidy a dawn member is promoted
+    /// at follows from its reproduction mode (see [`Race::ploidy`]).
+    pub scheme: GeneticScheme,
     /// The innate belief disposition seeded into every dawn member of the race (Part 28). All
     /// members of a race share this seed at the dawn; per-member divergence is the later
     /// inheritance and enculturation work.
@@ -67,7 +68,7 @@ impl Race {
         id: RaceId,
         genes: GeneSet,
         pool: GenePool,
-        ploidy: usize,
+        scheme: GeneticScheme,
         intrinsic: IntrinsicBeliefs,
         environment: Fixed,
     ) -> Self {
@@ -75,9 +76,18 @@ impl Race {
             id,
             genes,
             pool,
-            ploidy,
+            scheme,
             intrinsic,
             environment,
+        }
+    }
+
+    /// The ploidy a member is promoted or born at, derived from the reproduction mode: two for
+    /// a sexual diploid race, one for a haploid or clonal one.
+    pub fn ploidy(&self) -> usize {
+        match self.scheme.reproduction {
+            ReproductionMode::SexualDiploid => 2,
+            ReproductionMode::Haploid | ReproductionMode::Clonal => 1,
         }
     }
 }

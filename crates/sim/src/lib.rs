@@ -61,6 +61,7 @@ pub mod language;
 pub mod lod;
 pub mod primes;
 pub mod race;
+pub mod scenario;
 pub mod substrate;
 pub mod tom;
 pub mod value;
@@ -96,6 +97,7 @@ pub use language::{
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
+pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
 pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,

@@ -429,6 +429,32 @@ impl Axiom {
             Appraisal::Assimilated { pressure: signed }
         }
     }
+
+    /// Calcify an unchallenged axiom (design Part 28): one quiet phase raises its entrenchment
+    /// rank by `rate` toward `cap`, never past it. An axiom that goes unchallenged hardens, and
+    /// because a higher rank raises the entrenchment gate (the threshold curve reads the rank),
+    /// a hardened axiom is harder to move, which is the positive feedback that produces the
+    /// labile-to-calcified phase transition over time. The rate (the per-axis `calcify` datum)
+    /// and the cap are reserved owner values. A non-positive rate or a rank already at the cap
+    /// leaves the axiom unchanged.
+    pub fn calcify(&mut self, rate: i32, cap: i32) {
+        if rate <= 0 {
+            return;
+        }
+        self.entrenchment = self.entrenchment.saturating_add(rate).min(cap);
+    }
+
+    /// Weaken an axiom under challenge (the brittleness of design Part 28): a near-threshold
+    /// challenge that did not quite move the axiom still lowers its entrenchment rank by
+    /// `amount`, never below `floor`, so repeated near-misses make a once-rigid axiom brittle
+    /// and eventually movable. The caller detects a near miss from the assimilated pressure
+    /// against the gate (the reserved near-threshold band); the amount and floor are reserved.
+    pub fn weaken(&mut self, amount: i32, floor: i32) {
+        if amount <= 0 {
+            return;
+        }
+        self.entrenchment = self.entrenchment.saturating_sub(amount).max(floor);
+    }
 }
 
 /// The direction from a current stance toward an evidence position: `+1`, `-1`, or `0` when
@@ -997,5 +1023,31 @@ mod tests {
             ((hi - expected) - (expected - lo)).abs() <= tol,
             "the mutation is symmetric about the blend"
         );
+    }
+
+    #[test]
+    fn calcify_gains_toward_the_cap_and_weaken_lowers_toward_the_floor() {
+        let mut a = axiom(Fixed::ZERO, 0, 2);
+        // Quiet phases raise entrenchment by the rate toward the cap, then stop.
+        a.calcify(3, 10);
+        assert_eq!(a.entrenchment, 3);
+        a.calcify(3, 10);
+        assert_eq!(a.entrenchment, 6);
+        a.calcify(3, 10);
+        assert_eq!(a.entrenchment, 9);
+        a.calcify(3, 10);
+        assert_eq!(a.entrenchment, 10, "the cap holds");
+        a.calcify(3, 10);
+        assert_eq!(a.entrenchment, 10, "no gain past the cap");
+        // A non-positive rate is a no-op.
+        a.calcify(0, 10);
+        assert_eq!(a.entrenchment, 10);
+        // Brittleness: near-miss challenges lower entrenchment toward a floor.
+        a.weaken(4, 1);
+        assert_eq!(a.entrenchment, 6);
+        a.weaken(4, 1);
+        assert_eq!(a.entrenchment, 2);
+        a.weaken(4, 1);
+        assert_eq!(a.entrenchment, 1, "the floor holds");
     }
 }

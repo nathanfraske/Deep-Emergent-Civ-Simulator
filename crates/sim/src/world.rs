@@ -619,7 +619,7 @@ impl World {
             };
             for _ in 0..band.members {
                 let id = self.reg.mint();
-                let genome = race.pool.promote(self.seed, id.0, race.ploidy);
+                let genome = race.pool.promote(self.seed, id.0, race.ploidy());
                 let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
                 self.minds.insert(id, mind);
                 self.genomes.insert(id, genome);
@@ -817,8 +817,36 @@ impl World {
         mutation_spread: Fixed,
         generation: u64,
     ) -> Option<StableId> {
-        let parent_beliefs = self.intrinsic.get(&parent)?.clone();
         let child = self.reg.mint();
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+        )?;
+        self.intrinsic.insert(child, beliefs);
+        Some(child)
+    }
+
+    /// The intrinsic beliefs a child of `parent` inherits, keyed on the already-minted
+    /// `child` id (design Part 28). Shared by [`World::inherit_child`] and [`World::birth`]: for
+    /// each axiom the parent holds, the child's innate seed (and starting stance) is the
+    /// heritable-plus-encultured blend of the parent's seed and the band's local mean plus a
+    /// bounded mutation drawn under [`Phase::AXIOM_INHERIT`] keyed on the child and the axis;
+    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings.
+    /// `None` if the parent holds no intrinsic beliefs.
+    fn inherited_beliefs(
+        &self,
+        child: StableId,
+        parent: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<IntrinsicBeliefs> {
+        let parent_beliefs = self.intrinsic.get(&parent)?;
         let mut child_axioms = Vec::with_capacity(parent_beliefs.axioms.len());
         for pax in &parent_beliefs.axioms {
             let local_mean = {
@@ -851,13 +879,82 @@ impl World {
                 evidence: EvidenceRing::new(pax.evidence.cap()),
             });
         }
-        let child_beliefs = IntrinsicBeliefs {
+        Some(IntrinsicBeliefs {
             values: parent_beliefs.values.clone(),
             axioms: child_axioms,
             epistemic: parent_beliefs.epistemic.clone(),
-        };
-        self.intrinsic.insert(child, child_beliefs);
+        })
+    }
+
+    /// A full birth: a child of two parents that inherits both halves of its being (design
+    /// Parts 25 and 28), the integration point where the genome and the axiom kernel meet. The
+    /// child's genome is recombined from the two parents' genomes under the race's genetic
+    /// scheme (`GeneticScheme::reproduce`, keyed under [`Phase::REPRODUCE`] on the parents and
+    /// the generation), its mind is expressed from that genome through the race's gene set
+    /// ([`Mind::from_genome`]), and its intrinsic beliefs are inherited from the first parent
+    /// and the local band (the heritable-plus-encultured blend). The child is registered with a
+    /// genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id, or
+    /// `None` if either parent has no genome or the first parent has no beliefs.
+    ///
+    /// Deterministic and reproducible from the seed and the inputs: the genome draws key on the
+    /// parents and the generation, the belief mutation keys on the child id and the axis. The
+    /// Principle 10 caveat on the child-id keying of the belief draw stands as for
+    /// [`World::inherit_child`]: it is safe while birth order is a deterministic function of
+    /// canonical state. The genetic scheme's reproduction mode chooses sexual recombination,
+    /// haploid, or clonal; a single-parent mode ignores the second parent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn birth(
+        &mut self,
+        race: &Race,
+        parent_a: StableId,
+        parent_b: StableId,
+        band: &[StableId],
+        heritability: Fixed,
+        mutation_spread: Fixed,
+        generation: u64,
+    ) -> Option<StableId> {
+        let genome_a = self.genomes.get(&parent_a)?.clone();
+        let genome_b = self.genomes.get(&parent_b)?.clone();
+        let child = self.reg.mint();
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent_a,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+        )?;
+        let child_genome = race.scheme.reproduce(
+            &genome_a,
+            parent_a.0,
+            &genome_b,
+            parent_b.0,
+            race.genes.genes.len(),
+            self.seed,
+            generation,
+        );
+        let mind = Mind::from_genome(child, &race.genes, &child_genome, race.environment);
+        self.minds.insert(child, mind);
+        self.genomes.insert(child, child_genome);
+        self.intrinsic.insert(child, beliefs);
         Some(child)
+    }
+
+    /// A quiet-phase calcification pass over a band on one axiom axis (design Part 28): each
+    /// member's axiom on that axis that went unchallenged this phase gains entrenchment toward
+    /// the reserved cap, so an unchallenged conviction hardens across the people. The rate (the
+    /// per-axis `calcify` datum) and the cap are reserved owner values. Members not holding the
+    /// axis are skipped. Calcification raises the entrenchment gate, so a calcified band resists
+    /// the enculturation and challenge it would once have yielded to, the labile-to-calcified
+    /// transition over deep time.
+    pub fn calcify_band(&mut self, members: &[StableId], axis: AxiomAxisId, rate: i32, cap: i32) {
+        for id in members {
+            if let Some(intr) = self.intrinsic.get_mut(id) {
+                if let Some(ax) = intr.axioms.iter_mut().find(|a| a.axis == axis) {
+                    ax.calcify(rate, cap);
+                }
+            }
+        }
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition

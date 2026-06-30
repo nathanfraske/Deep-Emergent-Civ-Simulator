@@ -20,8 +20,9 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 use civsim_sim::{
     AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, DominanceMode,
-    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, InferenceParams,
-    IntrinsicBeliefs, Race, RaceId, SchemeId, SourceModeId, ValueAxisId, ValueProfile, World,
+    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
+    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, SchemeId, SourceModeId,
+    ValueAxisId, ValueProfile, World,
 };
 
 fn params() -> InferenceParams {
@@ -83,7 +84,20 @@ fn a_race(id: u32) -> Race {
             Fixed::ZERO,
         ),
     };
-    Race::new(RaceId(id), genes, pool, 2, intrinsic, Fixed::from_int(2))
+    let scheme = GeneticScheme {
+        id: SchemeId(0),
+        reproduction: ReproductionMode::SexualDiploid,
+        linkage_groups: Vec::new(),
+        mutation_rate: Fixed::ZERO,
+    };
+    Race::new(
+        RaceId(id),
+        genes,
+        pool,
+        scheme,
+        intrinsic,
+        Fixed::from_int(2),
+    )
 }
 
 #[test]
