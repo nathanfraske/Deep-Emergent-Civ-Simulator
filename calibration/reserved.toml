@@ -285,11 +285,11 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.distance_component_weights"
-basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement"
+basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement; normalised to sum to exactly one by deterministic residual absorption into the lexical component (R-LANG-DET)"
 status = "reserved"
 value = ""
 unit = "weight"
-source = "Part 33 language system; record 62.7; audit section 1g"
+source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET record 62.12"
 
 [[reserved]]
 id = "lang.l2_acquisition"
@@ -314,6 +314,40 @@ status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
+
+# --- R-LANG-DET: order-sensitive language procedures pinned (Part 33, record 62.12) ---
+
+[[reserved]]
+id = "langdet.salience_decay_rate"
+basis = "the concept-salience leaky-accumulator decay rate; basis the usage-recency half-life, with a hard lower bound so the usage term cannot underflow to zero (decay_bits >= ceil(2^32 / usage_max_bits)), and the concept-merge threshold required to sit above the salience scale's resolution floor"
+status = "reserved"
+value = ""
+unit = "rate"
+source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.usage_recency_window"
+basis = "the recency window over which concept usage is taken as a normalised rate in [0,1]; basis the recency window the retention record uses"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.substrate_quantization"
+basis = "the shared-semantic-substrate quantisation granularity; basis the coarsest grid that keeps distinct concept regions separable, consistent with the Part 21 ground-metric granularity; one knob reused for the distance walk, the walk key, and the correspondence tie window"
+status = "reserved"
+value = ""
+unit = "granularity"
+source = "Part 33.5; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.incommensurability_ceiling"
+basis = "the no-shared-form distance ceiling and the per-cell one-sided-coverage contribution; the per-cell contribution set equal to the existing language-distance floor rather than a new constant, with an optional distinct cross-modality ceiling on the basis that cross-modal contact is a harder barrier than within-modality unintelligibility"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 33.5; record 62.12; audit section 1n"
 
 # --- R-INST: emergent institutions (Part 36, record 62.8) ---
 

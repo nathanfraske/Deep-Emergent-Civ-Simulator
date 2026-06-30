@@ -2,14 +2,15 @@
 
 The working view of the research backlog (audit Section 3) and the reserved-values queue. Updated every session: resolved items move to the resolved list, new flags are added, order is adjusted. Each open item is one bullet, identifier first, then the one-line question, then readiness and couplings, so the backlog tool reads it deterministically. The owner sets the order; the readiness tags are guidance.
 
-Counts: 15 resolved, 27 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
+Counts: 16 resolved, 27 open. Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
 
 ---
 
 ## Open, ready to take (substrate or pattern already resolved)
 
 - **R-INFRA.** The etic-and-emic question applied to the buildings institutions inhabit (infrastructure). Ready: reuses the etic-and-emic substrate pattern resolved for institutions (R-INST). Couples to Parts 36, 46.
-- **R-LANG-MODALITY.** Generalizing the language system to signed and non-vocal modalities. Ready: extends the resolved language-and-meaning cluster. Couples to Part 33.
+- **R-LANG-MODALITY.** Generalizing the language system to signed and non-vocal modalities. Ready: extends the resolved language-and-meaning cluster, and R-LANG-DET worded the determinism pins over the generic form substrate so this adds only data. Couples to Part 33.
+- **R-LANG-TYPOLOGY.** Hardening the grammar typological parameters (word order, head direction, morphological type, alignment) from a closed enum to a data-defined substrate. Ready: reuses the data-substrate pattern; surfaced by the R-LANG-DET generalization audit. Couples to Parts 33, 25.
 - **R-WOUND.** Emergent wound representation without an authored wound enum. Ready: pairs with R-FLUID; both sit in Part 35. Couples to Part 35.
 - **R-FLUID.** Emergent body-fluid representation without an authored fluid enum. Ready: pairs with R-WOUND. Couples to Part 35.
 
@@ -48,7 +49,6 @@ The design-level seams the red and green audit found, where a determinism, conse
 - **R-SAVE-SCHEMA.** Versioned saves, restored id high-water marks, and a pinned on-disk layout. Site Part 7.3; couples to Parts 2, 40, 58.
 - **R-HARNESS-COVER.** Extend the determinism harness over phases, command buffers, gossip, mutation, a thread sweep, and save and replay. Site Part 3.5; couples to Parts 4, 7, 9, 11, 54.
 - **R-UNITS-PIN.** Pin the Part 55 unit system: scales, canonical direction, overflow policy, and exact round trips. Site Part 55; couples to Parts 3, 9, 40.
-- **R-LANG-DET.** Pin sound-change order, salience overflow, concept-id minting, the shared-concept traversal, and the dawn trigger. Site Part 33; couples to Parts 9, 21, 55.
 
 ## Recorded candidate explorations (not yet formally flagged, not in the open count)
 
@@ -70,6 +70,6 @@ The numbers the resolved mechanisms need are surfaced, not invented, and are the
 
 ---
 
-## Resolved (15)
+## Resolved (16)
 
-R-BEING-REP, R-VALUE-METRIC, R-AXIOM, R-GENOME, the six language-and-meaning items (R-LANG-CONCEPT, R-LANG-DISTANCE, R-LANG-LEARN, R-LANG-DISTORT, R-LANG-WRITING, R-LANG-GEN), R-EVIDENCE, R-INST, R-TIER-CONSIST, R-DEEPTECH-COMPOSE, R-TOM-UPDATE. Each has a mechanism in the design document, a record in Part 62, a bibliography group in Part 63, and a consolidation block in audit Section 1, with its calibrations reserved. R-TOM-UPDATE resolved 2026-06-29: the recursive theory-of-mind update is the evidence engine run recursively on whether a target believes a thing, fed only by access evidence (a data registry, not a closed enum) so it diverges from projection (Part 37, record 62.11).
+R-BEING-REP, R-VALUE-METRIC, R-AXIOM, R-GENOME, the six language-and-meaning items (R-LANG-CONCEPT, R-LANG-DISTANCE, R-LANG-LEARN, R-LANG-DISTORT, R-LANG-WRITING, R-LANG-GEN), R-EVIDENCE, R-INST, R-TIER-CONSIST, R-DEEPTECH-COMPOSE, R-TOM-UPDATE, R-LANG-DET. Each has a mechanism in the design document, a record in Part 62, a bibliography group in Part 63, and a consolidation block in audit Section 1, with its calibrations reserved. R-TOM-UPDATE resolved 2026-06-29: the recursive theory-of-mind update is the evidence engine run recursively on whether a target believes a thing, fed only by access evidence (a data registry, not a closed enum) so it diverges from projection (Part 37, record 62.11). R-LANG-DET resolved 2026-06-30 as a deep focused session with two bounded adversarial rounds: the order-sensitive language procedures are pinned (minted concept ids, innovation-index form-change ordering, a widened leaky salience accumulator, a symmetric matching-free distance over the shared semantic substrate, a deterministic dawn trigger), worded over the generic form substrate so R-LANG-MODALITY adds only data; it surfaced the new sibling item R-LANG-TYPOLOGY (Part 33, record 62.12).
