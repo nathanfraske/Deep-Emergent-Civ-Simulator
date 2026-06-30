@@ -193,6 +193,12 @@ impl InferenceFrame {
         }
     }
 
+    /// The candidate hypotheses of this frame, in their fixed order. Lets a holder walk
+    /// the frame's values for a canonical hash without owning a second copy.
+    pub fn hyps(&self) -> &[ValueId] {
+        &self.hyps
+    }
+
     /// The provenance of every piece of evidence that fed this frame.
     pub fn support(&self) -> &[EvidenceRef] {
         &self.support

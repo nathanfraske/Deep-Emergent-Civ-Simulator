@@ -274,6 +274,11 @@ impl NestedFrame {
     pub fn clamped_total(&self, value: ValueId, params: &InferenceParams) -> Option<Fixed> {
         self.frame.clamped_total(value, params)
     }
+
+    /// The candidate hypotheses the target's belief ranges over, in their fixed order.
+    pub fn hyps(&self) -> &[ValueId] {
+        self.frame.hyps()
+    }
 }
 
 /// Seeing through a lie: the deception verdict of the third sincerity frame in its

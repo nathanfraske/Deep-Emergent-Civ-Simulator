@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: First agents, a minimal Mind composing belief and theory of mind
+
+**What was done.** On `claude/engine-foundations`, composed the resolved belief (Part 9) and theory-of-mind (Part 37) mechanisms into a minimal per-entity `Mind` (`crates/sim/src/agent.rs`): it perceives and is told things (first-order belief via the evidence engine), forms and revises beliefs, models other minds from access evidence (the nested theory-of-mind frame), is deceived, and sees lies through, all deterministically and acuity-scaled. Added `hyps()` accessors to InferenceFrame and NestedFrame so a mind can hash its own frames canonically. The first multi-agent scene is `crates/sim/tests/first_agents.rs`: three minds (Anna witnesses, Boris hears the rumour, Clara watches Anna), exercising perception, gossip, a correctly-attributed false belief (Anna's model of Boris diverges from Anna's own belief), and a deception Clara sees through and refuses, plus a determinism test that the scene replays identically and is order-independent by state hash.
+
+**Self-audit.** No floating point in the Mind; a BTreeMap keyed by (subject, attribute) for canonical sorted iteration rather than a HashMap; no enums and no closed lists; no hardcoded thresholds or weights, all passed in or read from the reserved-manifest path. Full workspace green: tests pass, and `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean (the `model` method takes an `AccessObs` struct to stay under the argument-count lint).
+
+**What gates a deciding, acting agent.** A Mind knows and believes; it does not yet decide or act. That half is gated on the utility-AI decision layer (Part 8) and its data (actions, considerations, curves, drives, traits, values), which is owner content and reserved numbers; a world to perceive and act in (space, items, the trace and perception pipeline of Part 9.9); the deterministic scheduler and tick loop (Part 57, with R-CMD-ORDER and R-REDUCE-ORDER still open); and the reserved calibrations that gate tuned behaviour, which fail loud until the owner sets them.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged.
+
+**Queued next.** A small fixtures calibration profile so a Mind can be driven from the manifest path rather than test fixtures; integration of Minds with the two-tier world and conservation (promotion and demotion carrying first-order and second-order belief mass); and the utility-AI decision layer once its data is available.
+
+---
+
 ## 2026-06-29: Determinism harness coverage for the cognition and unit layers, and an order-independence fix in units
 
 **What was done.** Brought the three engine increments under determinism tests (R-HARNESS-COVER, R-REDUCE-ORDER) on `claude/engine-foundations`. Testing the units crate surfaced a real seam: `AbsoluteQuantity::add` is order-dependent when folded over a set under the Saturate policy, because saturating addition is commutative but not associative (`(MAX + 1) - 1` saturates to `MAX - 1` while `(MAX - 1) + 1` reaches `MAX`), and the crate had no order-independent reduction. Fixed by adding `AbsoluteQuantity::sum`, which accumulates exactly in 128-bit space and applies the overflow policy once at read, the same clamp-at-read discipline the evidence engine uses, and the `add` doc now names the non-associativity and points to `sum`.

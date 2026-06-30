@@ -38,7 +38,13 @@
 //!   with a typed anti-projection guarantee (a nested frame admits only access evidence
 //!   about its target) and a data-driven access-channel registry, so a false belief
 //!   and a seen-through lie come from one mechanism without a closed enum of evidence.
+//! - [`agent`]: a minimal [`agent::Mind`] composing belief and theory of mind into the
+//!   epistemic core of an agent: it perceives, forms and revises beliefs, models other
+//!   minds, is deceived, and sees lies through, all deterministically. It does not yet
+//!   decide or act (design Part 8); that half is gated on the systems and reserved
+//!   numbers the gating notes name.
 
+pub mod agent;
 pub mod calibration;
 pub mod conservation;
 pub mod evidence;
@@ -46,6 +52,7 @@ pub mod lod;
 pub mod substrate;
 pub mod tom;
 
+pub use agent::{AccessObs, Mind};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
