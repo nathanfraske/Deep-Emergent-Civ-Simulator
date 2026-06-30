@@ -30,7 +30,7 @@
 //! result, so a later deterministic scheduler (design Part 57) can drive many minds
 //! without changing what each concludes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::evidence::{AttrKindId, InferenceFrame, InferenceParams, ValueId};
 use crate::tom::{
@@ -80,16 +80,21 @@ pub struct Mind {
     pub acuity: Fixed,
     beliefs: BTreeMap<Question, InferenceFrame>,
     models: BTreeMap<Question, NestedFrame>,
+    /// The questions this mind is motivated to resolve (the inquiry goals of design 9.13).
+    /// A question it wonders about but has not committed a belief on is an open question it
+    /// will ask about; being asked seeds a question here, so curiosity spreads.
+    wondering: BTreeSet<Question>,
 }
 
 impl Mind {
-    /// A fresh mind with no beliefs and no models.
+    /// A fresh mind with no beliefs, models, or open questions.
     pub fn new(id: StableId, acuity: Fixed) -> Self {
         Mind {
             id,
             acuity,
             beliefs: BTreeMap::new(),
             models: BTreeMap::new(),
+            wondering: BTreeSet::new(),
         }
     }
 
@@ -164,6 +169,63 @@ impl Mind {
         None
     }
 
+    /// Every belief this mind has committed, in canonical question order. The dialogue
+    /// step walks these to decide what is worth telling and to whom (a richer reflection
+    /// than [`Mind::first_committed`], which returns only the first).
+    pub fn committed_beliefs(&self, params: &InferenceParams) -> Vec<SharedBelief> {
+        self.beliefs
+            .iter()
+            .filter_map(|((subject, attr), frame)| {
+                frame.commit(params).map(|value| SharedBelief {
+                    subject: *subject,
+                    attr: *attr,
+                    hyps: frame.hyps().to_vec(),
+                    value,
+                })
+            })
+            .collect()
+    }
+
+    /// This mind's committed belief on one question as a shareable belief, or `None` if it
+    /// has not concluded. The answer a being gives when asked.
+    pub fn shared_belief(
+        &self,
+        subject: StableId,
+        attr: AttrKindId,
+        params: &InferenceParams,
+    ) -> Option<SharedBelief> {
+        let frame = self.beliefs.get(&(subject, attr))?;
+        frame.commit(params).map(|value| SharedBelief {
+            subject,
+            attr,
+            hyps: frame.hyps().to_vec(),
+            value,
+        })
+    }
+
+    /// Register an open question this mind is motivated to resolve (an inquiry goal of
+    /// design 9.13). A being wonders about a question it has reason to want answered;
+    /// being asked seeds the same goal, so curiosity spreads through a conversation.
+    pub fn wonder(&mut self, subject: StableId, attr: AttrKindId) {
+        self.wondering.insert((subject, attr));
+    }
+
+    /// Whether this mind is motivated to resolve a question.
+    pub fn is_wondering(&self, subject: StableId, attr: AttrKindId) -> bool {
+        self.wondering.contains(&(subject, attr))
+    }
+
+    /// The open questions this mind would ask about: those it wonders about but has not yet
+    /// committed a belief on, in canonical order. Once it commits, a question drops out, so
+    /// a being stops asking what it has learned.
+    pub fn open_questions(&self, params: &InferenceParams) -> Vec<Question> {
+        self.wondering
+            .iter()
+            .copied()
+            .filter(|(subject, attr)| self.belief(*subject, *attr, params).is_none())
+            .collect()
+    }
+
     /// What this mind believes a target mind believes about a question, or `None`.
     pub fn modeled_belief(
         &self,
@@ -221,6 +283,11 @@ impl Mind {
                 h.write_fixed(nf.clamped_total(v, meta_params).unwrap());
             }
             h.write_u32(nf.commit(meta_params).unwrap_or(u32::MAX));
+        }
+        // The open questions, in canonical order (the BTreeSet is already sorted).
+        for (subject, attr) in &self.wondering {
+            h.write_stable(*subject);
+            h.write_u32(attr.0);
         }
         h.finish()
     }

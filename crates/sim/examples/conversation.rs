@@ -86,6 +86,12 @@ fn substrate() -> (ForceFloor, MoveRegistry) {
                 sign: EffectSign::Negative,
                 name: "refuse".to_string(),
             },
+            ForceEffectDef {
+                id: ForceEffectId(4),
+                kind: ForceKind::RaiseInquiry,
+                sign: EffectSign::Neutral,
+                name: "ask".to_string(),
+            },
         ],
     };
     let registry = MoveRegistry {
@@ -116,6 +122,15 @@ fn substrate() -> (ForceFloor, MoveRegistry) {
                 sincerity_judged: false,
                 felicity: vec![],
                 gloss: "doubts it".to_string(),
+            },
+            MoveKindDef {
+                id: MoveKindId(4),
+                name: "question".to_string(),
+                force: vec![ForceEffectId(4)],
+                expects: vec![MoveKindId(1)],
+                sincerity_judged: false,
+                felicity: vec![],
+                gloss: "asks".to_string(),
             },
         ],
     };
@@ -179,7 +194,18 @@ fn main() {
         name_of(band[2]),
         name_of(zev),
     );
-    println!("Promotion: all four are promoted to move-by-move dialogue.\n");
+    println!("Promotion: all four are promoted to move-by-move dialogue.");
+
+    // Ada has seen the water; Bero and Cael wonder where it is but cannot answer, so they
+    // will ask. Curiosity is an inquiry goal (design 9.13), seeded here.
+    w.set_wondering(band[1], WATERSHED, WATER);
+    w.set_wondering(band[2], WATERSHED, WATER);
+    println!(
+        "Curiosity: {} and {} wonder where the water is; only {} has seen it.\n",
+        name_of(band[1]),
+        name_of(band[2]),
+        name_of(band[0]),
+    );
 
     // Ada witnesses the water at the north spring; the band talks over the next ticks.
     w.tick(&[TickInput {
@@ -194,8 +220,20 @@ fn main() {
             from: band[0],
         },
     }]);
-    for _ in 0..5 {
+    // Run until the talk falls silent (no new moves), so the convergence is visible.
+    let mut prev = w.events().len();
+    let mut quiet = 0;
+    let mut ticks = 0;
+    while ticks < 40 && quiet < 3 {
         w.tick(&[]);
+        ticks += 1;
+        let now = w.events().len();
+        if now == prev {
+            quiet += 1;
+        } else {
+            quiet = 0;
+        }
+        prev = now;
     }
 
     // Narrate the move log: the canonical gist, then a non-canon flavor line.
@@ -226,6 +264,10 @@ fn main() {
                     ),
                 )
             }
+            ContentRef::Inquiry { .. } => (
+                format!("  {speaker} {gloss} {to}: where is the water?"),
+                format!("    (flavor) {speaker} spreads empty hands toward {to}."),
+            ),
             ContentRef::PriorMove { .. } => {
                 let line = format!("  {speaker} {gloss}.");
                 let flav = if gloss == "agrees" {
@@ -242,6 +284,8 @@ fn main() {
             println!("{flavor}");
         }
     }
+    println!("\nThe talk fell silent after {ticks} ticks: once each models the others as",);
+    println!("knowing, there is nothing left to tell and no open question, so it stops.");
 
     // The conversation is a query over the log, not a stored object.
     if let Some(first) = w.events().iter().next().map(|e| e.id) {

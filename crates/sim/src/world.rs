@@ -38,7 +38,7 @@ use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::dialogue::{
-    ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveRegistry, ResolvedBand,
+    ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
 use crate::language::{
@@ -75,6 +75,31 @@ fn felicity_reading(
     match dim {
         "trust" => trust.get(&(listener, speaker)).copied(),
         _ => None,
+    }
+}
+
+/// Build an assertion move from a speaker to one listener, carrying a belief question as
+/// its content. The ordinal and in-reply-to are filled in the write pass.
+fn assertion_move(
+    force: MoveKindId,
+    speaker: StableId,
+    listener: StableId,
+    shared: &SharedBelief,
+    channel: crate::tom::AccessChannelId,
+    tick: u64,
+) -> Move {
+    Move {
+        force,
+        speaker,
+        addressees: vec![listener],
+        content: ContentRef::Belief {
+            subject: shared.subject,
+            attr: shared.attr,
+        },
+        in_reply_to: None,
+        channel,
+        tick,
+        ordinal: 0,
     }
 }
 
@@ -214,9 +239,13 @@ struct DialogueConfig {
 /// steps already use).
 struct PendingMove {
     mv: Move,
-    /// The assertion this move answers, by its index in the same tick's pending list, so
-    /// the in-reply-to event id can be filled once the answered move has been appended.
+    /// The move this one answers, by its index in the same tick's pending list, so the
+    /// in-reply-to event id can be filled once the answered move has been appended.
     answers: Option<usize>,
+    /// Whether this move's content should point at the move it answers (true for an
+    /// acceptance or refusal, which are about the prior move; false for an answer to a
+    /// question, which carries its own belief content).
+    reply_as_prior: bool,
     /// The first-order and theory-of-mind effects to apply when the move lands.
     effect: MoveEffect,
 }
@@ -244,6 +273,13 @@ enum MoveEffect {
         listener: StableId,
         shared: SharedBelief,
         sign: EffectSign,
+    },
+    /// A question: it seeds the inquiry goal in the hearer (design 9.13), so being asked
+    /// makes the hearer wonder the question too. It moves no belief.
+    Inquire {
+        hearer: StableId,
+        subject: StableId,
+        attr: AttrKindId,
     },
 }
 
@@ -425,6 +461,29 @@ impl World {
     /// Whether a mind is promoted to move-by-move dialogue.
     pub fn is_promoted(&self, mind: StableId) -> bool {
         self.promoted.contains(&mind)
+    }
+
+    /// Seed an open question a mind is motivated to resolve (an inquiry goal of design
+    /// 9.13). A being that wonders a question it cannot answer will ask a co-located peer
+    /// in the dialogue step; the answer, if a peer holds it, grounds back. Being asked
+    /// seeds the same goal in the hearer, so curiosity spreads through a conversation.
+    pub fn set_wondering(&mut self, mind: StableId, subject: StableId, attr: AttrKindId) {
+        if let Some(m) = self.minds.get_mut(&mind) {
+            m.wonder(subject, attr);
+        }
+    }
+
+    /// Whether a mind still has this question open: it is curious about it and has not yet
+    /// committed a belief, so it would ask. Once it learns the answer the question is no
+    /// longer open, so this returns false even though the curiosity was once registered.
+    pub fn is_wondering(&self, mind: StableId, subject: StableId, attr: AttrKindId) -> bool {
+        self.minds
+            .get(&mind)
+            .map(|m| {
+                m.is_wondering(subject, attr)
+                    && m.belief(subject, attr, &self.belief_params).is_none()
+            })
+            .unwrap_or(false)
     }
 
     /// The trust a listener extends to a speaker, if any has been recorded.
@@ -792,7 +851,18 @@ impl World {
                 ForceKind::RegisterUptake,
                 Some(EffectSign::Negative),
             );
+            let inquiry_kind =
+                cfg.registry
+                    .first_realizing(&cfg.floor, ForceKind::RaiseInquiry, None);
             let assert_def = cfg.registry.move_kind(assert_kind).unwrap();
+            // A closure: does an assertion-kind move from `speaker` to `listener` land,
+            // given the felicity reading the world carries? (No felicity in the common case.)
+            let assertion_lands = |speaker: StableId, listener: StableId| -> bool {
+                assert_def.felicitous(
+                    |dim| felicity_reading(dim, &self.trust, listener, speaker),
+                    |band| cfg.bands.get(band).copied(),
+                )
+            };
 
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut pending: Vec<PendingMove> = Vec::new();
@@ -806,7 +876,7 @@ impl World {
                 };
                 // Move-by-move dialogue needs a promoted partner; demoted neighbours are
                 // covered by the one-pass gossip fallback instead.
-                let listeners: Vec<StableId> = ids
+                let peers: Vec<StableId> = ids
                     .iter()
                     .copied()
                     .filter(|l| {
@@ -815,94 +885,180 @@ impl World {
                             && self.place_of.get(l) == Some(&place)
                     })
                     .collect();
-                if listeners.is_empty() {
+                if peers.is_empty() {
                     continue;
                 }
-                let shared = match self
-                    .minds
-                    .get(&speaker)
-                    .and_then(|m| m.first_committed(&self.belief_params))
-                {
-                    Some(s) => s,
+                let mind = match self.minds.get(&speaker) {
+                    Some(m) => m,
+                    None => continue,
+                };
+
+                // INFORM: a committed belief that some peer does not, in the speaker's own
+                // model, already hold. Modelling the peer is the redundancy gate: the
+                // speaker stops telling a peer once its model of that peer (built from the
+                // peer's said acceptances) commits to the value, so the talk converges.
+                let mut informed = false;
+                for shared in mind.committed_beliefs(&self.belief_params) {
+                    let lacking: Vec<StableId> = peers
+                        .iter()
+                        .copied()
+                        .filter(|l| {
+                            mind.modeled_belief(*l, shared.attr, &self.meta_params)
+                                != Some(shared.value)
+                        })
+                        .collect();
+                    if lacking.is_empty() {
+                        continue;
+                    }
+                    let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
+                        .slot(SLOT_ADDRESSEE)
+                        .rng(self.seed)
+                        .range_u32(0, lacking.len() as u32) as usize;
+                    let listener = lacking[idx];
+                    let lands = assertion_lands(speaker, listener);
+                    let deception = self
+                        .minds
+                        .get(&listener)
+                        .map(|m| {
+                            m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params)
+                        })
+                        .unwrap_or(false);
+                    let trust = self
+                        .trust
+                        .get(&(listener, speaker))
+                        .copied()
+                        .unwrap_or(gp.trust_baseline);
+                    let assertion_idx = pending.len();
+                    pending.push(PendingMove {
+                        mv: assertion_move(
+                            assert_kind,
+                            speaker,
+                            listener,
+                            &shared,
+                            said_channel,
+                            self.clock,
+                        ),
+                        answers: None,
+                        reply_as_prior: false,
+                        effect: if lands {
+                            MoveEffect::Assert {
+                                listener,
+                                speaker,
+                                shared: shared.clone(),
+                                deception,
+                                trust,
+                            }
+                        } else {
+                            MoveEffect::Misfire
+                        },
+                    });
+                    if lands {
+                        let (resp_kind, sign) = if deception {
+                            (refuse_kind, EffectSign::Negative)
+                        } else {
+                            (accept_kind, EffectSign::Positive)
+                        };
+                        if let Some(rk) = resp_kind {
+                            pending.push(PendingMove {
+                                mv: Move {
+                                    force: rk,
+                                    speaker: listener,
+                                    addressees: vec![speaker],
+                                    content: ContentRef::Belief {
+                                        subject: shared.subject,
+                                        attr: shared.attr,
+                                    },
+                                    in_reply_to: None,
+                                    channel: said_channel,
+                                    tick: self.clock,
+                                    ordinal: 0,
+                                },
+                                answers: Some(assertion_idx),
+                                reply_as_prior: true,
+                                effect: MoveEffect::Uptake {
+                                    speaker,
+                                    listener,
+                                    shared: shared.clone(),
+                                    sign,
+                                },
+                            });
+                        }
+                    }
+                    informed = true;
+                    break;
+                }
+                if informed {
+                    continue;
+                }
+
+                // INQUIRE: an open question the speaker wonders about but cannot answer. It
+                // asks a peer; the question seeds the inquiry goal in that peer, and if the
+                // peer holds the answer it tells it back, which the asker grounds.
+                let inquiry_kind = match inquiry_kind {
+                    Some(k) => k,
+                    None => continue,
+                };
+                let open = mind.open_questions(&self.belief_params);
+                let (subject, attr) = match open.first() {
+                    Some(q) => *q,
                     None => continue,
                 };
                 let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
                     .slot(SLOT_ADDRESSEE)
                     .rng(self.seed)
-                    .range_u32(0, listeners.len() as u32) as usize;
-                let listener = listeners[idx];
-                let felicitous = assert_def.felicitous(
-                    |dim| felicity_reading(dim, &self.trust, listener, speaker),
-                    |band| cfg.bands.get(band).copied(),
-                );
-                let deception = self
-                    .minds
-                    .get(&listener)
-                    .map(|m| m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params))
-                    .unwrap_or(false);
-                let trust = self
-                    .trust
-                    .get(&(listener, speaker))
-                    .copied()
-                    .unwrap_or(gp.trust_baseline);
-
-                let assertion_idx = pending.len();
+                    .range_u32(0, peers.len() as u32) as usize;
+                let listener = peers[idx];
+                let question_idx = pending.len();
                 pending.push(PendingMove {
                     mv: Move {
-                        force: assert_kind,
+                        force: inquiry_kind,
                         speaker,
                         addressees: vec![listener],
-                        content: ContentRef::Belief {
-                            subject: shared.subject,
-                            attr: shared.attr,
-                        },
+                        content: ContentRef::Inquiry { subject, attr },
                         in_reply_to: None,
                         channel: said_channel,
                         tick: self.clock,
                         ordinal: 0,
                     },
                     answers: None,
-                    effect: if felicitous {
-                        MoveEffect::Assert {
-                            listener,
-                            speaker,
-                            shared: shared.clone(),
-                            deception,
-                            trust,
-                        }
-                    } else {
-                        MoveEffect::Misfire
+                    reply_as_prior: false,
+                    effect: MoveEffect::Inquire {
+                        hearer: listener,
+                        subject,
+                        attr,
                     },
                 });
-                // A felicitous assertion draws a response; a misfire stands as a bare attempt.
-                if felicitous {
-                    let (resp_kind, sign) = if deception {
-                        (refuse_kind, EffectSign::Negative)
-                    } else {
-                        (accept_kind, EffectSign::Positive)
-                    };
-                    if let Some(rk) = resp_kind {
+                // The answer: if the asked peer holds the belief, it tells it back, and the
+                // asker grounds it. The asker has no model of the answerer on this question
+                // (it asked because it did not know), so there is no deception verdict here.
+                if let Some(answer) = self
+                    .minds
+                    .get(&listener)
+                    .and_then(|m| m.shared_belief(subject, attr, &self.belief_params))
+                {
+                    if assertion_lands(listener, speaker) {
+                        let trust = self
+                            .trust
+                            .get(&(speaker, listener))
+                            .copied()
+                            .unwrap_or(gp.trust_baseline);
                         pending.push(PendingMove {
-                            mv: Move {
-                                force: rk,
-                                speaker: listener,
-                                addressees: vec![speaker],
-                                // Patched to point at the assertion once it has an id.
-                                content: ContentRef::Belief {
-                                    subject: shared.subject,
-                                    attr: shared.attr,
-                                },
-                                in_reply_to: None,
-                                channel: said_channel,
-                                tick: self.clock,
-                                ordinal: 0,
-                            },
-                            answers: Some(assertion_idx),
-                            effect: MoveEffect::Uptake {
-                                speaker,
+                            mv: assertion_move(
+                                assert_kind,
                                 listener,
-                                shared: shared.clone(),
-                                sign,
+                                speaker,
+                                &answer,
+                                said_channel,
+                                self.clock,
+                            ),
+                            answers: Some(question_idx),
+                            reply_as_prior: false,
+                            effect: MoveEffect::Assert {
+                                listener: speaker,
+                                speaker: listener,
+                                shared: answer,
+                                deception: false,
+                                trust,
                             },
                         });
                     }
@@ -918,7 +1074,9 @@ impl World {
             if let Some(ans) = pm.answers {
                 let target = appended[ans];
                 pm.mv.in_reply_to = Some(target);
-                pm.mv.content = ContentRef::PriorMove { event: target };
+                if pm.reply_as_prior {
+                    pm.mv.content = ContentRef::PriorMove { event: target };
+                }
             }
             pm.mv.ordinal = ordinal as u32;
             let id = self.events.append(pm.mv.to_event());
@@ -967,6 +1125,16 @@ impl World {
                                 },
                             );
                         }
+                    }
+                }
+                MoveEffect::Inquire {
+                    hearer,
+                    subject,
+                    attr,
+                } => {
+                    // Being asked seeds the inquiry goal in the hearer (design 9.13).
+                    if let Some(h) = self.minds.get_mut(&hearer) {
+                        h.wonder(subject, attr);
                     }
                 }
             }
@@ -1769,6 +1937,12 @@ name = "said"
                     sign: EffectSign::Negative,
                     name: "refuse".to_string(),
                 },
+                ForceEffectDef {
+                    id: ForceEffectId(4),
+                    kind: ForceKind::RaiseInquiry,
+                    sign: EffectSign::Neutral,
+                    name: "ask".to_string(),
+                },
             ],
         };
         let assert_felicity = if felicity_on_assert {
@@ -1807,6 +1981,15 @@ name = "said"
                     sincerity_judged: false,
                     felicity: vec![],
                     gloss: "declines".to_string(),
+                },
+                MoveKindDef {
+                    id: MoveKindId(4),
+                    name: "question".to_string(),
+                    force: vec![ForceEffectId(4)],
+                    expects: vec![MoveKindId(1)],
+                    sincerity_judged: false,
+                    felicity: vec![],
+                    gloss: "asks".to_string(),
                 },
             ],
         };
@@ -1993,6 +2176,102 @@ name = "said"
                 .modeled_belief(listener, AttrKindId(0), &mp),
             Some(10),
             "the speaker models the listener as having taken up the claim"
+        );
+    }
+
+    #[test]
+    fn a_curious_being_asks_and_is_answered() {
+        // One member knows where the water is; the other wonders but cannot answer, so it
+        // asks, and the knower's answer grounds into it.
+        let mut w = dialogue_world();
+        let knower = w.spawn(Fixed::ONE);
+        let seeker = w.spawn(Fixed::ONE);
+        w.set_place(knower, 1);
+        w.set_place(seeker, 1);
+        w.promote(knower);
+        w.promote(seeker);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0)); // the seeker is curious first
+        assert!(w.is_wondering(seeker, StableId(99), AttrKindId(0)));
+        w.tick(&[observe_for(knower, 10)]); // the knower commits the value, the seeker asks
+        for _ in 0..4 {
+            w.tick(&[]);
+        }
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(seeker)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the seeker learned the answer"
+        );
+        assert!(
+            !w.is_wondering(seeker, StableId(99), AttrKindId(0)),
+            "having learned, the seeker stops wondering"
+        );
+        // A question move was logged: the seeker actually asked, it did not only overhear.
+        let asked = w
+            .events()
+            .iter()
+            .filter_map(Move::from_event)
+            .any(|m| matches!(m.content, ContentRef::Inquiry { .. }));
+        assert!(asked, "the seeker raised a question");
+    }
+
+    #[test]
+    fn being_asked_seeds_the_inquiry_goal_in_the_hearer() {
+        // A seeker asks a peer who also does not know; the question seeds the goal, so the
+        // hearer comes to wonder it too (curiosity spreads, design 9.13).
+        let mut w = dialogue_world();
+        let seeker = w.spawn(Fixed::ONE);
+        let peer = w.spawn(Fixed::ONE);
+        w.set_place(seeker, 1);
+        w.set_place(peer, 1);
+        w.promote(seeker);
+        w.promote(peer);
+        w.set_wondering(seeker, StableId(99), AttrKindId(0));
+        w.tick(&[]);
+        assert!(
+            w.is_wondering(peer, StableId(99), AttrKindId(0)),
+            "being asked makes the hearer wonder the question too"
+        );
+    }
+
+    #[test]
+    fn redundancy_suppression_quiets_the_talk() {
+        // Once each party models the other as holding the claim, there is nothing left to
+        // tell and no open question, so the conversation falls silent rather than looping.
+        let mut w = dialogue_world();
+        let a = w.spawn(Fixed::ONE);
+        let b = w.spawn(Fixed::ONE);
+        w.set_place(a, 1);
+        w.set_place(b, 1);
+        w.promote(a);
+        w.promote(b);
+        w.tick(&[observe_for(a, 10)]);
+        let mut prev = w.events().len();
+        let mut quiet_streak = 0;
+        for _ in 0..30 {
+            w.tick(&[]);
+            let now = w.events().len();
+            if now == prev {
+                quiet_streak += 1;
+            } else {
+                quiet_streak = 0;
+            }
+            prev = now;
+            if quiet_streak >= 3 {
+                break;
+            }
+        }
+        assert!(
+            quiet_streak >= 3,
+            "the conversation falls silent once everyone is modelled as knowing"
+        );
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(b).unwrap().belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the belief still spread before the talk quieted"
         );
     }
 
