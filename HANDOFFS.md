@@ -4,6 +4,12 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Pushed to main, and a takeover handoff for the full fan-out
+
+The owner asked to push everything to main and to write a self-contained handoff for a fresh Claude Code agent that will run on a strong WSL box (Core Ultra 7 265K, RTX 5090, 192 GB, LLM brokers, Docker) to execute the full physics-and-materials substrate fan-out (the "full fat" fan-out). Fast-forwarded main to the designated branch tip (main was a strict ancestor, so no history was rewritten) and pushed. Wrote `docs/working/FANOUT_TAKEOVER_HANDOFF.md`: the read order, the mission, what is already done, the non-negotiables, the fan-out recipe (green/red structure, the waves, the output schema, the orchestration-go-wide note, the consolidation path), the environment, and the first steps. The red-team Steering Audit on the scoped biology proposal completed before this and its three blocking findings (the integer-Hill overflow/underflow, the hazard_load steering pre-verdict, the divide-by-zero panics) were folded into the proposal, which is now sign-off ready; three further findings (class-membership default, the reach gap, the risk weighting) are recorded for the registry and audit pass. The opening prompt to direct the takeover agent was given to the owner in chat. The parallel engine track (Phase 0 plus the substrate machinery) remains buildable and greenlit, recorded in the handoff section 7.
+
+---
+
 ## 2026-06-30: Scoping the full living-world slice, the physics-substrate fan-out, and branch consolidation
 
 After the three gap bricks, the owner asked for a full slice (build the world, seed creatures and flora, the dawn band exists and interacts and learns from it) and what the gates are. A grounding fan-out and the prime directive (audit the input) found that the slice rests on two unbuilt foundations, and that "build R-BIOSPHERE first" has a hidden prerequisite.
