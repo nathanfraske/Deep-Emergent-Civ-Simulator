@@ -6,7 +6,7 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ## 2026-06-30: Calcification, the full-birth integration, the scenario loader, and a deep lifecycle test
 
-The owner asked for all the remaining buildable pieces so deep end-to-end tests can run. Built three bricks plus a capstone, all on the established build-and-verify discipline; the genuinely-blocked items stayed deferred (prestige needs a status system, the conformist continuous form and the integer-Gaussian mutation are owner/stress-test forks, the LOD aggregate-pool axiom regime needs the pool tier extended).
+The owner asked for all the remaining buildable pieces so deep end-to-end tests can run. Built three bricks plus a capstone, all on the established build-and-verify discipline; the blocked items stayed deferred (prestige needs a status system, the conformist continuous form and the integer-Gaussian mutation are owner/stress-test forks, the LOD aggregate-pool axiom regime needs the pool tier extended).
 
 **Calcification (`axiom.rs`, `world.rs`).** `Axiom::calcify` raises an unchallenged axiom's entrenchment by a reserved rate toward a reserved cap; `Axiom::weaken` lowers it toward a floor under a near-miss challenge (brittleness). Because a higher rank raises the entrenchment gate, an unchallenged axiom hardens and resists what it once yielded to, the labile-to-calcified transition. `World::calcify_band` runs a quiet-phase pass. Committed (this batch).
 
