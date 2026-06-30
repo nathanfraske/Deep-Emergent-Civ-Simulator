@@ -118,6 +118,7 @@ fn dawn_band(seed: u64, path: &str, profile: Profile) -> (World, Vec<StableId>) 
     w.emit_trace(Trace {
         id: StableId(900),
         place: HERE,
+        channel: civsim_sim::SenseChannelId::DEFAULT,
         subject: StableId(99),
         attr: LOCATION,
         hyps: vec![RIVER, CAMP],

@@ -71,6 +71,10 @@ impl Phase {
     /// Drawing a child's bounded axiom-seed mutation on inheritance (design Part 28), keyed on
     /// the child's id and the axiom axis so two axes of one child never collide.
     pub const AXIOM_INHERIT: Phase = Phase(0x0B);
+    /// A mortality roll: whether a being dies this life-cadence given its age hazard (design
+    /// Part 20, the R-AGING life-process loop), keyed on the being and its age (the age occupies
+    /// the tick coordinate), so a being faces the same hazard at the same age on replay.
+    pub const MORTALITY: Phase = Phase(0x0C);
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);

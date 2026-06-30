@@ -49,6 +49,7 @@
 //!   command scheduler is held for its open determinism design (R-CMD-ORDER,
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
+pub mod affect;
 pub mod agent;
 pub mod axiom;
 pub mod calibration;
@@ -62,11 +63,13 @@ pub mod lod;
 pub mod primes;
 pub mod race;
 pub mod scenario;
+pub mod sensorium;
 pub mod substrate;
 pub mod tom;
 pub mod value;
 pub mod world;
 
+pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
 pub use agent::{AccessObs, Mind, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
@@ -98,6 +101,7 @@ pub use lod::{Individual, Pool, TwoTierWorld};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
+pub use sensorium::{SenseChannelId, Sensorium};
 pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,

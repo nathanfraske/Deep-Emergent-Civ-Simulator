@@ -34,10 +34,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
-use crate::decision::{ActionId, Behaviour, DriveId};
+use crate::decision::{ActionId, Behaviour, Curve, DriveId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
@@ -47,6 +48,7 @@ use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
 use crate::race::{BandSpec, Race};
+use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use crate::value::RaceId;
 use civsim_core::{DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
@@ -186,6 +188,11 @@ pub struct Trace {
     pub id: StableId,
     /// Where it sits; only co-located minds can perceive it.
     pub place: PlaceId,
+    /// The physical channel this trace travels on (the R-SENSORIUM channel gate). A being
+    /// perceives it only if its sensorium reads this channel; a being with no installed
+    /// sensorium reads every channel, so a trace on [`SenseChannelId::DEFAULT`] is perceived
+    /// by everyone co-located, the back-compatible default.
+    pub channel: SenseChannelId,
     /// The subject the implied belief is about.
     pub subject: StableId,
     /// The attribute the implied belief is about.
@@ -299,6 +306,13 @@ pub struct World {
     genomes: BTreeMap<StableId, Genome>,
     /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
     intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
+    /// Per-being transient affect, the event-driven emotional state (the R-EMOTION gap).
+    affect: BTreeMap<StableId, AffectState>,
+    /// Per-being age in life-cadence ticks, for the aging-and-mortality loop (the R-AGING gap).
+    ages: BTreeMap<StableId, u32>,
+    /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
+    /// with no entry reads every channel, so perception is gated only where a sensorium is set.
+    sensorium: BTreeMap<StableId, Sensorium>,
     traces: Vec<Trace>,
     /// The data-driven decision definitions (drives, curves, actions). None until set.
     behaviour: Option<Behaviour>,
@@ -358,6 +372,9 @@ impl World {
             place_of: BTreeMap::new(),
             genomes: BTreeMap::new(),
             intrinsic: BTreeMap::new(),
+            affect: BTreeMap::new(),
+            ages: BTreeMap::new(),
+            sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
             drive_levels: BTreeMap::new(),
@@ -625,6 +642,7 @@ impl World {
                 self.genomes.insert(id, genome);
                 self.intrinsic.insert(id, race.intrinsic.clone());
                 self.place_of.insert(id, band.place);
+                self.ages.insert(id, 0);
                 seeded.push(id);
             }
         }
@@ -937,6 +955,7 @@ impl World {
         self.minds.insert(child, mind);
         self.genomes.insert(child, child_genome);
         self.intrinsic.insert(child, beliefs);
+        self.ages.insert(child, 0);
         Some(child)
     }
 
@@ -955,6 +974,169 @@ impl World {
                 }
             }
         }
+    }
+
+    // --- Affect: the transient, event-driven emotional layer (the R-EMOTION gap) ---
+
+    /// A being's transient affective state, if it has one (for inspection).
+    pub fn affect_of(&self, id: StableId) -> Option<&AffectState> {
+        self.affect.get(&id)
+    }
+
+    /// A being's current felt level on one affect axis (zero if the being has no affect
+    /// state or has never touched the axis).
+    pub fn affect_level(&self, id: StableId, axis: AffectAxisId) -> Fixed {
+        self.affect
+            .get(&id)
+            .map(|a| a.level(axis))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Install a being's affective state (its baselines and any current values). A being's
+    /// affect axes and baselines are properly derived from its race and genome; this is the
+    /// route by which a tool, a test, or that later derivation sets them.
+    pub fn set_affect(&mut self, id: StableId, state: AffectState) {
+        self.affect.insert(id, state);
+    }
+
+    /// Appraise a change in one of a being's drives into affect and apply it (design Part 40,
+    /// the derived-appraisal half of R-EMOTION). The race's [`AppraisalBinding`] maps the drive
+    /// change to a signed delta on an affect axis (the gain and the relief sign are data), and
+    /// the delta lands on the being's affect state, clamped to range. The being's affect state
+    /// is created at the zero baseline if it had none. Returns the applied `(axis, delta)`, or
+    /// `None` if the race does not appraise that drive. Nothing is invented: the magnitude is the
+    /// measured drive change times the reserved gain the binding carries, so the engine authors
+    /// no event-to-emotion reaction.
+    pub fn appraise(
+        &mut self,
+        id: StableId,
+        drive: DriveId,
+        drive_change: Fixed,
+        binding: &AppraisalBinding,
+    ) -> Option<(AffectAxisId, Fixed)> {
+        let (axis, delta) = binding.delta(drive, drive_change)?;
+        self.affect.entry(id).or_default().apply(axis, delta);
+        Some((axis, delta))
+    }
+
+    /// Relax one being's transient affect toward its baseline by `rate` (the deterministic
+    /// fade between events; design Part 40). The rate is a reserved owner value. A no-op for a
+    /// being with no affect state.
+    pub fn decay_affect(&mut self, id: StableId, rate: Fixed) {
+        if let Some(a) = self.affect.get_mut(&id) {
+            a.decay(rate);
+        }
+    }
+
+    /// Harden one being's baseline on an affect axis under a sustained strong feeling (trauma;
+    /// design Part 40): if the deviation from baseline exceeds `threshold`, the baseline drifts
+    /// toward the current feeling by `fraction` of the excess, leaving a residue ordinary decay
+    /// no longer erases. The threshold and fraction are reserved owner values. Returns whether
+    /// the baseline moved; a no-op (false) for a being with no affect state.
+    pub fn harden_affect(
+        &mut self,
+        id: StableId,
+        axis: AffectAxisId,
+        threshold: Fixed,
+        fraction: Fixed,
+    ) -> bool {
+        self.affect
+            .get_mut(&id)
+            .map(|a| a.harden(axis, threshold, fraction))
+            .unwrap_or(false)
+    }
+
+    // --- Aging and mortality: the clock-driven life-process loop (the R-AGING gap) ---
+
+    /// A being's age in life-cadence steps, if tracked (seeded at the dawn and at birth).
+    pub fn age_of(&self, id: StableId) -> Option<u32> {
+        self.ages.get(&id).copied()
+    }
+
+    /// Set a being's age (used by the dawn seeding for a founding cohort that is not newborn,
+    /// and by tools and tests).
+    pub fn set_age(&mut self, id: StableId, age: u32) {
+        self.ages.insert(id, age);
+    }
+
+    /// Advance every tracked being's age by one life-cadence step (design Part 20). This is the
+    /// life-process beat the gap names: the caller runs it once per life cadence (the cadence
+    /// period in ticks is a reserved owner value, so wiring it into [`World::tick`] on a fixed
+    /// period waits on that value, never a fabricated one). Aging is saturating, so a long-lived
+    /// being's age never wraps.
+    pub fn age_step(&mut self) {
+        for age in self.ages.values_mut() {
+            *age = age.saturating_add(1);
+        }
+    }
+
+    /// Run one mortality pass over every tracked being against an age-hazard curve (design Part
+    /// 20, the R-AGING life-process loop). For each being in id order, the curve maps its age to
+    /// a per-cadence death probability (a rising-hazard curve is the data-driven default, owner
+    /// supplied as `hazard`), and a counter-RNG roll keyed on the being and its age under
+    /// [`Phase::MORTALITY`] decides whether it dies this cadence. The dead are removed (their
+    /// per-being state pruned) and their ids returned in id order. Deterministic and
+    /// observer-independent: the roll is a pure function of the seed, the being's canonical id,
+    /// and its age, so a being faces the same hazard on the same age on replay and the pass is
+    /// independent of thread count. The curve is evaluated in the owner's age units (age as a
+    /// whole-number [`Fixed`]); the cadence period and the curve shape are reserved owner values.
+    pub fn apply_mortality(&mut self, hazard: &Curve) -> Vec<StableId> {
+        let dead: Vec<StableId> = self
+            .ages
+            .iter()
+            .filter_map(|(&id, &age)| {
+                let chance = hazard
+                    .eval(Fixed::from_int(age as i32))
+                    .clamp(Fixed::ZERO, Fixed::ONE);
+                let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                (roll < chance).then_some(id)
+            })
+            .collect();
+        for id in &dead {
+            self.remove_being(*id);
+        }
+        dead
+    }
+
+    /// Remove a being from the world, pruning every per-being map it appears in (the death and
+    /// out-migration primitive of design Part 20). Minds, placement, genome, intrinsic beliefs,
+    /// affect, age, sensorium, drives, the last action, lexicon, language assignment, the
+    /// promoted set, and every trust edge naming the being are all dropped, so no dangling
+    /// reference to a departed being survives (referential integrity, design Part 58). Idempotent:
+    /// removing an unknown being is a no-op.
+    pub fn remove_being(&mut self, id: StableId) {
+        self.minds.remove(&id);
+        self.place_of.remove(&id);
+        self.genomes.remove(&id);
+        self.intrinsic.remove(&id);
+        self.affect.remove(&id);
+        self.ages.remove(&id);
+        self.sensorium.remove(&id);
+        self.drive_levels.remove(&id);
+        self.last_action.remove(&id);
+        self.lexicons.remove(&id);
+        self.lang_of.remove(&id);
+        self.promoted.remove(&id);
+        self.trust
+            .retain(|(listener, speaker), _| *listener != id && *speaker != id);
+    }
+
+    // --- Sensorium: the channel gate over perception (the R-SENSORIUM gap) ---
+
+    /// Install a being's sensorium, the channels it can perceive and its acuity on each (design
+    /// Part 33.3, the R-SENSORIUM channel gate). Until a sensorium is installed a being reads
+    /// every channel at full channel acuity, so perception is gated only where a sensorium is
+    /// declared. A being's sensorium is properly derived from its genome and anatomy; this is
+    /// the route by which that derivation, a tool, or a test sets it.
+    pub fn set_sensorium(&mut self, id: StableId, sensorium: Sensorium) {
+        self.sensorium.insert(id, sensorium);
+    }
+
+    /// A being's sensorium, if one has been installed (for inspection).
+    pub fn sensorium_of(&self, id: StableId) -> Option<&Sensorium> {
+        self.sensorium.get(&id)
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition
@@ -1746,7 +1928,19 @@ impl World {
                     if self.place_of.get(mind_id) != Some(&t.place) {
                         continue;
                     }
-                    let chance = t.salience.mul(mind.acuity).clamp(Fixed::ZERO, Fixed::ONE);
+                    // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives
+                    // the trace only on a channel it reads, and its channel acuity scales the
+                    // roll; a being with no sensorium reads every channel at full acuity, so the
+                    // place-based perception of every existing world is unchanged.
+                    let channel_acuity = match self.sensorium.get(mind_id) {
+                        Some(s) => match s.reads(t.channel) {
+                            Some(a) => a,
+                            None => continue,
+                        },
+                        None => Fixed::ONE,
+                    };
+                    let acuity = mind.acuity.mul(channel_acuity);
+                    let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
                     let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
                         .rng(self.seed)
                         .unit_fixed(0);
@@ -1826,6 +2020,7 @@ impl World {
         for t in traces {
             h.write_stable(t.id);
             h.write_u32(t.place);
+            h.write_u32(t.channel.0);
             h.write_stable(t.subject);
             h.write_u32(t.attr.0);
             for v in &t.hyps {
@@ -2010,6 +2205,7 @@ source = "Part 9"
         Trace {
             id: StableId(500),
             place,
+            channel: SenseChannelId::DEFAULT,
             subject: StableId(99),
             attr: AttrKindId(0),
             hyps: vec![10, 20],
@@ -2782,5 +2978,192 @@ name = "said"
             build(),
             "the logged conversation replays bit for bit, outcomes and move log alike"
         );
+    }
+
+    // --- Affect: the transient emotional layer wired through the world (R-EMOTION) ---
+
+    #[test]
+    fn a_world_appraises_a_drive_change_into_a_beings_affect() {
+        use crate::affect::DriveAppraisal;
+        const JOY: AffectAxisId = AffectAxisId(0);
+        let hunger = DriveId(0);
+        let mut w = world();
+        let being = w.spawn(Fixed::ONE);
+        let mut binding = AppraisalBinding::new();
+        // Relief from hunger reads positive on joy, gain 2.
+        binding.bind(
+            hunger,
+            DriveAppraisal {
+                axis: JOY,
+                gain: Fixed::from_int(2),
+                relief_positive: true,
+            },
+        );
+        // Hunger fell by 0.25 (relieved): joy rises by 0.25 * 2 = 0.5, landing on the being.
+        let applied = w.appraise(
+            being,
+            hunger,
+            Fixed::ZERO - Fixed::from_ratio(1, 4),
+            &binding,
+        );
+        assert_eq!(applied, Some((JOY, Fixed::from_ratio(1, 2))));
+        assert_eq!(w.affect_level(being, JOY), Fixed::from_ratio(1, 2));
+        // An unbound drive does not appraise and leaves affect untouched.
+        assert_eq!(w.appraise(being, DriveId(9), Fixed::ONE, &binding), None);
+        // Affect relaxes toward its baseline.
+        w.decay_affect(being, Fixed::ONE);
+        assert_eq!(
+            w.affect_level(being, JOY),
+            Fixed::ZERO,
+            "decayed to baseline"
+        );
+    }
+
+    #[test]
+    fn a_strong_feeling_hardens_a_beings_baseline_through_the_world() {
+        const DREAD: AffectAxisId = AffectAxisId(1);
+        let mut w = world();
+        let being = w.spawn(Fixed::ONE);
+        let mut state = AffectState::new();
+        state.apply(DREAD, Fixed::ONE);
+        w.set_affect(being, state);
+        // Below threshold: no hardening.
+        assert!(!w.harden_affect(being, DREAD, Fixed::from_int(2), Fixed::from_ratio(1, 2)));
+        // Above threshold: half the excess becomes the new baseline, and decay no longer
+        // returns all the way to zero (the persistent residue of trauma).
+        assert!(w.harden_affect(
+            being,
+            DREAD,
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 2)
+        ));
+        w.decay_affect(being, Fixed::ONE);
+        assert_eq!(w.affect_level(being, DREAD), Fixed::from_ratio(1, 2));
+    }
+
+    // --- Sensorium: the channel gate over perception (R-SENSORIUM) ---
+
+    fn channel_trace(id: u64, place: PlaceId, channel: SenseChannelId, subject: u64) -> Trace {
+        Trace {
+            id: StableId(id),
+            place,
+            channel,
+            subject: StableId(subject),
+            attr: AttrKindId(0),
+            hyps: vec![10, 20],
+            value: 10,
+            salience: Fixed::ONE,
+            weight: Fixed::from_int(5),
+            from: StableId(id),
+        }
+    }
+
+    #[test]
+    fn a_being_perceives_only_on_channels_its_sensorium_reads() {
+        const SIGHT: SenseChannelId = SenseChannelId(1);
+        const SCENT: SenseChannelId = SenseChannelId(2);
+        let mut w = world().with_seed(0x5E45E);
+        let anna = w.spawn(Fixed::ONE);
+        w.set_place(anna, 1);
+        // Anna reads sight but is blind to scent.
+        w.set_sensorium(anna, Sensorium::with([(SIGHT, Fixed::ONE)]));
+        // A sight trace about subject 70 and a scent trace about subject 80, both co-located
+        // and fully salient.
+        w.emit_trace(channel_trace(500, 1, SIGHT, 70));
+        w.emit_trace(channel_trace(501, 1, SCENT, 80));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(70), AttrKindId(0), &bp),
+            Some(10),
+            "the sight trace was perceived"
+        );
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(80), AttrKindId(0), &bp),
+            None,
+            "the scent trace was missed: the being is blind to that channel"
+        );
+    }
+
+    #[test]
+    fn a_being_with_no_sensorium_reads_every_channel() {
+        // Back-compatibility: a being that has never been given a sensorium perceives a trace
+        // on any channel exactly as before the channel gate existed.
+        const MANA: SenseChannelId = SenseChannelId(7);
+        let mut w = world().with_seed(0xBEEF);
+        let anna = w.spawn(Fixed::ONE);
+        w.set_place(anna, 1);
+        w.emit_trace(channel_trace(500, 1, MANA, 70));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(70), AttrKindId(0), &bp),
+            Some(10),
+            "a being with no sensorium reads every channel"
+        );
+    }
+
+    // --- Aging and mortality: the life-process loop (R-AGING) ---
+
+    fn rising_hazard() -> Curve {
+        // A simple rising hazard: certain survival at age 0, certain death by age 100. The shape
+        // is the data-driven default; the owner sets the real curve.
+        Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(100), Fixed::ONE),
+        ])
+    }
+
+    #[test]
+    fn an_old_being_dies_and_a_young_one_survives() {
+        let mut w = world().with_seed(0xA6E);
+        let young = w.spawn(Fixed::ONE);
+        let old = w.spawn(Fixed::ONE);
+        w.set_age(young, 0);
+        w.set_age(old, 100);
+        // Give the old being some state to confirm the prune reaches every map.
+        w.set_place(old, 3);
+        w.set_sensorium(old, Sensorium::with([(SenseChannelId(1), Fixed::ONE)]));
+        let dead = w.apply_mortality(&rising_hazard());
+        assert_eq!(dead, vec![old], "the old being died, the young one did not");
+        assert!(w.mind(old).is_none(), "the dead being's mind was pruned");
+        assert!(w.age_of(old).is_none(), "its age was pruned");
+        assert!(w.place_of(old).is_none(), "its placement was pruned");
+        assert!(w.sensorium_of(old).is_none(), "its sensorium was pruned");
+        assert!(w.mind(young).is_some(), "the survivor is untouched");
+        assert_eq!(w.population(), 1);
+    }
+
+    #[test]
+    fn age_step_advances_every_being() {
+        let mut w = world();
+        let a = w.spawn(Fixed::ONE);
+        let b = w.spawn(Fixed::ONE);
+        w.set_age(a, 4);
+        w.set_age(b, 9);
+        w.age_step();
+        assert_eq!(w.age_of(a), Some(5));
+        assert_eq!(w.age_of(b), Some(10));
+    }
+
+    #[test]
+    fn mortality_replays_deterministically() {
+        // A middling hazard exercises the stochastic path; the same seed must kill the same
+        // beings on the same ages every run.
+        let build = || {
+            let mut w = world().with_seed(0xD1CE);
+            let ids: Vec<StableId> = (0..8).map(|_| w.spawn(Fixed::ONE)).collect();
+            for (k, &id) in ids.iter().enumerate() {
+                w.set_age(id, 40 + k as u32); // a spread of ages around the half-hazard region
+            }
+            w.apply_mortality(&rising_hazard())
+        };
+        assert_eq!(build(), build(), "the same beings die on replay");
     }
 }

@@ -110,6 +110,7 @@ fn build(seed: u64) -> (World, Vec<StableId>, ArticulationSubstrate) {
     w.emit_trace(Trace {
         id: StableId(900),
         place: HERE,
+        channel: civsim_sim::SenseChannelId::DEFAULT,
         subject: QUARRY,
         attr: LOCATION,
         hyps: vec![RIVER, 20],

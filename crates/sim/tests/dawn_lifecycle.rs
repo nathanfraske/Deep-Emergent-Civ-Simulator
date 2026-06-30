@@ -19,9 +19,9 @@
 
 use std::collections::BTreeMap;
 
-use civsim_core::Fixed;
+use civsim_core::{Fixed, StableId};
 use civsim_sim::{
-    AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, DominanceMode,
+    AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, Curve, DominanceMode,
     EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
     InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, SchemeId, SourceModeId,
     ValueAxisId, ValueProfile, World,
@@ -172,6 +172,83 @@ fn the_lifecycle_produces_its_emergent_signatures() {
     assert!(
         sects >= 2,
         "bounded confidence kept the band fractured into sects"
+    );
+}
+
+/// Run a generational-turnover loop and return `(births, deaths, final_population)`. Each
+/// generation the band ages one life-cadence step, the two eldest survivors may bear a child, and
+/// an age-hazard mortality pass culls the old. This exercises the R-AGING life-process loop
+/// (`age_step`, `apply_mortality`, `remove_being`) together with the full birth integration.
+fn turnover(seed: u64) -> (usize, usize, usize) {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), a_race());
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 5,
+    }];
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+    let founders = w.seed_dawn_populations(&races, &bands);
+    // Age the founders across the lifespan so the eldest face real mortality from the start.
+    for (k, &id) in founders.iter().enumerate() {
+        w.set_age(id, 20 + 18 * k as u32); // 20, 38, 56, 74, 92
+    }
+    // A rising hazard: certain survival young, certain death by age 100. The data-driven
+    // default, non-final; the owner sets the real curve.
+    let hazard = Curve::new([
+        (Fixed::ZERO, Fixed::ZERO),
+        (Fixed::from_int(100), Fixed::ONE),
+    ]);
+    let race = a_race();
+    let mut roster: Vec<StableId> = founders.clone();
+    let mut births = 0usize;
+    let mut deaths = 0usize;
+    for generation in 0..10u64 {
+        w.age_step();
+        // The living roster (a being is alive while its age is still tracked): two of them bear
+        // a child into the same band.
+        let alive: Vec<StableId> = roster
+            .iter()
+            .copied()
+            .filter(|&id| w.age_of(id).is_some())
+            .collect();
+        if alive.len() >= 2 {
+            if let Some(child) = w.birth(
+                &race,
+                alive[0],
+                alive[1],
+                &alive,
+                Fixed::from_ratio(1, 2),
+                Fixed::from_ratio(1, 50),
+                generation,
+            ) {
+                roster.push(child);
+                births += 1;
+            }
+        }
+        deaths += w.apply_mortality(&hazard).len();
+    }
+    (births, deaths, w.population())
+}
+
+#[test]
+fn the_being_model_turns_over_generations_and_replays() {
+    let (births, deaths, population) = turnover(0x70E2);
+    assert!(births > 0, "the band bore children");
+    assert!(deaths > 0, "the eldest died: the population turned over");
+    // The population identity holds across every birth and death: no being is double-counted or
+    // leaked, which is the referential-integrity guarantee remove_being upholds (Part 58).
+    assert_eq!(
+        population,
+        5 + births - deaths,
+        "population = founders + births - deaths"
+    );
+    // The whole turnover loop replays bit for bit (the aging and mortality draws are keyed on the
+    // being and its age, the birth draws on the parents and the generation).
+    assert_eq!(
+        turnover(0x70E2),
+        (births, deaths, population),
+        "the generational turnover replays identically"
     );
 }
 
