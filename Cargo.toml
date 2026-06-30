@@ -4,7 +4,7 @@
 # dependency order, and the spatial and worldgen layer (crates/world, roadmap M1)
 # the simulation will sit on.
 [workspace]
-members = ["crates/core", "crates/physics", "crates/units", "crates/sim", "crates/world"]
+members = ["crates/core", "crates/physics", "crates/units", "crates/sim", "crates/world", "crates/viewer"]
 resolver = "2"
 
 [workspace.package]

@@ -24,7 +24,7 @@
 //! down), then a camera viewport panned across the world at a mid zoom. The same seed
 //! always prints the same picture (the quadtree and the worldgen are deterministic).
 
-use civsim_world::view::{whole_map_frame, Camera};
+use civsim_world::view::{whole_map_frame_color, Camera};
 use civsim_world::{BiomeSet, Coord3, FlatBounded, QuadTree, TileMap, WorldgenParams};
 
 fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
@@ -71,7 +71,7 @@ fn main() {
         }
         let side = tree.node_side(z);
         println!("== overview at zoom {z} (each glyph covers {side}x{side} tiles) ==");
-        print!("{}", whole_map_frame(&tree, &biomes, z));
+        print!("{}", whole_map_frame_color(&tree, &biomes, z));
         println!();
     }
 
@@ -83,7 +83,7 @@ fn main() {
         width / 2,
         height / 2
     );
-    print!("{}", cam.frame(&tree, &biomes, 48, 18));
+    print!("{}", cam.frame_color(&tree, &biomes, 48, 18));
 }
 
 /// A one-line legend of the biome glyphs and names in this set.

@@ -30,17 +30,50 @@ use civsim_core::Fixed;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct BiomeId(pub u16);
 
+/// An 8-bit-per-channel display colour. Colour is a presentation property of a biome, like
+/// its glyph: it is read by the view layer to paint the world (a coloured window or a
+/// truecolor terminal) and never enters canonical state (the tile hash keys on the biome
+/// id, not its colour), so determinism (Principle 3) and observer-independence (Principle
+/// 10) are untouched.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Rgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Rgb {
+    /// A colour from its three channels.
+    pub const fn new(r: u8, g: u8, b: u8) -> Rgb {
+        Rgb { r, g, b }
+    }
+
+    /// Pack into the `0x00RRGGBB` word a framebuffer window expects.
+    #[inline]
+    pub const fn pack(self) -> u32 {
+        ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+    }
+
+    /// A cheap perceptual luminance in `[0, 255]` (the integer Rec. 601 weights), used to
+    /// pick a readable foreground over this colour.
+    #[inline]
+    pub const fn luminance(self) -> u8 {
+        ((self.r as u32 * 77 + self.g as u32 * 150 + self.b as u32 * 29) >> 8) as u8
+    }
+}
+
 /// A closed `[lo, hi)` band over a normalised `[0, ONE)` field. A field `v` is in band
 /// when `lo <= v < hi`.
 pub type Band = (Fixed, Fixed);
 
-/// A biome: a named terrain class with the field ranges that recognise it and the glyph
-/// that renders it.
+/// A biome: a named terrain class with the field ranges that recognise it, the glyph that
+/// renders it in text, and the colour that paints it in a window.
 #[derive(Clone, Debug)]
 pub struct BiomeDef {
     pub id: BiomeId,
     pub name: String,
     pub glyph: char,
+    pub color: Rgb,
     pub elevation: Band,
     pub moisture: Band,
     pub temperature: Band,
@@ -103,6 +136,15 @@ impl BiomeSet {
             .unwrap_or("?")
     }
 
+    /// The display colour for a biome, or a neutral grey if the id is unknown.
+    pub fn color(&self, id: BiomeId) -> Rgb {
+        self.biomes
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| b.color)
+            .unwrap_or(Rgb::new(128, 128, 128))
+    }
+
     /// The number of biomes in the set.
     pub fn len(&self) -> usize {
         self.biomes.len()
@@ -114,44 +156,67 @@ impl BiomeSet {
     }
 
     /// A clearly labelled DEVELOPMENT FIXTURE biome set, so the first map slice has
-    /// something recognisable to generate and view. The bands are scaffolding, not
-    /// owner-reserved values; the authoritative biome data and thresholds are owner and
-    /// data choices for calibration. Ordered by priority: water and high ground first,
-    /// then the lowland biomes by moisture and temperature, with grassland as the catch.
+    /// something recognisable to generate and view. The bands and colours are scaffolding,
+    /// not owner-reserved values; the authoritative biome data, thresholds, and palette are
+    /// owner and data choices for calibration. Ordered by priority: water and high ground
+    /// first, then the lowland biomes by moisture and temperature, with grassland as the
+    /// catch.
     pub fn dev_default() -> BiomeSet {
         // Percentage helper over the normalised [0, ONE) field range.
         let p = |n: i64| Fixed::from_ratio(n, 100);
         // "Any value in range" sentinel: a band wider than the field can reach.
         let any: Band = (Fixed::ZERO, Fixed::from_int(2));
         let mut id = 0u16;
-        let mut def =
-            |name: &str, glyph: char, elevation: Band, moisture: Band, temperature: Band| {
-                let d = BiomeDef {
-                    id: BiomeId(id),
-                    name: name.to_string(),
-                    glyph,
-                    elevation,
-                    moisture,
-                    temperature,
-                };
-                id += 1;
-                d
+        let mut def = |name: &str,
+                       glyph: char,
+                       color: Rgb,
+                       elevation: Band,
+                       moisture: Band,
+                       temperature: Band| {
+            let d = BiomeDef {
+                id: BiomeId(id),
+                name: name.to_string(),
+                glyph,
+                color,
+                elevation,
+                moisture,
+                temperature,
             };
+            id += 1;
+            d
+        };
+        let rgb = Rgb::new;
         let biomes = vec![
-            def("ocean", '~', (p(0), p(40)), any, any),
-            def("coast", '.', (p(40), p(45)), any, any),
+            def("ocean", '~', rgb(28, 78, 156), (p(0), p(40)), any, any),
+            def("coast", '.', rgb(214, 203, 138), (p(40), p(45)), any, any),
             def(
                 "snowcap",
                 '*',
+                rgb(244, 246, 250),
                 (p(78), Fixed::from_int(2)),
                 any,
                 (p(0), p(35)),
             ),
-            def("mountain", '^', (p(75), Fixed::from_int(2)), any, any),
-            def("tundra", ',', (p(45), p(75)), any, (p(0), p(35))),
+            def(
+                "mountain",
+                '^',
+                rgb(124, 113, 102),
+                (p(75), Fixed::from_int(2)),
+                any,
+                any,
+            ),
+            def(
+                "tundra",
+                ',',
+                rgb(170, 178, 158),
+                (p(45), p(75)),
+                any,
+                (p(0), p(35)),
+            ),
             def(
                 "desert",
                 ':',
+                rgb(222, 198, 120),
                 (p(45), p(75)),
                 (p(0), p(30)),
                 (p(35), Fixed::from_int(2)),
@@ -159,11 +224,19 @@ impl BiomeSet {
             def(
                 "forest",
                 '#',
+                rgb(34, 110, 52),
                 (p(45), p(75)),
                 (p(55), Fixed::from_int(2)),
                 (p(35), Fixed::from_int(2)),
             ),
-            def("grassland", '"', (p(45), p(75)), any, any),
+            def(
+                "grassland",
+                '"',
+                rgb(112, 168, 74),
+                (p(45), p(75)),
+                any,
+                any,
+            ),
         ];
         // The grassland catch is the last entry; its id is the fallback.
         let fallback = BiomeId(id - 1);
@@ -201,6 +274,24 @@ mod tests {
         let set = BiomeSet::dev_default();
         assert_eq!(set.glyph(BiomeId(999)), '?');
         assert_eq!(set.name(BiomeId(999)), "?");
+        assert_eq!(set.color(BiomeId(999)), Rgb::new(128, 128, 128), "a neutral grey");
+    }
+
+    #[test]
+    fn every_biome_has_a_distinct_colour() {
+        let set = BiomeSet::dev_default();
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..set.len() as u16 {
+            assert!(seen.insert(set.color(BiomeId(i)).pack()), "colours are distinct");
+        }
+    }
+
+    #[test]
+    fn rgb_packs_and_weighs_as_expected() {
+        assert_eq!(Rgb::new(0x12, 0x34, 0x56).pack(), 0x0012_3456);
+        assert_eq!(Rgb::new(0, 0, 0).luminance(), 0);
+        assert_eq!(Rgb::new(255, 255, 255).luminance(), 255);
+        assert!(Rgb::new(255, 255, 255).luminance() > Rgb::new(28, 78, 156).luminance());
     }
 
     #[test]

@@ -21,11 +21,15 @@
 //! read. Both are pure functions of the tree and the biome glyphs, so the view is a read of
 //! canon and never writes it (Principle 10, observer independence, design Part 54): two
 //! cameras at different zooms over the same world draw consistent pictures and neither
-//! perturbs the simulation. The render is plain CPU text; the GPU multi-scale path (Part 14)
-//! is a later swap of the same reads.
+//! perturbs the simulation. Each read comes in three forms: a plain glyph frame, a
+//! truecolor glyph frame for a terminal that supports 24-bit ANSI ([`whole_map_frame_color`],
+//! [`Camera::frame_color`]), and an RGB pixel buffer for a window ([`Camera::paint`]). The
+//! colour is presentation data on the biome (it never enters canonical state), so painting
+//! the world in colour leaves determinism untouched. The GPU multi-scale path (Part 14) is a
+//! later swap of these same reads.
 
 use crate::lod::QuadTree;
-use crate::terrain::BiomeSet;
+use crate::terrain::{BiomeSet, Rgb};
 use crate::topology::Coord3;
 
 /// The glyph for a quadtree node: the dominant biome's glyph, or a space for a node off the
@@ -35,6 +39,32 @@ fn node_glyph(tree: &QuadTree, biomes: &BiomeSet, level: u32, nx: i32, ny: i32) 
     match tree.node(level, nx, ny) {
         Some(s) => biomes.glyph(s.dominant),
         None => ' ',
+    }
+}
+
+/// The colour of a quadtree node: the dominant biome's colour, or `None` for a node off the
+/// world.
+#[inline]
+fn node_color(tree: &QuadTree, biomes: &BiomeSet, level: u32, nx: i32, ny: i32) -> Option<Rgb> {
+    tree.node(level, nx, ny).map(|s| biomes.color(s.dominant))
+}
+
+/// Append one truecolor cell to `s`: the biome colour as the background with a
+/// luminance-chosen foreground glyph, then a reset. An off-world cell (`None`) is a plain
+/// space, so panning past the edge stays blank.
+fn push_ansi_cell(s: &mut String, color: Option<Rgb>, glyph: char) {
+    use std::fmt::Write as _;
+    match color {
+        Some(c) => {
+            let fg = if c.luminance() > 140 { (0, 0, 0) } else { (235, 235, 235) };
+            // \x1b[48;2;r;g;bm sets the background, \x1b[38;2;r;g;bm the foreground.
+            let _ = write!(
+                s,
+                "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+                c.r, c.g, c.b, fg.0, fg.1, fg.2, glyph
+            );
+        }
+        None => s.push(' '),
     }
 }
 
@@ -52,6 +82,29 @@ pub fn whole_map_frame(tree: &QuadTree, biomes: &BiomeSet, zoom: u32) -> String 
     for ny in 0..rows {
         for nx in 0..cols {
             s.push(node_glyph(tree, biomes, level, nx, ny));
+        }
+        s.push('\n');
+    }
+    s
+}
+
+/// The truecolor twin of [`whole_map_frame`]: the same overview at a zoom level, each cell
+/// painted with its biome colour (background) and glyph (foreground) using 24-bit ANSI
+/// escapes, one row per line. Renders in colour in a terminal that supports truecolor
+/// (Windows Terminal, most modern emulators).
+pub fn whole_map_frame_color(tree: &QuadTree, biomes: &BiomeSet, zoom: u32) -> String {
+    let level = zoom.min(tree.depth());
+    let side = tree.node_side(level);
+    let cols = div_ceil(tree.width(), side);
+    let rows = div_ceil(tree.height(), side);
+    let mut s = String::with_capacity(((cols * 24 + 1) * rows).max(0) as usize);
+    for ny in 0..rows {
+        for nx in 0..cols {
+            push_ansi_cell(
+                &mut s,
+                node_color(tree, biomes, level, nx, ny),
+                node_glyph(tree, biomes, level, nx, ny),
+            );
         }
         s.push('\n');
     }
@@ -104,6 +157,70 @@ impl Camera {
             s.push('\n');
         }
         s
+    }
+
+    /// The truecolor twin of [`Camera::frame`]: a `cols` by `rows` viewport centred on the
+    /// camera with each cell painted in its biome colour by 24-bit ANSI escapes.
+    pub fn frame_color(&self, tree: &QuadTree, biomes: &BiomeSet, cols: i32, rows: i32) -> String {
+        let cols = cols.max(0);
+        let rows = rows.max(0);
+        let level = self.level(tree);
+        let side = tree.node_side(level);
+        let cnx = self.center.x.div_euclid(side);
+        let cny = self.center.y.div_euclid(side);
+        let ox = cnx - cols / 2;
+        let oy = cny - rows / 2;
+        let mut s = String::with_capacity(((cols * 24 + 1) * rows) as usize);
+        for r in 0..rows {
+            for c in 0..cols {
+                push_ansi_cell(
+                    &mut s,
+                    node_color(tree, biomes, level, ox + c, oy + r),
+                    node_glyph(tree, biomes, level, ox + c, oy + r),
+                );
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    /// Paint the camera's view into a `px_w` by `px_h` RGB framebuffer (row-major
+    /// `0x00RRGGBB` words, the layout a window blits directly), each quadtree node drawn as a
+    /// `cell`-pixel square in its biome colour and any off-world pixel set to `bg`. The
+    /// camera centre sits at the middle of the buffer. This is a pure read of the tree, so
+    /// the window it feeds shows the world without ever writing canon (Principle 10).
+    pub fn paint(
+        &self,
+        tree: &QuadTree,
+        biomes: &BiomeSet,
+        px_w: usize,
+        px_h: usize,
+        cell: usize,
+        bg: Rgb,
+    ) -> Vec<u32> {
+        let cell = cell.max(1);
+        let level = self.level(tree);
+        let side = tree.node_side(level);
+        // The viewport in nodes, and the top-left node so the centre lands mid-buffer.
+        let cols = (px_w / cell).max(1) as i32;
+        let rows = (px_h / cell).max(1) as i32;
+        let cnx = self.center.x.div_euclid(side);
+        let cny = self.center.y.div_euclid(side);
+        let ox = cnx - cols / 2;
+        let oy = cny - rows / 2;
+        let bg = bg.pack();
+        let mut buf = vec![bg; px_w * px_h];
+        for py in 0..px_h {
+            let ny = oy + (py / cell) as i32;
+            let row = py * px_w;
+            for px in 0..px_w {
+                let nx = ox + (px / cell) as i32;
+                buf[row + px] = node_color(tree, biomes, level, nx, ny)
+                    .map(Rgb::pack)
+                    .unwrap_or(bg);
+            }
+        }
+        buf
     }
 }
 
@@ -222,5 +339,58 @@ mod tests {
         let cam = Camera::new(Coord3::ground(-1000, -1000), 5);
         let frame = cam.frame(&t, &b, 8, 4);
         assert!(frame.chars().all(|c| c == ' ' || c == '\n'), "off-world draws as space");
+    }
+
+    #[test]
+    fn the_colour_overview_carries_ansi_and_replays() {
+        let (t, _m, b) = tree(0xEA27, 48, 24);
+        let frame = whole_map_frame_color(&t, &b, 4);
+        assert!(frame.contains("\x1b[48;2;"), "cells set a truecolor background");
+        assert!(frame.contains("\x1b[0m"), "cells reset");
+        assert_eq!(frame, whole_map_frame_color(&t, &b, 4), "a colour view is a pure read");
+        // The same number of rows as the plain overview.
+        assert_eq!(
+            frame.lines().count(),
+            whole_map_frame(&t, &b, 4).lines().count()
+        );
+    }
+
+    #[test]
+    fn the_pixel_buffer_has_the_right_size_and_replays() {
+        let (t, _m, b) = tree(0xEA27, 96, 64);
+        let cam = Camera::new(Coord3::ground(48, 32), 5);
+        let bg = crate::terrain::Rgb::new(8, 8, 12);
+        let buf = cam.paint(&t, &b, 320, 200, 4, bg);
+        assert_eq!(buf.len(), 320 * 200, "one word per pixel");
+        assert_eq!(buf, cam.paint(&t, &b, 320, 200, 4, bg), "painting is a pure read");
+    }
+
+    #[test]
+    fn off_world_pixels_take_the_background() {
+        let (t, _m, b) = tree(0xEA27, 48, 24);
+        let bg = crate::terrain::Rgb::new(8, 8, 12);
+        // Centre far off the world: every pixel is the background colour.
+        let cam = Camera::new(Coord3::ground(-100000, -100000), 5);
+        let buf = cam.paint(&t, &b, 64, 64, 4, bg);
+        assert!(buf.iter().all(|&w| w == bg.pack()), "off-world is all background");
+    }
+
+    #[test]
+    fn a_painted_cell_matches_its_node_colour() {
+        let (t, _m, b) = tree(0xEA27, 96, 64);
+        let cam = Camera::new(Coord3::ground(48, 32), 5);
+        let bg = crate::terrain::Rgb::new(8, 8, 12);
+        let (w, h, cell) = (320usize, 200usize, 4usize);
+        let buf = cam.paint(&t, &b, w, h, cell, bg);
+        // The centre pixel's colour must be the colour of the node under the camera centre.
+        let level = cam.level(&t);
+        let side = t.node_side(level);
+        let want = node_color(&t, &b, level, cam.center.x.div_euclid(side), cam.center.y.div_euclid(side))
+            .map(crate::terrain::Rgb::pack)
+            .unwrap_or(bg.pack());
+        // The centre node sits at viewport centre (cols/2, rows/2), i.e. mid-buffer.
+        let cx = (w / cell / 2) * cell;
+        let cy = (h / cell / 2) * cell;
+        assert_eq!(buf[cy * w + cx], want, "the centre pixel is the centre node colour");
     }
 }

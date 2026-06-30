@@ -47,7 +47,7 @@ pub mod view;
 pub mod worldgen;
 
 pub use lod::{ChunkCoord, NodeSummary, QuadTree, CHUNK};
-pub use terrain::{BiomeDef, BiomeId, BiomeSet};
+pub use terrain::{BiomeDef, BiomeId, BiomeSet, Rgb};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
 pub use view::Camera;
 pub use worldgen::{Tile, TileMap, WorldgenParams};
