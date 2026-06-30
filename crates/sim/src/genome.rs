@@ -32,13 +32,21 @@
 //! [`GeneSet`]. Anatomy is intentionally absent (25.1): which body parts a body plan has
 //! is its own reserved question.
 //!
-//! Everything here is integer and fixed-point and a pure function of the genome and the
-//! gene set, so a phenotype is bit-identical across machines and thread counts. What this
-//! brick does not yet build, and what follows it: inheritance (segregation and
-//! recombination), mutation, the bounded epistasis lookup, the two-tier allele-frequency
-//! pool with Hardy-Weinberg promotion, and deep-time drift and selection (25.5, 25.7,
-//! 25.8). The per-race genetic scheme is represented here only by its id on a genome;
-//! its reproduction and inheritance variants arrive with the inheritance brick.
+//! Everything here is integer and fixed-point with counter-keyed RNG, so a genome, a
+//! phenotype, and a whole population's history are bit-identical across machines and
+//! thread counts. This module now carries the genome representation and expression (25.1,
+//! 25.3, 25.4), individual inheritance through the [`GeneticScheme`] (segregation,
+//! recombination, and discrete-state mutation; 25.2, 25.4, 25.5), and the aggregate-tier
+//! [`GenePool`] with Wright-Fisher drift, directional selection, genetic distance,
+//! declared speciation, and the two-tier promotion and demotion crossing (25.7, 25.8).
+//!
+//! What remains deferred, and why: the bounded epistasis lookup (25.4); the quantitative
+//! breeding-value tier (the breeder's-equation channel means alongside the discrete
+//! allele frequencies); the continuous additive mutation step and the infinitesimal
+//! segregation noise, which need the reserved integer-Gaussian approximation of 25.10;
+//! multi-allele loci (the pool is biallelic for now); and the large-Ne Wright-Fisher
+//! approximation, the genetic-distance measure (a fixation index versus a Nei distance),
+//! and the speciation and selection calibrations, which are owner-reserved choices.
 
 use civsim_core::{DrawKey, Fixed, Phase};
 
@@ -515,6 +523,176 @@ impl GeneticScheme {
     }
 }
 
+// --- The aggregate tier: allele-frequency pools and deep-time evolution (design 25.7,
+// 25.8) ---
+
+/// An aggregate-tier population: per-locus biallelic allele-state frequencies advanced
+/// statistically over deep time. The masses live here as frequency vectors rather than
+/// modelled individuals, which is what makes a deep-time radiation cheap; a promoted being
+/// carries an explicit [`Genome`] sampled from the pool, and a demoted being folds back
+/// into it. Biallelic per locus is the starting case; multi-allele loci and the
+/// quantitative breeding-value tier (the breeder's-equation channel means) are follow-ons.
+/// Every operation is integer and fixed-point with counter-keyed RNG, so a population's
+/// whole history is part of the world's reproducible identity.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GenePool {
+    /// The genetic scheme this population runs.
+    pub scheme: SchemeId,
+    /// The effective population size Ne (a reserved owner value supplied as data); it sets
+    /// the strength of drift, since a smaller Ne drifts harder.
+    pub effective_size: u32,
+    /// Per locus, the frequency of allele state 1 in `[0,1]`; state 0's frequency is the
+    /// complement.
+    freqs: Vec<Fixed>,
+}
+
+impl GenePool {
+    /// A pool over the given per-locus state-1 frequencies.
+    pub fn new(scheme: SchemeId, effective_size: u32, freqs: Vec<Fixed>) -> Self {
+        GenePool {
+            scheme,
+            effective_size,
+            freqs,
+        }
+    }
+
+    /// The number of loci tracked.
+    pub fn loci(&self) -> usize {
+        self.freqs.len()
+    }
+
+    /// The state-1 frequency at a locus, or `None` if out of range.
+    pub fn freq(&self, locus: usize) -> Option<Fixed> {
+        self.freqs.get(locus).copied()
+    }
+
+    /// One generation of Wright-Fisher drift: each locus's frequency is resampled as the
+    /// fraction of `2*Ne` gametes that carry state 1, each gamete drawn by counter-RNG
+    /// against the current frequency. Exact (a sum of Bernoulli draws), integer and
+    /// fixed-point with no float, so a population's drift is bit-identical. For very large
+    /// Ne the exact sum is costly and the design reserves a Gaussian approximation; the
+    /// method and its precision are an owner decision (25.10), so only the exact sampler is
+    /// built here. A fixed locus (frequency 0 or 1) cannot drift.
+    pub fn drift(&mut self, seed: u64, pool_id: u64, generation: u64) {
+        let two_ne = self.effective_size.saturating_mul(2);
+        if two_ne == 0 {
+            return;
+        }
+        for (locus, p) in self.freqs.iter_mut().enumerate() {
+            let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
+            let mut count: u32 = 0;
+            for k in 0..two_ne {
+                if rng.unit_fixed(k as u64) < *p {
+                    count += 1;
+                }
+            }
+            *p = Fixed::from_ratio(count as i64, two_ne as i64);
+        }
+    }
+
+    /// Directional selection by a per-locus selection coefficient (state 1's relative
+    /// fitness is `1 + s`): `p' = p(1+s) / (1 + p*s)`. The coefficients are reserved owner
+    /// values supplied as data (the selection-differential scaling of 25.7). Deterministic
+    /// fixed-point with no sampling; a coefficient of zero leaves a locus unchanged.
+    pub fn select(&mut self, coefficients: &[Fixed]) {
+        for (p, &s) in self.freqs.iter_mut().zip(coefficients.iter()) {
+            let den = Fixed::ONE + p.mul(s);
+            if den != Fixed::ZERO {
+                *p = p
+                    .mul(Fixed::ONE + s)
+                    .div(den)
+                    .clamp(Fixed::ZERO, Fixed::ONE);
+            }
+        }
+    }
+
+    /// A fixed-point genetic distance to another pool: the mean over shared loci of the
+    /// absolute frequency difference. This is the structural divergence the speciation test
+    /// reads; the exact population-genetics measure (a fixation index versus a Nei
+    /// distance) is a reserved owner choice (25.7), so this interim measure stands until it
+    /// is set.
+    pub fn distance(&self, other: &GenePool) -> Fixed {
+        let n = self.freqs.len().min(other.freqs.len());
+        if n == 0 {
+            return Fixed::ZERO;
+        }
+        let mut acc = Fixed::ZERO;
+        for i in 0..n {
+            let d = self.freqs[i] - other.freqs[i];
+            acc += if d < Fixed::ZERO { Fixed::ZERO - d } else { d };
+        }
+        acc.div(Fixed::from_int(n as i32))
+    }
+
+    /// Whether two pools have diverged past a reserved speciation distance threshold, the
+    /// declared-rather-than-scripted speciation of design 25.7.
+    pub fn speciated(&self, other: &GenePool, threshold: Fixed) -> bool {
+        self.distance(other) >= threshold
+    }
+
+    /// Promote an explicit genome from the pool by sampling, per locus, `ploidy` allele
+    /// states from the frequencies (Hardy-Weinberg: each allele drawn independently), keyed
+    /// on the new being's id so the individual is reproducible and statistically consistent
+    /// with the pool (design 25.8). The additive value is left at zero here (the
+    /// quantitative breeding-value tier is a follow-on); the discrete state is what the
+    /// pool tracks.
+    pub fn promote(&self, seed: u64, individual_id: u64, ploidy: usize) -> Genome {
+        let mut haps = Vec::with_capacity(ploidy);
+        for h in 0..ploidy {
+            let rng = DrawKey::pair(individual_id, h as u64, 0, Phase::PROMOTE).rng(seed);
+            let alleles = self
+                .freqs
+                .iter()
+                .enumerate()
+                .map(|(locus, &p)| {
+                    let s = if rng.unit_fixed(locus as u64) < p {
+                        1u16
+                    } else {
+                        0
+                    };
+                    Allele {
+                        additive: Fixed::ZERO,
+                        state: AlleleState(s),
+                        origin: individual_id as u32,
+                    }
+                })
+                .collect();
+            haps.push(Haplotype { alleles });
+        }
+        Genome {
+            scheme: self.scheme,
+            haps,
+        }
+    }
+
+    /// Fold a demoted individual's genotype back into the pool's frequencies (design 25.8):
+    /// each locus's frequency moves toward the individual's state-1 fraction, weighted by
+    /// the pool's size, with fixed rounding. Linkage disequilibrium and family structure
+    /// are lost, the documented cost of demotion.
+    pub fn demote(&mut self, genome: &Genome) {
+        let two_ne = (self.effective_size.saturating_mul(2)).min(i32::MAX as u32) as i32;
+        for (locus, p) in self.freqs.iter_mut().enumerate() {
+            let total: i32 = genome
+                .haps
+                .iter()
+                .filter_map(|h| h.alleles.get(locus))
+                .count() as i32;
+            if total == 0 {
+                continue;
+            }
+            let ones: i32 = genome
+                .haps
+                .iter()
+                .filter_map(|h| h.alleles.get(locus))
+                .filter(|a| a.state == AlleleState(1))
+                .count() as i32;
+            let numerator = p.mul(Fixed::from_int(two_ne)) + Fixed::from_int(ones);
+            let denom = Fixed::from_int(two_ne + total);
+            *p = numerator.div(denom).clamp(Fixed::ZERO, Fixed::ONE);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,6 +1056,114 @@ mod tests {
                 .all(|a| a.state == AlleleState(0)),
             "a zero mutation rate leaves every state untouched"
         );
+    }
+
+    // --- The aggregate tier: pools and deep-time evolution (design 25.7, 25.8) ---
+
+    #[test]
+    fn drift_leaves_a_fixed_locus_and_stays_in_range_and_replays() {
+        // A locus fixed at 0 or 1 cannot drift; a polymorphic locus drifts within [0,1] and
+        // replays bit for bit from the seed.
+        let mut p = GenePool::new(
+            SCHEME,
+            8,
+            vec![Fixed::ZERO, Fixed::ONE, Fixed::from_ratio(1, 2)],
+        );
+        let before = p.clone();
+        p.drift(0xD1F7, 1, 0);
+        assert_eq!(
+            p.freq(0),
+            Some(Fixed::ZERO),
+            "a locus fixed at 0 stays fixed"
+        );
+        assert_eq!(
+            p.freq(1),
+            Some(Fixed::ONE),
+            "a locus fixed at 1 stays fixed"
+        );
+        let mid = p.freq(2).unwrap();
+        assert!(
+            mid >= Fixed::ZERO && mid <= Fixed::ONE,
+            "drift stays in range"
+        );
+        // Replay: the same pool drifts identically.
+        let mut q = before;
+        q.drift(0xD1F7, 1, 0);
+        assert_eq!(p, q, "drift replays bit for bit");
+    }
+
+    #[test]
+    fn selection_pushes_frequency_and_zero_leaves_it() {
+        let mut p = GenePool::new(
+            SCHEME,
+            100,
+            vec![Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2)],
+        );
+        // A positive coefficient on locus 0, none on locus 1.
+        p.select(&[Fixed::from_ratio(1, 2), Fixed::ZERO]);
+        assert!(
+            p.freq(0).unwrap() > Fixed::from_ratio(1, 2),
+            "selection raised state 1"
+        );
+        assert_eq!(
+            p.freq(1),
+            Some(Fixed::from_ratio(1, 2)),
+            "no coefficient, no change"
+        );
+    }
+
+    #[test]
+    fn distance_is_zero_for_identical_and_one_for_opposite() {
+        let a = GenePool::new(SCHEME, 10, vec![Fixed::ONE, Fixed::ZERO]);
+        let same = a.clone();
+        let opposite = GenePool::new(SCHEME, 10, vec![Fixed::ZERO, Fixed::ONE]);
+        assert_eq!(a.distance(&same), Fixed::ZERO);
+        assert_eq!(a.distance(&opposite), Fixed::ONE);
+        assert!(a.speciated(&opposite, Fixed::from_ratio(1, 2)));
+        assert!(!a.speciated(&same, Fixed::from_ratio(1, 2)));
+    }
+
+    #[test]
+    fn promotion_samples_a_genome_and_replays() {
+        // A pool fixed at all-state-1 promotes a diploid genome of all state 1.
+        let pool = GenePool::new(SCHEME, 50, vec![Fixed::ONE, Fixed::ONE, Fixed::ONE]);
+        let g = pool.promote(0xBEEF, 7, 2);
+        assert_eq!(g.ploidy(), 2);
+        assert!(g
+            .haps
+            .iter()
+            .all(|h| h.alleles.iter().all(|a| a.state == AlleleState(1))));
+        // Same id and seed reproduce the same individual.
+        let again = pool.promote(0xBEEF, 7, 2);
+        assert_eq!(g, again, "promotion replays bit for bit");
+    }
+
+    #[test]
+    fn demotion_folds_a_genotype_back_toward_its_states() {
+        // A pool at frequency 1/2 that absorbs an all-state-1 individual moves upward.
+        let mut pool = GenePool::new(SCHEME, 4, vec![Fixed::from_ratio(1, 2)]);
+        let individual = Genome {
+            scheme: SCHEME,
+            haps: vec![
+                Haplotype {
+                    alleles: vec![Allele {
+                        additive: Fixed::ZERO,
+                        state: AlleleState(1),
+                        origin: 0,
+                    }],
+                },
+                Haplotype {
+                    alleles: vec![Allele {
+                        additive: Fixed::ZERO,
+                        state: AlleleState(1),
+                        origin: 0,
+                    }],
+                },
+            ],
+        };
+        pool.demote(&individual);
+        // (1/2 * 8 + 2) / (8 + 2) = 6/10 = 3/5 > 1/2.
+        assert_eq!(pool.freq(0), Some(Fixed::from_ratio(3, 5)));
     }
 
     #[test]

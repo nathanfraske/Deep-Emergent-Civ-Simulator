@@ -62,6 +62,12 @@ impl Phase {
     /// A reproduction draw (gamete strand choice, crossover, point mutation), keyed on the
     /// contributing parent and the locus so a lineage is bit-identical (design 25.4, 25.5).
     pub const REPRODUCE: Phase = Phase(0x08);
+    /// A Wright-Fisher drift resample of an allele-frequency pool over one deep-time
+    /// generation (design 25.7), keyed on the pool and the locus.
+    pub const EVOLVE: Phase = Phase(0x09);
+    /// Sampling an explicit genome from a pool's frequencies on promotion (design 25.8),
+    /// keyed on the new being's id.
+    pub const PROMOTE: Phase = Phase(0x0A);
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);
