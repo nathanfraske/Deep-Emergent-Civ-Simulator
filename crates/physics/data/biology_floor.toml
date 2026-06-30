@@ -1,9 +1,14 @@
 # The wave-0 biology-and-composition substrate floor (R-PHYS-BIO), expressed as data
-# over the QuantityAxis / InteractionLaw registry. Every axis range is reserved-with-basis
-# (the owner sets the bound; reading it unset fails loud). The floor carries axes and
-# laws only; the substances (the generated species) are R-BIOSPHERE's output over this
-# floor, never authored here. Source: design Part 41 (R-PHYS-BIO), record 62.16, and
-# docs/working/BIOSPHERE_SUBSTRATE_SCOPED_PROPOSAL.md.
+# over the QuantityAxis / InteractionLaw registry. The axis ranges below are SET to the
+# owner's confirmed values (2026-06-30, select-confirm), each the cited food-composition
+# or toxicology bound, every value a tunable lever revisable on the owner's signoff. One
+# axis stays reserved: the consumer reference_tolerance, whose pg/kg-to-g/kg envelope
+# exceeds one Q32.32 scale, so its scale is per toxin class (settled under R-UNITS-PIN).
+# The floor carries axes and laws only; the substances (the generated species) are
+# R-BIOSPHERE's output over this floor. Mechanism: design Part 41 (R-PHYS-BIO), record
+# 62.16, and docs/working/BIOSPHERE_SUBSTRATE_SCOPED_PROPOSAL.md. The energy_density axis
+# stores gross bomb-calorimetry energy (the owner's Decision 5); consumer-available
+# energy is a per-consumer derived measure over the assimilable axes.
 
 # --- Tier-0 gross composition axes (food-side, mass fractions of fresh tissue) ---
 
@@ -14,8 +19,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the closed [0, 1] mass-fraction interval"
-real = "USDA FoodData Central; FAO/INFOODS"
+range_lo = "0"
+range_hi = "1.0"
+real = "USDA FoodData Central; FAO/INFOODS (water-rich tissues to ~0.96, definitional ceiling 1.0)"
 
 [[axis]]
 id = "bio.energy_density"
@@ -24,8 +30,9 @@ unit = "kJ/g"
 dimension = "2,0,-2,0"
 scale = "kJ/g"
 tier = 0
-range_reserved = "the lipid ceiling ~38 kJ/g"
-real = "Atwater, Merrill and Watt, USDA Handbook 74"
+range_lo = "0"
+range_hi = "38"
+real = "Atwater, Merrill and Watt, USDA Agriculture Handbook 74 (pure-lipid gross ~38.9 kJ/g)"
 
 [[axis]]
 id = "bio.protein_fraction"
@@ -34,8 +41,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the lean-dried ceiling ~0.9"
-real = "USDA FoodData Central; WHO/FAO TRS 935"
+range_lo = "0"
+range_hi = "0.9"
+real = "USDA FoodData Central; WHO/FAO TRS 935 (lean-dried isolates ~0.9)"
 
 [[axis]]
 id = "bio.lipid_fraction"
@@ -44,8 +52,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the fat ceiling ~1.0"
-real = "USDA FoodData Central"
+range_lo = "0"
+range_hi = "1.0"
+real = "USDA FoodData Central (rendered fats and pressed oils ~1.0)"
 
 [[axis]]
 id = "bio.nonstructural_carbohydrate_fraction"
@@ -54,8 +63,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the starch and sugar ceiling ~1.0"
-real = "FAO carbohydrate paper 66; Van Soest et al. (1991)"
+range_lo = "0"
+range_hi = "1.0"
+real = "FAO Food and Nutrition Paper 66; USDA FoodData Central (refined sugar and starch ~1.0)"
 
 [[axis]]
 id = "bio.structural_carbohydrate_fraction"
@@ -64,8 +74,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the wood ceiling ~0.9"
-real = "Van Soest et al. (1991)"
+range_lo = "0"
+range_hi = "0.9"
+real = "Van Soest et al. (1991) (wood lignocellulose ~0.9 by NDF plus lignin)"
 
 [[axis]]
 id = "bio.mineral_ash_fraction"
@@ -74,18 +85,20 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the bone ceiling ~1.0"
-real = "Greenfield and Southgate, Food Composition Data (FAO 2003)"
+range_lo = "0"
+range_hi = "1.0"
+real = "Greenfield and Southgate, Food Composition Data (FAO 2003) (mineral salts and bone ash ~1.0)"
 
 [[axis]]
 id = "bio.toxin_load_coarse"
-measures = "the Tier-0 total toxin mass, the saturating sum of the Tier-1 toxin-class concentrations in their shared scale"
+measures = "the Tier-0 total toxin mass, the saturating sum of the Tier-1 toxin-class concentrations"
 unit = "mg/kg"
 dimension = "dimensionless"
 scale = "mg/kg"
 tier = 0
-range_reserved = "the sum of the documented per-class concentration maxima"
-real = "Casarett and Doull's Toxicology (Klaassen ed.)"
+range_lo = "0"
+range_hi = "59000"
+real = "Casarett and Doull's Toxicology; the ceiling is the sum of the registered per-class maxima (engine-derived as the registry grows)"
 
 # --- Tier-1 toxin-class concentration axes (a terran-chemistry starting registry; the
 # membership grows by demand-closure, the registry-population audit is R-BIO-REGISTRY) ---
@@ -97,18 +110,20 @@ unit = "mg/kg"
 dimension = "dimensionless"
 scale = "mg/kg"
 tier = 1
-range_reserved = "the documented alkaloid concentration envelope"
-real = "Wink (2003); Casarett and Doull's Toxicology"
+range_lo = "0"
+range_hi = "50000"
+real = "Wink (2003), Phytochemistry; Casarett and Doull's Toxicology (leaf and seed alkaloids to ~5 percent dry weight)"
 
 [[axis]]
 id = "bio.toxin.cyanogenic"
-measures = "cyanogenic and hydrolytic-release precursor concentration (preparation detoxifies)"
+measures = "cyanogenic and hydrolytic-release HCN-releasable concentration (preparation detoxifies)"
 unit = "mg/kg"
 dimension = "dimensionless"
 scale = "mg/kg"
 tier = 1
-range_reserved = "the documented cyanogenic-glycoside concentration envelope"
-real = "Noonan and Savage (1999)"
+range_lo = "0"
+range_hi = "4000"
+real = "Noonan and Savage (1999) (bitter cassava and almond ~1000 to 4000 mg HCN/kg)"
 
 [[axis]]
 id = "bio.toxin.cardiac_glycoside"
@@ -117,21 +132,23 @@ unit = "mg/kg"
 dimension = "dimensionless"
 scale = "mg/kg"
 tier = 1
-range_reserved = "the documented cardiac-glycoside concentration envelope"
-real = "Casarett and Doull's Toxicology, mechanism-tagged"
+range_lo = "0"
+range_hi = "5000"
+real = "Casarett and Doull's Toxicology, mechanism-tagged (foxglove cardenolides ~1500 to 4000 mg/kg)"
 
 # --- Consumer physiology axes (per-race, heritable under Part 25; an extensible
 # relation-kind registry, not a closed enum) ---
 
 [[axis]]
 id = "bio.consumer.requirement"
-measures = "the per-nutrient-class deficiency floor (a not-required sentinel distinct from zero)"
+measures = "the per-nutrient-class deficiency floor (a not-required sentinel distinct from zero; trace classes warrant a finer per-quantity scale)"
 unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the published requirement for an anchoring taxon scaled allometrically, never a human default"
-real = "WHO/FAO requirements (TRS 935; 2004)"
+range_lo = "0"
+range_hi = "1.0"
+real = "WHO/FAO TRS 935 (2007); WHO/FAO vitamin and mineral requirements (2004); an anchoring taxon scaled allometrically, never a human default"
 
 [[axis]]
 id = "bio.consumer.assimilation"
@@ -140,8 +157,9 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the closed [0, 1] interval"
-real = "Stevens and Hume, Comparative Physiology of the Vertebrate Digestive System"
+range_lo = "0"
+range_hi = "1.0"
+real = "Stevens and Hume, Comparative Physiology of the Vertebrate Digestive System (definitional efficiency)"
 
 [[axis]]
 id = "bio.consumer.fermentation"
@@ -150,17 +168,18 @@ unit = "fraction"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the symbiont-dependent extraction envelope"
-real = "Stevens and Hume"
+range_lo = "0"
+range_hi = "0.85"
+real = "Stevens and Hume (ruminant NDF digestibility ~0.8 to 0.85, symbiont-dependent)"
 
 [[axis]]
 id = "bio.consumer.reference_tolerance"
 measures = "the per-toxin-class reference dose harm is measured against (a not-applicable sentinel distinct from zero)"
 unit = "mg/kg-body"
 dimension = "dimensionless"
-scale = "ng/kg-capable"
+scale = "per-class (ng/kg-body to mg/kg-body)"
 tier = 0
-range_reserved = "the published tolerance for an anchoring taxon, on a per-quantity scale resolving the ng/kg extreme"
+range_reserved = "the published tolerance for an anchoring taxon; reserved because the pg/kg-to-g/kg envelope exceeds one Q32.32 scale, so the scale is per toxin class (R-UNITS-PIN)"
 real = "Casarett and Doull's Toxicology; Wilderman et al. (woodrat P450)"
 
 [[axis]]
@@ -170,8 +189,9 @@ unit = "integer"
 dimension = "dimensionless"
 scale = "1"
 tier = 0
-range_reserved = "the small integer matching the observed sigmoidicity for the class and consumer"
-real = "the Hill equation (Alon, An Introduction to Systems Biology, Appendix A)"
+range_lo = "1"
+range_hi = "3"
+real = "the Hill equation (Alon, Appendix A); the small-integer set is engine-imposed, the specific n the owner's per-class call"
 
 # --- The three interaction laws (the kernels are fixed Rust in laws.rs) ---
 

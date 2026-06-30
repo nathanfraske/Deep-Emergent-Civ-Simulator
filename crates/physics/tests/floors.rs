@@ -88,15 +88,40 @@ fn the_pressure_class_axes_share_the_pinned_megapascal_scale() {
 }
 
 #[test]
-fn every_reserved_range_is_in_the_review_queue_and_fails_loud() {
-    let reg = mechanical();
-    // The mechanical floor sets only the pressure scale; every range is reserved, so the
-    // whole axis set is the owner's review queue and reading any range fails loud.
-    assert_eq!(reg.reserved_axis_ids().len(), reg.axis_count());
-    let density = reg.axis("mat.density").unwrap();
+fn ranges_are_set_with_only_the_scale_pending_axes_reserved() {
+    use civsim_core::Fixed;
+    // The owner's confirmed values are set; only the two axes whose per-quantity scale is
+    // unsettled (R-UNITS-PIN) stay reserved: the geometry second moment of area and the
+    // per-class consumer reference tolerance.
+    let mech = mechanical();
     assert_eq!(
-        density.range.require("mat.density").unwrap_err(),
-        PhysicsError::ReservedRange("mat.density".to_string())
+        mech.reserved_axis_ids(),
+        vec!["mech.second_moment_of_area"],
+        "only the scale-pending geometry axis stays reserved"
+    );
+    // A set range now reads back the cited bound exactly.
+    let (lo, hi) = mech
+        .axis("mat.density")
+        .unwrap()
+        .range
+        .require("mat.density")
+        .unwrap();
+    assert_eq!(lo, Fixed::from_int(100));
+    assert_eq!(hi, Fixed::from_int(23000));
+    // The scale-pending axis still fails loud when read.
+    let smoa = mech.axis("mech.second_moment_of_area").unwrap();
+    assert_eq!(
+        smoa.range
+            .require("mech.second_moment_of_area")
+            .unwrap_err(),
+        PhysicsError::ReservedRange("mech.second_moment_of_area".to_string())
+    );
+
+    let bio = biology();
+    assert_eq!(
+        bio.reserved_axis_ids(),
+        vec!["bio.consumer.reference_tolerance"],
+        "only the per-class-scale tolerance stays reserved"
     );
 }
 
