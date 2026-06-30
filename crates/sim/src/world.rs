@@ -35,7 +35,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AccessObs, Mind, SharedBelief};
-use crate::axiom::IntrinsicBeliefs;
+use crate::axiom::{self, AxiomAxisId, IntrinsicBeliefs};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::dialogue::{
@@ -645,6 +645,48 @@ impl World {
     /// dawn).
     pub fn intrinsic_of(&self, id: StableId) -> Option<&IntrinsicBeliefs> {
         self.intrinsic.get(&id)
+    }
+
+    /// Set a being's intrinsic beliefs (used by the dawn seeding, by later inheritance, and by
+    /// tools and tests). The being need not already hold beliefs.
+    pub fn set_intrinsic(&mut self, id: StableId, beliefs: IntrinsicBeliefs) {
+        self.intrinsic.insert(id, beliefs);
+    }
+
+    /// Run one round of enculturation over a band on one axiom axis (design Part 28): each
+    /// member moves its stance toward the band's confidence-weighted mean stance, anchored to
+    /// its own innate seed by its effective stubbornness (the Friedkin-Johnsen rule). The mean
+    /// is computed once from the members' pre-update stances (a synchronous update), in a
+    /// canonical 128-bit order-independent reduction, so the round is bit-identical regardless
+    /// of member order or thread count. A member that does not hold the axis is left untouched
+    /// and does not enter the mean; if no member holds it (zero confidence), the round is a
+    /// no-op. This is not a culture-level kernel firing: the band's profile is the derived
+    /// aggregate of its members, and only members move. The bounded-confidence neighbour
+    /// selection and the conformist and prestige biases (which sharpen this into schism) are
+    /// the deferred next brick; this is the plain anchored average.
+    pub fn enculturate_band(&mut self, members: &[StableId], axis: AxiomAxisId) {
+        let mean = {
+            let pairs = members.iter().filter_map(|id| {
+                let intr = self.intrinsic.get(id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((ax.stance, ax.confidence))
+            });
+            match axiom::confidence_weighted_mean(pairs) {
+                Some(m) => m,
+                None => return,
+            }
+        };
+        for id in members {
+            if let Some(intr) = self.intrinsic.get_mut(id) {
+                let IntrinsicBeliefs {
+                    axioms, epistemic, ..
+                } = intr;
+                if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
+                }
+            }
+        }
     }
 
     /// Place a mind. Two minds in the same place are co-located, which is the condition

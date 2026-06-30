@@ -51,12 +51,16 @@
 //!   and disconfirming tags, as the paper specifies); a recency-weighted-pressure hybrid is
 //!   reserved for the stress-test batch.
 //!
-//! Deferred to later bricks (their dependencies are not built): enculturation (the
-//! Friedkin-Johnsen anchored average over a group), bounded-confidence schism (whose prestige
-//! arm waits on a status system), inheritance (the heritable-plus-encultured seed blend, on a
-//! new keyed `Phase`), calcification of unchallenged axioms, and the two level-of-detail
-//! group regimes. The numeric calibrations are reserved owner values (the `axiom.*` manifest
-//! entries), supplied as data, never invented here.
+//! Enculturation is now built on top of this brick: [`confidence_weighted_mean`] is the
+//! canonical group aggregate and [`enculturate`] is the Friedkin-Johnsen anchored average that
+//! moves a member toward its band's mean while anchoring it to its innate seed, wired over a
+//! band by [`crate::world::World::enculturate_band`].
+//!
+//! Still deferred to later bricks (their dependencies are not built): bounded-confidence
+//! schism (whose prestige arm waits on a status system), inheritance (the heritable-plus-
+//! encultured seed blend, on a new keyed `Phase`), calcification of unchallenged axioms, and
+//! the two level-of-detail group regimes. The numeric calibrations are reserved owner values
+//! (the `axiom.*` manifest entries), supplied as data, never invented here.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -509,6 +513,47 @@ pub fn entrenchment_threshold(curve: &Curve, rank: i32) -> Fixed {
     curve.eval(Fixed::from_int(rank))
 }
 
+/// The confidence-weighted mean stance of a group on one axiom axis (the group aggregate of
+/// design Part 28): `sum(stance * confidence) / sum(confidence)` over the members holding the
+/// axis. The accumulation is in 128-bit integer space and the division is a single final
+/// step, so the result is bit-identical regardless of the order the members are folded in or
+/// the thread count (Principle 3). Returns `None` if the total confidence is zero (no one to
+/// average), so the caller never divides by zero or invents a mean. This is the derived
+/// summary the enculturation pull and the deviation and fission tests read; it is never a
+/// culture-level kernel firing, only the aggregate of its members.
+pub fn confidence_weighted_mean(
+    stances: impl IntoIterator<Item = (Fixed, Fixed)>,
+) -> Option<Fixed> {
+    let mut numerator: i128 = 0;
+    let mut denominator: i128 = 0;
+    for (stance, confidence) in stances {
+        numerator += stance.mul(confidence).to_bits() as i128;
+        denominator += confidence.to_bits() as i128;
+    }
+    if denominator == 0 {
+        return None;
+    }
+    // Both accumulators are raw Q32.32 bit-sums; the mean in raw bits is (num << FRAC_BITS) /
+    // den, the same exact fixed-point ratio Fixed::from_ratio computes, done once.
+    let mean_bits = (numerator << (Fixed::FRAC_BITS as i128)) / denominator;
+    Some(Fixed::from_bits(mean_bits as i64))
+}
+
+/// The Friedkin-Johnsen enculturation update of one member's stance toward its group (design
+/// Part 28): `new = (1 - theta) * group_mean + theta * innate_seed`. The next stance is a
+/// convex blend of the confidence-weighted group mean it is exposed to and its own immutable
+/// innate seed (the FJ prejudice), weighted by the member's effective stubbornness `theta`
+/// ([`EpistemicStance::effective_stubbornness`]). A convex combination of bounded values, so
+/// it stays in range; theta at zero is the DeGroot pull to consensus, theta above zero keeps
+/// the member anchored to its seed, which is what holds a population in lasting disagreement
+/// rather than collapsing to one point (the bounded-confidence neighbour selection that
+/// refines which others a member is exposed to is the deferred schism brick).
+pub fn enculturate(group_mean: Fixed, innate_seed: Fixed, theta: Fixed) -> Fixed {
+    let theta = theta.clamp(Fixed::ZERO, Fixed::ONE);
+    ((Fixed::ONE - theta).mul(group_mean) + theta.mul(innate_seed))
+        .clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,5 +793,38 @@ mod tests {
         assert!(hi > lo, "a higher rank is harder to move");
         assert_eq!(lo, Fixed::from_int(1));
         assert_eq!(hi, Fixed::from_int(100));
+    }
+
+    #[test]
+    fn confidence_weighted_mean_weights_by_confidence_and_is_order_independent() {
+        // Equal confidence is a plain mean: (0 + 1) / 2 = 0.5.
+        let plain = confidence_weighted_mean([(Fixed::ZERO, Fixed::ONE), (Fixed::ONE, Fixed::ONE)]);
+        assert_eq!(plain, Some(Fixed::from_ratio(1, 2)));
+        // Weighted: stance 1 carries three times the confidence, so the mean leans to it:
+        // (0*1 + 1*3) / (1 + 3) = 0.75.
+        let weighted = [(Fixed::ZERO, Fixed::ONE), (Fixed::ONE, Fixed::from_int(3))];
+        let m = confidence_weighted_mean(weighted);
+        assert_eq!(m, Some(Fixed::from_ratio(3, 4)));
+        // Order-independent: the reversed sequence gives the same mean.
+        let rev = [(Fixed::ONE, Fixed::from_int(3)), (Fixed::ZERO, Fixed::ONE)];
+        assert_eq!(confidence_weighted_mean(rev), m);
+        // No confidence to average returns None, never a divide by zero or a fabricated mean.
+        assert_eq!(confidence_weighted_mean([(Fixed::ONE, Fixed::ZERO)]), None);
+        assert_eq!(confidence_weighted_mean(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn enculturate_anchors_to_the_seed_by_theta() {
+        let mean = Fixed::ONE;
+        let seed = Fixed::ZERO;
+        // theta 0 is DeGroot: the member moves fully to the group mean.
+        assert_eq!(enculturate(mean, seed, Fixed::ZERO), mean);
+        // theta 1 is full stubbornness: the member stays at its innate seed.
+        assert_eq!(enculturate(mean, seed, Fixed::ONE), seed);
+        // theta 0.5 blends halfway.
+        assert_eq!(
+            enculturate(mean, seed, Fixed::from_ratio(1, 2)),
+            Fixed::from_ratio(1, 2)
+        );
     }
 }
