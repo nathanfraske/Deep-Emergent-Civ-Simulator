@@ -65,7 +65,7 @@ pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedVa
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
-pub use language::{ConceptId, LanguageParams, Lexicon, WordId};
+pub use language::{CharacterPool, ConceptId, LanguageParams, Lexicon, Word};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use substrate::Substrate;
 pub use tom::{

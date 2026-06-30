@@ -26,7 +26,7 @@ use civsim_sim::decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId,
 };
 use civsim_sim::evidence::AttrKindId;
-use civsim_sim::language::{ConceptId, LanguageParams};
+use civsim_sim::language::{CharacterPool, ConceptId, LanguageParams};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::world::{Trace, World};
 
@@ -91,6 +91,13 @@ fn build(seed: u64) -> (World, Vec<StableId>) {
         .with_seed(seed);
     w.set_behaviour(behaviour());
     w.set_language(LanguageParams::from_manifest(&manifest).unwrap());
+    // A placeholder character pool (a dev fixture, not an authored phonetic inventory):
+    // words for a concept are built by sampling these syllables.
+    w.set_phonology(CharacterPool::new(
+        ["ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo", "ha", "du"].map(String::from),
+        2,
+        3,
+    ));
     w.set_concepts([CONCEPT]);
     let band: Vec<StableId> = (0..5).map(|_| w.spawn(Fixed::ONE)).collect();
     for &m in &band {
@@ -121,8 +128,8 @@ fn belief_str(w: &World, m: StableId) -> &'static str {
 
 fn word_str(w: &World, m: StableId) -> String {
     match w.word_for(m, CONCEPT) {
-        Some(word) => format!("{:04x}", word.0 & 0xffff),
-        None => "----".to_string(),
+        Some(word) => word.0,
+        None => "-".to_string(),
     }
 }
 
@@ -140,7 +147,7 @@ fn snapshot(w: &World, band: &[StableId], label: &str) {
     println!("    name    belief   word   doing");
     for (i, &m) in band.iter().enumerate() {
         println!(
-            "    {:<6}  {}   {}   {}",
+            "    {:<6}  {}   {:<6}   {}",
             NAMES[i],
             belief_str(w, m),
             word_str(w, m),
@@ -157,12 +164,12 @@ fn believers(w: &World, band: &[StableId]) -> usize {
 }
 
 fn distinct_words(w: &World, band: &[StableId]) -> usize {
-    let mut words: Vec<u64> = band
+    let mut words: Vec<String> = band
         .iter()
         .filter_map(|&m| w.word_for(m, CONCEPT))
         .map(|x| x.0)
         .collect();
-    words.sort_unstable();
+    words.sort();
     words.dedup();
     words.len()
 }

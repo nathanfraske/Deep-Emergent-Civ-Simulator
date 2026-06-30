@@ -38,7 +38,7 @@ use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::language::{ConceptId, LanguageParams, Lexicon, WordId};
+use crate::language::{CharacterPool, ConceptId, LanguageParams, Lexicon, Word};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
 
@@ -209,6 +209,9 @@ pub struct World {
     lexicons: BTreeMap<StableId, Lexicon>,
     /// The concepts a band coordinates words for (data).
     concepts: Vec<ConceptId>,
+    /// The character pool words are built from (data). None until set; the naming game is
+    /// then a no-op.
+    phonology: Option<CharacterPool>,
     /// The language calibration. None until set; the naming game is then a no-op.
     language: Option<LanguageParams>,
     events: EventLog,
@@ -243,6 +246,7 @@ impl World {
             trust: BTreeMap::new(),
             lexicons: BTreeMap::new(),
             concepts: Vec::new(),
+            phonology: None,
             language: None,
             events: EventLog::new(),
             belief_params,
@@ -318,9 +322,15 @@ impl World {
         self.language = Some(params);
     }
 
+    /// Install the character pool words are built from (data; each culture can have its
+    /// own). Until set, the naming game is a no-op.
+    pub fn set_phonology(&mut self, pool: CharacterPool) {
+        self.phonology = Some(pool);
+    }
+
     /// The word a mind uses for a concept, if it has settled on one.
-    pub fn word_for(&self, mind: StableId, concept: ConceptId) -> Option<WordId> {
-        self.lexicons.get(&mind)?.word_for(concept)
+    pub fn word_for(&self, mind: StableId, concept: ConceptId) -> Option<Word> {
+        self.lexicons.get(&mind)?.word_for(concept).cloned()
     }
 
     /// The current tick.
@@ -460,6 +470,10 @@ impl World {
             Some(l) => l,
             None => return,
         };
+        let pool = match self.phonology.as_ref() {
+            Some(p) if !p.is_empty() => p,
+            _ => return,
+        };
         if self.concepts.is_empty() {
             return;
         }
@@ -484,10 +498,10 @@ impl World {
             let pair = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_LANGUAGE]);
             let listener = listeners[pair.range_u32(0, listeners.len() as u32) as usize];
             let concept = self.concepts[pair.range_u32(1, self.concepts.len() as u32) as usize];
-            let existing = self
+            let existing: Option<Word> = self
                 .lexicons
                 .get(&speaker)
-                .and_then(|lex| lex.word_for(concept));
+                .and_then(|lex| lex.word_for(concept).cloned());
             let innovate = Rng::for_coords(
                 self.seed,
                 &[speaker.0, concept.0 as u64, self.clock, PHASE_INNOVATE],
@@ -496,18 +510,15 @@ impl World {
                 < lp.innovation_rate;
             let word = match existing {
                 Some(w) if !innovate => w,
-                _ => WordId(
-                    Rng::for_coords(
-                        self.seed,
-                        &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
-                    )
-                    .at(0),
-                ),
+                _ => pool.coin(Rng::for_coords(
+                    self.seed,
+                    &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
+                )),
             };
             self.lexicons
                 .entry(speaker)
                 .or_default()
-                .adopt(concept, word);
+                .adopt(concept, word.clone());
             self.lexicons
                 .entry(listener)
                 .or_default()
@@ -737,9 +748,13 @@ impl World {
             h.write_u32(t.place);
             h.write_stable(t.subject);
             h.write_u32(t.attr.0);
+            for v in &t.hyps {
+                h.write_u32(*v);
+            }
             h.write_u32(t.value);
             h.write_fixed(t.salience);
             h.write_fixed(t.weight);
+            h.write_stable(t.from);
         }
         // Trust edges, in (listener, speaker) order (the BTreeMap is already sorted).
         for ((listener, speaker), level) in &self.trust {
@@ -752,7 +767,8 @@ impl World {
             h.write_stable(*mind);
             for (concept, word) in lex.entries() {
                 h.write_u32(concept.0);
-                h.write_u64(word.0);
+                h.write_u64(word.0.len() as u64);
+                h.write_bytes(word.0.as_bytes());
             }
         }
         h.finish()
@@ -1138,9 +1154,14 @@ name = "said"
     }
 
     fn language_world() -> World {
-        use crate::language::LanguageParams;
+        use crate::language::{CharacterPool, LanguageParams};
         let mut w = World::new(params(), params(), AccessWeights::from_pairs([])).with_seed(0xABBA);
         w.set_concepts([ConceptId(1)]);
+        w.set_phonology(CharacterPool::new(
+            ["ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo"].map(String::from),
+            2,
+            3,
+        ));
         // Innovation off, so a band converges cleanly to one coined word.
         w.set_language(LanguageParams {
             innovation_rate: Fixed::ZERO,

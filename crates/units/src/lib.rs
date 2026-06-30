@@ -330,9 +330,27 @@ impl AbsoluteQuantity {
         let s1 = from_def.scale_bits as i32;
         let s2 = to_def.scale_bits as i32;
         let bits = if s2 >= s1 {
-            (self.bits as i128) << (s2 - s1)
+            // Up-scale by a left shift. A non-zero value shifted by 63 or more already
+            // exceeds the i64 range, so report it out of range rather than overflowing
+            // the i128 intermediate; a shift under 63 of an i64 value stays well inside
+            // i128. This honours the checked contract instead of panicking or wrapping.
+            let shift = (s2 - s1) as u32;
+            if self.bits == 0 {
+                0
+            } else if shift >= 63 {
+                return None;
+            } else {
+                (self.bits as i128) << shift
+            }
         } else {
-            idiv_round_half_even(self.bits as i128, 1i128 << (s1 - s2))
+            // Down-scale by a rounded division. Bound the shift so the divisor stays a
+            // positive power of two (1 << 127 would be i128::MIN); past that the result
+            // rounds to zero anyway, so report None rather than feed a bad denominator.
+            let shift = (s1 - s2) as u32;
+            if shift >= 127 {
+                return None;
+            }
+            idiv_round_half_even(self.bits as i128, 1i128 << shift)
         };
         if bits < i64::MIN as i128 || bits > i64::MAX as i128 {
             return None;

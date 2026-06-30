@@ -28,7 +28,7 @@ use civsim_sim::decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId,
 };
 use civsim_sim::evidence::AttrKindId;
-use civsim_sim::language::{ConceptId, LanguageParams};
+use civsim_sim::language::{CharacterPool, ConceptId, LanguageParams};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::world::{Trace, World};
 
@@ -97,6 +97,11 @@ fn dawn_band(seed: u64) -> (World, Vec<StableId>) {
         .with_seed(seed);
     w.set_behaviour(behaviour());
     w.set_language(LanguageParams::from_manifest(&manifest).expect("language fixture"));
+    w.set_phonology(CharacterPool::new(
+        ["ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo"].map(String::from),
+        2,
+        3,
+    ));
     w.set_concepts([ConceptId(1)]);
 
     let band: Vec<StableId> = (0..5).map(|_| w.spawn(Fixed::ONE)).collect();
