@@ -689,6 +689,107 @@ impl World {
         }
     }
 
+    /// Run one bounded-confidence enculturation round over a band on one axiom axis (design
+    /// Part 28, the schism mechanism). Each member moves toward the confidence-weighted mean of
+    /// only those members within the reserved confidence band `epsilon` of its own stance, then
+    /// anchors to its innate seed by its effective stubbornness. Members far apart admit none of
+    /// each other, so the band fractures into clusters (sects) rather than pulling to one mean,
+    /// which is what produces schism. The round is synchronous (every member reads the same
+    /// pre-update snapshot, the Hegselmann-Krause form) and order-independent, so it replays bit
+    /// for bit. A member outside everyone's band moves only toward its own seed. The conformist
+    /// and prestige transmission biases that further sharpen this are the deferred refinement;
+    /// the prestige arm in particular waits on a status system.
+    pub fn enculturate_band_bounded(
+        &mut self,
+        members: &[StableId],
+        axis: AxiomAxisId,
+        epsilon: Fixed,
+    ) {
+        let snapshot: Vec<(StableId, Fixed, Fixed)> = members
+            .iter()
+            .filter_map(|&id| {
+                let intr = self.intrinsic.get(&id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((id, ax.stance, ax.confidence))
+            })
+            .collect();
+        for &id in members {
+            let Some(&(_, my_stance, _)) = snapshot.iter().find(|(sid, _, _)| *sid == id) else {
+                continue;
+            };
+            let neighbours = snapshot.iter().map(|&(_, s, c)| (s, c));
+            let Some(mean) = axiom::bounded_confidence_mean(my_stance, neighbours, epsilon) else {
+                continue;
+            };
+            if let Some(intr) = self.intrinsic.get_mut(&id) {
+                let IntrinsicBeliefs {
+                    axioms, epistemic, ..
+                } = intr;
+                if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
+                }
+            }
+        }
+    }
+
+    /// The confidence-weighted variance of a band's stances on one axiom axis, the fission
+    /// signal (design Part 28): a wide spread on a central axiom is a group splitting. `None`
+    /// if no member holds the axis.
+    pub fn axiom_variance(&self, members: &[StableId], axis: AxiomAxisId) -> Option<Fixed> {
+        let pairs = members.iter().filter_map(|id| {
+            let intr = self.intrinsic.get(id)?;
+            let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+            Some((ax.stance, ax.confidence))
+        });
+        axiom::confidence_weighted_variance(pairs)
+    }
+
+    /// Whether a band is fissioning on an axiom axis: its stance variance has reached the
+    /// reserved fission threshold (design Part 28). A no-op axis (no holders) is not fissioning.
+    pub fn is_fissioning(&self, members: &[StableId], axis: AxiomAxisId, threshold: Fixed) -> bool {
+        self.axiom_variance(members, axis)
+            .is_some_and(|v| v >= threshold)
+    }
+
+    /// The sects a band falls into on one axiom axis: the bounded-confidence clusters at band
+    /// width `epsilon` (design Part 28). In one dimension these are the maximal runs of stances
+    /// whose consecutive gaps do not exceed `epsilon`, which are exactly the connected
+    /// components of the within-band influence graph. Members are gathered for the axis, sorted
+    /// canonically by stance then id, and split where a gap exceeds the band, so the partition
+    /// is deterministic. A band that has not fractured returns a single cluster.
+    pub fn stance_clusters(
+        &self,
+        members: &[StableId],
+        axis: AxiomAxisId,
+        epsilon: Fixed,
+    ) -> Vec<Vec<StableId>> {
+        let mut pairs: Vec<(Fixed, StableId)> = members
+            .iter()
+            .filter_map(|&id| {
+                let intr = self.intrinsic.get(&id)?;
+                let ax = intr.axioms.iter().find(|a| a.axis == axis)?;
+                Some((ax.stance, id))
+            })
+            .collect();
+        pairs.sort();
+        let mut clusters: Vec<Vec<StableId>> = Vec::new();
+        let mut last: Option<Fixed> = None;
+        for (stance, id) in pairs {
+            let start_new = match last {
+                Some(prev) => (stance - prev).abs() > epsilon,
+                None => true,
+            };
+            if start_new {
+                clusters.push(vec![id]);
+            } else if let Some(c) = clusters.last_mut() {
+                c.push(id);
+            }
+            last = Some(stance);
+        }
+        clusters
+    }
+
     /// Place a mind. Two minds in the same place are co-located, which is the condition
     /// for perceiving a shared trace and (in later phases) for talking.
     pub fn set_place(&mut self, mind: StableId, place: PlaceId) {

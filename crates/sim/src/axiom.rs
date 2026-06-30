@@ -554,6 +554,50 @@ pub fn enculturate(group_mean: Fixed, innate_seed: Fixed, theta: Fixed) -> Fixed
         .clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
 }
 
+/// The bounded-confidence mean a member is exposed to (design Part 28, the Deffuant and
+/// Hegselmann-Krause models): the confidence-weighted mean over only the neighbours whose
+/// stance lies within the confidence band `epsilon` of the member's own stance, in the
+/// synchronous Hegselmann-Krause form. A member far from a cluster admits none of it, which
+/// is what fractures a band into sects rather than pulling it to one mean. Returns `None` if
+/// no neighbour (the member included) falls within the band. The member should be in the
+/// `neighbours` list so it counts toward its own neighbourhood.
+pub fn bounded_confidence_mean(
+    member_stance: Fixed,
+    neighbours: impl IntoIterator<Item = (Fixed, Fixed)>,
+    epsilon: Fixed,
+) -> Option<Fixed> {
+    let within = neighbours.into_iter().filter(|(stance, _)| {
+        let gap = (*stance - member_stance).abs();
+        gap <= epsilon
+    });
+    confidence_weighted_mean(within)
+}
+
+/// The confidence-weighted variance of a band's stances on one axiom axis (design Part 28,
+/// the fission signal): `sum(confidence * (stance - mean)^2) / sum(confidence)`, the spread a
+/// fission test compares against a reserved threshold (a wide spread on a central axiom is a
+/// group splitting into sects). Accumulated in fixed point over a single pass for the mean and
+/// a second for the deviations, in canonical order at the call site. Returns `None` if the
+/// total confidence is zero. Zero variance means a value held uniformly across the people.
+pub fn confidence_weighted_variance(
+    stances: impl IntoIterator<Item = (Fixed, Fixed)>,
+) -> Option<Fixed> {
+    let pairs: Vec<(Fixed, Fixed)> = stances.into_iter().collect();
+    let mean = confidence_weighted_mean(pairs.iter().copied())?;
+    let mut numerator: i128 = 0;
+    let mut denominator: i128 = 0;
+    for (stance, confidence) in pairs {
+        let dev = stance - mean;
+        numerator += confidence.mul(dev.mul(dev)).to_bits() as i128;
+        denominator += confidence.to_bits() as i128;
+    }
+    if denominator == 0 {
+        return None;
+    }
+    let var_bits = (numerator << (Fixed::FRAC_BITS as i128)) / denominator;
+    Some(Fixed::from_bits(var_bits as i64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,5 +870,42 @@ mod tests {
             enculturate(mean, seed, Fixed::from_ratio(1, 2)),
             Fixed::from_ratio(1, 2)
         );
+    }
+
+    #[test]
+    fn bounded_confidence_mean_admits_only_neighbours_within_the_band() {
+        // A member at 0.0 with band 0.1: it averages 0.0 and 0.05 (both within), ignoring 0.9.
+        let neighbours = [
+            (Fixed::ZERO, Fixed::ONE),
+            (Fixed::from_ratio(5, 100), Fixed::ONE),
+            (Fixed::from_ratio(9, 10), Fixed::ONE),
+        ];
+        let m = bounded_confidence_mean(Fixed::ZERO, neighbours, Fixed::from_ratio(1, 10));
+        assert_eq!(
+            m,
+            Some(Fixed::from_ratio(25, 1000)),
+            "mean of 0 and 0.05 is 0.025"
+        );
+        // A member alone beyond every band still sees itself if it is in the list.
+        let lone = [(Fixed::from_ratio(9, 10), Fixed::ONE)];
+        assert_eq!(
+            bounded_confidence_mean(Fixed::from_ratio(9, 10), lone, Fixed::from_ratio(1, 100)),
+            Some(Fixed::from_ratio(9, 10))
+        );
+    }
+
+    #[test]
+    fn variance_is_zero_for_a_uniform_band_and_positive_for_a_spread() {
+        let uniform = [
+            (Fixed::from_ratio(1, 2), Fixed::ONE),
+            (Fixed::from_ratio(1, 2), Fixed::ONE),
+        ];
+        assert_eq!(confidence_weighted_variance(uniform), Some(Fixed::ZERO));
+        let spread = [(Fixed::ZERO, Fixed::ONE), (Fixed::ONE, Fixed::ONE)];
+        let v = confidence_weighted_variance(spread).unwrap();
+        assert!(v > Fixed::ZERO, "a spread band has positive variance");
+        // Mean 0.5, deviations +/-0.5, variance = 0.25.
+        assert_eq!(v, Fixed::from_ratio(1, 4));
+        assert_eq!(confidence_weighted_variance(std::iter::empty()), None);
     }
 }
