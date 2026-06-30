@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Conversation refinements (inquiry, redundancy suppression, coined words)
+
+Three improvements to the dialogue scene, on the owner's pick, before resuming deep M2.
+
+**Inquiry and redundancy suppression (`agent.rs`, `world.rs`).** The converse step is no longer a broadcast. A `Mind` carries a `wondering` set (the inquiry goals of 9.13). Per promoted speaker the step chooses an intent: INFORM a committed belief a peer lacks, else INQUIRE an open question it cannot answer by asking a co-located peer. A question records a move and seeds the inquiry goal in the hearer (being asked makes you wonder too); if the asked peer holds the belief it answers and the asker grounds it. Redundancy suppression is via theory of mind: a speaker informs a peer only while it does not already model that peer as holding the value, so after a couple of said-acceptances the model commits and the speaker stops; once everyone is modelled as knowing and no question is open, the conversation falls silent. New `Mind` methods (wonder, is_wondering, open_questions, committed_beliefs, shared_belief), `World::set_wondering`/`is_wondering`, a `MoveEffect::Inquire`, and a `reply_as_prior` flag so an answer keeps its belief content while an acceptance points at the prior move. The wondering set folds into the mind state hash.
+
+**Speak in the band's coined words (`language.rs`, `world.rs`).** `Lexicon::utterance` renders an ordered sequence of concepts as a mind's coined words (placeholder for any not yet coined); `World::lexicon` exposes a mind's lexicon. The full-slice example tags the herd belief's subject, attribute, and value with content concepts the band names alongside the primes, so a move renders as a primitive sentence in the emergent language ("wotuka halo nene"), the English gist alongside. The tagging is a fixture mapping; grounding the content as a drifting substrate region remains deep-M2 work.
+
+**Scenes.** `conversation` now seeds two seekers, so the run shows questions, answers, and the talk falling silent after a few ticks. `the_first_slice` speaks the herd talk in coined words. Both replay bit for bit; the two Steering Audit invariants still hold.
+
+**Where it stopped.** Three commits on `claude/determinism-keying-and-map`, pushed; full workspace green, fmt, clippy and rustdoc (`-D warnings`) clean. Research counts unchanged at 19 resolved and 25 open. Next, per the owner: resume deep M2 (the genome inheritance brick, then attaching a genome to a `Mind` so acuity, memory, and belief plasticity come from genes, then the axiom kernel R-AXIOM and the value metric R-VALUE-METRIC). The gate to conversation improvement #4 (disagreement and persuasion over values and axioms) is exactly that agent-tier opinion kernel; belief-level disagreement is already reachable through the defeasible inference engine.
+
+---
+
 ## 2026-06-30: Autonomous build, the full-slice capstone and the genome representation brick
 
 **The capstone (`crates/sim/examples/the_first_slice.rs`).** The first end-to-end emergent slice in one run, stitched from the milestones built so far: a generated world (M1), a band seeded onto a habitable cell with the cell as its place (lean M2), the naming game over all sixty-five NSM primes coining the band's own lexicon (M3), and then an emergent conversation (M4) in which a scout's witnessed knowledge of where the herd ranges grounds across the band as first-class move events reassembled into one conversation. The map is rendered with the band marked, the coined lexicon and the talk shown, all replaying bit for bit. The one honest seam, noted in the example and the roadmap, is the next build: the conversation content renders through the English gist, not the band's coined word, because a belief value is not yet grounded as a concept the naming game named (the `ConceptId`-as-substrate-region work of deep M2).
