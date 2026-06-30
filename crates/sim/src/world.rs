@@ -42,31 +42,12 @@ use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
+use civsim_core::{DrawKey, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
 /// place id, which is what lets one perceive a trace or talk to another. The full
 /// spatial hierarchy (design Part 6) refines this later.
 pub type PlaceId = u32;
-
-/// The RNG phase tag for a perception roll, namespacing it apart from other draws (a
-/// placeholder until the phase registry of R-RNG-COORD pins the namespace).
-const PHASE_PERCEPTION: u64 = 0x9001;
-
-/// The RNG phase tag for choosing a gossip listener.
-const PHASE_GOSSIP: u64 = 0x9002;
-
-/// The RNG phase tag for choosing a naming-game partner and concept.
-const PHASE_LANGUAGE: u64 = 0x9003;
-
-/// The RNG phase tag for the innovation roll (whether to coin a fresh word).
-const PHASE_INNOVATE: u64 = 0x9004;
-
-/// The RNG phase tag for minting a fresh word form.
-const PHASE_COIN: u64 = 0x9005;
-
-/// The RNG phase tag for a lineage innovating a regular form change (drift).
-const PHASE_DRIFT: u64 = 0x9006;
 
 /// The conventional access channel name a spoken belief travels through, used by the
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
@@ -540,18 +521,16 @@ impl World {
             if listeners.is_empty() {
                 continue;
             }
-            let pair = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_LANGUAGE]);
+            let pair = DrawKey::entity(speaker.0, self.clock, Phase::LANGUAGE).rng(self.seed);
             let listener = listeners[pair.range_u32(0, listeners.len() as u32) as usize];
             let concept = self.concepts[pair.range_u32(1, self.concepts.len() as u32) as usize];
             let existing: Option<Word> = self
                 .lexicons
                 .get(&speaker)
                 .and_then(|lex| lex.word_for(concept).cloned());
-            let innovate = Rng::for_coords(
-                self.seed,
-                &[speaker.0, concept.0 as u64, self.clock, PHASE_INNOVATE],
-            )
-            .unit_fixed(0)
+            let innovate = DrawKey::pair(speaker.0, concept.0 as u64, self.clock, Phase::INNOVATE)
+                .rng(self.seed)
+                .unit_fixed(0)
                 < lp.innovation_rate;
             let word = match existing {
                 Some(w) if !innovate => w,
@@ -564,10 +543,10 @@ impl World {
                         Some(l) if !l.form_system().is_empty() => l.form_system(),
                         _ => continue,
                     };
-                    fs.coin(Rng::for_coords(
-                        self.seed,
-                        &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
-                    ))
+                    fs.coin(
+                        DrawKey::pair(speaker.0, concept.0 as u64, self.clock, Phase::COIN)
+                            .rng(self.seed),
+                    )
                 }
             };
             self.lexicons
@@ -601,7 +580,7 @@ impl World {
         let generation = self.clock / params.generation_ticks;
         let lang_ids: Vec<LangId> = self.languages.keys().copied().collect();
         for lang_id in lang_ids {
-            let rng = Rng::for_coords(self.seed, &[lang_id.0 as u64, generation, PHASE_DRIFT]);
+            let rng = DrawKey::entity(lang_id.0 as u64, generation, Phase::DRIFT).rng(self.seed);
             let new_rules = match self.languages.get_mut(&lang_id) {
                 Some(l) => l.innovate(rng, &params),
                 None => continue,
@@ -668,7 +647,8 @@ impl World {
                     Some(s) => s,
                     None => continue,
                 };
-                let idx = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_GOSSIP])
+                let idx = DrawKey::entity(speaker.0, self.clock, Phase::GOSSIP)
+                    .rng(self.seed)
                     .range_u32(0, listeners.len() as u32) as usize;
                 let listener = listeners[idx];
                 let deception = self
@@ -783,11 +763,9 @@ impl World {
                         continue;
                     }
                     let chance = t.salience.mul(mind.acuity).clamp(Fixed::ZERO, Fixed::ONE);
-                    let roll = Rng::for_coords(
-                        self.seed,
-                        &[t.id.0, mind_id.0, self.clock, PHASE_PERCEPTION],
-                    )
-                    .unit_fixed(0);
+                    let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
+                        .rng(self.seed)
+                        .unit_fixed(0);
                     if roll < chance {
                         out.push(PerceptionHit {
                             mind: *mind_id,

@@ -22,9 +22,12 @@
 //!   (design Part 3.1). It is a newtype rather than a bare `i64` so that the typed
 //!   canonical-state boundary of Part 58 is a compile-time property: a float can
 //!   never silently stand in for authoritative state.
-//! - [`Rng`]: the per-entity counter-based RNG keyed on
-//!   `(master_seed, entity, phase, counter)` (design Part 3.2). Every draw is a
+//! - [`Rng`]: the per-entity counter-based RNG (design Part 3.2). Every draw is a
 //!   pure function of its coordinate, so results never depend on thread schedule.
+//! - [`DrawKey`] and [`Phase`]: the canonical draw-keying schema (the R-RNG-COORD
+//!   resolution) that folds a uniform coordinate (region, locus, secondary locus,
+//!   tick, phase, slot) and registers phase ids once, so the tick is always present
+//!   and two draw sites cannot collide on counter zero.
 //! - [`StableId`] and [`Registry`]: process-wide identity that survives promotion,
 //!   demotion, save, and load (design Part 2.1, Part 11).
 //! - [`Arena`] and [`Slab`]: contiguous arena allocation and a generationally
@@ -45,6 +48,7 @@ pub mod event;
 pub mod fixed;
 pub mod hash;
 pub mod id;
+pub mod keys;
 pub mod rng;
 
 pub use arena::{Arena, Slab, SlabHandle};
@@ -54,4 +58,5 @@ pub use event::{Event, EventId, EventKindId, EventLog};
 pub use fixed::{Fixed, FRAC_BITS};
 pub use hash::StateHasher;
 pub use id::{EntityHandle, EntityLocation, PoolId, Registry, StableId, StableRef};
+pub use keys::{DrawKey, Phase, ABSENT};
 pub use rng::{splitmix64, Rng};
