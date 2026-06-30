@@ -39,6 +39,10 @@
 //! recombination, and discrete-state mutation; 25.2, 25.4, 25.5), and the aggregate-tier
 //! [`GenePool`] with Wright-Fisher drift, directional selection, genetic distance,
 //! declared speciation, and the two-tier promotion and demotion crossing (25.7, 25.8).
+//! Speciation runs on the owner's chosen rule: a frequency-distance threshold or a count of
+//! active Dobzhansky-Muller incompatibilities, the latter drawn from the data
+//! [`IncompatibilityTable`], so a discrete genetic firewall can isolate two pools that are
+//! still close in frequency (25.7).
 //!
 //! What remains deferred, and why: the bounded epistasis lookup (25.4); the quantitative
 //! breeding-value tier (the breeder's-equation channel means alongside the discrete
@@ -691,6 +695,164 @@ impl GenePool {
             *p = numerator.div(denom).clamp(Fixed::ZERO, Fixed::ONE);
         }
     }
+
+    /// Whether the pool carries an allele state at a locus at or above a presence threshold:
+    /// state 1 is carried when its frequency meets `presence`, state 0 when its complement
+    /// does. The pool tracks the binary Mendelian view (state 0 versus state 1); any other
+    /// state is never carried at the pool tier (multi-allele pools are deferred, 25.10), so
+    /// such a query is `false` rather than an error.
+    pub fn carries(&self, locus: usize, state: AlleleState, presence: Fixed) -> bool {
+        match self.freqs.get(locus) {
+            None => false,
+            Some(&p) => match state.0 {
+                1 => p >= presence,
+                0 => (Fixed::ONE - p) >= presence,
+                _ => false,
+            },
+        }
+    }
+
+    /// Whether this pool is reproductively isolated from another (the declared speciation of
+    /// design 25.7, on the owner's chosen rule: distance and incompatibilities together). It
+    /// is isolated when the frequency distance has diverged past `dist_threshold`, or when
+    /// the count of Dobzhansky-Muller incompatibilities active across the two pools reaches
+    /// `incompat_threshold`. The first captures gradual divergence, the second the discrete
+    /// genetic firewall a single complementary allele pair can raise even between otherwise
+    /// close pools. Both the distance threshold and the count are reserved owner values; the
+    /// allele-presence threshold is the data fed to [`IncompatibilityTable::active_between`].
+    pub fn reproductively_isolated(
+        &self,
+        other: &GenePool,
+        dist_threshold: Fixed,
+        table: &IncompatibilityTable,
+        incompat_threshold: usize,
+        presence: Fixed,
+    ) -> bool {
+        self.distance(other) >= dist_threshold
+            || table.active_between(self, other, presence) >= incompat_threshold
+    }
+}
+
+/// How a Dobzhansky-Muller incompatibility bites when its two alleles meet in one genome.
+/// These are the fixed mechanism affordances (the ways an incompatibility can express), on
+/// the same footing as [`DominanceKind`] and the force kinds: the kinds are fixed Rust, the
+/// membership of the [`IncompatibilityTable`] is data and grows with the world (Principle
+/// 11). A genome that carries both partner alleles of a sterilizing pair develops but cannot
+/// breed; of a lethal pair, does not develop.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum IncompatibilityKind {
+    /// The hybrid develops but is sterile.
+    Sterilizing,
+    /// The hybrid is inviable.
+    Lethal,
+}
+
+/// The outcome of forming a hybrid genome against an [`IncompatibilityTable`]: viable and
+/// fertile, viable but sterile, or inviable. Ordered by severity so the worst active
+/// incompatibility governs the genome's outcome.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum HybridOutcome {
+    /// No active incompatibility; the hybrid is viable and fertile.
+    Viable,
+    /// At least one sterilizing incompatibility is active; viable but cannot breed.
+    Sterile,
+    /// At least one lethal incompatibility is active; inviable.
+    Inviable,
+}
+
+/// One Dobzhansky-Muller incompatibility: an ordered pair of allele states at two loci that
+/// is benign apart but deleterious when both are present in one genome (design 25.7). The
+/// canonical case is two lineages that each fix a different derived allele from a shared
+/// ancestor; neither lineage suffers, but a hybrid inherits both and pays the cost.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Incompatibility {
+    /// The first locus.
+    pub locus_a: u32,
+    /// The deleterious state at the first locus.
+    pub state_a: AlleleState,
+    /// The second locus.
+    pub locus_b: u32,
+    /// The deleterious state at the second locus.
+    pub state_b: AlleleState,
+    /// How the incompatibility bites when both states co-occur.
+    pub kind: IncompatibilityKind,
+}
+
+/// The set of Dobzhansky-Muller incompatibilities in play (design 25.7). This is the data
+/// registry, sibling to the gene set and the genetic scheme: the mechanism that reads it is
+/// fixed Rust, the pairs are data and grow as lineages accumulate divergence (Principle 11).
+/// Empty by default, so a world with no declared incompatibilities falls back to the pure
+/// distance test for speciation.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct IncompatibilityTable {
+    /// The incompatible allele pairs.
+    pub pairs: Vec<Incompatibility>,
+}
+
+impl IncompatibilityTable {
+    /// An empty table.
+    pub fn new() -> Self {
+        IncompatibilityTable { pairs: Vec::new() }
+    }
+
+    /// A table over the given pairs.
+    pub fn with(pairs: Vec<Incompatibility>) -> Self {
+        IncompatibilityTable { pairs }
+    }
+
+    /// Register one incompatibility.
+    pub fn add(&mut self, pair: Incompatibility) {
+        self.pairs.push(pair);
+    }
+
+    /// The outcome of an explicit hybrid genome: the most severe incompatibility whose both
+    /// partner alleles the genome carries on any haplotype governs the result. A genome that
+    /// carries neither side, or only one side, of every pair is [`HybridOutcome::Viable`].
+    pub fn hybrid_outcome(&self, genome: &Genome) -> HybridOutcome {
+        let mut worst = HybridOutcome::Viable;
+        for pair in &self.pairs {
+            if genome_carries(genome, pair.locus_a, pair.state_a)
+                && genome_carries(genome, pair.locus_b, pair.state_b)
+            {
+                let outcome = match pair.kind {
+                    IncompatibilityKind::Sterilizing => HybridOutcome::Sterile,
+                    IncompatibilityKind::Lethal => HybridOutcome::Inviable,
+                };
+                if outcome > worst {
+                    worst = outcome;
+                }
+            }
+        }
+        worst
+    }
+
+    /// The count of incompatibilities active across two pools: a pair is active when the two
+    /// deleterious alleles are partitioned across the pools, one pool carrying `state_a` at
+    /// `locus_a` while the other carries `state_b` at `locus_b` (or the mirror). This is the
+    /// Dobzhansky-Muller signature: each pool is internally consistent, but a cross would
+    /// unite the two alleles in one hybrid. The count is what [`GenePool::reproductively_
+    /// isolated`] compares against the reserved incompatibility threshold.
+    pub fn active_between(&self, a: &GenePool, b: &GenePool, presence: Fixed) -> usize {
+        self.pairs
+            .iter()
+            .filter(|pair| {
+                let forward = a.carries(pair.locus_a as usize, pair.state_a, presence)
+                    && b.carries(pair.locus_b as usize, pair.state_b, presence);
+                let mirror = b.carries(pair.locus_a as usize, pair.state_a, presence)
+                    && a.carries(pair.locus_b as usize, pair.state_b, presence);
+                forward || mirror
+            })
+            .count()
+    }
+}
+
+/// Whether a genome carries an allele state at a locus on any haplotype.
+fn genome_carries(genome: &Genome, locus: u32, state: AlleleState) -> bool {
+    genome.haps.iter().any(|h| {
+        h.alleles
+            .get(locus as usize)
+            .is_some_and(|a| a.state == state)
+    })
 }
 
 #[cfg(test)]
@@ -1181,6 +1343,142 @@ mod tests {
         assert_eq!(
             genes.express(&child, ACUITY, Fixed::ZERO),
             Fixed::from_int(4)
+        );
+    }
+
+    fn dm_table() -> IncompatibilityTable {
+        IncompatibilityTable::with(vec![Incompatibility {
+            locus_a: 0,
+            state_a: AlleleState(1),
+            locus_b: 1,
+            state_b: AlleleState(1),
+            kind: IncompatibilityKind::Lethal,
+        }])
+    }
+
+    #[test]
+    fn an_incompatibility_is_active_only_across_the_partition() {
+        // Lineage A fixes the derived allele at locus 0, lineage B at locus 1; neither pool
+        // carries both, so the pair is the Dobzhansky-Muller signature: active across the
+        // cross, dormant within either pool.
+        let presence = Fixed::from_ratio(9, 10);
+        let a = GenePool::new(SchemeId(1), 10, vec![Fixed::ONE, Fixed::ZERO]);
+        let b = GenePool::new(SchemeId(1), 10, vec![Fixed::ZERO, Fixed::ONE]);
+        let table = dm_table();
+        assert_eq!(
+            table.active_between(&a, &b, presence),
+            1,
+            "active across the cross"
+        );
+        assert_eq!(
+            table.active_between(&a, &a, presence),
+            0,
+            "dormant within a pool"
+        );
+        assert_eq!(
+            table.active_between(&b, &b, presence),
+            0,
+            "dormant within a pool"
+        );
+    }
+
+    #[test]
+    fn isolation_fires_on_incompatibility_even_when_distance_is_short() {
+        // The discrete firewall: two pools below the distance threshold are still isolated if
+        // the incompatibility count reaches its threshold. The pools share eight loci and
+        // diverge only at the two incompatible loci, so their mean distance (0.2) is short
+        // while the partitioned allele pair is fixed past the presence threshold.
+        let presence = Fixed::from_ratio(9, 10);
+        let far = Fixed::from_ratio(1, 2); // a distance threshold the pools do not reach
+        let half = Fixed::from_ratio(1, 2);
+        let mut a_freqs = vec![Fixed::ONE, Fixed::ZERO];
+        a_freqs.extend(std::iter::repeat_n(half, 8));
+        let mut b_freqs = vec![Fixed::ZERO, Fixed::ONE];
+        b_freqs.extend(std::iter::repeat_n(half, 8));
+        let a = GenePool::new(SchemeId(1), 10, a_freqs);
+        let b = GenePool::new(SchemeId(1), 10, b_freqs);
+        let table = dm_table();
+        assert!(
+            a.distance(&b) < far,
+            "the pools are within the distance threshold"
+        );
+        assert!(
+            a.reproductively_isolated(&b, far, &table, 1, presence),
+            "one active incompatibility isolates the pools"
+        );
+        assert!(
+            !a.reproductively_isolated(&b, far, &IncompatibilityTable::new(), 1, presence),
+            "with no incompatibilities and short distance the pools are not isolated"
+        );
+    }
+
+    #[test]
+    fn a_hybrid_genome_takes_the_worst_active_outcome() {
+        // A hybrid carrying both partner alleles is governed by the most severe pair.
+        let mut table = IncompatibilityTable::with(vec![Incompatibility {
+            locus_a: 0,
+            state_a: AlleleState(1),
+            locus_b: 1,
+            state_b: AlleleState(1),
+            kind: IncompatibilityKind::Sterilizing,
+        }]);
+        let one = Allele {
+            additive: Fixed::ZERO,
+            state: AlleleState(1),
+            origin: 0,
+        };
+        let zero = Allele {
+            additive: Fixed::ZERO,
+            state: AlleleState(0),
+            origin: 0,
+        };
+        let hybrid = Genome {
+            scheme: SchemeId(1),
+            haps: vec![Haplotype {
+                alleles: vec![one, one],
+            }],
+        };
+        let carrier_one_side = Genome {
+            scheme: SchemeId(1),
+            haps: vec![Haplotype {
+                alleles: vec![one, zero],
+            }],
+        };
+        assert_eq!(table.hybrid_outcome(&hybrid), HybridOutcome::Sterile);
+        assert_eq!(
+            table.hybrid_outcome(&carrier_one_side),
+            HybridOutcome::Viable,
+            "one side alone is benign"
+        );
+        table.add(Incompatibility {
+            locus_a: 0,
+            state_a: AlleleState(1),
+            locus_b: 1,
+            state_b: AlleleState(1),
+            kind: IncompatibilityKind::Lethal,
+        });
+        assert_eq!(
+            table.hybrid_outcome(&hybrid),
+            HybridOutcome::Inviable,
+            "the lethal pair dominates the sterilizing one"
+        );
+    }
+
+    #[test]
+    fn pool_carries_reads_both_states_against_presence() {
+        let presence = Fixed::from_ratio(9, 10);
+        let pool = GenePool::new(SchemeId(1), 10, vec![Fixed::ONE, Fixed::ZERO]);
+        assert!(pool.carries(0, AlleleState(1), presence), "state 1 fixed");
+        assert!(!pool.carries(0, AlleleState(0), presence), "state 0 absent");
+        assert!(pool.carries(1, AlleleState(0), presence), "state 0 fixed");
+        assert!(!pool.carries(1, AlleleState(1), presence), "state 1 absent");
+        assert!(
+            !pool.carries(0, AlleleState(2), presence),
+            "multi-allele not at pool tier"
+        );
+        assert!(
+            !pool.carries(9, AlleleState(1), presence),
+            "out of range is false"
         );
     }
 }

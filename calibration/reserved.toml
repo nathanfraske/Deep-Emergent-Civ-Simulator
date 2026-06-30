@@ -206,25 +206,15 @@ value = ""
 unit = "per_locus_per_generation"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
-[[reserved]]
-id = "genome.effective_population_size"
-basis = "the effective population size per pool"
-status = "reserved"
-value = ""
-unit = "count"
-source = "Part 25 genome model; record 62.5; audit section 1d"
-
-[[reserved]]
-id = "genome.speciation_thresholds"
-basis = "the speciation distance and incompatibility-count thresholds"
-status = "reserved"
-value = ""
-unit = "distance"
-source = "Part 25 genome model; record 62.5; audit section 1d"
+# Ne, the speciation distance, and the incompatibility-count threshold are surfaced in
+# full, with bases, in the genome-and-deep-time block below (the implemented set); the
+# coarse placeholders that once sat here are folded into those. The fertility curve below
+# is a distinct future tuneable: the soft genetic-distance-to-fertility falloff, beyond
+# the built binary hybrid outcome.
 
 [[reserved]]
 id = "genome.fertility_curve"
-basis = "the genetic-distance-to-fertility curve"
+basis = "the genetic-distance-to-fertility curve: the soft falloff of cross-fertility with divergence, beyond the built viable-or-sterile-or-inviable hybrid outcome; set so partial hybrid fertility tapers at the pace the speciation targets expect"
 status = "reserved"
 value = ""
 unit = "curve"
@@ -763,3 +753,19 @@ status = "reserved"
 value = ""
 unit = "generations"
 source = "Part 25.7; biosphere candidate"
+
+[[reserved]]
+id = "genome.speciation_incompatibilities"
+basis = "how many active Dobzhansky-Muller incompatibilities across two pools declare reproductive isolation on their own, independent of frequency distance; set so a single complementary allele pair can raise a genetic firewall between still-close pools where the design wants discrete speciation, higher where only accumulated divergence should isolate (Coyne and Orr, Dobzhansky-Muller)"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25.7"
+
+[[reserved]]
+id = "genome.allele_presence_threshold"
+basis = "the allele-state frequency at or above which a pool counts as carrying that state for the cross-pool incompatibility test; set near fixation so a pair is active only when each pool reliably contributes its partner allele to a hybrid, lower if a polymorphic pool should still trip the firewall (the presence input to the active-incompatibility count)"
+status = "reserved"
+value = ""
+unit = "frequency"
+source = "Part 25.7"

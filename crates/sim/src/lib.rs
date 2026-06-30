@@ -76,7 +76,8 @@ pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use genome::{
     Allele, AlleleState, BuildChannel, Channel, CognitionChannel, DominanceKind, DominanceMode,
     GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype,
-    ImbuedChannel, LifeHistoryChannel, LinkageGroup, ReproductionMode, SchemeId, TraitId,
+    HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable,
+    LifeHistoryChannel, LinkageGroup, ReproductionMode, SchemeId, TraitId,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
