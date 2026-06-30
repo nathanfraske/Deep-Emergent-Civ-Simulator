@@ -4,6 +4,24 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30: Deepen language, increment B (regular form change and lineages, drift)
+
+**What was done.** Implemented the R-LANG-DET drift core on the owner's chosen architecture, a first-class language lineage. `crates/sim/src/language.rs` gains `LangId`, `Language { id, parent, form_system, change_log }`, `FormChangeRule` (a feature value on a dimension becomes another, applied at once across a lineage's words and composing in innovation-index order so feeding and bleeding fall out of relative chronology), and `DriftParams { sound_change_rate, generation_ticks }`. `Language::innovate` coins one change per generation by counter-RNG over the lineage's own inventory and appends it to the log; `Language::fork` makes a daughter that inherits the form system and the full log and points at its parent, so a family tree reconstructs by walking parents.
+
+**Integration (`world.rs`).** The single global form system is replaced by `languages: BTreeMap<LangId, Language>` plus `lang_of` (which lineage each mind speaks) and a `drift` calibration. `set_form_system` now creates the default lineage `LangId(0)` (backward compatible: existing scenes get one lineage). The naming game coins from the speaker's lineage form system. A new drift phase runs once per generation: each lineage innovates and the new rules rewrite every speaker's lexicon in innovation order, so the lineage drifts as a unit and separated lineages diverge into sisters. `state_hash` folds each lineage's parent and change log and the per-mind lineage, so determinism holds. Added `add_language`, `set_language_of`, `set_drift`, `lineage`.
+
+**Scope (what B is and is not).** B is phonological/form drift plus the family payoff (fork, parent pointers, change logs, cognates). The automatic split trigger on a population separating is left for movement (where separation becomes dynamic); B provides `fork` and demonstrates sisters by a scripted fork. Morphology and grammaticalisation (the open R-LANG-TYPOLOGY), semantic shift and the distance metric (need the semantic substrate), borrowing on contact (needs a contact model, couples to movement), and per-being produce/perceive channels (a later increment) are all deferred, named plainly.
+
+**Reserved values surfaced (not invented).** `language.sound_change_rate` (per-generation form-change probability; basis the attested pace of regular sound change) and `language.generation_ticks` (the drift cadence; basis the tick-to-year and generation length), both reserved in the authoritative manifest, set as clearly-labelled dev fixtures (cranked high for a visible demo).
+
+**Tests and the run.** New `crates/sim/tests/drift.rs`: a band's word drifts over generations and the lineage drifts together; two sisters forked from one ancestor diverge into cognates with reconstructable parents; drift replays bit for bit and a different seed differs. `language.rs` unit tests cover form-change application, feeding/bleeding by rule order, deterministic innovation, and fork inheritance. The narrated example now runs with drift on and shows the word shifting across snapshots (kalosa/mikane to duri/duka/kadu) and the lineage logging ten regular form changes. Full workspace green, fmt and clippy clean.
+
+**Also.** Recorded R-CONVERSE in TODOS (candidate exploration): the gap between the abstracted naming-game coordination outcome and a modelled dialogue (how words are introduced and agreed), and how deep the non-authoritative interpretation layer (33.2) can go over the canonical events, surfaced from a prototype run.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged. Next: movement (Part 6 spatial layer; bands moving across places; the automatic split-on-separation trigger; a gossip-only belief-spread scene that isolates the trust and told-weight levers). R-LANG-TYPOLOGY, the nine determinism-hardening items, and R-WOUND remain ready.
+
+---
+
 ## 2026-06-30: Deepen language, increment A (structured form substrate, modality-generic)
 
 **What was done.** Began deepening the engine toward the resolved R-LANG-DET and R-LANG-MODALITY designs. Increment A replaces the opaque character-pool string with a structured, data-defined articulation substrate, so a word is real form rather than a placeholder token. `crates/sim/src/language.rs` rewritten:

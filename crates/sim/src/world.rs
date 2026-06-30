@@ -38,7 +38,9 @@ use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::language::{ConceptId, FormSystem, LanguageParams, Lexicon, Word};
+use crate::language::{
+    ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
+};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
 
@@ -62,6 +64,9 @@ const PHASE_INNOVATE: u64 = 0x9004;
 
 /// The RNG phase tag for minting a fresh word form.
 const PHASE_COIN: u64 = 0x9005;
+
+/// The RNG phase tag for a lineage innovating a regular form change (drift).
+const PHASE_DRIFT: u64 = 0x9006;
 
 /// The conventional access channel name a spoken belief travels through, used by the
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
@@ -209,9 +214,15 @@ pub struct World {
     lexicons: BTreeMap<StableId, Lexicon>,
     /// The concepts a band coordinates words for (data).
     concepts: Vec<ConceptId>,
-    /// The articulation system words are built from (data). None until set; the naming game
-    /// is then a no-op.
-    form_system: Option<FormSystem>,
+    /// The language lineages, by id. Each carries its own articulation system, change log,
+    /// and parent pointer; the naming game and drift operate per lineage. Empty until a form
+    /// system is installed (which creates the default lineage), and the naming game is then a
+    /// no-op.
+    languages: BTreeMap<LangId, Language>,
+    /// Which lineage each mind speaks. A mind with no entry speaks the default lineage.
+    lang_of: BTreeMap<StableId, LangId>,
+    /// The drift calibration. None until set; regular form change is then a no-op.
+    drift: Option<DriftParams>,
     /// The language calibration. None until set; the naming game is then a no-op.
     language: Option<LanguageParams>,
     events: EventLog,
@@ -246,7 +257,9 @@ impl World {
             trust: BTreeMap::new(),
             lexicons: BTreeMap::new(),
             concepts: Vec::new(),
-            form_system: None,
+            languages: BTreeMap::new(),
+            lang_of: BTreeMap::new(),
+            drift: None,
             language: None,
             events: EventLog::new(),
             belief_params,
@@ -322,10 +335,45 @@ impl World {
         self.language = Some(params);
     }
 
-    /// Install the articulation system words are built from (data; each culture can have its
-    /// own modality and inventory). Until set, the naming game is a no-op.
+    /// Install the articulation system words are built from (data) as the default lineage
+    /// (`LangId(0)`), which every mind speaks unless assigned otherwise. Until set, the naming
+    /// game is a no-op. For several lineages, use [`World::add_language`] and
+    /// [`World::set_language_of`].
     pub fn set_form_system(&mut self, fs: FormSystem) {
-        self.form_system = Some(fs);
+        self.languages
+            .insert(LangId(0), Language::new(LangId(0), fs));
+    }
+
+    /// Register a language lineage (its own articulation system, change log, and parent).
+    pub fn add_language(&mut self, lang: Language) {
+        self.languages.insert(lang.id(), lang);
+    }
+
+    /// Assign which lineage a mind speaks. Without this a mind speaks the default lineage.
+    pub fn set_language_of(&mut self, mind: StableId, lang: LangId) {
+        self.lang_of.insert(mind, lang);
+    }
+
+    /// Install the drift calibration. Until set, regular form change is a no-op.
+    pub fn set_drift(&mut self, params: DriftParams) {
+        self.drift = Some(params);
+    }
+
+    /// A language lineage by id, for inspecting its parent and change log.
+    pub fn lineage(&self, id: LangId) -> Option<&Language> {
+        self.languages.get(&id)
+    }
+
+    /// The lineage a mind speaks: its explicit assignment, else the default lineage, else any
+    /// registered lineage (a deterministic fallback for a single-lineage world).
+    fn lang_of_mind(&self, mind: StableId) -> Option<LangId> {
+        if let Some(l) = self.lang_of.get(&mind) {
+            return Some(*l);
+        }
+        if self.languages.contains_key(&LangId(0)) {
+            return Some(LangId(0));
+        }
+        self.languages.keys().next().copied()
     }
 
     /// The word a mind uses for a concept, if it has settled on one.
@@ -456,6 +504,7 @@ impl World {
         self.decide();
         self.gossip();
         self.converse_language();
+        self.drift_languages();
     }
 
     /// The naming-game step (design 33.9): each co-located speaker and a chosen listener
@@ -470,11 +519,7 @@ impl World {
             Some(l) => l,
             None => return,
         };
-        let pool = match self.form_system.as_ref() {
-            Some(p) if !p.is_empty() => p,
-            _ => return,
-        };
-        if self.concepts.is_empty() {
+        if self.languages.is_empty() || self.concepts.is_empty() {
             return;
         }
         // Applied sequentially in speaker-id order: a word coined or reused by an earlier
@@ -510,10 +555,20 @@ impl World {
                 < lp.innovation_rate;
             let word = match existing {
                 Some(w) if !innovate => w,
-                _ => pool.coin(Rng::for_coords(
-                    self.seed,
-                    &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
-                )),
+                _ => {
+                    let lang_id = match self.lang_of_mind(speaker) {
+                        Some(l) => l,
+                        None => continue,
+                    };
+                    let fs = match self.languages.get(&lang_id) {
+                        Some(l) if !l.form_system().is_empty() => l.form_system(),
+                        _ => continue,
+                    };
+                    fs.coin(Rng::for_coords(
+                        self.seed,
+                        &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
+                    ))
+                }
             };
             self.lexicons
                 .entry(speaker)
@@ -523,6 +578,57 @@ impl World {
                 .entry(listener)
                 .or_default()
                 .adopt(concept, word);
+        }
+    }
+
+    /// The drift step (design 33.4): once per generation each lineage may innovate a regular
+    /// form change, which is then applied in innovation order to every word its speakers hold,
+    /// so the lineage's lexicon drifts as a unit and two separated lineages diverge into
+    /// sisters. A no-op until the drift calibration is set. Deterministic: each lineage's
+    /// innovation is keyed by counter RNG on the lineage, the generation, and the phase, and
+    /// the speaker walk is id-ordered.
+    fn drift_languages(&mut self) {
+        let params = match self.drift {
+            Some(p) => p,
+            None => return,
+        };
+        if self.languages.is_empty()
+            || self.clock == 0
+            || !self.clock.is_multiple_of(params.generation_ticks)
+        {
+            return;
+        }
+        let generation = self.clock / params.generation_ticks;
+        let lang_ids: Vec<LangId> = self.languages.keys().copied().collect();
+        for lang_id in lang_ids {
+            let rng = Rng::for_coords(self.seed, &[lang_id.0 as u64, generation, PHASE_DRIFT]);
+            let new_rules = match self.languages.get_mut(&lang_id) {
+                Some(l) => l.innovate(rng, &params),
+                None => continue,
+            };
+            if new_rules.is_empty() {
+                continue;
+            }
+            // Speakers of this lineage, id-ordered; their converged words drift together.
+            let speakers: Vec<StableId> = self
+                .minds
+                .keys()
+                .copied()
+                .filter(|m| self.lang_of_mind(*m) == Some(lang_id))
+                .collect();
+            for m in speakers {
+                if let Some(lex) = self.lexicons.get_mut(&m) {
+                    let concepts: Vec<ConceptId> = lex.entries().map(|(c, _)| *c).collect();
+                    for c in concepts {
+                        if let Some(mut w) = lex.word_for(c).cloned() {
+                            for rule in &new_rules {
+                                w = rule.apply(&w);
+                            }
+                            lex.adopt(c, w);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -777,6 +883,22 @@ impl World {
                     }
                 }
             }
+        }
+        // Language lineages, by id: parent and the regular-form-change log.
+        for (id, lang) in &self.languages {
+            h.write_u32(id.0);
+            h.write_u32(lang.parent().map(|p| p.0).unwrap_or(u32::MAX));
+            for rule in lang.change_log() {
+                h.write_u32(rule.dim.0);
+                h.write_u32(rule.from.0);
+                h.write_u32(rule.to.0);
+                h.write_u64(rule.innovation_index);
+            }
+        }
+        // Which lineage each mind speaks, by mind id.
+        for (mind, lang) in &self.lang_of {
+            h.write_stable(*mind);
+            h.write_u32(lang.0);
         }
         h.finish()
     }

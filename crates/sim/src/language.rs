@@ -369,6 +369,179 @@ impl Lexicon {
     }
 }
 
+/// A language lineage id: a descent line that drifts as a unit (design 33.4).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub struct LangId(pub u32);
+
+/// A regular form change (the generalised sound change of design 33.4): a feature value on
+/// one dimension becomes another value on that dimension, applied at once to every form in a
+/// lineage's lexicon. Composes with other rules in innovation-index order, so feeding and
+/// bleeding fall out of relative chronology (the R-LANG-DET core). Unconditioned here; an
+/// environment condition is a later refinement.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FormChangeRule {
+    /// The feature dimension the change acts on.
+    pub dim: FeatureDimId,
+    /// The value that is rewritten.
+    pub from: FeatureValueId,
+    /// The value it becomes.
+    pub to: FeatureValueId,
+    /// The chronological index: rules apply in ascending order, the output of each feeding
+    /// the next. Append-only and never reordered, so the index is a total order over history.
+    pub innovation_index: u64,
+}
+
+impl FormChangeRule {
+    /// Rewrite a word by this rule: every primitive carrying `(dim, from)` takes `(dim, to)`
+    /// instead, re-canonicalised. Applied at once across the form (each primitive rewritten
+    /// from its pre-rule value), so the result is independent of primitive order.
+    pub fn apply(&self, word: &Word) -> Word {
+        let segments = word.segments().iter().map(|seg| {
+            let features = seg.features().iter().map(|&(d, v)| {
+                if d == self.dim && v == self.from {
+                    (d, self.to)
+                } else {
+                    (d, v)
+                }
+            });
+            FormSegment::new(features)
+        });
+        Word::new(word.modality(), segments)
+    }
+}
+
+/// The reserved calibrations drift needs: how often a lineage innovates a form change, and
+/// how many ticks make a generation. Read from the manifest, failing loud while reserved.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DriftParams {
+    /// The per-generation probability that a lineage innovates one regular form change.
+    pub sound_change_rate: Fixed,
+    /// How many ticks make one generation (the drift cadence).
+    pub generation_ticks: u64,
+}
+
+impl DriftParams {
+    /// Read the drift calibration from the manifest, failing loud while reserved.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
+        Ok(DriftParams {
+            sound_change_rate: m.require_fixed("language.sound_change_rate")?,
+            generation_ticks: m.require_i64("language.generation_ticks")?.max(1) as u64,
+        })
+    }
+}
+
+impl FormSystem {
+    /// The contrastive values present per dimension in the inventory, in id order: the
+    /// substrate a form change can act on, read from this lineage's own producible set.
+    pub fn dim_values(&self) -> BTreeMap<FeatureDimId, Vec<FeatureValueId>> {
+        let mut out: BTreeMap<FeatureDimId, Vec<FeatureValueId>> = BTreeMap::new();
+        for seg in &self.inventory {
+            for &(d, v) in seg.features() {
+                let vals = out.entry(d).or_default();
+                if !vals.contains(&v) {
+                    vals.push(v);
+                }
+            }
+        }
+        for vals in out.values_mut() {
+            vals.sort_by_key(|v| v.0);
+        }
+        out
+    }
+}
+
+/// A language lineage: a descent line with its own articulation system, the log of regular
+/// form changes it has undergone, and a pointer to its parent, so a family tree is
+/// reconstructable by walking parents and replaying logs (design 33.4). The lineage is the
+/// unit that drifts; its speakers' lexicons are rewritten by each change it innovates.
+#[derive(Clone, Debug)]
+pub struct Language {
+    id: LangId,
+    parent: Option<LangId>,
+    form_system: FormSystem,
+    change_log: Vec<FormChangeRule>,
+}
+
+impl Language {
+    /// A root lineage with no parent.
+    pub fn new(id: LangId, form_system: FormSystem) -> Self {
+        Language {
+            id,
+            parent: None,
+            form_system,
+            change_log: Vec::new(),
+        }
+    }
+
+    /// This lineage's id.
+    pub fn id(&self) -> LangId {
+        self.id
+    }
+
+    /// The parent lineage this descended from, if any.
+    pub fn parent(&self) -> Option<LangId> {
+        self.parent
+    }
+
+    /// The articulation system words in this lineage are coined from.
+    pub fn form_system(&self) -> &FormSystem {
+        &self.form_system
+    }
+
+    /// The regular form changes this lineage has undergone, in innovation order.
+    pub fn change_log(&self) -> &[FormChangeRule] {
+        &self.change_log
+    }
+
+    /// Fork a daughter lineage: it inherits the form system and the full change log (so it
+    /// shares this lineage's history) and points back to this lineage as its parent. The
+    /// daughter then drifts independently, becoming a sister of any other daughter. This is
+    /// the split of design 33.4; the trigger that fires it on a population separating couples
+    /// to movement and is added there.
+    pub fn fork(&self, daughter: LangId) -> Self {
+        Language {
+            id: daughter,
+            parent: Some(self.id),
+            form_system: self.form_system.clone(),
+            change_log: self.change_log.clone(),
+        }
+    }
+
+    /// Innovate this generation's regular form changes, append them to the log, and return
+    /// them in innovation order so a caller can rewrite the lineage's lexicons by them. With
+    /// the reserved per-generation rate the lineage coins one change: a value present in its
+    /// inventory on some dimension becomes another value on that dimension. Deterministic:
+    /// keyed on the supplied counter RNG. A multi-rule generation would append in canonical
+    /// content order (the R-LANG-DET same-tick tiebreak); one rule per generation is trivially
+    /// ordered.
+    pub fn innovate(&mut self, rng: Rng, params: &DriftParams) -> Vec<FormChangeRule> {
+        if rng.unit_fixed(0) >= params.sound_change_rate {
+            return Vec::new();
+        }
+        let candidates: Vec<(FeatureDimId, Vec<FeatureValueId>)> = self
+            .form_system
+            .dim_values()
+            .into_iter()
+            .filter(|(_, vs)| vs.len() >= 2)
+            .collect();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        let (dim, vals) = &candidates[rng.range_u32(1, candidates.len() as u32) as usize];
+        let from = vals[rng.range_u32(2, vals.len() as u32) as usize];
+        let others: Vec<FeatureValueId> = vals.iter().copied().filter(|v| *v != from).collect();
+        let to = others[rng.range_u32(3, others.len() as u32) as usize];
+        let rule = FormChangeRule {
+            dim: *dim,
+            from,
+            to,
+            innovation_index: self.change_log.len() as u64,
+        };
+        self.change_log.push(rule);
+        vec![rule]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,5 +610,97 @@ mod tests {
         // Same key, disjoint inventories: the rendered surfaces differ, so two cultures'
         // lexicons diverge.
         assert_ne!(sa.render(&wa), sb.render(&wb));
+    }
+
+    #[test]
+    fn form_change_rewrites_a_value() {
+        let dim = FeatureDimId(0);
+        let word = Word::new(
+            ProductionModalityId(0),
+            [
+                FormSegment::new([(dim, FeatureValueId(1))]),
+                FormSegment::new([(dim, FeatureValueId(2))]),
+            ],
+        );
+        let rule = FormChangeRule {
+            dim,
+            from: FeatureValueId(1),
+            to: FeatureValueId(5),
+            innovation_index: 0,
+        };
+        let changed = rule.apply(&word);
+        assert_eq!(
+            changed.segments()[0].features(),
+            &[(dim, FeatureValueId(5))]
+        );
+        assert_eq!(
+            changed.segments()[1].features(),
+            &[(dim, FeatureValueId(2))]
+        );
+    }
+
+    #[test]
+    fn rule_order_decides_the_result_feeding_and_bleeding() {
+        // Chained changes: A->B then B->C turns A into C; the reverse order leaves A as B,
+        // because B->C runs before any B exists. The result is a function of relative
+        // chronology, the R-LANG-DET ordering pin, with no environment needed.
+        let dim = FeatureDimId(0);
+        let (a, b, c) = (FeatureValueId(1), FeatureValueId(2), FeatureValueId(3));
+        let word = Word::new(ProductionModalityId(0), [FormSegment::new([(dim, a)])]);
+        let r_ab = FormChangeRule {
+            dim,
+            from: a,
+            to: b,
+            innovation_index: 0,
+        };
+        let r_bc = FormChangeRule {
+            dim,
+            from: b,
+            to: c,
+            innovation_index: 1,
+        };
+        let fed = r_bc.apply(&r_ab.apply(&word));
+        let bled = r_ab.apply(&r_bc.apply(&word));
+        assert_eq!(fed.segments()[0].features(), &[(dim, c)], "A->B->C feeds");
+        assert_eq!(bled.segments()[0].features(), &[(dim, b)], "B->C bleeds");
+        assert_ne!(fed, bled, "order changes the outcome");
+    }
+
+    #[test]
+    fn a_lineage_innovates_deterministically_and_logs() {
+        let (_s, forms) =
+            ArticulationSubstrate::syllabic(["ka", "lo", "mi", "tu"].map(String::from), 2, 2);
+        let params = DriftParams {
+            sound_change_rate: Fixed::ONE,
+            generation_ticks: 1,
+        };
+        let mut a = Language::new(LangId(0), forms.clone());
+        let mut b = Language::new(LangId(0), forms);
+        let key = Rng::for_coords(7, &[0, 1]);
+        let ra = a.innovate(key, &params);
+        let rb = b.innovate(key, &params);
+        assert_eq!(ra, rb, "the same key innovates the same change");
+        assert_eq!(ra.len(), 1, "rate one coins one change");
+        assert_eq!(a.change_log().len(), 1, "the change is logged");
+        assert_eq!(a.change_log()[0].innovation_index, 0);
+    }
+
+    #[test]
+    fn a_fork_inherits_the_log_and_points_at_its_parent() {
+        let (_s, forms) =
+            ArticulationSubstrate::syllabic(["ka", "lo", "mi"].map(String::from), 2, 2);
+        let params = DriftParams {
+            sound_change_rate: Fixed::ONE,
+            generation_ticks: 1,
+        };
+        let mut parent = Language::new(LangId(0), forms);
+        parent.innovate(Rng::for_coords(1, &[1]), &params);
+        let daughter = parent.fork(LangId(1));
+        assert_eq!(daughter.parent(), Some(LangId(0)));
+        assert_eq!(
+            daughter.change_log(),
+            parent.change_log(),
+            "the daughter inherits the history"
+        );
     }
 }

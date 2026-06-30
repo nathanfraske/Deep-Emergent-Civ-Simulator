@@ -26,7 +26,7 @@ use civsim_sim::decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId,
 };
 use civsim_sim::evidence::AttrKindId;
-use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
+use civsim_sim::language::{ArticulationSubstrate, ConceptId, DriftParams, LangId, LanguageParams};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::world::{Trace, World};
 
@@ -100,6 +100,8 @@ fn build(seed: u64) -> (World, Vec<StableId>, ArticulationSubstrate) {
         3,
     );
     w.set_form_system(forms);
+    // Drift on, so the shared word changes over generations (regular form change, 33.4).
+    w.set_drift(DriftParams::from_manifest(&manifest).unwrap());
     w.set_concepts([CONCEPT]);
     let band: Vec<StableId> = (0..5).map(|_| w.spawn(Fixed::ONE)).collect();
     for &m in &band {
@@ -214,6 +216,12 @@ fn main() {
         distinct_words(&w, &substrate, &band) == 1,
         word_str(&w, &substrate, band[0])
     );
+    if let Some(lang) = w.lineage(LangId(0)) {
+        println!(
+            "  the language underwent {} regular form changes as it drifted (33.4)",
+            lang.change_log().len()
+        );
+    }
 
     // Determinism, shown rather than asserted: the same seed reproduces the same world.
     let (mut again, _, _) = build(seed);

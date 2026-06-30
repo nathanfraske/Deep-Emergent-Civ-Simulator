@@ -154,3 +154,19 @@ status = "set"
 value = "0.05"
 unit = "probability"
 source = "dev fixture for Part 33 language"
+
+[[reserved]]
+id = "language.sound_change_rate"
+basis = "FIXTURE placeholder, not the owner's value; cranked high so drift is visible in a short demo run, far faster than a real language changes"
+status = "set"
+value = "1.0"
+unit = "probability"
+source = "dev fixture for Part 33.4 drift"
+
+[[reserved]]
+id = "language.generation_ticks"
+basis = "FIXTURE placeholder, not the owner's value; a short generation so several form changes land in a 40-tick demo"
+status = "set"
+value = "4"
+unit = "ticks"
+source = "dev fixture for Part 33.4 drift"
