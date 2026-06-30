@@ -141,7 +141,7 @@ fn the_scene_is_reproducible_and_order_independent() {
         for which in order {
             apply(which, &mut anna);
         }
-        anna.state_hash(&p)
+        anna.state_hash(&p, &p)
     };
 
     let forward = build(false);

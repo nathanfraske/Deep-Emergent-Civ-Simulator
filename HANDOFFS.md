@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: Phase 1 runtime spine, a world of minds and a serial deterministic tick
+
+**What was done.** On `claude/engine-foundations`, stood up the runtime spine (RUNBOOK section 3; design Parts 4 and 57). `crates/sim/src/world.rs`: a `World` owning the minds (a BTreeMap keyed by id), the event log, a clock, and the cognition calibrations, with a serial deterministic `tick` that applies a batch of `Stimulus` (Observe for first-order, Model for second-order) to the minds in one canonical order (by target id then a caller ordinal), and a `state_hash` over the whole world. `World::from_manifest` loads the calibrations under a profile: `Calibrated` fails loud while any required value is reserved, and `Development` runs on a fixtures profile. This is deliberately the serial tick, not the parallel command scheduler, which is held for its open determinism design (R-CMD-ORDER, R-REDUCE-ORDER). `Mind::state_hash` was corrected to take the first-order and theory-of-mind params separately, since the design reserves them separately.
+
+**The fixtures profile.** `calibration/profiles/dev-fixtures.toml`: clearly-labelled non-authoritative placeholder numbers for the cognition layers, so the engine can run in development before the owner sets the real values. The authoritative manifest (`calibration/reserved.toml`) is untouched and still reserves every one of these, so a production `Calibrated` world fails loud, which a test asserts. No value was invented into the authoritative manifest; the two files are kept deliberately separate so a fixture is never mistaken for a decision.
+
+**Tests.** `crates/sim/tests/world_tick.rs` builds a world from the fixtures profile through the manifest path and runs the Anna, Boris, and Clara scene across three ticks, asserting the per-tick state hashes replay identically, that the world changes from tick to tick, and that loading the authoritative reserved manifest under `Calibrated` refuses to start. The world unit tests cover spawn minting distinct ids, a tick advancing the clock and forming a belief, within-tick input-order independence by state hash, and the fail-loud gate.
+
+**Self-audit.** No floating point; a BTreeMap for canonical iteration rather than a HashMap; the one enum is `Stimulus`, the two evidence orders, which is mechanism; and no hardcoded calibration numbers in non-test code, the only fixtures living in the labelled dev profile and in test code. Full workspace green: tests pass, and `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean.
+
+**Where it stopped.** Committed to `claude/engine-foundations`, not merged.
+
+**Queued next, Phase 2.** Place and perception: a minimal spatial and co-location layer (Part 6) and the trace-to-perception-to-belief pipeline (Part 9.9), so the tick's stimuli come from the world rather than a script. The reserved perception numbers and the trace-kind registry are surfaced as they are reached, not invented.
+
+---
+
 ## 2026-06-29: First agents, a minimal Mind composing belief and theory of mind
 
 **What was done.** On `claude/engine-foundations`, composed the resolved belief (Part 9) and theory-of-mind (Part 37) mechanisms into a minimal per-entity `Mind` (`crates/sim/src/agent.rs`): it perceives and is told things (first-order belief via the evidence engine), forms and revises beliefs, models other minds from access evidence (the nested theory-of-mind frame), is deceived, and sees lies through, all deterministically and acuity-scaled. Added `hyps()` accessors to InferenceFrame and NestedFrame so a mind can hash its own frames canonically. The first multi-agent scene is `crates/sim/tests/first_agents.rs`: three minds (Anna witnesses, Boris hears the rumour, Clara watches Anna), exercising perception, gossip, a correctly-attributed false belief (Anna's model of Boris diverges from Anna's own belief), and a deception Clara sees through and refuses, plus a determinism test that the scene replays identically and is order-independent by state hash.

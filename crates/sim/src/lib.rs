@@ -43,6 +43,11 @@
 //!   minds, is deceived, and sees lies through, all deterministically. It does not yet
 //!   decide or act (design Part 8); that half is gated on the systems and reserved
 //!   numbers the gating notes name.
+//! - [`world`]: the runtime spine (design Parts 4, 57). A [`world::World`] owns the
+//!   minds, the event log, a clock, and the calibrations, and a serial deterministic
+//!   tick applies a batch of stimuli to the minds in one canonical order. The parallel
+//!   command scheduler is held for its open determinism design (R-CMD-ORDER,
+//!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
 pub mod agent;
 pub mod calibration;
@@ -51,6 +56,7 @@ pub mod evidence;
 pub mod lod;
 pub mod substrate;
 pub mod tom;
+pub mod world;
 
 pub use agent::{AccessObs, Mind};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
@@ -62,3 +68,4 @@ pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
+pub use world::{Stimulus, TickInput, World};

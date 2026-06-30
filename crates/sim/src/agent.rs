@@ -160,9 +160,15 @@ impl Mind {
 
     /// A canonical 128-bit hash of the mind's whole epistemic state: its beliefs then its
     /// models, each walked in sorted question order, each question's clamped totals and
-    /// committed value folded in. A pure function of the state, so two minds that took
-    /// the same evidence in any order hash identically.
-    pub fn state_hash(&self, params: &InferenceParams) -> u128 {
+    /// committed value folded in. First-order beliefs are read under `belief_params` (the
+    /// `evidence.*` calibrations) and models under `meta_params` (the `tom.*`
+    /// calibrations), since the design reserves the two separately. A pure function of the
+    /// state, so two minds that took the same evidence in any order hash identically.
+    pub fn state_hash(
+        &self,
+        belief_params: &InferenceParams,
+        meta_params: &InferenceParams,
+    ) -> u128 {
         let mut h = StateHasher::new();
         h.write_stable(self.id);
         h.write_fixed(self.acuity);
@@ -171,18 +177,18 @@ impl Mind {
             h.write_u32(attr.0);
             for &v in frame.hyps() {
                 h.write_u32(v);
-                h.write_fixed(frame.clamped_total(v, params).unwrap());
+                h.write_fixed(frame.clamped_total(v, belief_params).unwrap());
             }
-            h.write_u32(frame.commit(params).unwrap_or(u32::MAX));
+            h.write_u32(frame.commit(belief_params).unwrap_or(u32::MAX));
         }
         for ((target, attr), nf) in &self.models {
             h.write_stable(*target);
             h.write_u32(attr.0);
             for &v in nf.hyps() {
                 h.write_u32(v);
-                h.write_fixed(nf.clamped_total(v, params).unwrap());
+                h.write_fixed(nf.clamped_total(v, meta_params).unwrap());
             }
-            h.write_u32(nf.commit(params).unwrap_or(u32::MAX));
+            h.write_u32(nf.commit(meta_params).unwrap_or(u32::MAX));
         }
         h.finish()
     }
@@ -317,6 +323,6 @@ mod tests {
             StableId(5),
         );
 
-        assert_eq!(a.state_hash(&p), b.state_hash(&p));
+        assert_eq!(a.state_hash(&p, &p), b.state_hash(&p, &p));
     }
 }
