@@ -118,3 +118,29 @@ status = "set"
 value = "2"
 unit = "log_odds"
 source = "dev fixture for Part 37 theory of mind"
+
+# --- gossip and trust (Phase 4), FIXTURE placeholders ---
+
+[[reserved]]
+id = "gossip.told_weight"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_penalty"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.5"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"

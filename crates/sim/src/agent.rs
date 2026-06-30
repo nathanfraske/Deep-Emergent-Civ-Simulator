@@ -42,6 +42,20 @@ use civsim_core::{Fixed, StableId, StateHasher};
 /// so the mind's state walks in a canonical, deterministic order.
 type Question = (StableId, AttrKindId);
 
+/// A belief a mind can share in conversation: the question and its committed value, plus
+/// the hypothesis frame so a hearer can entertain the same question.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedBelief {
+    /// The subject the belief is about.
+    pub subject: StableId,
+    /// The attribute the belief is about.
+    pub attr: AttrKindId,
+    /// The candidate values of the question.
+    pub hyps: Vec<ValueId>,
+    /// The committed value being shared.
+    pub value: ValueId,
+}
+
 /// One access observation about a target mind: which data channel it came through, the
 /// target-belief value it points at, and who it came from (provenance).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -130,6 +144,24 @@ impl Mind {
             .entry((target, attr))
             .or_insert_with(|| NestedFrame::new(target, 1, attr, hyps));
         nf.observe_access(weights, obs.channel, obs.toward, acuity, obs.from)
+    }
+
+    /// Reflect a belief to share: the first committed belief in canonical question
+    /// order, or `None` if the mind has concluded nothing. This is the minimal
+    /// reflection step of the gossip loop (design 9.5); a richer version weights the
+    /// choice by salience.
+    pub fn first_committed(&self, params: &InferenceParams) -> Option<SharedBelief> {
+        for ((subject, attr), frame) in &self.beliefs {
+            if let Some(value) = frame.commit(params) {
+                return Some(SharedBelief {
+                    subject: *subject,
+                    attr: *attr,
+                    hyps: frame.hyps().to_vec(),
+                    value,
+                });
+            }
+        }
+        None
     }
 
     /// What this mind believes a target mind believes about a question, or `None`.

@@ -515,3 +515,31 @@ status = "reserved"
 value = ""
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
+
+# --- gossip and trust (Part 9.5, Part 37) ---
+# The told-weight and trust dynamics of transmission. Added as the gossip loop reached
+# them; reserved until the owner sets them.
+
+[[reserved]]
+id = "gossip.told_weight"
+basis = "the belief weight a heard assertion carries before trust scaling, relative to a witnessed observation (lighter than first-hand)"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "Part 9.5 gossip loop; audit section"
+
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight"
+status = "reserved"
+value = ""
+unit = "fraction"
+source = "Part 9.5 gossip loop; Part 37 trust"
+
+[[reserved]]
+id = "gossip.trust_penalty"
+basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter"
+status = "reserved"
+value = ""
+unit = "fraction"
+source = "Part 9.5 gossip loop; Part 37 trust"

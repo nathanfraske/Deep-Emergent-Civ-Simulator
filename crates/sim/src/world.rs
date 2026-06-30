@@ -34,7 +34,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::agent::{AccessObs, Mind};
+use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
@@ -49,6 +49,37 @@ pub type PlaceId = u32;
 /// The RNG phase tag for a perception roll, namespacing it apart from other draws (a
 /// placeholder until the phase registry of R-RNG-COORD pins the namespace).
 const PHASE_PERCEPTION: u64 = 0x9001;
+
+/// The RNG phase tag for choosing a gossip listener.
+const PHASE_GOSSIP: u64 = 0x9002;
+
+/// The conventional access channel name a spoken belief travels through, used by the
+/// gossip step to update the hearer's model of the speaker. If the data registry defines
+/// no such channel, the model update is skipped (the first-order belief still passes).
+const SAID_CHANNEL: &str = "said";
+
+/// The reserved calibrations the gossip loop needs. Read from the manifest; until set,
+/// reading them fails loud rather than running on a fabricated default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GossipParams {
+    /// The belief weight a heard assertion carries, before trust scaling.
+    pub told_weight: Fixed,
+    /// The trust a fresh listener extends to a speaker (a 0..1 multiplier on the weight).
+    pub trust_baseline: Fixed,
+    /// How much trust drops when the listener sees through a speaker's lie.
+    pub trust_penalty: Fixed,
+}
+
+impl GossipParams {
+    /// Read the gossip calibrations from the manifest, failing loud while reserved.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
+        Ok(GossipParams {
+            told_weight: m.require_fixed("gossip.told_weight")?,
+            trust_baseline: m.require_fixed("gossip.trust_baseline")?,
+            trust_penalty: m.require_fixed("gossip.trust_penalty")?,
+        })
+    }
+}
 
 /// One stimulus delivered to a mind on a tick: either a first-order observation about
 /// the world, or a second-order observation about a target mind's access. Phase 1
@@ -122,6 +153,16 @@ pub struct Trace {
     pub from: StableId,
 }
 
+/// One gossip exchange, gathered in the read pass and applied in the write pass so the
+/// deception check reads the model before it is updated.
+struct GossipAction {
+    listener: StableId,
+    speaker: StableId,
+    shared: SharedBelief,
+    deception: bool,
+    trust: Fixed,
+}
+
 /// One perception success, gathered in the read pass and applied in the write pass so
 /// the perception walk stays a pure read.
 struct PerceptionHit {
@@ -148,6 +189,12 @@ pub struct World {
     drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
     /// The action each mind chose on the last tick, for inspection.
     last_action: BTreeMap<StableId, ActionId>,
+    /// The data-defined access channels (for resolving the spoken channel in gossip).
+    channels: AccessChannelRegistry,
+    /// The gossip calibrations. None until set; gossip is then a no-op.
+    gossip: Option<GossipParams>,
+    /// Per-pair trust, keyed (listener, speaker): a 0..1 multiplier on a heard weight.
+    trust: BTreeMap<(StableId, StableId), Fixed>,
     events: EventLog,
     /// The first-order belief calibrations (the `evidence.*` reserved values).
     belief_params: InferenceParams,
@@ -175,6 +222,9 @@ impl World {
             behaviour: None,
             drive_levels: BTreeMap::new(),
             last_action: BTreeMap::new(),
+            channels: AccessChannelRegistry::default(),
+            gossip: None,
+            trust: BTreeMap::new(),
             events: EventLog::new(),
             belief_params,
             meta_params,
@@ -207,12 +257,36 @@ impl World {
             "tom.meta_log_odds_clamp",
             "tom.meta_commit_threshold",
             "tom.meta_runner_up_margin",
+            "gossip.told_weight",
+            "gossip.trust_baseline",
+            "gossip.trust_penalty",
         ];
         manifest.gate(profile, &required)?;
         let belief_params = InferenceParams::from_manifest(manifest)?;
         let meta_params = tom::meta_params_from_manifest(manifest)?;
         let weights = AccessWeights::from_manifest(channels, manifest)?;
-        Ok(World::new(belief_params, meta_params, weights))
+        let gossip = GossipParams::from_manifest(manifest)?;
+        let mut world = World::new(belief_params, meta_params, weights);
+        world.channels = channels.clone();
+        world.gossip = Some(gossip);
+        Ok(world)
+    }
+
+    /// Install the access-channel registry (for resolving the spoken channel in gossip).
+    /// [`World::from_manifest`] does this for you; tests use it with the direct
+    /// constructor.
+    pub fn set_channels(&mut self, channels: AccessChannelRegistry) {
+        self.channels = channels;
+    }
+
+    /// Install the gossip calibrations. Until set, the gossip step is a no-op.
+    pub fn set_gossip(&mut self, params: GossipParams) {
+        self.gossip = Some(params);
+    }
+
+    /// The trust a listener extends to a speaker, if any has been recorded.
+    pub fn trust(&self, listener: StableId, speaker: StableId) -> Option<Fixed> {
+        self.trust.get(&(listener, speaker)).copied()
     }
 
     /// The current tick.
@@ -336,6 +410,104 @@ impl World {
         }
         self.perceive();
         self.decide();
+        self.gossip();
+    }
+
+    /// The transmission step (design 9.5): each co-located speaker shares one belief with
+    /// one co-located listener chosen by counter-based RNG. The listener updates its model
+    /// of the speaker (the speaker said it) and, if it does not see the assertion as a lie,
+    /// integrates it into its own belief at a trust-scaled weight; a seen-through lie
+    /// instead lowers trust and is not integrated. Speakers are walked in id order and the
+    /// deception check reads the model before the model is updated (read-old, write-new),
+    /// so the step is deterministic. A no-op until the gossip calibrations are set.
+    fn gossip(&mut self) {
+        let gp = match self.gossip {
+            Some(g) => g,
+            None => return,
+        };
+        let actions: Vec<GossipAction> = {
+            let ids: Vec<StableId> = self.minds.keys().copied().collect();
+            let mut out = Vec::new();
+            for &speaker in &ids {
+                let place = match self.place_of.get(&speaker) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let listeners: Vec<StableId> = ids
+                    .iter()
+                    .copied()
+                    .filter(|l| *l != speaker && self.place_of.get(l) == Some(&place))
+                    .collect();
+                if listeners.is_empty() {
+                    continue;
+                }
+                let shared = match self
+                    .minds
+                    .get(&speaker)
+                    .and_then(|m| m.first_committed(&self.belief_params))
+                {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let idx = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_GOSSIP])
+                    .range_u32(0, listeners.len() as u32) as usize;
+                let listener = listeners[idx];
+                let deception = self
+                    .minds
+                    .get(&listener)
+                    .map(|m| m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params))
+                    .unwrap_or(false);
+                let trust = self
+                    .trust
+                    .get(&(listener, speaker))
+                    .copied()
+                    .unwrap_or(gp.trust_baseline);
+                out.push(GossipAction {
+                    listener,
+                    speaker,
+                    shared,
+                    deception,
+                    trust,
+                });
+            }
+            out
+        };
+        let said = self.channels.by_name(SAID_CHANNEL).map(|c| c.id);
+        for a in actions {
+            if let Some(channel) = said {
+                let weights = &self.weights;
+                if let Some(listener) = self.minds.get_mut(&a.listener) {
+                    let _ = listener.model(
+                        weights,
+                        a.speaker,
+                        a.shared.attr,
+                        a.shared.hyps.iter().copied(),
+                        AccessObs {
+                            channel,
+                            toward: a.shared.value,
+                            from: a.speaker,
+                        },
+                    );
+                }
+            }
+            if a.deception {
+                let lowered = (a.trust - gp.trust_penalty).clamp(Fixed::ZERO, Fixed::ONE);
+                self.trust.insert((a.listener, a.speaker), lowered);
+            } else {
+                let w = gp.told_weight.mul(a.trust);
+                if let Some(listener) = self.minds.get_mut(&a.listener) {
+                    listener.consider(
+                        a.shared.subject,
+                        a.shared.attr,
+                        a.shared.hyps.iter().copied(),
+                        a.shared.value,
+                        w,
+                        a.speaker,
+                    );
+                }
+                self.trust.entry((a.listener, a.speaker)).or_insert(a.trust);
+            }
+        }
     }
 
     /// The decision step (design Part 8): each mind's drives rise, then it scores its
@@ -466,6 +638,12 @@ impl World {
             h.write_u32(t.value);
             h.write_fixed(t.salience);
             h.write_fixed(t.weight);
+        }
+        // Trust edges, in (listener, speaker) order (the BTreeMap is already sorted).
+        for ((listener, speaker), level) in &self.trust {
+            h.write_stable(*listener);
+            h.write_stable(*speaker);
+            h.write_fixed(*level);
         }
         h.finish()
     }
@@ -712,5 +890,140 @@ source = "Part 9"
             w.state_hash()
         };
         assert_eq!(build(), build(), "the decision loop is reproducible");
+    }
+
+    const WITNESSED: crate::tom::AccessChannelId = crate::tom::AccessChannelId(1);
+    const SAID: crate::tom::AccessChannelId = crate::tom::AccessChannelId(3);
+
+    fn gossip_world() -> World {
+        let mut w = World::new(
+            params(),
+            params(),
+            AccessWeights::from_pairs([
+                (WITNESSED, Fixed::from_int(4)),
+                (SAID, Fixed::from_int(2)),
+            ]),
+        )
+        .with_seed(0x6055);
+        w.set_channels(
+            AccessChannelRegistry::from_toml_str(
+                r#"
+[[channels]]
+id = 1
+name = "witnessed"
+[[channels]]
+id = 3
+name = "said"
+"#,
+            )
+            .unwrap(),
+        );
+        w.set_gossip(GossipParams {
+            told_weight: Fixed::from_int(3),
+            trust_baseline: Fixed::ONE,
+            trust_penalty: Fixed::from_ratio(1, 2),
+        });
+        w
+    }
+
+    fn observe_for(mind: StableId, toward: ValueId) -> TickInput {
+        TickInput {
+            mind,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject: StableId(99),
+                attr: AttrKindId(0),
+                hyps: vec![10, 20],
+                toward,
+                weight: Fixed::from_int(5),
+                from: mind,
+            },
+        }
+    }
+
+    #[test]
+    fn a_rumour_spreads_to_a_co_located_listener() {
+        let mut w = gossip_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        // The speaker observes a value; gossip at the end of the tick passes it on.
+        w.tick(&[observe_for(speaker, 10)]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(speaker)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10)
+        );
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the rumour reached the co-located listener"
+        );
+    }
+
+    #[test]
+    fn a_caught_lie_lowers_trust_and_is_refused() {
+        let mut w = gossip_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 1);
+        // In one tick: the speaker comes to believe 10 (so it will assert 10), while the
+        // listener witnessed that the speaker actually has access to 20. At gossip the
+        // listener sees the assertion as a lie, refuses it, and lowers trust.
+        w.tick(&[
+            observe_for(speaker, 10),
+            TickInput {
+                mind: listener,
+                ordinal: 0,
+                stim: Stimulus::Model {
+                    target: speaker,
+                    attr: AttrKindId(0),
+                    hyps: vec![10, 20],
+                    obs: AccessObs {
+                        channel: WITNESSED,
+                        toward: 20,
+                        from: listener,
+                    },
+                },
+            },
+        ]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the listener refused the lie"
+        );
+        assert_eq!(
+            w.trust(listener, speaker),
+            Some(Fixed::from_ratio(1, 2)),
+            "trust dropped by the penalty"
+        );
+    }
+
+    #[test]
+    fn the_band_replays_deterministically() {
+        let build = || {
+            let mut w = gossip_world();
+            let a = w.spawn(Fixed::ONE);
+            let b = w.spawn(Fixed::ONE);
+            let c = w.spawn(Fixed::ONE);
+            for m in [a, b, c] {
+                w.set_place(m, 1);
+            }
+            w.tick(&[observe_for(a, 10)]);
+            for _ in 0..5 {
+                w.tick(&[]);
+            }
+            w.state_hash()
+        };
+        assert_eq!(build(), build(), "the band's gossip replays bit for bit");
     }
 }

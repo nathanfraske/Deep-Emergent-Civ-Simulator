@@ -59,7 +59,7 @@ pub mod substrate;
 pub mod tom;
 pub mod world;
 
-pub use agent::{AccessObs, Mind};
+pub use agent::{AccessObs, Mind, SharedBelief};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
@@ -70,4 +70,4 @@ pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
-pub use world::{PlaceId, Stimulus, TickInput, Trace, World};
+pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
