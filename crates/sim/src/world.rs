@@ -547,6 +547,12 @@ impl World {
         self.lexicons.get(&mind)?.word_for(concept).cloned()
     }
 
+    /// A mind's lexicon, for rendering a thought in its coined words (the legibility layer
+    /// over the naming game). `None` if the mind has coined nothing yet.
+    pub fn lexicon(&self, mind: StableId) -> Option<&Lexicon> {
+        self.lexicons.get(&mind)
+    }
+
     /// The current tick.
     pub fn clock(&self) -> u64 {
         self.clock

@@ -23,11 +23,14 @@
 //! all sixty-five NSM primes, and M4 modelled dialogue. Every number is a labelled
 //! fixture, never an owner value, and the whole run replays bit for bit from its seed.
 //!
-//! One honest seam is visible here and is the next build (the roadmap's deep M2): the
-//! conversation's content is rendered through the deterministic English gist, not the
-//! band's coined words, because a belief value is not yet grounded as a concept the naming
-//! game named. The band's emergent lexicon is shown alongside; tying a witnessed fact to
-//! the word the band coined for it is the `ConceptId`-as-substrate-region work still ahead.
+//! The conversation is spoken in the band's own coined words: the example tags the herd
+//! belief's subject, attribute, and value with concepts the band names in the naming game,
+//! so a move renders as those coined words in order (a primitive sentence), with the
+//! English gist alongside for legibility. The honest seam that remains, the roadmap's deep
+//! M2 work, is that this tagging is a fixture mapping rather than the concepts being
+//! grounded as regions of the semantic substrate that can drift, split, and merge; the
+//! rendering layer here consumes the naming game's output but does not yet make the content
+//! itself an emergent concept.
 
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
@@ -35,7 +38,7 @@ use civsim_sim::dialogue::{
     Move, MoveKindDef, MoveKindId, MoveRegistry,
 };
 use civsim_sim::evidence::InferenceParams;
-use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
+use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
 use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
@@ -48,6 +51,24 @@ const HERD: StableId = StableId(900);
 const RANGE: AttrKindId = AttrKindId(0);
 const NORTH: u32 = 10;
 const SOUTH: u32 = 20;
+
+// Content concepts the band coins words for, beyond the sixty-five primes (ids 1..=65), so
+// the herd talk can be spoken in the band's own language. The belief's subject, attribute,
+// and value each map to one of these; the band coordinates a word for each in the naming
+// game, and a move renders as those words in order, a primitive sentence.
+const C_HERD: ConceptId = ConceptId(66);
+const C_RANGE: ConceptId = ConceptId(67);
+const C_NORTH: ConceptId = ConceptId(68);
+const C_SOUTH: ConceptId = ConceptId(69);
+
+/// The content concept a belief value names, so the value can be spoken in a coined word.
+fn value_concept(v: u32) -> ConceptId {
+    match v {
+        NORTH => C_NORTH,
+        SOUTH => C_SOUTH,
+        _ => C_NORTH,
+    }
+}
 
 const SYLLABLES: [&str; 12] = [
     "ka", "lo", "mi", "tu", "ne", "sa", "ri", "wo", "ha", "du", "pe", "go",
@@ -176,7 +197,13 @@ fn main() {
         trust_baseline: Fixed::ONE,
         trust_penalty: Fixed::from_ratio(1, 2),
     });
-    w.set_concepts(nsm_concept_ids());
+    // The band coordinates words for the sixty-five primes and the handful of content
+    // concepts the herd talk needs, so the conversation can be spoken in its own language.
+    let concepts: Vec<ConceptId> = nsm_concept_ids()
+        .into_iter()
+        .chain([C_HERD, C_RANGE, C_NORTH, C_SOUTH])
+        .collect();
+    w.set_concepts(concepts.clone());
     let (substr, forms) = ArticulationSubstrate::syllabic(SYLLABLES.map(String::from), 2, 3);
     w.set_form_system(forms);
     w.set_language(LanguageParams {
@@ -205,8 +232,8 @@ fn main() {
         home.x, home.y
     );
 
-    // 3. Phase one: the naming game, until the band shares a word for every prime.
-    let concepts = nsm_concept_ids();
+    // 3. Phase one: the naming game, until the band shares a word for every concept (the
+    //    primes and the handful of content concepts the herd talk will need).
     let converged = |w: &World| {
         concepts.iter().all(|&c| {
             let first = w.word_for(band[0], c);
@@ -219,11 +246,11 @@ fn main() {
         naming_ticks += 1;
     }
     println!(
-        "After {naming_ticks} ticks the band has coined a shared word for all {} primes.",
+        "After {naming_ticks} ticks the band has coined a shared word for all {} concepts.",
         concepts.len()
     );
     println!("A few of its first words (English gist, coined word):");
-    for &c in concepts.iter().take(6) {
+    for &c in nsm_concept_ids().iter().take(6) {
         let gloss = nsm_gloss(c).unwrap_or("?");
         let word = w
             .word_for(band[0], c)
@@ -269,12 +296,14 @@ fn main() {
         println!("{line}");
     }
 
-    // 6. Narrate the conversation from the move log (canonical gist).
+    // 6. Narrate the conversation from the move log, spoken in the band's coined words
+    //    with the English gist alongside (the legibility layer over the naming game).
     let bp = *w.belief_params();
     println!(
-        "\n{} returns having seen the herd, and the band talks it over (first moves):",
+        "\n{} returns having seen the herd, and the band talks it over in its own words",
         name_of(band[0])
     );
+    println!("(coined words, then the English gist):");
     let mut shown = 0;
     for e in w.events().iter() {
         if (e.id.0 as usize) < move_floor {
@@ -292,16 +321,39 @@ fn main() {
             .map(|m| m.gloss.as_str())
             .unwrap_or("?");
         let speaker = name_of(mv.speaker);
+        let to = || -> String {
+            mv.addressees
+                .iter()
+                .map(|a| name_of(*a))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         match mv.content {
             ContentRef::Belief { subject, attr } => {
                 let val = w
                     .mind(mv.speaker)
                     .and_then(|m| m.belief(subject, attr, &bp));
-                let to: Vec<&str> = mv.addressees.iter().map(|a| name_of(*a)).collect();
+                // The thought rendered in the speaker's own coined words: herd, range, value.
+                let said = match (val, w.lexicon(mv.speaker)) {
+                    (Some(v), Some(lex)) => {
+                        lex.utterance(&[C_HERD, C_RANGE, value_concept(v)], &substr, "?")
+                    }
+                    _ => "...".to_string(),
+                };
                 println!(
-                    "  {speaker} {gloss} {}: the herd ranges in {}.",
-                    to.join(", "),
-                    val.map(range_name).unwrap_or("somewhere")
+                    "  {speaker} {gloss} {}: \"{said}\"  (the herd ranges in {})",
+                    to(),
+                    val.map(range_name).unwrap_or("somewhere"),
+                );
+            }
+            ContentRef::Inquiry { .. } => {
+                let said = w
+                    .lexicon(mv.speaker)
+                    .map(|lex| lex.utterance(&[C_HERD, C_RANGE], &substr, "?"))
+                    .unwrap_or_default();
+                println!(
+                    "  {speaker} {gloss} {}: \"{said}?\"  (where does the herd range?)",
+                    to()
                 );
             }
             _ => println!("  {speaker} {gloss}."),
