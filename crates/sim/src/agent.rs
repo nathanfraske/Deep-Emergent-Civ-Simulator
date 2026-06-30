@@ -21,6 +21,13 @@
 //! model another mind from access evidence, be deceived, and see a lie through, all
 //! deterministically.
 //!
+//! Its cognition is a phenotype rather than an authored number. [`Mind::from_genome`] expresses
+//! the reasoning acuity, memory capacity, and belief plasticity from a being's genes through
+//! the [`crate::genome`] machinery (design Part 25.6), so a mind's sharpness is a consequence
+//! of its inheritance and differs by race and by individual. Acuity is the live channel today
+//! (it scales every observation); memory and plasticity are carried, their consumers (belief
+//! deterioration and update-rate modulation) the named follow-on.
+//!
 //! What a [`Mind`] is not: it does not decide or act. There is no utility-AI choice
 //! (design Part 8), no drives or goals, and no body in a world to act on. It is the
 //! knowing-and-believing half of an agent, the half whose mechanisms are resolved and
@@ -33,6 +40,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::evidence::{AttrKindId, InferenceFrame, InferenceParams, ValueId};
+use crate::genome::{Channel, CognitionChannel, GeneSet, Genome};
 use crate::tom::{
     detects_deception, AccessChannelId, AccessWeights, NestedFrame, ProjectionRejected,
 };
@@ -75,9 +83,19 @@ pub struct AccessObs {
 pub struct Mind {
     /// Who this mind belongs to.
     pub id: StableId,
-    /// The mind's reasoning acuity (design Part 25): it scales the weight extracted from
-    /// every observation, so a sharper mind concludes from less.
+    /// The mind's reasoning acuity (design Part 25.6): it scales the weight extracted from
+    /// every observation, so a sharper mind concludes from less. The live cognition channel,
+    /// read by [`Mind::consider`], [`Mind::model`], and the world's perception roll.
     pub acuity: Fixed,
+    /// The mind's memory capacity (design Part 25.6): it governs belief deterioration (Part
+    /// 9), how well a belief resists decay over time. Carried from the genome; its consumer,
+    /// the deterioration step, is the named follow-on, so this is the phenotype the engine
+    /// holds ready rather than a live modifier yet. Neutral (no modulation) at [`Fixed::ONE`].
+    pub memory: Fixed,
+    /// The mind's belief plasticity (design Part 25.6, Part 20): it governs how readily
+    /// beliefs update under new evidence. Carried from the genome; its consumer, the
+    /// update-rate modulation, is the named follow-on. Neutral at [`Fixed::ONE`].
+    pub plasticity: Fixed,
     beliefs: BTreeMap<Question, InferenceFrame>,
     models: BTreeMap<Question, NestedFrame>,
     /// The questions this mind is motivated to resolve (the inquiry goals of design 9.13).
@@ -87,11 +105,51 @@ pub struct Mind {
 }
 
 impl Mind {
-    /// A fresh mind with no beliefs, models, or open questions.
+    /// A fresh mind with the given reasoning acuity and a neutral memory and plasticity (no
+    /// modulation), no beliefs, models, or open questions. Use this where a mind's cognition
+    /// is supplied directly (tests, fixtures); [`Mind::from_genome`] is the path that derives
+    /// the whole cognition phenotype from a being's genes.
     pub fn new(id: StableId, acuity: Fixed) -> Self {
         Mind {
             id,
             acuity,
+            memory: Fixed::ONE,
+            plasticity: Fixed::ONE,
+            beliefs: BTreeMap::new(),
+            models: BTreeMap::new(),
+            wondering: BTreeSet::new(),
+        }
+    }
+
+    /// A fresh mind whose cognition phenotype is expressed from a genome (design Part 25.6).
+    /// Each cognition channel (reasoning acuity, memory capacity, belief plasticity) is read
+    /// from the gene set through the same deterministic, float-free [`GeneSet::express`] every
+    /// phenotype uses, with the supplied non-genetic `environment` offset (nurture) added per
+    /// channel. The mechanism is fixed; which genes feed each channel and with what weight is
+    /// data (Principle 11), so two races with different gene sets, or two beings with
+    /// different alleles, get different minds from one rule. A being's mind is thus a
+    /// consequence of its inheritance rather than an authored number.
+    pub fn from_genome(id: StableId, genes: &GeneSet, genome: &Genome, environment: Fixed) -> Self {
+        let acuity = genes.express(
+            genome,
+            Channel::Cognition(CognitionChannel::ReasoningAcuity),
+            environment,
+        );
+        let memory = genes.express(
+            genome,
+            Channel::Cognition(CognitionChannel::MemoryCapacity),
+            environment,
+        );
+        let plasticity = genes.express(
+            genome,
+            Channel::Cognition(CognitionChannel::BeliefPlasticity),
+            environment,
+        );
+        Mind {
+            id,
+            acuity,
+            memory,
+            plasticity,
             beliefs: BTreeMap::new(),
             models: BTreeMap::new(),
             wondering: BTreeSet::new(),
@@ -266,6 +324,8 @@ impl Mind {
         let mut h = StateHasher::new();
         h.write_stable(self.id);
         h.write_fixed(self.acuity);
+        h.write_fixed(self.memory);
+        h.write_fixed(self.plasticity);
         for ((subject, attr), frame) in &self.beliefs {
             h.write_stable(*subject);
             h.write_u32(attr.0);
@@ -296,6 +356,9 @@ impl Mind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::genome::{
+        Allele, AlleleState, DominanceMode, GeneDef, GeneEffect, GeneId, Haplotype, SchemeId,
+    };
     use crate::tom::AccessWeights;
 
     const LOCATION: AttrKindId = AttrKindId(0);
@@ -370,6 +433,64 @@ mod tests {
         // The speaker asserts the box; the mind sees through it.
         assert!(m.detects_lie(speaker, LOCATION, BOX, &params()));
         assert!(!m.detects_lie(speaker, LOCATION, BASKET, &params()));
+    }
+
+    fn cognition_gene(id: u32, channel: Channel) -> GeneDef {
+        GeneDef {
+            id: GeneId(id),
+            effects: vec![GeneEffect {
+                channel,
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        }
+    }
+
+    fn cognition_genes() -> GeneSet {
+        GeneSet {
+            genes: vec![
+                cognition_gene(0, Channel::Cognition(CognitionChannel::ReasoningAcuity)),
+                cognition_gene(1, Channel::Cognition(CognitionChannel::MemoryCapacity)),
+                cognition_gene(2, Channel::Cognition(CognitionChannel::BeliefPlasticity)),
+            ],
+        }
+    }
+
+    fn haploid(acuity: i32, memory: i32, plasticity: i32) -> Genome {
+        let allele = |v: i32| Allele {
+            additive: Fixed::from_int(v),
+            state: AlleleState(0),
+            origin: 0,
+        };
+        Genome {
+            scheme: SchemeId(0),
+            haps: vec![Haplotype {
+                alleles: vec![allele(acuity), allele(memory), allele(plasticity)],
+            }],
+        }
+    }
+
+    #[test]
+    fn cognition_phenotype_comes_from_the_genome() {
+        // Each cognition channel is expressed from the genes, so the mind's sharpness is its
+        // inheritance, not an authored number.
+        let genes = cognition_genes();
+        let m = Mind::from_genome(StableId(1), &genes, &haploid(2, 3, 4), Fixed::ZERO);
+        assert_eq!(m.acuity, Fixed::from_int(2));
+        assert_eq!(m.memory, Fixed::from_int(3));
+        assert_eq!(m.plasticity, Fixed::from_int(4));
+
+        // The expressed acuity drives behaviour: a sharp genome concludes from a sub-threshold
+        // weight the same dull genome cannot, the genome-to-cognition-to-belief chain end to end.
+        let marble = StableId(99);
+        let w = Fixed::from_int(2); // below the threshold of 3 at unit acuity
+        let mut sharp = Mind::from_genome(StableId(1), &genes, &haploid(2, 3, 4), Fixed::ZERO);
+        sharp.consider(marble, LOCATION, [BASKET, BOX], BASKET, w, StableId(2));
+        assert_eq!(sharp.belief(marble, LOCATION, &params()), Some(BASKET));
+
+        let mut dull = Mind::from_genome(StableId(1), &genes, &haploid(1, 3, 4), Fixed::ZERO);
+        dull.consider(marble, LOCATION, [BASKET, BOX], BASKET, w, StableId(2));
+        assert_eq!(dull.belief(marble, LOCATION, &params()), None);
     }
 
     #[test]
