@@ -61,6 +61,7 @@ pub mod lod;
 pub mod primes;
 pub mod substrate;
 pub mod tom;
+pub mod value;
 pub mod world;
 
 pub use agent::{AccessObs, Mind, SharedBelief};
@@ -90,5 +91,10 @@ pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use value::{
+    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
+    EmicProjection, EticAxisId, EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId,
+    RaceProjection, StructureKind, ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
