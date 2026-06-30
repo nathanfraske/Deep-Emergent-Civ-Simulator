@@ -65,7 +65,8 @@
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::AttrKindId;
 use crate::language::ConceptId;
-use civsim_core::{EventId, Fixed, StableId};
+use crate::tom::AccessChannelId;
+use civsim_core::{Event, EventId, EventKindId, EventLog, Fixed, StableId};
 use serde::{Deserialize, Serialize};
 
 /// The etic floor of primitive effects: the engine affordances a dialogue move's force
@@ -502,6 +503,311 @@ pub enum ContentRef {
     },
 }
 
+impl ContentRef {
+    /// The entities this content references as subjects, so a move event can index its
+    /// topic in the provenance index (a belief or inquiry is about a subject; a concept
+    /// proposal and a reply reference no world subject of their own).
+    pub fn topic_subjects(&self) -> Vec<StableId> {
+        match self {
+            ContentRef::Belief { subject, .. } | ContentRef::Inquiry { subject, .. } => {
+                vec![*subject]
+            }
+            ContentRef::Concept { .. } | ContentRef::PriorMove { .. } => Vec::new(),
+        }
+    }
+}
+
+/// The registered event-schema id under which a dialogue move is logged. A single kind
+/// carries every move; the move's force is a registry id in the payload, not a closed
+/// `EventKind` variant, so the encoding stands under either resolution of R-EVENT
+/// (design Part 9.5, Part 7.1). The value is a registered schema identifier, mechanism on
+/// the same footing as the [`civsim_core::Phase`] ids, not world content, and is fixed
+/// when the R-EVENT event-kind registry lands.
+pub const MOVE_EVENT_KIND: EventKindId = EventKindId(0xD1A);
+
+/// The payload schema version, so a future move-schema change is detectable rather than
+/// silently misread.
+const MOVE_PAYLOAD_VERSION: u8 = 1;
+
+/// The absent-reference sentinel for an optional event id in the payload, matching the
+/// degrade-sentinel convention of the draw-keying schema.
+const NO_REPLY: u64 = u64::MAX;
+
+/// A dialogue move: a communicative act recorded as a first-class canonical event (design
+/// Part 9.5). It carries the force it realises (a registry id), who spoke, whom it
+/// addresses, the content it refers to (a handle into existing state, never authored
+/// text), the move it answers if any, the channel it travels (33.3), and its place in the
+/// canonical order (tick and a per-tick ordinal). The move is the unit the conversation
+/// query reassembles into a conversation; nothing here stores a conversation object.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Move {
+    /// The recognised move kind this act realises (a registry id, in the payload).
+    pub force: MoveKindId,
+    /// Who spoke.
+    pub speaker: StableId,
+    /// Whom the move addresses, in stable-id order (the determinism pin of Part 9.5).
+    pub addressees: Vec<StableId>,
+    /// What the move is about: a handle into state the engine already holds.
+    pub content: ContentRef,
+    /// The move this one answers, if it is a response (the in-reply-to adjacency).
+    pub in_reply_to: Option<EventId>,
+    /// The access channel the move travels (witnessed-medium spoken, signed, written; 33.3).
+    pub channel: AccessChannelId,
+    /// The tick the move was made.
+    pub tick: u64,
+    /// The per-tick move ordinal that, with the speaker id, totally orders same-tick moves.
+    pub ordinal: u32,
+}
+
+impl Move {
+    /// Encode the move as a canonical event row. The speaker is the sole actor; the
+    /// addressees and the content's topic subjects are the subjects, so the provenance
+    /// index finds the move for every participant and topic. Everything needed to
+    /// reconstruct the move rides in the payload as fixed-width big-endian integers, so
+    /// the bytes are canonical and platform-independent (no float, no hashing).
+    pub fn to_event(&self) -> Event {
+        let mut subjects = self.addressees.clone();
+        subjects.extend(self.content.topic_subjects());
+        let mut e = Event::new(self.tick, MOVE_EVENT_KIND, vec![self.speaker], subjects);
+        e.payload = self.encode_payload();
+        e
+    }
+
+    fn encode_payload(&self) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.push(MOVE_PAYLOAD_VERSION);
+        p.extend_from_slice(&self.force.0.to_be_bytes());
+        p.extend_from_slice(&self.channel.0.to_be_bytes());
+        p.extend_from_slice(&self.ordinal.to_be_bytes());
+        let reply = self.in_reply_to.map(|e| e.0).unwrap_or(NO_REPLY);
+        p.extend_from_slice(&reply.to_be_bytes());
+        encode_content(&self.content, &mut p);
+        p.extend_from_slice(&(self.addressees.len() as u32).to_be_bytes());
+        for a in &self.addressees {
+            p.extend_from_slice(&a.0.to_be_bytes());
+        }
+        p
+    }
+
+    /// Reconstruct a move from a logged event, or `None` if the event is not a dialogue
+    /// move or its payload is malformed. Total over arbitrary bytes, so a corrupt or
+    /// foreign event never panics the conversation query.
+    pub fn from_event(e: &Event) -> Option<Move> {
+        if e.kind != MOVE_EVENT_KIND {
+            return None;
+        }
+        let speaker = *e.actors.first()?;
+        let mut c = Cursor::new(&e.payload);
+        if c.u8()? != MOVE_PAYLOAD_VERSION {
+            return None;
+        }
+        let force = MoveKindId(c.u32()?);
+        let channel = AccessChannelId(c.u32()?);
+        let ordinal = c.u32()?;
+        let reply = c.u64()?;
+        let in_reply_to = (reply != NO_REPLY).then_some(EventId(reply));
+        let content = decode_content(&mut c)?;
+        let n = c.u32()? as usize;
+        let mut addressees = Vec::with_capacity(n);
+        for _ in 0..n {
+            addressees.push(StableId(c.u64()?));
+        }
+        Some(Move {
+            force,
+            speaker,
+            addressees,
+            content,
+            in_reply_to,
+            channel,
+            tick: e.tick,
+            ordinal,
+        })
+    }
+
+    /// Every participant of the move: the speaker then the addressees.
+    pub fn participants(&self) -> Vec<StableId> {
+        let mut all = Vec::with_capacity(1 + self.addressees.len());
+        all.push(self.speaker);
+        all.extend_from_slice(&self.addressees);
+        all
+    }
+
+    /// The base topic of the move, for the co-reference link of the conversation query.
+    /// A belief or inquiry is about a question, a proposal about a concept; a reply has no
+    /// base topic of its own (it connects through the in-reply-to link instead).
+    fn base_topic(&self) -> Option<TopicKey> {
+        match self.content {
+            ContentRef::Belief { subject, attr } | ContentRef::Inquiry { subject, attr } => {
+                Some(TopicKey::Question(subject, attr))
+            }
+            ContentRef::Concept { concept } => Some(TopicKey::Concept(concept)),
+            ContentRef::PriorMove { .. } => None,
+        }
+    }
+}
+
+/// The base-topic token two moves compare on to count as co-referenced.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TopicKey {
+    Question(StableId, AttrKindId),
+    Concept(ConceptId),
+}
+
+fn encode_content(c: &ContentRef, p: &mut Vec<u8>) {
+    match c {
+        ContentRef::Belief { subject, attr } => {
+            p.push(1);
+            p.extend_from_slice(&subject.0.to_be_bytes());
+            p.extend_from_slice(&attr.0.to_be_bytes());
+        }
+        ContentRef::Inquiry { subject, attr } => {
+            p.push(2);
+            p.extend_from_slice(&subject.0.to_be_bytes());
+            p.extend_from_slice(&attr.0.to_be_bytes());
+        }
+        ContentRef::Concept { concept } => {
+            p.push(3);
+            p.extend_from_slice(&concept.0.to_be_bytes());
+        }
+        ContentRef::PriorMove { event } => {
+            p.push(4);
+            p.extend_from_slice(&event.0.to_be_bytes());
+        }
+    }
+}
+
+fn decode_content(c: &mut Cursor) -> Option<ContentRef> {
+    match c.u8()? {
+        1 => Some(ContentRef::Belief {
+            subject: StableId(c.u64()?),
+            attr: AttrKindId(c.u32()?),
+        }),
+        2 => Some(ContentRef::Inquiry {
+            subject: StableId(c.u64()?),
+            attr: AttrKindId(c.u32()?),
+        }),
+        3 => Some(ContentRef::Concept {
+            concept: ConceptId(c.u32()?),
+        }),
+        4 => Some(ContentRef::PriorMove {
+            event: EventId(c.u64()?),
+        }),
+        _ => None,
+    }
+}
+
+/// A bounds-checked big-endian reader over a payload slice. Every read returns `None`
+/// past the end, so decoding foreign or truncated bytes fails cleanly rather than
+/// panicking.
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Cursor { bytes, pos: 0 }
+    }
+
+    fn take(&mut self, n: usize) -> Option<&[u8]> {
+        let end = self.pos.checked_add(n)?;
+        let slice = self.bytes.get(self.pos..end)?;
+        self.pos = end;
+        Some(slice)
+    }
+
+    fn u8(&mut self) -> Option<u8> {
+        self.take(1).map(|b| b[0])
+    }
+
+    fn u32(&mut self) -> Option<u32> {
+        self.take(4)
+            .map(|b| u32::from_be_bytes(b.try_into().unwrap()))
+    }
+
+    fn u64(&mut self) -> Option<u64> {
+        self.take(8)
+            .map(|b| u64::from_be_bytes(b.try_into().unwrap()))
+    }
+}
+
+/// A conversation reassembled from the move log (design Part 9.5, Principle 5): the
+/// move-event ids that belong together, with the participants gathered across them. A
+/// conversation is not stored; it is this query over co-referenced move events, the way an
+/// artifact's saga is a query over its tagged events.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Conversation {
+    /// The move-event ids in the conversation, in ascending id order (deterministic).
+    pub event_ids: Vec<EventId>,
+    /// Every participant across the conversation, in stable-id order.
+    pub participants: Vec<StableId>,
+}
+
+/// Reassemble the conversation containing a seed move from the event log. Two moves join
+/// the same conversation when they fall within `window` ticks of each other and either one
+/// answers the other (the in-reply-to link) or they share a participant and a base topic
+/// (the co-reference link), which is exactly the participants, topic, in-reply-to, and
+/// time-window the resolution names. The conversation is the connected component of the
+/// seed under that relation, computed deterministically (moves processed in ascending
+/// event-id order) and returned sorted. Returns `None` if the seed is not a move event.
+pub fn conversation_of(log: &EventLog, seed: EventId, window: u64) -> Option<Conversation> {
+    // Decode every move event once, in ascending id order (the log is append-ordered).
+    let moves: Vec<(EventId, Move)> = log
+        .iter()
+        .filter_map(|e| Move::from_event(e).map(|m| (e.id, m)))
+        .collect();
+    if !moves.iter().any(|(id, _)| *id == seed) {
+        return None;
+    }
+    let adjacent = |a: &Move, b: &Move, a_id: EventId, b_id: EventId| -> bool {
+        if a.tick.abs_diff(b.tick) > window {
+            return false;
+        }
+        if a.in_reply_to == Some(b_id) || b.in_reply_to == Some(a_id) {
+            return true;
+        }
+        let shares_participant = a
+            .participants()
+            .iter()
+            .any(|p| b.participants().contains(p));
+        let shares_topic = match (a.base_topic(), b.base_topic()) {
+            (Some(x), Some(y)) => x == y,
+            _ => false,
+        };
+        shares_participant && shares_topic
+    };
+    // Breadth-first closure from the seed, visiting in ascending id order for determinism.
+    let mut in_set = vec![seed];
+    let mut frontier = vec![seed];
+    while let Some(cur) = frontier.pop() {
+        let cur_move = &moves.iter().find(|(id, _)| *id == cur).unwrap().1;
+        for (id, m) in &moves {
+            if in_set.contains(id) {
+                continue;
+            }
+            if adjacent(cur_move, m, cur, *id) {
+                in_set.push(*id);
+                frontier.push(*id);
+            }
+        }
+    }
+    in_set.sort();
+    let mut participants: Vec<StableId> = Vec::new();
+    for id in &in_set {
+        let m = &moves.iter().find(|(mid, _)| mid == id).unwrap().1;
+        for p in m.participants() {
+            if !participants.contains(&p) {
+                participants.push(p);
+            }
+        }
+    }
+    participants.sort();
+    Some(Conversation {
+        event_ids: in_set,
+        participants,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,5 +1105,195 @@ source = "Part 9.5"
         ] {
             assert!(k.is_affordance());
         }
+    }
+
+    fn assertion(
+        speaker: StableId,
+        addressee: StableId,
+        subject: StableId,
+        tick: u64,
+        ordinal: u32,
+    ) -> Move {
+        Move {
+            force: MoveKindId(1),
+            speaker,
+            addressees: vec![addressee],
+            content: ContentRef::Belief {
+                subject,
+                attr: AttrKindId(0),
+            },
+            in_reply_to: None,
+            channel: AccessChannelId(3),
+            tick,
+            ordinal,
+        }
+    }
+
+    #[test]
+    fn a_move_round_trips_through_an_event() {
+        // Every content shape survives the encode-append-decode round trip.
+        let speaker = StableId(1);
+        let cases = [
+            ContentRef::Belief {
+                subject: StableId(99),
+                attr: AttrKindId(2),
+            },
+            ContentRef::Inquiry {
+                subject: StableId(7),
+                attr: AttrKindId(5),
+            },
+            ContentRef::Concept {
+                concept: ConceptId(42),
+            },
+            ContentRef::PriorMove { event: EventId(3) },
+        ];
+        for content in cases {
+            let m = Move {
+                force: MoveKindId(2),
+                speaker,
+                addressees: vec![StableId(10), StableId(20)],
+                content,
+                in_reply_to: Some(EventId(8)),
+                channel: AccessChannelId(3),
+                tick: 17,
+                ordinal: 4,
+            };
+            let mut log = EventLog::new();
+            let id = log.append(m.to_event());
+            let decoded = Move::from_event(log.get(id)).unwrap();
+            assert_eq!(decoded, m, "the move survived the event round trip");
+        }
+    }
+
+    #[test]
+    fn a_move_with_no_reply_round_trips() {
+        let m = assertion(StableId(1), StableId(2), StableId(99), 3, 0);
+        let mut log = EventLog::new();
+        let id = log.append(m.to_event());
+        let decoded = Move::from_event(log.get(id)).unwrap();
+        assert_eq!(decoded.in_reply_to, None);
+        assert_eq!(decoded, m);
+    }
+
+    #[test]
+    fn the_event_indexes_participants_and_topic() {
+        // The move event references the speaker, the addressees, and the topic subject, so
+        // the provenance index finds it for each (the query's keys survive R-EVENT).
+        let m = assertion(StableId(1), StableId(2), StableId(99), 5, 0);
+        let mut log = EventLog::new();
+        log.append(m.to_event());
+        assert_eq!(log.history_of(StableId(1)).count(), 1, "speaker indexed");
+        assert_eq!(log.history_of(StableId(2)).count(), 1, "addressee indexed");
+        assert_eq!(log.history_of(StableId(99)).count(), 1, "topic indexed");
+        assert_eq!(
+            log.history_of(StableId(404)).count(),
+            0,
+            "a stranger is not"
+        );
+    }
+
+    #[test]
+    fn a_foreign_or_corrupt_event_decodes_to_none() {
+        // A non-move event is not a move.
+        let other = Event::new(1, EventKindId(7), vec![StableId(1)], vec![]);
+        assert_eq!(Move::from_event(&other), None);
+        // A move-kinded event with a truncated payload fails cleanly, never panics.
+        let mut truncated = Event::new(1, MOVE_EVENT_KIND, vec![StableId(1)], vec![]);
+        truncated.payload = vec![MOVE_PAYLOAD_VERSION, 0, 0];
+        assert_eq!(Move::from_event(&truncated), None);
+    }
+
+    #[test]
+    fn the_payload_encoding_is_canonical_and_stable() {
+        // The same move encodes to the same bytes every time (a pure function of the
+        // move), which is what lets a logged conversation replay bit for bit.
+        let m = assertion(StableId(1), StableId(2), StableId(99), 3, 0);
+        assert_eq!(m.to_event().payload, m.to_event().payload);
+    }
+
+    #[test]
+    fn a_conversation_gathers_a_reply_chain() {
+        // An assertion, an answer to it, and an answer to that form one conversation,
+        // linked by the in-reply-to chain even as the topic reference changes to the prior
+        // move.
+        let (a, b) = (StableId(1), StableId(2));
+        let mut log = EventLog::new();
+        let m0 = assertion(a, b, StableId(99), 1, 0);
+        let id0 = log.append(m0.to_event());
+        let m1 = Move {
+            force: MoveKindId(3),
+            speaker: b,
+            addressees: vec![a],
+            content: ContentRef::PriorMove { event: id0 },
+            in_reply_to: Some(id0),
+            channel: AccessChannelId(3),
+            tick: 2,
+            ordinal: 0,
+        };
+        let id1 = log.append(m1.to_event());
+        let m2 = Move {
+            force: MoveKindId(1),
+            speaker: a,
+            addressees: vec![b],
+            content: ContentRef::PriorMove { event: id1 },
+            in_reply_to: Some(id1),
+            channel: AccessChannelId(3),
+            tick: 3,
+            ordinal: 0,
+        };
+        let id2 = log.append(m2.to_event());
+
+        let conv = conversation_of(&log, id0, 10).unwrap();
+        assert_eq!(
+            conv.event_ids,
+            vec![id0, id1, id2],
+            "the whole chain is one talk"
+        );
+        assert_eq!(conv.participants, vec![a, b]);
+    }
+
+    #[test]
+    fn a_conversation_links_co_reference_and_excludes_the_unrelated() {
+        // Two moves by the same pair on the same topic join even without a reply link; a
+        // move by a stranger pair on a different topic does not; a move past the window is
+        // excluded though it shares a participant and topic.
+        let (a, b, c) = (StableId(1), StableId(2), StableId(3));
+        let topic = StableId(99);
+        let other_topic = StableId(88);
+        let mut log = EventLog::new();
+        let here0 = log.append(assertion(a, b, topic, 1, 0).to_event());
+        let here1 = log.append(assertion(b, a, topic, 2, 0).to_event()); // same pair, same topic
+        let _elsewhere = log.append(assertion(a, c, other_topic, 2, 1).to_event()); // diff topic
+        let _too_late = log.append(assertion(a, b, topic, 100, 0).to_event()); // past the window
+
+        let conv = conversation_of(&log, here0, 5).unwrap();
+        assert_eq!(
+            conv.event_ids,
+            vec![here0, here1],
+            "only the co-referenced, in-window moves join"
+        );
+    }
+
+    #[test]
+    fn the_conversation_query_is_deterministic() {
+        // The same log yields the same conversation every call (order-independent set,
+        // sorted result).
+        let (a, b) = (StableId(1), StableId(2));
+        let topic = StableId(99);
+        let mut log = EventLog::new();
+        let seed = log.append(assertion(a, b, topic, 1, 0).to_event());
+        log.append(assertion(b, a, topic, 2, 0).to_event());
+        log.append(assertion(a, b, topic, 3, 0).to_event());
+        assert_eq!(
+            conversation_of(&log, seed, 10),
+            conversation_of(&log, seed, 10)
+        );
+    }
+
+    #[test]
+    fn conversation_of_a_non_move_seed_is_none() {
+        let mut log = EventLog::new();
+        let other = log.append(Event::new(1, EventKindId(7), vec![StableId(1)], vec![]));
+        assert_eq!(conversation_of(&log, other, 10), None);
     }
 }

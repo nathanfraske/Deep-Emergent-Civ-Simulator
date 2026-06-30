@@ -67,8 +67,9 @@ pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedVa
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use dialogue::{
-    ContentGateError, ContentRef, EffectSign, FelicityCond, ForceEffectDef, ForceEffectId,
-    ForceFloor, ForceKind, MoveKindDef, MoveKindId, MoveRegistry, ResolvedBand,
+    conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
+    ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
+    MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use language::{
