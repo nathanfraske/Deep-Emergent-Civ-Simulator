@@ -40,7 +40,7 @@
 //! 25.8). The per-race genetic scheme is represented here only by its id on a genome;
 //! its reproduction and inheritance variants arrive with the inheritance brick.
 
-use civsim_core::Fixed;
+use civsim_core::{DrawKey, Fixed, Phase};
 
 /// A data-defined gene identifier (Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -318,6 +318,203 @@ fn channel_weight(gene: &GeneDef, channel: Channel) -> Option<Fixed> {
     found.then_some(weight)
 }
 
+// --- Inheritance: per-race scheme, gamete formation, and reproduction (design 25.2, 25.4,
+// 25.5) ---
+
+/// How a race or species reproduces and inherits (design 25.2). Three mechanism variants
+/// are implemented here, defaulting to the sexual diploid model ordinary creatures share.
+/// The two escape-hatch modes the design names (eusocial caste inheritance and a
+/// magically-determined non-allelic rule) are deferred; they dispatch to bespoke audited
+/// functions when built, and are not in this enum yet.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ReproductionMode {
+    /// The common default: Mendelian segregation with recombination, two parents, a
+    /// diploid offspring.
+    SexualDiploid,
+    /// A single haploid parent contributes its one strand (with mutation) to a haploid
+    /// offspring.
+    Haploid,
+    /// The offspring is the single parent's genome copied, plus mutation (no recombination,
+    /// no second parent).
+    Clonal,
+}
+
+/// One linkage group (design 25.4): an ordered run of loci (gene indices into the
+/// [`GeneSet`]) that travel together, with a per-interval recombination fraction. Genes in
+/// different groups assort independently; within a group, a crossover between two adjacent
+/// loci fires when a draw falls below that interval's fraction, so linkage disequilibrium
+/// and hitchhiking emerge for free.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct LinkageGroup {
+    /// The loci in this group, in map order, as gene indices into the gene set.
+    pub loci: Vec<u32>,
+    /// The crossover fraction for each adjacent interval, length `loci.len().saturating_sub(1)`.
+    /// Reserved owner values (the genetic map), supplied as data, never fabricated.
+    pub recombination: Vec<Fixed>,
+}
+
+/// A per-race genetic scheme (design 25.2): which reproduction variant a race runs and its
+/// genetic map. The mechanism is fixed; the linkage map and the mutation rate are data.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GeneticScheme {
+    /// The scheme's identifier (carried on a [`Genome`]).
+    pub id: SchemeId,
+    /// Which reproduction and inheritance variant this scheme runs.
+    pub reproduction: ReproductionMode,
+    /// The linkage groups partitioning the genes. Loci not covered by any group assort
+    /// independently (each its own singleton).
+    pub linkage_groups: Vec<LinkageGroup>,
+    /// The per-locus point-mutation probability (a reserved owner value, supplied as data).
+    /// A draw below this flips the locus's discrete allele state.
+    pub mutation_rate: Fixed,
+}
+
+// Draw-site slots within the REPRODUCE phase, so the strand, crossover, and mutation rolls
+// of one reproduction cannot collide on counter zero (the R-RNG-COORD slot rule).
+const SLOT_STRAND: u32 = 0;
+const SLOT_CROSSOVER: u32 = 1;
+const SLOT_MUTATE: u32 = 2;
+
+impl GeneticScheme {
+    /// Form one gamete from a parent: a haplotype indexed by the gene set's order, each
+    /// allele drawn from one of the parent's strands by walking the linkage groups with
+    /// crossover (design 25.4), then point mutation applied per locus (25.5). For a haploid
+    /// or clonal parent the single strand is copied (no recombination). Every draw is keyed
+    /// through the canonical schema on the contributing parent and the locus, so a lineage
+    /// is bit-identical across machines and thread counts. `gene_count` is the gene set's
+    /// length; `parent_id` keys the draws; `generation` is the reproduction ordinal.
+    pub fn gamete(
+        &self,
+        parent: &Genome,
+        gene_count: usize,
+        seed: u64,
+        parent_id: u64,
+        generation: u64,
+    ) -> Haplotype {
+        // The strand each locus is copied from. For a diploid parent, walk the linkage
+        // groups; for a single-strand parent, every locus reads strand 0.
+        let diploid = parent.haps.len() >= 2;
+        let mut strand = vec![0usize; gene_count];
+        if diploid {
+            // Loci covered by a group follow its walk; uncovered loci assort independently.
+            let mut covered = vec![false; gene_count];
+            for (g, group) in self.linkage_groups.iter().enumerate() {
+                // Independent assortment between groups: each group starts on its own draw.
+                let mut s = (DrawKey::pair(parent_id, g as u64, generation, Phase::REPRODUCE)
+                    .slot(SLOT_STRAND)
+                    .rng(seed)
+                    .at(0)
+                    & 1) as usize;
+                for (i, &locus) in group.loci.iter().enumerate() {
+                    let l = locus as usize;
+                    if l < gene_count {
+                        strand[l] = s;
+                        covered[l] = true;
+                    }
+                    // Crossover before the next locus in the group.
+                    if i + 1 < group.loci.len() {
+                        let frac = group.recombination.get(i).copied().unwrap_or(Fixed::ZERO);
+                        let roll =
+                            DrawKey::pair(parent_id, locus as u64, generation, Phase::REPRODUCE)
+                                .slot(SLOT_CROSSOVER)
+                                .rng(seed)
+                                .unit_fixed(0);
+                        if roll < frac {
+                            s ^= 1;
+                        }
+                    }
+                }
+            }
+            for (l, c) in covered.iter().enumerate() {
+                if !*c {
+                    strand[l] = (DrawKey::pair(parent_id, l as u64, generation, Phase::REPRODUCE)
+                        .slot(SLOT_STRAND)
+                        .rng(seed)
+                        .at(0)
+                        & 1) as usize;
+                }
+            }
+        }
+
+        // Copy each locus's allele from the chosen strand, then mutate. `strand` is zero
+        // for a single-strand (haploid or clonal) parent, so the same walk serves both.
+        let mut alleles = Vec::with_capacity(gene_count);
+        for (l, &s) in strand.iter().enumerate() {
+            let mut allele = parent
+                .haps
+                .get(s)
+                .and_then(|h| h.alleles.get(l))
+                .copied()
+                .or_else(|| parent.haps.first().and_then(|h| h.alleles.get(l)).copied())
+                .unwrap_or(Allele::additive(Fixed::ZERO));
+            let roll = DrawKey::pair(parent_id, l as u64, generation, Phase::REPRODUCE)
+                .slot(SLOT_MUTATE)
+                .rng(seed)
+                .unit_fixed(0);
+            if roll < self.mutation_rate {
+                // A point mutation flips the discrete allele state to a fresh variant. The
+                // continuous additive-step mutation is deferred (it needs the reserved
+                // integer-Gaussian approximation of 25.10), so the quantitative spine does
+                // not yet mutate here.
+                allele.state = AlleleState(allele.state.0.wrapping_add(1));
+            }
+            alleles.push(allele);
+        }
+        Haplotype { alleles }
+    }
+
+    /// Produce an offspring genome from one or two parents under this scheme (design 25.4,
+    /// 25.5). Sexual diploid recombines a gamete from each parent; haploid takes a single
+    /// strand from one parent; clonal copies the one parent and mutates. A pure function of
+    /// the seed, the parents, their ids, and the generation ordinal, so a lineage replays
+    /// bit for bit. `p2` is ignored for the single-parent modes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reproduce(
+        &self,
+        p1: &Genome,
+        p1_id: u64,
+        p2: &Genome,
+        p2_id: u64,
+        gene_count: usize,
+        seed: u64,
+        generation: u64,
+    ) -> Genome {
+        match self.reproduction {
+            ReproductionMode::SexualDiploid => {
+                let g1 = self.gamete(p1, gene_count, seed, p1_id, generation);
+                let g2 = self.gamete(p2, gene_count, seed, p2_id, generation);
+                Genome {
+                    scheme: self.id,
+                    haps: vec![g1, g2],
+                }
+            }
+            ReproductionMode::Haploid => {
+                let g = self.gamete(p1, gene_count, seed, p1_id, generation);
+                Genome {
+                    scheme: self.id,
+                    haps: vec![g],
+                }
+            }
+            ReproductionMode::Clonal => {
+                // The offspring is the parent's strands copied, each mutated per locus.
+                let g = self.gamete(p1, gene_count, seed, p1_id, generation);
+                let haps = if p1.haps.len() >= 2 {
+                    // A diploid clone keeps both strands; the gamete already mutated strand
+                    // choices, so mutate the second strand on its own draw stream.
+                    let g2 = self.gamete(p1, gene_count, seed, p1_id ^ 1, generation);
+                    vec![g, g2]
+                } else {
+                    vec![g]
+                };
+                Genome {
+                    scheme: self.id,
+                    haps,
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,5 +747,154 @@ mod tests {
             haps: vec![Haplotype::default(), Haplotype::default()],
         };
         assert_eq!(g.ploidy(), 2);
+    }
+
+    // --- Inheritance (design 25.2, 25.4, 25.5) ---
+
+    // A diploid parent over `n` loci whose two strands are tagged by origin, so a gamete's
+    // provenance is visible: strand 0 alleles carry `o0`, strand 1 alleles carry `o1`.
+    fn tagged_parent(n: usize, o0: u32, o1: u32) -> Genome {
+        let strand = |o: u32| Haplotype {
+            alleles: (0..n)
+                .map(|_| Allele {
+                    additive: Fixed::from_int(1),
+                    state: AlleleState(0),
+                    origin: o,
+                })
+                .collect(),
+        };
+        Genome {
+            scheme: SCHEME,
+            haps: vec![strand(o0), strand(o1)],
+        }
+    }
+
+    fn scheme(mode: ReproductionMode, n: usize, recomb: i32, mutation: Fixed) -> GeneticScheme {
+        // One linkage group covering all loci, a uniform per-interval crossover fraction.
+        GeneticScheme {
+            id: SCHEME,
+            reproduction: mode,
+            linkage_groups: vec![LinkageGroup {
+                loci: (0..n as u32).collect(),
+                recombination: vec![Fixed::from_int(recomb); n.saturating_sub(1)],
+            }],
+            mutation_rate: mutation,
+        }
+    }
+
+    #[test]
+    fn clonal_reproduction_copies_the_parent_and_replays() {
+        let n = 4;
+        let parent = tagged_parent(n, 10, 11);
+        let sc = scheme(ReproductionMode::Clonal, n, 0, Fixed::ZERO);
+        let child = sc.reproduce(&parent, 1, &parent, 2, n, 0xABC, 0);
+        // No mutation, no recombination: the clone's first strand reproduces a parent strand.
+        assert_eq!(child.haps.len(), 2);
+        assert!(child.haps[0]
+            .alleles
+            .iter()
+            .all(|a| a.origin == 10 || a.origin == 11));
+        // Bit-identical replay.
+        let again = sc.reproduce(&parent, 1, &parent, 2, n, 0xABC, 0);
+        assert_eq!(child, again, "a clonal lineage replays bit for bit");
+    }
+
+    #[test]
+    fn a_sexual_child_draws_each_strand_from_the_matching_parent() {
+        let n = 4;
+        let p1 = tagged_parent(n, 10, 11);
+        let p2 = tagged_parent(n, 20, 21);
+        let sc = scheme(ReproductionMode::SexualDiploid, n, 0, Fixed::ZERO);
+        let child = sc.reproduce(&p1, 1, &p2, 2, n, 0x5EED, 0);
+        assert_eq!(child.haps.len(), 2);
+        // Hap 0 is p1's gamete (origins from p1), hap 1 is p2's gamete (origins from p2).
+        assert!(
+            child.haps[0]
+                .alleles
+                .iter()
+                .all(|a| a.origin == 10 || a.origin == 11),
+            "the first strand came from parent one"
+        );
+        assert!(
+            child.haps[1]
+                .alleles
+                .iter()
+                .all(|a| a.origin == 20 || a.origin == 21),
+            "the second strand came from parent two"
+        );
+        // Replay is bit-identical.
+        let again = sc.reproduce(&p1, 1, &p2, 2, n, 0x5EED, 0);
+        assert_eq!(child, again, "a sexual lineage replays bit for bit");
+    }
+
+    #[test]
+    fn no_crossover_keeps_a_strand_intact_and_full_crossover_recombines() {
+        let n = 4;
+        let p1 = tagged_parent(n, 10, 11);
+        let p2 = tagged_parent(n, 20, 21);
+        // With recombination 0, a gamete is one parent strand wholesale: every locus shares
+        // the one origin.
+        let clean = scheme(ReproductionMode::SexualDiploid, n, 0, Fixed::ZERO);
+        let child = clean.reproduce(&p1, 1, &p2, 2, n, 7, 0);
+        let o0 = child.haps[0].alleles[0].origin;
+        assert!(
+            child.haps[0].alleles.iter().all(|a| a.origin == o0),
+            "no crossover leaves the strand intact"
+        );
+        // With recombination 1, the strand flips at every interval, so a multi-locus gamete
+        // carries both of its parent's origins (it is recombined).
+        let crossed = scheme(ReproductionMode::SexualDiploid, n, 1, Fixed::ZERO);
+        let child2 = crossed.reproduce(&p1, 1, &p2, 2, n, 7, 0);
+        let origins: std::collections::BTreeSet<u32> =
+            child2.haps[0].alleles.iter().map(|a| a.origin).collect();
+        assert_eq!(
+            origins,
+            [10, 11].into_iter().collect(),
+            "full crossover recombines both strands of parent one"
+        );
+    }
+
+    #[test]
+    fn mutation_at_full_rate_flips_every_state_and_off_flips_none() {
+        let n = 3;
+        let p1 = tagged_parent(n, 10, 11);
+        let p2 = tagged_parent(n, 20, 21);
+        // Parent strands start at state 0.
+        let always = scheme(ReproductionMode::SexualDiploid, n, 0, Fixed::ONE);
+        let mutated = always.reproduce(&p1, 1, &p2, 2, n, 1, 0);
+        assert!(
+            mutated.haps[0]
+                .alleles
+                .iter()
+                .all(|a| a.state != AlleleState(0)),
+            "a full mutation rate flips every locus's discrete state"
+        );
+        let never = scheme(ReproductionMode::SexualDiploid, n, 0, Fixed::ZERO);
+        let clean = never.reproduce(&p1, 1, &p2, 2, n, 1, 0);
+        assert!(
+            clean.haps[0]
+                .alleles
+                .iter()
+                .all(|a| a.state == AlleleState(0)),
+            "a zero mutation rate leaves every state untouched"
+        );
+    }
+
+    #[test]
+    fn a_child_genotype_still_expresses_a_phenotype() {
+        // The inherited genome plugs straight back into the genotype-to-phenotype map.
+        let n = 2;
+        let p1 = tagged_parent(n, 10, 11);
+        let p2 = tagged_parent(n, 20, 21);
+        let sc = scheme(ReproductionMode::SexualDiploid, n, 0, Fixed::ZERO);
+        let child = sc.reproduce(&p1, 1, &p2, 2, n, 99, 0);
+        let genes = GeneSet {
+            genes: vec![additive_gene(1, ACUITY, 1), additive_gene(2, ACUITY, 1)],
+        };
+        // Each locus carries additive 1 on both strands, weight 1, two loci: 2*(1+1)*1 = 4.
+        assert_eq!(
+            genes.express(&child, ACUITY, Fixed::ZERO),
+            Fixed::from_int(4)
+        );
     }
 }

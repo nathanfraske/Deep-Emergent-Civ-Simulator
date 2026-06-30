@@ -59,6 +59,9 @@ impl Phase {
     /// scoped draws are keyed without the addressee, addressee-scoped draws with it, each
     /// on its own slot (the determinism pins of Part 9.5).
     pub const CONVERSE: Phase = Phase(0x07);
+    /// A reproduction draw (gamete strand choice, crossover, point mutation), keyed on the
+    /// contributing parent and the locus so a lineage is bit-identical (design 25.4, 25.5).
+    pub const REPRODUCE: Phase = Phase(0x08);
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);
