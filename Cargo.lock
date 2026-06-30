@@ -11,6 +11,7 @@ name = "civsim-sim"
 version = "0.1.0"
 dependencies = [
  "civsim-core",
+ "civsim-world",
  "serde",
  "toml",
 ]
