@@ -50,6 +50,13 @@ The design-level seams the red and green audit found, where a determinism, conse
 - **R-UNITS-PIN.** Pin the Part 55 unit system: scales, canonical direction, overflow policy, and exact round trips. Site Part 55; couples to Parts 3, 9, 40.
 - **R-LANG-DET.** Pin sound-change order, salience overflow, concept-id minting, the shared-concept traversal, and the dawn trigger. Site Part 33; couples to Parts 9, 21, 55.
 
+## Recorded candidate explorations (not yet formally flagged, not in the open count)
+
+Two exploration documents the owner asked to record now and queue for later. They are stored verbatim under `docs/working/`, are vehicles for future research items rather than counted backlog entries, and do not change the 27-open total until they are formally flagged through the workflow. Both sit far out, sequenced after the simulation core and the epistemics are built and proven, since each reads through systems that have to exist first.
+
+- **R-EMBODIMENT (candidate).** How a player could control a character or lead a band while holding determinism, observer-independence, the per-individual epistemics, and emergence. The on-ideology direction keeps the learned axes as the lens and the limit: the player supplies will and intent, the existing systems resolve perception, capability, and social outcome, player input enters the event log as exogenous events for replay, and the decision source becomes a per-agent data property (Principle 11). The hard build is the epistemic-rendering interface, showing a belief store rather than canon, including absence and falsehood. Vehicle: `docs/working/PLAYER_EMBODIMENT_EXPLORATION.md`. Couples to Parts 7, 8, 9, 33, 36, 37.
+- **R-CONFIG (candidate).** How an observer configures a world, and where the line falls between tunable and restricted. The control surface is the profile, not the engine: selection levers are free, value overrides are free within their declared ranges, and generative levers run the steering and computability gates. Canon-affecting levers are seed-time and reproducible; observer-side controls are runtime and never enter canon. Open within it: the exact runtime-mutable set, the validation of override ranges against the substrate, and the configuration interface. Vehicle: `docs/working/WORLD_CONFIGURATION_AND_LEVERS.md`. Couples to Principles 3, 8, 9, 10, 11 and the world-profile and demand-closure model.
+
 ---
 
 ## Reserved-values queue
