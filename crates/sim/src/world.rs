@@ -38,6 +38,7 @@ use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::decision::{ActionId, Behaviour, DriveId};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
+use crate::language::{ConceptId, LanguageParams, Lexicon, WordId};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
 
@@ -52,6 +53,15 @@ const PHASE_PERCEPTION: u64 = 0x9001;
 
 /// The RNG phase tag for choosing a gossip listener.
 const PHASE_GOSSIP: u64 = 0x9002;
+
+/// The RNG phase tag for choosing a naming-game partner and concept.
+const PHASE_LANGUAGE: u64 = 0x9003;
+
+/// The RNG phase tag for the innovation roll (whether to coin a fresh word).
+const PHASE_INNOVATE: u64 = 0x9004;
+
+/// The RNG phase tag for minting a fresh word form.
+const PHASE_COIN: u64 = 0x9005;
 
 /// The conventional access channel name a spoken belief travels through, used by the
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
@@ -195,6 +205,12 @@ pub struct World {
     gossip: Option<GossipParams>,
     /// Per-pair trust, keyed (listener, speaker): a 0..1 multiplier on a heard weight.
     trust: BTreeMap<(StableId, StableId), Fixed>,
+    /// Per-mind lexicons (concept to word).
+    lexicons: BTreeMap<StableId, Lexicon>,
+    /// The concepts a band coordinates words for (data).
+    concepts: Vec<ConceptId>,
+    /// The language calibration. None until set; the naming game is then a no-op.
+    language: Option<LanguageParams>,
     events: EventLog,
     /// The first-order belief calibrations (the `evidence.*` reserved values).
     belief_params: InferenceParams,
@@ -225,6 +241,9 @@ impl World {
             channels: AccessChannelRegistry::default(),
             gossip: None,
             trust: BTreeMap::new(),
+            lexicons: BTreeMap::new(),
+            concepts: Vec::new(),
+            language: None,
             events: EventLog::new(),
             belief_params,
             meta_params,
@@ -287,6 +306,21 @@ impl World {
     /// The trust a listener extends to a speaker, if any has been recorded.
     pub fn trust(&self, listener: StableId, speaker: StableId) -> Option<Fixed> {
         self.trust.get(&(listener, speaker)).copied()
+    }
+
+    /// Install the concepts a band coordinates words for (data the owner provides).
+    pub fn set_concepts(&mut self, concepts: impl IntoIterator<Item = ConceptId>) {
+        self.concepts = concepts.into_iter().collect();
+    }
+
+    /// Install the language calibration. Until set, the naming game is a no-op.
+    pub fn set_language(&mut self, params: LanguageParams) {
+        self.language = Some(params);
+    }
+
+    /// The word a mind uses for a concept, if it has settled on one.
+    pub fn word_for(&self, mind: StableId, concept: ConceptId) -> Option<WordId> {
+        self.lexicons.get(&mind)?.word_for(concept)
     }
 
     /// The current tick.
@@ -411,6 +445,74 @@ impl World {
         self.perceive();
         self.decide();
         self.gossip();
+        self.converse_language();
+    }
+
+    /// The naming-game step (design 33.9): each co-located speaker and a chosen listener
+    /// align on a word for a chosen concept. If the speaker has a word it shares it (and
+    /// with the reserved innovation rate coins a fresh variant instead); if it has none
+    /// it coins one. Both adopt the word, so a band converges and isolated bands diverge.
+    /// The partner, the concept, the innovation roll, and the minted word form are all
+    /// keyed on counter-based RNG, and speakers are walked in id order, so it replays bit
+    /// for bit. A no-op until the language calibration and some concepts are set.
+    fn converse_language(&mut self) {
+        let lp = match self.language {
+            Some(l) => l,
+            None => return,
+        };
+        if self.concepts.is_empty() {
+            return;
+        }
+        // Applied sequentially in speaker-id order: a word coined or reused by an earlier
+        // speaker is visible to a later one in the same tick, which is what drives the band
+        // to consensus. Serial id order is deterministic, so this still replays bit for bit.
+        let ids: Vec<StableId> = self.minds.keys().copied().collect();
+        for speaker in ids {
+            let place = match self.place_of.get(&speaker) {
+                Some(p) => *p,
+                None => continue,
+            };
+            let listeners: Vec<StableId> = self
+                .minds
+                .keys()
+                .copied()
+                .filter(|l| *l != speaker && self.place_of.get(l) == Some(&place))
+                .collect();
+            if listeners.is_empty() {
+                continue;
+            }
+            let pair = Rng::for_coords(self.seed, &[speaker.0, self.clock, PHASE_LANGUAGE]);
+            let listener = listeners[pair.range_u32(0, listeners.len() as u32) as usize];
+            let concept = self.concepts[pair.range_u32(1, self.concepts.len() as u32) as usize];
+            let existing = self
+                .lexicons
+                .get(&speaker)
+                .and_then(|lex| lex.word_for(concept));
+            let innovate = Rng::for_coords(
+                self.seed,
+                &[speaker.0, concept.0 as u64, self.clock, PHASE_INNOVATE],
+            )
+            .unit_fixed(0)
+                < lp.innovation_rate;
+            let word = match existing {
+                Some(w) if !innovate => w,
+                _ => WordId(
+                    Rng::for_coords(
+                        self.seed,
+                        &[speaker.0, concept.0 as u64, self.clock, PHASE_COIN],
+                    )
+                    .at(0),
+                ),
+            };
+            self.lexicons
+                .entry(speaker)
+                .or_default()
+                .adopt(concept, word);
+            self.lexicons
+                .entry(listener)
+                .or_default()
+                .adopt(concept, word);
+        }
     }
 
     /// The transmission step (design 9.5): each co-located speaker shares one belief with
@@ -644,6 +746,14 @@ impl World {
             h.write_stable(*listener);
             h.write_stable(*speaker);
             h.write_fixed(*level);
+        }
+        // Lexicons, by mind id then concept id.
+        for (mind, lex) in &self.lexicons {
+            h.write_stable(*mind);
+            for (concept, word) in lex.entries() {
+                h.write_u32(concept.0);
+                h.write_u64(word.0);
+            }
         }
         h.finish()
     }
@@ -1025,5 +1135,61 @@ name = "said"
             w.state_hash()
         };
         assert_eq!(build(), build(), "the band's gossip replays bit for bit");
+    }
+
+    fn language_world() -> World {
+        use crate::language::LanguageParams;
+        let mut w = World::new(params(), params(), AccessWeights::from_pairs([])).with_seed(0xABBA);
+        w.set_concepts([ConceptId(1)]);
+        // Innovation off, so a band converges cleanly to one coined word.
+        w.set_language(LanguageParams {
+            innovation_rate: Fixed::ZERO,
+        });
+        w
+    }
+
+    #[test]
+    fn two_isolated_bands_grow_different_words_for_one_concept() {
+        let mut w = language_world();
+        let band_a: Vec<StableId> = (0..3).map(|_| w.spawn(Fixed::ONE)).collect();
+        let band_b: Vec<StableId> = (0..3).map(|_| w.spawn(Fixed::ONE)).collect();
+        for &m in &band_a {
+            w.set_place(m, 1);
+        }
+        for &m in &band_b {
+            w.set_place(m, 2);
+        }
+        for _ in 0..40 {
+            w.tick(&[]);
+        }
+        let c = ConceptId(1);
+        let wa = w.word_for(band_a[0], c);
+        let wb = w.word_for(band_b[0], c);
+        assert!(wa.is_some() && wb.is_some(), "each band coined a word");
+        // Each band converged internally.
+        for &m in &band_a {
+            assert_eq!(w.word_for(m, c), wa, "band A shares one word");
+        }
+        for &m in &band_b {
+            assert_eq!(w.word_for(m, c), wb, "band B shares one word");
+        }
+        // The two isolated bands coined different words: language is emergent.
+        assert_ne!(wa, wb, "isolated bands diverged");
+    }
+
+    #[test]
+    fn the_naming_game_replays_deterministically() {
+        let build = || {
+            let mut w = language_world();
+            let ids: Vec<StableId> = (0..4).map(|_| w.spawn(Fixed::ONE)).collect();
+            for &m in &ids {
+                w.set_place(m, 1);
+            }
+            for _ in 0..20 {
+                w.tick(&[]);
+            }
+            w.state_hash()
+        };
+        assert_eq!(build(), build(), "the naming game replays bit for bit");
     }
 }

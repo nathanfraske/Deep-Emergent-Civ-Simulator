@@ -543,3 +543,13 @@ status = "reserved"
 value = ""
 unit = "fraction"
 source = "Part 9.5 gossip loop; Part 37 trust"
+
+# --- language: the naming game (Part 33) ---
+
+[[reserved]]
+id = "language.innovation_rate"
+basis = "the per-interaction probability a speaker coins a fresh word form instead of reusing its own, the seed of lexical drift and dialect split"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33 procedural language; record 62.6"

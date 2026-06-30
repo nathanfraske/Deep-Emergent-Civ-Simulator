@@ -144,3 +144,13 @@ status = "set"
 value = "0.5"
 unit = "fraction"
 source = "dev fixture for Part 9.5 gossip"
+
+# --- language (Phase 5), FIXTURE placeholder ---
+
+[[reserved]]
+id = "language.innovation_rate"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.05"
+unit = "probability"
+source = "dev fixture for Part 33 language"
