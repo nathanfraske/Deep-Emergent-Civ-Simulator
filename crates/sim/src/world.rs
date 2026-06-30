@@ -38,7 +38,16 @@ use crate::agent::{AccessObs, Mind};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use civsim_core::{EventLog, Fixed, Registry, StableId, StateHasher};
+use civsim_core::{EventLog, Fixed, Registry, Rng, StableId, StateHasher};
+
+/// A place in the world. Minimal for now: two minds are co-located when they share a
+/// place id, which is what lets one perceive a trace or talk to another. The full
+/// spatial hierarchy (design Part 6) refines this later.
+pub type PlaceId = u32;
+
+/// The RNG phase tag for a perception roll, namespacing it apart from other draws (a
+/// placeholder until the phase registry of R-RNG-COORD pins the namespace).
+const PHASE_PERCEPTION: u64 = 0x9001;
 
 /// One stimulus delivered to a mind on a tick: either a first-order observation about
 /// the world, or a second-order observation about a target mind's access. Phase 1
@@ -85,11 +94,53 @@ pub struct TickInput {
     pub stim: Stimulus,
 }
 
+/// A perceptible, placed consequence of an event (design Part 9.9). A mind co-located
+/// with a trace may perceive it and form an observed belief. The salience (a 0..1
+/// perceptibility) and the belief weight are data carried from the trace kind's reserved
+/// calibration; this struct is the placed instance the emitter drops into the world, so
+/// the world's perception step invents no number of its own.
+#[derive(Clone, Debug)]
+pub struct Trace {
+    /// The trace's own stable id (keys the perception roll).
+    pub id: StableId,
+    /// Where it sits; only co-located minds can perceive it.
+    pub place: PlaceId,
+    /// The subject the implied belief is about.
+    pub subject: StableId,
+    /// The attribute the implied belief is about.
+    pub attr: AttrKindId,
+    /// The candidate values of the question.
+    pub hyps: Vec<ValueId>,
+    /// The value perceiving the trace proposes.
+    pub value: ValueId,
+    /// Perceptibility in 0..1, scaled by a perceiver's acuity (data, reserved-calibrated).
+    pub salience: Fixed,
+    /// The belief weight a successful perception carries (data, reserved-calibrated).
+    pub weight: Fixed,
+    /// Provenance of the implied belief.
+    pub from: StableId,
+}
+
+/// One perception success, gathered in the read pass and applied in the write pass so
+/// the perception walk stays a pure read.
+struct PerceptionHit {
+    mind: StableId,
+    subject: StableId,
+    attr: AttrKindId,
+    hyps: Vec<ValueId>,
+    value: ValueId,
+    weight: Fixed,
+    from: StableId,
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
+    seed: u64,
     reg: Registry,
     minds: BTreeMap<StableId, Mind>,
+    place_of: BTreeMap<StableId, PlaceId>,
+    traces: Vec<Trace>,
     events: EventLog,
     /// The first-order belief calibrations (the `evidence.*` reserved values).
     belief_params: InferenceParams,
@@ -109,13 +160,24 @@ impl World {
     ) -> Self {
         World {
             clock: 0,
+            seed: 0,
             reg: Registry::new(),
             minds: BTreeMap::new(),
+            place_of: BTreeMap::new(),
+            traces: Vec::new(),
             events: EventLog::new(),
             belief_params,
             meta_params,
             weights,
         }
+    }
+
+    /// Set the master seed that keys every stochastic draw (perception rolls and, in
+    /// later phases, gossip pairing and decisions). The seed and the world alone
+    /// determine the canonical timeline (design Principle 10).
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
     }
 
     /// A world whose calibrations are loaded from the manifest under a profile. Under
@@ -171,6 +233,29 @@ impl World {
         self.minds.get(&id)
     }
 
+    /// Place a mind. Two minds in the same place are co-located, which is the condition
+    /// for perceiving a shared trace and (in later phases) for talking.
+    pub fn set_place(&mut self, mind: StableId, place: PlaceId) {
+        self.place_of.insert(mind, place);
+    }
+
+    /// Where a mind is, if it has been placed.
+    pub fn place_of(&self, mind: StableId) -> Option<PlaceId> {
+        self.place_of.get(&mind).copied()
+    }
+
+    /// Drop a perceptible trace into the world. Co-located minds may perceive it on a
+    /// later tick. The trace carries its own salience and weight as data; the world adds
+    /// no number of its own.
+    pub fn emit_trace(&mut self, trace: Trace) {
+        self.traces.push(trace);
+    }
+
+    /// How many traces are currently in the world.
+    pub fn trace_count(&self) -> usize {
+        self.traces.len()
+    }
+
     /// The belief calibrations the world reasons under.
     pub fn belief_params(&self) -> &InferenceParams {
         &self.belief_params
@@ -223,6 +308,58 @@ impl World {
                 }
             }
         }
+        self.perceive();
+    }
+
+    /// The perception step (design Part 9.9): each co-located mind rolls against each
+    /// trace's salience scaled by its own acuity, and on success forms an observed
+    /// belief. Traces are walked in id order and minds in id order, and each roll is
+    /// keyed on counter-based RNG over the seed, the trace, the perceiver, the tick, and
+    /// the perception phase, so the result is bit-identical on replay and independent of
+    /// thread count. A two-pass shape (decide, then apply) keeps the walk a pure read.
+    fn perceive(&mut self) {
+        let hits: Vec<PerceptionHit> = {
+            let mut traces: Vec<&Trace> = self.traces.iter().collect();
+            traces.sort_by_key(|t| t.id);
+            let mut out = Vec::new();
+            for t in traces {
+                for (mind_id, mind) in &self.minds {
+                    if self.place_of.get(mind_id) != Some(&t.place) {
+                        continue;
+                    }
+                    let chance = t.salience.mul(mind.acuity).clamp(Fixed::ZERO, Fixed::ONE);
+                    let roll = Rng::for_coords(
+                        self.seed,
+                        &[t.id.0, mind_id.0, self.clock, PHASE_PERCEPTION],
+                    )
+                    .unit_fixed(0);
+                    if roll < chance {
+                        out.push(PerceptionHit {
+                            mind: *mind_id,
+                            subject: t.subject,
+                            attr: t.attr,
+                            hyps: t.hyps.clone(),
+                            value: t.value,
+                            weight: t.weight,
+                            from: t.from,
+                        });
+                    }
+                }
+            }
+            out
+        };
+        for hit in hits {
+            if let Some(mind) = self.minds.get_mut(&hit.mind) {
+                mind.consider(
+                    hit.subject,
+                    hit.attr,
+                    hit.hyps.iter().copied(),
+                    hit.value,
+                    hit.weight,
+                    hit.from,
+                );
+            }
+        }
     }
 
     /// A canonical 128-bit hash of the whole world: the clock, the id registry, the
@@ -231,14 +368,32 @@ impl World {
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
+        h.write_u64(self.seed);
         self.reg.hash_into(&mut h);
         h.write_u64(self.events.len() as u64);
         for (id, mind) in &self.minds {
             h.write_stable(*id);
+            if let Some(place) = self.place_of.get(id) {
+                h.write_u32(*place);
+            } else {
+                h.write_u32(u32::MAX);
+            }
             // Fold each mind's own canonical state hash in as a 128-bit value.
             let mh = mind.state_hash(&self.belief_params, &self.meta_params);
             h.write_u64(mh as u64);
             h.write_u64((mh >> 64) as u64);
+        }
+        // Active traces, in id order.
+        let mut traces: Vec<&Trace> = self.traces.iter().collect();
+        traces.sort_by_key(|t| t.id);
+        for t in traces {
+            h.write_stable(t.id);
+            h.write_u32(t.place);
+            h.write_stable(t.subject);
+            h.write_u32(t.attr.0);
+            h.write_u32(t.value);
+            h.write_fixed(t.salience);
+            h.write_fixed(t.weight);
         }
         h.finish()
     }
@@ -343,5 +498,78 @@ source = "Part 9"
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         let chans = AccessChannelRegistry::default();
         assert!(World::from_manifest(&m, &chans, Profile::Calibrated).is_err());
+    }
+
+    fn trace(place: PlaceId, value: ValueId, salience: Fixed) -> Trace {
+        Trace {
+            id: StableId(500),
+            place,
+            subject: StableId(99),
+            attr: AttrKindId(0),
+            hyps: vec![10, 20],
+            value,
+            salience,
+            weight: Fixed::from_int(5),
+            from: StableId(500),
+        }
+    }
+
+    #[test]
+    fn co_located_minds_perceive_a_trace_and_others_do_not() {
+        let mut w = world().with_seed(0x5EED);
+        let (here, elsewhere) = (1u32, 2u32);
+        let anna = w.spawn(Fixed::ONE);
+        let boris = w.spawn(Fixed::ONE);
+        w.set_place(anna, here);
+        w.set_place(boris, elsewhere);
+        // Salience 1 and acuity 1 give a certain perception for the co-located mind.
+        w.emit_trace(trace(here, 10, Fixed::ONE));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "the co-located mind perceived the trace"
+        );
+        assert_eq!(
+            w.mind(boris)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "a mind elsewhere perceived nothing"
+        );
+    }
+
+    #[test]
+    fn an_imperceptible_trace_is_missed() {
+        let mut w = world().with_seed(7);
+        let anna = w.spawn(Fixed::ONE);
+        w.set_place(anna, 1);
+        // Salience 0 gives a zero chance, so the trace is never perceived.
+        w.emit_trace(trace(1, 10, Fixed::ZERO));
+        w.tick(&[]);
+        let bp = *w.belief_params();
+        assert_eq!(
+            w.mind(anna)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None
+        );
+    }
+
+    #[test]
+    fn the_perception_roll_replays_deterministically() {
+        // A middling chance exercises the stochastic path; it must replay bit for bit.
+        let build = || {
+            let mut w = world().with_seed(0xABCD);
+            let a = w.spawn(Fixed::from_ratio(1, 2));
+            w.set_place(a, 1);
+            w.emit_trace(trace(1, 10, Fixed::from_ratio(1, 2)));
+            w.tick(&[]);
+            w.state_hash()
+        };
+        assert_eq!(build(), build());
     }
 }

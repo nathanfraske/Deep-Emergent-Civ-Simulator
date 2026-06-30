@@ -68,4 +68,4 @@ pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
-pub use world::{Stimulus, TickInput, World};
+pub use world::{PlaceId, Stimulus, TickInput, Trace, World};
