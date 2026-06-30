@@ -4,6 +4,25 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-29: Phases 2 to 6, the Dawn Band prototype, and an implementation audit
+
+**What was done.** Built the engine prototype through the roadmap's phases on `claude/engine-foundations`, each a committed, tested, self-audited increment driven from the dev-fixtures profile with the authoritative manifest left fail-loud.
+- Phase 2 (place and perception, Parts 6 and 9.9): a place id per mind for co-location and a trace-to-perception-to-belief pipeline; co-located minds roll counter-RNG against a trace's salience scaled by acuity and form observed beliefs (`crates/sim/src/world.rs`).
+- Phase 3 (utility-AI decision, Part 8): `decision.rs`, a data-driven Behaviour (drives, response curves as sorted points, actions scored as weight times the product of considerations, argmax with lowest-id tie-break); a decide phase rises drives and applies the chosen action's satisfaction.
+- Phase 4 (transmission and the band, Parts 9.5 and 37): a gossip phase where co-located speakers share a belief with an RNG-chosen listener, the listener models the speaker through the spoken channel and integrates at a trust-scaled weight unless it sees the assertion as a lie, which lowers trust. Lightweight relationships (co-location plus trust) stand in for the open R-RELATION.
+- Phase 5 (emergent language, Part 33): `language.rs`, a naming game where a band converges on a shared word per concept and isolated bands diverge; words minted by counter-RNG rather than content-hash, side-stepping the R-LANG-DET collision concern. The deeper phonological generation and concept-region formation wait on R-LANG-DET.
+- Phase 6 capstone: the `dawn_band` integration test and a narrated `dawn_band` example running every phase together over forty ticks. The parallel command scheduler is held for the open R-CMD-ORDER and R-REDUCE-ORDER; the serial tick gives end-to-end determinism, which the capstone confirms (same seed bit-identical, different seed differs).
+
+**The run.** `cargo run -p civsim-sim --example dawn_band` shows the news (quarry at the river) reaching all five minds by tick one through perception and gossip, the shared word churning under the innovation rate and settling to one, forage and rest alternating as hunger rises and is satisfied, and the state hash replaying identically on the seed and differing on another.
+
+**Implementation audit.** 138 workspace tests pass; fmt and clippy are clean. A discipline sweep across the six new modules: zero floating point, zero HashMap (BTreeMap and sorted Vecs for every canonical walk), the only enums are the two recursion-level mechanism tags (Stimulus, EvidenceOrder), and zero hardcoded calibration literals in non-test code. The authoritative reserved.toml stays fully reserved (the new cognition, gossip, and language values are status reserved, value empty); the only set numbers are the owner's pre-existing two, and the sixteen fixtures live solely in the dev profile. An independent correctness review of the new code was run as a second pass.
+
+**Reserved values surfaced for owner ideation.** The prototype runs on dev fixtures; tuned behaviour waits on the owner's numbers and data: evidence.* (clamp, commit threshold, runner-up margin, implication weights), tom.* (meta clamp, threshold, margin, and six access-channel weights), gossip.* (told weight, trust baseline, trust penalty), language.innovation_rate, plus the data catalogues (drives, response curves, actions, concepts, and trace kinds with their salience and weight). Each reserved entry carries its basis in reserved.toml.
+
+**Where it stopped.** All phases committed to `claude/engine-foundations`, not merged. Queued next: ideate the reserved values to stand up a calibrated prototype; resolve R-LANG-DET to deepen language; resolve the scheduler (R-CMD-ORDER, R-REDUCE-ORDER) to parallelise at scale; resolve R-RELATION for the full social fabric.
+
+---
+
 ## 2026-06-29: Phase 1 runtime spine, a world of minds and a serial deterministic tick
 
 **What was done.** On `claude/engine-foundations`, stood up the runtime spine (RUNBOOK section 3; design Parts 4 and 57). `crates/sim/src/world.rs`: a `World` owning the minds (a BTreeMap keyed by id), the event log, a clock, and the cognition calibrations, with a serial deterministic `tick` that applies a batch of `Stimulus` (Observe for first-order, Model for second-order) to the minds in one canonical order (by target id then a caller ordinal), and a `state_hash` over the whole world. `World::from_manifest` loads the calibrations under a profile: `Calibrated` fails loud while any required value is reserved, and `Development` runs on a fixtures profile. This is deliberately the serial tick, not the parallel command scheduler, which is held for its open determinism design (R-CMD-ORDER, R-REDUCE-ORDER). `Mind::state_hash` was corrected to take the first-order and theory-of-mind params separately, since the design reserves them separately.
