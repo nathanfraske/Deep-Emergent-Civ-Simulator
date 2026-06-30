@@ -55,6 +55,9 @@ impl Phase {
     pub const COIN: Phase = Phase(0x05);
     /// A lineage innovating a regular form change (drift).
     pub const DRIFT: Phase = Phase(0x06);
+    /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
+    /// tick; the field being sampled is the draw-site slot and the octave the region.
+    pub const WORLDGEN: Phase = Phase(0x10);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

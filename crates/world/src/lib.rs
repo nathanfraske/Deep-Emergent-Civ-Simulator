@@ -26,9 +26,20 @@
 //!   canonical state. [`topology::Coord3::key`] folds a cell into a draw-key locus, so the
 //!   spatial layer plugs straight into the canonical RNG keying of `civsim-core`.
 //!
-//! The terrain and biome substrate, the fixed-point worldgen passes, the chunk grid and
-//! quadtree, and the headless glyph view land here next.
+//! - [`noise`]: deterministic fixed-point fractal value noise, the field generator
+//!   worldgen samples (design Part 12).
+//! - [`terrain`]: the terrain and biome substrate (design Part 12), biomes recognised
+//!   over data-defined field ranges rather than a closed enum.
+//! - [`worldgen`]: worldgen pass one and the tile map (design Parts 12, 6, 14), a seed
+//!   turned into a bit-identical tile grid with a headless glyph render to view it.
+//!
+//! The chunk grid and quadtree LOD structure and the multi-scale GPU view land here next.
 
+pub mod noise;
+pub mod terrain;
 pub mod topology;
+pub mod worldgen;
 
+pub use terrain::{BiomeDef, BiomeId, BiomeSet};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
+pub use worldgen::{Tile, TileMap, WorldgenParams};
