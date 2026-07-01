@@ -154,52 +154,69 @@ design should state that plainly.
 
 ## The external literature, verified
 
-A targeted survey of the discrete-event-simulation and agent-based-modelling literature confirmed the
-technique mapping above and sharpened three points. The survey was run directly, source by source,
-because the deep-research harness failed on an internal error mid-run; each load-bearing claim below
-was checked against more than one result.
+A survey of the discrete-event-simulation and agent-based-modelling literature confirmed most of the
+technique mapping above, corrected one framing, and added concrete named systems. The verification was
+adversarial: a fan-out research pass ran the full search and fetch and then checked each extracted
+claim against its primary source, sustaining sixty-seven claims and refuting eight, which are dropped;
+the eight refutations caught a real over-claim in the first draft of this section, folded below. Each
+load-bearing point cites a primary source.
 
-The determinism crux is the ordering of simultaneous events, and the field's answer is a total
-tie-break order, which the engine already carries. In discrete-event simulation, event simultaneity,
-two events scheduled at the same simulated time, is where reproducibility is won or lost: the result
-depends on the order the simultaneous events execute, and because simulators use different, sometimes
-ad hoc, tie-breaking, the same model can be irreproducible across simulators (the simultaneous-events
-literature). The discipline that fixes it is a total order on a tie-break key that is a function of the
-event data rather than of insertion sequence or thread, and recent work extends virtual time with an
-arbitrary-length series of tie-breaking values to give an unbiased deterministic total order over
-otherwise-incomparable parallel events (the 2021 unbiased-deterministic-total-ordering preprint). This
-is exactly the R-CMD-ORDER key applied to wakes: (tick, region, id, phase, ordinal) is that tie-break
-series, so the engine's existing command-order discipline is the field-standard answer rather than a
-bespoke one.
+The determinism crux is the ordering of simultaneous events, and the field offers three clean answers,
+of which the engine takes the first. Event simultaneity, two events at the same simulated time, is
+where reproducibility is won or lost: the result depends on the order the simultaneous events execute,
+and an ad-hoc or thread-dependent tie-break is the one route that breaks it. The three principled
+answers are (a) impose a total tie-break order that is a function of the event data, the standard
+discrete-event practice and the route this engine takes through R-CMD-ORDER's key (tick, region, id,
+phase, ordinal); (b) leave the order formally unspecified, treating any order as consistent with the
+specification and adding a tie-break rule only per-application where determinism is required, the
+symmetric-DEVS-for-agents position, which drops classic DEVS's select function outright (Goldstein and
+colleagues 2018); or (c) assign each simultaneous event a pseudo-random-derived tie-break value in an
+extended virtual-time vector, deliberately unbiased and seed-randomizable so that changing the seed
+samples other valid orderings (McGlohon and Carothers 2021). The correction the verification forced is
+worth stating plainly: option (c) is not a content-based key and does not endorse one; it exists
+precisely because content-based ordering can leave events incomparable and imposes a bias, and a raw
+payload comparison is provably incomplete since byte-identical events cannot be distinguished. The
+engine wants reproducibility rather than an unbiased sample, so a fixed content-based order (a) is the
+right choice, its determinism coming from the key being total and data-derived, with the seed
+available as a final discriminator only if two events are ever otherwise incomparable.
 
-Parallel DEVS offers the alternative and confirms the engine's choice is sound. Classic DEVS (Zeigler)
-resolved simultaneous internal transitions with a select function, an authored tie-breaker that
-serialised colliding events; Parallel DEVS (Chow and Zeigler 1994) removed the select function
-entirely and replaced it with the confluent transition function, a formal construct that activates all
-simultaneous transitions consistently rather than by an authored order. So the field carries two
-determinism-clean options for simultaneous events: impose a total tie-break order (the engine's route,
-via R-CMD-ORDER), or define a confluent rule that makes the outcome order-independent. The engine
-takes the first because it already holds the key. What the literature settles is that an ad-hoc or
-thread-dependent order is the one route that breaks reproducibility, and the engine takes neither.
+Parallel DEVS confirms the engine's choice is one of the field's settled ones. Classic DEVS (Zeigler,
+Theory of Modeling and Simulation) resolved simultaneous internal transitions with a select function,
+an authored tie-breaker that serialised colliding events; Parallel DEVS (Chow and Zeigler 1994)
+replaced it with the confluent transition function, a formal construct that combines simultaneous
+internal and external transitions rather than ordering them, and the later multicomponent variant
+carries the same confluent rule and a bag of simultaneous inputs (multiPDEVS, Foures, Albert, Nketsa
+2018). So the field's determinism-clean options for simultaneity are a total order, a confluent rule,
+or a declared-non-deterministic order made deterministic per-application, and an ad-hoc thread-
+dependent order is the only one that breaks reproducibility. The engine takes the total order because
+it already holds the key.
 
-The event queue is a solved data-structure problem. The pending-event set is served in near-constant
-time by the calendar queue (Brown 1988, O(1) amortised, about three times faster than a splay tree at
-ten thousand events, and the structure behind simulators such as GTW, CSIM, and ns-2) and, for
-large-scale runs where the calendar queue degrades, the ladder queue (Tang, Goh, Thng 2005, O(1) at
-scale). A deterministic engine keys either structure by the total tie-break order above, so the
-queue's asymptotic efficiency and the wake order's reproducibility are independent concerns, both
-settled.
+The event queue is a fast but distribution-dependent structure rather than an unconditional constant.
+The pending-event set is served in near-constant time by the calendar queue (Brown 1988), but the O(1)
+is an experimental result for standard priority-increment distributions with the bucket width tuned
+near the average event separation, and Brown himself notes it degrades when the priority distribution
+is very non-uniform or changes drastically, while adjacent doubling-and-halving resize thresholds can
+thrash toward O(N) per operation under boundary oscillation. Comparative benchmarks bear out that the
+best structure is application-dependent: the ladder queue outperforms a splay tree beyond a few
+thousand events and the gap widens with scale (Franceschini, Bisgambiglia, Bisgambiglia 2015), yet at
+large sizes the calendar and lazy queues give good average but very long worst-case access while skew
+heaps and splay trees hold the best worst-case (Ronngren and Ayani 1997). So the queue is a solved but
+tunable problem, efficient in the common case with a worst-case the engine must bound, and it is keyed
+by the total tie-break order above so efficiency and reproducibility stay independent concerns.
 
-Event-driven execution's saving and its limit are both confirmed. Event-driven agent simulation
-schedules an event only when an agent chooses to act or communicate, so it avoids processing idle
-agents by construction, and the event-bus pattern reduces the interaction wiring from a quadratic
-all-pairs scan to a linear one (the event-driven multi-agent literature). The honest boundary the
-field reports matches sub-problem 5: the choice between event-driven and time-stepped execution is
-system-dependent, and where interaction is dense enough that most agents act every step, the two
-converge, which is why recent frameworks combine a tick base with per-agent discrete events (the
-time-stepped-versus-discrete-event ABM comparisons, and hybrid designs such as MOSAIK 3.0). So the
-literature agrees event-driven execution is a saving on the idle majority rather than on the active
-crowd, which is the crossover the design carries as its honest limit.
+The saving and its limit are both confirmed by named systems. Event-driven multi-agent kernels realise
+the sleeping-agent design exactly: ABIDES (Byrd, Hybinette, Balch 2019) routes every interaction
+through one central priority queue, activates an agent only through a wakeup call or a received message
+with no polling loop, and has background agents self-schedule their next wakeup at a chosen interval,
+which is the self-scheduled crossing of sub-problem 2; its reproducibility, though, comes from being
+single-threaded (same seed, guaranteed identical, with the same-timestamp order left arbitrary), a
+weaker guarantee than the thread-count-independence this engine requires, which is exactly why the
+total-order key matters here and did not there. The crossover of sub-problem 5 is confirmed with a
+quantified case from event-driven molecular dynamics: a discrete, event-driven potential outperforms
+the continuous, time-stepped form at gas densities but is significantly slower at high densities
+(Thomson, Lue, Bannerman 2014), the same shape as the design's honest limit, that event-driven
+execution wins where interaction is sparse and loses where it is dense, so a dense region falls back to
+a flat sweep.
 
 ## The determinism contract event-driven execution must meet
 
@@ -288,26 +305,32 @@ breadth completion of the level-of-detail principle the temporal pass completes 
 
 ## Sources
 
-The primary sources behind the external-literature section, grouped by sub-problem. Where the survey
-returned a title and venue but not a verified author list, the entry is cited by title and identifier
-rather than an invented attribution.
+The primary sources behind the external-literature section, grouped by sub-problem, each carried
+through the adversarial verification pass. Where the sources gave an inconsistent author list, the
+entry uses "and colleagues" rather than commit to a wrong order.
 
-The discrete-event world-views and the DEVS formalism:
+The DEVS formalism and simultaneous-event handling:
 
-- Goldstein, R., Wainer, G. A., Khan, A. (2013). "The DEVS Formalism." An introduction to the Discrete Event System Specification and its simulation semantics.
-- Chow, A. C. H., Zeigler, B. P. (1994). "Parallel DEVS: a parallel, hierarchical, modular modeling formalism." *Proceedings of the 1994 Winter Simulation Conference*, 716-722. Removes the classic-DEVS select function and introduces the confluent transition function for simultaneous events.
-
-The future-event list (the event-queue data structures):
-
-- Brown, R. (1988). "Calendar queues: a fast O(1) priority queue implementation for the simulation event set problem." *Communications of the ACM* 31(10), 1220-1227.
-- Tang, W. T., Goh, R. S. M., Thng, I. L. J. (2005). "Ladder queue: an O(1) priority queue structure for large-scale discrete event simulation." *ACM Transactions on Modeling and Computer Simulation* 15(3), 175-204.
+- Zeigler, B. P., Muzy, A., Kofman, E. (2018). *Theory of Modeling and Simulation*, 3rd ed. Academic Press. The DEVS formalism, first introduced by Zeigler in the 1976 first edition, and its simulation semantics.
+- Chow, A. C. H., Zeigler, B. P. (1994). "Parallel DEVS: a parallel, hierarchical, modular modeling formalism." *Proceedings of the 1994 Winter Simulation Conference*, 716-722. Replaces the classic-DEVS select function with the confluent transition function for simultaneous events.
+- Foures, D., Albert, V., Nketsa, A. (2018). "multiPDEVS: a parallel multicomponent system specification formalism." *Complexity* 2018, article 3751917 (DOI 10.1155/2018/3751917). The confluent transition function and the bag of simultaneous inputs, with state collisions as an added conflict class in the nonmodular approach.
+- Goldstein, R., and colleagues (2018). "A symmetric formalism for discrete event simulation with agents." *Proceedings of the 2018 Winter Simulation Conference* (Autodesk Research). Drops the classic-DEVS select function and treats simultaneous-event order as unspecified unless a per-application tie-break is added.
 
 Deterministic ordering of simultaneous events:
 
-- "Simultaneous events and lookahead in simulation protocols." *ACM Transactions on Modeling and Computer Simulation* (DOI 10.1145/361026.361032). The reproducibility problem posed by simultaneous events and the role of a well-defined ordering.
-- "Unbiased Deterministic Total Ordering of Parallel Simulations" (arXiv:2105.00069, 2021). Extends virtual time with a series of tie-breaking values to give a scheduling-independent total order over incomparable events.
+- McGlohon, N., Carothers, C. D. (2021). "Unbiased deterministic total ordering of parallel simulations with simultaneous events" (arXiv:2105.00069). Extends virtual time with pseudo-random-derived tie-break values for a deliberately unbiased, seed-randomizable total order, deterministic for a given seed.
+- Piccione, A., Pellegrini, A. (2023). "Practical tie-breaking for parallel and distributed simulations." *DS-RT 2023*. A content-based deterministic tie-break, provably incomplete as a fully general scheme since byte-identical events are indistinguishable.
+- "Simultaneous events and lookahead in simulation protocols." *ACM Transactions on Modeling and Computer Simulation* (DOI 10.1145/361026.361032). The reproducibility problem posed by simultaneous events.
 
-Event-driven agent execution and the crossover with time-stepping:
+The future-event list (the event-queue data structures and their limits):
 
-- "Event-Driven Multi-agent Simulation." The event-driven agent pattern in which an idle agent is not processed until an event it registered for occurs.
-- "MOSAIK 3.0: Combining Time-Stepped and Discrete Event Simulation" (arXiv:2410.16937, 2024). A hybrid tick-plus-discrete-event scheme, evidence for the system-dependent crossover between the two.
+- Brown, R. (1988). "Calendar queues: a fast O(1) priority queue implementation for the simulation event set problem." *Communications of the ACM* 31(10), 1220-1227. Experimental O(1) for standard priority-increment distributions, degrading under very non-uniform or rapidly changing distributions.
+- Tang, W. T., Goh, R. S. M., Thng, I. L. J. (2005). "Ladder queue: an O(1) priority queue structure for large-scale discrete event simulation." *ACM Transactions on Modeling and Computer Simulation* 15(3), 175-204.
+- Ronngren, R., Ayani, R. (1997). "A comparative study of parallel and sequential priority queue algorithms." *ACM Transactions on Modeling and Computer Simulation* (DOI 10.1145/249204.249205). At large sizes the calendar and lazy queues give good average but poor worst-case access, while skew heaps and splay trees hold the best worst-case.
+- Franceschini, R., Bisgambiglia, P.-A., Bisgambiglia, P. (2015). "A comparative study of pending event set implementations for PDEVS simulation." *DEVS Integrative M&S Symposium (SpringSim '15)*, 77-84 (DOI 10.5555/2872965.2872976). The ladder queue outperforms a splay tree beyond a few thousand events; the best structure is application-dependent.
+
+Event-driven agent kernels and the density crossover:
+
+- Byrd, D., Hybinette, M., Balch, T. H. (2019). "ABIDES: towards high-fidelity market simulation for AI research" (arXiv:1904.12066). A discrete-event multi-agent kernel: one central priority queue, agents activated only by a wakeup or a message with no polling, background agents self-scheduling their next wakeup; reproducible by being single-threaded.
+- Amrouni, S., and colleagues (2021). "ABIDES-Gym: gym environments for multi-agent discrete event simulation and application to financial markets" (arXiv:2110.14771). The discrete-event multi-agent taxonomy (time-step versus event-time) and the sleeping-agent self-wakeup pattern.
+- Thomson, C., Lue, L., Bannerman, M. N. (2014). "Mapping continuous potentials to discrete forms." *Journal of Chemical Physics* 140, 034105 (arXiv:1309.7292). Event-driven, discrete molecular dynamics outperforms time-stepped, continuous form at gas densities but is significantly slower at high densities, a quantified density crossover.
