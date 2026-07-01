@@ -1150,6 +1150,21 @@ impl World {
         self.place_of.get(&mind).copied()
     }
 
+    /// Group the placed minds by their place, in canonical mind-id order. The co-location phases
+    /// (the naming game, dialogue, gossip) use this to find a speaker's neighbours in
+    /// O(occupants) rather than rescanning every mind, turning each phase's inner scan from
+    /// O(N^2) to O(N). The per-place lists are in mind-id order, identical to the old
+    /// `minds.keys().filter(place)` scan they replace, so the draws that index into a listener list
+    /// are unchanged and the tick replays bit for bit (profile-guided, Part 13; determinism
+    /// preserved, Principle 3).
+    fn colocated_index(&self) -> BTreeMap<PlaceId, Vec<StableId>> {
+        let mut idx: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for (&mind, &place) in &self.place_of {
+            idx.entry(place).or_default().push(mind);
+        }
+        idx
+    }
+
     /// Drop a perceptible trace into the world. Co-located minds may perceive it on a
     /// later tick. The trace carries its own salience and weight as data; the world adds
     /// no number of its own.
@@ -1238,6 +1253,38 @@ impl World {
         self.drift_languages();
     }
 
+    /// A profiling aid, not part of the simulation: advance one tick with no stimuli and return the
+    /// wall-clock nanoseconds spent in each of the six phases (perceive, decide, converse, gossip,
+    /// converse_language, drift_languages), so a benchmark can see where a tick's time goes. It
+    /// produces exactly the state `tick(&[])` would, since it runs the same phases in the same order
+    /// with an empty input batch; the `Instant` it reads is non-canonical and never enters state, so
+    /// the resulting hash is unchanged (Principle 3). This exists to answer "profile before
+    /// optimizing" (Part 13), and it is compiled into the library only as a measurement tool.
+    pub fn tick_timed(&mut self) -> [u128; 6] {
+        use std::time::Instant;
+        self.clock += 1;
+        let mut ns = [0u128; 6];
+        let s = Instant::now();
+        self.perceive();
+        ns[0] = s.elapsed().as_nanos();
+        let s = Instant::now();
+        self.decide();
+        ns[1] = s.elapsed().as_nanos();
+        let s = Instant::now();
+        self.converse();
+        ns[2] = s.elapsed().as_nanos();
+        let s = Instant::now();
+        self.gossip();
+        ns[3] = s.elapsed().as_nanos();
+        let s = Instant::now();
+        self.converse_language();
+        ns[4] = s.elapsed().as_nanos();
+        let s = Instant::now();
+        self.drift_languages();
+        ns[5] = s.elapsed().as_nanos();
+        ns
+    }
+
     /// The naming-game step (design 33.9): each co-located speaker and a chosen listener
     /// align on a word for a chosen concept. If the speaker has a word it shares it (and
     /// with the reserved innovation rate coins a fresh variant instead); if it has none
@@ -1256,18 +1303,17 @@ impl World {
         // Applied sequentially in speaker-id order: a word coined or reused by an earlier
         // speaker is visible to a later one in the same tick, which is what drives the band
         // to consensus. Serial id order is deterministic, so this still replays bit for bit.
+        let by_place = self.colocated_index();
         let ids: Vec<StableId> = self.minds.keys().copied().collect();
         for speaker in ids {
             let place = match self.place_of.get(&speaker) {
                 Some(p) => *p,
                 None => continue,
             };
-            let listeners: Vec<StableId> = self
-                .minds
-                .keys()
-                .copied()
-                .filter(|l| *l != speaker && self.place_of.get(l) == Some(&place))
-                .collect();
+            let listeners: Vec<StableId> = by_place
+                .get(&place)
+                .map(|v| v.iter().copied().filter(|&l| l != speaker).collect())
+                .unwrap_or_default();
             if listeners.is_empty() {
                 continue;
             }
@@ -1428,6 +1474,7 @@ impl World {
                 )
             };
 
+            let by_place = self.colocated_index();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut pending: Vec<PendingMove> = Vec::new();
             for &speaker in &ids {
@@ -1440,15 +1487,15 @@ impl World {
                 };
                 // Move-by-move dialogue needs a promoted partner; demoted neighbours are
                 // covered by the one-pass gossip fallback instead.
-                let peers: Vec<StableId> = ids
-                    .iter()
-                    .copied()
-                    .filter(|l| {
-                        *l != speaker
-                            && self.promoted.contains(l)
-                            && self.place_of.get(l) == Some(&place)
+                let peers: Vec<StableId> = by_place
+                    .get(&place)
+                    .map(|v| {
+                        v.iter()
+                            .copied()
+                            .filter(|&l| l != speaker && self.promoted.contains(&l))
+                            .collect()
                     })
-                    .collect();
+                    .unwrap_or_default();
                 if peers.is_empty() {
                     continue;
                 }
@@ -1785,6 +1832,7 @@ impl World {
             None => return,
         };
         let actions: Vec<GossipAction> = {
+            let by_place = self.colocated_index();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut out = Vec::new();
             for &speaker in &ids {
@@ -1797,11 +1845,10 @@ impl World {
                     Some(p) => *p,
                     None => continue,
                 };
-                let listeners: Vec<StableId> = ids
-                    .iter()
-                    .copied()
-                    .filter(|l| *l != speaker && self.place_of.get(l) == Some(&place))
-                    .collect();
+                let listeners: Vec<StableId> = by_place
+                    .get(&place)
+                    .map(|v| v.iter().copied().filter(|&l| l != speaker).collect())
+                    .unwrap_or_default();
                 if listeners.is_empty() {
                     continue;
                 }

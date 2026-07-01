@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 7): profiled the tick, and a 5x profile-guided win the scheduler would have missed
+
+The owner asked for a before/after profiling test (a hundred people, a long run) to see how much the scheduler work improves things. Profiling first changed the answer, and it is the point of the pass. On `claude/physics-substrate-fanout`, all 275 sim tests pass, clippy clean.
+
+**The profiler (`crates/sim/examples/tick_bench.rs`, `World::tick_timed`).** Seeds N beings across co-located bands into a running dawn `World` (language, dialogue, gossip installed, everyone promoted) and times the serial tick over many iterations, with a per-phase breakdown. `tick_timed` is a non-canonical profiling method (reads `Instant`, never enters state), so the reported `state_hash` is unchanged. Baseline (100 beings, 10 bands, 10000 ticks, release): 415 us/tick, 2407 ticks/sec, and 100 in-world years at full per-tick fidelity would take about 364 hours (the number that motivates temporal LOD).
+
+**The finding.** The per-phase breakdown put about 99.5% of the tick in two phases, converse (dialogue) 52% and language (the naming game) 47%, and near-zero everywhere else. So the cross-system deterministic scheduler would not have helped this workload at all: the cost is inside two phases, not spread across independent systems. What the profile pointed at instead was an O(N^2) co-location scan: three phases (converse_language, converse, gossip) each had every speaker rescan all N minds to find its co-located listeners.
+
+**The change (`crates/sim/src/world.rs`).** A `colocated_index` helper groups placed minds by place once per phase in canonical mind-id order, turning each scan from O(N^2) to O(N). The per-place lists are in the same mind-id order the old filter produced, so the draws that index into a listener list are unchanged and the tick replays bit for bit: the `state_hash` after the change is identical to before (`78d6f0c2...`), and every determinism, dawn, language, and dialogue test passes. Result at 100 beings: 415 to 85 us/tick, a 4.9x speedup (converse 8.5x, language 3.5x; language is now the dominant remaining cost, since the naming game is inherently sequential within a band). 100 in-world years at full fidelity dropped from 364 to 75 hours.
+
+**The lesson, and where it leaves the scheduler.** Profile before optimizing (Part 13): the scheduler was the plausible next build, and the profile showed a 5x serial win it would have missed. The scheduler and Rayon remain the right substrate for parallelism (the design pass stands), but this workload's remaining cost is intra-phase data-parallelism across independent bands (language, sequential within a band, independent across bands), not cross-system scheduling, and the honest next step is to weigh that band-level data-parallelism against just running fewer minds per base tick under significance-driven fidelity. Nothing consolidated; the scheduler cluster stays open pending sign-off of `docs/deterministic_scheduler_design.md`.
+
+---
+
 ## 2026-07-01 (continued 6): the deterministic-scheduler design pass and the canon-walk/reduce hardening
 
 The owner asked for work orthogonal to the physics fan-out, picked the deterministic scheduler (Part 57), and asked to explore whether to adopt hecs and Rayon now or hold off. On `claude/physics-substrate-fanout`, workspace green, core clippy clean.
