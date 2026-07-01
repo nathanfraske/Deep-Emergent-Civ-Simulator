@@ -1115,6 +1115,183 @@ pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_st
     }
 }
 
+// === Chemistry (R-PHYS-W2, wave 2) ===
+
+/// Reaction enthalpy delta_h = sum(product formation enthalpies) - sum(reactants) per kg, and whether
+/// the barrier is crossed (`temperature >= barrier`, the generalization of combustion's ignition
+/// gate). The caller forms the mass-weighted sums by `Fixed::saturating_sum` (order-independent);
+/// this kernel takes them. A negative delta_h is exothermic. Which reactions occur emerges from the
+/// sign over the substance vectors, never an authored recipe (Hess's law).
+pub fn reaction(products_sum: Fixed, reactants_sum: Fixed, temperature: Fixed, barrier: Fixed) -> (Fixed, bool) {
+    (products_sum - reactants_sum, temperature >= barrier)
+}
+
+/// Corrosion driving margin (a rate proxy): the oxidiser-minus-material potential, times the
+/// material susceptibility, times a monotone acidity factor. A thermodynamically uphill pairing
+/// (non-positive driving) does not attack. Reports the driving margin; the exponential Tafel rate is
+/// deferred. The pairing emerges from the measured potentials, not an authored table (this is the
+/// wave-2 corrosion the R-WOUND corrosion mode and R-FLUID corrosion were flagged against).
+pub fn corrosion(fluid_potential: Fixed, material_potential: Fixed, susceptibility: Fixed, acidity_factor: Fixed, corrosion_max: Fixed) -> Fixed {
+    let driving = fluid_potential - material_potential;
+    if driving <= ZERO {
+        return ZERO;
+    }
+    let r1 = match driving.checked_mul(susceptibility) {
+        Some(x) => x,
+        None => return corrosion_max,
+    };
+    match r1.checked_mul(acidity_factor) {
+        Some(x) => x.min(corrosion_max),
+        None => corrosion_max,
+    }
+}
+
+/// Ideal Carnot efficiency eta = 1 - Tc/Th, the maximum thermodynamic efficiency (the ideal end of
+/// the heat-to-work ceiling; the real irreversible cycle is deferred). A non-positive gradient yields
+/// zero.
+pub fn carnot_limit(hot: Fixed, cold: Fixed) -> Fixed {
+    if hot <= cold || hot <= ZERO {
+        return ZERO;
+    }
+    let ratio = match cold.checked_div(hot) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    (Fixed::ONE - ratio).clamp(ZERO, Fixed::ONE)
+}
+
+/// Dissolution leach fraction: the fraction of a solute extracted into a solvent, its solute affinity
+/// times the solvent aggressiveness, clamped to `[0, 1]`. The soak-and-leach of medicine and
+/// preparation (detox, tincture, decoction); the time-resolved Noyes-Whitney rate is deferred.
+pub fn dissolution(solute_affinity: Fixed, solvent_aggressiveness: Fixed) -> Fixed {
+    match solute_affinity.checked_mul(solvent_aggressiveness) {
+        Some(x) => x.clamp(ZERO, Fixed::ONE),
+        None => Fixed::ONE,
+    }
+}
+
+// === Optics and signal (R-PHYS-W2, wave 2) ===
+
+/// Radiant heat exchange j = emissivity*sigma*(T_hot^4 - T_cold^4) (W), Stefan-Boltzmann, absorbing
+/// the wave-1 radiant-heat ceiling. Sigma is interleaved with the four temperature multiplies so no
+/// intermediate fourth power materialises; the emissive power reaches the Q32.32 ceiling near
+/// T ~ 14000 K (blue-star and plasma), above which a surface routes to the cap (an honest Tier-0
+/// limit; a forge and a solar surface are well within). A cooler surface than its surroundings emits
+/// nothing net here (the absorption side is the caller's).
+pub fn radiant_emission(emissivity: Fixed, area: Fixed, t_hot: Fixed, t_cold: Fixed, sigma: Fixed, flux_max: Fixed) -> Fixed {
+    let fourth = |t: Fixed| {
+        sigma
+            .checked_mul(t)
+            .and_then(|x| x.checked_mul(t))
+            .and_then(|x| x.checked_mul(t))
+            .and_then(|x| x.checked_mul(t))
+    };
+    let e_hot = match fourth(t_hot) {
+        Some(x) => x,
+        None => return flux_max,
+    };
+    let e_cold = match fourth(t_cold) {
+        Some(x) => x,
+        None => return flux_max,
+    };
+    if e_hot < e_cold {
+        return ZERO;
+    }
+    let net = e_hot - e_cold;
+    match net.checked_mul(emissivity).and_then(|x| x.checked_mul(area)) {
+        Some(q) => q.min(flux_max),
+        None => flux_max,
+    }
+}
+
+/// Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
+/// temperature reads the long-wavelength cap.
+pub fn wien_peak(temperature: Fixed, wien_b: Fixed, wavelength_max: Fixed) -> Fixed {
+    match wien_b.checked_div(temperature) {
+        Some(x) => x.min(wavelength_max),
+        None => wavelength_max,
+    }
+}
+
+/// Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
+/// spatial reach (light or sound). A distant source (the r^2 or 4*pi*r^2 product past the ceiling) is
+/// negligible (zero); a source at zero distance reads the cap.
+pub fn inverse_square_falloff(power: Fixed, distance: Fixed, four_pi: Fixed, irrad_max: Fixed) -> Fixed {
+    let r2 = match distance.checked_mul(distance) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let denom = match four_pi.checked_mul(r2) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    if denom == ZERO {
+        return irrad_max;
+    }
+    match power.checked_div(denom) {
+        Some(e) => e.min(irrad_max),
+        None => irrad_max,
+    }
+}
+
+/// Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
+/// bounded fraction of the incident so no overflow forms; the absorbed is the residual (R+T+A=1),
+/// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
+/// attenuation.
+pub fn interface_split(incident: Fixed, reflectance: Fixed, transmittance: Fixed) -> (Fixed, Fixed, Fixed) {
+    let reflected = incident.checked_mul(reflectance).unwrap_or(incident).min(incident);
+    let transmitted = incident.checked_mul(transmittance).unwrap_or(ZERO).min(incident);
+    let absorbed = (incident - reflected - transmitted).clamp(ZERO, incident);
+    (reflected, absorbed, transmitted)
+}
+
+/// Optical depth tau = alpha*path (dimensionless), the medium-attenuation half of a stimulus's reach;
+/// the transmitted fraction exp(-tau) is transcendental and deferred (report the measured indicator,
+/// defer the transform).
+pub fn optical_depth(absorption_coefficient: Fixed, path: Fixed, tau_max: Fixed) -> Fixed {
+    match absorption_coefficient.checked_mul(path) {
+        Some(x) => x.min(tau_max),
+        None => tau_max,
+    }
+}
+
+/// Refractive contrast n2/n1 and whether total internal reflection is possible (n1 > n2), a measured
+/// condition and not a verdict. The angle-resolved Snell law needs sin and is deferred.
+pub fn refractive_contrast(n1: Fixed, n2: Fixed, contrast_max: Fixed) -> (Fixed, bool) {
+    if n1 <= ZERO {
+        return (contrast_max, false);
+    }
+    let contrast = match n2.checked_div(n1) {
+        Some(x) => x.min(contrast_max),
+        None => contrast_max,
+    };
+    (contrast, n1 > n2)
+}
+
+/// Radiative-equilibrium temperature T_eq = (E_abs/(emissivity*sigma))^(1/4) (K), the inverse of the
+/// forward emission law, the term that SETS a surface's temperature from absorbed irradiance. The
+/// fourth root is two nested integer square roots, so the unrepresentable T^4 never forms. A
+/// non-positive absorbed flux reads zero; a non-emitter never equilibrates and reads the cap.
+pub fn radiative_equilibrium(absorbed_irradiance: Fixed, emissivity: Fixed, sigma: Fixed, t_max: Fixed) -> Fixed {
+    if absorbed_irradiance <= ZERO {
+        return ZERO;
+    }
+    let es = match emissivity.checked_mul(sigma) {
+        Some(x) => x,
+        None => return t_max,
+    };
+    let den_sqrt = es.sqrt();
+    if den_sqrt == ZERO {
+        return t_max;
+    }
+    let num_sqrt = absorbed_irradiance.sqrt();
+    let t2 = match num_sqrt.checked_div(den_sqrt) {
+        Some(x) => x,
+        None => return t_max,
+    };
+    t2.sqrt().min(t_max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
