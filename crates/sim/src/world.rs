@@ -51,7 +51,10 @@ use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use crate::value::RaceId;
-use civsim_core::{DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId, StateHasher};
+use civsim_core::{
+    CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId,
+    StateHasher,
+};
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
 /// place id, which is what lets one perceive a trace or talk to another. The full
@@ -245,13 +248,23 @@ struct DialogueConfig {
     bands: BTreeMap<String, ResolvedBand>,
 }
 
+/// The [`CommandKey`] kind discriminant for a dialogue-move append command. This is the
+/// command kind (every dialogue move is one "append this move" command), not the move's
+/// own `MoveKindId`, which rides in the move itself; keeping one command kind for the
+/// whole turn keeps a turn's moves contiguous in the total order, so a response always
+/// follows the move it answers.
+const CMD_DIALOGUE: u32 = 1;
+
 /// One recorded dialogue move gathered in the converse read pass and appended to the log
 /// in a second pass, so the read walk stays pure (the shape the perception and gossip
-/// steps already use).
+/// steps already use). Each move is keyed by [`CommandKey`] under its turn owner, and
+/// the write pass applies the moves in total key order (R-CMD-ORDER, design Part 4.3).
 struct PendingMove {
     mv: Move,
-    /// The move this one answers, by its index in the same tick's pending list, so the
-    /// in-reply-to event id can be filled once the answered move has been appended.
+    /// The move this one answers, by its emission ordinal within the same turn (the
+    /// same turn owner), so the in-reply-to event id can be resolved from the key map
+    /// once the answered move has been appended. A turn's moves are contiguous and
+    /// ordinal-ordered in the total order, so the answered move always precedes this one.
     answers: Option<usize>,
     /// Whether this move's content should point at the move it answers (true for an
     /// acceptance or refusal, which are about the prior move; false for an answer to a
@@ -354,6 +367,13 @@ pub struct World {
     meta_params: InferenceParams,
     /// The data-defined access channels and their reserved weights.
     weights: AccessWeights,
+    /// The execution width of the parallel read stage (the tick's ActionStage, design
+    /// Part 4.1): how many worker threads compute speaker turns concurrently. This is a
+    /// non-canonical execution parameter, never hashed and proven unable to change any
+    /// canonical outcome, because the produced commands are re-ordered at the barrier by
+    /// [`CommandKey`] before application (R-CMD-ORDER; the determinism harness asserts
+    /// bit-identity across a worker sweep). 1 means serial.
+    workers: usize,
 }
 
 impl World {
@@ -394,7 +414,16 @@ impl World {
             belief_params,
             meta_params,
             weights,
+            workers: 1,
         }
+    }
+
+    /// Set the execution width of the parallel read stage (the ActionStage worker
+    /// count). Purely an execution choice: the canonical result is proven identical for
+    /// any width, because the barrier re-orders the produced commands by [`CommandKey`]
+    /// before any of them applies (R-CMD-ORDER). Clamped to at least 1.
+    pub fn set_workers(&mut self, workers: usize) {
+        self.workers = workers.max(1);
     }
 
     /// Set the master seed that keys every stochastic draw (perception rolls and, in
@@ -1440,8 +1469,12 @@ impl World {
             None => return,
         };
 
-        // Read pass: borrow the substrate and the minds immutably, produce owned moves.
-        let pending: Vec<PendingMove> = {
+        // Read pass: borrow the substrate and the minds immutably, produce owned, keyed
+        // moves. Each promoted speaker's turn is computed independently over the frozen
+        // state (the parallel ActionStage of design Part 4.1) and the moves re-order at
+        // the barrier by CommandKey, so the production order, and therefore the worker
+        // count, cannot influence the applied order (R-CMD-ORDER).
+        let ordered: Vec<(CommandKey, PendingMove)> = {
             let cfg = self.dialogue.as_ref().unwrap();
             let assert_kind =
                 match cfg
@@ -1476,14 +1509,18 @@ impl World {
 
             let by_place = self.colocated_index();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
-            let mut pending: Vec<PendingMove> = Vec::new();
-            for &speaker in &ids {
+            let clock = self.clock;
+            // One speaker's whole turn over the frozen state: a pure function of
+            // (&World, speaker), since every read is immutable and every draw is keyed
+            // by DrawKey, so turns can be computed by any worker in any order.
+            let turn = |speaker: StableId| -> Vec<PendingMove> {
+                let mut out: Vec<PendingMove> = Vec::new();
                 if !self.promoted.contains(&speaker) {
-                    continue;
+                    return out;
                 }
                 let place = match self.place_of.get(&speaker) {
                     Some(p) => *p,
-                    None => continue,
+                    None => return out,
                 };
                 // Move-by-move dialogue needs a promoted partner; demoted neighbours are
                 // covered by the one-pass gossip fallback instead.
@@ -1497,11 +1534,11 @@ impl World {
                     })
                     .unwrap_or_default();
                 if peers.is_empty() {
-                    continue;
+                    return out;
                 }
                 let mind = match self.minds.get(&speaker) {
                     Some(m) => m,
-                    None => continue,
+                    None => return out,
                 };
 
                 // INFORM: a committed belief that some peer does not, in the speaker's own
@@ -1539,8 +1576,8 @@ impl World {
                         .get(&(listener, speaker))
                         .copied()
                         .unwrap_or(gp.trust_baseline);
-                    let assertion_idx = pending.len();
-                    pending.push(PendingMove {
+                    let assertion_idx = out.len();
+                    out.push(PendingMove {
                         mv: assertion_move(
                             assert_kind,
                             speaker,
@@ -1570,7 +1607,7 @@ impl World {
                             (accept_kind, EffectSign::Positive)
                         };
                         if let Some(rk) = resp_kind {
-                            pending.push(PendingMove {
+                            out.push(PendingMove {
                                 mv: Move {
                                     force: rk,
                                     speaker: listener,
@@ -1599,7 +1636,7 @@ impl World {
                     break;
                 }
                 if informed {
-                    continue;
+                    return out;
                 }
 
                 // INQUIRE: an open question the speaker wonders about but cannot answer. It
@@ -1607,20 +1644,25 @@ impl World {
                 // peer holds the answer it tells it back, which the asker grounds.
                 let inquiry_kind = match inquiry_kind {
                     Some(k) => k,
-                    None => continue,
+                    None => return out,
                 };
                 let open = mind.open_questions(&self.belief_params);
                 let (subject, attr) = match open.first() {
                     Some(q) => *q,
-                    None => continue,
+                    None => return out,
                 };
+                // This draw shares its exact key (speaker, clock, CONVERSE, addressee
+                // slot) with the INFORM listener pick above; the two are mutually
+                // exclusive per turn (the informed early return), so the coordinates
+                // never collide. A third draw site in Phase::CONVERSE must take a
+                // distinct slot (R-RNG-COORD).
                 let idx = DrawKey::entity(speaker.0, self.clock, Phase::CONVERSE)
                     .slot(SLOT_ADDRESSEE)
                     .rng(self.seed)
                     .range_u32(0, peers.len() as u32) as usize;
                 let listener = peers[idx];
-                let question_idx = pending.len();
-                pending.push(PendingMove {
+                let question_idx = out.len();
+                out.push(PendingMove {
                     mv: Move {
                         force: inquiry_kind,
                         speaker,
@@ -1669,7 +1711,7 @@ impl World {
                             .get(&(speaker, listener))
                             .copied()
                             .unwrap_or(gp.trust_baseline);
-                        pending.push(PendingMove {
+                        out.push(PendingMove {
                             mv: assertion_move(
                                 assert_kind,
                                 listener,
@@ -1690,16 +1732,76 @@ impl World {
                         });
                     }
                 }
+                out
+            };
+
+            // The barrier merge (R-CMD-ORDER): turns are computed serially or by worker
+            // threads, each move keyed (tick, turn owner, CMD_DIALOGUE, ordinal within
+            // the turn), and the buffer drains in total key order, so the applied order
+            // is a pure function of the produced set whatever the worker count. Turn
+            // owners are walked in ascending id order and a turn's moves keep their
+            // emission order, so this total order coincides with the serial walk and
+            // adoption changes no canonical outcome.
+            let workers = self.workers.max(1);
+            let mut buf = CommandBuffer::new();
+            if workers == 1 {
+                for &s in &ids {
+                    for (ord, pm) in turn(s).into_iter().enumerate() {
+                        buf.push(CommandKey::new(clock, s, CMD_DIALOGUE, ord as u64), pm);
+                    }
+                }
+            } else {
+                let turn = &turn;
+                let ids = &ids;
+                let parts: Vec<Vec<(CommandKey, PendingMove)>> = std::thread::scope(|sc| {
+                    let handles: Vec<_> = (0..workers)
+                        .map(|w| {
+                            sc.spawn(move || {
+                                let mut part: Vec<(CommandKey, PendingMove)> = Vec::new();
+                                for (i, &s) in ids.iter().enumerate() {
+                                    if i % workers == w {
+                                        for (ord, pm) in turn(s).into_iter().enumerate() {
+                                            part.push((
+                                                CommandKey::new(
+                                                    clock,
+                                                    s,
+                                                    CMD_DIALOGUE,
+                                                    ord as u64,
+                                                ),
+                                                pm,
+                                            ));
+                                        }
+                                    }
+                                }
+                                part
+                            })
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().expect("a turn worker panicked"))
+                        .collect()
+                });
+                for part in parts {
+                    for (k, pm) in part {
+                        buf.push(k, pm);
+                    }
+                }
             }
-            pending
+            buf.into_ordered()
         };
 
-        // Write pass: append the moves (filling in-reply-to) and apply their effects. The
-        // substrate borrow is released, so the &mut self effect helpers are free to run.
-        let mut appended: Vec<EventId> = Vec::with_capacity(pending.len());
-        for (ordinal, mut pm) in pending.into_iter().enumerate() {
+        // Write pass (the single-threaded ActionApply barrier, design Part 4.1): append
+        // the moves in total CommandKey order, resolving in-reply-to through the key map,
+        // and apply their effects. The substrate borrow is released, so the &mut self
+        // effect helpers are free to run.
+        let mut appended: BTreeMap<CommandKey, EventId> = BTreeMap::new();
+        for (ordinal, (key, mut pm)) in ordered.into_iter().enumerate() {
             if let Some(ans) = pm.answers {
-                let target = appended[ans];
+                let qkey = CommandKey::new(key.tick, key.primary, key.kind, ans as u64);
+                let target = *appended
+                    .get(&qkey)
+                    .expect("an answered move precedes its answer in the total order");
                 pm.mv.in_reply_to = Some(target);
                 if pm.reply_as_prior {
                     pm.mv.content = ContentRef::PriorMove { event: target };
@@ -1707,7 +1809,7 @@ impl World {
             }
             pm.mv.ordinal = ordinal as u32;
             let id = self.events.append(pm.mv.to_event());
-            appended.push(id);
+            appended.insert(key, id);
             match pm.effect {
                 MoveEffect::Misfire => {}
                 MoveEffect::Assert {

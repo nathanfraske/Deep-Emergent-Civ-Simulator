@@ -29,10 +29,12 @@
 //! continues to the same hash as the world it was cloned from, so the save schema and
 //! the id high-water marks reproduce the world exactly.
 //!
-//! The tick here is serial (Rayon is held off, per the scheduler design pass). The
-//! thread-count sweep that will assert the parallel tick bit-identical is the command
-//! barrier sweep in the core harness, written with that sight; when the parallel tick
-//! lands it runs through this same replay harness at a sweep of worker counts.
+//! The converse stage now runs its read pass on worker threads (the ActionStage of
+//! design Part 4.1), with the produced moves re-ordered at the barrier by `CommandKey`
+//! before application, so the third property asserted here is the R-CMD-ORDER contract
+//! itself: the full tick is bit-identical at every worker count, because the applied
+//! order is a pure function of the produced command set rather than of the thread that
+//! produced it. The sweep runs the same replay at widths 1, 2, 3, and 8.
 
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
@@ -164,16 +166,28 @@ fn dawn_world(beings: usize, bands: usize, seed: u64) -> World {
     w
 }
 
-/// Run a dawn world for `ticks` and return the (state hash, event-log hash) after each
-/// tick, the canonical fingerprint of the whole run.
-fn run_trace(beings: usize, bands: usize, seed: u64, ticks: u64) -> Vec<(u128, u128)> {
+/// Run a dawn world for `ticks` at the given ActionStage worker width and return the
+/// (state hash, event-log hash) after each tick, the canonical fingerprint of the run.
+fn run_trace_workers(
+    beings: usize,
+    bands: usize,
+    seed: u64,
+    ticks: u64,
+    workers: usize,
+) -> Vec<(u128, u128)> {
     let mut w = dawn_world(beings, bands, seed);
+    w.set_workers(workers);
     let mut trace = Vec::with_capacity(ticks as usize);
     for _ in 0..ticks {
         w.tick(&[]);
         trace.push((w.state_hash(), w.event_log_hash()));
     }
     trace
+}
+
+/// Run a dawn world serially (worker width 1).
+fn run_trace(beings: usize, bands: usize, seed: u64, ticks: u64) -> Vec<(u128, u128)> {
+    run_trace_workers(beings, bands, seed, ticks, 1)
 }
 
 #[test]
@@ -196,6 +210,24 @@ fn dawn_tick_diverges_on_a_different_seed() {
     let a = run_trace(40, 5, 1, 60);
     let b = run_trace(40, 5, 2, 60);
     assert_ne!(a, b, "distinct seeds should not produce the same trace");
+}
+
+#[test]
+fn full_tick_is_bit_identical_across_worker_counts() {
+    // The R-CMD-ORDER adoption proof, and the thread-count sweep R-HARNESS-COVER names:
+    // the converse read pass runs on worker threads producing keyed commands, the
+    // barrier re-orders them by CommandKey, and the whole tick's canonical state and
+    // event log must be bit-identical at every width. Round-robin turn assignment means
+    // the pre-barrier production order scrambles differently at each width, so only the
+    // total-order sort can be holding the canon still.
+    let serial = run_trace_workers(40, 5, 0xC0FFEE, 80, 1);
+    for workers in [2usize, 3, 8] {
+        let parallel = run_trace_workers(40, 5, 0xC0FFEE, 80, workers);
+        assert_eq!(
+            serial, parallel,
+            "the tick diverged at {workers} workers: the applied order leaked the thread schedule"
+        );
+    }
 }
 
 #[test]
