@@ -57,7 +57,7 @@ pub use cacheline::CacheLine;
 pub use canonical::{
     canonical_reduce, canonical_sorted, quantize_depth_mm, quantize_unit, Canonical, NonCanonical,
 };
-pub use command::{content_id, CommandKey, EventQueue};
+pub use command::{content_id, CommandBuffer, CommandKey, EventQueue};
 pub use event::{Event, EventId, EventKindId, EventLog};
 pub use fixed::{Fixed, FRAC_BITS};
 pub use hash::StateHasher;

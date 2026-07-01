@@ -42,6 +42,7 @@
 //! wired into the tick. It writes no canonical state on its own; it orders what the
 //! caller feeds it.
 
+use crate::canonical::canonical_sorted;
 use crate::hash::StateHasher;
 use crate::id::StableId;
 use std::collections::BTreeMap;
@@ -178,10 +179,75 @@ impl<P> Default for EventQueue<P> {
     }
 }
 
+/// The single-threaded barrier that applies a tick's buffered commands in total order:
+/// the `ActionApply` phase of the tick (design Part 4.1; R-CMD-ORDER, Part 4.3).
+///
+/// During the parallel `ActionStage`, workers push commands (a spawn, a promotion, an
+/// event emission, any structural change) into the buffer without coordinating, in
+/// whatever order and interleaving the scheduler gives them. At the barrier the buffer
+/// is drained in [`CommandKey`] order, so structural change applies as a pure function
+/// of the command set rather than of the worker that produced each command or the moment
+/// it arrived. That is the determinism the total order buys by construction: the applied
+/// sequence, and any id minted while draining, are independent of the thread count. A
+/// spawn command carrying no id yet is assigned one inside the drain, in canonical order,
+/// so ids are minted at the barrier and never in the parallel stage.
+pub struct CommandBuffer<C> {
+    pending: Vec<(CommandKey, C)>,
+}
+
+impl<C> CommandBuffer<C> {
+    /// An empty buffer.
+    pub fn new() -> Self {
+        CommandBuffer {
+            pending: Vec::new(),
+        }
+    }
+
+    /// The number of buffered commands.
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Whether the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Buffer a command, as a worker does during the parallel stage. The order of pushes
+    /// carries no meaning: the barrier re-orders by [`CommandKey`], so two runs that push
+    /// the same commands in different orders apply them identically.
+    pub fn push(&mut self, key: CommandKey, command: C) {
+        self.pending.push((key, command));
+    }
+
+    /// Consume the buffer and return its commands in total [`CommandKey`] order, the
+    /// canonical order the barrier applies them in. Reuses the R-CANON-WALK canonical
+    /// walk (design Part 3.5), so the result is a pure function of the buffered set given
+    /// unique keys (the emission ordinal is the caller's uniqueness contract).
+    pub fn into_ordered(self) -> Vec<(CommandKey, C)> {
+        canonical_sorted(self.pending, |pair: &(CommandKey, C)| pair.0)
+    }
+
+    /// Drain the buffer at the barrier, applying each command in total [`CommandKey`]
+    /// order. A closure that mints ids or appends events sees the commands in the
+    /// canonical order, so whatever it produces is independent of the push order and the
+    /// worker count.
+    pub fn apply_ordered(self, mut apply: impl FnMut(CommandKey, C)) {
+        for (key, command) in self.into_ordered() {
+            apply(key, command);
+        }
+    }
+}
+
+impl<C> Default for CommandBuffer<C> {
+    fn default() -> Self {
+        CommandBuffer::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canonical::canonical_sorted;
 
     fn key(tick: u64, primary: u64, kind: u32, ordinal: u64) -> CommandKey {
         CommandKey::new(tick, StableId(primary), kind, ordinal)
@@ -293,6 +359,70 @@ mod tests {
         h.write_u64(7);
         h.write_stable(StableId(3));
         assert_eq!(make(7, 3), h.finish() as u64);
+    }
+
+    #[test]
+    fn command_buffer_applies_in_key_order_independent_of_push_order() {
+        // The ActionApply barrier: whatever order workers push commands in, the barrier
+        // drains them in CommandKey order, so both the applied sequence and any id minted
+        // while draining are a pure function of the command set. This is the
+        // thread-count-independence R-CMD-ORDER guarantees by construction, proven by
+        // pushing the same commands in two different interleavings (as two different
+        // worker counts would) and asserting identical output.
+        let commands = [
+            (key(2, 3, 0, 0), "promote"),
+            (key(1, 7, 5, 0), "spawn-a"),
+            (key(1, 7, 5, 1), "spawn-b"),
+            (key(2, 3, 0, 1), "emit"),
+            (key(1, 4, 5, 0), "spawn-c"),
+        ];
+
+        // Drain a buffer built from a given push order, minting a sequential id for each
+        // "spawn" command as the barrier reaches it, and record (command, minted id).
+        let run = |push_order: Vec<(CommandKey, &'static str)>| {
+            let mut buf = CommandBuffer::new();
+            for (k, c) in push_order {
+                buf.push(k, c);
+            }
+            let mut applied: Vec<(&'static str, Option<StableId>)> = Vec::new();
+            let mut next_spawn_id = 500u64;
+            buf.apply_ordered(|_key, command| {
+                let minted = if command.starts_with("spawn") {
+                    let id = StableId(next_spawn_id);
+                    next_spawn_id += 1;
+                    Some(id)
+                } else {
+                    None
+                };
+                applied.push((command, minted));
+            });
+            applied
+        };
+
+        let forward = run(commands.to_vec());
+        let reversed = run(commands.iter().rev().copied().collect());
+        let mut rotated = commands.to_vec();
+        rotated.rotate_left(3);
+        let rotated = run(rotated);
+
+        assert_eq!(forward, reversed, "push order does not change application");
+        assert_eq!(forward, rotated, "nor does a different interleaving");
+        // And the minted spawn ids follow the canonical order: spawn-c (tick 1, primary 4)
+        // before spawn-a and spawn-b (tick 1, primary 7).
+        let spawn_ids: Vec<_> = forward
+            .iter()
+            .filter(|(c, _)| c.starts_with("spawn"))
+            .map(|(c, id)| (*c, id.unwrap()))
+            .collect();
+        assert_eq!(
+            spawn_ids,
+            vec![
+                ("spawn-c", StableId(500)),
+                ("spawn-a", StableId(501)),
+                ("spawn-b", StableId(502)),
+            ],
+            "spawn ids minted at the barrier in CommandKey order"
+        );
     }
 
     #[test]
