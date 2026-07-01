@@ -60,6 +60,7 @@ pub mod dialogue;
 pub mod edibility;
 pub mod epoch;
 pub mod evidence;
+pub mod genesis;
 pub mod genome;
 pub mod language;
 pub mod lineage;
