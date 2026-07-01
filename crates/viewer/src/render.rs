@@ -52,6 +52,26 @@ fn fill_rect(buf: &mut [u32], w: usize, x0: usize, y0: usize, rw: usize, rh: usi
     }
 }
 
+/// Draw a one-pixel outline around a cell rectangle, the cursor the tile selector uses to
+/// indicate the hovered cell. Presentation only.
+pub fn draw_outline(buf: &mut [u32], w: usize, x0: usize, y0: usize, rw: usize, rh: usize, color: Rgb) {
+    let h = buf.len() / w.max(1);
+    let c = color.pack();
+    let x1 = (x0 + rw).min(w);
+    let y1 = (y0 + rh).min(h);
+    if x0 >= w || y0 >= h || x1 == 0 || y1 == 0 {
+        return;
+    }
+    for x in x0..x1 {
+        buf[y0 * w + x] = c;
+        buf[(y1 - 1) * w + x] = c;
+    }
+    for y in y0..y1 {
+        buf[y * w + x0] = c;
+        buf[y * w + (x1 - 1)] = c;
+    }
+}
+
 /// Paint the superfine view centred on `center`, each tile drawn as a `tile_px` square: its
 /// biome colour, then the organisms on it as centred marks. Returns a `w` by `h` RGB buffer.
 pub fn superfine(
