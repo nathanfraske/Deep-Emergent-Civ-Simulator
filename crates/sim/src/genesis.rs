@@ -36,6 +36,7 @@ use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, Worldg
 
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region};
 use crate::epoch::{run, EpochParams, EpochReport};
+use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
@@ -72,13 +73,25 @@ pub struct RegionBiosphere {
     pub report: EpochReport,
 }
 
+/// What a placed occupant is, so a view can draw it in its individual form: which species,
+/// its trophic layer (0 producers, the plants; higher the animals), and its region. A read
+/// of canon, never authored per occupant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct OccupantInfo {
+    pub species: SpeciesId,
+    pub layer: u16,
+    pub region: (i32, i32),
+}
+
 /// The mature, dawn-ready living world: the generated map, the per-region biospheres (keyed
-/// by region-grid coordinate), and the located occupants promoted onto the map.
+/// by region-grid coordinate), the located occupants promoted onto the map, and what each
+/// occupant is (for the superfine view).
 #[derive(Clone, Debug)]
 pub struct LivingWorld {
     pub map: TileMap,
     pub regions: BTreeMap<(i32, i32), RegionBiosphere>,
     pub occupants: LocationIndex,
+    pub occupant_info: BTreeMap<OccupantId, OccupantInfo>,
 }
 
 impl LivingWorld {
@@ -136,6 +149,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
 
     let mut regions: BTreeMap<(i32, i32), RegionBiosphere> = BTreeMap::new();
     let mut occupants = LocationIndex::new();
+    let mut occupant_info: BTreeMap<OccupantId, OccupantInfo> = BTreeMap::new();
     let side = params.region_side.max(1);
     let cols = (params.width + side - 1) / side;
     let rows = (params.height + side - 1) / side;
@@ -152,7 +166,17 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
 
             // The dawn: promote a representative surviving organism of each species onto a
             // tile in the region, so the located-identity join carries the living world.
-            place_survivors(&mut occupants, &biosphere, region_id, x0, y0, side, &map);
+            place_survivors(
+                &mut occupants,
+                &mut occupant_info,
+                &biosphere,
+                region_id,
+                (rx, ry),
+                x0,
+                y0,
+                side,
+                &map,
+            );
 
             regions.insert((rx, ry), RegionBiosphere { region, biosphere, report });
         }
@@ -162,6 +186,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
         map,
         regions,
         occupants,
+        occupant_info,
     }
 }
 
@@ -221,30 +246,42 @@ fn derive_region(map: &TileMap, x0: i32, y0: i32, side: i32, env_axes: usize) ->
 /// Promote a representative surviving organism of each species onto a tile in the region and
 /// index it, spreading them across the block deterministically so the superfine zoom finds
 /// occupants. The organism id folds the region id and the species id, so it is stable.
+#[allow(clippy::too_many_arguments)]
 fn place_survivors(
     occupants: &mut LocationIndex,
+    occupant_info: &mut BTreeMap<OccupantId, OccupantInfo>,
     biosphere: &Biosphere,
     region_id: u64,
+    region: (i32, i32),
     x0: i32,
     y0: i32,
     side: i32,
     map: &TileMap,
 ) {
     let topo = map.topo();
-    let mut slot = 0i32;
     for id in biosphere.species.ids() {
         let sp = biosphere.species.get(id).unwrap();
         if sp.extinct {
             continue;
         }
-        // Spread across the block in a fixed row-major order, staying on the map.
-        let dx = slot % side;
-        let dy = (slot / side) % side;
+        // Scatter across the region block by a deterministic per-species hash, so the living
+        // world reads as a spread ecology rather than a clustered grid. Collisions share a
+        // tile, which the location index and the superfine view both handle.
+        let dx = (civsim_core::splitmix64(id.0 as u64 ^ region_id) % side.max(1) as u64) as i32;
+        let dy = (civsim_core::splitmix64(id.0 as u64 ^ region_id ^ 0x5bd1_e995)
+            % side.max(1) as u64) as i32;
         let coord = Coord3::ground(x0 + dx, y0 + dy);
         if topo.contains(coord) {
-            let occ_id = StableId((region_id << 20) ^ id.0 as u64);
-            occupants.place(OccupantId::organism(occ_id), coord);
-            slot += 1;
+            let occ = OccupantId::organism(StableId((region_id << 20) ^ id.0 as u64));
+            occupants.place(occ, coord);
+            occupant_info.insert(
+                occ,
+                OccupantInfo {
+                    species: id,
+                    layer: sp.layer,
+                    region,
+                },
+            );
         }
     }
 }
