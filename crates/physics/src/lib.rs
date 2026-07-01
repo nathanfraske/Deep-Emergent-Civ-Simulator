@@ -30,9 +30,9 @@
 //! that loads it from data, with three disciplines enforced structurally. Every value
 //! is fixed-point ([`Fixed`]), parsed from a decimal string by integer arithmetic, so
 //! no floating point reaches canonical state. Every axis carries a [`Dimension`] that
-//! is a monomial over the four Part 55 base dimensions, so the neutrality test (every
-//! axis reduces to a base dimension) is a property of the type rather than a check that
-//! can be forgotten. And every axis range is either [`AxisRange::Set`] or
+//! is a monomial over the Part 55 base dimensions (four from the dawn, plus electric current from
+//! wave 3), so the neutrality test (every axis reduces to a base dimension) is a property of the type
+//! rather than a check that can be forgotten. And every axis range is either [`AxisRange::Set`] or
 //! [`AxisRange::Reserved`]: reading a reserved range fails loud (the owner must set it,
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
@@ -45,8 +45,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-/// A physical dimension as a monomial over the four Part 55 base dimensions. Because
-/// a dimension is only ever exponents over length, mass, time, and temperature, the
+/// A physical dimension as a monomial over the Part 55 base dimensions. Because a
+/// dimension is only ever integer exponents over length, mass, time, temperature, and (from wave 3)
+/// electric current, the
 /// neutrality test (an axis reduces to a base dimension and is not a steering leak in
 /// the costume of physics) holds by construction: there is no way to author an axis
 /// whose dimension is not such a monomial. The dimensionless Ratio class is the
@@ -61,6 +62,12 @@ pub struct Dimension {
     pub time: i8,
     /// Exponent of temperature.
     pub temperature: i8,
+    /// Exponent of electric current, the fifth base added for the wave-3 electricity-and-magnetism
+    /// tier (R-PHYS-W3; the SI ampere). Electricity is the first quantity dimensionally independent
+    /// of the other four bases, and the Gaussian half-integer alternative is unrepresentable in an
+    /// `i8` monomial, so current is the fifth base. Every earlier axis is unchanged with a current
+    /// exponent of zero, so the neutrality-by-construction property is preserved over five bases.
+    pub current: i8,
 }
 
 impl Dimension {
@@ -71,6 +78,7 @@ impl Dimension {
         mass: 0,
         time: 0,
         temperature: 0,
+        current: 0,
     };
     /// Length.
     pub const LENGTH: Dimension = Dimension {
@@ -78,6 +86,7 @@ impl Dimension {
         mass: 0,
         time: 0,
         temperature: 0,
+        current: 0,
     };
     /// Mass.
     pub const MASS: Dimension = Dimension {
@@ -85,6 +94,7 @@ impl Dimension {
         mass: 1,
         time: 0,
         temperature: 0,
+        current: 0,
     };
     /// Time.
     pub const TIME: Dimension = Dimension {
@@ -92,6 +102,7 @@ impl Dimension {
         mass: 0,
         time: 1,
         temperature: 0,
+        current: 0,
     };
     /// Temperature.
     pub const TEMPERATURE: Dimension = Dimension {
@@ -99,6 +110,7 @@ impl Dimension {
         mass: 0,
         time: 0,
         temperature: 1,
+        current: 0,
     };
     /// Area, length squared.
     pub const AREA: Dimension = Dimension {
@@ -106,6 +118,7 @@ impl Dimension {
         mass: 0,
         time: 0,
         temperature: 0,
+        current: 0,
     };
     /// Volume, length cubed.
     pub const VOLUME: Dimension = Dimension {
@@ -113,6 +126,7 @@ impl Dimension {
         mass: 0,
         time: 0,
         temperature: 0,
+        current: 0,
     };
     /// Velocity, length over time.
     pub const VELOCITY: Dimension = Dimension {
@@ -120,6 +134,7 @@ impl Dimension {
         mass: 0,
         time: -1,
         temperature: 0,
+        current: 0,
     };
     /// Force, mass times length over time squared.
     pub const FORCE: Dimension = Dimension {
@@ -127,6 +142,7 @@ impl Dimension {
         mass: 1,
         time: -2,
         temperature: 0,
+        current: 0,
     };
     /// Energy, mass times length squared over time squared.
     pub const ENERGY: Dimension = Dimension {
@@ -134,6 +150,7 @@ impl Dimension {
         mass: 1,
         time: -2,
         temperature: 0,
+        current: 0,
     };
     /// Pressure, mass over length and time squared.
     pub const PRESSURE: Dimension = Dimension {
@@ -141,6 +158,33 @@ impl Dimension {
         mass: 1,
         time: -2,
         temperature: 0,
+        current: 0,
+    };
+    /// Electric current, the SI ampere (the fifth base, wave 3).
+    pub const CURRENT: Dimension = Dimension {
+        length: 0,
+        mass: 0,
+        time: 0,
+        temperature: 0,
+        current: 1,
+    };
+    /// Electric charge, the coulomb (ampere times time).
+    pub const CHARGE: Dimension = Dimension {
+        length: 0,
+        mass: 0,
+        time: 1,
+        temperature: 0,
+        current: 1,
+    };
+    /// Electric potential, the volt (power over current, mass length squared over time cubed and
+    /// current). The unified dimension of `elec.potential`, `elec.emf`, and the promoted
+    /// `chem.standard_potential`.
+    pub const VOLTAGE: Dimension = Dimension {
+        length: 2,
+        mass: 1,
+        time: -3,
+        temperature: 0,
+        current: -1,
     };
 
     /// Whether this is the dimensionless Ratio class.
@@ -158,6 +202,7 @@ impl std::ops::Mul for Dimension {
             mass: self.mass + o.mass,
             time: self.time + o.time,
             temperature: self.temperature + o.temperature,
+            current: self.current + o.current,
         }
     }
 }
@@ -171,6 +216,7 @@ impl std::ops::Div for Dimension {
             mass: self.mass - o.mass,
             time: self.time - o.time,
             temperature: self.temperature - o.temperature,
+            current: self.current - o.current,
         }
     }
 }
@@ -660,6 +706,9 @@ fn parse_dimension(name: &str) -> Result<Dimension, String> {
         "force" => Some(Dimension::FORCE),
         "energy" => Some(Dimension::ENERGY),
         "pressure" => Some(Dimension::PRESSURE),
+        "current" | "ampere" => Some(Dimension::CURRENT),
+        "charge" | "coulomb" => Some(Dimension::CHARGE),
+        "voltage" | "volt" | "potential" | "emf" => Some(Dimension::VOLTAGE),
         "dimensionless" | "ratio" => Some(Dimension::DIMENSIONLESS),
         _ => None,
     };
@@ -667,19 +716,22 @@ fn parse_dimension(name: &str) -> Result<Dimension, String> {
         return Ok(d);
     }
     let parts: Vec<&str> = t.split(',').map(|p| p.trim()).collect();
-    if parts.len() == 4 {
+    if parts.len() == 4 || parts.len() == 5 {
         let exps: Result<Vec<i8>, _> = parts.iter().map(|p| p.parse::<i8>()).collect();
         if let Ok(e) = exps {
+            // A 4-tuple is a pre-wave-3 dimension: its current exponent is zero, so every earlier
+            // floor's data loads unchanged. A 5-tuple carries the electric-current exponent.
             return Ok(Dimension {
                 length: e[0],
                 mass: e[1],
                 time: e[2],
                 temperature: e[3],
+                current: if e.len() == 5 { e[4] } else { 0 },
             });
         }
     }
     Err(format!(
-        "expected a dimension name or a 'length,mass,time,temperature' exponent tuple, got '{t}'"
+        "expected a dimension name or a 'length,mass,time,temperature[,current]' exponent tuple, got '{t}'"
     ))
 }
 

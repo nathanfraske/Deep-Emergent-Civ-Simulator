@@ -1317,6 +1317,222 @@ pub fn radiative_equilibrium(absorbed_irradiance: Fixed, emissivity: Fixed, sigm
     t2.sqrt().min(t_max)
 }
 
+// === Electricity and magnetism (R-PHYS-W3, wave 3) ===
+//
+// The reserved constants (the Coulomb coefficient on its x1e9 scale, the vacuum permeability MU_0,
+// the tick duration DT, and each coil's turn count and turn density) are the caller's, passed in, not
+// fabricated inline. Every zero divisor and every overflow routes to the physical extreme (a
+// coincident charge or a short to a cap, an open to a cap). The two induction laws are the only place
+// the substrate takes a time derivative: a first-order finite difference over a resident state axis's
+// prior-tick sample, deterministic and tick-rate-dependent.
+
+/// Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
+/// (like signs repel). Coincident charges route to the cap; a distant pair is negligible. The
+/// Coulomb coefficient is passed on its reserved x1e9 output scale.
+pub fn coulomb_force(q1: Fixed, q2: Fixed, r: Fixed, k_coulomb: Fixed, f_max: Fixed) -> (Fixed, bool) {
+    let repulsive = (q1 > ZERO) == (q2 > ZERO);
+    if r <= ZERO {
+        return (f_max, repulsive);
+    }
+    let r2 = match r.checked_mul(r) {
+        Some(x) => x,
+        None => return (ZERO, repulsive),
+    };
+    let qq = match sat_abs(q1).checked_mul(sat_abs(q2)) {
+        Some(x) => x,
+        None => return (f_max, repulsive),
+    };
+    let base = match qq.checked_div(r2) {
+        Some(x) => x,
+        None => return (f_max, repulsive),
+    };
+    match base.checked_mul(k_coulomb) {
+        Some(f) => (f.min(f_max), repulsive),
+        None => (f_max, repulsive),
+    }
+}
+
+/// Ohm's law V = I*R (V).
+pub fn ohm_voltage(current: Fixed, resistance: Fixed, v_max: Fixed) -> Fixed {
+    match current.checked_mul(resistance) {
+        Some(v) => v.min(v_max),
+        None => v_max,
+    }
+}
+
+/// Circuit current I = emf / r_total (A), a magnitude; a zero total resistance is a short (the cap).
+/// The caller forms r_total as the order-independent `saturating_sum` of the series resistances.
+pub fn circuit_current(emf: Fixed, r_total: Fixed, i_max: Fixed) -> Fixed {
+    if r_total <= ZERO {
+        return i_max;
+    }
+    match sat_abs(emf).checked_div(r_total) {
+        Some(i) => i.min(i_max),
+        None => i_max,
+    }
+}
+
+/// Joule power P = I*V (W), the dissipated power (which feeds `law.sensible_heat`, so a wire heats).
+pub fn power_dissipation(current: Fixed, voltage: Fixed, power_max: Fixed) -> Fixed {
+    match sat_abs(current).checked_mul(sat_abs(voltage)) {
+        Some(p) => p.min(power_max),
+        None => power_max,
+    }
+}
+
+/// Capacitor stored energy U = (1/2) C V^2 (J), staged against the V^2 overflow.
+pub fn capacitor_energy(capacitance: Fixed, voltage: Fixed, e_max: Fixed) -> Fixed {
+    if sat_abs(voltage) > V2_MAX {
+        return e_max;
+    }
+    let half_c = match capacitance.checked_mul(HALF) {
+        Some(x) => x,
+        None => return e_max,
+    };
+    let t = match half_c.checked_mul(voltage) {
+        Some(x) => x,
+        None => return e_max,
+    };
+    match t.checked_mul(voltage) {
+        Some(u) => u.min(e_max),
+        None => e_max,
+    }
+}
+
+/// Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
+/// the unification law that closes the loop the wave-2 corrosion driving margin opened as a proxy.
+pub fn battery_emf(cathode: Fixed, anode: Fixed) -> Fixed {
+    sat_sub(cathode, anode)
+}
+
+/// Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
+/// a vanishing cross-section is an open (the cap).
+pub fn resistance(resistivity: Fixed, length: Fixed, area: Fixed, r_max: Fixed) -> Fixed {
+    if area <= ZERO {
+        return r_max;
+    }
+    let rl = match resistivity.checked_mul(length) {
+        Some(x) => x,
+        None => return r_max,
+    };
+    match rl.checked_div(area) {
+        Some(r) => r.min(r_max),
+        None => r_max,
+    }
+}
+
+/// Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
+/// permeability does not overflow. The nonlinear B-H saturation loop is deferred.
+pub fn solenoid_field(permeability: Fixed, current: Fixed, turn_density: Fixed, mu_0: Fixed, b_max: Fixed) -> Fixed {
+    let ni = match turn_density.checked_mul(current) {
+        Some(x) => x,
+        None => return b_max,
+    };
+    let b0 = match ni.checked_mul(mu_0) {
+        Some(x) => x,
+        None => return b_max,
+    };
+    match b0.checked_mul(permeability) {
+        Some(b) => b.min(b_max),
+        None => b_max,
+    }
+}
+
+/// Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+pub fn flux_linkage(flux_density: Fixed, area: Fixed, phi_max: Fixed) -> Fixed {
+    match flux_density.checked_mul(area) {
+        Some(p) => p.min(phi_max),
+        None => phi_max,
+    }
+}
+
+/// Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
+pub fn motor_force(flux_density: Fixed, current: Fixed, length: Fixed, f_max: Fixed) -> Fixed {
+    let bi = match flux_density.checked_mul(current) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    match bi.checked_mul(length) {
+        Some(f) => sat_abs(f).min(f_max),
+        None => f_max,
+    }
+}
+
+/// Lorentz force on a moving charge F = |q|*v*B (N).
+pub fn lorentz_force(charge: Fixed, velocity: Fixed, flux_density: Fixed, f_max: Fixed) -> Fixed {
+    let qv = match sat_abs(charge).checked_mul(sat_abs(velocity)) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    match qv.checked_mul(sat_abs(flux_density)) {
+        Some(f) => f.min(f_max),
+        None => f_max,
+    }
+}
+
+/// Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
+/// is the perpendicular-orientation envelope (the compass, galvanometer, and motor torque).
+pub fn dipole_torque(moment: Fixed, flux_density: Fixed, torque_max: Fixed) -> Fixed {
+    match sat_abs(moment).checked_mul(sat_abs(flux_density)) {
+        Some(t) => t.min(torque_max),
+        None => torque_max,
+    }
+}
+
+/// Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
+/// threads the prior-tick flux (canonical state) and the fixed tick duration DT.
+pub fn faraday_emf(flux_now: Fixed, flux_prev: Fixed, turns: Fixed, dt: Fixed, v_max: Fixed) -> Fixed {
+    if dt <= ZERO {
+        return ZERO;
+    }
+    let dphi = sat_sub(flux_now, flux_prev);
+    let rate = dphi
+        .checked_div(dt)
+        .unwrap_or(if dphi < ZERO { Fixed::MIN } else { Fixed::MAX });
+    let prod = rate
+        .checked_mul(turns)
+        .unwrap_or(if rate < ZERO { Fixed::MIN } else { Fixed::MAX });
+    // Lenz: the EMF opposes the change, so negate the flux-rate term.
+    sat_sub(ZERO, prod).clamp(ZERO - v_max, v_max)
+}
+
+/// Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
+/// M = k*sqrt(L1*L2) formed by the caller. The transformer and choke, and the closing half of the
+/// R-COMMS inductance gap.
+pub fn inductive_emf(inductance: Fixed, current_now: Fixed, current_prev: Fixed, dt: Fixed, v_max: Fixed) -> Fixed {
+    if dt <= ZERO {
+        return ZERO;
+    }
+    let di = sat_sub(current_now, current_prev);
+    let rate = di
+        .checked_div(dt)
+        .unwrap_or(if di < ZERO { Fixed::MIN } else { Fixed::MAX });
+    let prod = rate
+        .checked_mul(inductance)
+        .unwrap_or(if rate < ZERO { Fixed::MIN } else { Fixed::MAX });
+    sat_sub(ZERO, prod).clamp(ZERO - v_max, v_max)
+}
+
+/// Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy, staged
+/// against the I^2 overflow.
+pub fn inductor_energy(inductance: Fixed, current: Fixed, i2_max: Fixed, e_max: Fixed) -> Fixed {
+    if sat_abs(current) > i2_max {
+        return e_max;
+    }
+    let half_l = match inductance.checked_mul(HALF) {
+        Some(x) => x,
+        None => return e_max,
+    };
+    let t = match half_l.checked_mul(current) {
+        Some(x) => x,
+        None => return e_max,
+    };
+    match t.checked_mul(current) {
+        Some(u) => u.min(e_max),
+        None => e_max,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

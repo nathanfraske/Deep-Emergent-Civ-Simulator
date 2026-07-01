@@ -19,10 +19,10 @@ real = "CRC thermochemical tables; Atkins, Physical Chemistry (fuel and oxide en
 
 [[axis]]
 id = "chem.standard_potential"
-measures = "standard electrode potential, a relative electromotive ordering (a Tier-0 proxy until the wave-3 E and M floor)"
+measures = "standard electrode potential, the reduction potential relative to the standard hydrogen electrode (promoted to the volt by wave 3, unified with elec.potential and elec.emf)"
 unit = "V"
-dimension = "dimensionless"
-scale = "V (relative ordering; the volt dimension arrives with wave-3 electromagnetism)"
+dimension = "voltage"
+scale = "V (the volt, wave-3 promotion, dimension-and-scale only, no numeric re-fit; unified with elec.potential and elec.emf)"
 tier = 0
 range_reserved = "proposed bounds [-5, 5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
 real = "CRC standard electrode-potential (electromotive) series"
