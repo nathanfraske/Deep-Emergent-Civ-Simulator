@@ -4,6 +4,16 @@ The working view of the research backlog (audit Section 3) and the reserved-valu
 
 Counts: 26 resolved, 33 open (the body arc R-BUILD-PHYS, R-WOUND, and R-FLUID resolved together 2026-07-01, the per-part body promoted from the anatomy vector with wounds measured over the R-PHYS-MECH floor and fluids as data-defined substances, at design.md Part 35, record 62.20, audit block 1v, built in crates/sim/src/body.rs, pending owner morning review; R-BEHAVIOR-EVOLVE flagged then resolved 2026-07-01, behaviour evolved from physics and selection across four built-and-proven stages, at design.md Part 8.4, record 62.19, audit block 1u; R-PHYS-BIO and R-PHYS-MECH resolved by the physics-substrate fan-out's waves 0 and 1, with R-SOURCE-VECTOR and R-BIO-REGISTRY added as wave-0 carried seams; wave 1's named reach ceilings are wave-2 and thermal-deepening scope under the open R-DEEPTECH-PHYSICS, not new counted items; R-BIOSPHERE resolved as the distinct reader of the biology floor, a former candidate exploration so the open count is unchanged). Source of truth for the full reasoning is `docs/design.md` and `docs/audit.md`.
 
+## Wiring decisions (owner, 2026-07-01), for when the living-creature stack is integrated into a running World
+
+The owner's calls on what it takes to wire the biosphere, dawn, evolved controller, homeostasis, locomotion, and body arc into one running World, made when the arc was reviewed:
+
+- **Behaviour tier: defer 25.10, seed controllers at the dawn.** Animals do not evolve behaviour during the pre-dawn radiation at the pool tier; controllers seed at the dawn and evolve at the individual/sampled-episode tier (what is built). The quantitative breeding-value tier (25.10) stays deferred, so the pure-frequency deep-time controller evolution is not built now.
+- **Life cadence: keep 1 in-world year** until we profile 1 in-world month; revisit and tune the reserved life-process values then.
+- **Promotion / level-of-detail (recommendation, to confirm at build time): promote within the focus/observed region**, the Part 11/54 significance thresholds riding as reserved values.
+- **Entity storage (hecs-vs-grow): stay StableId-keyed for the first integrated slice**, decide at scale when the full tick is profiled.
+- **The 20 reserved `body.*`/`behavior.*`/`physiology.*` values** (plus the R-UNITS-PIN scales) are the calibration batch for a fail-loud Calibrated production world; a dev-fixture demo runs without them.
+
 The build plan toward the first end-to-end emergent slice (generated map, seeded bands, the naming game over the primes, emergent dialogue) is in `ROADMAP.md`. Its milestones:
 
 - **M0: lock the determinism keying contract.** R-RNG-COORD resolved (the canonical `DrawKey` schema: a uniform coordinate with the tick always present, a registered phase set, and a per-phase slot so two draw sites do not collide on counter zero, implemented in `crates/core` and adopted at every draw site). Still to pin: R-REDUCE-ORDER for the gossip-conflict apply and the weighted pick (the serial tick already applies in a pinned order, so it is not blocking the slice).
