@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 5): the owner's wiring calls, the hidden-width lever, and the wave-2 fan-out
+
+Three things this stretch, all on `claude/physics-substrate-fanout` (PR #7), workspace green throughout.
+
+**The controller hidden-width lever.** On a compute-tax exploration (`crates/sim/examples/controller_tax.rs`, a probe measuring per-tick and per-individual cost across the hidden-width sweep, with the evolved-controller literature for the sufficiency basis), the owner set `behavior.controller_hidden_width = 4` as a tuneable lever (audit 6d, reserved.toml `set`, the Part 8.4 reserved list annotated). The per-tick tax at h=4 is about 2x the reaction norm and negligible at focus scale; the express O(weight_count^2) path wants a channel index before h grows past single digits.
+
+**The wiring decisions (owner).** On what it takes to integrate the biosphere, dawn, evolved controller, homeostasis, locomotion, and body arc into one running World: defer the quantitative breeding-value tier (25.10) and seed controllers at the dawn (evolving at the sampled-episode tier); keep the life cadence at 1 in-world year until 1 month is profiled; promote within the focus region (recommendation); stay StableId-keyed for the first slice and decide hecs-vs-grow at scale; the 20 body/behavior/physiology reserved values are the calibration batch for a fail-loud world. Recorded in TODOS. The honest headline: a dev-fixture demo slice needs no owner call; the production/at-scale wiring needs the batch and the entity-storage call.
+
+**Wave 2 run (fluids, chemistry, optics).** The owner chose wave 2 as the next move. Ran the fan-out (three green domain teams, a red Steering-Audit per domain recomputing the Q32.32 by hand, six consumer-interface checks, a max-effort synthesis) and produced the hardened proposal `docs/working/FLUIDS_CHEMISTRY_OPTICS_SUBSTRATE_PROPOSAL.md`, awaiting sign-off. Fluids (9 axes, 9 laws), chemistry (8, 5), optics (10, 7); 19 confirmed red findings folded; six consumer contracts. It absorbs the wave-1 reach ceilings (hydrostatics, buoyancy, convective and radiant heat, the Carnot heat-to-work limit) and, on the owner's later ask, adds the dynamic-pressure force family: drag and aerodynamic lift (the layer that floors flight and realistic ballistics, as reduced-order lumped-coefficient laws, with turbulence the deferred categorical ceiling). Five unification decisions taken (one density axis widened to gases, a canonical `therm.temperature` state axis, one energy-per-mass scale, one activation-barrier concept, the pinned megapascal). The design docs and counts are unchanged (26 resolved, 33 open) since wave 2 stays a proposal until sign-off.
+
+**Where it stopped.** Wave 2's proposal is on the table for sign-off. On sign-off: consolidate into Part 41/58/35 (records, audit blocks, counts) and build the kernels (the wave-1 recipe). The owner also asked about the deepening beyond wave 2 (wave 3 electricity-and-magnetism, then electronics/semiconductors, then nuclear/orbital, plus the tier-opening discovery mechanism that is the R-DEEPTECH-PHYSICS/R-DEEPTECH-SCIENCE coupling, with turbulence/chaos the permanent offline-proxy boundary) and where lift lands (wave 2's fluids floor, answered above).
+
+---
+
 ## 2026-07-01 (continued 4): the body arc built and resolved end to end (R-BUILD-PHYS, R-WOUND, R-FLUID)
 
 The owner set the controller hidden width to 4 (a tuneable lever on a compute-tax exploration; audit 6d, reserved.toml `set`), then chose to take the physiology/anatomy/wound arc as one dive and, autonomously, scope and wire all that is buildable into the engine and audit it, for morning review. Done, on `claude/physics-substrate-fanout` (PR #7), workspace green and clippy and rustdoc `-D warnings` clean throughout.
