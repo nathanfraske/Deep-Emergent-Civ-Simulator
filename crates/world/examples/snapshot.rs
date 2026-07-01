@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! QUARANTINED DEV-FIXTURE HARNESS (not canonical). This example uses authored, dev-fixture numbers
+//! (calibrations, seeds, scenario values) to produce a result for demonstration and testing only, and
+//! its behaviour is not authoritative (design Principle 11, the reserved-value discipline: an authored
+//! constant in the path of world content is a defect until it earns its place). The canonical runner
+//! is manifest-driven and fail-loud with zero unapproved authored features; see docs/QUARANTINE.md.
+//!
 //! A headless colour snapshot of a generated world: it paints the whole map through the same
 //! [`Camera::paint`] read the window uses and writes it as a binary PPM (`P6`), so the
 //! coloured map can be inspected without a display. Run it with:

@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! QUARANTINED DEV-FIXTURE HARNESS (not canonical). This example uses authored, dev-fixture numbers
+//! (calibrations, seeds, scenario values) to produce a result for demonstration and testing only, and
+//! its behaviour is not authoritative (design Principle 11, the reserved-value discipline: an authored
+//! constant in the path of world content is a defect until it earns its place). The canonical runner
+//! is manifest-driven and fail-loud with zero unapproved authored features; see docs/QUARANTINE.md.
+//!
 //! CPU baseline for a canonical fixed-point heat-diffusion field (a Jacobi stencil, the Part 5.5 GPU
 //! workload), the compute-bound counterpart to the elementwise multiply bench. Each cell reuses its
 //! four toroidal neighbours, so this is arithmetic-dense rather than bandwidth-bound, the regime where

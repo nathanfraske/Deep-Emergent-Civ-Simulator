@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! QUARANTINED DEV-FIXTURE HARNESS (not canonical). This example uses authored, dev-fixture numbers
+//! (calibrations, seeds, scenario values) to produce a result for demonstration and testing only, and
+//! its behaviour is not authoritative (design Principle 11, the reserved-value discipline: an authored
+//! constant in the path of world content is a defect until it earns its place). The canonical runner
+//! is manifest-driven and fail-loud with zero unapproved authored features; see docs/QUARANTINE.md.
+//!
 //! A watchable conversation: a promoted band grounds a shared belief through modelled
 //! dialogue, and the move log is narrated. Run with:
 //! `cargo run -p civsim-sim --example conversation`.

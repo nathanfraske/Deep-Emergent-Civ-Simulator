@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! QUARANTINED DEV-FIXTURE HARNESS (not canonical). This example uses authored, dev-fixture numbers
+//! (calibrations, seeds, scenario values) to produce a result for demonstration and testing only, and
+//! its behaviour is not authoritative (design Principle 11, the reserved-value discipline: an authored
+//! constant in the path of world content is a defect until it earns its place). The canonical runner
+//! is manifest-driven and fail-loud with zero unapproved authored features; see docs/QUARANTINE.md.
+//!
 //! The full R-BIOSPHERE simulation, made visible: it runs the world-genesis sequence
 //! (worldgen, then the pre-dawn biosphere epoch, then the dawn-ready living world), prints
 //! the coloured map, then zooms to the superfine to list a region's surviving species and the

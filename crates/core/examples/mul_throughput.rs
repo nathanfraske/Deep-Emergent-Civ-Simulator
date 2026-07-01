@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! QUARANTINED DEV-FIXTURE HARNESS (not canonical). This example uses authored, dev-fixture numbers
+//! (calibrations, seeds, scenario values) to produce a result for demonstration and testing only, and
+//! its behaviour is not authoritative (design Principle 11, the reserved-value discipline: an authored
+//! constant in the path of world content is a defect until it earns its place). The canonical runner
+//! is manifest-driven and fail-loud with zero unapproved authored features; see docs/QUARANTINE.md.
+//!
 //! CPU throughput baseline for the canonical Q32.32 multiply (single thread), for the GPU-vs-CPU
 //! comparison. Run: `cargo run -p civsim-core --release --example mul_throughput`. The GPU counterpart
 //! is `docs/working/gpu_mul_throughput.py`; both compute the identical fixed-point product, so the
