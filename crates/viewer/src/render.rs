@@ -22,7 +22,7 @@
 //! and located occupants and never writes them, so the superfine view is an observer of the
 //! world, not an author of it (Principle 10).
 
-use civsim_core::splitmix64;
+use civsim_core::{splitmix64, Fixed};
 use civsim_sim::genesis::LivingWorld;
 use civsim_world::{BiomeSet, Coord3, Rgb, TopologySpace};
 
@@ -193,27 +193,34 @@ pub fn superfine(
             };
             fill_rect(&mut buf, w, px0, py0, tile_px, tile_px, tile_color.pack());
 
-            // The organisms on this tile, drawn as marks in a small grid within the block.
+            // The organisms on this tile, drawn as marks sized by body mass and coloured by
+            // kind, so anatomy shows: a big carnivore is a large red mark, a small plant a
+            // small green one.
             let occ = living.occupants.occupants(coord);
             if occ.is_empty() {
                 continue;
             }
-            let mark = (tile_px / 3).max(2);
-            let gap = (tile_px - mark) / 2;
             for (i, o) in occ.iter().enumerate().take(4) {
-                let color = living
-                    .occupant_info
-                    .get(o)
-                    .map(|info| organism_color(info.layer, info.species.0))
+                let info = living.occupant_info.get(o);
+                let color = info
+                    .map(|inf| organism_color(inf.layer, inf.species.0))
                     .unwrap_or(Rgb::new(240, 240, 240));
-                // Up to four marks: quadrant offsets so several occupants stay distinct.
-                let (qx, qy) = match i {
-                    0 => (gap, gap),
-                    1 => (gap.saturating_sub(mark / 2), gap.saturating_sub(mark / 2)),
-                    2 => (gap + mark / 2, gap + mark / 2),
-                    _ => (gap + mark / 2, gap.saturating_sub(mark / 2)),
+                // Mark size scales with body mass: a quarter-tile at the smallest up to about
+                // eight-tenths of a tile at the largest (integer, via the Fixed body-mass value).
+                let bm = info.map(|inf| inf.morphology.body_mass).unwrap_or(Fixed::from_ratio(1, 2));
+                let span = Fixed::from_int((tile_px * 3 / 5) as i32);
+                let extra = bm.checked_mul(span).map(|v| v.to_int().max(0) as usize).unwrap_or(0);
+                let mark = (tile_px / 4 + extra).clamp(2, tile_px);
+                // Centre a lone occupant; nudge several so they stay distinct.
+                let base = (tile_px.saturating_sub(mark)) / 2;
+                let nudge = tile_px / 6;
+                let (ox, oy) = match i {
+                    0 => (base, base),
+                    1 => (base.saturating_sub(nudge), base.saturating_sub(nudge)),
+                    2 => (base + nudge, base + nudge),
+                    _ => (base + nudge, base.saturating_sub(nudge)),
                 };
-                fill_rect(&mut buf, w, px0 + qx, py0 + qy, mark, mark, color.pack());
+                fill_rect(&mut buf, w, px0 + ox, py0 + oy, mark, mark, color.pack());
             }
         }
     }

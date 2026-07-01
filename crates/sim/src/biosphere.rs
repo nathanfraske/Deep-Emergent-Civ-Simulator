@@ -139,14 +139,40 @@ impl Niche {
     }
 }
 
+/// A species' aggregate-tier anatomy, a morphological trait vector over the fauna axes the
+/// catalogue declares (design 25.14). Each is normalised to `[0, ONE]` at this tier and maps
+/// to the axis's reserved envelope where a consumer needs the real quantity; body mass is the
+/// master trait. This is the level-of-detail form of anatomy (Principle 1, Part 35): the
+/// masses carry a trait vector, and a promoted individual builds a full per-part Body from it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Morphology {
+    /// Body mass, the master size trait.
+    pub body_mass: Fixed,
+    /// Natural weaponry: claws, teeth, horns, sting (offense).
+    pub weaponry: Fixed,
+    /// Natural armour: carapace, scute, thick hide (defense).
+    pub armor: Fixed,
+    /// Structural tissue toughness (materials, resilience).
+    pub toughness: Fixed,
+    /// Sensory acuity across the modalities.
+    pub sensory: Fixed,
+    /// Encephalization: the intelligence axis that gates a mind.
+    pub encephalization: Fixed,
+    /// Diet breadth: 0 a strict specialist, ONE a broad generalist.
+    pub diet_breadth: Fixed,
+    /// Aggressiveness, a temperament axis.
+    pub aggression: Fixed,
+}
+
 /// A generated species: its trophic layer (0 producers, higher consumers), its fundamental
-/// niche, what it draws on, and the allele-frequency pool the pre-dawn epoch radiates. The
-/// trophic layer is the grounding depth the closure walk assigns, stored as the sampling
-/// layer and reconciled by [`grounded`].
+/// niche, its aggregate-tier anatomy, what it draws on, and the allele-frequency pool the
+/// pre-dawn epoch radiates. The trophic layer is the grounding depth the closure walk
+/// assigns, stored as the sampling layer and reconciled by [`grounded`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Species {
     pub layer: u16,
     pub niche: Niche,
+    pub morphology: Morphology,
     pub draws_on: Vec<SourceRef>,
     pub pool: GenePool,
     /// Whether the lineage has gone extinct. Append-only: an extinct species stays in the
@@ -386,9 +412,23 @@ fn sample_candidate(
         p.pool_size,
         vec![Fixed::from_ratio(1, 2); p.loci],
     );
+    // The aggregate-tier anatomy: each morphological trait drawn on its own counter (offset
+    // past the niche counters), so a species' form is a reproducible point over the axes.
+    let m = |i: u64| rng.unit_fixed(200 + i);
+    let morphology = Morphology {
+        body_mass: m(0),
+        weaponry: m(1),
+        armor: m(2),
+        toughness: m(3),
+        sensory: m(4),
+        encephalization: m(5),
+        diet_breadth: m(6),
+        aggression: m(7),
+    };
     Some(Species {
         layer,
         niche: Niche { optimum, breadth },
+        morphology,
         draws_on,
         pool,
         extinct: false,
@@ -480,18 +520,49 @@ mod tests {
     }
 
     #[test]
+    fn generated_species_have_distinct_deterministic_anatomy() {
+        let p = GeneratorParams::dev_default();
+        let a = generate(0xB105, &region(), 7, &p);
+        let b = generate(0xB105, &region(), 7, &p);
+        // Deterministic: the same seed gives the same anatomy.
+        for id in a.species.ids() {
+            assert_eq!(
+                a.species.get(id).unwrap().morphology,
+                b.species.get(id).unwrap().morphology
+            );
+        }
+        // Distinct: not every species shares one body mass (anatomy varies across the roster).
+        let masses: std::collections::BTreeSet<i64> = a
+            .species
+            .ids()
+            .map(|id| a.species.get(id).unwrap().morphology.body_mass.to_bits())
+            .collect();
+        assert!(masses.len() > 1, "species differ in body mass");
+    }
+
+    #[test]
     fn an_orphan_is_not_grounded() {
         // A consumer whose only prey is absent is an orphan.
         let mut sp: BTreeMap<SpeciesId, Species> = BTreeMap::new();
         let pool = GenePool::new(SchemeId(0), 10, vec![Fixed::from_ratio(1, 2)]);
         // Build directly: species 0 producer on abiotic 0, species 1 consumer on species 99.
+        let m = Morphology {
+            body_mass: Fixed::ZERO,
+            weaponry: Fixed::ZERO,
+            armor: Fixed::ZERO,
+            toughness: Fixed::ZERO,
+            sensory: Fixed::ZERO,
+            encephalization: Fixed::ZERO,
+            diet_breadth: Fixed::ZERO,
+            aggression: Fixed::ZERO,
+        };
         sp.insert(
             SpeciesId(0),
-            Species { layer: 0, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Abiotic(0)], pool: pool.clone(), extinct: false },
+            Species { layer: 0, niche: Niche { optimum: vec![], breadth: vec![] }, morphology: m, draws_on: vec![SourceRef::Abiotic(0)], pool: pool.clone(), extinct: false },
         );
         sp.insert(
             SpeciesId(1),
-            Species { layer: 1, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Species(SpeciesId(99))], pool, extinct: false },
+            Species { layer: 1, niche: Niche { optimum: vec![], breadth: vec![] }, morphology: m, draws_on: vec![SourceRef::Species(SpeciesId(99))], pool, extinct: false },
         );
         let mut abiotic = BTreeSet::new();
         abiotic.insert(0u16);

@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
 
-use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region};
+use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Morphology, Region};
 use crate::epoch::{run, EpochParams, EpochReport};
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
@@ -81,6 +81,8 @@ pub struct OccupantInfo {
     pub species: SpeciesId,
     pub layer: u16,
     pub region: (i32, i32),
+    /// The species' aggregate-tier anatomy, so a view can size and inspect the individual.
+    pub morphology: Morphology,
 }
 
 /// The mature, dawn-ready living world: the generated map, the per-region biospheres (keyed
@@ -280,6 +282,7 @@ fn place_survivors(
                     species: id,
                     layer: sp.layer,
                     region,
+                    morphology: sp.morphology,
                 },
             );
         }

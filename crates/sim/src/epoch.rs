@@ -187,6 +187,9 @@ pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> 
                 let daughter = crate::biosphere::Species {
                     layer: parent.layer,
                     niche: parent.niche.clone(),
+                    // A daughter inherits its parent's aggregate anatomy (morphology drift is a
+                    // later refinement; the genetic pool already diverges by the founder-fork).
+                    morphology: parent.morphology,
                     draws_on: parent.draws_on.clone(),
                     pool: daughter_pool,
                     extinct: false,

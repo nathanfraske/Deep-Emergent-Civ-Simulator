@@ -33,6 +33,7 @@ mod render;
 
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
+use civsim_core::Fixed;
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld};
 use civsim_sim::located::OccupantId;
 use civsim_world::view::Camera;
@@ -57,23 +58,40 @@ fn layer_label(layer: u16) -> &'static str {
     }
 }
 
-/// A short description of the occupants on a tile, for the selector readout.
+/// A one-to-nine reading of a normalised trait, for the compact inspector line.
+fn d10(f: Fixed) -> i32 {
+    f.checked_mul(Fixed::from_int(10)).map(|v| v.to_int()).unwrap_or(0).clamp(0, 9)
+}
+
+/// The selector readout for a tile's occupants: the selected creature's kind, species, and its
+/// anatomy (size, weaponry, armour, intelligence, diet breadth), so hovering inspects the
+/// individual form; extra occupants are counted.
 fn describe_occupants(living: &LivingWorld, occ: &[OccupantId]) -> String {
     if occ.is_empty() {
         return "no organisms".to_string();
     }
-    let mut parts = Vec::new();
-    for o in occ.iter().take(3) {
-        if let Some(info) = living.occupant_info.get(o) {
-            parts.push(format!("{}#{}", layer_label(info.layer), info.species.0));
-        }
-    }
-    let more = if occ.len() > 3 {
-        format!(" +{} more", occ.len() - 3)
+    let more = if occ.len() > 1 {
+        format!("  +{}", occ.len() - 1)
     } else {
         String::new()
     };
-    format!("{} here: {}{}", occ.len(), parts.join(", "), more)
+    match living.occupant_info.get(&occ[0]) {
+        Some(info) => {
+            let m = &info.morphology;
+            format!(
+                "{}#{}  sz{} wpn{} arm{} int{} diet{}{}",
+                layer_label(info.layer),
+                info.species.0,
+                d10(m.body_mass),
+                d10(m.weaponry),
+                d10(m.armor),
+                d10(m.encephalization),
+                d10(m.diet_breadth),
+                more
+            )
+        }
+        None => format!("{} organisms", occ.len()),
+    }
 }
 
 /// Render a superfine frame of a living world to a binary PPM and exit (a display-free way to
