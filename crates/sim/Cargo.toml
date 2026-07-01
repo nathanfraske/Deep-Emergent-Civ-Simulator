@@ -10,6 +10,10 @@ rust-version.workspace = true
 
 [dependencies]
 civsim-core = { path = "../core" }
+# The biosphere reads the resolved biology-and-composition floor (R-PHYS-BIO) to measure
+# edibility as a relation between an organism's composition and a consumer's physiology.
+# physics depends only on core, so this adds no heavy or fast-moving dependency.
+civsim-physics = { path = "../physics" }
 # serde and toml are mature, stable crates (not the fast-moving GPU/ECS stack of
 # design Part 61), used only to parse the calibration manifest and the data-driven
 # substrate definitions. No floating point reaches canonical state through them.
