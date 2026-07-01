@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30 (continued 5): the full stack tuned up, the initial goal realized (superfine living map)
+
+The owner asked to "tune it up so we can make the full stack work, and do what my initial goal was" (the large-scale map that zooms to the superfine where you see individual animals and plants). Done: the viewer now runs the whole world-genesis sequence and its zoom reveals the living content.
+
+**The living-world viewer.** `crates/viewer` now builds a `LivingWorld` at startup (worldgen plus the pre-dawn biosphere epoch) and draws it. Below the whole-tile view it draws the biome quadtree overview; zooming in past it enters four superfine levels of magnified per-tile rendering. `render.rs`: the superfine paint draws each tile as a biome-coloured block with the located organisms as marks, coloured by trophic layer (plants green, herbivores amber, carnivores red) and jittered per species so each is a distinct individual form, a pure read of canon (Principle 10, the faithful-render half of R-VIEW-ELAB). A headless `--ppm` snapshot mode writes a superfine frame for display-free inspection (verified visually: biome terrain with organisms scattered as coloured dots across forest, grassland, coast, a lake, and desert). `civsim-sim` and `civsim-core` added as viewer deps.
+
+**Genesis tuning.** Promoted organisms now scatter across each region by a deterministic per-species hash (so the superfine view reads as a spread ecology, not a clustered grid), and each occupant carries an `OccupantInfo` (species, trophic layer, region) so the view can draw it in its individual form. `LivingWorld` gains `occupant_info`.
+
+**Verification.** 2 new render tests plus the genesis changes; the full workspace green, clippy `--all-targets -D warnings` clean, the genesis and living-world proofs still bit-identical. Committed and pushed (PR #7).
+
+**Where it stopped.** The initial functional goal is realized: `cargo run -p civsim-viewer` opens a window that zooms from the whole coloured world down to the superfine, where the individual plants and animals of the self-made biosphere stand on their tiles, all deterministic from one seed. The map-program task (large-scale-to-superfine-individuals) is complete. Remaining tuning and depth (all optional, owner-directed): the reserved calibrations across the dev fixtures (`GeneratorParams`, `EpochParams`, `GenesisParams`, `FloorCaps`) await the owner's numbers; the full 86-axis trait registry as loadable data; the consumer physiology derived from Part 20 drives and Part 35 anatomy; the soil `Stock` worldgen field (a moisture stand-in for now); and richer superfine elaboration (R-VIEW-ELAB proper) if wanted.
+
+---
+
 ## 2026-06-30 (continued 4): R-BIOSPHERE built onto the substrate, phase 4 joined, and the full simulation proven
 
 The owner said "add them to the build, all that is buildable now, then phase 4, then prove the full simulation." Done, all on `claude/physics-substrate-fanout` (PR #7), each chunk committed and pushed.
