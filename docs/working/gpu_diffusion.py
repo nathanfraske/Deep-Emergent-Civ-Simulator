@@ -1,7 +1,8 @@
 # GPU counterpart to crates/core/examples/diffusion_bench.rs: the same canonical fixed-point Jacobi
 # heat-diffusion stencil (Part 5.5 workload), run on the GPU. Prints the same checksum (must match the
 # CPU bit-for-bit) and the throughput. Spike (cupy/NVRTC); the production kernel is a CubeCL #[cube]
-# function. crates.io is blocked in this box so CubeCL is not yet buildable here; this stands in.
+# function (the confirmed backend). This cupy spike was the quickest on-device check; crates.io is
+# reachable, so the production kernel is CubeCL.
 #   ./gpuvenv/bin/python docs/working/gpu_diffusion.py
 import numpy as np, cupy as cp
 props = cp.cuda.runtime.getDeviceProperties(0)

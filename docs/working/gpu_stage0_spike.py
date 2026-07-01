@@ -5,12 +5,13 @@
 # a real NVIDIA GPU. RESULT (RTX 5090, driver 13.2, cupy-cuda12x runtime CUDA 12.9): PASS, 2,000,324
 # multiply + 2,000,306 divide cases (all corners + 2M random each), zero mismatches.
 #
-# Stand-up (network to PyPI required; crates.io blocked in this box, so wgpu was not used):
+# Stand-up (this cupy/NVRTC path was the quickest on-device check; crates.io is REACHABLE, so the
+# production path is CubeCL, not cupy):
 #   python3 -m venv gpuvenv && ./gpuvenv/bin/pip install "cupy-cuda12x[ctk]"
 #   ./gpuvenv/bin/python docs/working/gpu_stage0_spike.py
 #
-# The same limb algorithm ports to a WGSL/SPIR-V/Metal/HLSL shader unchanged; a multi-vendor run is
-# the remaining Stage 0 confirmation, and it is bit-identical by the integer-exactness argument.
+# The same limb algorithm ports to a CubeCL #[cube] kernel unchanged; a multi-vendor run is the
+# remaining Stage 0 confirmation, bit-identical by the integer-exactness argument.
 
 #!/usr/bin/env python3
 # R-GPU-CANON-PIN Stage 0 device gate: the pinned u32-limb Q32.32 multiply, JIT-compiled with NVRTC
