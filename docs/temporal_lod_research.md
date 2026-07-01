@@ -260,6 +260,78 @@ is unnecessary; the profiling says it cannot, so this is the mechanism that make
 it is the temporal completion of the level-of-detail principle the engine otherwise only half
 realizes.
 
+## The build factors and their prerequisites
+
+Naming the technique for each sub-problem is not the whole scope. A build needs every load-bearing
+factor named, and the mapping above had left several implicit. Enumerated in full, the build factors
+and the open items they depend on are these, so the scope is closed in the sense that matters: no
+load-bearing factor is unnamed and the prerequisites order the work.
+
+The per-subsystem coarse-step registry, and the catalogue it needs. The registry mechanism is clear:
+each subsystem declares a coarse advance that is the temporal analogue of the spatial restrict,
+conserving its declared projections. What the pass had not enumerated is the catalogue itself, which
+of the engine's systems already carry a coarse advance (the ecology does), which need one built
+(demography, stocks, culture, belief diffusion, institutions), and which are fine-only, so their
+canonical activity forces a region to fine resolution rather than being coarsened at all. That
+catalogue is the first thing the coarse-step-registry stage produces.
+
+The event-channel and rate model. Tau-leaping draws a count for each event channel from that
+channel's rate over the leap, so a build must enumerate the demographic and social channels a quiet
+region emits (a birth, a death, a feud, a small migration, per Part 8.3, Part 15, and Part 25) and fix
+where each channel's propensity is read from the aggregate pool state. The channel set is data
+(Principle 11); the reading is the build factor.
+
+The fixed-point deterministic distribution sampler. The counter-based RNG gives a reproducible uniform
+draw; tau-leaping needs a Poisson count and binomial tau-leaping needs a binomial count, and turning a
+uniform draw into either exactly in Q32.32 is a specific algorithm rather than a free consequence of
+the RNG. This sampler is determinism-sensitive and was unnamed in the mapping. It is a named build
+factor now, and it couples to R-GPU-CANON-PIN, which pins the multiply, divide, and transcendental
+emulation such a sampler uses, so the sampler must be declared canonical under that item.
+
+The conservative cross-region synchronization core. This is the per-region future-event list, the
+lookahead-and-null-message protocol that lets a region advance on a proven lower bound of incoming
+timestamps, and the total canonical order on simultaneous inter-region events. It is the same
+event-queue substrate as event-driven agent execution (Part 57's second foundation) at the coarser
+granularity of a region rather than an agent, so the two levers share machinery and should be built to
+one design.
+
+The stiffness policy, a scoping choice surfaced rather than hidden. A region with widely separated
+fast and slow timescales is where explicit tau-leaping fails; the simplest faithful answer is that
+such a region promotes to fine, and the more complex answer is implicit tau-leaping (Rathinam et al.
+2003). The recommendation is promote-on-stiffness, so stiffness joins exhaustion and rare pivotal
+events as a demotion-refusing trigger, and implicit tau-leaping stays a later option rather than a
+first-build requirement.
+
+The entity-handoff-across-clocks protocol. When a migrating individual, a promoted mind, or a caravan
+crosses from a region at one local clock to a region at another, the transfer must be deterministic
+and conserving. It rides on the lookahead (the crossing takes at least the propagation time) and on
+R-TIER-CONSIST's lift and restrict (the entity is lifted into the destination's resolution), but the
+handoff itself is a build factor the cross-region core owns.
+
+The event-driven promote-and-demote schedule, wired to significance and the leap condition, with the
+hysteresis the reserved idle threshold sets, so a region does not thrash between resolutions.
+
+Underneath the factors sit prerequisites, open items a temporal-LOD build depends on rather than
+merely couples to. The load-bearing one is R-PROJ-REGISTER. A coarse step conserves exactly only what
+each subsystem has registered as an exact projection, and today only population and wealth are
+registered, with belief mass folded as a truncating mean and genetics, ecology, language, and
+institutions registering nothing. Until each registers an exact integer partition, a coarse span
+cannot conserve them exactly, so the conservation guarantee sub-problem 3 rests on is only as complete
+as that registry, and R-PROJ-REGISTER is a hard prerequisite rather than a sibling. The determinism
+harness (R-HARNESS-COVER) is the second: proving that a region run coarse-then-fine and one run fine
+throughout agree bit for bit on conserved state, across runs and thread counts, needs the harness to
+exercise the resolution path, which the current harness (a pure per-entity accumulation) does not.
+R-GPU-CANON-PIN is the third, through the sampler above. R-CMD-ORDER and R-REDUCE-ORDER, already
+named, pin the total order on inter-region events and non-associative combines. R-SAVE-SCHEMA is the
+last: a saved world holds regions at different local ticks and resolutions, which the snapshot schema
+must version and restore.
+
+The ordering falls out of the prerequisites. R-PROJ-REGISTER and the fixed-point sampler come first,
+because the conservation guarantee and the coarse draw depend on them; then the per-subsystem
+coarse-step registry with its catalogue and rate model; then the conservative cross-region core shared
+with event-driven execution; then the promote-and-demote schedule. The honest limit sits outside the
+factor list, because it is a property of nonlinear dynamics rather than a thing to build.
+
 ---
 
 # The companion mechanism: R-VIEW-ELAB, watching the aggregate in full
