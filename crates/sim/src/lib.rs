@@ -57,6 +57,7 @@ pub mod calibration;
 pub mod conservation;
 pub mod decision;
 pub mod dialogue;
+pub mod epoch;
 pub mod evidence;
 pub mod genome;
 pub mod language;

@@ -149,6 +149,10 @@ pub struct Species {
     pub niche: Niche,
     pub draws_on: Vec<SourceRef>,
     pub pool: GenePool,
+    /// Whether the lineage has gone extinct. Append-only: an extinct species stays in the
+    /// lineage tree as history (the phylogeny is complete), so extinction is a state the
+    /// payload carries rather than a deletion (design 25.12).
+    pub extinct: bool,
 }
 
 /// The generator's reserved parameters (fork F8 and the seeding parameters). DEVELOPMENT
@@ -384,6 +388,7 @@ fn sample_candidate(
         niche: Niche { optimum, breadth },
         draws_on,
         pool,
+        extinct: false,
     })
 }
 
@@ -479,11 +484,11 @@ mod tests {
         // Build directly: species 0 producer on abiotic 0, species 1 consumer on species 99.
         sp.insert(
             SpeciesId(0),
-            Species { layer: 0, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Abiotic(0)], pool: pool.clone() },
+            Species { layer: 0, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Abiotic(0)], pool: pool.clone(), extinct: false },
         );
         sp.insert(
             SpeciesId(1),
-            Species { layer: 1, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Species(SpeciesId(99))], pool },
+            Species { layer: 1, niche: Niche { optimum: vec![], breadth: vec![] }, draws_on: vec![SourceRef::Species(SpeciesId(99))], pool, extinct: false },
         );
         let mut abiotic = BTreeSet::new();
         abiotic.insert(0u16);
