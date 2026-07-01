@@ -63,6 +63,7 @@ pub mod evidence;
 pub mod genome;
 pub mod language;
 pub mod lineage;
+pub mod located;
 pub mod lod;
 pub mod primes;
 pub mod race;
