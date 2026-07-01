@@ -4,6 +4,16 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30 (continued 6): a tile-selector cursor and the owner's value tuning
+
+**Tile selector.** The viewer now has a mouse cursor: the hovered cell is outlined (`render::draw_outline`) and the window title reads out what is under it, the region cell and its dominant biome in the overview, and the tile, its biome, and the organisms on it (kind and species, "plant#12, herbivore#40") in the superfine. Works in both zoom regimes off the same mapping the paint uses; the `--ppm` snapshot draws it on the centre tile. Pure presentation.
+
+**Value tuning (owner-set, dev fixtures, freely tunable with signoff).** Went over the runnable knobs together. The owner chose: a 256x192 default world, a richer ecology (`GeneratorParams` to 4 trophic layers and 9 niches per layer, so a region grows about 36 founders before radiation), and kept the radiation depth (40 generations) and harshness (extinction floor 0.12, selection 0.2) at the current moderate defaults. Genesis at that size runs about 2.3 seconds in release and about 16 MB. Fixed the stale species-cap test (the richer generator makes more founders than its old cap; the cap bounds the radiation, not the founders). The deeper canonical R-BIOSPHERE reserved calibrations remain a separate, more formal set to pin when wanted.
+
+**Where it stopped.** The living-world viewer is tuned and has a tile selector; `cargo run --release -p civsim-viewer` opens the 256x192 world, pans and zooms from the whole coloured map to the superfine individuals, and the cursor reads out any tile. All on `claude/physics-substrate-fanout`, PR #7, the full workspace green.
+
+---
+
 ## 2026-06-30 (continued 5): the full stack tuned up, the initial goal realized (superfine living map)
 
 The owner asked to "tune it up so we can make the full stack work, and do what my initial goal was" (the large-scale map that zooms to the superfine where you see individual animals and plants). Done: the viewer now runs the whole world-genesis sequence and its zoom reveals the living content.
