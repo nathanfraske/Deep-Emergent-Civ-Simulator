@@ -14,6 +14,17 @@ The build plan toward the first end-to-end emergent slice (generated map, seeded
 
 ---
 
+## Time, tick rate, and playback (landed 2026-07-01)
+
+The observer's playback machinery is built and determinism-safe (`docs/time_and_playback.md`). `crates/sim/src/clock.rs` (a `Steppable` trait, a `SimClock` for the reserved base-tick duration, and a pure view-side `PlaybackDriver` with pause, single-step, speed control, and a `lod_debt` catch-up seam); `crates/sim/src/epoch.rs` (a `Radiation` one-generation stepper, proven bit-identical to the batch); `crates/sim/src/genesis.rs` (a `WorldGenesis` staged driver, proven equal to `genesis`); and the viewer now animates the pre-dawn radiation live at an adjustable speed (plus a headless `--radiate` trace). The coarse deep-time end of the vision is watchable today. Two determinism provisos stand for any future live loop: advance only by whole ticks (skipping active ticks is the open Part 32 problem), and never drive a birth or promotion from a view-time path (allocation-order id keying, `id.rs`).
+
+- **Fine end (one in-world second per real second, people walking around).** Not started. An emergent-locomotion build: beings with map coordinates that change per tick, moved by drives resolving against beliefs and pathfinding (physics authored in via anatomy, terrain, energetics; where and why emergent, Principle 9), plus the dawn-`World`-to-map bridge. Couples to Parts 8, 9, 13, 20, 25, 35, and the located join.
+- **Coarse end (years per second) at general fidelity.** The pre-dawn radiation view covers it for deep time; the general case is temporal level of detail (Part 32) plus the non-authoritative view elaboration R-VIEW-ELAB, both open research. The `PlaybackDriver`'s `lod_debt` is the seam a temporal-LOD absorber would consume.
+
+Reserved-values queue (surfaced 2026-07-01, for the owner to set and confirm via a test; recommendations and bases in `docs/time_and_playback.md`): the base-tick duration (world-seconds per tick, recommend 1.0, already reserved in Part 54); the life-cadence period (base ticks per aging and mortality beat, derive from Part 20 and the base tick); and the generation-to-years mapping (in-world years per pre-dawn radiation generation, tie to the Part 25 organism generation time). The view-layer playback knobs (default speed, step factor, rate bounds, per-frame cap) are free-to-tune development defaults, not reserved calibration values, since they never enter canon.
+
+---
+
 ## Open, ready to take (substrate or pattern already resolved)
 
 - **R-INFRA.** The etic-and-emic question applied to the buildings institutions inhabit (infrastructure). Ready: reuses the etic-and-emic substrate pattern resolved for institutions (R-INST). Couples to Parts 36, 46.

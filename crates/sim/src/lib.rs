@@ -55,6 +55,7 @@ pub mod anatomy;
 pub mod biosphere;
 pub mod axiom;
 pub mod calibration;
+pub mod clock;
 pub mod conservation;
 pub mod decision;
 pub mod dialogue;
@@ -86,6 +87,7 @@ pub use axiom::{
     EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
 };
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
+pub use clock::{PlaybackDriver, SimClock, Steppable};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use dialogue::{

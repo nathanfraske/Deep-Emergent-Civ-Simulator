@@ -34,7 +34,8 @@ mod render;
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
 use civsim_sim::anatomy::WorldProfile;
-use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld};
+use civsim_sim::clock::PlaybackDriver;
+use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::located::OccupantId;
 use civsim_world::view::Camera;
 use civsim_world::{BiomeSet, Coord3, QuadTree, Rgb};
@@ -48,6 +49,9 @@ const BG: Rgb = Rgb::new(8, 9, 14);
 const CURSOR: Rgb = Rgb::new(255, 240, 90);
 /// How many superfine levels sit past the whole-tile overview (each magnifies the tile more).
 const SUPERFINE_LEVELS: u32 = 4;
+/// The default live playback speed, in radiation generations per real second. A view-side
+/// default the observer speeds up or slows down from; it never touches canonical state.
+const DEFAULT_GEN_RATE: f64 = 4.0;
 
 /// The selector readout for a tile's occupants: the selected creature inspected in full (its
 /// derived trophic label, temperament, natural weapons, covering, and senses, named from the
@@ -202,6 +206,52 @@ fn stats_cmd(argv: &[String]) {
     );
 }
 
+/// The headless live-radiation trace: `--radiate [seed] [w] [h] [profile]` steps the staged world
+/// genesis one generation at a time and prints the species and survivor counts as the pre-dawn
+/// ecology radiates, so the deep-time evolution can be watched unfolding without a display (the
+/// coarse, deep-time end of the playback spectrum). It exercises the same `step_once`/`snapshot`
+/// path the windowed viewer drives, and it ends bit-identical to a one-shot genesis.
+fn radiate_cmd(argv: &[String]) {
+    let seed: u64 = parse(argv.get(2), 0xEA27);
+    let mut params = GenesisParams::dev_default();
+    params.width = parse(argv.get(3), 96);
+    params.height = parse(argv.get(4), 64);
+    params.profile = world_profile(argv.get(5));
+    let mut wg = WorldGenesis::new(seed, &params);
+    println!(
+        "staged genesis: {} regions, {} founder species over {} generations",
+        wg.snapshot().regions.len(),
+        wg.species(),
+        wg.generations_planned()
+    );
+    println!("gen  species  alive  daughters  extinctions");
+    loop {
+        let snap = wg.snapshot();
+        let daughters: u32 = snap.regions.values().map(|r| r.report.daughters).sum();
+        let extinctions: u32 = snap.regions.values().map(|r| r.report.extinctions).sum();
+        println!(
+            "{:>3}  {:>7}  {:>5}  {:>9}  {:>11}",
+            wg.generation(),
+            wg.species(),
+            wg.alive(),
+            daughters,
+            extinctions
+        );
+        if !wg.step_once() {
+            break;
+        }
+    }
+    // Confirm the stepped world matches the one-shot batch genesis bit for bit.
+    let stepped = wg.snapshot();
+    let batch = genesis(seed, &params);
+    let ok = stepped.state_hash() == batch.state_hash();
+    println!(
+        "final living-world hash {:032x}  ({} batch genesis)",
+        stepped.state_hash(),
+        if ok { "matches" } else { "DIFFERS FROM" }
+    );
+}
+
 /// The world profile from a test-world name: Arcanum and Confluence carry magic, Mirror and
 /// Tempest (and anything else) are grounded (Part 34, the test worlds).
 fn world_profile(name: Option<&String>) -> WorldProfile {
@@ -243,6 +293,12 @@ fn main() {
         stats_cmd(&argv);
         return;
     }
+    // Headless live-radiation trace: `--radiate [seed] [w] [h]` steps the staged genesis and
+    // prints the ecology unfolding generation by generation, then exits.
+    if argv.get(1).map(|s| s == "--radiate").unwrap_or(false) {
+        radiate_cmd(&argv);
+        return;
+    }
     // Scripted demo: `--demo [seconds] [seed] [w] [h]` auto-zooms from the whole world into a
     // populated tile, holds, and self-closes, for when interactive control is unavailable.
     let (demo_secs, base) = if argv.get(1).map(|s| s == "--demo").unwrap_or(false) {
@@ -254,24 +310,41 @@ fn main() {
     let width: i32 = parse(argv.get(base + 1), 256);
     let height: i32 = parse(argv.get(base + 2), 192);
 
-    // Run the whole world-genesis sequence once: worldgen, then the pre-dawn biosphere epoch.
-    // Deterministic and immutable for the life of the window; only the camera changes.
+    // Stage world genesis so the pre-dawn radiation can be watched unfolding rather than shown as
+    // a finished snapshot: worldgen and the founders are seeded up front, then each frame advances
+    // the radiation at the observer's chosen speed. The window is an observer that reads canon and
+    // never writes it (Principle 10); the playback is a speed over the deterministic timeline, not
+    // a change to it (Part 14.6). Stepped to completion the world is bit-identical to a one-shot
+    // genesis.
     let mut params = GenesisParams::dev_default();
     params.width = width;
     params.height = height;
     params.profile = world_profile(argv.get(base + 3));
-    eprintln!("running world genesis (worldgen + pre-dawn biosphere epoch)...");
-    let living = genesis(seed, &params);
+    eprintln!("staging world genesis (worldgen + founders; the radiation runs live)...");
+    let mut wg = WorldGenesis::new(seed, &params);
+    // Demo mode has no interactive control, so run the radiation to completion up front and
+    // showcase the finished, matured world with the auto-zoom.
+    if demo_secs.is_some() {
+        while wg.step_once() {}
+    }
+    let mut living = wg.snapshot();
     eprintln!(
-        "living world: {} regions, {} species ({} alive), hash {:032x}",
+        "staged living world: {} regions, {} species ({} alive) at generation {}/{}",
         living.regions.len(),
-        living.species(),
-        living.alive(),
-        living.state_hash()
+        wg.species(),
+        wg.alive(),
+        wg.generation(),
+        wg.generations_planned(),
     );
     let biomes = BiomeSet::dev_default();
     let tree = QuadTree::build(&living.map);
     let max_zoom = tree.depth() + SUPERFINE_LEVELS;
+
+    // The observer's time control: a playback speed over the radiation, with pause and single
+    // step, decoupled from the render frame rate. The window redraws at its own fps while the
+    // simulation advances by whole generations banked from real elapsed time.
+    let mut driver = PlaybackDriver::new(DEFAULT_GEN_RATE);
+    let mut last_frame = std::time::Instant::now();
 
     let mut win_w = 960usize;
     let mut win_h = 640usize;
@@ -314,6 +387,31 @@ fn main() {
         .unwrap_or(home);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Advance the live radiation by the whole generations the playback banks this frame. The
+        // real frame delta comes from the render layer (float is fine here, Part 14.6); the driver
+        // turns it into an integer number of whole generation steps, so determinism is untouched.
+        // Interactive mode only: demo mode already ran the radiation to completion.
+        let frame_dt = {
+            let now = std::time::Instant::now();
+            let dt = now.duration_since(last_frame).as_secs_f64();
+            last_frame = now;
+            dt
+        };
+        if demo_secs.is_none() && !wg.is_complete() {
+            let steps = driver.advance(frame_dt);
+            let mut advanced = false;
+            for _ in 0..steps {
+                if wg.step_once() {
+                    advanced = true;
+                }
+            }
+            if advanced {
+                // Re-read the canonical state into a fresh snapshot for drawing. Only the occupants
+                // change as the ecology radiates; the terrain and its quadtree are fixed.
+                living = wg.snapshot();
+            }
+        }
+
         let depth = tree.depth();
         if let Some(total) = demo_secs {
             let t = start.elapsed().as_secs_f32();
@@ -353,6 +451,15 @@ fn main() {
                         zoom = 0;
                         cam.center = home;
                     }
+                    // Time control: space pauses, `.` and `,` speed up and slow down, `n` steps
+                    // one generation. These change how fast the observer watches, never what
+                    // happens (Principle 10).
+                    Key::Space => {
+                        driver.toggle_pause();
+                    }
+                    Key::Period => driver.scale_rate(2.0),
+                    Key::Comma => driver.scale_rate(0.5),
+                    Key::N => driver.request_steps(1),
                     _ => {}
                 }
             }
@@ -457,8 +564,55 @@ fn main() {
             }
         }
 
+        // The time-control HUD, drawn top-left: how far the radiation has run, the playback speed,
+        // whether it is paused or complete, and any temporal-LOD debt (the honest signal that the
+        // chosen speed asked for more generations in a frame than the budget could run).
+        let debt = if driver.lod_debt() > 0 {
+            format!("  lod-debt {}", driver.lod_debt())
+        } else {
+            String::new()
+        };
+        let state = if wg.is_complete() {
+            "[complete]"
+        } else if driver.is_paused() {
+            "[paused]"
+        } else {
+            "radiating"
+        };
+        let status = format!(
+            "gen {}/{}  {state}  {:.2} gen/s  alive {}{debt}",
+            wg.generation(),
+            wg.generations_planned(),
+            driver.rate(),
+            wg.alive(),
+        );
+        render::draw_label(
+            &mut buf,
+            win_w,
+            win_h,
+            4,
+            4,
+            &status,
+            2,
+            Rgb::new(240, 240, 170),
+            Rgb::new(10, 12, 20),
+        );
+        if demo_secs.is_none() {
+            render::draw_label(
+                &mut buf,
+                win_w,
+                win_h,
+                4,
+                20,
+                "space pause  . faster  , slower  n step  +/- zoom  wasd pan",
+                1,
+                Rgb::new(170, 180, 200),
+                Rgb::new(10, 12, 20),
+            );
+        }
+
         window.set_title(&format!(
-            "civsim living world  0x{seed:X}  {mode}  |  {detail}"
+            "civsim living world  0x{seed:X}  {mode}  |  {status}  |  {detail}"
         ));
         window
             .update_with_buffer(&buf, win_w, win_h)

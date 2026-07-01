@@ -124,101 +124,239 @@ pub fn selection_coefficients(suitability: Fixed, loci: usize, p: &EpochParams) 
     vec![s; loci]
 }
 
-/// Run the pre-dawn radiation epoch over a region's biosphere, mutating the lineage in place
-/// and returning a summary. Deterministic: every draw keys on the world seed with the
-/// generation in the tick coordinate.
-pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> EpochReport {
-    let mut report = EpochReport {
-        generations: p.generations,
-        ..EpochReport::default()
-    };
-    // Per-species population stock, capacity set from the species' region suitability.
+/// The per-species population stocks at the start of the epoch, capacity set from each species'
+/// region suitability. Split out so the batch [`run`] and the one-generation [`Radiation`] stepper
+/// build the same initial state.
+fn init_pops(
+    bio: &Biosphere,
+    region: &Region,
+    p: &EpochParams,
+) -> std::collections::BTreeMap<SpeciesId, Stock> {
     let mut pops: std::collections::BTreeMap<SpeciesId, Stock> = std::collections::BTreeMap::new();
     for id in bio.species.ids().collect::<Vec<_>>() {
         let suit = bio.species.get(id).unwrap().niche.suitability(&region.env);
         let cap = p.pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO);
         pops.insert(id, Stock::new(cap, cap, p.pop_regen));
     }
+    pops
+}
 
-    for g in 0..p.generations {
-        // Selection and drift over every live pool, in canonical id order.
-        let ids: Vec<SpeciesId> = bio.species.ids().collect();
-        for id in &ids {
-            let (suit, extinct, loci) = {
-                let sp = bio.species.get(*id).unwrap();
-                (
-                    sp.niche.suitability(&region.env),
-                    sp.extinct,
-                    sp.pool.loci(),
-                )
-            };
-            if extinct {
-                continue;
-            }
-            let coeffs = selection_coefficients(suit, loci, p);
-            let sp = bio.species.get_mut(*id).unwrap();
-            sp.pool.select(&coeffs);
-            sp.pool.drift(seed, id.0 as u64, g);
+/// The count of living (non-extinct) species, for the epoch report.
+fn count_alive(bio: &Biosphere) -> u32 {
+    bio.species
+        .ids()
+        .filter(|&id| !bio.species.get(id).unwrap().extinct)
+        .count() as u32
+}
 
-            // Population dynamics: capacity tracks suitability; collapse is extinction.
-            if let Some(stock) = pops.get_mut(id) {
-                let cap = p.pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO);
-                stock.set_capacity(cap);
-                stock.step(Fixed::ZERO);
-                if suit < p.extinction_floor || stock.is_collapsed() {
-                    bio.species.get_mut(*id).unwrap().extinct = true;
-                    report.extinctions += 1;
-                }
-            }
+/// Advance the radiation by exactly one generation `g` (design Part 25.12): selection and drift
+/// over every live pool in canonical id order, the population dynamics that drive extinction, then
+/// speciation on the cadence. This is the loop body of the epoch, extracted so the whole epoch can
+/// be run either as a batch ([`run`]) or one generation at a time for a live, watchable radiation
+/// ([`Radiation`]). It keys every draw on the world seed with `g` in the tick coordinate, so a
+/// generation reproduces bit for bit however it is driven.
+pub fn step_generation(
+    seed: u64,
+    bio: &mut Biosphere,
+    region: &Region,
+    p: &EpochParams,
+    pops: &mut std::collections::BTreeMap<SpeciesId, Stock>,
+    report: &mut EpochReport,
+    g: u64,
+) {
+    // Selection and drift over every live pool, in canonical id order.
+    let ids: Vec<SpeciesId> = bio.species.ids().collect();
+    for id in &ids {
+        let (suit, extinct, loci) = {
+            let sp = bio.species.get(*id).unwrap();
+            (
+                sp.niche.suitability(&region.env),
+                sp.extinct,
+                sp.pool.loci(),
+            )
+        };
+        if extinct {
+            continue;
         }
+        let coeffs = selection_coefficients(suit, loci, p);
+        let sp = bio.species.get_mut(*id).unwrap();
+        sp.pool.select(&coeffs);
+        sp.pool.drift(seed, id.0 as u64, g);
 
-        // Speciation on the cadence: fork a founder off each live species, bounded by the cap.
-        if p.speciation_cadence != 0 && g % p.speciation_cadence == p.speciation_cadence - 1 {
-            for id in &ids {
-                if bio.species.len() >= p.max_species {
-                    break;
-                }
-                let parent = bio.species.get(*id).unwrap();
-                if parent.extinct {
-                    continue;
-                }
-                let daughter_pool =
-                    parent.pool.found(seed, id.0 as u64, g, p.founder_size, p.recovery_size);
-                let daughter = crate::biosphere::Species {
-                    layer: parent.layer,
-                    niche: parent.niche.clone(),
-                    // A daughter inherits its parent's aggregate anatomy (body-plan drift is a
-                    // later refinement; the genetic pool already diverges by the founder-fork).
-                    body_plan: parent.body_plan.clone(),
-                    draws_on: parent.draws_on.clone(),
-                    pool: daughter_pool,
-                    extinct: false,
-                };
-                if let Some(child) = bio.species.speciate(*id, daughter) {
-                    report.daughters += 1;
-                    let cap = {
-                        let s = bio.species.get(child).unwrap().niche.suitability(&region.env);
-                        p.pop_capacity.checked_mul(s).unwrap_or(Fixed::ZERO)
-                    };
-                    pops.insert(child, Stock::new(cap, cap, p.pop_regen));
-                    // Orr-snowball: a deterministic incompatibility roll keyed on the ordered
-                    // pair and the generation, so the count accumulates per sweep.
-                    let rng =
-                        DrawKey::pair(id.0 as u64, child.0 as u64, g, Phase::SPECIATE).rng(seed);
-                    if rng.flip(0) {
-                        report.incompatibilities += 1;
-                    }
-                }
+        // Population dynamics: capacity tracks suitability; collapse is extinction.
+        if let Some(stock) = pops.get_mut(id) {
+            let cap = p.pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO);
+            stock.set_capacity(cap);
+            stock.step(Fixed::ZERO);
+            if suit < p.extinction_floor || stock.is_collapsed() {
+                bio.species.get_mut(*id).unwrap().extinct = true;
+                report.extinctions += 1;
             }
         }
     }
 
-    report.alive = bio
-        .species
-        .ids()
-        .filter(|&id| !bio.species.get(id).unwrap().extinct)
-        .count() as u32;
+    // Speciation on the cadence: fork a founder off each live species, bounded by the cap.
+    if p.speciation_cadence != 0 && g % p.speciation_cadence == p.speciation_cadence - 1 {
+        for id in &ids {
+            if bio.species.len() >= p.max_species {
+                break;
+            }
+            let parent = bio.species.get(*id).unwrap();
+            if parent.extinct {
+                continue;
+            }
+            let daughter_pool =
+                parent.pool.found(seed, id.0 as u64, g, p.founder_size, p.recovery_size);
+            let daughter = crate::biosphere::Species {
+                layer: parent.layer,
+                niche: parent.niche.clone(),
+                // A daughter inherits its parent's aggregate anatomy (body-plan drift is a
+                // later refinement; the genetic pool already diverges by the founder-fork).
+                body_plan: parent.body_plan.clone(),
+                draws_on: parent.draws_on.clone(),
+                pool: daughter_pool,
+                extinct: false,
+            };
+            if let Some(child) = bio.species.speciate(*id, daughter) {
+                report.daughters += 1;
+                let cap = {
+                    let s = bio.species.get(child).unwrap().niche.suitability(&region.env);
+                    p.pop_capacity.checked_mul(s).unwrap_or(Fixed::ZERO)
+                };
+                pops.insert(child, Stock::new(cap, cap, p.pop_regen));
+                // Orr-snowball: a deterministic incompatibility roll keyed on the ordered
+                // pair and the generation, so the count accumulates per sweep.
+                let rng =
+                    DrawKey::pair(id.0 as u64, child.0 as u64, g, Phase::SPECIATE).rng(seed);
+                if rng.flip(0) {
+                    report.incompatibilities += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Run the pre-dawn radiation epoch over a region's biosphere, mutating the lineage in place
+/// and returning a summary. Deterministic: every draw keys on the world seed with the
+/// generation in the tick coordinate. This is the batch form; [`Radiation`] is the one-generation
+/// stepper that produces the identical result when stepped to completion.
+pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> EpochReport {
+    let mut report = EpochReport {
+        generations: p.generations,
+        ..EpochReport::default()
+    };
+    let mut pops = init_pops(bio, region, p);
+    for g in 0..p.generations {
+        step_generation(seed, bio, region, p, &mut pops, &mut report, g);
+    }
+    report.alive = count_alive(bio);
     report
+}
+
+/// A one-generation stepper over the pre-dawn radiation, so the deep-time evolution can be watched
+/// unfolding rather than only seen as a finished summary. It owns the region's biosphere and the
+/// running epoch state (the population stocks, the generation counter, the accumulating report),
+/// advances exactly one generation per [`Steppable::step`], and stepped to completion reproduces
+/// the batch [`run`] bit for bit, since both call the same [`step_generation`] over the same
+/// generation coordinates. Deterministic and self-contained: a step reads no wall-clock, so the
+/// radiation replays identically however an observer paced it (Principle 3, Principle 10).
+#[derive(Clone, Debug)]
+pub struct Radiation {
+    seed: u64,
+    region: Region,
+    params: EpochParams,
+    bio: Biosphere,
+    pops: std::collections::BTreeMap<SpeciesId, Stock>,
+    gen: u64,
+    report: EpochReport,
+}
+
+impl Radiation {
+    /// Begin a radiation over a region's freshly generated biosphere. The report is initialised
+    /// exactly as the batch [`run`] initialises it (its `generations` field is the planned total),
+    /// so a fully stepped radiation's report equals the batch result.
+    pub fn new(seed: u64, bio: Biosphere, region: Region, params: EpochParams) -> Radiation {
+        let pops = init_pops(&bio, &region, &params);
+        let report = EpochReport {
+            generations: params.generations,
+            alive: count_alive(&bio),
+            ..EpochReport::default()
+        };
+        Radiation {
+            seed,
+            region,
+            params,
+            bio,
+            pops,
+            gen: 0,
+            report,
+        }
+    }
+
+    /// Advance one generation if the epoch has not yet run its planned generations, returning
+    /// whether a generation was run. A no-op once complete, so stepping past the end is harmless.
+    pub fn step_once(&mut self) -> bool {
+        if self.gen >= self.params.generations {
+            return false;
+        }
+        step_generation(
+            self.seed,
+            &mut self.bio,
+            &self.region,
+            &self.params,
+            &mut self.pops,
+            &mut self.report,
+            self.gen,
+        );
+        self.gen += 1;
+        self.report.alive = count_alive(&self.bio);
+        true
+    }
+
+    /// The current biosphere, at the generation reached so far.
+    pub fn biosphere(&self) -> &Biosphere {
+        &self.bio
+    }
+
+    /// The region the radiation is fit to.
+    pub fn region(&self) -> &Region {
+        &self.region
+    }
+
+    /// The epoch report accumulated so far (its `alive` is live; `daughters`/`extinctions`/
+    /// `incompatibilities` grow as the radiation runs).
+    pub fn report(&self) -> EpochReport {
+        self.report
+    }
+
+    /// Generations run so far.
+    pub fn generation(&self) -> u64 {
+        self.gen
+    }
+
+    /// The planned total generations.
+    pub fn generations_planned(&self) -> u64 {
+        self.params.generations
+    }
+
+    /// Whether the radiation has run all its planned generations.
+    pub fn is_complete(&self) -> bool {
+        self.gen >= self.params.generations
+    }
+
+    /// Consume the radiation and return its matured biosphere and final report.
+    pub fn into_parts(self) -> (Biosphere, EpochReport) {
+        (self.bio, self.report)
+    }
+}
+
+impl crate::clock::Steppable for Radiation {
+    fn step(&mut self) {
+        self.step_once();
+    }
+    fn now(&self) -> u64 {
+        self.gen
+    }
 }
 
 #[cfg(test)]
@@ -301,5 +439,77 @@ mod tests {
         run(0xB105, &mut bio, &region(4), &ep);
         assert!(bio.len() <= ep.max_species, "the cap bounds the lineage size");
         assert!(bio.len() > founders, "the radiation grew the lineage toward the cap");
+    }
+
+    /// A bit-exact fold of a biosphere's evolving state: each species' identity, kind, extinction
+    /// flag, and its whole allele-frequency pool. Two biospheres fold to the same value only if
+    /// their radiations landed on identical genetic state.
+    fn bio_hash(bio: &Biosphere) -> u128 {
+        use civsim_core::StateHasher;
+        let mut h = StateHasher::new();
+        for id in bio.species.ids() {
+            let sp = bio.species.get(id).unwrap();
+            h.write_u64(id.0 as u64);
+            h.write_u32(sp.layer as u32);
+            h.write_u32(sp.extinct as u32);
+            for l in 0..sp.pool.loci() {
+                h.write_fixed(sp.pool.freq(l).unwrap_or(Fixed::ZERO));
+            }
+        }
+        h.finish()
+    }
+
+    #[test]
+    fn stepping_one_generation_at_a_time_equals_the_batch() {
+        // The determinism heart of the live view: advancing the radiation one generation at a
+        // time (as the observer's playback does) reproduces the batch run bit for bit, in both
+        // the summary report and the full genetic state, since both drive the same
+        // step_generation over the same generation coordinates.
+        let gp = GeneratorParams::dev_default();
+        let ep = EpochParams::dev_default();
+        let reg = region(4);
+        let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
+        // Two identical fresh biospheres (generate is deterministic from its seed and inputs).
+        let mut bio_batch =
+            generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
+        let bio_step =
+            generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
+
+        let report_batch = run(0xB105, &mut bio_batch, &reg, &ep);
+
+        let mut rad = Radiation::new(0xB105, bio_step, reg.clone(), ep);
+        let mut steps = 0u64;
+        while rad.step_once() {
+            steps += 1;
+        }
+        assert_eq!(steps, ep.generations, "ran exactly the planned generations");
+        assert!(rad.is_complete());
+        assert!(!rad.step_once(), "stepping past the end runs nothing");
+
+        let report_step = rad.report();
+        let (bio_step, _) = rad.into_parts();
+        assert_eq!(report_batch, report_step, "the stepped report equals the batch report");
+        assert_eq!(
+            bio_hash(&bio_batch),
+            bio_hash(&bio_step),
+            "the stepped biosphere is bit-identical to the batch"
+        );
+    }
+
+    #[test]
+    fn a_radiation_reports_live_progress_as_it_steps() {
+        let gp = GeneratorParams::dev_default();
+        let ep = EpochParams::dev_default();
+        let reg = region(4);
+        let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
+        let bio = generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
+        let mut rad = Radiation::new(0xB105, bio, reg, ep);
+        assert_eq!(rad.generation(), 0);
+        assert_eq!(rad.generations_planned(), ep.generations);
+        // A few steps advance the generation counter and keep the alive count current.
+        rad.step_once();
+        rad.step_once();
+        assert_eq!(rad.generation(), 2, "the generation counter tracks steps");
+        assert!(rad.report().alive > 0, "the live report carries a current alive count");
     }
 }

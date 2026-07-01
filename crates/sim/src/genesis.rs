@@ -36,7 +36,8 @@ use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, Worldg
 
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
-use crate::epoch::{run, EpochParams, EpochReport};
+use crate::clock::Steppable;
+use crate::epoch::{run, EpochParams, EpochReport, Radiation};
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
 
@@ -275,6 +276,186 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
     }
 }
 
+/// One region held by the staged world-genesis driver: the block it covers on the map and its
+/// running radiation (which owns the region's biosphere and its epoch state).
+#[derive(Clone, Debug)]
+struct StagedRegion {
+    coord: (i32, i32),
+    region_id: u64,
+    x0: i32,
+    y0: i32,
+    radiation: Radiation,
+}
+
+/// The staged form of world genesis, so the pre-dawn radiation can be watched unfolding rather
+/// than only seen as the finished [`LivingWorld`]. Where [`genesis`] runs worldgen, then every
+/// region's whole radiation, then the dawn placement in one call, this driver runs worldgen and
+/// the founder generation up front, then advances every region's radiation one generation per
+/// [`Steppable::step`], and can produce a [`LivingWorld`] snapshot of the current state at any
+/// point. Stepped to completion it yields a living world bit-identical to [`genesis`], since the
+/// radiation stepper reproduces the batch epoch exactly and the placement is a pure function of
+/// the matured biospheres. It is a driver over canonical state, not a view: it holds no camera and
+/// writes no randomness beyond the deterministic epoch (Principle 10).
+#[derive(Clone, Debug)]
+pub struct WorldGenesis {
+    params: GenesisParams,
+    map: TileMap,
+    registry: BodyPlanRegistry,
+    regions: Vec<StagedRegion>,
+    side: i32,
+    gen: u64,
+}
+
+impl WorldGenesis {
+    /// Begin a staged world genesis: run worldgen and seed every region's founders (generation 0),
+    /// leaving the radiation to be stepped. Deterministic from the one world seed, exactly as
+    /// [`genesis`].
+    pub fn new(seed: u64, params: &GenesisParams) -> WorldGenesis {
+        let biomes = BiomeSet::dev_default();
+        let map = TileMap::generate(
+            seed,
+            FlatBounded::new(params.width, params.height, 1),
+            &biomes,
+            &WorldgenParams::dev_default(),
+        );
+        let registry = BodyPlanRegistry::dev_default();
+        let side = params.region_side.max(1);
+        let cols = (params.width + side - 1) / side;
+        let rows = (params.height + side - 1) / side;
+
+        let mut regions = Vec::new();
+        for ry in 0..rows {
+            for rx in 0..cols {
+                let x0 = rx * side;
+                let y0 = ry * side;
+                let region = derive_region(&map, x0, y0, side, params.generator.env_axes);
+                let region_id = ((rx as u64) << 32) | (ry as u64 & 0xffff_ffff);
+                let biosphere = generate(
+                    seed,
+                    &region,
+                    region_id,
+                    &params.generator,
+                    &registry,
+                    params.profile,
+                );
+                let radiation = Radiation::new(seed, biosphere, region, params.epoch);
+                regions.push(StagedRegion {
+                    coord: (rx, ry),
+                    region_id,
+                    x0,
+                    y0,
+                    radiation,
+                });
+            }
+        }
+
+        WorldGenesis {
+            params: *params,
+            map,
+            registry,
+            regions,
+            side,
+            gen: 0,
+        }
+    }
+
+    /// Advance every region's radiation by one generation, if any remain. Returns whether a
+    /// generation was run (false once the whole radiation is complete).
+    pub fn step_once(&mut self) -> bool {
+        if self.gen >= self.params.epoch.generations {
+            return false;
+        }
+        for sr in &mut self.regions {
+            sr.radiation.step_once();
+        }
+        self.gen += 1;
+        true
+    }
+
+    /// Generations run so far across the radiation.
+    pub fn generation(&self) -> u64 {
+        self.gen
+    }
+
+    /// The planned total generations.
+    pub fn generations_planned(&self) -> u64 {
+        self.params.epoch.generations
+    }
+
+    /// Whether the whole radiation has run.
+    pub fn is_complete(&self) -> bool {
+        self.gen >= self.params.epoch.generations
+    }
+
+    /// The living species across all regions at the generation reached so far.
+    pub fn alive(&self) -> u32 {
+        self.regions.iter().map(|sr| sr.radiation.report().alive).sum()
+    }
+
+    /// The total species (living and extinct) across all regions so far.
+    pub fn species(&self) -> usize {
+        self.regions.iter().map(|sr| sr.radiation.biosphere().len()).sum()
+    }
+
+    /// The generated map (fixed for the life of the driver).
+    pub fn map(&self) -> &TileMap {
+        &self.map
+    }
+
+    /// Build a [`LivingWorld`] snapshot of the current state: the map, each region's biosphere and
+    /// report as they stand, and a fresh dawn placement of the surviving organisms. A pure read of
+    /// the driver's canonical state; the driver is unchanged.
+    pub fn snapshot(&self) -> LivingWorld {
+        let mut regions: BTreeMap<(i32, i32), RegionBiosphere> = BTreeMap::new();
+        let mut occupants = LocationIndex::new();
+        let mut occupant_info: BTreeMap<OccupantId, OccupantInfo> = BTreeMap::new();
+        for sr in &self.regions {
+            let biosphere = sr.radiation.biosphere();
+            place_survivors(
+                &mut occupants,
+                &mut occupant_info,
+                biosphere,
+                sr.region_id,
+                sr.coord,
+                sr.x0,
+                sr.y0,
+                self.side,
+                &self.map,
+            );
+            regions.insert(
+                sr.coord,
+                RegionBiosphere {
+                    region: sr.radiation.region().clone(),
+                    biosphere: biosphere.clone(),
+                    report: sr.radiation.report(),
+                },
+            );
+        }
+        LivingWorld {
+            map: self.map.clone(),
+            regions,
+            occupants,
+            occupant_info,
+            registry: self.registry.clone(),
+        }
+    }
+
+    /// Run the whole radiation to completion and return the mature living world, the batch result.
+    pub fn into_living(mut self) -> LivingWorld {
+        while self.step_once() {}
+        self.snapshot()
+    }
+}
+
+impl Steppable for WorldGenesis {
+    fn step(&mut self) {
+        self.step_once();
+    }
+    fn now(&self) -> u64 {
+        self.gen
+    }
+}
+
 /// Derive a region's environmental profile from the map tiles in its block: the mean of each
 /// terrain field over the block, plus a soil-fertility field (a moisture-derived stand-in
 /// until the soil stock lands). Abiotic sources present: light always, water when the block is
@@ -384,6 +565,46 @@ mod tests {
         assert_eq!(a.state_hash(), b.state_hash(), "the same seed yields the same living world");
         let c = genesis(0x2222, &p);
         assert_ne!(a.state_hash(), c.state_hash(), "a different seed, a different world");
+    }
+
+    #[test]
+    fn staged_genesis_matches_batch_genesis() {
+        // The end-to-end determinism proof for the live view: the staged driver stepped to
+        // completion produces a living world bit-identical to the one-shot batch genesis, so
+        // watching the radiation unfold never diverges from the canonical result.
+        let p = GenesisParams::dev_default();
+        let batch = genesis(0x11FE, &p);
+        let staged = WorldGenesis::new(0x11FE, &p).into_living();
+        assert_eq!(
+            batch.state_hash(),
+            staged.state_hash(),
+            "staged genesis stepped to completion matches batch genesis bit for bit"
+        );
+    }
+
+    #[test]
+    fn a_staged_genesis_can_be_watched_step_by_step() {
+        let p = GenesisParams::dev_default();
+        let mut wg = WorldGenesis::new(0x11FE, &p);
+        assert_eq!(wg.generation(), 0);
+        let founders = wg.species();
+        assert!(founders > 0, "the founders are seeded before any radiation");
+        // A snapshot at generation 0 is already a valid living world (the founders on the map).
+        let snap0 = wg.snapshot();
+        assert!(!snap0.occupants.is_empty(), "generation 0 places the founders");
+        // Step the whole radiation; progress advances and the ecology grows.
+        for _ in 0..p.epoch.generations {
+            wg.step_once();
+        }
+        assert!(wg.is_complete());
+        assert_eq!(wg.generation(), p.epoch.generations);
+        let snapf = wg.snapshot();
+        assert!(snapf.species() >= snap0.species(), "the radiation grew the lineage");
+        assert_eq!(
+            snapf.state_hash(),
+            genesis(0x11FE, &p).state_hash(),
+            "the fully stepped snapshot equals batch genesis"
+        );
     }
 
     #[test]

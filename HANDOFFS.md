@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01: arbitrary tick rate, the radiation as a stepper, and a live playback viewer
+
+On branch `claude/arbitrary-tickrate-step-6e32ma`. The owner asked how we stand up an arbitrary tick rate, a tick step, and showing things happening instead of a fixed snapshot, then to build the radiation animation and scope the full vision (one in-world second per real second up to years per second), and asked what dictates walking around under "physics in, everything else emergent."
+
+**Grounded first.** The load-bearing fact: the RNG is counter-based and tick-keyed with no running stream and no wall-clock in canonical state (`rng.rs`, `keys.rs`), so state at tick N is a pure function of (seed, N). An adversarial cross-check confirmed tick-purity (CONFIRMED, qualified) and surfaced two provisos: a live loop must advance only by whole ticks (skipping active ticks is the unsolved Part 32 problem), and must never drive a birth or promotion from a view-time path (those draws key on allocation-order ids, `id.rs`, safe only inside canonical tick logic). The spec already frames arbitrary tick rate as observer playback speed (Principle 10; Part 14.6; Part 54, design.md line 3058) and reserves the base-tick duration.
+
+**Built (all determinism-safe, workspace green, clippy -D warnings clean).** (1) `crates/sim/src/clock.rs`: a `Steppable` trait, a `SimClock` carrying the reserved base-tick duration for the world-time readout, and a view-side `PlaybackDriver` that turns real seconds plus a chosen speed into whole ticks, with pause, single-step, speed control, and a per-frame catch-up cap that surfaces `lod_debt` (the honest temporal-LOD seam). Pure (no `Instant` inside), fully unit-tested. (2) `crates/sim/src/epoch.rs`: extracted `step_generation` and added a `Radiation` one-generation stepper (`impl Steppable`); `run` is now a wrapper; a test proves stepping equals the batch bit-for-bit in report and full allele state. (3) `crates/sim/src/genesis.rs`: a `WorldGenesis` staged driver (worldgen plus founders up front, one generation per step, `snapshot()` to a `LivingWorld`); a test proves stepped-to-completion equals batch `genesis`. (4) `crates/viewer/src/main.rs`: the viewer now holds `WorldGenesis` and advances it through the `PlaybackDriver` decoupled from the render fps, with space/`.`/`,`/`n` controls and a HUD; a headless `--radiate` mode traces the ecology unfolding and confirms it matches batch genesis.
+
+**Scoped (design half).** `docs/time_and_playback.md`: the time/playback model as built and as specified, the two determinism provisos, the emergent-locomotion answer to "what dictates walking around" (physics authored in via anatomy, terrain, energetics; where and why emergent from drives, beliefs, decision, pathfinding, subtile movement, per Principle 9), the full spectrum (fine one-second-per-second walking needs the emergent locomotion path plus the dawn-to-map bridge; years-per-second needs Part 32 temporal LOD plus R-VIEW-ELAB, both open), and a reserved-values batch with recommendations and bases (base-tick duration recommend 1.0s; life-cadence period; generation-to-years mapping), for the owner to set and confirm via a test.
+
+**Where it stopped.** The coarse deep-time end is live and watchable at an adjustable speed today; the fine "walking around" end is scoped as an emergent-locomotion build (not started). Next, per the owner's plan: bring the reserved batch to the owner to set and confirm; then build the emergent locomotion path and the dawn-world-to-map bridge for the fine end. Not yet committed/pushed at time of writing this line.
+
+---
+
 ## 2026-06-30 (continued 7): the MCP harness, the living-world variables set, and the anatomy layer
 
 Three things this stretch, all on PR #7, workspace green throughout.
