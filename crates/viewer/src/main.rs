@@ -224,14 +224,19 @@ fn radiate_cmd(argv: &[String]) {
         wg.species(),
         wg.generations_planned()
     );
-    println!("gen  species  alive  daughters  extinctions");
+    println!(
+        "one generation ~= {} in-world years (owner-set)",
+        civsim_sim::YEARS_PER_GENERATION
+    );
+    println!("gen   ~kyr  species  alive  daughters  extinctions");
     loop {
         let snap = wg.snapshot();
         let daughters: u32 = snap.regions.values().map(|r| r.report.daughters).sum();
         let extinctions: u32 = snap.regions.values().map(|r| r.report.extinctions).sum();
         println!(
-            "{:>3}  {:>7}  {:>5}  {:>9}  {:>11}",
+            "{:>3}  {:>5}  {:>7}  {:>5}  {:>9}  {:>11}",
             wg.generation(),
+            wg.generation() * civsim_sim::YEARS_PER_GENERATION / 1000,
             wg.species(),
             wg.alive(),
             daughters,
@@ -579,10 +584,13 @@ fn main() {
         } else {
             "radiating"
         };
+        // Deep-time readout: one radiation generation is the owner-set YEARS_PER_GENERATION.
+        let years = wg.generation() * civsim_sim::YEARS_PER_GENERATION;
         let status = format!(
-            "gen {}/{}  {state}  {:.2} gen/s  alive {}{debt}",
+            "gen {}/{} (~{}k yr)  {state}  {:.2} gen/s  alive {}{debt}",
             wg.generation(),
             wg.generations_planned(),
+            years / 1000,
             driver.rate(),
             wg.alive(),
         );

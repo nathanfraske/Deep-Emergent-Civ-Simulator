@@ -799,3 +799,33 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "frequency"
 source = "Part 25.7"
+
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "the base tick as the finest canonical timestep, short enough in world-time that people and animals move smoothly rather than jittering (design.md line 3058) and matching R-VIEW-ELAB's near-one-second view target; one in-world second per tick, so playback speed 1.0 plays one in-world second per real second"
+status = "set"
+value = "1"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "seconds_per_tick"
+source = "Part 14.6, Part 54; docs/time_and_playback.md"
+
+[[reserved]]
+id = "time.life_cadence_ticks"
+basis = "the period between aging-and-mortality beats, the unit the age-hazard curve is scaled to (Part 20, R-AGING); set to one in-world year, the demographic unit real life tables use, which at a one-second base tick is 31536000 ticks. Note: revisit one in-world month (2592000 ticks) if it is within the compute budget, for smoother visible aging"
+status = "set"
+value = "31536000"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "ticks"
+source = "Part 20; crates/sim/src/world.rs age_step/apply_mortality"
+
+[[reserved]]
+id = "time.years_per_generation"
+basis = "the in-world years one pre-dawn radiation generation represents, for the deep-time readout only (never canonical state); set to 10000 years, matching deep speciation timescales, so the default forty-generation radiation spans about 400000 years"
+status = "set"
+value = "10000"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "years_per_generation"
+source = "Part 25, Part 32; docs/time_and_playback.md"

@@ -229,9 +229,28 @@ pub struct GeneratorParams {
     pub layers: u16,
     /// The number of niche draw sites to attempt per layer per region.
     pub niches_per_layer: u32,
+    /// The prior probability a producer's body is rooted rather than mobile (design 25.14,
+    /// Principle 9). RESERVED. A strong tendency, not a law: autotrophy favours staying in the
+    /// light, so this is set high, but below one so a mobile autotroph (a walking tree) can arise.
+    pub producer_rooted_prior: Fixed,
+    /// The prior probability a consumer's body is rooted rather than mobile. RESERVED. Set low,
+    /// since heterotrophy favours moving to the food, but above zero so a sessile consumer (a
+    /// coral, a barnacle) can arise. Whether a body walks is drawn morphology, never kingdom.
+    pub consumer_rooted_prior: Fixed,
 }
 
 impl GeneratorParams {
+    /// The prior that a body at this trophic layer is rooted: high for a producer, low for a
+    /// consumer, neither absolute, so the rooted-or-mobile outcome is an emergent draw and not a
+    /// kingdom rule (Principle 9).
+    pub fn rooted_prior(&self, layer: u16) -> Fixed {
+        if layer == 0 {
+            self.producer_rooted_prior
+        } else {
+            self.consumer_rooted_prior
+        }
+    }
+
     /// A labelled DEVELOPMENT FIXTURE, not owner values, so the generator runs and can be
     /// tested now, the way the dev biome set and dev worldgen params let the map run.
     pub fn dev_default() -> GeneratorParams {
@@ -249,6 +268,11 @@ impl GeneratorParams {
             // grows a fuller food web.
             layers: 4,
             niches_per_layer: 9,
+            // Rooted-or-mobile priors (dev fixture): a producer is usually rooted and a consumer
+            // usually mobile, each a strong tendency but neither absolute, so a walking tree and a
+            // sessile filter-feeder can both emerge rather than being forbidden by kingdom.
+            producer_rooted_prior: Fixed::from_ratio(97, 100),
+            consumer_rooted_prior: Fixed::from_ratio(3, 100),
         }
     }
 }
@@ -446,9 +470,10 @@ fn sample_candidate(
         vec![Fixed::from_ratio(1, 2); p.loci],
     );
     // The structured aggregate-tier anatomy: a body plan of typed parts and a temperament,
-    // drawn on counters offset past the niche counters (design 25.14).
-    // A producer (layer 0, drawing on abiotic sources) is sessile, the mark of a plant.
-    let body_plan = sample_body_plan(rng, layer, layer == 0, reg, profile, 200);
+    // drawn on counters offset past the niche counters (design 25.14). Whether the body is rooted
+    // or mobile is drawn against the role prior, not fixed by kingdom, so a mobile autotroph (a
+    // walking tree) can emerge rather than being ruled out (Principle 9).
+    let body_plan = sample_body_plan(rng, layer, p.rooted_prior(layer), reg, profile, 200);
     Some(Species {
         layer,
         niche: Niche { optimum, breadth },
@@ -577,7 +602,7 @@ mod tests {
         let bp = sample_body_plan(
             &DrawKey::entity(1, 0, Phase::BIOSPHERE_SAMPLE).rng(0),
             1,
-            false,
+            Fixed::ZERO,
             &reg(),
             WorldProfile::grounded(),
             200,

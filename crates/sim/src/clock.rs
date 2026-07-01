@@ -54,23 +54,36 @@ pub trait Steppable {
     fn now(&self) -> u64;
 }
 
-/// The base-tick duration: how much world-time one canonical tick represents. This is a RESERVED
-/// owner calibration value, not a fabricated constant (design Part 54 reserves the base-tick
-/// duration; the runbook manifest carries it). The mechanism above does not depend on its value,
-/// since advancing by whole ticks is deterministic whatever a tick means in world-time; it is
-/// used only to label the observer's speed and time readout. The development fixture below is the
-/// owner's stated anchor, one in-world second per tick, which matches the design's near-one-second
-/// resolution target for smooth movement and view elaboration (Part 32, R-VIEW-ELAB); the
-/// authoritative value is the owner's to set.
+/// The life-cadence period in base ticks: how often aging and the mortality roll beat, the unit
+/// the age-hazard curve is scaled to (design Part 20, R-AGING). Owner-set (2026-07-01,
+/// `time.life_cadence_ticks`) to one in-world year, which at the one-second base tick is
+/// 31_536_000 ticks. Note: revisit one in-world month (2_592_000 ticks) if it fits the compute
+/// budget, for smoother visible aging. The aging step is written to run once per this cadence and
+/// is not yet wired into the tick (`crate::world::World::age_step`); this constant is the value it
+/// waits on.
+pub const LIFE_CADENCE_TICKS: u64 = 31_536_000;
+
+/// In-world years one pre-dawn radiation generation represents, for the deep-time readout only,
+/// never canonical state. Owner-set (2026-07-01, `time.years_per_generation`) to 10_000 years, a
+/// deep speciation timescale, so the default forty-generation radiation spans about 400_000 years.
+pub const YEARS_PER_GENERATION: u64 = 10_000;
+
+/// The base-tick duration: how much world-time one canonical tick represents. This is a reserved
+/// owner calibration value (design Part 54; `time.base_tick_seconds` in the manifest), owner-set
+/// (2026-07-01) to one in-world second per tick. The mechanism above does not depend on its value,
+/// since advancing by whole ticks is deterministic whatever a tick means in world-time; it is used
+/// only to label the observer's speed and time readout. One second per tick matches the design's
+/// definition of the base tick as short enough for smooth movement (line 3058) and R-VIEW-ELAB's
+/// near-one-second view target, and makes playback speed 1.0 play one in-world second per real
+/// second.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SimClock {
-    /// World-seconds represented by one base tick. RESERVED: owner value, dev fixture 1.0.
+    /// World-seconds represented by one base tick. Owner-set to 1.0 (`time.base_tick_seconds`).
     pub world_seconds_per_tick: f64,
 }
 
 impl SimClock {
-    /// A labelled DEVELOPMENT FIXTURE (one in-world second per tick), the owner's stated anchor,
-    /// not an authoritative calibration.
+    /// The clock at the owner-set base-tick duration, one in-world second per tick.
     pub fn dev_default() -> SimClock {
         SimClock {
             world_seconds_per_tick: 1.0,
@@ -375,6 +388,20 @@ mod tests {
         assert!(d.rate() <= MAX_RATE, "an enormous rate is clamped to the ceiling");
         d.scale_rate(0.0); // ignored (non-positive)
         assert!(d.rate() <= MAX_RATE);
+    }
+
+    #[test]
+    fn the_owner_set_time_values_are_what_was_confirmed() {
+        // The owner set these on 2026-07-01 (calibration/reserved.toml); this test is the
+        // confirmation. Base tick is one in-world second, so a year of ticks is a year of seconds
+        // and playback speed 1.0 reads one in-world second per real second; the life cadence is one
+        // in-world year; a radiation generation reads as ten thousand years.
+        assert_eq!(SimClock::dev_default().world_seconds_per_tick, 1.0);
+        assert_eq!(LIFE_CADENCE_TICKS, 365 * 24 * 3600, "one in-world year at a one-second tick");
+        assert_eq!(YEARS_PER_GENERATION, 10_000);
+        // At the set base tick, the life cadence is exactly one year of world-time.
+        let c = SimClock::dev_default();
+        assert_eq!(c.world_seconds(LIFE_CADENCE_TICKS), 365.0 * 24.0 * 3600.0);
     }
 
     #[test]

@@ -222,14 +222,19 @@ fn pick(rng: &Rng, base: u64, list: &[KindDef], profile: WorldProfile, n: usize)
 }
 
 /// Sample a creature's body plan for its trophic layer, from the registries and gated by the
-/// world profile. A `sessile` organism (a producer, a plant) is rooted and bears few weapons
-/// (structural defenses); a mobile one (a consumer, an animal) bears more weapons at higher
-/// trophic layers and moves by one or two mobile modes. Keyed off the `base` counter of the
-/// species' sample draw, so a species' anatomy is a reproducible point over the registries.
+/// world profile. Whether the body is rooted or mobile is an emergent morphological outcome, drawn
+/// against a `rooted_prior` bias, not a rule keyed on the organism's kingdom (Principle 9, physics
+/// in and behaviour out). The prior is a strong tendency, not a law: autotrophy favours staying in
+/// the light and heterotrophy favours moving to the food, so a producer is passed a high prior and
+/// a consumer a low one, but neither is absolute, so a mobile autotroph (a walking tree) and a
+/// sessile consumer (a coral, a barnacle) can both arise. A rooted body bears few, structural
+/// weapons; a mobile one bears more at higher trophic layers and moves by one or two mobile modes.
+/// Keyed off the `base` counter of the species' sample draw, so a species' anatomy is a
+/// reproducible point over the registries.
 pub fn sample_body_plan(
     rng: &Rng,
     layer: u16,
-    sessile: bool,
+    rooted_prior: Fixed,
     reg: &BodyPlanRegistry,
     profile: WorldProfile,
     base: u64,
@@ -244,9 +249,12 @@ pub fn sample_body_plan(
         sociability: rng.unit_fixed(base + 6),
         aggression: rng.unit_fixed(base + 7),
     };
-    // Weapon count: a sessile producer bears at most one (structural, like spines); a mobile
-    // consumer bears more at higher trophic layers.
-    let want_weapons = if sessile { (rng.range_u32(base + 19, 2)) as usize } else { (layer as usize).min(3) };
+    // Rooted or mobile is drawn against the prior, not set by kingdom: below the prior the body is
+    // rooted, above it the body moves. A high prior (a producer) is usually but not always rooted.
+    let is_rooted = rng.unit_fixed(base + 79) < rooted_prior;
+    // Weapon count: a rooted body bears at most one (structural, like spines); a mobile one bears
+    // more at higher trophic layers. This keys off the drawn morphology, not the kingdom.
+    let want_weapons = if is_rooted { (rng.range_u32(base + 19, 2)) as usize } else { (layer as usize).min(3) };
     let weapons = pick(rng, base + 20, &reg.weapons, profile, want_weapons);
     // One primary covering (always present; real coverings include bare hide).
     let covering = pick(rng, base + 40, &reg.coverings, profile, 1)
@@ -259,9 +267,10 @@ pub fn sample_body_plan(
     // One to three senses.
     let want_senses = 1 + (rng.range_u32(base + 60, 3)) as usize;
     let senses = pick(rng, base + 62, &reg.senses, profile, want_senses);
-    // Locomotion: a sessile organism is rooted (the plant mark, registry id 0); a mobile one
-    // moves by one or two of the mobile modes (the non-rooted kinds).
-    let locomotion = if sessile {
+    // Locomotion: a rooted body carries the rooted mark (registry id 0) and does not walk; a mobile
+    // one moves by one or two of the mobile modes (the non-rooted kinds). The outcome is the drawn
+    // morphology, so a mobile autotroph carries real locomotion and a walking tree can exist.
+    let locomotion = if is_rooted {
         vec![0]
     } else {
         let mobile: Vec<KindDef> = reg.locomotion.iter().filter(|k| k.id != 0).cloned().collect();
@@ -306,7 +315,7 @@ mod tests {
     #[test]
     fn a_grounded_profile_bears_no_magical_kinds() {
         let reg = BodyPlanRegistry::dev_default();
-        let plan = sample_body_plan(&rng(), 2, false, &reg, WorldProfile::grounded(), 200);
+        let plan = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
         for w in &plan.weapons {
             assert!(!reg.weapons.iter().find(|k| k.id == w.kind).unwrap().fantasy, "no magic weapon in a grounded world");
         }
@@ -316,17 +325,37 @@ mod tests {
     #[test]
     fn a_predator_bears_more_weapons_than_a_plant() {
         let reg = BodyPlanRegistry::dev_default();
-        let plant = sample_body_plan(&rng(), 0, true, &reg, WorldProfile::grounded(), 200);
-        let predator = sample_body_plan(&rng(), 3, false, &reg, WorldProfile::grounded(), 200);
-        assert!(plant.weapons.len() <= 1, "a plant bears at most one weapon");
-        assert!(predator.weapons.len() >= plant.weapons.len(), "a predator bears more");
+        let rooted = sample_body_plan(&rng(), 0, Fixed::ONE, &reg, WorldProfile::grounded(), 200);
+        let predator = sample_body_plan(&rng(), 3, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
+        assert!(rooted.weapons.len() <= 1, "a rooted body bears at most one, structural weapon");
+        assert!(predator.weapons.len() >= rooted.weapons.len(), "a mobile predator bears more");
+    }
+
+    #[test]
+    fn mobility_is_the_body_not_the_kingdom() {
+        // A producer is usually rooted but not by law: with a prior below one, a producer body can
+        // draw mobile, a walking tree, and a consumer can draw rooted, a sessile filter-feeder. The
+        // outcome is the drawn morphology, never the kingdom (Principle 9). Over many species a
+        // high-but-not-one producer prior yields at least one mobile autotroph.
+        let reg = BodyPlanRegistry::dev_default();
+        let prior = Fixed::from_ratio(90, 100); // high, not absolute
+        let mut mobile_producers = 0;
+        for s in 0..200u64 {
+            let r = DrawKey::entity(s, 0, Phase::BIOSPHERE_SAMPLE).rng(0xB0D1);
+            let body = sample_body_plan(&r, 0, prior, &reg, WorldProfile::grounded(), 200);
+            // A body whose locomotion is not just the rooted mark can walk (a walking tree).
+            if body.locomotion.iter().any(|&m| m != 0) {
+                mobile_producers += 1;
+            }
+        }
+        assert!(mobile_producers > 0, "a walking tree can emerge: mobility is drawn, not decreed");
     }
 
     #[test]
     fn a_body_plan_is_deterministic() {
         let reg = BodyPlanRegistry::dev_default();
-        let a = sample_body_plan(&rng(), 2, false, &reg, WorldProfile::magical(), 200);
-        let b = sample_body_plan(&rng(), 2, false, &reg, WorldProfile::magical(), 200);
+        let a = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::magical(), 200);
+        let b = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::magical(), 200);
         assert_eq!(a, b, "same key, same body plan");
         assert!(!a.senses.is_empty() && !a.locomotion.is_empty(), "a creature has senses and moves");
     }
@@ -338,7 +367,7 @@ mod tests {
         let mut saw_magic = false;
         for s in 0..80u64 {
             let r = DrawKey::entity(s, 0, Phase::BIOSPHERE_SAMPLE).rng(0xB0D1);
-            let plan = sample_body_plan(&r, 3, false, &reg, WorldProfile::magical(), 200);
+            let plan = sample_body_plan(&r, 3, Fixed::ZERO, &reg, WorldProfile::magical(), 200);
             let magic_weapon = plan
                 .weapons
                 .iter()

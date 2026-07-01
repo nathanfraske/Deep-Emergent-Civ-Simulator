@@ -92,6 +92,11 @@ impl Phase {
     /// as lineages diverge, keyed on the ordered pair, the locus pair, and the generation so
     /// the count accumulates per sweep rather than re-rolling once.
     pub const SPECIATE: Phase = Phase(0x11);
+    /// An exploration draw: the heading a being takes when it is searching for a resource it does
+    /// not yet know of, keyed on the being and the exploration period so its search is a
+    /// reproducible function of the seed, the being, and the tick, never of the camera (a being
+    /// discovers the world by moving through it, it does not read the map like a god).
+    pub const EXPLORE: Phase = Phase(0x12);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

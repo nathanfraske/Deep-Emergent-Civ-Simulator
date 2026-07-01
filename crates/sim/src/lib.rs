@@ -67,6 +67,7 @@ pub mod genome;
 pub mod language;
 pub mod lineage;
 pub mod located;
+pub mod locomotion;
 pub mod lod;
 pub mod primes;
 pub mod race;
@@ -87,7 +88,9 @@ pub use axiom::{
     EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
 };
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
-pub use clock::{PlaybackDriver, SimClock, Steppable};
+pub use clock::{
+    PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION,
+};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use dialogue::{
@@ -107,6 +110,7 @@ pub use language::{
     FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
     Word,
 };
+pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};

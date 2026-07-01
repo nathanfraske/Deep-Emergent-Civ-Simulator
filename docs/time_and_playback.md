@@ -176,3 +176,39 @@ radiation view is governed by the existing R-BIOSPHERE epoch fixtures (the speci
 species cap, the generation count); the current dev fixtures reach the species cap within about a
 dozen generations, after which the view holds steady, so a livelier deep-time view is a matter of
 those reserved epoch calibrations.
+
+## Emergent locomotion, built, and three corrections toward the principle
+
+The fine end's first slice is built (`crates/sim/src/locomotion.rs`, `examples/walkers.rs`):
+positioned beings walk the map at a physics-bounded speed and settle where their needs are met.
+Three corrections, each an application of "physics in, everything else emergent," shaped it and are
+worth recording because they are the pattern the rest of the fine end must follow.
+
+Mobility is the body, not the kingdom. A first pass gated movement on "is it a plant." That
+templates the outcome: it forbids a walking tree. The fix is that walking is gated on the body's
+locomotion organ, a morphological fact, and whether a body has one is itself an emergent draw, not a
+rule keyed on trophic role. The generator's hard `sessile = producer` was replaced by a
+`rooted_prior` draw, a strong tendency (an autotroph favours staying in the light) that is never
+absolute, so a mobile autotroph and a sessile filter-feeder can both arise. The priors are reserved.
+
+A being is not a god. A first pass let a being head for the nearest resource within a wide radius,
+which is omniscience: it knew where water was without ever having seen it. The fix is that a being
+knows only what it has perceived within a small true sensory range and remembered, and it navigates
+by that belief; knowing of no satisfier, it explores to discover one, on a heading keyed on the
+seed, the being, and the tick, so it earns its knowledge by moving through the world rather than
+reading the map. Being told of a place it has not seen is the next layer (Part 9 gossip and
+language).
+
+Behaviour itself must not be authored, and this one is not yet fixed, only fixed in place as a
+placeholder and flagged. The being still chooses from an authored list of drives and actions
+(the decision layer): it has a thirst, and a way to relieve it is to seek water, because that menu
+was written. A fixed behavioural repertoire chosen from outside the simulation is steering at the
+level of behaviour. The end goal is that the policy is not authored at all: a being's homeostatic
+state (energy, water, integrity) is a consequence of its body's physics, its motor options are the
+affordances of its morphology, and the mapping from state to motion is a heritable policy expressed
+from its genome that evolves under the pre-dawn epoch's selection, with fitness a consequence of
+homeostatic survival rather than an authored objective. Seeking water when dry becomes a behaviour
+the lineage came to have because the ones that did survived. This is the emergent-behaviour work,
+R-BEHAVIOR-EVOLVE in the backlog; it grounds in the genome and the epoch's selection that already
+exist, and it is the layer beneath everything above. The movement physics this slice builds is the
+substrate such a policy would drive; the authored decision layer is the placeholder to replace.

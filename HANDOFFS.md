@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued): emergent locomotion, and three physics-in catches
+
+Built the fine end's first slice, then hardened it against the owner's Principle-9 catches, all on `claude/arbitrary-tickrate-step-6e32ma`, workspace green and clippy -D warnings clean throughout.
+
+**Owner set the reserved time batch (via question, confirmed by a test).** Base tick 1 in-world second, life cadence 1 in-world year (note: revisit 1 month if the compute budget allows), generation 10000 years. Recorded in `calibration/reserved.toml` (three `set` entries), reflected in `clock.rs` constants (`LIFE_CADENCE_TICKS`, `YEARS_PER_GENERATION`), wired into the radiation readout, and confirmed by `the_owner_set_time_values_are_what_was_confirmed`.
+
+**Emergent locomotion (`crates/sim/src/locomotion.rs`, `examples/walkers.rs`).** Positioned beings (Coord3 plus subtile fraction) walk at a physics-bounded speed derived from body morphology (allometric size, temperament activity, having a locomotion organ) and terrain cost, reusing the decision layer for which drive is pressing. Deterministic, keyed on seed and tick. The `walkers` example shows a band searching a generated map and settling where water and forage meet.
+
+**Three catches, each an application of physics-in-everything-else-emergent.** (1) Mobility is the body, not the kingdom: the hard `sessile = producer` rule in `sample_body_plan` is replaced by an emergent `rooted_prior` draw (a strong-but-not-absolute role bias, `producer_rooted_prior`/`consumer_rooted_prior` reserved on `GeneratorParams`), so a walking tree (mobile autotroph) and a sessile filter-feeder can both emerge. (2) A being is not a god: it navigates only by what it has perceived within a small true sensory range and remembered (`Walker.known`), and explores to discover what it does not know (heading keyed on `Phase::EXPLORE`), so it cannot head for water it has never seen. (3) Behaviour itself must not be authored: the drive-and-action `Behaviour` is a fixed repertoire chosen from outside the sim, which is steering; it is fixed in place as a placeholder and flagged as **R-BEHAVIOR-EVOLVE** (a heritable policy expressed from the genome, evolved under the epoch's selection, fitness from homeostatic survival), the layer beneath everything. Grounds in `genome.rs` and `epoch.rs`.
+
+**Where it stopped.** The movement physics substrate is built and honest about its limits. The behaviour policy is the next and deepest layer: replacing the authored decision menu with an evolved heritable policy (R-BEHAVIOR-EVOLVE), the formal design.md flag and record still to be written in a dedicated pass. Also pending: the dawn-World-to-map bridge (so the running minds sit on the walked map), perception as line-of-sight and the full Part 9 belief store (being told of a place), and pathfinding (Part 13).
+
+---
+
 ## 2026-07-01: arbitrary tick rate, the radiation as a stepper, and a live playback viewer
 
 On branch `claude/arbitrary-tickrate-step-6e32ma`. The owner asked how we stand up an arbitrary tick rate, a tick step, and showing things happening instead of a fixed snapshot, then to build the radiation animation and scope the full vision (one in-world second per real second up to years per second), and asked what dictates walking around under "physics in, everything else emergent."
