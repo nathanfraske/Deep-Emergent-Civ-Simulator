@@ -87,19 +87,32 @@ fn snapshot(argv: &[String]) {
     params.height = parse(argv.get(5), 64);
     let living = genesis(seed, &params);
     let biomes = BiomeSet::dev_default();
-    let center = Coord3::ground(params.width / 2, params.height / 2);
+    let center = populated_center(&living, params.width, params.height);
     let (w, h, tile_px) = (720usize, 480usize, 18usize);
     let mut buf = render::superfine(&living, &biomes, center, tile_px, w, h, BG);
     // Draw the selector cursor on the centre tile, so the snapshot shows it too.
     let (cols, rows) = ((w / tile_px) as i32, (h / tile_px) as i32);
-    render::draw_outline(
+    let ccol = (cols / 2) as usize;
+    let crow = (rows / 2) as usize;
+    render::draw_outline(&mut buf, w, ccol * tile_px, crow * tile_px, tile_px, tile_px, CURSOR);
+    // The selector readout for the centre tile, drawn on the map like the live viewer.
+    let biome = living
+        .map
+        .tile(center)
+        .map(|t| biomes.name(t.biome).to_string())
+        .unwrap_or_else(|| "off the world".to_string());
+    let occ = living.occupants.occupants(center);
+    let detail = format!("tile ({},{})  {biome}  |  {}", center.x, center.y, describe_occupants(&living, &occ));
+    render::draw_label(
         &mut buf,
         w,
-        (cols / 2) as usize * tile_px,
-        (rows / 2) as usize * tile_px,
-        tile_px,
-        tile_px,
-        CURSOR,
+        h,
+        (ccol * tile_px) as i32,
+        (crow * tile_px + tile_px + 3) as i32,
+        &detail,
+        2,
+        Rgb::new(245, 245, 245),
+        Rgb::new(12, 14, 22),
     );
     let mut out = Vec::with_capacity(w * h * 3 + 32);
     out.extend_from_slice(format!("P6\n{w} {h}\n255\n").as_bytes());
@@ -115,6 +128,85 @@ fn snapshot(argv: &[String]) {
         "wrote {path} ({w}x{h}) superfine at ({}, {}); living-world hash {:032x}",
         center.x,
         center.y,
+        living.state_hash()
+    );
+}
+
+/// Write an RGB pixel buffer as a binary PPM.
+fn write_ppm(path: &str, w: usize, h: usize, buf: &[u32]) {
+    use std::io::Write as _;
+    let mut out = Vec::with_capacity(w * h * 3 + 32);
+    out.extend_from_slice(format!("P6\n{w} {h}\n255\n").as_bytes());
+    for word in buf {
+        out.push((word >> 16) as u8);
+        out.push((word >> 8) as u8);
+        out.push(*word as u8);
+    }
+    std::fs::File::create(path)
+        .and_then(|mut f| f.write_all(&out))
+        .expect("write the PPM");
+}
+
+/// The occupied tile nearest the map centre, for centring a superfine frame.
+fn populated_center(living: &LivingWorld, w: i32, h: i32) -> Coord3 {
+    let home = Coord3::ground(w / 2, h / 2);
+    living
+        .occupants
+        .occupied()
+        .min_by_key(|c| {
+            let dx = (c.x - home.x) as i64;
+            let dy = (c.y - home.y) as i64;
+            dx * dx + dy * dy
+        })
+        .unwrap_or(home)
+}
+
+/// The test-harness render: `--render <path> <mode> <seed> <w> <h>`, mode overview or
+/// superfine, writes a PPM the harness converts and inspects.
+fn render_cmd(argv: &[String]) {
+    let path = argv.get(2).cloned().unwrap_or_else(|| "frame.ppm".to_string());
+    let mode = argv.get(3).map(String::as_str).unwrap_or("overview");
+    let seed: u64 = parse(argv.get(4), 0xEA27);
+    let mut params = GenesisParams::dev_default();
+    params.width = parse(argv.get(5), 256);
+    params.height = parse(argv.get(6), 192);
+    let living = genesis(seed, &params);
+    let biomes = BiomeSet::dev_default();
+    if mode == "superfine" {
+        let center = populated_center(&living, params.width, params.height);
+        let (w, h, tile_px) = (720usize, 480usize, 18usize);
+        let buf = render::superfine(&living, &biomes, center, tile_px, w, h, BG);
+        write_ppm(&path, w, h, &buf);
+    } else {
+        let tree = QuadTree::build(&living.map);
+        let cell = (720 / params.width.max(1)).max(1) as usize;
+        let (w, h) = (params.width as usize * cell, params.height as usize * cell);
+        let cam = Camera::new(
+            Coord3::ground(params.width / 2, params.height / 2),
+            tree.depth(),
+        );
+        let buf = cam.paint(&tree, &biomes, w, h, cell, BG);
+        write_ppm(&path, w, h, &buf);
+    }
+    eprintln!("wrote {path} ({mode})");
+}
+
+/// The test-harness stats: `--stats <seed> <w> <h>` prints the living world's summary as JSON.
+fn stats_cmd(argv: &[String]) {
+    let seed: u64 = parse(argv.get(2), 0xEA27);
+    let mut params = GenesisParams::dev_default();
+    params.width = parse(argv.get(3), 256);
+    params.height = parse(argv.get(4), 192);
+    let living = genesis(seed, &params);
+    let daughters: u32 = living.regions.values().map(|r| r.report.daughters).sum();
+    let extinctions: u32 = living.regions.values().map(|r| r.report.extinctions).sum();
+    println!(
+        "{{\"seed\":{seed},\"width\":{},\"height\":{},\"regions\":{},\"species\":{},\"alive\":{},\"daughters\":{daughters},\"extinctions\":{extinctions},\"hash\":\"{:032x}\"}}",
+        params.width,
+        params.height,
+        living.regions.len(),
+        living.species(),
+        living.alive(),
         living.state_hash()
     );
 }
@@ -138,9 +230,27 @@ fn main() {
         snapshot(&argv);
         return;
     }
-    let seed: u64 = parse(argv.get(1), 0xEA27);
-    let width: i32 = parse(argv.get(2), 256);
-    let height: i32 = parse(argv.get(3), 192);
+    // Headless render for the test harness: `--render <path> <mode> <seed> <w> <h>` where mode
+    // is overview or superfine. Writes a PPM and exits.
+    if argv.get(1).map(|s| s == "--render").unwrap_or(false) {
+        render_cmd(&argv);
+        return;
+    }
+    // Headless stats for the test harness: `--stats <seed> <w> <h>` prints JSON and exits.
+    if argv.get(1).map(|s| s == "--stats").unwrap_or(false) {
+        stats_cmd(&argv);
+        return;
+    }
+    // Scripted demo: `--demo [seconds] [seed] [w] [h]` auto-zooms from the whole world into a
+    // populated tile, holds, and self-closes, for when interactive control is unavailable.
+    let (demo_secs, base) = if argv.get(1).map(|s| s == "--demo").unwrap_or(false) {
+        (Some(parse(argv.get(2), 12.0f32)), 3usize)
+    } else {
+        (None, 1usize)
+    };
+    let seed: u64 = parse(argv.get(base), 0xEA27);
+    let width: i32 = parse(argv.get(base + 1), 256);
+    let height: i32 = parse(argv.get(base + 2), 192);
 
     // Run the whole world-genesis sequence once: worldgen, then the pre-dawn biosphere epoch.
     // Deterministic and immutable for the life of the window; only the camera changes.
@@ -188,40 +298,60 @@ fn main() {
     let mut cam = Camera::new(home, 0);
     let mut zoom: u32 = 0;
 
+    // Demo mode zooms into the populated tile nearest the map centre and self-closes.
+    let start = std::time::Instant::now();
+    let target_center = living
+        .occupants
+        .occupied()
+        .min_by_key(|c| {
+            let dx = (c.x - home.x) as i64;
+            let dy = (c.y - home.y) as i64;
+            dx * dx + dy * dy
+        })
+        .unwrap_or(home);
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let depth = tree.depth();
-        // Pan by one node in the overview, one tile in the superfine, so panning stays steady.
-        let step = if zoom <= depth {
-            tree.node_side(zoom)
+        if let Some(total) = demo_secs {
+            let t = start.elapsed().as_secs_f32();
+            if t >= total {
+                break; // the demo has run its course; close the window
+            }
+            // Zoom in over the first 70% of the time, then hold at the deepest level.
+            let ramp = (total * 0.7).max(0.001);
+            let frac = (t / ramp).min(1.0);
+            zoom = ((frac * (max_zoom as f32 + 0.999)) as u32).min(max_zoom);
+            cam.center = target_center;
         } else {
-            1
-        };
-        let mut dx = 0i32;
-        let mut dy = 0i32;
-        if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
-            dx -= step;
-        }
-        if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
-            dx += step;
-        }
-        if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
-            dy -= step;
-        }
-        if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
-            dy += step;
-        }
-        cam.center.x += dx;
-        cam.center.y += dy;
+            // Pan by one node in the overview, one tile in the superfine, so panning is steady.
+            let step = if zoom <= depth { tree.node_side(zoom) } else { 1 };
+            let mut dx = 0i32;
+            let mut dy = 0i32;
+            if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
+                dx -= step;
+            }
+            if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
+                dx += step;
+            }
+            if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
+                dy -= step;
+            }
+            if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
+                dy += step;
+            }
+            cam.center.x += dx;
+            cam.center.y += dy;
 
-        for k in window.get_keys_pressed(KeyRepeat::No) {
-            match k {
-                Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
-                Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
-                Key::Home => {
-                    zoom = 0;
-                    cam.center = home;
+            for k in window.get_keys_pressed(KeyRepeat::No) {
+                match k {
+                    Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
+                    Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
+                    Key::Home => {
+                        zoom = 0;
+                        cam.center = home;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
         cam.zoom = zoom.min(depth);
@@ -255,9 +385,15 @@ fn main() {
             )
         };
 
-        // The tile selector: outline the hovered cell and read out what is under it.
+        // The tile selector: outline the hovered cell and read out what is under it. In demo
+        // mode there is no mouse, so point at the centre of the window (the target tile).
         let mut detail = "point at a tile".to_string();
-        if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Discard) {
+        let mouse = if demo_secs.is_some() {
+            Some((win_w as f32 / 2.0, win_h as f32 / 2.0))
+        } else {
+            window.get_mouse_pos(MouseMode::Discard)
+        };
+        if let Some((mx, my)) = mouse {
             let (mx, my) = (mx as i32, my as i32);
             if mx >= 0 && my >= 0 && (mx as usize) < win_w && (my as usize) < win_h {
                 let cols = (win_w as i32 / cell_px).max(1);
@@ -302,6 +438,19 @@ fn main() {
                     let occ = living.occupants.occupants(coord);
                     format!("tile ({cell_x},{cell_y})  {biome}  |  {}", describe_occupants(&living, &occ))
                 };
+                // Draw the readout on the map, just below the selected cell, so the names of
+                // what the cursor sits on are visible without watching the title bar.
+                render::draw_label(
+                    &mut buf,
+                    win_w,
+                    win_h,
+                    ccol * cell_px,
+                    crow * cell_px + cell_px + 3,
+                    &detail,
+                    2,
+                    Rgb::new(245, 245, 245),
+                    Rgb::new(12, 14, 22),
+                );
             }
         }
 
