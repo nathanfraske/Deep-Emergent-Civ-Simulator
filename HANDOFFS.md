@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 11): temporal LOD deep-researched, verified against the primary sources, and formally flagged (R-TEMPORAL-LOD)
+
+The owner asked to look into temporal level of detail, scope it, and deep-research it, preserving the existing documentation and intent, then said "when the research comes back take a look at what the next engine lever is." All on the branch the temporal work sits on (`claude/physics-substrate-fanout`; the owner's separate directive was to keep the physics fan-out separate, which it stays).
+
+**The scoping pass (`docs/temporal_lod_research.md`, from the earlier part of this session).** Decomposes Part 32 into five sub-problems and maps each to existing machinery or a known external technique: the coarse population step is tau-leaping; coarse-fine agreement is conservation, not identity (R-TIER-CONSIST, resolved); cross-region reconciliation is conservative PDES; the schedule is Part 54's significance-and-seed schedule on the time axis; and the busy-time fast-forward limit is preserved exactly as the design states it. A companion section scopes R-VIEW-ELAB (the two halves of one bargain: run the world cheap, watch it in full). Nothing in Part 32, Part 54, or the R-VIEW-ELAB flag was changed; the pass decomposes and grounds.
+
+**The deep-research verification (this continuation).** A fan-out deep-research pass (search, fetch, three-vote adversarial verification per claim) confirmed the technique mapping against the primary sources and sharpened three points, now folded into the doc's "The external literature, verified" section: the conservation-exact form is binomial tau-leaping (the binomial cap is the temporal analogue of R-TIER-CONSIST's exact conservation), tuned by a critical-firing threshold (about five to fifteen, Cao/Gillespie/Petzold 2005); cross-region reconciliation is conservative (Chandy-Misra-Bryant lookahead), not optimistic Time Warp (Jefferson 1985, whose rollback timing is the determinism hazard the engine cannot adopt), with the subtle Jefferson-Barnes result that even an optimistic simulator can be made externally deterministic noted but declined; and the fundamental limit is provable and shared, matching the design. Added the critical-firing threshold to the reserved-values section (surfaced with its basis, not set) and a Sources section citing the primary literature grouped by sub-problem.
+
+**The formal flag (R-TEMPORAL-LOD, open count 33 to 34).** An additive Needs-research blockquote at the Part 32 site in `docs/design.md` (all existing Part 32 text preserved), a Section 3 engine-fidelity backlog bullet in `docs/audit.md` (the subsection retitled to include Part 32 and note the temporal clock as the third open engine-fidelity question), a Section 2 engine-fidelity paragraph, the Limitation count bumped to thirty-four with R-TEMPORAL-LOD named, a TODOS open bullet next to its sibling R-VIEW-ELAB, and the TODOS count line bumped. Verified: 0 em dashes and 0 banned adverbs across design, audit, and research; parts gapless (64); fences balanced (208); backlog count moved by exactly one (33 to 34); records 62 sequential; single flag site in the design.
+
+**Where it stopped, and what is next.** Temporal LOD is scoped, verified, and flagged as open research ready to build (the per-subsystem coarse-step registry and the conservative cross-region synchronization core, each prototyped in isolation). The owner's standing instruction is to assess the next engine lever now the research is back; the leading candidate is event-driven agent execution (Part 57's second foundation, the biggest open lever for thousands of active agents), to be weighed against the coarse-processing sentient tier and data-parallelism (the scheduler plus Rayon) before recommending.
+
+---
+
 ## 2026-07-01 (continued 10): wave 3 signed off, built, consolidated, and audited (R-PHYS-W3)
 
 The owner signed off the wave-3 recommendations ("go ahead, I sign off on your recs"). Built, consolidated as resolved, and audited end to end on `claude/physics-substrate-fanout`, workspace green throughout.
