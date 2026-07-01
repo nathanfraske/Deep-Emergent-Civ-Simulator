@@ -158,32 +158,45 @@ pub struct Species {
     pub extinct: bool,
 }
 
-/// The emergent trophic label, derived from what a species draws on rather than stored (fork
-/// F11): a producer draws only on abiotic sources, a carnivore draws on at least one animal
-/// (a non-producer species), a herbivore draws on species that are all producers. The lookup
-/// resolves each drawn-on species' role in the same set, so "carnivore" is a reading of the
-/// food web, never an authored type.
+/// The emergent kingdom-and-diet label, derived from what a species is and eats rather than
+/// stored (fork F11), so "carnivore" and "plant" are readings of the food web, never authored
+/// types. Kingdom comes from autotrophy, not diet: a species that draws on any abiotic source
+/// is a producer (a plant), whatever else it eats, so a plant that also takes prey is a
+/// carnivorous plant, still a plant. A consumer (no abiotic source, a heterotroph) is an
+/// animal, labelled by its diet: a herbivore eats only producers, a carnivore eats animals, an
+/// omnivore eats both. Prey roles are resolved recursively in the same set.
 pub fn trophic_label(species: &std::collections::BTreeMap<SpeciesId, Species>, id: SpeciesId) -> &'static str {
     let sp = match species.get(&id) {
         Some(s) => s,
         None => return "unknown",
     };
+    let is_producer = sp.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_)));
     let mut eats_species = false;
     let mut eats_animal = false;
+    let mut eats_plant = false;
     for src in &sp.draws_on {
         if let SourceRef::Species(dep) = src {
             eats_species = true;
-            // A prey that itself draws on a species is an animal; a prey that draws only on
-            // abiotic sources is a plant (a producer).
+            // A prey drawing on abiotic is a plant; a prey drawing on a species is an animal.
             if let Some(prey) = species.get(dep) {
+                if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_))) {
+                    eats_plant = true;
+                }
                 if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Species(_))) {
                     eats_animal = true;
                 }
             }
         }
     }
-    if !eats_species {
-        "plant"
+    if is_producer {
+        // Kingdom is plant regardless of diet; carnivory is a supplement, not a reclassification.
+        if eats_species {
+            "carnivorous plant"
+        } else {
+            "plant"
+        }
+    } else if eats_animal && eats_plant {
+        "omnivore"
     } else if eats_animal {
         "carnivore"
     } else {
@@ -434,7 +447,8 @@ fn sample_candidate(
     );
     // The structured aggregate-tier anatomy: a body plan of typed parts and a temperament,
     // drawn on counters offset past the niche counters (design 25.14).
-    let body_plan = sample_body_plan(rng, layer, reg, profile, 200);
+    // A producer (layer 0, drawing on abiotic sources) is sessile, the mark of a plant.
+    let body_plan = sample_body_plan(rng, layer, layer == 0, reg, profile, 200);
     Some(Species {
         layer,
         niche: Niche { optimum, breadth },
@@ -563,6 +577,7 @@ mod tests {
         let bp = sample_body_plan(
             &DrawKey::entity(1, 0, Phase::BIOSPHERE_SAMPLE).rng(0),
             1,
+            false,
             &reg(),
             WorldProfile::grounded(),
             200,
@@ -581,9 +596,24 @@ mod tests {
         assert!(live.contains(&SpeciesId(0)), "the producer grounds on abiotic");
         assert!(!live.contains(&SpeciesId(1)), "the consumer with an absent prey is an orphan");
 
-        // The trophic label is derived from diet, not stored: 0 is a plant, 1 eats a species.
-        let full: BTreeMap<SpeciesId, Species> = sp.clone();
+        // The label is derived, not stored: 0 is a plant, 1 is a heterotroph.
+        let mut full: BTreeMap<SpeciesId, Species> = sp.clone();
         assert_eq!(trophic_label(&full, SpeciesId(0)), "plant");
-        assert_eq!(trophic_label(&full, SpeciesId(1)), "herbivore", "eats species 99, which is absent so treated as a producer-eater");
+        // A producer that also takes prey is a carnivorous plant, still a plant (the fix):
+        // kingdom is autotrophy, not diet.
+        full.insert(
+            SpeciesId(2),
+            Species {
+                layer: 0,
+                niche: Niche { optimum: vec![], breadth: vec![] },
+                body_plan: full.get(&SpeciesId(0)).unwrap().body_plan.clone(),
+                draws_on: vec![SourceRef::Abiotic(0), SourceRef::Species(SpeciesId(0))],
+                pool: full.get(&SpeciesId(0)).unwrap().pool.clone(),
+                extinct: false,
+            },
+        );
+        assert_eq!(trophic_label(&full, SpeciesId(2)), "carnivorous plant", "a plant that eats prey stays a plant");
+        // A pure heterotroph that eats the plant is a herbivore (an animal).
+        assert_eq!(trophic_label(&full, SpeciesId(1)), "herbivore");
     }
 }

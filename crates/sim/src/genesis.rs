@@ -129,21 +129,33 @@ impl LivingWorld {
             Some(s) => s,
             None => return "unknown".to_string(),
         };
-        // Derive the trophic label from diet, cheaply, without cloning the region (fork F11).
+        // Derive the kingdom-and-diet label cheaply, without cloning the region (fork F11).
+        // Kingdom is autotrophy, not diet: a producer is a plant whatever it eats.
+        let is_producer = sp.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_)));
         let mut eats_species = false;
         let mut eats_animal = false;
+        let mut eats_plant = false;
         for src in &sp.draws_on {
             if let SourceRef::Species(dep) = src {
                 eats_species = true;
                 if let Some(prey) = bio.species.get(*dep) {
+                    if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_))) {
+                        eats_plant = true;
+                    }
                     if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Species(_))) {
                         eats_animal = true;
                     }
                 }
             }
         }
-        let label = if !eats_species {
-            "plant"
+        let label = if is_producer {
+            if eats_species {
+                "carnivorous plant"
+            } else {
+                "plant"
+            }
+        } else if eats_animal && eats_plant {
+            "omnivore"
         } else if eats_animal {
             "carnivore"
         } else {
