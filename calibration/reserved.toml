@@ -829,3 +829,37 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-01"
 unit = "years_per_generation"
 source = "Part 25, Part 32; docs/time_and_playback.md"
+
+# --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
+
+[[reserved]]
+id = "physiology.reserve_capacity_per_mass"
+basis = "the reserve capacity of a homeostatic axis (energy, water) as a multiple of body mass, so a bigger body carries a larger reserve and more endurance; per axis, from the Part 20 physiology (an energy store and a water store scale differently with mass)"
+status = "reserved"
+value = ""
+unit = "capacity_per_body_mass"
+source = "Part 15, Part 20; crates/sim/src/homeostasis.rs; docs/emergent_behavior_design.md"
+
+[[reserved]]
+id = "physiology.base_metabolic_drain"
+basis = "the resting per-tick drain of a homeostatic axis as a fraction of its capacity, the basal metabolic rate of Part 20 mapped onto the base tick (one in-world second, owner-set); per axis, since water is lost slower than energy is burnt"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick"
+source = "Part 20; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "physiology.exertion_drain_coupling"
+basis = "how much body exertion (a unit-interval activity signal) adds to a homeostatic axis's per-tick drain, the movement-and-work energy cost of Part 20; per axis, since energy couples strongly to exertion and water less"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick_per_exertion"
+source = "Part 20; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "physiology.death_floor"
+basis = "the viable floor of a homeostatic axis as a fraction of capacity, at or below which the body fails on that axis and dies; per axis, from the Part 20 death conditions (the physiological reserve at which the body can no longer function)"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity"
+source = "Part 20; crates/sim/src/homeostasis.rs"

@@ -4,6 +4,16 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 2): R-BEHAVIOR-EVOLVE signed off, Stage 1 built
+
+The owner signed off on the evolved-behaviour design pass (`docs/emergent_behavior_design.md`), with the standard conditions and "cite everything and audit as you build it," staged build, controller leaning neural net. The item was formally flagged first (design.md Part 8, audit Section 3, open count 36 to 37, verification suite green), then the build began.
+
+**Stage 1 (`crates/sim/src/homeostasis.rs`), workspace green, clippy clean.** The physical substrate an evolved controller will read and act through, built so a being's needs and options are consequences of its body, not an authored menu (Principle 9). Two data-defined registries (Principle 11, not closed enums): a `HomeostaticRegistry` of axes (energy, water as the dev fixture, extensible to an arcane charge or a heat store), each a Part 15 `Stock` that drains by metabolism (a consequence of body physics, exertion-coupled) and is restored only by intake whose yield the R-PHYS-BIO edibility floor measures, with death when any axis falls through its per-axis floor (you die of thirst though your energy is full); and an `AffordanceRegistry` of physical operations gated by morphology (move gated on a non-rooted locomotion organ, the walking-tree rule; ingest unconditional), the gates reading the fixed Part 25.14 anatomy categories while the affordance set is data. Deterministic (no RNG, reuses `Stock`), reserved values (capacity-per-mass, base drain, exertion coupling, death floor, per axis) surfaced in `calibration/reserved.toml` with bases. Nine tests, including the walking-tree and per-axis-death audits.
+
+**Next.** Stage 2: the heritable controller as a new genome channel (sibling to cognition and composition), expressed per individual to a fixed-point reaction-norm mapping physiology plus percepts to an affordance primitive, retiring the authored `Behaviour` in the locomotion path. Then Stage 3 (homeostatic-survival selection in the epoch, with a proof behaviour shifts) and Stage 4 plus consolidation (the fixed-point network, then the design.md record and Part 62/63). The design.md consolidation and the Part 62 record wait until the mechanism settles across the stages.
+
+---
+
 ## 2026-07-01 (continued): emergent locomotion, and three physics-in catches
 
 Built the fine end's first slice, then hardened it against the owner's Principle-9 catches, all on `claude/arbitrary-tickrate-step-6e32ma`, workspace green and clippy -D warnings clean throughout.

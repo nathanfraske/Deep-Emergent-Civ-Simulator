@@ -64,6 +64,7 @@ pub mod epoch;
 pub mod evidence;
 pub mod genesis;
 pub mod genome;
+pub mod homeostasis;
 pub mod language;
 pub mod lineage;
 pub mod located;
@@ -109,6 +110,10 @@ pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
     FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
     Word,
+};
+pub use homeostasis::{
+    AffordanceDef, AffordanceId, AffordanceRegistry, Homeostasis, HomeostaticAxisDef,
+    HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
