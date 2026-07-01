@@ -53,6 +53,7 @@ pub mod affect;
 pub mod agent;
 pub mod anatomy;
 pub mod biosphere;
+pub mod body;
 pub mod axiom;
 pub mod calibration;
 pub mod clock;
@@ -93,6 +94,12 @@ pub use axiom::{
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use clock::{
     PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION,
+};
+pub use body::{
+    apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
+    DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
+    MeasureKind, PartCondition, TissueLayer, TissueMaterial, TissueMaterialId, TissueRegistry,
+    WoundRecord,
 };
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};

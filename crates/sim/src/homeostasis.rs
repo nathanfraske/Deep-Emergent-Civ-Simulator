@@ -115,6 +115,23 @@ impl HomeostaticRegistry {
         }
     }
 
+    /// A DEVELOPMENT FIXTURE for an embodied being: energy and water (metabolic reserves) plus
+    /// integrity (bodily condition, refreshed from the per-part body rather than drained). Integrity
+    /// does not self-drain (its base and exertion draws are zero); it is set each tick from
+    /// [`crate::body::Body::integrity`]. Not owner values.
+    pub fn dev_embodied() -> HomeostaticRegistry {
+        let mut reg = HomeostaticRegistry::dev_default();
+        reg.axes.push(HomeostaticAxisDef {
+            id: INTEGRITY,
+            name: "integrity".to_string(),
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+        });
+        reg
+    }
+
     /// The axis definition for an id, if registered.
     pub fn axis(&self, id: HomeostaticAxisId) -> Option<&HomeostaticAxisDef> {
         self.axes.iter().find(|a| a.id == id)
@@ -125,6 +142,15 @@ impl HomeostaticRegistry {
 pub const ENERGY: HomeostaticAxisId = HomeostaticAxisId(0);
 /// The water axis of the development fixture.
 pub const WATER: HomeostaticAxisId = HomeostaticAxisId(1);
+/// The integrity axis: bodily condition, an axis whose level is refreshed each tick from the per-part
+/// body ([`crate::body::Body::integrity`], R-WOUND) rather than drained by metabolism, so a wound is a
+/// state the evolved controller reads and a destroyed body is a death. Derived, never a competing
+/// store (design Part 35).
+pub const INTEGRITY: HomeostaticAxisId = HomeostaticAxisId(2);
+/// The temperature axis: core temperature, a two-sided survivable band. The metabolic side is a
+/// reserve; the environmental exchange (through the resolved thermal floor) is the reserved coupling
+/// that waits on the located world.
+pub const TEMPERATURE: HomeostaticAxisId = HomeostaticAxisId(3);
 
 /// A being's homeostatic state: one reserve [`Stock`] per axis, keyed by axis id in canonical
 /// order so a walk over the reserves is reproducible (R-CANON-WALK). The reserves do not self-
@@ -164,6 +190,22 @@ impl Homeostasis {
     /// unregistered axis reads as zero.
     pub fn capacity(&self, axis: HomeostaticAxisId) -> Fixed {
         self.reserves.get(&axis).map(|s| s.capacity()).unwrap_or(Fixed::ZERO)
+    }
+
+    /// Set a derived axis's level to a fraction of its capacity, for an axis whose value is sourced
+    /// from elsewhere each tick rather than drained by metabolism (integrity, refreshed from the
+    /// per-part body; design Part 35's derived, never-stored condition). A no-op for an unregistered
+    /// axis. The fraction is clamped to `[0, ONE]`.
+    pub fn set_level(&mut self, axis: HomeostaticAxisId, fraction: Fixed) {
+        if let Some(stock) = self.reserves.get_mut(&axis) {
+            let target = fraction.clamp(Fixed::ZERO, Fixed::ONE).checked_mul(stock.capacity()).unwrap_or(Fixed::ZERO);
+            let current = stock.amount();
+            if target >= current {
+                stock.deposit(target - current);
+            } else {
+                stock.take(current - target);
+            }
+        }
     }
 
     /// Advance one tick of metabolism: every reserve drains by its resting rate plus its exertion
@@ -296,6 +338,22 @@ impl AffordanceRegistry {
         }
     }
 
+    /// A DEVELOPMENT FIXTURE for a combat-capable world: move, ingest, and strike (gated on a natural
+    /// weapon). Kept distinct from [`AffordanceRegistry::dev_default`] so the foraging behaviour tests
+    /// keep their two-affordance layout; a predator's controller layout carries the extra strike
+    /// output and can evolve to use it, closing predator-prey (R-BEHAVIOR-EVOLVE).
+    pub fn dev_predator() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: STRIKE,
+            name: "strike".to_string(),
+            requires: MorphCategory::Weapon,
+            min_development: Fixed::ZERO,
+            param: AffordanceParam::Directional,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, reading its morphology. A
     /// rooted body cannot move; a body bearing a locomotion organ can, whatever its kingdom.
     pub fn afforded(&self, body: &BodyPlan) -> Vec<AffordanceId> {
@@ -320,6 +378,8 @@ impl AffordanceRegistry {
 pub const MOVE: AffordanceId = AffordanceId(0);
 /// The ingest affordance of the development fixture.
 pub const INGEST: AffordanceId = AffordanceId(1);
+/// The strike affordance (a natural-weapon attack), in the combat fixture only.
+pub const STRIKE: AffordanceId = AffordanceId(2);
 
 /// The rooted locomotion mark: a locomotion list holding only this is not a mobile organ (the
 /// walking-tree rule, matching `crate::locomotion`).

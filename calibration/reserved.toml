@@ -932,3 +932,69 @@ status = "reserved"
 value = ""
 unit = "ticks"
 source = "Part 8, Part 54; crates/sim/src/evolve.rs"
+
+# --- The body arc: R-BUILD-PHYS, R-WOUND, R-FLUID (Part 35; record 62.20; docs/working/BODY_ARC_SCOPE.md) ---
+
+[[reserved]]
+id = "body.tissue_properties"
+basis = "the material property vector per tissue material (indentation hardness, fracture strength and energy, specific cutting energy, elastic modulus, thermal expansion), the values the resolved R-PHYS-MECH wound laws read; from real material datasheets (Yamada, Strength of Biological Materials; Currey, Bones), the floor's real-with-source provenance discipline, per tissue"
+status = "reserved"
+value = ""
+unit = "material_axes"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.damage_caps"
+basis = "the contact-pressure, delivered-energy, and stress caps the wound laws saturate to (MPa, floor energy, MPa); from the floor's own axis maxima, a representability bound rather than a realism one"
+status = "reserved"
+value = ""
+unit = "floor_axis_maxima"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.fracture_damage"
+basis = "the integrity a clean fracture removes from a part, in [0,1]; the loss of structural function when a load-bearing part breaks (near-total), the mapping from the measured fracture margin to the condition"
+status = "reserved"
+value = ""
+unit = "fraction_of_integrity"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.burn_scale"
+basis = "the temperature rise (floor units) that a full-severity burn corresponds to; the tissue's thermal-damage threshold (protein denaturation), the mapping from the measured thermal stress and delta-T to the condition"
+status = "reserved"
+value = ""
+unit = "temperature_rise"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.fluid_critical_fraction"
+basis = "the fraction of a fluid pool that may be lost before the body fails on it (Part 35's critical fraction), per fluid; the survivable fractional loss (for a mammal, roughly a third of blood volume, Guyton and Hall)"
+status = "reserved"
+value = ""
+unit = "fraction_of_volume"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.clot_and_breach_rates"
+basis = "how fast a breach seals per tick (the clot rate, per fluid) and the bleed volume a full-depth breach opens per tick (the breach rate); the coagulation and haemorrhage timescales of the fluid, per race"
+status = "reserved"
+value = ""
+unit = "volume_fraction_per_tick"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.promotion_shape"
+basis = "the body-promotion parameters (the torso mass fraction and the base tissue thickness at unit body mass); real body-segment mass fractions and tissue depths scaled allometrically"
+status = "reserved"
+value = ""
+unit = "body_shape"
+source = "Part 35, Part 20; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.strike_energetics"
+basis = "the force, velocity, and contact area of a natural-weapon strike; the wielder's derived strength and the weapon's geometry (a sharp weapon a small contact area), the inputs the kinetic-energy and contact laws consume"
+status = "reserved"
+value = ""
+unit = "strike_inputs"
+source = "Part 35, Part 8; crates/sim/src/body.rs"
