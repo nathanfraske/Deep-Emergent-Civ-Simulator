@@ -877,11 +877,13 @@ source = "Part 41 (R-PHYS-BIO), Part 8; crates/sim/src/locomotion.rs"
 
 [[reserved]]
 id = "behavior.controller_hidden_width"
-basis = "the hidden width of the behaviour controller: zero is a linear reaction norm (the substrate and determinism proof), positive a recurrent network that can gate a response on internal state; the smallest hidden state that represents the conditional foraging and predator-prey behaviours the ecology needs, against the per-tick evaluation budget, a performance-and-expressiveness bound found by trial"
-status = "reserved"
-value = ""
+basis = "the hidden width of the behaviour controller: zero is a linear reaction norm (the substrate and determinism proof), positive a recurrent network that can gate a response on internal state; the smallest hidden state that represents the conditional foraging and predator-prey behaviours the ecology needs, against the per-tick evaluation budget, a performance-and-expressiveness bound found by trial. Set to 4: the compute-tax probe (crates/sim/examples/controller_tax.rs) put the per-tick evaluation cost of a small recurrent net at about 2x the reaction norm at h=4 and negligible at focus scale, and the evolved-controller literature (Beer CTRNNs, ~2 to 10 interneurons, ~5 canonical for state-dependent behaviour) places the useful hidden layer squarely there; the h^2 evaluation wall and the O(weight_count^2) expression cost only bite past single digits. A tuneable lever, raised for more expressive behaviour or lowered for compute; raising past single digits wants the express channel-index optimization first"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
 unit = "hidden_units"
-source = "Part 8; crates/sim/src/controller.rs"
+source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
 [[reserved]]
 id = "behavior.controller_init_spread"
