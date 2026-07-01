@@ -328,7 +328,7 @@ pub fn fracture_onset(
 /// velocity, so a representable energy is never pre-saturated (the wave-1 fix); the
 /// squared velocity is guarded against its overflow-safe ceiling.
 pub fn kinetic_energy(mass: Fixed, velocity: Fixed, energy_max: Fixed) -> Fixed {
-    if velocity.abs() > V2_MAX {
+    if sat_abs(velocity) > V2_MAX {
         return energy_max;
     }
     let v2 = match velocity.checked_mul(velocity) {
@@ -813,6 +813,25 @@ pub fn thermal_stress(
     (sigma, fractured)
 }
 
+/// Saturating absolute value: `Fixed::MIN.abs()` would panic (i64::MIN negation), so the extreme
+/// magnitude routes to the ceiling rather than panicking, keeping the kernels total.
+#[inline]
+fn sat_abs(v: Fixed) -> Fixed {
+    if v == Fixed::MIN {
+        Fixed::MAX
+    } else {
+        v.abs()
+    }
+}
+
+/// Saturating difference in i128, so a subtraction of two saturated sums cannot panic or wrap; an
+/// out-of-range result routes to the signed extreme.
+#[inline]
+fn sat_sub(a: Fixed, b: Fixed) -> Fixed {
+    let d = (a.to_bits() as i128) - (b.to_bits() as i128);
+    Fixed::from_bits_i128(d).unwrap_or(if d < 0 { Fixed::MIN } else { Fixed::MAX })
+}
+
 // === Fluids, weather, and acoustics (R-PHYS-W2, wave 2) ===
 //
 // All kernels are closed-form integer over the Fixed ops, staged so a product that could exceed the
@@ -859,7 +878,7 @@ pub fn buoyant_force(density: Fixed, gravity: Fixed, volume: Fixed, f_max: Fixed
 /// density before the squared velocity (the kinetic-energy staging); a velocity past the overflow-safe
 /// square ceiling routes to the cap.
 pub fn dynamic_pressure(density: Fixed, velocity: Fixed, p_max: Fixed) -> Fixed {
-    if velocity.abs() > V2_MAX {
+    if sat_abs(velocity) > V2_MAX {
         return p_max;
     }
     let v2 = match velocity.checked_mul(velocity) {
@@ -884,7 +903,7 @@ pub fn dynamic_pressure(density: Fixed, velocity: Fixed, p_max: Fixed) -> Fixed 
 /// coefficient); the two differ only in the coefficient. The coefficient product is built before the
 /// squared velocity.
 fn aero_force(coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
-    if velocity.abs() > V2_MAX {
+    if sat_abs(velocity) > V2_MAX {
         return f_max;
     }
     let v2 = match velocity.checked_mul(velocity) {
@@ -924,7 +943,7 @@ pub fn aerodynamic_lift(lift_coefficient: Fixed, density: Fixed, area: Fixed, ve
 /// Reynolds number is a reserved consumer constant, kept out of the kernel. Zero speed reads zero, an
 /// inviscid fluid reads the cap.
 pub fn reynolds_number(density: Fixed, velocity: Fixed, length: Fixed, viscosity: Fixed, re_max: Fixed) -> Fixed {
-    let speed = velocity.abs();
+    let speed = sat_abs(velocity);
     if speed == ZERO {
         return ZERO;
     }
@@ -1105,7 +1124,7 @@ pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_st
     if vpd <= ZERO {
         return ZERO;
     }
-    let wind_fn = match b_wind.checked_mul(wind.abs()) {
+    let wind_fn = match b_wind.checked_mul(sat_abs(wind)) {
         Some(x) => a_still.saturating_add(x),
         None => a_still,
     };
@@ -1123,7 +1142,9 @@ pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_st
 /// this kernel takes them. A negative delta_h is exothermic. Which reactions occur emerges from the
 /// sign over the substance vectors, never an authored recipe (Hess's law).
 pub fn reaction(products_sum: Fixed, reactants_sum: Fixed, temperature: Fixed, barrier: Fixed) -> (Fixed, bool) {
-    (products_sum - reactants_sum, temperature >= barrier)
+    // Saturating in i128: the sums are order-independent saturating_sums bounded only by i64, so the
+    // difference of opposite-signed extremes must not panic or wrap.
+    (sat_sub(products_sum, reactants_sum), temperature >= barrier)
 }
 
 /// Corrosion driving margin (a rate proxy): the oxidiser-minus-material potential, times the
@@ -1239,6 +1260,10 @@ pub fn inverse_square_falloff(power: Fixed, distance: Fixed, four_pi: Fixed, irr
 /// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
 /// attenuation.
 pub fn interface_split(incident: Fixed, reflectance: Fixed, transmittance: Fixed) -> (Fixed, Fixed, Fixed) {
+    // The fractions are physical partitions in [0, 1]; clamping keeps a reflected/transmitted term in
+    // [0, incident] so the residual subtraction cannot overflow on an out-of-domain negative input.
+    let reflectance = reflectance.clamp(ZERO, Fixed::ONE);
+    let transmittance = transmittance.clamp(ZERO, Fixed::ONE);
     let reflected = incident.checked_mul(reflectance).unwrap_or(incident).min(incident);
     let transmitted = incident.checked_mul(transmittance).unwrap_or(ZERO).min(incident);
     let absorbed = (incident - reflected - transmitted).clamp(ZERO, incident);

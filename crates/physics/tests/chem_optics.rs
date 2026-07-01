@@ -104,6 +104,20 @@ fn radiative_equilibrium_sets_a_temperature_by_the_nested_square_roots() {
 }
 
 #[test]
+fn the_kernels_are_total_on_adversarial_inputs() {
+    // Regression (wave-2 audit): reaction's difference of two saturated opposite-signed sums must
+    // saturate, not panic; interface_split with an out-of-domain negative reflectance must not
+    // overflow the residual. Both are total.
+    let (dh, _) = laws::reaction(Fixed::MAX, Fixed::MIN, Fixed::from_int(300), Fixed::from_int(300));
+    assert_eq!(dh, Fixed::MAX, "the saturated difference routes to the extreme, no panic");
+    let (r, a, t) = laws::interface_split(Fixed::from_int(100), Fixed::from_int(-1), Fixed::from_int(2));
+    // A negative reflectance clamps to zero and a >1 transmittance clamps to one; the split stays sane.
+    assert_eq!(r, Fixed::ZERO);
+    assert_eq!(t, Fixed::from_int(100));
+    assert_eq!(a, Fixed::ZERO);
+}
+
+#[test]
 fn optics_reach_splits_and_attenuates_and_refracts() {
     // Inverse-square: farther is dimmer.
     let near = laws::inverse_square_falloff(Fixed::from_int(1000), Fixed::from_int(1), f(1256, 100), Fixed::from_int(1_000_000)).to_f64_lossy();

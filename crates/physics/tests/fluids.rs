@@ -133,6 +133,17 @@ fn hydrostatic_pressure_rises_with_depth_and_buoyancy_with_volume() {
 }
 
 #[test]
+fn extreme_velocity_routes_to_the_cap_rather_than_panicking() {
+    // Regression (wave-2 audit): the Fixed::MIN velocity magnitude must route to the cap, not panic
+    // on abs (i64::MIN negation). The kernels are total, never panicking on an out-of-domain input.
+    let p_max = Fixed::from_int(100000);
+    let f_max = Fixed::from_int(1_000_000_000);
+    assert_eq!(laws::dynamic_pressure(Fixed::from_int(1), Fixed::MIN, p_max), p_max);
+    assert_eq!(laws::drag_force(Fixed::ONE, Fixed::ONE, Fixed::ONE, Fixed::MIN, f_max), f_max);
+    assert_eq!(laws::reynolds_number(Fixed::ONE, Fixed::MIN, Fixed::ONE, Fixed::ONE, f_max), f_max);
+}
+
+#[test]
 fn reynolds_gates_the_regime_and_the_kernels_replay() {
     let re_max = Fixed::from_int(1_000_000_000);
     // Water pipe: rho 998, v 1, L 0.1, mu 1e-3 -> Re ~ 99800 (turbulent).
