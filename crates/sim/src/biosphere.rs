@@ -195,8 +195,11 @@ impl GeneratorParams {
             fit_cutoff: Fixed::from_ratio(1, 10),
             open_min: Fixed::from_ratio(8, 100),
             resample_bound: 24,
-            layers: 3,
-            niches_per_layer: 6,
+            // Richer ecology (owner-tuned 2026-06-30): four trophic layers (producers,
+            // herbivores, carnivores, apex) and nine niche draw sites per layer, so a region
+            // grows a fuller food web.
+            layers: 4,
+            niches_per_layer: 9,
         }
     }
 }

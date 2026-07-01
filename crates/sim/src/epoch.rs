@@ -287,11 +287,16 @@ mod tests {
     #[test]
     fn the_species_cap_bounds_the_radiation() {
         let gp = GeneratorParams::dev_default();
-        let mut ep = EpochParams::dev_default();
-        ep.max_species = 20;
-        ep.generations = 200;
         let mut bio = generate(0xB105, &region(4), 7, &gp);
+        let founders = bio.len();
+        // The cap bounds the radiation (the daughters), so set it above the founder count and
+        // fork often over many generations; the lineage grows toward the cap but never past it.
+        let mut ep = EpochParams::dev_default();
+        ep.max_species = founders + 12;
+        ep.generations = 300;
+        ep.speciation_cadence = 5;
         run(0xB105, &mut bio, &region(4), &ep);
         assert!(bio.len() <= ep.max_species, "the cap bounds the lineage size");
+        assert!(bio.len() > founders, "the radiation grew the lineage toward the cap");
     }
 }

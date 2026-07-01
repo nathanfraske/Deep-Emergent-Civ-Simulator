@@ -139,8 +139,8 @@ fn main() {
         return;
     }
     let seed: u64 = parse(argv.get(1), 0xEA27);
-    let width: i32 = parse(argv.get(2), 96);
-    let height: i32 = parse(argv.get(3), 64);
+    let width: i32 = parse(argv.get(2), 256);
+    let height: i32 = parse(argv.get(3), 192);
 
     // Run the whole world-genesis sequence once: worldgen, then the pre-dawn biosphere epoch.
     // Deterministic and immutable for the life of the window; only the camera changes.
