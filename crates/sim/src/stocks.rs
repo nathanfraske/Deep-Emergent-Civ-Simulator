@@ -81,6 +81,20 @@ impl Stock {
         self.amount <= Fixed::ZERO
     }
 
+    /// The fraction of capacity currently filled, in `[0, ONE]`: `amount / capacity`, with an
+    /// empty or non-positive capacity reading as zero. This is the canonical normaliser a
+    /// consumer reads a stock through (for example a soil-fertility field feeding the
+    /// biome-fit law), so the whole `[0, capacity]` range maps to `[0, ONE]` deterministically
+    /// with a single guarded divide.
+    pub fn occupancy(&self) -> Fixed {
+        if self.capacity <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        // amount is held in [0, capacity], so the quotient is in [0, ONE] and the divide
+        // (guarded against a zero denominator above) cannot overflow.
+        self.amount.checked_div(self.capacity).unwrap_or(Fixed::ZERO)
+    }
+
     /// The logistic regeneration increment for one step, `r * amount * (1 - amount/capacity)`,
     /// formed occupancy-first so no intermediate exceeds the amount. It is zero at capacity
     /// (the gap closes) and zero at empty (nothing to grow from), so a collapsed stock does
@@ -271,6 +285,18 @@ mod tests {
         let r = flow(&mut from, &mut to, Fixed::ONE, Fixed::ONE);
         assert_eq!(r.moved, f(1, 10), "capped at what the source holds");
         assert!(from.is_collapsed());
+    }
+
+    #[test]
+    fn occupancy_normalises_amount_over_capacity() {
+        assert_eq!(Stock::new(Fixed::ZERO, Fixed::ONE, Fixed::ZERO).occupancy(), Fixed::ZERO);
+        assert_eq!(Stock::new(Fixed::ONE, Fixed::ONE, Fixed::ZERO).occupancy(), Fixed::ONE);
+        assert!(approx(Stock::new(f(1, 2), Fixed::ONE, Fixed::ZERO).occupancy(), f(1, 2)));
+        // A wide capacity still normalises into [0, ONE].
+        let s = Stock::new(f(30, 1), Fixed::from_int(100), Fixed::ZERO);
+        assert!(approx(s.occupancy(), f(3, 10)), "30 of 100 reads as 0.3");
+        // A zero capacity reads as empty, not a divide by zero.
+        assert_eq!(Stock::new(Fixed::ZERO, Fixed::ZERO, Fixed::ZERO).occupancy(), Fixed::ZERO);
     }
 
     #[test]
