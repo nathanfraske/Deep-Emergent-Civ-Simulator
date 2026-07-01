@@ -998,3 +998,27 @@ status = "reserved"
 value = ""
 unit = "strike_inputs"
 source = "Part 35, Part 8; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "field.diffusion"
+basis = "the medium's thermal diffusivity over the cell size and the base tick, kept below the four-neighbour stencil's explicit 0.25 stability bound; a conduction rate, not a taste value"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
+
+[[reserved]]
+id = "field.relaxation"
+basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
+
+[[reserved]]
+id = "field.body_exchange"
+basis = "the body-to-environment convective coupling per tick, the discrete Newton-cooling rate from the fluids-floor convective coefficient and the body surface-to-thermal-mass ratio (law.convective_flux); the body core-temperature exchange the body arc deferred until a located world existed"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"

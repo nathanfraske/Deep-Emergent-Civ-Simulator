@@ -75,6 +75,7 @@ pub mod locomotion;
 pub mod lod;
 pub mod primes;
 pub mod race;
+pub mod runner;
 pub mod scenario;
 pub mod sensorium;
 pub mod stocks;
