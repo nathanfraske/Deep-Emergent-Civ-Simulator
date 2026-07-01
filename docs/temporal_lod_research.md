@@ -133,6 +133,65 @@ base-tick duration, already a reserved value, bounds how fast significance can p
 schedule is not a new mechanism; it is the existing significance schedule extended to time, with
 R-VIEW-ELAB the sibling that handles the camera's separate, non-canonical wish to watch.
 
+## The external literature, verified
+
+A deep-research pass (fan-out search, source fetch, and three-vote adversarial verification of each
+claim) confirmed the technique mapping above against the primary sources and sharpened three points.
+
+The coarse population step is tau-leaping, and the conservation-exact form is binomial. Gillespie's
+tau-leaping draws each event channel's count over a coarse step as a Poisson variable with mean rate
+times the step, leaping over many events at once (Gillespie 2001; Cao, Gillespie, Petzold 2005,
+2006). Its faithfulness has a precise bound, the leap condition: the step must be small enough that
+no rate changes significantly over it (bounded by a tolerance times the total rate), and the largest
+such step is the coarsest faithful one (Cao, Gillespie, Petzold 2006). The unbounded Poisson leap can
+overshoot and drive a small population negative, exactly near exhaustion, so the form the engine
+wants is binomial tau-leaping, which caps each channel's count by the population available to undergo
+it and thereby conserves mass exactly (Chatterjee, Vlachos, Katsoulakis 2005; Cao, Gillespie, Petzold
+2005, "Avoiding Negative Populations"). This is load-bearing here: the binomial cap is the temporal
+analogue of R-TIER-CONSIST's exact conservation, so the coarse leap conserves the population and stock
+quantities exactly rather than approximately, which is what sub-problem 3 requires. A single control
+parameter, the critical-firing threshold, tunes continuously between the fast inexact leap (threshold
+zero) and the exact per-event simulation (threshold infinity), with a value around five to fifteen
+usually best (Cao, Gillespie, Petzold 2005), a principled reserved knob for how coarse a region runs.
+
+The failure boundaries are the demotion triggers. The leap breaks precisely where coarsening is
+inappropriate: near exhaustion (a population crashing), under stiffness (widely separated fast and
+slow timescales, where implicit tau-leaping steps larger but damps the fast fluctuations, Rathinam,
+Petzold, Cao, Gillespie 2003), and where rare pivotal events dominate. So the technique's boundary
+coincides with the region's significance boundary, and the leap condition is the promotion signal.
+
+Cross-region reconciliation is conservative parallel discrete-event simulation. Regions at different
+local clocks are logical processes, and the two synchronization families are the canonical dichotomy:
+conservative (lookahead, no rollback) and optimistic (rollback, no lookahead), per Jefferson and
+Barnes citing Fujimoto. The conservative family (Chandy-Misra-Bryant with null messages to break the
+deadlock a waiting cycle would cause, Fujimoto 2017) is deterministic and schedule-independent: a
+process advances only with a proven lower bound on all future incoming timestamps, and that bound,
+the lookahead, is the minimum send-to-receive delay, which for this engine is the travel or
+propagation time of a migration, a caravan, an army, or a rumour, a physical fact of the world's
+geography and Part 46 infrastructure. Optimistic Time Warp (Jefferson 1985) runs ahead speculatively
+and rolls back on a straggler, its rollback and anti-message activity a function of message arrival
+timing rather than the seed, which is the determinism hazard the engine cannot adopt. A subtle
+result, surfaced by the research: even an optimistic simulator can be made externally deterministic
+if a total event order with explicit tie-breaking, deterministic handlers, and reproducible per-
+process RNG streams are all enforced (Jefferson and Barnes, Unified Virtual Time), but the
+conservative family gives the same determinism without the rollback machinery, so it stays the
+choice.
+
+The fundamental limit is provable and shared across all of these, and it matches what the design
+already states. Every coarse technique can conserve exactly-conserved quantities (through the bounded
+binomial draw) and reproduce low-order statistics (the mean, and in the linear regime the variance to
+first order), but none can reproduce the exact trajectory of a nonlinear or chaotic fine system. A
+span dominated by sharply changing rates, near-exhaustion, stiffness, or rare pivotal events is
+exactly where coarse advancement stops being faithful and the region must run fine. This is the
+busy-time fast-forward bound the design set, now with its primary-source grounding, and it confirms
+the honest shape: quiet time is cheap and conserving, busy time is bounded by its own importance.
+
+Bit-reproducibility is achievable, and the recipe is stated. Key every coarse draw and the fine steps
+it stands in for to the same reproducible seed-derived stream (a hash of the region, the event
+channel, and the virtual-time interval, the engine's existing draw-key pattern), and use conservative
+synchronization at region boundaries, so promoting or demoting a region does not change the committed
+result and the world stays bit-identical across runs and machine counts.
+
 ## What is open, and the honest limit
 
 Two things remain real research, and one is bounded rather than solvable.
@@ -174,11 +233,17 @@ fine-to-coarse transition conserves the declared projections exactly in integer 
 The base-tick duration, already reserved, and, new to this pass and surfaced with their bases for the
 owner to set: the leap-condition tolerance (how much a region's event rates may change over a coarse
 span before the leap is refused and the region promoted, basis the statistical-faithfulness bound of
-tau-leaping against the acceptable drift in conserved quantities); the per-region coarsening idle
-threshold (how long a region must be canonically quiet before it demotes, basis the significance
-thresholds Part 54 already reserves, on the time axis); and the cross-region lookahead floor (the
-minimum inter-region propagation delay, basis the travel and communication times the world's own
-geography and Part 46 infrastructure already imply, read not invented). None is fabricated here.
+tau-leaping against the acceptable drift in conserved quantities); the critical-firing threshold, the
+single knob that tunes a region continuously between the fast inexact leap and exact per-event
+simulation by declaring a channel critical (and so simulated event by event) once its remaining
+population falls within that many firings of exhaustion (basis the tau-leaping literature's measured
+optimum, a value around five to fifteen, traded against the per-tick budget: lower runs cheaper and
+coarser, higher runs more exactly and dearer, Cao, Gillespie, Petzold 2005); the per-region
+coarsening idle threshold (how long a region must be canonically quiet before it demotes, basis the
+significance thresholds Part 54 already reserves, on the time axis); and the cross-region lookahead
+floor (the minimum inter-region propagation delay, basis the travel and communication times the
+world's own geography and Part 46 infrastructure already imply, read not invented). None is
+fabricated here.
 
 ## What a build would look like, staged
 
@@ -296,3 +361,30 @@ seeded, disposable dramatization of the aggregate truth that costs nothing and c
 is canonically true. Both are significance-and-seed mechanisms with a strict one-way boundary to
 canon, and both should be prototyped in isolation before either is committed, as Part 32 asks of its
 half.
+
+---
+
+## Sources
+
+The primary sources behind the external-literature section, grouped by sub-problem, cited so the
+owner and any later build can trace each claim to its origin. These are the long-form grounding; the
+technique mapping in the body is the consolidation.
+
+Coarse population advancement (tau-leaping and its conservation-exact form):
+
+- Gillespie, D. T. (2001). "Approximate accelerated stochastic simulation of chemically reacting systems." *Journal of Chemical Physics* 115(4), 1716-1733. The tau-leaping method: leaping over many reaction events in one step by drawing each channel's firing count as a Poisson variable with mean rate times the step.
+- Cao, Y., Gillespie, D. T., Petzold, L. R. (2006). "Efficient step size selection for the tau-leaping simulation method." *Journal of Chemical Physics* 124(4), 044109. The leap condition and its adaptive step selection: the coarsest faithful step is the largest one over which no propensity changes by more than a tolerance.
+- Cao, Y., Gillespie, D. T., Petzold, L. R. (2005). "Avoiding negative populations in explicit Poisson tau-leaping." *Journal of Chemical Physics* 123(5), 054104. The critical-firing threshold that separates critical from non-critical channels, and the value range (about five to fifteen) that trades speed against exactness.
+- Chatterjee, A., Vlachos, D. G., Katsoulakis, M. A. (2005). "Binomial distribution based tau-leap accelerated stochastic simulation." *Journal of Chemical Physics* 122(2), 024112. Binomial tau-leaping: capping each channel's count by the population available to undergo it, so mass is conserved exactly and populations cannot go negative.
+- Rathinam, M., Petzold, L. R., Cao, Y., Gillespie, D. T. (2003). "Stiffness in stochastic chemically reacting systems: the implicit tau-leaping method." *Journal of Chemical Physics* 119(24), 12784-12794. Implicit tau-leaping for stiff systems: stepping over fast timescales while damping their fluctuations, and the boundary where explicit leaping fails.
+
+Cross-region reconciliation (parallel discrete-event simulation synchronization):
+
+- Chandy, K. M., Misra, J. (1979). "Distributed simulation: a case study in design and verification of distributed programs." *IEEE Transactions on Software Engineering* SE-5(5), 440-452. Conservative synchronization with lookahead and null messages to break deadlock.
+- Jefferson, D. R. (1985). "Virtual time." *ACM Transactions on Programming Languages and Systems* 7(3), 404-425. The Time Warp mechanism: optimistic execution with rollback, anti-messages, and global virtual time, the optimistic family this engine declines for its rollback-timing nondeterminism.
+- Jefferson, D. R., Barnes, P. D. (2022). "Virtual time III, part 1: Unified virtual time synchronization for scalable parallel discrete-event simulation." *ACM Transactions on Modeling and Computer Simulation* 32(4), 26. The conservative-versus-optimistic dichotomy and the conditions (total event order, deterministic handlers, reproducible per-process streams) under which even an optimistic simulator is externally deterministic.
+- Fujimoto, R. M. (2017). "Parallel and distributed simulation." *Proceedings of the 2017 Winter Simulation Conference*, 111-125. The survey framing of both synchronization families and the role of lookahead as the minimum send-to-receive delay.
+
+Multiscale and coarse-grained integration (the fundamental limit):
+
+- Kevrekidis, I. G., Gear, C. W., Hyman, J. M., Kevrekidis, P. G., Runborg, O., Theodoropoulos, C. (2003). "Equation-free, coarse-grained multiscale computation: enabling microscopic simulators to perform system-level analysis." *Communications in Mathematical Sciences* 1(4), 715-762. Coarse projective integration and the equation-free framework: advancing a system at the coarse level from short bursts of fine simulation, and the limit that only coarse observables, not the fine trajectory, are recovered.
