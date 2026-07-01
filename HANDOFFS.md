@@ -4,6 +4,24 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30 (continued 4): R-BIOSPHERE built onto the substrate, phase 4 joined, and the full simulation proven
+
+The owner said "add them to the build, all that is buildable now, then phase 4, then prove the full simulation." Done, all on `claude/physics-substrate-fanout` (PR #7), each chunk committed and pushed.
+
+**R-BIOSPHERE prerequisites.** `crates/core/keys.rs`: registered the four new phases (BIOSPHERE_SAMPLE 0x0D, GENESIS 0x0E, FOUND 0x0F, SPECIATE 0x11). `crates/sim/src/genome.rs`: the axis-keyed `Channel::Composition(CompositionAxisId)` (F10, heritable tissue composition) and `GenePool::found` (the founder-fork, binomial sampling at a small effective size on `Phase::FOUND`).
+
+**The biosphere mechanism** (`crates/sim`). `biosphere.rs`: the generate-and-validate seeder (Part 25.11), with `EnvProfile`/`Region`, the `Niche` and its Liebig-minimum piecewise-linear tent biome-fit, the `grounded()` least-fixed-point food-web closure, the seeded `generate()` filling trophic layers with a bounded resample and a closure-preserving fallback, and reserved `GeneratorParams`; `SourceRef` is the matter-eating interim (F5). `epoch.rs`: the pre-dawn radiation (Part 25.12), each generation applying the environment-to-coefficient selection kernel (clamped divide-safe), drifting every live pool, forking founders on a cadence into the parent-pointer lineage with an Orr-snowball incompatibility roll, and driving extinctions via the Part 15 population stock; reserved `EpochParams`. `edibility.rs`: edibility as a living relation (Part 25.13) reading the resolved floor (`civsim-physics`), a genesis stick-breaking composition against a per-race physiology, proving the same organism is food to a tolerant eater and poison to a sensitive one.
+
+**Phase 4, the located-identity join.** `located.rs`: the two-way `LocationIndex` between a world `Coord3` and its occupants, entity-world-agnostic (`OccupantId` keyed by `StableId`, tagged Being or Organism), so the hecs-versus-grow fork stays open. `civsim-world` and `civsim-physics` added as `civsim-sim` dependencies (both core-only-plus, no cycle).
+
+**The full simulation proven.** `genesis.rs`: the world-genesis sequence (worldgen becomes region `EnvProfile`s, each region generates a closed-food-web biosphere, the epoch radiates, and surviving organisms are promoted onto the map through the located join), a `LivingWorld` with a canonical `state_hash`. An example (`cargo run -p civsim-sim --example living_world`) renders it: the coloured map, the superfine zoom listing a region's species with their trophic layers and food-web edges and the organisms on its tiles, and the relational edibility. A 48x32 genesis yields 6 regions, 384 species (364 alive), 276 daughters radiated and 20 extinct over 40 generations, replaying bit-identically.
+
+**Verification.** Across the build, 40-plus new tests; the full workspace is green (32 test binaries), clippy `--all-targets -D warnings` and rustdoc `-D warnings` clean. Every value stays reserved-with-basis in a labelled dev fixture (`GeneratorParams`, `EpochParams`, `GenesisParams`, `FloorCaps`); nothing is fabricated.
+
+**Where it stopped.** R-BIOSPHERE is built and proven end to end onto the stock-and-lineage substrate, phase 4 joins sim to world, and the world-genesis sequence runs deterministically and viewably. Named follow-ons: the full 86-axis trait registry as loadable data (the generator uses a compact env-axis fixture); the consumer physiology derived from Part 20 drives and Part 35 anatomy (the interim uses direct `Physiology`); the three named build prerequisites are partly addressed (the soil field is a moisture-derived stand-in until the soil `Stock` worldgen field lands); the reserved calibrations await the owner; and the superfine individual render (R-VIEW-ELAB) so the viewer window draws the located organisms.
+
+---
+
 ## 2026-06-30 (continued 3): R-BIOSPHERE research finished, piping built, and R-BIOSPHERE consolidated as resolved
 
 Finished the R-BIOSPHERE dive the owner had chosen ("finish the research first and consolidate before building"), built the settled piping in parallel, and consolidated R-BIOSPHERE into the design docs as resolved on the owner's sign-off.
