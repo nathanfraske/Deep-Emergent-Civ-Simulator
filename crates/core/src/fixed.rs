@@ -274,6 +274,264 @@ impl Fixed {
     }
 }
 
+// === Transcendental constants (Q32.32, round-to-nearest of c*2^32, embedded exactly and
+// deterministically as raw bits; the pinned reference for R-GPU-CANON-PIN). ===
+const LN2: Fixed = Fixed::from_bits(2977044472); // ln 2
+const INV_LN2: Fixed = Fixed::from_bits(6196328019); // 1/ln 2
+const PI_BITS: Fixed = Fixed::from_bits(13493037705); // pi
+const HALF_PI_BITS: Fixed = Fixed::from_bits(6746518852); // pi/2
+const HALF: Fixed = Fixed::from_bits(1 << 31); // 0.5, for round-to-nearest
+const CORDIC_INV_GAIN: Fixed = Fixed::from_bits(2608131496); // 1/A_32, the CORDIC prescale
+const CORDIC_N: usize = 32;
+const CORDIC_ATAN: [Fixed; CORDIC_N] = [
+    Fixed::from_bits(3373259426),
+    Fixed::from_bits(1991351318),
+    Fixed::from_bits(1052175346),
+    Fixed::from_bits(534100635),
+    Fixed::from_bits(268086748),
+    Fixed::from_bits(134174063),
+    Fixed::from_bits(67103403),
+    Fixed::from_bits(33553749),
+    Fixed::from_bits(16777131),
+    Fixed::from_bits(8388597),
+    Fixed::from_bits(4194303),
+    Fixed::from_bits(2097152),
+    Fixed::from_bits(1048576),
+    Fixed::from_bits(524288),
+    Fixed::from_bits(262144),
+    Fixed::from_bits(131072),
+    Fixed::from_bits(65536),
+    Fixed::from_bits(32768),
+    Fixed::from_bits(16384),
+    Fixed::from_bits(8192),
+    Fixed::from_bits(4096),
+    Fixed::from_bits(2048),
+    Fixed::from_bits(1024),
+    Fixed::from_bits(512),
+    Fixed::from_bits(256),
+    Fixed::from_bits(128),
+    Fixed::from_bits(64),
+    Fixed::from_bits(32),
+    Fixed::from_bits(16),
+    Fixed::from_bits(8),
+    Fixed::from_bits(4),
+    Fixed::from_bits(2),
+];
+
+/// Multiply a `Fixed` by 2^k (k signed), saturating on overflow, flooring on a negative shift.
+#[inline]
+fn scale_pow2(v: Fixed, k: i32) -> Fixed {
+    if k >= 0 {
+        let s = (v.0 as i128) << k;
+        if s > i64::MAX as i128 {
+            Fixed::MAX
+        } else if s < i64::MIN as i128 {
+            Fixed::MIN
+        } else {
+            Fixed(s as i64)
+        }
+    } else {
+        Fixed(v.0 >> (-k) as u32)
+    }
+}
+
+/// CORDIC circular rotation: given an angle in about `[-pi/4, pi/4]`, return `(cos, sin)`. Shift-add
+/// only, `CORDIC_N` fixed iterations, so the result is bit-identical on every machine and backend.
+#[inline]
+fn cordic_rotation(theta: Fixed) -> (Fixed, Fixed) {
+    let mut x = CORDIC_INV_GAIN;
+    let mut y = Fixed::ZERO;
+    let mut z = theta;
+    let mut i = 0usize;
+    while i < CORDIC_N {
+        let dx = Fixed(x.0 >> i);
+        let dy = Fixed(y.0 >> i);
+        if z.0 >= 0 {
+            x -= dy;
+            y += dx;
+            z -= CORDIC_ATAN[i];
+        } else {
+            x += dy;
+            y -= dx;
+            z += CORDIC_ATAN[i];
+        }
+        i += 1;
+    }
+    (x, y)
+}
+
+/// CORDIC vectoring: return `atan(y0/x0)` for `x0 > 0`, driving `y` to zero and accumulating the
+/// angle. Shift-add only, `CORDIC_N` fixed iterations.
+#[inline]
+fn cordic_vectoring(mut x: Fixed, mut y: Fixed) -> Fixed {
+    let mut z = Fixed::ZERO;
+    let mut i = 0usize;
+    while i < CORDIC_N {
+        let dx = Fixed(x.0 >> i);
+        let dy = Fixed(y.0 >> i);
+        if y.0 >= 0 {
+            x += dy;
+            y -= dx;
+            z += CORDIC_ATAN[i];
+        } else {
+            x -= dy;
+            y += dx;
+            z -= CORDIC_ATAN[i];
+        }
+        i += 1;
+    }
+    z
+}
+
+impl Fixed {
+    /// The circle constant pi, as a Q32.32 constant.
+    pub const PI: Fixed = PI_BITS;
+    /// Half pi (a right angle), as a Q32.32 constant.
+    pub const HALF_PI: Fixed = HALF_PI_BITS;
+
+    /// Round to the nearest integer (half up), for range reduction.
+    #[inline]
+    fn round_to_int(self) -> i32 {
+        (self + HALF).to_int()
+    }
+
+    /// The natural exponential `e^x`, integer-only and deterministic (the pinned R-GPU-CANON-PIN
+    /// reference). Range-reduces `x = k*ln2 + r`, evaluates a Maclaurin series on `r` by integer
+    /// Horner, and scales by `2^k` with an exact shift. Outside the representable window (about
+    /// `[-22, 21.5]`) it saturates to zero or the maximum, an honest Q32.32 limit.
+    pub fn exp(self) -> Fixed {
+        if self > Fixed::from_int(22) {
+            return Fixed::MAX;
+        }
+        if self < Fixed::from_int(-22) {
+            return Fixed::ZERO;
+        }
+        let k = self.mul(INV_LN2).to_int();
+        let r = self - Fixed::from_int(k).mul(LN2);
+        // exp(r) = 1 + r(1 + r/2 (1 + r/3 (...))), Horner over the Maclaurin series.
+        let mut acc = Fixed::ONE;
+        let mut i = 18i32;
+        while i >= 1 {
+            acc = Fixed::ONE + r.mul(acc).div(Fixed::from_int(i));
+            i -= 1;
+        }
+        scale_pow2(acc, k)
+    }
+
+    /// The natural logarithm `ln(x)`, integer-only and deterministic. Normalizes `x = m*2^e` with
+    /// `m` in `[1,2)` by a leading-bit scan, then `ln(x) = e*ln2 + ln(m)` with `ln(m)` from the fast
+    /// `atanh` series on `(m-1)/(m+1)`. A non-positive input has no real log and returns
+    /// [`Fixed::MIN`] as a fail-loud sentinel; callers guard their domain.
+    pub fn ln(self) -> Fixed {
+        if self.0 <= 0 {
+            return Fixed::MIN;
+        }
+        let b = self.0;
+        let msb = 63 - b.leading_zeros() as i32;
+        let e = msb - FRAC_BITS as i32;
+        let m = if e >= 0 {
+            Fixed(b >> e as u32)
+        } else {
+            Fixed(b << (-e) as u32)
+        };
+        let u = (m - Fixed::ONE).div(m + Fixed::ONE);
+        let w = u.mul(u);
+        // sum_{j=0}^{J} w^j / (2j+1), Horner.
+        let mut acc = Fixed::ZERO;
+        let mut j = 12i32;
+        while j >= 0 {
+            acc = acc.mul(w) + Fixed::ONE.div(Fixed::from_int(2 * j + 1));
+            j -= 1;
+        }
+        let ln_m = Fixed::from_int(2).mul(u).mul(acc);
+        Fixed::from_int(e).mul(LN2) + ln_m
+    }
+
+    /// Sine and cosine together, integer-only and deterministic (CORDIC). Reduces the angle to
+    /// `[-pi/4, pi/4]` by quadrant, rotates, and maps back. Returns `(sin, cos)`.
+    #[inline]
+    pub fn sin_cos(self) -> (Fixed, Fixed) {
+        let n = self.div(HALF_PI_BITS).round_to_int();
+        let r = self - Fixed::from_int(n).mul(HALF_PI_BITS);
+        let (c, s) = cordic_rotation(r);
+        match n.rem_euclid(4) {
+            0 => (s, c),
+            1 => (c, Fixed::ZERO - s),
+            2 => (Fixed::ZERO - s, Fixed::ZERO - c),
+            _ => (Fixed::ZERO - c, s),
+        }
+    }
+
+    /// The sine of an angle in radians.
+    #[inline]
+    pub fn sin(self) -> Fixed {
+        self.sin_cos().0
+    }
+
+    /// The cosine of an angle in radians.
+    #[inline]
+    pub fn cos(self) -> Fixed {
+        self.sin_cos().1
+    }
+
+    /// The arctangent `atan(x)` in radians, in `(-pi/2, pi/2)`, integer-only and deterministic
+    /// (CORDIC vectoring). A very large magnitude saturates toward the right angle.
+    pub fn atan(self) -> Fixed {
+        let bound = Fixed::from_int(1 << 28);
+        if self > bound {
+            return Fixed::HALF_PI;
+        }
+        if self < Fixed::ZERO - bound {
+            return Fixed::ZERO - Fixed::HALF_PI;
+        }
+        cordic_vectoring(Fixed::ONE, self)
+    }
+
+    /// The arcsine `asin(x)` in radians, in `[-pi/2, pi/2]`. Outside the domain `[-1, 1]` (the
+    /// physical total-internal-reflection boundary) it saturates to the right angle. Computed as
+    /// `atan(x / sqrt(1 - x*x))`.
+    pub fn asin(self) -> Fixed {
+        if self >= Fixed::ONE {
+            return Fixed::HALF_PI;
+        }
+        if self <= Fixed::from_int(-1) {
+            return Fixed::ZERO - Fixed::HALF_PI;
+        }
+        let denom = (Fixed::ONE - self.mul(self)).sqrt();
+        cordic_vectoring(denom, self)
+    }
+
+    /// Integer power `x^n` by exponentiation-by-squaring, exact to the multiply rounding and
+    /// deterministic. A negative exponent takes the reciprocal first.
+    pub fn powi(self, n: i32) -> Fixed {
+        if n == 0 {
+            return Fixed::ONE;
+        }
+        let mut base = if n < 0 { Fixed::ONE.div(self) } else { self };
+        let mut e = n.unsigned_abs();
+        let mut acc = Fixed::ONE;
+        while e > 0 {
+            if e & 1 == 1 {
+                acc = acc.mul(base);
+            }
+            e >>= 1;
+            if e > 0 {
+                base = base.mul(base);
+            }
+        }
+        acc
+    }
+
+    /// Real power `x^y = exp(y * ln x)` for `x > 0`, composed from the pinned `ln` and `exp`. A
+    /// non-positive base returns zero (the domain guard).
+    pub fn powf(self, y: Fixed) -> Fixed {
+        if self <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        y.mul(self.ln()).exp()
+    }
+}
+
 impl Add for Fixed {
     type Output = Fixed;
     #[inline]
