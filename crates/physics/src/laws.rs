@@ -813,6 +813,308 @@ pub fn thermal_stress(
     (sigma, fractured)
 }
 
+// === Fluids, weather, and acoustics (R-PHYS-W2, wave 2) ===
+//
+// All kernels are closed-form integer over the Fixed ops, staged so a product that could exceed the
+// Q32.32 ceiling is either checked (routing to the reserved physical-limit cap) or reduced before it
+// forms. Caps are reserved representability limits passed by the caller. `Fixed::sqrt` is the exact
+// deterministic integer isqrt; the speed of sound uses it after a divide, and takes the megapascal
+// bridge as a factor of one thousand (the square root of the pinned MPa scale) so the pascal-scale
+// modulus never materialises.
+
+/// Hydrostatic pressure P = rho*g*h (MPa). The megapascal bridge is applied before the depth multiply
+/// so a deep column is not pre-saturated. A zero column reads zero.
+pub fn hydrostatic_pressure(density: Fixed, gravity: Fixed, height: Fixed, p_max: Fixed) -> Fixed {
+    if height <= ZERO {
+        return ZERO;
+    }
+    let rho_g = match density.checked_mul(gravity) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    let per_m = match rho_g.checked_div(C_PA) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    match per_m.checked_mul(height) {
+        Some(p) => p.min(p_max),
+        None => p_max,
+    }
+}
+
+/// Buoyant force F = rho*g*V (N), Archimedes. The float-versus-sink comparison to the weight is the
+/// agent layer, not this law.
+pub fn buoyant_force(density: Fixed, gravity: Fixed, volume: Fixed, f_max: Fixed) -> Fixed {
+    let rho_g = match density.checked_mul(gravity) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    match rho_g.checked_mul(volume) {
+        Some(f) => f.min(f_max),
+        None => f_max,
+    }
+}
+
+/// Dynamic (stagnation) pressure q = (1/2) rho v^2 (MPa). The half and the MPa bridge are applied to
+/// density before the squared velocity (the kinetic-energy staging); a velocity past the overflow-safe
+/// square ceiling routes to the cap.
+pub fn dynamic_pressure(density: Fixed, velocity: Fixed, p_max: Fixed) -> Fixed {
+    if velocity.abs() > V2_MAX {
+        return p_max;
+    }
+    let v2 = match velocity.checked_mul(velocity) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    let rh = match density.checked_mul(HALF) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    let coeff = match rh.checked_div(C_PA) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    match coeff.checked_mul(v2) {
+        Some(q) => q.min(p_max),
+        None => p_max,
+    }
+}
+
+/// Aerodynamic force (1/2) C rho A v^2 (N), shared by drag (C = drag coefficient) and lift (C = lift
+/// coefficient); the two differ only in the coefficient. The coefficient product is built before the
+/// squared velocity.
+fn aero_force(coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+    if velocity.abs() > V2_MAX {
+        return f_max;
+    }
+    let v2 = match velocity.checked_mul(velocity) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    let c1 = match density.checked_mul(HALF) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    let c2 = match c1.checked_mul(coefficient) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    let c3 = match c2.checked_mul(area) {
+        Some(x) => x,
+        None => return f_max,
+    };
+    match c3.checked_mul(v2) {
+        Some(f) => f.min(f_max),
+        None => f_max,
+    }
+}
+
+/// Drag force (1/2) Cd rho A v^2 (N).
+pub fn drag_force(drag_coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+    aero_force(drag_coefficient, density, area, velocity, f_max)
+}
+
+/// Aerodynamic lift (1/2) Cl rho A v^2 (N), the reduced-order lumped-coefficient lift that floors a
+/// wing, a gliding creature, a sail, and the lift half of a ballistic arc.
+pub fn aerodynamic_lift(lift_coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+    aero_force(lift_coefficient, density, area, velocity, f_max)
+}
+
+/// Reynolds number Re = rho*|v|*L/mu (dimensionless), a laminar/turbulent regime gate. The transition
+/// Reynolds number is a reserved consumer constant, kept out of the kernel. Zero speed reads zero, an
+/// inviscid fluid reads the cap.
+pub fn reynolds_number(density: Fixed, velocity: Fixed, length: Fixed, viscosity: Fixed, re_max: Fixed) -> Fixed {
+    let speed = velocity.abs();
+    if speed == ZERO {
+        return ZERO;
+    }
+    if viscosity == ZERO {
+        return re_max;
+    }
+    let rv = match density.checked_mul(speed) {
+        Some(x) => x,
+        None => return re_max,
+    };
+    let re = match rv.checked_div(viscosity) {
+        Some(x) => x,
+        None => return re_max,
+    };
+    match re.checked_mul(length) {
+        Some(x) => x.min(re_max),
+        None => re_max,
+    }
+}
+
+/// Young-Laplace curvature pressure dP = 2*gamma/r (MPa). Zero radius reads the cap (infinite
+/// curvature). Divide-only, so no overflow product forms.
+pub fn laplace_pressure(surface_tension: Fixed, radius: Fixed, p_max: Fixed) -> Fixed {
+    if radius <= ZERO {
+        return p_max;
+    }
+    let two_g = match surface_tension.checked_mul(Fixed::from_int(2)) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    let pa = match two_g.checked_div(radius) {
+        Some(x) => x,
+        None => return p_max,
+    };
+    match pa.checked_div(C_PA) {
+        Some(x) => x.min(p_max),
+        None => p_max,
+    }
+}
+
+/// Volumetric strain dV/V = dP/K (dimensionless). Zero bulk modulus reads the cap. No product.
+pub fn compressibility(pressure: Fixed, bulk_modulus: Fixed, strain_max: Fixed) -> Fixed {
+    match pressure.checked_div(bulk_modulus) {
+        Some(s) => s.clamp(ZERO, strain_max),
+        None => strain_max,
+    }
+}
+
+/// Newton convective cooling q = h*A*|T_hot - T_cold| (W), the body arc's convective exchange. The
+/// absolute-value gradient matches conduction.
+pub fn convective_flux(h: Fixed, area: Fixed, hot: Fixed, cold: Fixed, flux_max: Fixed) -> Fixed {
+    let dt = (hot - cold).abs();
+    let ha = match h.checked_mul(area) {
+        Some(x) => x,
+        None => return flux_max,
+    };
+    match ha.checked_mul(dt) {
+        Some(x) => x.min(flux_max),
+        None => flux_max,
+    }
+}
+
+/// Hagen-Poiseuille laminar flow Q = pi*dP*r^4/(8*mu*L) (m^3/s). The driving pressure is bridged to
+/// pascals and divided down before the four radius multiplies, so the underflowing r^4 shrinks an
+/// already-reduced base; an underflow is the correct choked (zero) direction. A frictionless or
+/// zero-length channel reads the cap; zero radius or pressure reads zero.
+pub fn poiseuille_flow(dp: Fixed, radius: Fixed, viscosity: Fixed, length: Fixed, q_max: Fixed) -> Fixed {
+    if radius <= ZERO || dp <= ZERO {
+        return ZERO;
+    }
+    if viscosity == ZERO || length == ZERO {
+        return q_max;
+    }
+    let pa = match dp.checked_mul(C_PA) {
+        Some(x) => x,
+        None => return q_max,
+    };
+    let mut b = match pa.checked_div(viscosity).and_then(|x| x.checked_div(length)).and_then(|x| x.checked_div(Fixed::from_int(8))) {
+        Some(x) => x,
+        None => return q_max,
+    };
+    for _ in 0..4 {
+        b = match b.checked_mul(radius) {
+            Some(x) => x,
+            None => return ZERO,
+        };
+    }
+    match b.checked_mul(Fixed::from_ratio(355, 113)) {
+        Some(q) => q.min(q_max),
+        None => q_max,
+    }
+}
+
+/// Speed of sound c = sqrt(K/rho) (m/s). The modulus stays on the megapascal scale and the pascal
+/// bridge is taken as a factor of one thousand (the square root of the MPa scale) after the root, so
+/// the pascal-scale modulus (which would overflow for water) never forms. Zero density reads the cap.
+pub fn speed_of_sound(bulk_modulus: Fixed, density: Fixed, c_max: Fixed) -> Fixed {
+    if density <= ZERO {
+        return c_max;
+    }
+    let ratio = match bulk_modulus.checked_div(density) {
+        Some(x) => x,
+        None => return c_max,
+    };
+    match ratio.sqrt().checked_mul(Fixed::from_int(1000)) {
+        Some(c) => c.min(c_max),
+        None => c_max,
+    }
+}
+
+/// Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
+/// density field. The pressure is bridged to pascals. A zero or sub-floor R_s*T reads the dense cap.
+pub fn ideal_gas_density(pressure: Fixed, temperature: Fixed, gas_constant: Fixed, rho_min: Fixed, rho_max: Fixed) -> Fixed {
+    let pa = match pressure.checked_mul(C_PA) {
+        Some(x) => x,
+        None => return rho_max,
+    };
+    let rt = match gas_constant.checked_mul(temperature) {
+        Some(x) => x,
+        None => return rho_max,
+    };
+    if rt <= ZERO {
+        return rho_max;
+    }
+    match pa.checked_div(rt) {
+        Some(r) => r.clamp(rho_min, rho_max),
+        None => rho_max,
+    }
+}
+
+/// Boussinesq natural-convection acceleration a = g*(T_parcel - T_ambient)/T_ambient (m/s^2), signed
+/// up when the parcel is warmer, using the ideal-gas 1/T thermal expansion. Zero ambient reads zero.
+pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max: Fixed) -> Fixed {
+    if t_ambient <= ZERO {
+        return ZERO;
+    }
+    let dt = t_parcel - t_ambient;
+    let ratio = match dt.checked_div(t_ambient) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let lo = ZERO - a_max;
+    match ratio.checked_mul(gravity) {
+        Some(a) => a.clamp(lo, a_max),
+        None => {
+            if dt < ZERO {
+                lo
+            } else {
+                a_max
+            }
+        }
+    }
+}
+
+/// Saturation vapour pressure e_s = e_ref + slope*(T - T_ref) (MPa), the affine tangent to the
+/// Clausius-Clapeyron curve over the simulated band (the exact exp/log curve is deferred to
+/// R-GPU-CANON-PIN). Clamped to [0, cap]; valid within about twenty kelvin of the reference.
+pub fn saturation_vapor_pressure(temperature: Fixed, slope: Fixed, t_ref: Fixed, e_ref: Fixed, es_cap: Fixed) -> Fixed {
+    let dt = temperature - t_ref;
+    let term = match slope.checked_mul(dt) {
+        Some(x) => x,
+        None => {
+            if dt < ZERO {
+                return ZERO;
+            } else {
+                return es_cap;
+            }
+        }
+    };
+    (e_ref + term).clamp(ZERO, es_cap)
+}
+
+/// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
+/// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
+/// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
+pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_still: Fixed, b_wind: Fixed, e_max: Fixed) -> Fixed {
+    let vpd = e_saturation - e_ambient;
+    if vpd <= ZERO {
+        return ZERO;
+    }
+    let wind_fn = match b_wind.checked_mul(wind.abs()) {
+        Some(x) => a_still.saturating_add(x),
+        None => a_still,
+    };
+    match wind_fn.checked_mul(vpd) {
+        Some(e) => e.min(e_max),
+        None => e_max,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

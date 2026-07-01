@@ -106,7 +106,9 @@ fn ranges_are_set_with_only_the_scale_pending_axes_reserved() {
         .range
         .require("mat.density")
         .unwrap();
-    assert_eq!(lo, Fixed::from_int(100));
+    // The low bound was widened to the lightest gas for wave 2 (owner-signed 2026-07-01) so
+    // atmospheric buoyancy and wind are expressible; the high bound is unchanged.
+    assert_eq!(lo, Fixed::from_ratio(8, 100));
     assert_eq!(hi, Fixed::from_int(23000));
     // The scale-pending axis still fails loud when read.
     let smoa = mech.axis("mech.second_moment_of_area").unwrap();

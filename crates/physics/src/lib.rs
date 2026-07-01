@@ -420,6 +420,44 @@ impl PhysicsRegistry {
         Self::from_toml_str(&text)
     }
 
+    /// Extend this registry with another floor file's axes, laws, and substances, then revalidate the
+    /// whole. A wave loads onto the previous floor rather than duplicating the shared axes it reads:
+    /// the wave-2 fluids, chemistry, and optics floor references the wave-1 mechanical and material
+    /// axes, so it is merged onto the mechanical floor rather than standing alone. A duplicate id is
+    /// an error, never a silent overwrite.
+    pub fn extend_from_toml_str(&mut self, s: &str) -> Result<(), PhysicsError> {
+        let file: RegistryFile =
+            toml::from_str(s).map_err(|e| PhysicsError::Parse(e.to_string()))?;
+        for a in file.axis {
+            let axis = a.into_axis()?;
+            if self.axes.contains_key(&axis.id) {
+                return Err(PhysicsError::Duplicate(axis.id));
+            }
+            self.axes.insert(axis.id.clone(), axis);
+        }
+        for l in file.law {
+            let law = l.into_law()?;
+            if self.laws.contains_key(&law.id) {
+                return Err(PhysicsError::Duplicate(law.id));
+            }
+            self.laws.insert(law.id.clone(), law);
+        }
+        for s in file.substance {
+            let sub = s.into_substance()?;
+            if self.substances.contains_key(&sub.id) {
+                return Err(PhysicsError::Duplicate(sub.id));
+            }
+            self.substances.insert(sub.id.clone(), sub);
+        }
+        self.validate()
+    }
+
+    /// Extend this registry from another floor file path.
+    pub fn extend(&mut self, path: impl AsRef<Path>) -> Result<(), PhysicsError> {
+        let text = std::fs::read_to_string(path).map_err(|e| PhysicsError::Io(e.to_string()))?;
+        self.extend_from_toml_str(&text)
+    }
+
     fn from_file(file: RegistryFile) -> Result<Self, PhysicsError> {
         let mut reg = PhysicsRegistry::new();
         for a in file.axis {

@@ -195,9 +195,9 @@ unit = "kg/m^3"
 dimension = "-3,1,0,0"
 scale = "kg/m^3"
 tier = 0
-range_lo = "100"
+range_lo = "0.08"
 range_hi = "23000"
-real = "CRC Handbook of Chemistry and Physics, density tables (osmium 22590, rounded up)"
+real = "CRC Handbook of Chemistry and Physics, density tables; the low bound widened to the lightest simulated gas (hydrogen ~0.0899) so atmospheric buoyancy, hydrostatics, and wind are expressible (wave-2 unification 2.1, owner-signed 2026-07-01), osmium ~22590 the high end"
 
 [[axis]]
 id = "mat.indentation_hardness"
