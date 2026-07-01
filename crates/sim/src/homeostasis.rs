@@ -160,6 +160,12 @@ impl Homeostasis {
         self.reserves.get(&axis).map(|s| s.amount()).unwrap_or(Fixed::ZERO)
     }
 
+    /// The capacity of an axis's reserve (for sizing a fractional intake against a bite yield). An
+    /// unregistered axis reads as zero.
+    pub fn capacity(&self, axis: HomeostaticAxisId) -> Fixed {
+        self.reserves.get(&axis).map(|s| s.capacity()).unwrap_or(Fixed::ZERO)
+    }
+
     /// Advance one tick of metabolism: every reserve drains by its resting rate plus its exertion
     /// coupling times the body's current exertion (a unit-interval signal, for example the fraction
     /// of top speed a mover is using). Deterministic; draws no randomness. Returns whether the body
@@ -229,10 +235,23 @@ pub enum MorphCategory {
     Sense,
 }
 
-/// One affordance as data: a physical operation and the morphological requirement that gates it.
-/// The set and the gates are data (Principle 11); the categories the gates read are the authored
-/// anatomy (Part 25.14). Membership is what makes a body able to walk or to strike, never a rule
-/// about when it should.
+/// The shape of the parameter a physical operation takes, a structural property of the operation
+/// itself (a move is aimed somewhere, an ingestion is not), not a behaviour. It sets how many
+/// controller outputs the operation reads (R-BEHAVIOR-EVOLVE, [`crate::controller`]): a directional
+/// operation reads an activation and a heading, a scalar one reads only an activation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AffordanceParam {
+    /// The operation takes no aim (ingesting the matter on the current tile, resting).
+    Scalar,
+    /// The operation is aimed by a two-component heading on the map (moving, and later striking or
+    /// grasping toward a target).
+    Directional,
+}
+
+/// One affordance as data: a physical operation, the morphological requirement that gates it, and
+/// the shape of its parameter. The set and the gates are data (Principle 11); the categories the
+/// gates read are the authored anatomy (Part 25.14). Membership is what makes a body able to walk
+/// or to strike, never a rule about when it should.
 #[derive(Clone, Debug)]
 pub struct AffordanceDef {
     /// The affordance id.
@@ -243,6 +262,8 @@ pub struct AffordanceDef {
     pub requires: MorphCategory,
     /// The minimum development the required organ must have, in `[0, ONE]`. Ignored for `Any`.
     pub min_development: Fixed,
+    /// The shape of the operation's parameter (how many controller outputs it reads).
+    pub param: AffordanceParam,
 }
 
 /// The set of affordance primitives a world runs, data-defined and extensible.
@@ -262,12 +283,14 @@ impl AffordanceRegistry {
                     name: "move".to_string(),
                     requires: MorphCategory::Locomotion,
                     min_development: Fixed::ZERO,
+                    param: AffordanceParam::Directional,
                 },
                 AffordanceDef {
                     id: INGEST,
                     name: "ingest".to_string(),
                     requires: MorphCategory::Any,
                     min_development: Fixed::ZERO,
+                    param: AffordanceParam::Scalar,
                 },
             ],
         }

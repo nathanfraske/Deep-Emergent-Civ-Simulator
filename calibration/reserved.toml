@@ -863,3 +863,70 @@ status = "reserved"
 value = ""
 unit = "fraction_of_capacity"
 source = "Part 20; crates/sim/src/homeostasis.rs"
+
+# --- R-BEHAVIOR-EVOLVE Stages 2 to 4: the evolved behaviour controller (Part 8; record 62.19;
+# docs/emergent_behavior_design.md) ---
+
+[[reserved]]
+id = "physiology.intake_yield"
+basis = "the fraction of a reserve's capacity restored by one tick of ingesting a source of it; the interim stand-in for the net-nutrition and water-content per bite the resolved edibility floor measures (R-PHYS-BIO), until the floor's measure is wired to the located matter"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick"
+source = "Part 41 (R-PHYS-BIO), Part 8; crates/sim/src/locomotion.rs"
+
+[[reserved]]
+id = "behavior.controller_hidden_width"
+basis = "the hidden width of the behaviour controller: zero is a linear reaction norm (the substrate and determinism proof), positive a recurrent network that can gate a response on internal state; the smallest hidden state that represents the conditional foraging and predator-prey behaviours the ecology needs, against the per-tick evaluation budget, a performance-and-expressiveness bound found by trial"
+status = "reserved"
+value = ""
+unit = "hidden_units"
+source = "Part 8; crates/sim/src/controller.rs"
+
+[[reserved]]
+id = "behavior.controller_init_spread"
+basis = "the half-range of a founder lineage's initial random controller weights; the weight scale at which the activation's clamp is neither always saturated nor always near zero, so behavioural variation is expressible from the start (a representational bound)"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 8; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.controller_mutation_rate"
+basis = "the per-controller-weight probability of a bounded mutation on inheritance; the mutation scale the pre-dawn epoch uses for the other genome channels (epoch EpochParams), adjusted for the larger controller parameter space"
+status = "reserved"
+value = ""
+unit = "probability_per_weight"
+source = "Part 8, Part 25; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.controller_mutation_step"
+basis = "the bounded magnitude of a controller-weight mutation; small enough that a small weight change is a small behaviour change (smooth evolution) yet large enough to explore the weight space, a stress-test tunable"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 8; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.selection_pop_size"
+basis = "the number of controller lineages under homeostatic-survival selection each generation; the sample size that resolves the fitness ranking against the per-generation evaluation budget, a performance bound on the significance-and-time gradient (Part 54)"
+status = "reserved"
+value = ""
+unit = "lineages"
+source = "Part 8, Part 54; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.selection_generations"
+basis = "the number of generations behaviour is allowed to adapt before the dawn; the deep-time depth, tied to the pre-dawn radiation depth (EpochParams generations)"
+status = "reserved"
+value = ""
+unit = "generations"
+source = "Part 8, Part 25; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.episode_ticks"
+basis = "the length in ticks of a homeostatic-survival scoring episode; long enough that a viable controller's survival separates from an unviable one under the metabolic timescale, against the evaluation budget (a proxy-versus-episode length on the Part 54 significance gradient)"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 8, Part 54; crates/sim/src/evolve.rs"

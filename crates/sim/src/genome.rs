@@ -145,7 +145,25 @@ pub enum Channel {
     /// selection. The variant is the fixed engine interface; which composition axes exist,
     /// and which genes reach them, is data.
     Composition(CompositionAxisId),
+    /// A heritable behaviour-controller weight, by controller-parameter id (R-BEHAVIOR-EVOLVE,
+    /// design Part 8; the evolved-behaviour work whose pass is `docs/emergent_behavior_design.md`).
+    /// The controller is the mapping from a being's homeostatic state and percept to which
+    /// morphological affordance it issues; its parameters are the heritable data expressed here,
+    /// one weight per controller-parameter id, so behaviour is a lineage's inheritance the way
+    /// its size and acuity are, evolving under the pre-dawn epoch's selection rather than being
+    /// authored (Principle 9). The variant is the fixed engine interface; the controller's
+    /// topology and how many parameters it has are data ([`crate::controller`]).
+    Controller(ControllerParamId),
 }
+
+/// A controller-parameter id, an index into a being's behaviour controller's flat weight vector
+/// ([`crate::controller`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
+/// and the topology it indexes are data, sibling to the composition-axis registry. It is a `u32`
+/// (not a `u16`), so a large controller (a wide recurrent network over a rich registry) cannot
+/// silently collide two weights on one channel by truncation; `Channel` is already `u32`-sized
+/// through [`TraitId`], so the width costs nothing.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ControllerParamId(pub u32);
 
 /// A composition-axis id, an index into the biosphere composition-axis registry (the floor
 /// axes an organism's tissue varies over). A numeric id keeps [`Channel`] `Copy` and `Ord`;

@@ -291,7 +291,7 @@ struct StagedRegion {
 /// than only seen as the finished [`LivingWorld`]. Where [`genesis`] runs worldgen, then every
 /// region's whole radiation, then the dawn placement in one call, this driver runs worldgen and
 /// the founder generation up front, then advances every region's radiation one generation per
-/// [`Steppable::step`], and can produce a [`LivingWorld`] snapshot of the current state at any
+/// [`crate::clock::Steppable::step`], and can produce a [`LivingWorld`] snapshot of the current state at any
 /// point. Stepped to completion it yields a living world bit-identical to [`genesis`], since the
 /// radiation stepper reproduces the batch epoch exactly and the placement is a pure function of
 /// the matured biospheres. It is a driver over canonical state, not a view: it holds no camera and

@@ -256,7 +256,7 @@ pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> 
 /// A one-generation stepper over the pre-dawn radiation, so the deep-time evolution can be watched
 /// unfolding rather than only seen as a finished summary. It owns the region's biosphere and the
 /// running epoch state (the population stocks, the generation counter, the accumulating report),
-/// advances exactly one generation per [`Steppable::step`], and stepped to completion reproduces
+/// advances exactly one generation per [`crate::clock::Steppable::step`], and stepped to completion reproduces
 /// the batch [`run`] bit for bit, since both call the same [`step_generation`] over the same
 /// generation coordinates. Deterministic and self-contained: a step reads no wall-clock, so the
 /// radiation replays identically however an observer paced it (Principle 3, Principle 10).

@@ -97,6 +97,11 @@ impl Phase {
     /// reproducible function of the seed, the being, and the tick, never of the camera (a being
     /// discovers the world by moving through it, it does not read the map like a god).
     pub const EXPLORE: Phase = Phase(0x12);
+    /// A behaviour-controller draw (R-BEHAVIOR-EVOLVE): the initial random controller weights of a
+    /// founder lineage and the bounded mutation of a controller weight on inheritance, keyed on the
+    /// individual and the controller-parameter locus so a lineage's evolved behaviour is a
+    /// reproducible function of the seed and its ancestry (design Part 8, the evolved-behaviour work).
+    pub const CONTROLLER: Phase = Phase(0x13);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

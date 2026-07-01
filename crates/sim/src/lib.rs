@@ -57,11 +57,13 @@ pub mod axiom;
 pub mod calibration;
 pub mod clock;
 pub mod conservation;
+pub mod controller;
 pub mod decision;
 pub mod dialogue;
 pub mod edibility;
 pub mod epoch;
 pub mod evidence;
+pub mod evolve;
 pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
@@ -93,6 +95,7 @@ pub use clock::{
     PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION,
 };
 pub use conservation::{ConservationError, ConservationRegistry};
+pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use dialogue::{
     conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
@@ -100,11 +103,16 @@ pub use dialogue::{
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use evolve::{
+    controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
+    selection_gradient, EvolveParams, EvolveReport,
+};
 pub use genome::{
-    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, DominanceKind, DominanceMode,
-    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype,
-    HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable,
-    LifeHistoryChannel, LinkageGroup, ReproductionMode, SchemeId, TraitId,
+    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, CompositionAxisId,
+    ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect, GeneId, GenePool, GeneSet,
+    GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel, Incompatibility,
+    IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup, ReproductionMode,
+    SchemeId, TraitId,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
@@ -112,8 +120,8 @@ pub use language::{
     Word,
 };
 pub use homeostasis::{
-    AffordanceDef, AffordanceId, AffordanceRegistry, Homeostasis, HomeostaticAxisDef,
-    HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
+    AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
+    HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};

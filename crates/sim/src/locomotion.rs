@@ -12,57 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Emergent locomotion: how a being walks, and how it comes to know where to walk (design Part 8,
-//! Part 9, Part 13, Part 20, Part 25; Principles 8, 9, 10).
+//! Emergent locomotion driven by an evolved controller (design Part 8, Part 9, Part 13, Part 20,
+//! Part 25; R-BEHAVIOR-EVOLVE; Principles 8, 9, 10).
 //!
-//! Two things are authored, and both are physics. First, a body's capacity to move, derived from
-//! its morphology ([`crate::anatomy::BodyPlan`]): a body with no locomotion organ does not walk,
-//! whatever its kingdom, so a rooted tree stays put while a body that bears a locomotion organ
-//! moves, even an autotroph, so a walking tree walks. Whether a body has that organ is itself an
-//! emergent morphological outcome, not a rule keyed on being a plant (see
-//! [`crate::anatomy::sample_body_plan`]). Second, the terrain a body crosses (passability and cost,
-//! read through the [`Terrain`] trait). Everything else emerges.
+//! What is authored here is physics, and only physics. A body's capacity to move is its morphology
+//! ([`crate::anatomy::BodyPlan`]): a body with no locomotion organ is rooted and never moves,
+//! whatever its kingdom, so a rooted tree stays put while a body that bears the organ moves, even an
+//! autotroph, so a walking tree walks. Whether a body has that organ is itself an emergent
+//! morphological outcome, not a rule keyed on being a plant. Its ground speed comes from its size,
+//! its activity, and the terrain (passability and cost, read through [`Terrain`]). Its needs are the
+//! homeostatic reserves that drain by metabolism ([`crate::homeostasis`]); its options are the
+//! affordances its morphology permits. All of that is physics.
 //!
-//! What emerges, and the correction this module is careful about: a being is not a god and does not
-//! read the world map. It knows only what it has perceived. Each tick it perceives satisfiers
-//! within a small true sensory range and remembers them ([`Walker::known`]), so its picture of
-//! where water and forage are is a belief it has earned by being near them (a lean stand-in for the
-//! full perception-and-belief of Part 9, which will also let a being be told of a place it has
-//! never seen). Then its drives rise, the decision layer ([`crate::decision::Behaviour`]) picks the
-//! pressing one, and it walks toward the nearest satisfier it *knows of*. When it knows of none it
-//! explores, moving on a heading drawn from counter-based RNG keyed on the being and the tick
-//! ([`civsim_core::Phase::EXPLORE`]), so it discovers the world by moving through it rather than by
-//! being handed its coordinates. A thirsty being that has never seen water wanders until it comes
-//! within sight of some, remembers it, and can then return to it, which is how knowing where to go
-//! is supposed to arise.
+//! What is not authored is the behaviour: which affordance the being issues, and where it aims it.
+//! That is the evolved controller ([`crate::controller`]), a heritable mapping from the being's
+//! reserves and percept to an affordance, expressed from its genome and (under the pre-dawn epoch)
+//! selected by whether it keeps the body alive. Nobody writes "seek water when dry": each tick the
+//! being perceives the sources within its sensory range and remembers them ([`Walker::known`]),
+//! reads its own reserves, and its controller decides. A being that has evolved the adaptive coupling
+//! walks up the gradient to a known source and ingests it; one that has not starves. This is the
+//! retirement of the authored decision menu that the prior slice flagged: the drives-and-actions
+//! policy is gone from this path, replaced by the expressed controller (the [`crate::decision`]
+//! utility layer remains the shape of the sentient, deliberative tier above, which the controller
+//! underlies rather than replaces).
 //!
-//! The mechanism is fixed Rust and fully deterministic: beings are walked in stable-id order,
-//! position is exact fixed-point (a subtile fractional coordinate, so movement is smooth within a
-//! tile, design.md line 640), every choice keys on the seed, the being, and the tick and never on
-//! the camera (Principle 10), and the nearest-target and exploration ties break canonically. What
-//! the physics needs is reserved with its basis in [`LocomotionParams`] and defaulted only by a
-//! labelled development fixture; the drive rates are the decision layer's data.
+//! Non-omniscience stands: a being knows only what it has perceived (a small true sensory range) or
+//! remembered, so it cannot head for a source it has never seen; when its controller wants to move
+//! but has no known gradient to follow, it explores, a heading drawn from counter-based RNG keyed on
+//! the being and the tick ([`civsim_core::Phase::EXPLORE`]), discovering the world by moving through
+//! it. The mechanism is fixed Rust and fully deterministic: beings are walked in stable-id order,
+//! position is exact fixed-point (a subtile fractional coordinate), the controller evaluation and the
+//! metabolism draw no randomness, and every choice keys on the seed, the being, and the tick, never
+//! on the camera (Principle 10). What the movement physics needs is reserved with its basis in
+//! [`LocomotionParams`] and defaulted only by a labelled development fixture.
 //!
-//! The load-bearing limit, and the honest one. What is authored physics here is the movement and
-//! the perception: how fast a body goes, what ground it can cross, how far it senses, what it
-//! remembers. What is *not* yet emergent, and is authored steering, is the policy: the drives and
-//! the action menu ([`crate::decision::Behaviour`]) that say a being has a thirst and that a way to
-//! relieve it is to seek water. A fixed list of actions a creature may take is a repertoire chosen
-//! from outside the simulation, which is exactly the steering Principle 9 forbids at the level of
-//! behaviour. The end goal is that the policy is not authored at all: a being's homeostatic state
-//! (its energy, its water, its integrity) is a consequence of its body's physics, its motor
-//! options are the affordances of its morphology, and the mapping from state to motion is a
-//! heritable policy expressed from its genome that evolves under selection, so that seeking water
-//! when dry is a behaviour the lineage came to have because the ones that did survived, not a rule
-//! anyone wrote. This module supplies the physics substrate that such a policy would drive; the
-//! [`crate::decision::Behaviour`] it currently consults is a placeholder standing in for the
-//! evolved policy, flagged in the backlog as the emergent-behaviour work (R-BEHAVIOR-EVOLVE).
-//!
-//! Other honest limits of this slice. Perception is a range gate, not yet line of sight or the full
-//! belief store of Part 9, and knowledge is never forgotten or shared (being told of a place is the
-//! next layer). Movement is straight-line with a passability gate rather than routing around an
-//! obstacle (the pathfinding of Part 13). Exploration is an undirected search modulated only by
-//! the being's mobility, not yet by an exploration drive or a memory of where it has already been.
+//! Honest limits. Perception is a range gate, not yet line of sight or the full belief store of Part
+//! 9, and knowledge is never forgotten or shared. Movement is straight-line with a passability gate
+//! rather than routing around an obstacle (the pathfinding of Part 13). The reaction-norm controller
+//! cannot gate a response on internal state through a product (it moves toward a known source
+//! whenever away from it, whatever the reserve, and ingests underfoot when the reserve is low); the
+//! recurrent controller lifts that ceiling (both are [`crate::controller`]). The intake yield here is
+//! a reserved fraction standing in for the resolved edibility floor's measure (R-PHYS-BIO); wiring
+//! the floor's net-nutrition and water-content per bite is the named follow-on.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,7 +61,10 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId};
 use civsim_world::Coord3;
 
 use crate::anatomy::BodyPlan;
-use crate::decision::{Behaviour, DriveId};
+use crate::controller::{Controller, ControllerLayout};
+use crate::homeostasis::{
+    AffordanceRegistry, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, INGEST, MOVE,
+};
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -85,22 +79,12 @@ pub struct LocomotionParams {
     /// `1 + terrain_penalty * (cost - 1)`). RESERVED. Basis: the slowdown of real difficult ground
     /// (broken, steep, or wet terrain) relative to open ground.
     pub terrain_penalty: Fixed,
-    /// Metabolic energy spent per tile of distance moved, drawn from the being's reserve. RESERVED.
-    /// Basis: the movement energy cost per body mass over distance from the metabolic model of
-    /// Part 20, scaled so a being must rest or feed rather than move without limit.
-    pub move_cost: Fixed,
-    /// Energy restored on reaching and using a satisfier (feeding, drinking, resting). RESERVED.
-    /// Basis: the intake-to-expenditure ratio of the same metabolic model.
-    pub rest_energy: Fixed,
-    /// Within this distance, in tiles, of a target tile's centre the being has arrived. RESERVED.
-    /// Basis: a fraction of a tile, the reach at which a being is at the resource.
-    pub arrive_radius: Fixed,
     /// The lowest activity factor, so even a sluggish body creeps rather than freezing (the
     /// temperament activity axis scales speed between this floor and one). RESERVED. Basis: the
     /// ratio of a slow gait to a brisk one.
     pub activity_floor: Fixed,
-    /// How far, in whole tiles, a being perceives a satisfier: the true sensory range within which
-    /// it comes to know of a resource, so knowledge is earned by nearness, not read from the map.
+    /// How far, in whole tiles, a being perceives a source: the true sensory range within which it
+    /// comes to know of a resource, so knowledge is earned by nearness, not read from the map.
     /// RESERVED. Basis: the perception range the being's sensory morphology and acuity imply
     /// (Part 9); small, a handful of tiles, not the whole world.
     pub sense_range: i64,
@@ -108,6 +92,11 @@ pub struct LocomotionParams {
     /// a direction rather than jittering in place. RESERVED. Basis: the persistence of a real
     /// search path before it turns.
     pub explore_persistence: u64,
+    /// The fraction of a reserve's capacity restored by one tick of ingesting a source of it.
+    /// RESERVED. Basis: the net-nutrition and water-content per bite the resolved edibility floor
+    /// measures (R-PHYS-BIO, `crate::edibility`); this fraction is the interim stand-in until the
+    /// floor's measure is wired to the located matter.
+    pub intake_yield: Fixed,
 }
 
 impl LocomotionParams {
@@ -116,12 +105,10 @@ impl LocomotionParams {
         LocomotionParams {
             base_speed: Fixed::from_ratio(1, 1),
             terrain_penalty: Fixed::from_ratio(1, 1),
-            move_cost: Fixed::from_ratio(1, 100),
-            rest_energy: Fixed::from_ratio(1, 2),
-            arrive_radius: Fixed::from_ratio(1, 2),
             activity_floor: Fixed::from_ratio(1, 4),
             sense_range: 4,
             explore_persistence: 6,
+            intake_yield: Fixed::from_ratio(1, 4),
         }
     }
 }
@@ -138,14 +125,15 @@ pub trait Terrain {
     fn cost(&self, coord: Coord3) -> Fixed;
 }
 
-/// Where the satisfiers of each drive really sit on the map, the world's ground truth: a drive
-/// maps to the set of tiles that relieve it (water tiles relieve thirst, forage tiles relieve
-/// hunger). The world builds this from its content; a being does not get to read it, it can only
-/// perceive the tiles near it (see [`step`]). The module never hardcodes which drive seeks what, so
-/// a drive that seeks a resource exists only where that pairing is placed (Principle 11).
+/// Where the sources of each homeostatic axis really sit on the map, the world's ground truth: an
+/// axis maps to the set of tiles that bear matter restoring it (water tiles bear water, forage tiles
+/// bear energy). The world builds this from its content and the edibility floor; a being does not
+/// get to read it, it can only perceive the tiles near it (see [`step`]). The module never hardcodes
+/// which axis a tile restores, so a source-of-an-axis exists only where that pairing is placed
+/// (Principle 11).
 #[derive(Clone, Debug, Default)]
 pub struct ResourceField {
-    tiles: BTreeMap<DriveId, BTreeSet<Coord3>>,
+    tiles: BTreeMap<HomeostaticAxisId, BTreeSet<Coord3>>,
 }
 
 impl ResourceField {
@@ -154,26 +142,37 @@ impl ResourceField {
         ResourceField::default()
     }
 
-    /// Record that `coord` bears a satisfier of `drive`.
-    pub fn add(&mut self, drive: DriveId, coord: Coord3) {
-        self.tiles.entry(drive).or_default().insert(coord);
+    /// Record that `coord` bears a source of `axis`.
+    pub fn add(&mut self, axis: HomeostaticAxisId, coord: Coord3) {
+        self.tiles.entry(axis).or_default().insert(coord);
     }
 
-    /// Whether a coordinate bears a satisfier of a drive.
-    pub fn satisfies(&self, drive: DriveId, coord: Coord3) -> bool {
-        self.tiles.get(&drive).is_some_and(|s| s.contains(&coord))
+    /// Whether a coordinate bears a source of an axis.
+    pub fn source(&self, axis: HomeostaticAxisId, coord: Coord3) -> bool {
+        self.tiles.get(&axis).is_some_and(|s| s.contains(&coord))
     }
 
-    /// The drives this field carries satisfiers for.
-    pub fn drives(&self) -> impl Iterator<Item = DriveId> + '_ {
+    /// The axes this field carries sources for, in canonical id order.
+    pub fn axes(&self) -> impl Iterator<Item = HomeostaticAxisId> + '_ {
         self.tiles.keys().copied()
+    }
+
+    /// The axes whose source is on a given tile, in canonical id order (what a being can ingest
+    /// where it stands).
+    pub fn axes_here(&self, coord: Coord3) -> Vec<HomeostaticAxisId> {
+        self.tiles
+            .iter()
+            .filter(|(_, s)| s.contains(&coord))
+            .map(|(&a, _)| a)
+            .collect()
     }
 }
 
-/// A being that occupies the map and can walk: its stable id, its exact position in fractional
-/// tile coordinates, its body plan (the physics of how it moves), its current drive levels, its
-/// metabolic reserve, and, crucially, its own remembered knowledge of where satisfiers are: a
-/// belief earned by perceiving them, not a copy of the world.
+/// A being that occupies the map and can walk: its stable id, its exact position in fractional tile
+/// coordinates, its body plan (the physics of how it moves), its homeostatic reserves (its needs,
+/// draining by metabolism), its expressed behaviour controller (its evolved policy) and the hidden
+/// state the controller carries, its own remembered knowledge of where sources of each axis are (a
+/// belief earned by perceiving them, not a copy of the world), and whether it is still alive.
 #[derive(Clone, Debug)]
 pub struct Walker {
     /// The stable id, the canonical order beings are walked in.
@@ -184,28 +183,34 @@ pub struct Walker {
     pub y: Fixed,
     /// The body plan the movement physics reads (mass, activity, whether it has locomotion at all).
     pub body: BodyPlan,
-    /// The current level of each drive, in the unit interval.
-    pub drives: BTreeMap<DriveId, Fixed>,
-    /// The metabolic reserve, in the unit interval. Movement draws it; feeding and resting restore
-    /// it. At zero the being cannot move until it recovers.
-    pub energy: Fixed,
-    /// What this being knows: the tiles bearing a satisfier of each drive that it has perceived. It
-    /// navigates by this, not by the world, so it can only head for a resource it has come to know.
-    pub known: BTreeMap<DriveId, BTreeSet<Coord3>>,
+    /// The homeostatic reserves: the being's needs as physical states of its body.
+    pub homeostasis: Homeostasis,
+    /// The expressed behaviour controller, the being's evolved policy.
+    pub controller: Controller,
+    /// The controller's carried hidden state (empty for a reaction norm).
+    pub hidden: Vec<Fixed>,
+    /// What this being knows: the tiles bearing a source of each axis that it has perceived. It
+    /// navigates by this, not by the world, so it can only head for a source it has come to know.
+    pub known: BTreeMap<HomeostaticAxisId, BTreeSet<Coord3>>,
+    /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
+    pub alive: bool,
 }
 
 impl Walker {
-    /// A walker placed at the centre of a tile with a full reserve, no drive pressure, and no
-    /// knowledge yet: it has seen nothing and must perceive or explore to learn the world.
-    pub fn new(id: StableId, tile: Coord3, body: BodyPlan) -> Walker {
+    /// A walker placed at the centre of a tile with the given reserves and controller, no knowledge
+    /// yet: it has seen nothing and must perceive or explore to learn the world.
+    pub fn new(id: StableId, tile: Coord3, body: BodyPlan, homeostasis: Homeostasis, controller: Controller) -> Walker {
+        let hidden = controller.fresh_hidden();
         Walker {
             id,
             x: Fixed::from_int(tile.x) + HALF,
             y: Fixed::from_int(tile.y) + HALF,
             body,
-            drives: BTreeMap::new(),
-            energy: Fixed::ONE,
+            homeostasis,
+            controller,
+            hidden,
             known: BTreeMap::new(),
+            alive: true,
         }
     }
 
@@ -215,22 +220,22 @@ impl Walker {
     }
 
     /// Whether this body can walk at all: a body with no locomotion organ is rooted (a fixed tree)
-    /// and never moves however its drives read, whatever its kingdom; a body that bears one moves,
-    /// even an autotroph, so a walking tree walks. Mobility is the body, never the kingdom.
+    /// and never moves however its controller reads, whatever its kingdom; a body that bears one
+    /// moves, even an autotroph, so a walking tree walks. Mobility is the body, never the kingdom.
     pub fn is_mobile(&self) -> bool {
         !self.body.locomotion.is_empty() && self.body.locomotion.iter().any(|&m| m != ROOTED_MODE)
     }
 
-    /// Record that this being now knows of a satisfier of `drive` at `coord`.
-    pub fn learn(&mut self, drive: DriveId, coord: Coord3) {
-        self.known.entry(drive).or_default().insert(coord);
+    /// Record that this being now knows of a source of `axis` at `coord`.
+    pub fn learn(&mut self, axis: HomeostaticAxisId, coord: Coord3) {
+        self.known.entry(axis).or_default().insert(coord);
     }
 
-    /// The nearest satisfier of `drive` this being knows of, to where it stands, by squared
-    /// distance with a canonical tie-break. `None` if it knows of none.
-    fn nearest_known(&self, drive: DriveId) -> Option<Coord3> {
+    /// The nearest source of `axis` this being knows of, to where it stands, by squared distance
+    /// with a canonical tie-break. `None` if it knows of none.
+    fn nearest_known(&self, axis: HomeostaticAxisId) -> Option<Coord3> {
         let from = self.coord();
-        self.known.get(&drive)?.iter().copied().min_by_key(|c| {
+        self.known.get(&axis)?.iter().copied().min_by_key(|c| {
             let dx = (c.x - from.x) as i64;
             let dy = (c.y - from.y) as i64;
             (dx * dx + dy * dy, c.x, c.y)
@@ -242,6 +247,9 @@ impl Walker {
 const HALF: Fixed = Fixed::from_bits(1i64 << 31);
 /// The registry id of the rooted (non-)locomotion mode: a body carrying only this does not walk.
 const ROOTED_MODE: u16 = 0;
+/// The smallest squared heading magnitude that counts as a directional signal; below it the being
+/// has no gradient to follow and explores instead.
+const HEADING_EPS: Fixed = Fixed::from_bits(1i64 << 22); // ~1e-3
 
 /// Floor a fractional tile coordinate to its integer tile (arithmetic shift floors negatives too;
 /// Q32.32 fixed point).
@@ -249,19 +257,21 @@ fn floor_i32(v: Fixed) -> i32 {
     (v.to_bits() >> 32) as i32
 }
 
-/// The physics of a body's ground speed on a tile, in tiles per tick. It rises with body size
-/// (an allometric square-root of mass, larger bodies taking longer strides), scales with the
-/// temperament activity axis between the reserved floor and one, and is divided down by terrain
-/// cost above open ground. A body with no locomotion organ, or with no reserve, does not move.
-pub fn locomotion_speed(body: &BodyPlan, energy: Fixed, terrain_cost: Fixed, p: &LocomotionParams) -> Fixed {
+/// The physics of a body's ground speed on a tile, in tiles per tick. It rises with body size (an
+/// allometric square-root of mass, larger bodies taking longer strides), scales with the temperament
+/// activity axis between the reserved floor and one, and is divided down by terrain cost above open
+/// ground. A body with no locomotion organ does not move. Whether the being has the reserves to move
+/// is the metabolism's concern, not this pure physical speed.
+pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionParams) -> Fixed {
     let mobile = !body.locomotion.is_empty() && body.locomotion.iter().any(|&m| m != ROOTED_MODE);
-    if !mobile || energy <= Fixed::ZERO {
+    if !mobile {
         return Fixed::ZERO;
     }
     // Allometric size factor: sqrt(body_mass) in [0, 1], so a bigger body strides faster.
     let size = body.body_mass.clamp(Fixed::ZERO, Fixed::ONE).sqrt();
     // Activity factor between the reserved floor and one.
-    let activity = p.activity_floor + (Fixed::ONE - p.activity_floor).mul(body.temperament.activity.clamp(Fixed::ZERO, Fixed::ONE));
+    let activity = p.activity_floor
+        + (Fixed::ONE - p.activity_floor).mul(body.temperament.activity.clamp(Fixed::ZERO, Fixed::ONE));
     // Terrain divisor: 1 + terrain_penalty * (cost - 1), never below one.
     let over = if terrain_cost > Fixed::ONE {
         terrain_cost - Fixed::ONE
@@ -274,32 +284,63 @@ pub fn locomotion_speed(body: &BodyPlan, energy: Fixed, terrain_cost: Fixed, p: 
     speed.clamp(Fixed::ZERO, p.base_speed)
 }
 
-/// Perceive the world within the being's sensory range: for each drive the field carries, any
-/// satisfier tile within `sense_range` tiles of where the being stands is learned. This is the
-/// being seeing what is near it; it learns nothing about tiles beyond its senses.
+/// Perceive the world within the being's sensory range: for each axis the field carries, any source
+/// tile within `sense_range` tiles of where the being stands is learned. This is the being seeing
+/// what is near it; it learns nothing about tiles beyond its senses.
 fn perceive(w: &mut Walker, resources: &ResourceField, range: i64) {
     let here = w.coord();
-    let drives: Vec<DriveId> = resources.drives().collect();
-    for drive in drives {
+    let axes: Vec<HomeostaticAxisId> = resources.axes().collect();
+    for axis in axes {
         for dy in -range..=range {
             for dx in -range..=range {
                 let c = Coord3::ground(here.x + dx as i32, here.y + dy as i32);
-                if resources.satisfies(drive, c) {
-                    w.learn(drive, c);
+                if resources.source(axis, c) {
+                    w.learn(axis, c);
                 }
             }
         }
     }
 }
 
-/// Advance every being one tick of locomotion. Each perceives nearby satisfiers into its memory,
-/// its drives rise, the decision layer picks the pressing one, and it walks toward the nearest
-/// satisfier it knows of; knowing of none, it explores to discover. Deterministic: beings are
-/// walked in stable-id order, exploration keys on `(seed, being, tick)`, and every step is exact
-/// fixed-point. Returns the number of beings that moved this tick.
+/// The unit direction from a being to the nearest known source of each axis it knows of. A source
+/// on the being's own tile reads as a zero direction (there is nowhere to go for it); the being
+/// tells that case apart through the separate here-flag the percept carries.
+fn source_dirs(w: &Walker) -> BTreeMap<HomeostaticAxisId, (Fixed, Fixed)> {
+    let mut m = BTreeMap::new();
+    let axes: Vec<HomeostaticAxisId> = w.known.keys().copied().collect();
+    for axis in axes {
+        if let Some(c) = w.nearest_known(axis) {
+            let tx = Fixed::from_int(c.x) + HALF;
+            let ty = Fixed::from_int(c.y) + HALF;
+            let dx = tx - w.x;
+            let dy = ty - w.y;
+            let dist = (dx.mul(dx) + dy.mul(dy)).sqrt();
+            if dist > Fixed::ZERO {
+                let ux = dx.div(dist).clamp(Fixed::from_int(-1), Fixed::ONE);
+                let uy = dy.div(dist).clamp(Fixed::from_int(-1), Fixed::ONE);
+                m.insert(axis, (ux, uy));
+            } else {
+                m.insert(axis, (Fixed::ZERO, Fixed::ZERO));
+            }
+        }
+    }
+    m
+}
+
+/// Advance every being one tick of controller-driven locomotion. Each perceives nearby sources into
+/// its memory, reads its reserves and its percept, and its controller decides which affordance to
+/// issue: moving (toward a known source it is drawn to, or exploring when it has no gradient) or
+/// ingesting the matter underfoot. Then its metabolism drains its reserves, more when it exerted
+/// itself, and a being whose reserve falls through its floor dies. Deterministic: beings are walked
+/// in stable-id order, the controller and metabolism draw no randomness, exploration keys on
+/// `(seed, being, tick)`, and every step is exact fixed-point. Returns the number of beings that
+/// moved this tick.
+#[allow(clippy::too_many_arguments)]
 pub fn step<T: Terrain>(
     walkers: &mut [Walker],
-    behaviour: &Behaviour,
+    homeo: &HomeostaticRegistry,
+    layout: &ControllerLayout,
+    afford: &AffordanceRegistry,
     terrain: &T,
     resources: &ResourceField,
     p: &LocomotionParams,
@@ -309,68 +350,60 @@ pub fn step<T: Terrain>(
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
     for w in walkers.iter_mut() {
+        if !w.alive {
+            continue;
+        }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
         perceive(w, resources, p.sense_range);
-        // Drives rise on their reserved rates (the decision layer's data).
-        for d in &behaviour.drives {
-            let lvl = w.drives.entry(d.id).or_insert(Fixed::ZERO);
-            *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
-        }
-        if !w.is_mobile() {
-            continue; // a rooted body never moves, however its drives read
-        }
-        // The pressing action, chosen exactly as the decision layer chooses (emergent from drives).
-        let action_id = match behaviour.choose(&w.drives) {
-            Some(a) => a,
-            None => continue,
-        };
-        let satisfies: Vec<DriveId> = match behaviour.action(action_id) {
-            Some(def) => def.satisfies.clone(),
-            None => continue,
-        };
-        if satisfies.is_empty() {
-            continue;
-        }
-        // The nearest KNOWN satisfier of the pressing action, across the drives it satisfies.
-        let target = satisfies
-            .iter()
-            .filter_map(|&d| w.nearest_known(d).map(|c| (d, c)))
-            .min_by_key(|&(_, c)| {
-                let here = w.coord();
-                let dx = (c.x - here.x) as i64;
-                let dy = (c.y - here.y) as i64;
-                (dx * dx + dy * dy, c.x, c.y)
-            });
-        let cost = terrain.cost(w.coord());
-        let speed = locomotion_speed(&w.body, w.energy, cost, p);
-        if speed <= Fixed::ZERO {
-            continue;
-        }
-        match target {
-            Some((drive, tile)) => {
-                if walk_toward(w, tile, speed, terrain, p) {
-                    moved += 1;
-                }
-                if arrived(w, tile, p.arrive_radius) && resources.satisfies(drive, w.coord()) {
-                    let satisfy_amount = behaviour
-                        .drives
-                        .iter()
-                        .find(|d| d.id == drive)
-                        .map(|d| d.satisfy_amount)
-                        .unwrap_or(Fixed::ZERO);
-                    if let Some(lvl) = w.drives.get_mut(&drive) {
-                        *lvl = sub_floor(*lvl, satisfy_amount);
+        let here = w.coord();
+        let here_axes: BTreeSet<HomeostaticAxisId> = resources.axes_here(here).into_iter().collect();
+        let dirs = source_dirs(w);
+        let input = layout.build_input(&w.homeostasis, &here_axes, &dirs);
+        let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
+        w.hidden = new_hidden;
+        let afforded = afford.afforded(&w.body);
+        let decision = layout.decide(&out, &afforded);
+
+        let mut exertion = Fixed::ZERO;
+        if let Some(d) = decision {
+            if d.activation > Fixed::ZERO {
+                match d.affordance {
+                    MOVE => {
+                        let cost = terrain.cost(here);
+                        let speed = locomotion_speed(&w.body, cost, p);
+                        if speed > Fixed::ZERO {
+                            let (hx, hy) = d.heading.unwrap_or((Fixed::ZERO, Fixed::ZERO));
+                            let mag2 = hx.mul(hx) + hy.mul(hy);
+                            let did = if mag2 > HEADING_EPS {
+                                walk_dir(w, hx, hy, speed, terrain)
+                            } else {
+                                // It wants to move but has no known gradient: it explores.
+                                explore(w, terrain, speed, p, seed, tick)
+                            };
+                            if did {
+                                moved += 1;
+                                exertion = Fixed::ONE;
+                            }
+                        }
                     }
-                    w.energy = (w.energy + p.rest_energy).clamp(Fixed::ZERO, Fixed::ONE);
+                    INGEST => {
+                        // Take in what the current tile offers on each axis it is a source of; the
+                        // yield is the reserved fraction of the reserve's capacity.
+                        for axis in resources.axes_here(here) {
+                            let cap = w.homeostasis.capacity(axis);
+                            let amount = p.intake_yield.mul(cap);
+                            w.homeostasis.ingest(axis, amount);
+                        }
+                    }
+                    _ => {} // an affordance the engine has no enactment for yet: idle
                 }
             }
-            None => {
-                // It knows of no satisfier: it explores to discover one, rather than heading for a
-                // place it has no way of knowing about.
-                if explore(w, terrain, speed, p, seed, tick) {
-                    moved += 1;
-                }
-            }
+        }
+
+        // Metabolism drains the reserves every tick (basal, plus the tick's exertion); a being whose
+        // reserve falls through its floor dies.
+        if !w.homeostasis.metabolize(homeo, exertion) {
+            w.alive = false;
         }
     }
     moved
@@ -420,76 +453,48 @@ fn explore<T: Terrain>(
         if terrain.passable(ncoord, &w.body) {
             w.x = nx;
             w.y = ny;
-            w.energy = sub_floor(w.energy, p.move_cost.mul(speed));
             return true;
         }
     }
     false // hemmed in on every side
 }
 
-/// Whether a walker is within the arrival radius of a target tile's centre.
-fn arrived(w: &Walker, target: Coord3, radius: Fixed) -> bool {
-    let tx = Fixed::from_int(target.x) + HALF;
-    let ty = Fixed::from_int(target.y) + HALF;
-    let dx = tx - w.x;
-    let dy = ty - w.y;
-    let d2 = dx.mul(dx) + dy.mul(dy);
-    d2 <= radius.mul(radius)
-}
-
-/// Step a walker toward a target tile by up to `speed` tiles, straight line, only entering passable
-/// tiles. Returns whether it moved. Snaps to the target centre when within one step of it.
-fn walk_toward<T: Terrain>(
+/// Step a walker one step of `speed` along a heading vector, normalising the heading and entering
+/// only a passable tile. Returns whether it moved. A blocked step holds the being in place (routing
+/// is Part 13, future).
+fn walk_dir<T: Terrain>(
     w: &mut Walker,
-    target: Coord3,
+    hx: Fixed,
+    hy: Fixed,
     speed: Fixed,
     terrain: &T,
-    p: &LocomotionParams,
 ) -> bool {
-    let tx = Fixed::from_int(target.x) + HALF;
-    let ty = Fixed::from_int(target.y) + HALF;
-    let dx = tx - w.x;
-    let dy = ty - w.y;
-    let dist = (dx.mul(dx) + dy.mul(dy)).sqrt();
-    if dist <= p.arrive_radius {
-        return false; // already there
+    let mag = (hx.mul(hx) + hy.mul(hy)).sqrt();
+    if mag <= Fixed::ZERO {
+        return false;
     }
-    let (nx, ny) = if dist <= speed {
-        (tx, ty) // one step reaches the centre
-    } else {
-        let ux = dx.div(dist);
-        let uy = dy.div(dist);
-        (w.x + ux.mul(speed), w.y + uy.mul(speed))
-    };
+    let ux = hx.div(mag);
+    let uy = hy.div(mag);
+    let nx = w.x + ux.mul(speed);
+    let ny = w.y + uy.mul(speed);
     let ncoord = Coord3::ground(floor_i32(nx), floor_i32(ny));
     if !terrain.passable(ncoord, &w.body) {
-        return false; // blocked; a straight-line mover holds (routing is Part 13, future)
+        return false;
     }
     w.x = nx;
     w.y = ny;
-    let step_dist = if dist <= speed { dist } else { speed };
-    w.energy = sub_floor(w.energy, p.move_cost.mul(step_dist));
     true
-}
-
-/// Subtract, flooring at zero.
-fn sub_floor(a: Fixed, b: Fixed) -> Fixed {
-    let r = a - b;
-    if r < Fixed::ZERO {
-        Fixed::ZERO
-    } else {
-        r
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::anatomy::{BodyPlan, Part, Temperament};
-    use crate::decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef};
+    use crate::controller::ControllerLayout;
+    use crate::homeostasis::{
+        AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
+    };
 
-    const THIRST: DriveId = DriveId(0);
-    const HUNGER: DriveId = DriveId(1);
     const SEED: u64 = 0x10C0;
 
     struct OpenGround;
@@ -512,40 +517,43 @@ mod tests {
         }
     }
 
-    fn ramp() -> Curve {
-        Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)])
+    /// A registry with only a water axis, so movement tests are not confounded by energy starvation
+    /// (a labelled test fixture, not owner canon).
+    fn water_reg() -> HomeostaticRegistry {
+        HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: WATER,
+                name: "water".to_string(),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 300),
+                exertion_drain: Fixed::from_ratio(1, 400),
+                death_floor: Fixed::ZERO,
+            }],
+        }
     }
 
-    fn behaviour() -> Behaviour {
-        Behaviour {
-            drives: vec![
-                DriveDef {
-                    id: THIRST,
-                    rise_per_tick: Fixed::from_ratio(1, 100),
-                    satisfy_amount: Fixed::from_ratio(9, 10),
-                },
-                DriveDef {
-                    id: HUNGER,
-                    rise_per_tick: Fixed::from_ratio(1, 200),
-                    satisfy_amount: Fixed::from_ratio(9, 10),
-                },
-            ],
-            curves: vec![ramp()],
-            actions: vec![
-                ActionDef {
-                    id: ActionId(0),
-                    weight: Fixed::ONE,
-                    considerations: vec![Consideration { drive: THIRST, curve: 0 }],
-                    satisfies: vec![THIRST],
-                },
-                ActionDef {
-                    id: ActionId(1),
-                    weight: Fixed::ONE,
-                    considerations: vec![Consideration { drive: HUNGER, curve: 0 }],
-                    satisfies: vec![HUNGER],
-                },
-            ],
-        }
+    fn layout_for(reg: &HomeostaticRegistry) -> ControllerLayout {
+        ControllerLayout::new(reg, &AffordanceRegistry::dev_default(), 0)
+    }
+
+    /// A taxis controller for a single target axis whose input block starts at `base`: it moves
+    /// toward the known source when away from it and ingests the matter underfoot when the reserve is
+    /// low. Output layout: [move_act, move_dx, move_dy, ingest_act].
+    fn taxis_controller(l: &ControllerLayout, base: usize) -> Controller {
+        let n_in = l.n_in();
+        let bias = n_in - 1;
+        let (lvl, here, dx, dy) = (base, base + 1, base + 2, base + 3);
+        let mut w = vec![Fixed::ZERO; l.weight_count()];
+        // move_act (output 0): wants to move (bias), suppressed when the source is underfoot.
+        w[bias] = Fixed::ONE;
+        w[here] = Fixed::from_int(-1);
+        // move_dx / move_dy (outputs 1, 2): follow the source direction.
+        w[n_in + dx] = Fixed::ONE;
+        w[2 * n_in + dy] = Fixed::ONE;
+        // ingest_act (output 3): fire when the source is underfoot and the reserve is low.
+        w[3 * n_in + here] = Fixed::ONE;
+        w[3 * n_in + lvl] = Fixed::from_int(-1);
+        Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
     }
 
     fn mobile_body() -> BodyPlan {
@@ -574,183 +582,207 @@ mod tests {
         b
     }
 
-    /// A walking tree: an autotroph (it could photosynthesise) that nonetheless bears a mobile
-    /// locomotion organ, so it walks. Mobility is the body, not the kingdom.
+    /// A walking tree: an autotroph body that nonetheless bears a mobile locomotion organ, so it
+    /// walks. Mobility is the body, not the kingdom.
     fn walking_tree_body() -> BodyPlan {
         let mut b = mobile_body();
-        b.locomotion = vec![3]; // a mobile mode, on a body one would call a plant
+        b.locomotion = vec![3];
         b
+    }
+
+    /// A walker with a taxis-for-water controller over the water-only registry, pre-drained so it is
+    /// thirsty enough to drink on arrival.
+    fn water_walker(id: u64, tile: Coord3, body: BodyPlan) -> (Walker, HomeostaticRegistry, ControllerLayout, AffordanceRegistry) {
+        let reg = water_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let l = layout_for(&reg);
+        let c = taxis_controller(&l, 0); // water is axis 0 in this registry
+        let mut homeo = Homeostasis::new(&reg, Fixed::ONE);
+        for _ in 0..120 {
+            homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty
+        }
+        (Walker::new(StableId(id), tile, body, homeo, c), reg, l, afford)
     }
 
     #[test]
     fn a_rooted_body_never_moves_however_thirsty() {
+        let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), rooted_body());
+        wk.learn(WATER, Coord3::ground(2, 0));
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(2, 0));
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), rooted_body())];
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(2, 0));
         let p = LocomotionParams::dev_default();
-        let start = w[0].coord();
-        for t in 0..50 {
-            step(&mut w, &b, &OpenGround, &field, &p, SEED, t);
+        let start = ws[0].coord();
+        for t in 0..40 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
         }
-        assert_eq!(w[0].coord(), start, "a rooted body stays put whatever its kingdom");
+        assert_eq!(ws[0].coord(), start, "a rooted body stays put whatever its kingdom");
     }
 
     #[test]
     fn a_walking_tree_walks_because_its_body_can() {
-        // Same setup, but the body bears a mobile locomotion organ though it is otherwise a plant.
-        // It knows where the water is (it has been near it), and it walks there.
+        let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), walking_tree_body());
+        wk.learn(WATER, Coord3::ground(6, 0));
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(6, 0));
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), walking_tree_body())];
-        w[0].learn(THIRST, Coord3::ground(6, 0));
-        w[0].drives.insert(THIRST, Fixed::from_ratio(9, 10));
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(6, 0));
         let p = LocomotionParams::dev_default();
-        let start = w[0].coord();
-        for t in 0..100 {
-            step(&mut w, &b, &OpenGround, &field, &p, SEED, t);
+        let start = ws[0].coord();
+        for t in 0..60 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
         }
-        assert_ne!(w[0].coord(), start, "a walking tree moves: mobility is the body, not the kingdom");
+        assert_ne!(ws[0].coord(), start, "a walking tree moves: mobility is the body, not the kingdom");
     }
 
     #[test]
-    fn a_being_walks_to_water_it_knows_of() {
+    fn a_being_walks_to_water_it_knows_of_and_drinks() {
+        let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
+        wk.learn(WATER, Coord3::ground(9, 0)); // it has seen this water before
+        let thirst_before = wk.homeostasis.level(WATER);
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(9, 0));
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body())];
-        w[0].learn(THIRST, Coord3::ground(9, 0)); // it has seen this water before
-        w[0].drives.insert(THIRST, Fixed::from_ratio(9, 10));
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(9, 0));
         let p = LocomotionParams::dev_default();
         let mut reached = false;
-        for t in 0..100 {
-            step(&mut w, &b, &OpenGround, &field, &p, SEED, t);
-            if w[0].coord() == Coord3::ground(9, 0) {
+        for t in 0..80 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
+            if ws[0].coord() == Coord3::ground(9, 0) {
                 reached = true;
+                // give it a few ticks to drink
+                for t2 in t + 1..t + 6 {
+                    step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t2);
+                }
                 break;
             }
         }
         assert!(reached, "the being walked to the water it knew of");
-        assert!(w[0].drives[&THIRST] < Fixed::from_ratio(9, 10), "and was relieved");
+        assert!(ws[0].homeostasis.level(WATER) > thirst_before, "and drank, restoring its water");
     }
 
     #[test]
     fn a_being_does_not_head_for_water_it_has_never_perceived() {
-        // The non-omniscience test: water sits far away, out of sensory range, and the being has
-        // never seen it. On its first step it must not teleport toward the water it cannot know of;
-        // it explores instead, so it does not close the distance to the water on purpose.
+        // Non-omniscience: water sits far, out of sensory range; the being has never seen it, so on
+        // its first step it explores rather than making a beeline for water it cannot know of.
+        let (wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        let water = Coord3::ground(40, 0);
-        field.add(THIRST, water);
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body())];
-        w[0].drives.insert(THIRST, Fixed::from_ratio(9, 10));
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(40, 0));
         let p = LocomotionParams::dev_default();
-        assert!(!w[0].known.contains_key(&THIRST), "it starts knowing of no water");
-        step(&mut w, &b, &OpenGround, &field, &p, SEED, 0);
-        // It moved (explored) but did not learn the far water, and is not within a step of it.
+        assert!(!ws[0].known.contains_key(&WATER), "it starts knowing of no water");
+        step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, 0);
         assert!(
-            w[0].known.get(&THIRST).map(|s| s.is_empty()).unwrap_or(true),
+            ws[0].known.get(&WATER).map(|s| s.is_empty()).unwrap_or(true),
             "it did not learn of water outside its senses"
         );
-        assert!(w[0].coord().x < 5, "it did not make a beeline for water it cannot know about");
+        assert!(ws[0].coord().x < 5, "it did not make a beeline for water it cannot know about");
     }
 
     #[test]
-    fn a_being_discovers_water_by_exploring_then_is_relieved() {
-        // The being knows of no water, but water is reachable. Left to explore, it should come
-        // within sensory range of the water, learn it, walk to it, and slake its thirst.
+    fn a_being_discovers_water_by_exploring_then_drinks() {
+        // The being knows of no water, but a band of water is reachable. Left to explore, it should
+        // come within sensory range of some, learn it, walk to it, and slake its thirst.
+        let (wk, reg, l, afford) = water_walker(1, Coord3::ground(4, 4), mobile_body());
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        // A short line of water tiles, so an undirected search is likely to sense one within range.
         for x in 6..=10 {
-            field.add(THIRST, Coord3::ground(x, 3));
-            field.add(THIRST, Coord3::ground(x, 4));
+            field.add(WATER, Coord3::ground(x, 3));
+            field.add(WATER, Coord3::ground(x, 4));
         }
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(4, 4), mobile_body())];
-        w[0].drives.insert(THIRST, Fixed::from_ratio(6, 10));
-        let b = behaviour();
         let p = LocomotionParams::dev_default();
         let mut learned = false;
-        for t in 0..400 {
-            step(&mut w, &b, &OpenGround, &field, &p, SEED, t);
-            if w[0].known.get(&THIRST).is_some_and(|s| !s.is_empty()) {
+        let mut drank = false;
+        let start_thirst = ws[0].homeostasis.level(WATER);
+        for t in 0..600 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
+            if ws[0].known.get(&WATER).is_some_and(|s| !s.is_empty()) {
                 learned = true;
             }
-            if learned && w[0].drives[&THIRST] < Fixed::from_ratio(2, 10) {
+            if learned && ws[0].homeostasis.level(WATER) > start_thirst {
+                drank = true;
                 break;
             }
         }
         assert!(learned, "the being discovered water by exploring, not by reading the map");
-        assert!(w[0].drives[&THIRST] < Fixed::from_ratio(4, 10), "and having found it, drank");
-    }
-
-    #[test]
-    fn the_pressing_drive_chooses_among_known_destinations() {
-        // It knows of both water (east) and forage (west). Very thirsty and barely hungry, it heads
-        // east toward the water: the destination is chosen by the pressing drive.
-        let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(9, 0));
-        field.add(HUNGER, Coord3::ground(0, 0));
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(5, 0), mobile_body())];
-        w[0].learn(THIRST, Coord3::ground(9, 0));
-        w[0].learn(HUNGER, Coord3::ground(0, 0));
-        w[0].drives.insert(THIRST, Fixed::from_ratio(95, 100));
-        w[0].drives.insert(HUNGER, Fixed::from_ratio(10, 100));
-        let b = behaviour();
-        let p = LocomotionParams::dev_default();
-        step(&mut w, &b, &OpenGround, &field, &p, SEED, 0);
-        assert!(w[0].x > Fixed::from_int(5), "the thirstier being moved east toward known water");
+        assert!(drank, "and having found it, drank");
     }
 
     #[test]
     fn perception_is_local_not_global() {
+        let (wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(2, 0)); // within sense range of the origin
-        field.add(THIRST, Coord3::ground(40, 0)); // far outside it
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body())];
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(2, 0)); // within sense range of the origin
+        field.add(WATER, Coord3::ground(40, 0)); // far outside it
         let p = LocomotionParams::dev_default();
-        step(&mut w, &b, &OpenGround, &field, &p, SEED, 0);
-        let known = w[0].known.get(&THIRST).cloned().unwrap_or_default();
+        step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, 0);
+        let known = ws[0].known.get(&WATER).cloned().unwrap_or_default();
         assert!(known.contains(&Coord3::ground(2, 0)), "it perceived the near water");
         assert!(!known.contains(&Coord3::ground(40, 0)), "it did not perceive the far water");
     }
 
     #[test]
     fn a_wall_blocks_a_straight_line_mover() {
+        let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
+        wk.learn(WATER, Coord3::ground(9, 0));
+        let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(THIRST, Coord3::ground(9, 0));
-        let mut w = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body())];
-        w[0].learn(THIRST, Coord3::ground(9, 0));
-        w[0].drives.insert(THIRST, Fixed::from_ratio(9, 10));
-        let b = behaviour();
+        field.add(WATER, Coord3::ground(9, 0));
         let p = LocomotionParams::dev_default();
-        for t in 0..100 {
-            step(&mut w, &b, &Walled, &field, &p, SEED, t);
+        for t in 0..80 {
+            step(&mut ws, &reg, &l, &afford, &Walled, &field, &p, SEED, t);
         }
-        assert!(w[0].coord().x < 5, "the wall stops the straight-line mover short of the water");
+        assert!(ws[0].coord().x < 5, "the wall stops the straight-line mover short of the water");
     }
 
     #[test]
     fn locomotion_replays_bit_identically() {
         let run = || {
+            let reg = water_reg();
+            let afford = AffordanceRegistry::dev_default();
+            let l = layout_for(&reg);
+            let c = taxis_controller(&l, 0);
             let mut field = ResourceField::new();
             for x in 6..=10 {
-                field.add(THIRST, Coord3::ground(x, 3));
+                field.add(WATER, Coord3::ground(x, 3));
             }
-            let mut w = vec![
-                Walker::new(StableId(2), Coord3::ground(0, 0), mobile_body()),
-                Walker::new(StableId(1), Coord3::ground(1, 6), mobile_body()),
-            ];
-            let b = behaviour();
+            let mk = |id: u64, tile: Coord3| {
+                let mut h = Homeostasis::new(&reg, Fixed::ONE);
+                for _ in 0..80 {
+                    h.metabolize(&reg, Fixed::ZERO);
+                }
+                Walker::new(StableId(id), tile, mobile_body(), h, c.clone())
+            };
+            let mut ws = vec![mk(2, Coord3::ground(0, 0)), mk(1, Coord3::ground(1, 6))];
             let p = LocomotionParams::dev_default();
             for t in 0..80 {
-                step(&mut w, &b, &OpenGround, &field, &p, SEED, t);
+                step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
             }
-            (w[0].x.to_bits(), w[0].y.to_bits(), w[1].x.to_bits(), w[1].y.to_bits())
+            (ws[0].x.to_bits(), ws[0].y.to_bits(), ws[1].x.to_bits(), ws[1].y.to_bits())
         };
         assert_eq!(run(), run(), "the same setup, including exploration, replays bit for bit");
+    }
+
+    #[test]
+    fn metabolism_kills_an_unfed_being() {
+        // With the real dev registry (energy and water) and no sources anywhere, a being that never
+        // eats or drinks eventually dies: survival is a physical fact, the fitness Stage 3 selects on.
+        let reg = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let c = taxis_controller(&l, 4); // water block starts at input 4 in the two-axis layout
+        let homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let mut ws = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body(), homeo, c)];
+        let field = ResourceField::new(); // barren
+        let p = LocomotionParams::dev_default();
+        let mut died_at = None;
+        for t in 0..100_000 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
+            if !ws[0].alive {
+                died_at = Some(t);
+                break;
+            }
+        }
+        assert!(died_at.is_some(), "unfed and unwatered, the being dies");
     }
 
     #[test]
@@ -762,8 +794,8 @@ mod tests {
         let mut big = mobile_body();
         big.body_mass = Fixed::ONE;
         big.temperament.activity = Fixed::ONE;
-        let vs = locomotion_speed(&small, Fixed::ONE, Fixed::ONE, &p);
-        let vb = locomotion_speed(&big, Fixed::ONE, Fixed::ONE, &p);
+        let vs = locomotion_speed(&small, Fixed::ONE, &p);
+        let vb = locomotion_speed(&big, Fixed::ONE, &p);
         assert!(vb > vs, "the larger, more active body has the greater ground speed");
     }
 
@@ -771,8 +803,29 @@ mod tests {
     fn difficult_terrain_slows_a_body() {
         let p = LocomotionParams::dev_default();
         let body = mobile_body();
-        let open = locomotion_speed(&body, Fixed::ONE, Fixed::ONE, &p);
-        let rough = locomotion_speed(&body, Fixed::ONE, Fixed::from_int(3), &p);
+        let open = locomotion_speed(&body, Fixed::ONE, &p);
+        let rough = locomotion_speed(&body, Fixed::from_int(3), &p);
         assert!(rough < open, "costlier ground slows the body");
+    }
+
+    #[test]
+    fn energy_and_water_both_being_sought_is_the_next_layer() {
+        // A sanity check that a two-axis being can be constructed and stepped without panic; the
+        // full two-need forage loop is what selection (Stage 3) and the recurrent controller
+        // (Stage 4) bring.
+        let reg = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let c = Controller::zeros(&l);
+        let homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let mut ws = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body(), homeo, c)];
+        let field = ResourceField::new();
+        let p = LocomotionParams::dev_default();
+        for t in 0..10 {
+            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
+        }
+        assert!(ws[0].alive, "a two-axis being steps without dying over a short unfed horizon");
+        assert_eq!(reg.axes.len(), 2, "the dev registry carries both energy and water axes");
+        let _ = (ENERGY, WATER);
     }
 }
