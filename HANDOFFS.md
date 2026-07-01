@@ -16,6 +16,20 @@ Two threads this stretch, on `claude/physics-substrate-fanout`, workspace green.
 
 ---
 
+## 2026-07-01 (continued 14): built the R-CMD-ORDER key and the shared event-queue substrate (crates/core/src/command.rs)
+
+The owner chose to build the event-queue substrate, first slice R-CMD-ORDER plus the queue, on the current branch (an AskUserQuestion pick, then the recommendation to do R-CMD-ORDER first because it is the shared prerequisite for both engine levers, is an already-open determinism item, and is pure engine mechanics with no reserved values). Grounding confirmed there is no command buffer in code yet (`command_sort_key` is design-only, Part 4.3; the world runs a serial tick with `Registry::mint`), so this is a fresh reusable core primitive built prototype-in-isolation, not a hardening of existing code.
+
+**Built (`crates/core/src/command.rs`, one feat commit).** Three R-CMD-ORDER sub-mechanisms and the substrate: `CommandKey`, the total order (tick, primary `StableId`, kind, emission ordinal) compared lexicographically so any sequence keyed by it is a pure function of the command set independent of insertion order and worker count (the ordinal is the caller's uniqueness contract); `content_id`, deriving an id from canonical content via the FNV-1a `StateHasher` rather than emission order, so an event or spawned entity gets the same id on every replay whatever worker produced it; and `EventQueue<P>`, a `BTreeMap`-backed deterministic future-event list keyed by `CommandKey` with `schedule`/`peek`/`pop`/`drain_due(tick)`, a colliding key surfaced as a `Some` return rather than silently reordered. This is the one substrate both levers drain, agent wake queue (R-AGENT-EXEC) and cross-region core (R-TEMPORAL-LOD), at agent and region granularity.
+
+**Tested.** Six tests: lexicographic ordering; insertion-order-independent drain (the determinism proof, since thread count differs only in insertion interleaving, so insertion-independence is thread-count-independence); `drain_due`; loud collision signalling; content-id purity and agreement with a direct hash; and insertion-independent spawn-id minting in `CommandKey` order (reusing the R-CANON-WALK `canonical_sorted` helper for the barrier mint). Exported from `lib.rs`. Workspace green (527 tests, core now 57), clippy and rustdoc `-D warnings` clean.
+
+**Status of R-CMD-ORDER.** Built as a substrate, prototype-in-isolation, but it stays open in the backlog (like R-CANON-WALK and R-REDUCE-ORDER, whose helpers are built but whose items stay open until adopted): resolution needs the substrate wired into a real command buffer and the tick loop, minting spawn ids at the barrier and content-addressing event ids, plus the R-HARNESS-COVER bit-identity proof. No open count change.
+
+**Where it stopped, and what is next.** The shared event-queue substrate exists and is proven deterministic in isolation. Per the owner's chosen first slice (R-CMD-ORDER plus the queue), this is the review point. Next candidates when the owner calls it: the self-scheduled wake layer over the substrate (the closed-form homeostatic-reserve crossing plus the place/percept subscription, R-AGENT-EXEC follow-on), or wiring the substrate into a command buffer and tick loop to move R-CMD-ORDER toward resolved, or the per-subsystem coarse-step registry on the temporal-LOD side. The physics fan-out stays separate.
+
+---
+
 ## 2026-07-01 (continued 12): event-driven agent execution scoped and flagged (R-AGENT-EXEC), the breadth-axis lever
 
 The owner picked event-driven agent execution as the next engine lever (an AskUserQuestion pick), then said "Go ahead." It is Part 57's second foundation, the agent execution model, and the breadth-axis companion to temporal LOD: temporal LOD makes deep time cheap by coarsening quiet spans, event-driven execution makes a dense present cheap by not stepping idle agents, and the two share one event-queue substrate at region and agent granularity. All on `claude/physics-substrate-fanout`.
