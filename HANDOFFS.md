@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 6): the deterministic-scheduler design pass and the canon-walk/reduce hardening
+
+The owner asked for work orthogonal to the physics fan-out, picked the deterministic scheduler (Part 57), and asked to explore whether to adopt hecs and Rayon now or hold off. On `claude/physics-substrate-fanout`, workspace green, core clippy clean.
+
+**Grounded the true state first (the backlog was stale).** The determinism red-team's original claims have partly been overtaken: every canonical id newtype now derives `Ord` (the R-CANON-WALK bullet's "PoolId and EventId lack Ord" is stale), and the C-05 parallel-sum seam is closed (`Fixed::sum_bits` folds in i128, order-independent even when a prefix would overflow). `world.rs` states the serial tick is deliberate and the parallel scheduler is left for R-CMD-ORDER/R-REDUCE-ORDER. So what is open is narrower: no unified canonical-iteration helper (per-container `BTreeMap` convention plus the one `Registry::entries_sorted`), no general `canonical_reduce`, and no scheduler.
+
+**Design pass (`docs/deterministic_scheduler_design.md`), for owner sign-off.** The four items resolve as one substrate (Part 57 says R-REDUCE-ORDER settles with the scheduler's declared read/write sets): the scheduler derives a deterministic order plus safe parallel batches purely from each system's declared resource read/write sets, keyed on stable system ids, storage-agnostic; R-CANON-WALK becomes a structural rule plus one sanctioned iteration helper; R-REDUCE-ORDER a sort-then-fold primitive; R-CMD-ORDER a total command key specified now and wired when the command stage lands. **The hecs/Rayon call: hold off on both this pass.** The scheduler reasons over declared resources that map equally to a `BTreeMap` today or a hecs column later, so it needs neither; adopting hecs is the owner's deferred storage-at-scale call, and switching on Rayon before the guardrails are proven makes R-CMD/REDUCE/CANON live blockers at once (the red-team's own "stay serial"), and there is no profile yet showing the serial tick is the limit. Build the substrate storage- and parallelism-agnostic now, hecs- and Rayon-ready by design, adopt neither; both are unblocked, not required, by this pass.
+
+**Built the buildable-now, open primitives (`crates/core/src/canonical.rs`).** `canonical_sorted` (the single sanctioned canonical-iteration path, R-CANON-WALK) and `canonical_reduce` (sort by total key then fold, the non-associative-combine primitive, R-REDUCE-ORDER), the general form of what `sum_bits` already does for the associative sum. Storage- and parallelism-agnostic, no reserved values (structural). Four tests including a non-associative combine proving the arrival-order nondeterminism is pinned out.
+
+**Where it stopped.** The scheduler core (declared-access to layered-schedule, still over the serial tick with the phases expressed as declared-access systems) and R-CMD-ORDER's wiring wait on owner sign-off of the design pass. The items stay open (nothing consolidated yet). hecs and Rayon deliberately not touched.
+
+---
+
 ## 2026-07-01 (continued 5): the owner's wiring calls, the hidden-width lever, and the wave-2 fan-out
 
 Three things this stretch, all on `claude/physics-substrate-fanout` (PR #7), workspace green throughout.
