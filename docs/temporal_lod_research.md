@@ -6,7 +6,10 @@ written for the owner to weigh before any build. It preserves the existing docum
 nothing in Part 32, Part 54 (R-TIER-CONSIST), or the R-VIEW-ELAB flag is changed by this pass; it
 decomposes the problem, maps each piece to the engine's existing machinery or to a known external
 technique, and separates what is achievable from the one part the design already marks as
-open. The binding commitments it honors, quoted from the design so they are not drifted:
+open. A companion section at the end scopes R-VIEW-ELAB, the view-time elaboration flagged open at
+Part 54, since temporal LOD and view elaboration are the two halves of one bargain, run the world
+cheap and watch it in full. The binding commitments it honors, quoted from the design so they are
+not drifted:
 identical-outcomes agreement between a coarse and a fine tier is "rejected as mathematically
 unattainable for nonlinear dynamics (Leontief, Theil) rather than merely costly" (Part 54); "cheap
 fast-forward through busy time would require coarse stepping that reproduces fine stepping exactly,
@@ -191,3 +194,105 @@ machine proves able to hold the full-fidelity world over the spans the vision wa
 is unnecessary; the profiling says it cannot, so this is the mechanism that makes deep time run, and
 it is the temporal completion of the level-of-detail principle the engine otherwise only half
 realizes.
+
+---
+
+# The companion mechanism: R-VIEW-ELAB, watching the aggregate in full
+
+Temporal level of detail and the coarse-processing tier make the world cheap by running most of it
+as aggregates: a quiet region is a population distribution, the sparse coarse state of its named
+sentients, its stocks and culture, and its event log, not ten thousand simulated bodies. R-VIEW-ELAB
+is the other half of that bargain, and the design flags it open at Part 54: Part 54 settles the ruling
+(the camera never promotes anything to canon; only significance and the seed do) but not the
+mechanism. This section scopes that mechanism, since it is the direct answer to "keep everyone as a
+cheap aggregate, yet let the observer zoom in and watch ten thousand people go about their days." It
+preserves the Part 54 ruling and the R-VIEW-ELAB flag's requirements unchanged; it specifies how they
+are met.
+
+## Two layers: the aggregate is the truth, the crowd is a dramatization
+
+The canonical layer holds a coarse region wholly but as statistics, identities, and events rather
+than bodies: the population as a distribution (occupations, ages, wealth), the permanent identity and
+sparse coarse state of every sentient (no one is lost, since every person keeps a stable identity and
+history whether or not anyone watches, Part 54), the prevailing culture, beliefs, and stocks, and the
+recorded event log. That is everyone whole as an aggregate: the truth is all present, as numbers and
+sparse records, and it costs almost nothing. The crowd an observer sees on zooming in is a second,
+non-canonical layer the view invents from that truth, renders, and discards.
+
+## The core trick: seeded, stateless invention
+
+The view stores no crowd. It generates each individual as a pure function of a coordinate, the
+counter-based-RNG idea the engine already runs on, but view-side, so it may use floating point and
+the GPU and need not be bit-identical, only consistent on re-look. Individual number `k` in region
+`R` at canonical time `T` is a draw keyed on `(R, T, pool_seed, k)`, and from that seed the view
+draws everything about them (age, occupation, appearance, and the activity they are performing this
+second) by sampling the region's actual distribution: if the pool is three-fifths farmers, about
+three-fifths of the invented people farm; if a famine event is on record, they read as hungry and the
+granary is empty. The crowd is therefore a faithful sample of the aggregate truth rather than a
+fabrication divorced from it, and because each person is a function of the coordinate rather than a
+stored object, zooming out and back, or two observers looking at the same region at the same
+canonical time, see the same crowd doing the same things. This is reproducibility without storage,
+the R-VIEW-ELAB analogue of the canonical draw schema, one level down and non-authoritative.
+
+## Motion between coarse updates
+
+The canonical layer updates coarsely; the view wants smooth per-second motion at the base tick. The
+elaboration runs each invented person's micro-life view-side and seeded: a walk to the well, a field
+tended, a stopped conversation, generated from the person's seed and sampled occupation, animated
+smoothly between the coarse canonical anchor points. This is the locomotion and evolved-behaviour
+machinery the engine already has (drives, non-omniscient perception, physics-bounded walking, the
+controller), run on ephemeral invented individuals and discarded each frame rather than written to
+canon, so the same code renders the crowd it would otherwise simulate.
+
+## The two identity cases
+
+The flag names the distinction, and it is load-bearing. The anonymous mass (the ten thousand
+peasants) is invented wholesale from the pool seed: no canonical identity, ephemeral render puppets,
+regenerated identically on re-look, discarded when the camera leaves. A named sentient run at coarse
+processing (a person who exists canonically but not at full fidelity) is animated from their real
+coarse state rather than invented: the view elaborates the actual farmer, his real occupation and
+sparse beliefs and location, into per-tick motion. Invented-from-nothing for the mass;
+animated-from-coarse-truth for the named. The second case is where R-VIEW-ELAB touches R-LIVELINESS,
+since generating a named person's plausible daily routine from sparse coarse state is the same
+question that item asks, and the two should be settled together.
+
+## The one-way wall
+
+The elaboration is structurally unable to write canon: it lives on the non-canonical side of the
+typed `Canonical`/`NonCanonical` boundary the core already carries (design Part 58, Part 3.4), so a
+write of authoritative state from the elaboration is a compile error, not a discipline to remember. A
+duel watched between two invented peasants does not become a canonical event, they never gain
+identities, and nothing they do feeds back. If something consequential should happen in that region,
+it is the canonical significance-and-seed schedule (Part 54) that promotes the region or a person to
+real fidelity, driven by the world and the seed and never by the camera, so looking changes nothing
+and stays reproducible (Principle 10). This is what lets an observer zoom into any of a million
+villages and watch, for free, without the act of watching altering a single fate.
+
+## What it reuses, what is open, and the reserved values
+
+R-VIEW-ELAB reuses almost entirely what exists: the counter-based seeding (a view-side draw key), the
+aggregate pools, the locomotion and evolved-behaviour machinery for the micro-lives, and the
+`NonCanonical` wall for the boundary. The open, hard parts are the ones the flag names: the faithful
+and cheap projection from pool statistics to a sampled individual, so the crowd never contradicts the
+canonical demographics, beliefs, or recorded events; the named-sentient daily-routine generation from
+sparse coarse state (shared with R-LIVELINESS); and rendering ten thousand disposable bodies at the
+frame rate, which is GPU-instanced procedural work, affordable precisely because it is view-side and
+thrown away. It rides on temporal level of detail for the quiet spans that make regions coarse in the
+first place, but it is its own mechanism and does not depend on temporal LOD being built to work over
+a region already run coarse by significance. What is reserved, surfaced not set: the base-tick
+duration that fixes the near-one-second elaboration resolution (already reserved); and the sampling
+fidelity budget (how many invented individuals a zoom elaborates before it degrades to a coarser
+crowd, a performance bound on the view rather than a canonical value, so it may be a view-side setting
+rather than a reserved calibration). No canonical value is fabricated here, since the elaboration
+writes no canon.
+
+## The two halves together
+
+Temporal LOD and R-VIEW-ELAB are the two halves of one sentence: run the world cheap, and watch it in
+full. Temporal LOD (with the coarse-processing tier and event-driven execution) makes a planet of
+civilizations affordable by spending fidelity only where significance and the seed put it; R-VIEW-ELAB
+lets the observer stand anywhere in that cheap world and see it teeming, by inventing a faithful,
+seeded, disposable dramatization of the aggregate truth that costs nothing and cannot lie about what
+is canonically true. Both are significance-and-seed mechanisms with a strict one-way boundary to
+canon, and both should be prototyped in isolation before either is committed, as Part 32 asks of its
+half.
