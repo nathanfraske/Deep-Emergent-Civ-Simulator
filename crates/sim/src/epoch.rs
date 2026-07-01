@@ -187,9 +187,9 @@ pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> 
                 let daughter = crate::biosphere::Species {
                     layer: parent.layer,
                     niche: parent.niche.clone(),
-                    // A daughter inherits its parent's aggregate anatomy (morphology drift is a
+                    // A daughter inherits its parent's aggregate anatomy (body-plan drift is a
                     // later refinement; the genetic pool already diverges by the founder-fork).
-                    morphology: parent.morphology,
+                    body_plan: parent.body_plan.clone(),
                     draws_on: parent.draws_on.clone(),
                     pool: daughter_pool,
                     extinct: false,
@@ -263,7 +263,7 @@ mod tests {
         let gp = GeneratorParams::dev_default();
         let ep = EpochParams::dev_default();
         let run_once = || {
-            let mut bio = generate(0xB105, &region(4), 7, &gp);
+            let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
             let founders = bio.len();
             let report = run(0xB105, &mut bio, &region(4), &ep);
             (founders, bio.len(), report)
@@ -282,7 +282,7 @@ mod tests {
         let ep = EpochParams::dev_default();
         // Seed in a mild region, then radiate in a hostile one (extreme temperature) so many
         // niches fall below the extinction floor.
-        let mut bio = generate(0xB105, &region(4), 7, &gp);
+        let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
         let report = run(0xB105, &mut bio, &region(10), &ep);
         assert!(report.extinctions > 0, "a hostile region kills poorly-fit species");
     }
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn the_species_cap_bounds_the_radiation() {
         let gp = GeneratorParams::dev_default();
-        let mut bio = generate(0xB105, &region(4), 7, &gp);
+        let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
         let founders = bio.len();
         // The cap bounds the radiation (the daughters), so set it above the founder count and
         // fork often over many generations; the lineage grows toward the cap but never past it.

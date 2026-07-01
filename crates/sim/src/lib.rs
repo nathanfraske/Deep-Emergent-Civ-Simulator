@@ -51,6 +51,7 @@
 
 pub mod affect;
 pub mod agent;
+pub mod anatomy;
 pub mod biosphere;
 pub mod axiom;
 pub mod calibration;

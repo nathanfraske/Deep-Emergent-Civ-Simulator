@@ -34,7 +34,8 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
 
-use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Morphology, Region};
+use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
+use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
 use crate::epoch::{run, EpochParams, EpochReport};
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
@@ -49,10 +50,12 @@ pub struct GenesisParams {
     pub region_side: i32,
     pub generator: GeneratorParams,
     pub epoch: EpochParams,
+    /// The world profile that gates content (whether magic is present), from the test worlds.
+    pub profile: WorldProfile,
 }
 
 impl GenesisParams {
-    /// A labelled DEVELOPMENT FIXTURE, not owner values.
+    /// A labelled DEVELOPMENT FIXTURE, not owner values (a grounded, no-magic world).
     pub fn dev_default() -> GenesisParams {
         GenesisParams {
             width: 48,
@@ -60,6 +63,7 @@ impl GenesisParams {
             region_side: 16,
             generator: GeneratorParams::dev_default(),
             epoch: EpochParams::dev_default(),
+            profile: WorldProfile::grounded(),
         }
     }
 }
@@ -81,19 +85,20 @@ pub struct OccupantInfo {
     pub species: SpeciesId,
     pub layer: u16,
     pub region: (i32, i32),
-    /// The species' aggregate-tier anatomy, so a view can size and inspect the individual.
-    pub morphology: Morphology,
+    /// Body mass, so a view can size the individual without a species lookup.
+    pub body_mass: Fixed,
 }
 
 /// The mature, dawn-ready living world: the generated map, the per-region biospheres (keyed
-/// by region-grid coordinate), the located occupants promoted onto the map, and what each
-/// occupant is (for the superfine view).
+/// by region-grid coordinate), the located occupants promoted onto the map, what each occupant
+/// is (for the superfine view), and the body-plan registry (so a view can name the parts).
 #[derive(Clone, Debug)]
 pub struct LivingWorld {
     pub map: TileMap,
     pub regions: BTreeMap<(i32, i32), RegionBiosphere>,
     pub occupants: LocationIndex,
     pub occupant_info: BTreeMap<OccupantId, OccupantInfo>,
+    pub registry: BodyPlanRegistry,
 }
 
 impl LivingWorld {
@@ -105,6 +110,69 @@ impl LivingWorld {
     /// The total species (living and extinct) across all regions.
     pub fn species(&self) -> usize {
         self.regions.values().map(|r| r.biosphere.len()).sum()
+    }
+
+    /// A one-line description of a placed occupant for the superfine inspector: its derived
+    /// trophic label (from what it eats, not a stored type), temperament, natural weapons,
+    /// covering, and senses, all named from the body-plan registry.
+    pub fn describe(&self, occ: OccupantId) -> String {
+        let info = match self.occupant_info.get(&occ) {
+            Some(i) => i,
+            None => return "unknown".to_string(),
+        };
+        let region = match self.regions.get(&info.region) {
+            Some(r) => r,
+            None => return "unknown".to_string(),
+        };
+        let bio = &region.biosphere;
+        let sp = match bio.species.get(info.species) {
+            Some(s) => s,
+            None => return "unknown".to_string(),
+        };
+        // Derive the trophic label from diet, cheaply, without cloning the region (fork F11).
+        let mut eats_species = false;
+        let mut eats_animal = false;
+        for src in &sp.draws_on {
+            if let SourceRef::Species(dep) = src {
+                eats_species = true;
+                if let Some(prey) = bio.species.get(*dep) {
+                    if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Species(_))) {
+                        eats_animal = true;
+                    }
+                }
+            }
+        }
+        let label = if !eats_species {
+            "plant"
+        } else if eats_animal {
+            "carnivore"
+        } else {
+            "herbivore"
+        };
+        let bp = &sp.body_plan;
+        let reg = &self.registry;
+        let weapons: Vec<&str> = bp
+            .weapons
+            .iter()
+            .map(|p| BodyPlanRegistry::name(&reg.weapons, p.kind))
+            .collect();
+        let senses: Vec<&str> = bp
+            .senses
+            .iter()
+            .map(|p| BodyPlanRegistry::name(&reg.senses, p.kind))
+            .collect();
+        let covering = BodyPlanRegistry::name(&reg.coverings, bp.covering.kind);
+        let arms = if weapons.is_empty() {
+            "unarmed".to_string()
+        } else {
+            weapons.join("+")
+        };
+        format!(
+            "{label}#{}  {}  {arms}  {covering}  senses:{}",
+            info.species.0,
+            temperament_word(bp.temperament.boldness),
+            senses.join("/")
+        )
     }
 
     /// A deterministic 128-bit hash of the whole living world: the map, then each region in
@@ -152,6 +220,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
     let mut regions: BTreeMap<(i32, i32), RegionBiosphere> = BTreeMap::new();
     let mut occupants = LocationIndex::new();
     let mut occupant_info: BTreeMap<OccupantId, OccupantInfo> = BTreeMap::new();
+    let registry = BodyPlanRegistry::dev_default();
     let side = params.region_side.max(1);
     let cols = (params.width + side - 1) / side;
     let rows = (params.height + side - 1) / side;
@@ -163,7 +232,8 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
             let region = derive_region(&map, x0, y0, side, params.generator.env_axes);
             // A stable per-region id folds the grid coordinate; used to key the region's draws.
             let region_id = ((rx as u64) << 32) | (ry as u64 & 0xffff_ffff);
-            let mut biosphere = generate(seed, &region, region_id, &params.generator);
+            let mut biosphere =
+                generate(seed, &region, region_id, &params.generator, &registry, params.profile);
             let report = run(seed, &mut biosphere, &region, &params.epoch);
 
             // The dawn: promote a representative surviving organism of each species onto a
@@ -189,6 +259,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
         regions,
         occupants,
         occupant_info,
+        registry,
     }
 }
 
@@ -282,7 +353,7 @@ fn place_survivors(
                     species: id,
                     layer: sp.layer,
                     region,
-                    morphology: sp.morphology,
+                    body_mass: sp.body_plan.body_mass,
                 },
             );
         }

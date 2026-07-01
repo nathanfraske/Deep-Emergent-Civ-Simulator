@@ -33,7 +33,7 @@ mod render;
 
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
-use civsim_core::Fixed;
+use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld};
 use civsim_sim::located::OccupantId;
 use civsim_world::view::Camera;
@@ -49,23 +49,9 @@ const CURSOR: Rgb = Rgb::new(255, 240, 90);
 /// How many superfine levels sit past the whole-tile overview (each magnifies the tile more).
 const SUPERFINE_LEVELS: u32 = 4;
 
-/// The plain-language kind of an organism by its trophic layer.
-fn layer_label(layer: u16) -> &'static str {
-    match layer {
-        0 => "plant",
-        1 => "herbivore",
-        _ => "carnivore",
-    }
-}
-
-/// A one-to-nine reading of a normalised trait, for the compact inspector line.
-fn d10(f: Fixed) -> i32 {
-    f.checked_mul(Fixed::from_int(10)).map(|v| v.to_int()).unwrap_or(0).clamp(0, 9)
-}
-
-/// The selector readout for a tile's occupants: the selected creature's kind, species, and its
-/// anatomy (size, weaponry, armour, intelligence, diet breadth), so hovering inspects the
-/// individual form; extra occupants are counted.
+/// The selector readout for a tile's occupants: the selected creature inspected in full (its
+/// derived trophic label, temperament, natural weapons, covering, and senses, named from the
+/// registry), with extra occupants counted.
 fn describe_occupants(living: &LivingWorld, occ: &[OccupantId]) -> String {
     if occ.is_empty() {
         return "no organisms".to_string();
@@ -75,23 +61,7 @@ fn describe_occupants(living: &LivingWorld, occ: &[OccupantId]) -> String {
     } else {
         String::new()
     };
-    match living.occupant_info.get(&occ[0]) {
-        Some(info) => {
-            let m = &info.morphology;
-            format!(
-                "{}#{}  sz{} wpn{} arm{} int{} diet{}{}",
-                layer_label(info.layer),
-                info.species.0,
-                d10(m.body_mass),
-                d10(m.weaponry),
-                d10(m.armor),
-                d10(m.encephalization),
-                d10(m.diet_breadth),
-                more
-            )
-        }
-        None => format!("{} organisms", occ.len()),
-    }
+    format!("{}{}", living.describe(occ[0]), more)
 }
 
 /// Render a superfine frame of a living world to a binary PPM and exit (a display-free way to
@@ -103,6 +73,7 @@ fn snapshot(argv: &[String]) {
     let mut params = GenesisParams::dev_default();
     params.width = parse(argv.get(4), 96);
     params.height = parse(argv.get(5), 64);
+    params.profile = world_profile(argv.get(6));
     let living = genesis(seed, &params);
     let biomes = BiomeSet::dev_default();
     let center = populated_center(&living, params.width, params.height);
@@ -188,6 +159,7 @@ fn render_cmd(argv: &[String]) {
     let mut params = GenesisParams::dev_default();
     params.width = parse(argv.get(5), 256);
     params.height = parse(argv.get(6), 192);
+    params.profile = world_profile(argv.get(7));
     let living = genesis(seed, &params);
     let biomes = BiomeSet::dev_default();
     if mode == "superfine" {
@@ -215,6 +187,7 @@ fn stats_cmd(argv: &[String]) {
     let mut params = GenesisParams::dev_default();
     params.width = parse(argv.get(3), 256);
     params.height = parse(argv.get(4), 192);
+    params.profile = world_profile(argv.get(5));
     let living = genesis(seed, &params);
     let daughters: u32 = living.regions.values().map(|r| r.report.daughters).sum();
     let extinctions: u32 = living.regions.values().map(|r| r.report.extinctions).sum();
@@ -227,6 +200,17 @@ fn stats_cmd(argv: &[String]) {
         living.alive(),
         living.state_hash()
     );
+}
+
+/// The world profile from a test-world name: Arcanum and Confluence carry magic, Mirror and
+/// Tempest (and anything else) are grounded (Part 34, the test worlds).
+fn world_profile(name: Option<&String>) -> WorldProfile {
+    match name.map(|s| s.to_ascii_lowercase()).as_deref() {
+        Some("arcanum") | Some("confluence") | Some("magic") | Some("magical") => {
+            WorldProfile::magical()
+        }
+        _ => WorldProfile::grounded(),
+    }
 }
 
 fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
@@ -275,6 +259,7 @@ fn main() {
     let mut params = GenesisParams::dev_default();
     params.width = width;
     params.height = height;
+    params.profile = world_profile(argv.get(base + 3));
     eprintln!("running world genesis (worldgen + pre-dawn biosphere epoch)...");
     let living = genesis(seed, &params);
     eprintln!(

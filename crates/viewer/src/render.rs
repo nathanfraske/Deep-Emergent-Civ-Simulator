@@ -207,7 +207,7 @@ pub fn superfine(
                     .unwrap_or(Rgb::new(240, 240, 240));
                 // Mark size scales with body mass: a quarter-tile at the smallest up to about
                 // eight-tenths of a tile at the largest (integer, via the Fixed body-mass value).
-                let bm = info.map(|inf| inf.morphology.body_mass).unwrap_or(Fixed::from_ratio(1, 2));
+                let bm = info.map(|inf| inf.body_mass).unwrap_or(Fixed::from_ratio(1, 2));
                 let span = Fixed::from_int((tile_px * 3 / 5) as i32);
                 let extra = bm.checked_mul(span).map(|v| v.to_int().max(0) as usize).unwrap_or(0);
                 let mark = (tile_px / 4 + extra).clamp(2, tile_px);
