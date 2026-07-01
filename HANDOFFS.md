@@ -4,6 +4,16 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-01 (continued 9): the wave-3 electricity-and-magnetism proposal landed, awaiting sign-off
+
+The wave-3 fan-out (two green domain teams, a red Steering-Audit per domain, four consumer-interface checks, a max-effort synthesis) produced `docs/working/ELECTROMAGNETISM_SUBSTRATE_PROPOSAL.md`, awaiting the owner's sign-off. Electrostatics and current (9 axes, 7 laws), magnetism and induction (4 axes, 5 laws), ten confirmed red findings folded. E and M is framed as a discoverable deepening tier under R-DEEPTECH-PHYSICS (three instrument-and-theory rungs, never a per-race unlock table), not a Tier-0 floor.
+
+The load-bearing catch is **S-ELEC-DIM**, surfaced for the owner rather than decided: electricity is the first quantity dimensionally independent of length, mass, time, and temperature, so it forces a fifth base dimension into the locked `Dimension` monomial (Part 55). The Gaussian half-integer route is unrepresentable in the `i8` exponent, so the SI ampere (electric current) as the fifth base is recommended, backward-compatible with every earlier axis at current exponent 0, neutrality-by-construction preserved. Because it touches the locked representation, it is the owner's Principle-9 call and the gate on the whole wave. Also surfaced: the optional `elec.potential`/`elec.emf` collapse, the volt promotion of `chem.standard_potential` (dimension-only, no re-fit), and the reserved-values batch (all in TODOS). Deferred and named: full Maxwell wave propagation, AC/frequency-domain and the tuned LC circuit (radio, wave 4), the dipole sin(theta), and the Nernst/Tafel transcendentals.
+
+Counts unchanged (27 resolved, 33 open): wave 3 stays a proposal until sign-off, then consolidates into Part 41/55/58 and builds on the wave-2 recipe. This is where the autonomous run stopped for morning review.
+
+---
+
 ## 2026-07-01 (continued 8): wave 2 completeness-checked, consolidated, built, and audited; wave 3 in flight
 
 The owner signed off the two wave-2 unification decisions and said "consolidate and implement, wire, and audit, then move on to the next wave autonomously," and to completeness-check the other domains (even wave 1). All on `claude/physics-substrate-fanout` (PR #7), workspace green throughout.
