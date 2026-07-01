@@ -21,12 +21,23 @@
 //! the contract is provable before any simulation system exists, and a regression
 //! is caught the moment it is introduced rather than discovered as drift.
 //!
-//! The world here is deliberately small: each entity accumulates a fixed-point
-//! quantity from its own counter-based RNG stream over a number of ticks. Because
-//! every draw is a pure function of `(seed, entity, phase, counter)` and the
+//! The accumulation world here is deliberately small: each entity accumulates a
+//! fixed-point quantity from its own counter-based RNG stream over a number of ticks.
+//! Because every draw is a pure function of `(seed, entity, phase, counter)` and the
 //! accumulation is exact `Fixed` addition, the result depends on neither the thread
 //! count nor the chunking. The state is folded in `StableId` order, the fixed
 //! canonical order of Part 3.5.
+//!
+//! That accumulation, and the associative-reduction cases, are order-independent by
+//! construction, so they cannot catch the regressions R-HARNESS-COVER (Part 3.5) names:
+//! a command-ordering, iteration-order, or reduction-order break. The harness therefore
+//! also exercises the order-SENSITIVE machinery, where determinism comes from a total
+//! order rather than from associativity: worker threads produce commands concurrently
+//! and the single-threaded barrier drains them in `CommandKey` order (the tick's
+//! ActionStage/ActionApply, design Part 4.1). That case is written with a sight on the
+//! eventual Rayon tick, so the same worker sweep that runs the command buffer today runs
+//! the parallel tick when it lands, and the property Rayon will stress is already
+//! asserted.
 
 use civsim_core::{Fixed, Rng, StableId, StateHasher};
 
@@ -174,4 +185,94 @@ fn order_independent_reduction_survives_intermediate_overflow() {
     // Demonstrate that the naive operator fold is the unsafe path on this input.
     let naive = std::panic::catch_unwind(|| xs.iter().copied().sum::<Fixed>());
     assert!(naive.is_err(), "naive Sum overflows on the bad prefix");
+}
+
+#[test]
+fn command_application_is_thread_count_independent() {
+    // The order-SENSITIVE counterpart to the accumulation and reduction tests above,
+    // and the harness structured with a sight on Rayon (R-HARNESS-COVER, R-CMD-ORDER).
+    // The tests above prove machinery that is order-independent by construction; a real
+    // regression hides in the order-SENSITIVE machinery, where determinism comes from a
+    // total order rather than from associativity. This models the tick's
+    // ActionStage/ActionApply (design Part 4.1): worker threads produce commands
+    // concurrently, then the single-threaded barrier drains the merged set in
+    // `CommandKey` order and mints spawn ids as it goes. Commands are assigned to
+    // workers round-robin, so the worker boundaries (and thus the pre-barrier
+    // production order) scramble differently at every thread count; only the barrier's
+    // total-order sort recovers a single canonical order. The applied sequence and the
+    // minted ids must therefore be bit-identical across worker counts, and a barrier
+    // that leaned on production order rather than the key would fail here. When the real
+    // tick is parallelized this same shape runs it, so the harness already asserts the
+    // property Rayon will stress.
+    use civsim_core::{CommandBuffer, CommandKey};
+
+    // A deterministic command set with unique keys: for each primary, a spawn then a
+    // promote, at a tick derived from the primary so the ordering is non-trivial.
+    let n = 4_000u64;
+    let commands: Vec<(CommandKey, &'static str)> = (0..n)
+        .flat_map(|p| {
+            let tick = p % 13;
+            [
+                (CommandKey::new(tick, StableId(p), 0, 0), "spawn"),
+                (CommandKey::new(tick, StableId(p), 1, 0), "promote"),
+            ]
+        })
+        .collect();
+
+    // Produce the commands across `threads` workers (round-robin, in parallel), merge
+    // the per-worker buffers at the barrier, drain in CommandKey order, and mint a
+    // sequential id for each spawn. Returns the applied sequence with each minted id.
+    let run = |threads: usize| -> Vec<(&'static str, Option<u64>)> {
+        let threads = threads.max(1);
+        let commands = &commands;
+        let buffers: Vec<CommandBuffer<&'static str>> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..threads)
+                .map(|w| {
+                    s.spawn(move || {
+                        let mut buf = CommandBuffer::new();
+                        for (i, (k, c)) in commands.iter().enumerate() {
+                            if i % threads == w {
+                                buf.push(*k, *c);
+                            }
+                        }
+                        buf
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        let mut merged = CommandBuffer::new();
+        for (k, c) in buffers.into_iter().flat_map(|b| b.into_ordered()) {
+            merged.push(k, c);
+        }
+        let mut applied = Vec::with_capacity(merged.len());
+        let mut next_id = 1_000_000u64;
+        merged.apply_ordered(|_key, c| {
+            let minted = if c == "spawn" {
+                let id = next_id;
+                next_id += 1;
+                Some(id)
+            } else {
+                None
+            };
+            applied.push((c, minted));
+        });
+        applied
+    };
+
+    let one = run(1);
+    let width = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4);
+    assert_eq!(one, run(4), "command application diverged at 4 workers");
+    assert_eq!(one, run(3), "command application diverged at 3 workers (uneven)");
+    assert_eq!(one, run(width), "command application diverged at machine width");
+    // The minted spawn ids follow the canonical order, densely from the base.
+    let spawn_ids: Vec<u64> = one.iter().filter_map(|(_, id)| *id).collect();
+    assert_eq!(spawn_ids.len(), n as usize, "every spawn minted one id");
+    assert!(
+        spawn_ids.windows(2).all(|w| w[1] == w[0] + 1),
+        "spawn ids are minted densely in canonical order at the barrier"
+    );
 }
