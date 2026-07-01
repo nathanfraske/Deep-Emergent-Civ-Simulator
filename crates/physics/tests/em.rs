@@ -124,10 +124,29 @@ fn induction_is_a_signed_per_tick_delta_opposing_the_change() {
     let back = laws::inductive_emf(Fixed::from_int(2), Fixed::from_int(3), Fixed::ONE, dt, v_max);
     assert!(back < Fixed::ZERO, "a rising current makes a back-EMF");
     assert_eq!(laws::capacitor_energy(Fixed::from_int(2), Fixed::from_int(3), Fixed::from_int(1_000_000)), Fixed::from_int(9));
-    assert_eq!(laws::inductor_energy(Fixed::from_int(2), Fixed::from_int(3), Fixed::from_int(46340), Fixed::from_int(1_000_000)), Fixed::from_int(9));
+    assert_eq!(laws::inductor_energy(Fixed::from_int(2), Fixed::from_int(3), Fixed::from_int(1_000_000)), Fixed::from_int(9));
+    // Regression (wave-3 audit): a small capacitor at a high voltage stores a real, representable
+    // energy, not a spurious cap (0.5 * 1e-9 F * (1e5 V)^2 = 5 J); no voltage-only guard.
+    let small_hi = laws::capacitor_energy(f(1, 1_000_000_000), Fixed::from_int(100_000), Fixed::from_int(1_000_000)).to_f64_lossy();
+    assert!((4.0..6.0).contains(&small_hi), "small C at high V stores ~5 J, got {small_hi}");
     // Determinism: a pure function of its inputs.
     let a = laws::faraday_emf(f(2, 100), f(1, 100), Fixed::from_int(1000), dt, v_max);
     assert_eq!(a, emf, "the same inputs replay bit for bit");
+}
+
+#[test]
+fn the_content_hash_covers_the_fifth_base() {
+    // Regression (wave-3 audit): the registry content hash must fold the current exponent, so two
+    // registries differing only in a dimension's current base are distinguishable (charge 0,0,1,0,1
+    // versus time 0,0,1,0,0).
+    let toml = |dim: &str| {
+        format!(
+            "[[axis]]\nid = \"x\"\nmeasures = \"m\"\nunit = \"u\"\ndimension = \"{dim}\"\nscale = \"u\"\ntier = 0\nrange_reserved = \"b\"\nreal = \"r\"\n"
+        )
+    };
+    let charge = PhysicsRegistry::from_toml_str(&toml("0,0,1,0,1")).unwrap();
+    let time = PhysicsRegistry::from_toml_str(&toml("0,0,1,0,0")).unwrap();
+    assert_ne!(charge.content_id(), time.content_id(), "the fifth base must change the content hash");
 }
 
 #[test]

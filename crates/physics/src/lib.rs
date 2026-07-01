@@ -620,6 +620,7 @@ impl PhysicsRegistry {
                 d.mass as u8,
                 d.time as u8,
                 d.temperature as u8,
+                d.current as u8,
             ]);
             h.write_bytes(axis.scale_unit.as_bytes());
             match &axis.range {
@@ -648,6 +649,7 @@ impl PhysicsRegistry {
                 d.mass as u8,
                 d.time as u8,
                 d.temperature as u8,
+                d.current as u8,
             ]);
             h.write_u32(law.tier as u32);
         }
@@ -691,8 +693,10 @@ fn write_provenance(h: &mut StateHasher, p: &Provenance) {
 }
 
 /// Parse a dimension from a name (length, mass, time, temperature, area, volume,
-/// velocity, force, energy, pressure, dimensionless or ratio) or, for a monomial the
-/// named set does not cover, from a `length,mass,time,temperature` exponent tuple.
+/// velocity, force, energy, pressure, current, charge, voltage, dimensionless or ratio) or, for a
+/// monomial the named set does not cover, from a `length,mass,time,temperature` exponent tuple, or a
+/// `length,mass,time,temperature,current` five-tuple that carries the wave-3 electric-current base (a
+/// four-tuple loads with a current exponent of zero, so every pre-wave-3 floor parses unchanged).
 fn parse_dimension(name: &str) -> Result<Dimension, String> {
     let t = name.trim();
     let named = match t.to_ascii_lowercase().as_str() {

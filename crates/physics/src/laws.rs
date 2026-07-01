@@ -1380,11 +1380,10 @@ pub fn power_dissipation(current: Fixed, voltage: Fixed, power_max: Fixed) -> Fi
     }
 }
 
-/// Capacitor stored energy U = (1/2) C V^2 (J), staged against the V^2 overflow.
+/// Capacitor stored energy U = (1/2) C V^2 (J). The capacitance is halved first and each product is
+/// a checked multiply, so no raw V^2 forms and an overflow (a large C at a large V) routes to the cap;
+/// there is no voltage-only guard, which would spuriously cap a small capacitor at a high voltage.
 pub fn capacitor_energy(capacitance: Fixed, voltage: Fixed, e_max: Fixed) -> Fixed {
-    if sat_abs(voltage) > V2_MAX {
-        return e_max;
-    }
     let half_c = match capacitance.checked_mul(HALF) {
         Some(x) => x,
         None => return e_max,
@@ -1513,12 +1512,11 @@ pub fn inductive_emf(inductance: Fixed, current_now: Fixed, current_prev: Fixed,
     sat_sub(ZERO, prod).clamp(ZERO - v_max, v_max)
 }
 
-/// Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy, staged
-/// against the I^2 overflow.
-pub fn inductor_energy(inductance: Fixed, current: Fixed, i2_max: Fixed, e_max: Fixed) -> Fixed {
-    if sat_abs(current) > i2_max {
-        return e_max;
-    }
+/// Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
+/// inductance is halved first and each product is a checked multiply, so an overflow routes to the
+/// cap (no raw I^2, and no current-only guard that would spuriously cap a small inductor at a high
+/// current).
+pub fn inductor_energy(inductance: Fixed, current: Fixed, e_max: Fixed) -> Fixed {
     let half_l = match inductance.checked_mul(HALF) {
         Some(x) => x,
         None => return e_max,
