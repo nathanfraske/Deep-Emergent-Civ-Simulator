@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-06-30 (continued 7): the MCP harness, the living-world variables set, and the anatomy layer
+
+Three things this stretch, all on PR #7, workspace green throughout.
+
+**The civsim-harness MCP server.** Stood up `tools/civsim_harness_server.py` (the same stdlib-only JSON-RPC pattern as `projectops`), registered in `.mcp.json`, exposing `render` (a living-world frame as a PNG), `genesis_stats` (the deterministic summary), `test` (cargo test pass/fail), and `visual_diff` (render-versus-golden regression). Backed by the viewer's new headless `--render`/`--stats` modes. Verified end to end over JSON-RPC. Note: MCP servers load at session start, so it needs a Claude Code reload to become live tools.
+
+**The living-world variables set.** Went over the variables that drive what is built and the owner ratified all four clusters (genetics, speciation firewall, niche shaping, edibility/terrain). Graduated the canonical genome and biosphere values to `set` in `calibration/reserved.toml` (reserved 67 to 57): genetics (loci 8, Ne 200, mutation 1e-4, recombination 0.5, heritability 0.5, selection 0.2), the speciation firewall (distance 0.30, incompatibilities 2, presence 0.9), and predawn generations 40. The ecology tuning levers stay in the crate dev fixtures at their ratified values. Recorded in audit Section 6c. Deferred: the quantitative-tier genome pieces and the physics-floor reference_tolerance (R-UNITS-PIN).
+
+**The anatomy layer (the owner asked how to see creature diversity).** Grounded in the document first: added design.md Part 25.14 specifying a generated species' anatomy as an aggregate-tier morphological trait vector over the catalogue fauna axes, with the full Part 35 per-part Body on promotion (Principle 1), R-BUILD-PHYS and R-WOUND the open siblings. Built it: a `Morphology` (body mass, weaponry, armour, tissue toughness, sensory, encephalization, diet breadth, aggression) sampled per species and carried on the occupant, so creatures now differ anatomically. The viewer sizes each organism mark by body mass (big carnivore a large red mark, small plant a small green one) and the tile selector reads out the selected creature's anatomy at the cursor (kind, species, size, weapon, armour, intel, diet). Also gave the viewer a demo mode (auto-zoom, self-close) and an on-canvas 5x7-font label so the cursor names show on the map, not just the title bar.
+
+**Where it stopped.** The living world is calibrated to the owner's variables, its creatures are anatomically distinct and inspectable, and the MCP harness is up. Next, per the owner's plan (variables, then the dawn): bring the people in, seeding sentient bands onto the map into the biosphere, wiring drives to edibility, and running the tick loop so a civilization begins living in the world. The anatomy trait vector is in place for the consumer wiring the dawn needs.
+
+---
+
 ## 2026-06-30 (continued 6): a tile-selector cursor and the owner's value tuning
 
 **Tile selector.** The viewer now has a mouse cursor: the hovered cell is outlined (`render::draw_outline`) and the window title reads out what is under it, the region cell and its dominant biome in the overview, and the tile, its biome, and the organisms on it (kind and species, "plant#12, herbivore#40") in the superfine. Works in both zoom regimes off the same mapping the paint uses; the `--ppm` snapshot draws it on the centre tile. Pure presentation.
