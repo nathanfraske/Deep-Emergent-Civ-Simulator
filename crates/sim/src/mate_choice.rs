@@ -76,9 +76,16 @@
 //! offspring must be both heterozygous AND viable to score). When the fittest mate by distance is
 //! a Dobzhansky-Muller incompatible cross, selection from random founders discovers to weight the
 //! prospective-viability feature, so the feature set the resolved mechanism needs is a selected
-//! consequence rather than an authored one. What remains is folding this feature-weighted loop
-//! onto the shared `evolve_with` plus `Controller` substrate (once its input registry carries a
-//! candidate-percept family) and the `World::birth` choosing call site.
+//! consequence rather than an authored one.
+//!
+//! Sixth, the `World::birth` choosing call site is now built ([`crate::world::World::choose_mate`]):
+//! a per-being heritable [`MatePreference`] over the distance axis, seeded at the dawn with
+//! unbiased variation (symmetric about indifference, so no direction is authored) and inherited
+//! at birth by the midparent rule plus a bounded mutation, so which way a being assorts is a
+//! heritable trait shaped by differential reproduction rather than a per-race lever. What remains
+//! is folding the feature-weighted loop onto the shared `evolve_with` plus `Controller` substrate
+//! (once its input registry carries a candidate-percept family) and giving the World choose site
+//! a Dobzhansky-Muller table so it can weight the incompatibility axis, not distance alone.
 //!
 //! Compute: this is the cheap "matching rule / magic trait / one-allele" case (Felsenstein
 //! 1981; Servedio et al 2011; Kopp et al 2018), where the mating cue is the fitness-relevant
@@ -90,8 +97,10 @@
 //! both axes is built as a standalone selection loop ([`evolve_featured_preference`]) and its
 //! folding onto the shared `evolve_with` plus `Controller` substrate rides that substrate's input
 //! registry carrying a candidate-percept family; the value and axiom distances are added as further
-//! features; and the `World::birth` call site, which today takes both parents pre-chosen, does
-//! the choosing. The reserved values the resolved mechanism surfaces (none fabricated) are the
+//! features; and the `World::birth` call site now does the choosing under a per-being heritable
+//! preference ([`crate::world::World::choose_mate`]), with the incompatibility axis at that site
+//! awaiting a Dobzhansky-Muller table on the choose path. The reserved values the resolved
+//! mechanism surfaces (none fabricated) are the
 //! cost of choosiness, the preference mutation variance, and, for the deep-time pure-frequency
 //! fallback only, a per-race assortment-bias scalar.
 

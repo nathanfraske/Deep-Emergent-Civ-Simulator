@@ -286,7 +286,7 @@ fn choose_mate_honours_the_preference_sign_and_excludes_self() {
         .collect();
     let min_d = dists.iter().map(|(_, d)| *d).min().unwrap();
     let max_d = dists.iter().map(|(_, d)| *d).max().unwrap();
-    // Guard against a vacuous test: the band must actually spread in distance, or nearest and
+    // Guard against a vacuous test: the band must spread in distance, or nearest and
     // farthest are the same pick and the preference sign proves nothing.
     assert!(min_d != max_d, "the candidates spread in genetic distance");
 
