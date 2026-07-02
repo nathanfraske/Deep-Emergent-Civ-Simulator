@@ -45,8 +45,10 @@ use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::lod::TwoTierWorld;
 use civsim_sim::primes::nsm_concept_ids;
+use civsim_sim::runner::{Field, FieldCalib, Runner};
 use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, World};
+use civsim_world::Coord3;
 
 const WITNESSED: AccessChannelId = AccessChannelId(1);
 const SAID: AccessChannelId = AccessChannelId(3);
@@ -269,4 +271,100 @@ fn two_tier_save_load_and_continued_replay_match() {
         "the reload diverged from the original after continued replay"
     );
     assert!(reload.referential_integrity_ok());
+}
+
+// --- The composed canonical tick: the runner drives the cognition world (roadmap Tier B item 2) ---
+
+/// A labelled temperature-field fixture: a small bounded field with a fixed, clearly-authored
+/// baseline gradient. A test fixture, never owner canon (the runner carries no default calibration).
+fn field_fixture() -> Field {
+    let (w, h) = (8i32, 6i32);
+    let baseline: Vec<Fixed> = (0..(w * h)).map(|i| Fixed::from_int(i % 5)).collect();
+    Field::new(w, h, baseline)
+}
+
+/// Labelled field calibrations, within the documented stability bounds (diffusion below 0.25,
+/// relaxation and exchange in [0, 1]). A fixture, never owner canon.
+fn field_calib() -> FieldCalib {
+    FieldCalib {
+        diffusion: Fixed::from_ratio(1, 8),
+        relaxation: Fixed::from_ratio(1, 16),
+        exchange: Fixed::from_ratio(1, 4),
+    }
+}
+
+/// Run the COMPOSED canonical tick: a runner that owns a live dawn world steps the field, the
+/// body-thermal exchange, and the world cognition tick as one composite step, returning the composite
+/// (runner state hash, world event-log hash) after each tick. A few located beings sit in the field
+/// (labelled fixture ids in a high range, distinct from the world's cognition beings) so the
+/// field-thermal state is exercised; the two sides share no data across the seam yet, only the
+/// composite step and hash. Unifying the two populations is the field-to-cognition coupling increment.
+fn composed_trace(
+    beings: usize,
+    bands: usize,
+    seed: u64,
+    ticks: u64,
+    workers: usize,
+) -> Vec<(u128, u128)> {
+    let mut world = dawn_world(beings, bands, seed);
+    world.set_workers(workers);
+    let mut runner = Runner::with_world(field_fixture(), field_calib(), world);
+    for k in 0..4u64 {
+        let id = StableId(10_000 + k);
+        let coord = Coord3::ground((k as i32) % 8, (k as i32) % 6);
+        runner.place_being(id, coord, Fixed::from_int(37));
+    }
+    let mut trace = Vec::with_capacity(ticks as usize);
+    for _ in 0..ticks {
+        runner.step();
+        let world = runner.world().expect("the composed runner owns a world");
+        // Clock lockstep: the field spine and the cognition world advance together, one per step.
+        assert_eq!(
+            runner.clock(),
+            world.clock(),
+            "runner and world clocks drifted"
+        );
+        trace.push((runner.state_hash(), world.event_log_hash()));
+    }
+    trace
+}
+
+#[test]
+fn composed_runner_tick_replay_is_bit_identical() {
+    // The canonical runner now drives the cognition world as a fixed sub-phase after its field
+    // phases. Two composed runs from one seed must produce the same composite state hash and world
+    // event-log hash at every tick: the field spine and the six-phase cognition tick, folded into one
+    // canonical fingerprint, reproduce bit for bit.
+    let a = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
+    let b = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
+    assert_eq!(a.len(), 100);
+    assert_eq!(a, b, "the composed tick did not replay bit for bit");
+}
+
+#[test]
+fn composed_runner_tick_diverges_on_a_different_seed() {
+    // The composite trace is seed-sensitive, so the bit-identity above is a real reproduction of a
+    // non-trivial composed run rather than a constant.
+    let a = composed_trace(40, 5, 1, 60, 1);
+    let b = composed_trace(40, 5, 2, 60, 1);
+    assert_ne!(
+        a, b,
+        "distinct seeds should not produce the same composed trace"
+    );
+}
+
+#[test]
+fn composed_runner_tick_is_bit_identical_across_worker_counts() {
+    // The field spine is worker-agnostic and the cognition tick re-orders its commands at the
+    // CommandKey barrier, so the composite must be bit-identical at every World worker width: the
+    // field-first-then-cognition order is fixed and the applied command order is a pure function of
+    // the produced set, not of the thread that produced it (R-CMD-ORDER, R-HARNESS-COVER).
+    let serial = composed_trace(40, 5, 0xBEEF, 80, 1);
+    for workers in [2usize, 3, 8] {
+        let parallel = composed_trace(40, 5, 0xBEEF, 80, workers);
+        assert_eq!(
+            serial, parallel,
+            "the composed tick diverged at {workers} workers"
+        );
+    }
 }

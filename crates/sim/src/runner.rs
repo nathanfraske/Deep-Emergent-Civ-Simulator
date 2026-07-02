@@ -30,11 +30,21 @@
 //! Everything walks in canonical id or coordinate order and reads no camera, so a run reproduces bit
 //! for bit and is thread-count invariant (Principles 3 and 10).
 //!
-//! What it is not yet: the agent cognition tick (minds, dialogue, the naming game, evolution) is the
-//! next increment, composed onto this spine through [`crate::world::World`]; and the field layer is
-//! one field (temperature) so far, the pattern the moisture, wind, and resource fields follow.
+//! The agent cognition tick is composed onto this spine: a runner built with [`Runner::with_world`]
+//! owns a [`crate::world::World`] and runs [`crate::world::World::tick`] as a fixed sub-phase after
+//! the field phases, in a pinned within-tick order (the field phases first, then cognition), so that a
+//! later field-to-cognition coupling reads the same-tick thermal state. The two sides carry disjoint
+//! mutable state and share only [`StableId`], so the composition is additive rather than a merge of
+//! contended state, and the composite [`Runner::state_hash`] folds the field-side hash and then the
+//! world's canonical hash in a pinned order. Honest limits held here: there is no field-to-cognition
+//! or cognition-to-field data flow yet (temperature is not a percept, and no chosen action moves a
+//! coordinate), and the world hash does not yet fold the being lifecycle (genomes, ages, affect) or
+//! the dialogue log, so the composite is not a complete canonical hash of all being state until those
+//! later increments land. The field layer is one field (temperature) so far, the pattern the moisture,
+//! wind, and resource fields follow.
 
 use crate::located::{LocationIndex, OccupantId};
+use crate::world::World;
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{Coord3, TileMap};
 use std::collections::BTreeMap;
@@ -163,10 +173,15 @@ pub struct Runner {
     /// as the thermal state the field drives; the body-arc harm mapping from a temperature outside a
     /// race's comfort band is a reserved consumer (the two-sided band the body arc deferred).
     body_temp: BTreeMap<StableId, Fixed>,
+    /// The cognition world composed onto this spine, ticked as a fixed sub-phase after the field
+    /// phases. `None` for a field-only runner ([`Runner::new`]), `Some` for the composed runner
+    /// ([`Runner::with_world`]). The world carries disjoint mutable state, its own seed, and its own
+    /// canonical hash; this runner never reaches into it beyond ticking it and folding its hash.
+    world: Option<World>,
 }
 
 impl Runner {
-    /// A runner over a field with the given reserved calibrations.
+    /// A field-only runner over a field with the given reserved calibrations (no cognition world).
     pub fn new(field: Field, calib: FieldCalib) -> Runner {
         Runner {
             clock: 0,
@@ -174,6 +189,23 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            world: None,
+        }
+    }
+
+    /// A composed runner that owns a cognition [`World`] and ticks it as a fixed sub-phase after the
+    /// field phases. The caller constructs and calibrates the world (fail-loud on any unset reserved
+    /// value, per the world's own manifest discipline); this runner adds no authored number, no new
+    /// RNG draw, and no new phase, so the composite reproduces bit for bit exactly as each side already
+    /// does.
+    pub fn with_world(field: Field, calib: FieldCalib, world: World) -> Runner {
+        Runner {
+            clock: 0,
+            field,
+            calib,
+            index: LocationIndex::new(),
+            body_temp: BTreeMap::new(),
+            world: Some(world),
         }
     }
 
@@ -198,9 +230,16 @@ impl Runner {
         self.body_temp.get(&id).copied()
     }
 
-    /// One canonical tick: step the field, then let each located being exchange heat with its cell
-    /// (Newton convective coupling toward the local field temperature). Beings are walked in
-    /// canonical id order.
+    /// The composed cognition world, if any (a pure read, for tests and rendering).
+    pub fn world(&self) -> Option<&World> {
+        self.world.as_ref()
+    }
+
+    /// One canonical tick, in a pinned within-tick order: step the field, let each located being
+    /// exchange heat with its cell (Newton convective coupling toward the local field temperature,
+    /// beings walked in canonical id order), then tick the composed cognition world as the fixed next
+    /// sub-phase. The field phases run first so that a later field-to-cognition coupling reads the
+    /// same-tick thermal state; no input batch crosses the seam yet.
     pub fn step(&mut self) {
         self.field.step(&self.calib);
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
@@ -212,11 +251,16 @@ impl Runner {
                 self.body_temp.insert(id, next);
             }
         }
+        if let Some(world) = self.world.as_mut() {
+            world.tick(&[]);
+        }
         self.clock += 1;
     }
 
     /// The canonical state hash: the clock, the field, and every located being's temperature in id
-    /// order. A run reproduces this bit for bit; it is independent of thread count and camera.
+    /// order, then (for a composed runner) the world's canonical hash folded in a pinned position. A
+    /// run reproduces this bit for bit; it is independent of thread count and camera. The world hash
+    /// is left byte-identical to [`crate::world::World::state_hash`]; a field-only runner omits it.
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
@@ -224,6 +268,11 @@ impl Runner {
         for (id, t) in &self.body_temp {
             h.write_stable(*id);
             h.write_fixed(*t);
+        }
+        if let Some(world) = &self.world {
+            let wh = world.state_hash();
+            h.write_u64((wh >> 64) as u64);
+            h.write_u64(wh as u64);
         }
         h.finish()
     }
