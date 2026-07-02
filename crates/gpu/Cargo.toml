@@ -1,0 +1,20 @@
+# The canonical GPU compute crate (design Part 5.4, R-GPU-CANON-PIN). It carries the CubeCL
+# dependency so the determinism bedrock in crates/core stays dependency-free (see core/Cargo.toml):
+# the GPU path is a consumer of the Fixed oracle, never the other way round. The crate builds with no
+# CUDA present (cudarc dynamically loads the driver and NVRTC at runtime), so the workspace compiles
+# on a machine with no device; the device-touching tests self-skip unless CIVSIM_GPU is set. It is
+# excluded from the workspace default-members so a plain `cargo build`/`cargo test` stays lean and
+# CUDA-free; build it with `cargo build -p civsim-gpu`.
+[package]
+name = "civsim-gpu"
+description = "Canonical GPU compute for the Emergent Civilization Simulator: CubeCL #[cube] kernels (the pinned Q32.32 limb multiply/divide and the fixed-point field stencils) gated bit-for-bit against the crates/core Fixed oracle (R-GPU-CANON-PIN)."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+cubecl = { version = "0.10", features = ["cuda"] }
