@@ -46,6 +46,20 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): visual projection scoped, physics-derived terrain colour built (first slice)
+
+The owner asked how to visually show the deep world (physics, anatomy, materials), and whether procgen PNG pixel art is the way. Answered and delivered a first slice on `claude/visual-projection`.
+
+**The thesis.** Do not author appearance, derive it: appearance is a projection of the canonical data the sim already computes, never a hand-drawn template (Principle 8). The chem-optics floor already carries the optical axes (reflectance, albedo, emissivity, absorption) that the light physics uses, materials are Substance vectors, anatomy is a per-part body graph, and temperature/wetness/wounds are live state, so a material's colour is a read of its optical vector, a hot thing glows from its thermal state, and a creature's shape is its part graph. The renderer is a non-canonical consumer (Principle 10), so it is free to use floats and the GPU; the bit-identity discipline does not apply to pixels. Procgen pixel art is the right richer view, a projection, not an art asset.
+
+**First slice built.** `physics_terrain_color` in `crates/viewer/src/render.rs` derives terrain colour from a tile's own elevation, moisture, and temperature fields (each in [0,1], what worldgen computed), so terrain looks like its physics (water blue deepening with depth, wet temperate land green, dry ground tan, cold heights snow, hot arid ochre, peaks lightening to rock) rather than an authored biome swatch. Wired into `superfine` with a light biome accent for identity. Proven by `physics_terrain_colour_reflects_the_fields`; viewer tests, fmt, and clippy green.
+
+**Scoped for sign-off.** `docs/working/VISUAL_PROJECTION_SCOPED_PROPOSAL.md`: a data-driven `VisualProjection` registry (material palette from the optical axes, anatomy silhouette from the part graph, state overlays), a two-tier glyph-then-procgen-sprite view, a content-hash sprite atlas the GPU can rasterize, the reserved palette values surfaced with basis (aesthetic calls the owner sets), and the honest limits (procgen ugliness, physics is not a pleasing palette by default, arbitrary morphology is the real work). Build order: terrain slice (done), the registry proper, the anatomy silhouette, the sprite atlas.
+
+**Where it stopped.** The terrain slice and the proposal are on `claude/visual-projection`, pending merge. The registry and the anatomy silhouette are the next builds on the owner's sign-off. Note: another agent is on R-UNITS-PIN concurrently; this touches only the viewer and reads the physics axes, so collision is low.
+
+---
+
 ## 2026-07-02 (continued): the deterministic scheduler core built (the keystone)
 
 The owner signed off the scheduler design and said to build the core. Built `crates/core/src/schedule.rs`: `ResourceId` and `SystemId` (stable canonical ids), `Access` (declared read/write sets over resources), `Access::conflicts_with` (a writer conflicts with any reader or writer of the same resource, symmetric), the layered `schedule` derivation (walk systems in `SystemId` order, place each in the earliest batch after every lower-id system it conflicts with, so batches are conflict-free and conflicting pairs run in id order), `flatten`, and `run_serial`. A pure function of the sorted declarations, so deterministic and observer-independent (Principles 3, 10), storage-agnostic (hecs later), and Rayon-ready (a parallel executor runs a batch concurrently, sound because a batch holds no conflicting pair). Data-defined resources and systems (Principle 11), no reserved values.
