@@ -249,9 +249,8 @@ impl HarmonyModel {
     /// Add one bias row, kept sorted by (then, given) so any walk is canonical.
     pub fn add(&mut self, b: HarmonyBias) {
         self.biases.push(b);
-        self.biases.sort_by_key(|b| {
-            (b.then_param, b.then_value, b.given_param, b.given_value)
-        });
+        self.biases
+            .sort_by_key(|b| (b.then_param, b.then_value, b.given_param, b.given_value));
     }
 
     /// The rows, in canonical order.
@@ -368,9 +367,9 @@ pub fn validate(
     // Priors: present for every parameter, covering every value exactly once, a positive
     // total, counts within the representability bound.
     for p in &registry.params {
-        let counts = prior.counts(p.id).ok_or_else(|| {
-            TypologyError::BadPrior(format!("parameter {:?} has no prior", p.id))
-        })?;
+        let counts = prior
+            .counts(p.id)
+            .ok_or_else(|| TypologyError::BadPrior(format!("parameter {:?} has no prior", p.id)))?;
         if counts.len() != p.values.len()
             || counts
                 .iter()
@@ -420,9 +419,9 @@ pub fn validate(
         }
     }
     for b in &harmony.biases {
-        let given = registry
-            .param(b.given_param)
-            .ok_or_else(|| TypologyError::UnknownParam(format!("bias given {:?}", b.given_param)))?;
+        let given = registry.param(b.given_param).ok_or_else(|| {
+            TypologyError::UnknownParam(format!("bias given {:?}", b.given_param))
+        })?;
         let then = registry
             .param(b.then_param)
             .ok_or_else(|| TypologyError::UnknownParam(format!("bias then {:?}", b.then_param)))?;
@@ -645,10 +644,7 @@ impl TypologyParams {
 /// the 83A anchor could draw contradictions (an SVO language classed OV), so the anchor
 /// is 83A and the subject-order refinement waits for a coherence rule, recorded in the
 /// proposal's decision batch.
-pub fn wals_seed(
-    strong: Fixed,
-    weak: Fixed,
-) -> (TypologyRegistry, TypologyPrior, HarmonyModel) {
+pub fn wals_seed(strong: Fixed, weak: Fixed) -> (TypologyRegistry, TypologyPrior, HarmonyModel) {
     let mut reg = TypologyRegistry::new();
     let mut prior = TypologyPrior::new();
     let mut harmony = HarmonyModel::new();
@@ -675,7 +671,10 @@ pub fn wals_seed(
         });
         prior.set(
             TypologyParamId(id),
-            values.iter().map(|&(vid, _, c)| (TypologyValueId(vid), c)).collect(),
+            values
+                .iter()
+                .map(|&(vid, _, c)| (TypologyValueId(vid), c))
+                .collect(),
             source,
         );
     };
@@ -687,7 +686,11 @@ pub fn wals_seed(
         "order of object and verb",
         0,
         "WALS 83A (Dryer 2013), 1518 languages: OV 712, VO 705, no dominant 101",
-        &[(0, "OV", 712), (1, "VO", 705), (2, "no dominant order", 101)],
+        &[
+            (0, "OV", 712),
+            (1, "VO", 705),
+            (2, "no dominant order", 101),
+        ],
         &mut reg,
         &mut prior,
     );
@@ -713,7 +716,11 @@ pub fn wals_seed(
         "order of genitive and noun",
         1,
         "WALS 86A (Dryer 2013), 1249 languages: GenN 685, NGen 468, no dominant 96",
-        &[(0, "genitive-noun", 685), (1, "noun-genitive", 468), (2, "no dominant order", 96)],
+        &[
+            (0, "genitive-noun", 685),
+            (1, "noun-genitive", 468),
+            (2, "no dominant order", 96),
+        ],
         &mut reg,
         &mut prior,
     );
@@ -960,8 +967,7 @@ mod tests {
     fn wals_seed_validates_and_samples_every_parameter() {
         let (reg, prior, harmony) = seed();
         validate(&reg, &prior, &harmony).expect("the shipped seed validates");
-        let p = sample_profile(&reg, &prior, &harmony, disharmony(), 0xC17, 7, 0)
-            .expect("samples");
+        let p = sample_profile(&reg, &prior, &harmony, disharmony(), 0xC17, 7, 0).expect("samples");
         assert_eq!(p.len(), reg.params().len(), "every parameter drew a value");
         for def in reg.params() {
             let v = p.get(def.id).expect("value present");
@@ -983,7 +989,10 @@ mod tests {
                 break;
             }
         }
-        assert!(any_differs, "distinct cultures draw distinct grammars somewhere");
+        assert!(
+            any_differs,
+            "distinct cultures draw distinct grammars somewhere"
+        );
     }
 
     #[test]
@@ -1005,8 +1014,7 @@ mod tests {
         // to sampling under an empty harmony model. The tilt can bias, never dictate.
         let (reg, prior, harmony) = seed();
         for culture in 0..20u64 {
-            let gated =
-                sample_profile(&reg, &prior, &harmony, Fixed::ONE, 5, culture, 0).unwrap();
+            let gated = sample_profile(&reg, &prior, &harmony, Fixed::ONE, 5, culture, 0).unwrap();
             let empty = sample_profile(
                 &reg,
                 &prior,
@@ -1031,8 +1039,14 @@ mod tests {
             id: TypologyParamId(0),
             gloss: "anchor".into(),
             values: vec![
-                TypologyValueDef { id: TypologyValueId(0), gloss: "a0".into() },
-                TypologyValueDef { id: TypologyValueId(1), gloss: "a1".into() },
+                TypologyValueDef {
+                    id: TypologyValueId(0),
+                    gloss: "a0".into(),
+                },
+                TypologyValueDef {
+                    id: TypologyValueId(1),
+                    gloss: "a1".into(),
+                },
             ],
             sample_priority: 0,
             source: "test fixture".into(),
@@ -1041,15 +1055,29 @@ mod tests {
             id: TypologyParamId(1),
             gloss: "dependent".into(),
             values: vec![
-                TypologyValueDef { id: TypologyValueId(0), gloss: "d0".into() },
-                TypologyValueDef { id: TypologyValueId(1), gloss: "d1".into() },
+                TypologyValueDef {
+                    id: TypologyValueId(0),
+                    gloss: "d0".into(),
+                },
+                TypologyValueDef {
+                    id: TypologyValueId(1),
+                    gloss: "d1".into(),
+                },
             ],
             sample_priority: 1,
             source: "test fixture".into(),
         });
         let mut prior = TypologyPrior::new();
-        prior.set(TypologyParamId(0), vec![(TypologyValueId(0), 1), (TypologyValueId(1), 1)], "test");
-        prior.set(TypologyParamId(1), vec![(TypologyValueId(0), 1), (TypologyValueId(1), 1)], "test");
+        prior.set(
+            TypologyParamId(0),
+            vec![(TypologyValueId(0), 1), (TypologyValueId(1), 1)],
+            "test",
+        );
+        prior.set(
+            TypologyParamId(1),
+            vec![(TypologyValueId(0), 1), (TypologyValueId(1), 1)],
+            "test",
+        );
         let mut harmony = HarmonyModel::new();
         harmony.add(HarmonyBias {
             given_param: TypologyParamId(0),
@@ -1072,8 +1100,7 @@ mod tests {
         // And on every culture this seed draws with the anchor at 0, the dependent is 0.
         let mut conditioned = 0;
         for culture in 0..64u64 {
-            let p =
-                sample_profile(&reg, &prior, &harmony, Fixed::ZERO, 77, culture, 0).unwrap();
+            let p = sample_profile(&reg, &prior, &harmony, Fixed::ZERO, 77, culture, 0).unwrap();
             if p.get(TypologyParamId(0)) == Some(TypologyValueId(0)) {
                 conditioned += 1;
                 assert_eq!(
@@ -1147,9 +1174,8 @@ mod tests {
         }
         for culture in 0..10u64 {
             let a = sample_profile(&reg, &prior, &harmony, disharmony(), 3, culture, 1).unwrap();
-            let b =
-                sample_profile(&relabelled, &prior2, &harmony2, disharmony(), 3, culture, 1)
-                    .unwrap();
+            let b = sample_profile(&relabelled, &prior2, &harmony2, disharmony(), 3, culture, 1)
+                .unwrap();
             assert_eq!(a, b, "labels are etic surface, never draw input");
         }
     }
