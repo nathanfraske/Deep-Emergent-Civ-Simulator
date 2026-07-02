@@ -36,6 +36,7 @@
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
+use civsim_world::Coord3;
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::homeostasis::{Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, RESPIRATION};
@@ -111,6 +112,89 @@ pub fn dev_respiration() -> HomeostaticRegistry {
             death_floor: Fixed::from_ratio(1, 2),
         }],
     }
+}
+
+/// A per-cell ambient-medium field: the medium each map cell holds, as its respirable content and its
+/// density, in the row-major layout the temperature field uses ([`crate::runner::Field`]). A being reads
+/// the medium of the cell it stands in, so respiration (and, a later increment, buoyancy) is located:
+/// moving from a water cell to an air cell changes the medium a body exchanges with. The medium is data,
+/// not a label: air, water, lava, and a magical fluid are the same field over different axis values
+/// (Principle 9).
+#[derive(Clone, Debug)]
+pub struct MediumField {
+    width: i32,
+    height: i32,
+    respirable: Vec<Fixed>,
+    density: Vec<Fixed>,
+}
+
+impl MediumField {
+    /// A field from explicit per-cell respirable content and density (row-major, `width * height` each).
+    pub fn new(
+        width: i32,
+        height: i32,
+        respirable: Vec<Fixed>,
+        density: Vec<Fixed>,
+    ) -> MediumField {
+        assert!(width > 0 && height > 0, "a field has positive extent");
+        let n = (width as usize) * (height as usize);
+        assert_eq!(respirable.len(), n, "respirable is width*height long");
+        assert_eq!(density.len(), n, "density is width*height long");
+        MediumField {
+            width,
+            height,
+            respirable,
+            density,
+        }
+    }
+
+    /// A uniform medium filling the whole field (one medium everywhere).
+    pub fn uniform(width: i32, height: i32, respirable: Fixed, density: Fixed) -> MediumField {
+        let n = (width as usize) * (height as usize);
+        MediumField::new(width, height, vec![respirable; n], vec![density; n])
+    }
+
+    fn idx(&self, x: i32, y: i32) -> Option<usize> {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return None;
+        }
+        Some((y * self.width + x) as usize)
+    }
+
+    /// The respirable content of the medium at a cell. Off the field there is no medium and this reads
+    /// zero (no medium, no breath), the substrate's absence convention.
+    pub fn respirable_at(&self, x: i32, y: i32) -> Fixed {
+        self.idx(x, y)
+            .map(|i| self.respirable[i])
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The density of the medium at a cell (zero off the field). The buoyancy increment reads this
+    /// against a being's body density through the resolved `law.buoyant_force`.
+    pub fn density_at(&self, x: i32, y: i32) -> Fixed {
+        self.idx(x, y)
+            .map(|i| self.density[i])
+            .unwrap_or(Fixed::ZERO)
+    }
+}
+
+/// One tick of respiration for a being located at `pos` in an ambient-medium field: read the medium of
+/// its cell and exchange gas with it ([`respire`]). Off the field a being finds no medium and takes up
+/// nothing (it suffocates on its buffer). This is the located form the running world uses; the unlocated
+/// [`respire`] takes the medium content directly, for isolation tests and callers that already know the
+/// medium.
+pub fn respire_at(
+    homeo: &mut Homeostasis,
+    plan: &BodyPlan,
+    organs: &BodyPlanRegistry,
+    field: &MediumField,
+    pos: Coord3,
+    transfer_k: Fixed,
+    flux_cap: Fixed,
+) {
+    let content = field.respirable_at(pos.x, pos.y);
+    let area = exchange_area(plan, organs);
+    respire(homeo, area, transfer_k, content, flux_cap);
 }
 
 #[cfg(test)]
@@ -278,5 +362,98 @@ mod tests {
         let plan = body(vec![organ(gill, (3, 4))]);
         let run = || survive(&plan, &organs, Fixed::from_ratio(3, 4), 200);
         assert_eq!(run(), run(), "the same body and medium replay bit for bit");
+    }
+
+    /// A two-cell field: cell (0,0) is a rich medium, cell (1,0) is a poor one, each a uniform density.
+    fn two_region_field() -> MediumField {
+        MediumField::new(
+            2,
+            1,
+            vec![Fixed::ONE, Fixed::from_ratio(1, 5)], // rich then poor respirable content
+            vec![Fixed::from_int(998), Fixed::from_ratio(1225, 1000)], // water then air density
+        )
+    }
+
+    /// Run the located respiration-plus-metabolism loop at a cell, returning whether the being ended
+    /// alive after the given ticks.
+    fn survive_at(plan: &BodyPlan, organs: &BodyPlanRegistry, pos: Coord3, ticks: u32) -> bool {
+        let reg = dev_respiration();
+        let field = two_region_field();
+        let cap = Fixed::from_int(1000);
+        let mut h = Homeostasis::new(&reg, plan, organs);
+        for _ in 0..ticks {
+            respire_at(&mut h, plan, organs, &field, pos, Fixed::ONE, cap);
+            if !h.metabolize(&reg, Fixed::ZERO) {
+                break;
+            }
+        }
+        h.is_alive(&reg)
+    }
+
+    #[test]
+    fn a_being_breathes_the_medium_of_the_cell_it_stands_in() {
+        // The same body in the same field: standing in the rich cell it survives, in the poor cell it
+        // suffocates. Respiration is located: the medium is the cell's, not the being's label.
+        let (organs, gill) = registry_with_gill();
+        let plan = body(vec![organ(gill, (1, 1))]);
+        assert!(
+            survive_at(&plan, &organs, Coord3::ground(0, 0), 500),
+            "in the rich cell it breathes and survives"
+        );
+        assert!(
+            !survive_at(&plan, &organs, Coord3::ground(1, 0), 500),
+            "in the poor cell the same body suffocates"
+        );
+    }
+
+    #[test]
+    fn off_the_field_there_is_no_medium_to_breathe() {
+        // A being off the field finds no medium (respirable content zero) and suffocates on its buffer,
+        // whatever its anatomy. The field's absence convention: no medium, no breath.
+        let (organs, gill) = registry_with_gill();
+        let plan = body(vec![organ(gill, (1, 1))]);
+        assert!(
+            !survive_at(&plan, &organs, Coord3::ground(99, 99), 500),
+            "off the field there is no medium to exchange with"
+        );
+    }
+
+    #[test]
+    fn the_field_reads_back_its_medium_and_zero_off_the_edge() {
+        let field = two_region_field();
+        assert_eq!(field.respirable_at(0, 0), Fixed::ONE);
+        assert_eq!(field.respirable_at(1, 0), Fixed::from_ratio(1, 5));
+        assert_eq!(
+            field.density_at(0, 0),
+            Fixed::from_int(998),
+            "the water cell's density"
+        );
+        assert_eq!(
+            field.density_at(1, 0),
+            Fixed::from_ratio(1225, 1000),
+            "the air cell's density"
+        );
+        assert_eq!(
+            field.respirable_at(-1, 0),
+            Fixed::ZERO,
+            "off the field, no medium"
+        );
+        assert_eq!(
+            field.density_at(5, 5),
+            Fixed::ZERO,
+            "off the field, no density"
+        );
+    }
+
+    #[test]
+    fn located_respiration_is_deterministic() {
+        let (organs, gill) = registry_with_gill();
+        let plan = body(vec![organ(gill, (1, 1))]);
+        let run = || survive_at(&plan, &organs, Coord3::ground(0, 0), 200);
+        assert_eq!(
+            run(),
+            run(),
+            "the same body, field, and cell replay bit for bit"
+        );
     }
 }
