@@ -46,6 +46,18 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): the deterministic scheduler's first real tick integration (the runner)
+
+The owner said go ahead. With `World::tick` hot from concurrent R-AGING work, the runner (`crates/sim/src/runner.rs`, low-collision, stable) was the clean surface for the scheduler's first REAL integration. On `claude/scheduler-runner-integration`.
+
+**Built.** The runner tick's phases are now declared as deterministic-scheduler systems over named resources (the field, the body-temperature map, the located index, the cognition world): `Runner::tick_systems` returns the `BTreeMap<SystemId, Access>`, the body-thermal exchange is extracted into `phase_body_exchange`, `run_phase` dispatches a phase by id, and `Runner::step_scheduled` builds the schedule and runs it through `run_serial`. Proven bit-identical to the hand-pinned `step` over 40 composed ticks (`the_runner_tick_runs_through_the_scheduler_bit_identically`). The composed-runner determinism suite still passes, so the phase extraction is behaviour-preserving.
+
+**The payoff the schedule demonstrates.** The cognition world shares no resource with the field phases, so the scheduler places the world tick in the first batch alongside the field step (a parallelisable pair) while the field-reading body exchange serialises after, yet the result is bit-identical: the reordered phases do not conflict, and the counter RNG is draw-keyed rather than sequential (R-RNG-COORD), so a reorder cannot change a draw. The scheduler discovered the field/cognition parallelism from the declarations alone.
+
+**Where it stopped.** The runner integration is green (fmt, workspace clippy, the full sim suite) on `claude/scheduler-runner-integration`. The next, hotter surface is expressing `World::tick`'s cognition phases as declared-access systems (the real per-being parallelism win), best taken when the concurrent tick work settles. Then the Rayon executor when a profile shows the serial tick is the limit. The on-ramp flag-flips and the held research dives stay owner-gated.
+
+---
+
 ## 2026-07-02 (continued): visual projection scoped, physics-derived terrain colour built (first slice)
 
 The owner asked how to visually show the deep world (physics, anatomy, materials), and whether procgen PNG pixel art is the way. Answered and delivered a first slice on `claude/visual-projection`.
