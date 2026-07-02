@@ -12,25 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Order-independence of the two live reduce sites (R-REDUCE-ORDER, design Part 57).
+//! Order behaviour of the two live reduce sites (R-REDUCE-ORDER, design Part 57), including the
+//! order-dependence seam the determinism audit found in one of them.
 //!
-//! The determinism cluster needs every combine that a parallel fold could reorder to be a
-//! pure function of its input set, not of arrival or thread order. Two live sites are named:
-//! the gossip conflict apply (`world.rs`, the `apply_assertion` write pass) and the typology
-//! weighted pick (`typology.rs`, the cumulative walk in `sample_profile`). Both are already
-//! order-independent by construction; this harness proves it rather than rewriting the code,
-//! which is the standing preference for the hot `world.rs` path.
+//! The determinism cluster needs every combine a parallel fold could reorder to be safe. Two live
+//! sites are named: the gossip conflict apply (`world.rs`, the `apply_assertion` write pass) and
+//! the typology weighted pick (`typology.rs`, the cumulative walk in `sample_profile`). Their
+//! determinism guarantees differ, and the difference matters for parallelism; this harness proves
+//! each rather than rewriting the code, the standing preference for the hot `world.rs` path.
 //!
-//! The gossip apply is write-only over state frozen in its build pass, so its only
-//! order-sensitivity is the per-listener fold of told-evidence considers and theory-of-mind
-//! models when several speakers gossip to one listener in a tick. First-order evidence
-//! accumulates as a raw sum with the certainty clamp applied at read (`evidence.rs`), the mind
-//! hash reads only the clamped totals and the committed value (never the provenance order), and
-//! each speaker's model is keyed to a distinct id, so the fold is a pure function of the action
-//! set. The typology pick is a cumulative walk over the tilted per-value weights: order-sensitive
-//! on the weight vector, and pinned by the value-id-sorted walk the substrate guarantees
-//! (`TypologyPrior::set` sorts counts by value id on insert). Value id is the total key that
-//! recovers the canonical weight vector from any permutation.
+//! The TYPOLOGY pick is order-independent by construction: the cumulative walk is over the
+//! value-id-sorted weight vector `TypologyPrior::set` guarantees, so value id is the total key
+//! that recovers the canonical vector from any permutation. It is safe to fold in any order.
+//!
+//! The GOSSIP apply is order-independent only when competing assertions share a candidate set
+//! (`hyps`): first-order evidence toward a shared candidate accumulates as a raw sum with the
+//! certainty clamp applied at read (`evidence.rs`), and the mind hash reads only clamped totals
+//! and the committed value. But when two assertions about the same `(subject, attr)` carry
+//! DIFFERENT candidate sets, the apply is order-DEPENDENT: the frame's `hyps` is fixed
+//! first-writer-wins (`agent.rs`, `or_insert_with`), `add_evidence` then drops any evidence toward
+//! a value absent from that frozen set (`evidence.rs`: "Evidence toward a value not in the frame
+//! is ignored"), and `state_hash` walks `frame.hyps()` in first-writer order. So the gossip apply
+//! is NOT an order-independent reduce site; its tick determinism rides the canonical `CommandKey`
+//! barrier (R-CMD-ORDER), which fixes the apply order single-threaded. The mismatched-candidate
+//! case is not a live divergence today, but it would surface the moment the APPLY pass (rather
+//! than the pure-read generation pass) is parallelised or reordered, so it is surfaced for the
+//! owner: canonicalize the per-question candidate set, or hold the apply to the canonical barrier.
+//! The tests below prove the shared-set order-independence and lock the mismatched-set
+//! order-dependence on record.
 //!
 //! The shuffles here are deterministic: a fixed reversal and a hand-written permutation, never
 //! `rand`, so the harness itself replays bit for bit.
@@ -93,10 +102,10 @@ fn apply_gossip(listener: &mut Mind, told_weight: Fixed, actions: &[(u64, ValueI
 }
 
 #[test]
-fn gossip_conflict_apply_is_order_independent() {
-    // R-REDUCE-ORDER site (a): the gossip conflict apply (world.rs, the converse/gossip write
-    // pass). Several speakers assert competing values about one question to a shared listener in
-    // a single tick; the same assertion set applied in a canonical (id-sorted) order, reversed,
+fn gossip_apply_is_order_independent_for_a_shared_candidate_set() {
+    // R-REDUCE-ORDER site (a), the order-INDEPENDENT sub-case: competing assertions that share a
+    // candidate set (every action carries GOSSIP_HYPS). Several speakers assert competing values
+    // about one question to a shared listener in a single tick; the same assertion set applied in a canonical (id-sorted) order, reversed,
     // and a fixed scramble must drive the listener to a bit-identical state hash. The certainty
     // clamp bites here: three considers toward one value total sixty, past the clamp of fifty, so
     // a per-step clamp (rather than clamp-at-read) would leak arrival order and fail this test.
@@ -148,6 +157,40 @@ fn gossip_conflict_apply_is_order_independent() {
         m.belief(GOSSIP_SUBJECT, GOSSIP_ATTR, &p),
         Some(10),
         "the committed belief is a function of the assertion set, not its order"
+    );
+}
+
+#[test]
+fn gossip_apply_is_order_dependent_when_candidate_sets_differ() {
+    // The seam the determinism audit found, locked here so it cannot be silently reclaimed as
+    // order-independent. When two assertions about the same (subject, attr) carry DIFFERENT
+    // candidate sets, the frame's hyps is fixed first-writer-wins and add_evidence drops evidence
+    // toward a value absent from it (agent.rs, evidence.rs), so the committed belief depends on
+    // which assertion applies first. The gossip apply is therefore NOT an order-independent reduce
+    // site; it is deterministic in the live tick only because the CommandKey barrier fixes the
+    // apply order (R-CMD-ORDER). Surfaced for the owner as the thing to close (canonicalize the
+    // per-question candidate set) before the apply pass itself is parallelised.
+    let p = gossip_params();
+    let w = Fixed::from_int(20);
+    // S1 believes value 10 with candidate set {10, 20}; S2 believes 30 with {10, 30}.
+    let belief = |first_s1: bool| {
+        let mut m = Mind::new(StableId(1), Fixed::ONE);
+        let s1 = (StableId(10), [10, 20], 10);
+        let s2 = (StableId(20), [10, 30], 30);
+        let order = if first_s1 { [s1, s2] } else { [s2, s1] };
+        for (spk, hyps, toward) in order {
+            m.consider(GOSSIP_SUBJECT, GOSSIP_ATTR, hyps, toward, w, spk);
+        }
+        m.belief(GOSSIP_SUBJECT, GOSSIP_ATTR, &p)
+    };
+    // S1 first fixes the candidate set to {10, 20}, dropping S2's evidence toward 30, so 10
+    // commits; S2 first admits both, and the 20-vs-20 tie leaves the belief uncommitted.
+    assert_eq!(belief(true), Some(10), "S1-first commits 10");
+    assert_eq!(belief(false), None, "S2-first ties and stays uncommitted");
+    assert_ne!(
+        belief(true),
+        belief(false),
+        "documented seam: the gossip apply is order-dependent for mismatched candidate sets"
     );
 }
 
