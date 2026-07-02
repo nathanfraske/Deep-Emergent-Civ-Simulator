@@ -256,6 +256,97 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             output: Asserted("sigma = E*alpha*dT*constraint; dT is a composed temperature difference, not a registry axis, so the output is not a port monomial"),
         },
 
+        // === Fluids, weather, and acoustics (wave 2) ===
+        "hydrostatic_pressure" => KernelContract {
+            ports: const { &[cur("density", 1), cur("gravity", 1), cur("height", 1)] },
+            output: Monomial,
+        },
+        "buoyant_force" => KernelContract {
+            ports: const { &[cur("density", 1), cur("gravity", 1), cur("volume", 1)] },
+            output: Monomial,
+        },
+        "dynamic_pressure" => KernelContract {
+            ports: const { &[cur("density", 1), cur("velocity", 2)] },
+            output: Monomial,
+        },
+        "drag_force" => KernelContract {
+            ports: const {
+                &[
+                    cur("drag_coefficient", 1),
+                    cur("density", 1),
+                    cur("area", 1),
+                    cur("velocity", 2),
+                ]
+            },
+            output: Monomial,
+        },
+        "aerodynamic_lift" => KernelContract {
+            ports: const {
+                &[
+                    cur("lift_coefficient", 1),
+                    cur("density", 1),
+                    cur("area", 1),
+                    cur("velocity", 2),
+                ]
+            },
+            output: Monomial,
+        },
+        "reynolds_number" => KernelContract {
+            ports: const {
+                &[
+                    cur("density", 1),
+                    cur("velocity", 1),
+                    cur("length", 1),
+                    cur("viscosity", -1),
+                ]
+            },
+            output: Monomial,
+        },
+        "laplace_pressure" => KernelContract {
+            ports: const { &[cur("surface_tension", 1), cur("radius", -1)] },
+            output: Monomial,
+        },
+        "compressibility" => KernelContract {
+            ports: const { &[cur("pressure", 1), cur("bulk_modulus", -1)] },
+            output: Monomial,
+        },
+        "convective_flux" => KernelContract {
+            ports: const {
+                &[cur("h", 0), cur("area", 0), cur("hot", 0), cur("cold", 0)]
+            },
+            output: Asserted("q = h*A*|hot-cold|; the two temperatures are a composed difference over therm.temperature, and the flux-versus-per-tick-energy scale is a reserved unit convention"),
+        },
+        "poiseuille_flow" => KernelContract {
+            ports: const {
+                &[cur("dp", 0), cur("radius", 0), cur("viscosity", 0), cur("length", 0)]
+            },
+            output: Asserted("Q = pi*dP*r^4/(8*mu*L); the kernel computes a volumetric flow rate (volume/time) while the law declares volume, the rate-versus-per-tick convention a reserved decision"),
+        },
+        "speed_of_sound" => KernelContract {
+            ports: const { &[cur("bulk_modulus", 0), cur("density", 0)] },
+            output: Asserted("c = sqrt(K/rho); the square root halves the exponents, outside the integer monomial algebra"),
+        },
+        "ideal_gas_density" => KernelContract {
+            ports: const { &[cur("pressure", 0), cur("temperature", 0)] },
+            output: Asserted("rho = P/(R_s*T); the specific gas constant R_s carries residual dimension, outside the port monomial"),
+        },
+        "thermal_buoyancy" => KernelContract {
+            ports: const {
+                &[cur("t_parcel", 0), cur("t_ambient", 0), cur("gravity", 0)]
+            },
+            output: Asserted("a = g*(T_parcel-T_ambient)/T_ambient; the two temperatures are a composed difference and ratio over therm.temperature, and the declared dimensionless output omits the gravity factor, a reserved convention"),
+        },
+        "saturation_vapor_pressure" => KernelContract {
+            ports: const { &[cur("temperature", 0)] },
+            output: Asserted("affine e_s = e_ref + slope*(T-T_ref); an affine form with a dimensional slope and offset, not a monomial"),
+        },
+        "evaporation_rate" => KernelContract {
+            ports: const {
+                &[cur("e_ambient", 0), cur("e_saturation", 0), cur("wind", 0)]
+            },
+            output: Asserted("E = (a + b*|wind|)*(e_s - e_a); a difference of vapor pressures scaled by a wind function with dimensional constants, not a port monomial"),
+        },
+
         // === Electricity and magnetism (wave 3) ===
         "coulomb_force" => KernelContract {
             ports: const { &[cur("q1", 1), cur("q2", 1), cur("r", -2)] },
