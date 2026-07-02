@@ -193,6 +193,18 @@ range_lo = "1"
 range_hi = "3"
 real = "the Hill equation (Alon, Appendix A); the small-integer set is engine-imposed, the specific n the owner's per-class call"
 
+# --- Respiratory-surface composition axis (R-MEDIUM: the gas-exchange surface a respiratory tissue presents) ---
+
+[[axis]]
+id = "bio.respiratory_surface"
+measures = "gas-exchange surface area a respiratory tissue presents per unit organ development (the area the Fick membrane law exchanges over)"
+unit = "m^2"
+dimension = "area"
+scale = "m^2 (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "proposed bounds [0, 200], reserved-with-basis pending the owner's set (the R-MEDIUM floor is not yet owner-calibrated; basis in the real citation below)"
+real = "West, Respiratory Physiology (human alveolar surface ~70 m^2); fish gill lamellar surface tables; a non-respiratory tissue carries 0, so a body with no respiratory organ presents no exchange area and cannot breathe. A composition axis read sim-side to derive a being's exchange area (the law.membrane_gas_flux area port), the same way bio.energy_density feeds the metabolic reserve"
+
 # --- Derived score axes (the produced outputs of the two fold laws, read by edibility) ---
 
 [[axis]]

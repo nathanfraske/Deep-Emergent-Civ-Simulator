@@ -187,6 +187,11 @@ pub const INTEGRITY: HomeostaticAxisId = HomeostaticAxisId(2);
 /// reserve; the environmental exchange (through the resolved thermal floor) is the reserved coupling
 /// that waits on the located world.
 pub const TEMPERATURE: HomeostaticAxisId = HomeostaticAxisId(3);
+/// The respiration axis: the body's respirable-gas reserve (an oxygen buffer). It drains by metabolism
+/// and is replenished by gas exchange with the ambient medium through the Fick membrane law (R-MEDIUM,
+/// [`crate::medium`]). A being with no respiratory organ presents no exchange surface, takes up nothing,
+/// and suffocates, whatever the medium.
+pub const RESPIRATION: HomeostaticAxisId = HomeostaticAxisId(4);
 
 /// A being's homeostatic state: one reserve [`Stock`] per axis, keyed by axis id in canonical
 /// order so a walk over the reserves is reproducible (R-CANON-WALK). The reserves do not self-
@@ -331,6 +336,20 @@ impl Homeostasis {
             .get_mut(&axis)
             .map(|s| s.deposit(amount))
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Adjust an axis's reserve by a signed delta: deposit when positive, take when negative, held in
+    /// `[0, capacity]`. The medium respiration coupling ([`crate::medium::respire`]) uses this to apply
+    /// the signed Fick gas flux, which is uptake in a richer medium and loss in a poorer one. A no-op
+    /// for an unregistered axis.
+    pub fn adjust(&mut self, axis: HomeostaticAxisId, delta: Fixed) {
+        if let Some(stock) = self.reserves.get_mut(&axis) {
+            if delta >= Fixed::ZERO {
+                stock.deposit(delta);
+            } else {
+                stock.take(Fixed::ZERO - delta);
+            }
+        }
     }
 
     /// Whether every reserve is above its death floor. A body fails the moment one axis falls
