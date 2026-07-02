@@ -1,0 +1,77 @@
+# Consensus Roadmap: the ground-truth order of things (for sign-off)
+
+This reconciles the three ordering artifacts in the repo against what is built in code, into one authoritative sequence, each item cited to where its gate lives. It is a synthesis for the owner to sign off on, not a maintained document; nothing here is committed until you approve it.
+
+The three sources it reconciles:
+
+- **`ROADMAP.md`**, the near-term critical path to a living, talking world (milestones M0 through M4).
+- **`docs/design.md` Part 60**, the full implementation staging (Stage 0 through Stage 14).
+- **`docs/audit.md` Section 3**, the research backlog: every open item tagged `R-XXX` with its site (`Part N`), its prerequisites, and its couplings, plus the resolved-item record (Part 62).
+
+The reconciliation was checked against a direct read of every crate's modules, tests, and the calibration manifest, so "done" below means built and proven in code, not merely planned.
+
+## The headline reconciliation (read this first)
+
+The build did not follow Part 60's stage numbers in order. It followed the research-gate dependency order instead, front-loading the determinism bedrock, the reasoning-and-being core, the physics substrate, and the embodiment stack, because those are the pieces the emergent design cannot be proven without. The consequence is that the actual frontier is best read as a research-gated dependency graph plus the `ROADMAP.md` M-slice, and Part 60's stage numbers are a topic index rather than a build order.
+
+Three divergences the ground-truth read exposes, stated plainly so the sign-off is honest:
+
+- **The code is ahead of `ROADMAP.md`'s prose.** `ROADMAP.md` still says the deep being model is "absent" and the map is "entirely unbuilt." Neither holds: the being model (genome, intrinsic beliefs, axioms, value profile) is wired end to end through `seed_dawn_populations`, and the map generates, classifies biomes, builds a level-of-detail quadtree, and renders in a windowed viewer, proven bit-identical by `crates/world/tests/zoom.rs`. `ROADMAP.md`'s "Where we are" section is stale and should be refreshed.
+- **The code is ahead of the audit's bookkeeping in the determinism cluster.** The audit still lists `R-CMD-ORDER` among the open determinism items, but the mechanism is built (`crates/core/src/command.rs`: `CommandBuffer`, `EventQueue`, the total ordering key). This is the same "mechanism built, item open until consolidated" state that `R-LANG-TYPOLOGY` is in. The audit's resolved count (28) undercounts what code proves; a consolidation pass is owed for `R-CMD-ORDER`, `R-LANG-TYPOLOGY`, and the canonical-walk and reduce helpers.
+- **The physics substrate and embodiment stack are built ahead of their nominal Part 60 stage.** Five physics floors (biology, mechanical, fluids, chem-optics, electricity-and-magnetism) and the full homeostasis-to-controller-to-evolve embodiment chain exist and are tested, though Part 60 places the physics substrate as a Stage 14 concern. They are substrate, proven in isolation, not yet integrated into a running world tick.
+
+So the single biggest truth for sequencing: the engine is a deterministic, serial, CPU, promoted-tier core with a viewable generated map, a deep cognition-and-language core, and a broad shelf of tested-but-not-yet-integrated substrate modules. What stands between it and a running world is not more substrate. It is **owner calibration**, **integration into the canonical runner**, and then the **parallel, persistence, and made-world** tracks.
+
+## Tier A: done (built and proven, research resolved)
+
+Each of these is implemented in code with a determinism or behavioural test, and its research question is resolved in Part 62 unless noted.
+
+- **The determinism bedrock.** Q32.32 `Fixed`, the per-entity counter RNG and the canonical draw-keying schema (`R-RNG-COORD`, site Part 3.2, record 62.15, `ROADMAP.md` M0), the canonical-state boundary that makes a float in canon a compile error (Part 58), the state hash (Part 3.5), the id registry with save-side id continuity, and the append-only event log. Gate met: `crates/core/tests/determinism.rs` holds one-seed-one-world across thread counts.
+- **The command and event-queue substrate.** `CommandBuffer` and `EventQueue` with the total ordering key (`R-CMD-ORDER`, site Part 4.3 and 57). Mechanism built; the audit item awaits consolidation (see the headline divergence).
+- **The GPU canonical-arithmetic foundations.** Fixed-point multiply and divide emulation and the transcendental oracles (exp, ln, sin, cos, atan, asin, pow), proven bit-identical to the CPU path (`R-GPU-CANON-PIN` software half, Part 60 Stage 0, `crates/core/tests/gpu_emulation.rs` and `transcendentals.rs`). Gate remaining: the cross-vendor device run is a confirmation, not a rebuild.
+- **The generated map.** Topology and the 2.5D coordinate model (Part 56), fixed-point fractal worldgen with elevation, moisture, and temperature, biome classification by data-defined ranges, the level-of-detail quadtree (Part 6), and the camera-and-glyph view plus a windowed viewer (Part 14). This is `ROADMAP.md` M1 and Part 60 Stage 2 worldgen, proven by `crates/world/tests/zoom.rs`.
+- **The reasoning-and-being core** (Part 60 Stage 3, the most mature area). The evidence engine (`R-EVIDENCE`, 62.7), recursive theory of mind (`R-TOM-UPDATE`, 62.11), the value-distance metric (`R-VALUE-METRIC`, 62.3), axiomatic belief (`R-AXIOM`, 62.4), the genome and genotype-to-phenotype map (`R-GENOME`, 62.5), being representation (`R-BEING-REP`), and the utility-AI decision layer, wired end to end and exercised by `dawn_seed.rs`, `dawn_lifecycle.rs`, and the false-belief-and-deception battery `tom_battery.rs`.
+- **Language and dialogue.** The naming game over the roughly sixty-five semantic primes (`ROADMAP.md` M3, `sim/tests/primes.rs`), the emergent lexicon and articulation substrate (`R-LANG-DET` 62.12, `R-LANG-MODALITY` 62.13), the typological substrate (`R-LANG-TYPOLOGY`, built in `crates/sim/src/typology.rs`, item open pending consolidation), and modelled dialogue as a speech-act substrate (`R-CONVERSE` 62.14, `ROADMAP.md` M4, `dialogue_steering.rs`).
+- **The physics substrate floors** (`R-PHYS-BIO`, `R-PHYS-MECH`, `R-PHYS-W2`, `R-PHYS-W3`; records 62.16 onward): five data floors and their closed-form fixed-point law kernels, built and tested, the reach-bounding authored layer.
+- **The living-substrate and deep-time modules.** Stocks and flows (Part 15), biosphere generation, the pre-dawn radiation epoch, and the genesis sequence (`R-BIOSPHERE`), the species-lineage tree, and edibility as a measured relation.
+- **The embodiment and behaviour stack.** Homeostatic physiology and affordances, structured anatomy, the per-part body with wounds and fluids (`R-BUILD-PHYS`, `R-WOUND`, `R-FLUID`, 62.20), emergent locomotion, and the evolved controller with homeostatic-survival selection (`R-BEHAVIOR-EVOLVE`, 62.19), including the eastward-scorer steering fix landed this session.
+- **Tier consistency.** The two-tier individual-and-pool model and the conserved-projection registry (`R-TIER-CONSIST`, 62.9), and the resolved institution-function substrate (`R-INST`, 62.8).
+
+## Tier B: the near-term frontier (what to do next), with gates
+
+This is where the consensus order matters most, because the substrate shelf is deep but the running world is thin. Recommended order:
+
+1. **Owner calibration of the reserved values.** The manifest carries 113 reserved entries; 31 are set and 82 remain fail-loud sentinels (`calibration/reserved.toml`, RUNBOOK section 4). Under the Calibrated profile the engine refuses to start on any unset value, so the real (non-dev-fixture) world cannot run until these are set. This is the single largest unblock and gates everything that runs a world rather than a test. Gate: each value is reserved-with-basis at its mechanism site; you set it, the manifest graduates it to `set`.
+2. **Wire the built core into the canonical runner.** `crates/sim/src/runner.rs` carries the physics field layer (Part 5.4, 5.5) with zero authored numbers, and its own doc names the next increment: "the agent cognition tick." The being-and-cognition core exists but is not yet driven by the canonical runner. Gate: integration, not research.
+3. **Close the M1 tail.** Add the hydrology pass `ROADMAP.md` M1 lists as light-or-stubbed, and move biome membership from the in-code `BiomeSet::dev_default` fixture to a data loader (Principle 11). Gate: `R-WEATHER` (site Part 18) is deferred and not required for the hydrology pass; the biome loader is a data-driven-by-default cleanup.
+4. **The open determinism cluster, before any parallelism or persistence.** The audit's eight remaining determinism items, each cited to its site: `R-CANON-WALK` (Part 3.5, primitive built, full sweep open), `R-REDUCE-ORDER` (Part 57, built for the combines touched, full form open), `R-SAVE-SCHEMA` (Part 58, only the id-continuity half built; the rkyv-and-bincode versioned persistence and migration path are not), `R-PROJ-REGISTER` (Part 58, only population, wealth, genome, and axiom register exact projections; belief, ecology, language, and institutions still fold as lossy means), `R-UNITS-PIN` (Part 55, mechanism built, pin open), `R-HARNESS-COVER` (Part 58, extended, the full coarse-versus-fine proof open), `R-GPU-CANON-PIN` (Part 60, the device gate), and `R-CMD-ORDER` (built, consolidation owed). The load-bearing one is `R-PROJ-REGISTER`: it is the hard prerequisite for temporal level of detail. Gate for the whole cluster: `ROADMAP.md`'s "stay serial" risk, the moment a phase is parallelised these become live blockers at once.
+
+## Tier C: engine fidelity in time and breadth (gated on Tier B)
+
+- **`R-TEMPORAL-LOD`** (site Part 32), the adaptive per-region clock, scoped in `docs/temporal_lod_research.md`. Hard prerequisites, cited: `R-PROJ-REGISTER` (load-bearing), `R-HARNESS-COVER`, `R-GPU-CANON-PIN` (the fixed-point sampler), and the inter-region order items `R-CMD-ORDER`, `R-REDUCE-ORDER`, `R-SAVE-SCHEMA`.
+- **`R-AGENT-EXEC`** (site Part 57), event-driven agent execution, scoped in `docs/event_driven_execution_research.md`. Prerequisites: `R-CMD-ORDER` (built) and the deterministic scheduler. It shares one event-queue substrate with `R-TEMPORAL-LOD`, so the two must be built to a single design.
+- **`R-VIEW-ELAB`** (site Part 54), the non-authoritative view elaboration; sits with the level-of-detail foundations and is partly present as the pure-read superfine render.
+
+## Tier D: the made world (Part 60 Stages 6 through 13), the largest new work
+
+Gated on the focus-scale local settlement layer (Part 60 Stage 11), which Part 60 names the keystone and the heaviest single capability, on the scale of Dwarf Fortress's own core loop. The order within this tier follows Part 60: the living world (Stage 6, ecology, climate, economy, geology, with the stocks and biosphere substrate already built), peoples and conflict and deep history (Stage 7), the observation and dramaturg layer (Stage 8), emergent society (Stage 9, institutions and governance and economy already resolved as substrate, plus language drift, magic, combat, and divinity), presentation and modding and adaptive time (Stage 10, which folds in `R-TEMPORAL-LOD`), the local settlement layer (Stage 11), the civilizational physical layer (Stage 12, mechanical power, infrastructure, transport, agriculture), and knowledge and material culture and the social atom (Stage 13).
+
+Content-registry gates that must open for world content to emerge, each a data registry rather than a closed enum (Principle 11), cited to site: `R-EVENT` (Part 7), `R-RELATION` (Part 10), `R-WEATHER` (Part 18), `R-CONTACT` (Part 21), `R-CATASTROPHE` (Part 26), `R-DOMAIN` (Part 38), `R-INFRA` (Part 46), and `R-COMMS` (Part 41).
+
+The gaps-and-holes items ride this tier, several with a buildable half already in code: `R-EMOTION` (transient affect, buildable half in `affect.rs`), `R-SENSORIUM` (channel-gated perception, buildable half in `sensorium.rs`), and `R-AGING`, `R-REST`, `R-REPRO`, `R-CHILDHOOD`, `R-JUSTICE`, `R-LIVELINESS`, `R-TECTONICS`.
+
+## Tier E: the north star (Part 60 Stage 14; Parts 41, 61), the far horizon
+
+The emergent technology design space, gated on the made world (Stages 11 through 13) and the physics substrate being in place. Its first gate is the one still-unimplemented test in the whole workspace: `convergence_without_a_target_is_forced_by_physics` (`crates/sim/tests/steering.rs`, an ignored placeholder whose own guard says the subject "does not exist yet"). Stage 14 must first prove convergence without a target, two isolated cultures reaching the same physical attractor from different seeds, with the convergence explained by physics and not authored bias, checked by the steering audit.
+
+The `R-DEEPTECH` cluster: composition is resolved (`R-DEEPTECH-COMPOSE`, 62.10); the four deeper questions remain open and are, by the owner's standing instruction, to be taken super-deep when reached rather than scoped down now: `R-DEEPTECH-SCIENCE`, `R-DEEPTECH-PHYSICS`, `R-DEEPTECH-DEPTH`, and `R-DEEPTECH-SCALE` (sites Parts 41 and 61). The new steering item `R-EVOLVE-STEER` (site Part 8.4, flagged this session) rides here as well, since the pool-tier controller-evolution wiring it constrains is itself gated on the quantitative genome tier (25.10) and temporal level of detail (Part 32).
+
+## Cross-cutting gates (true at every tier)
+
+- **Owner calibration.** Eighty-two reserved values remain fail-loud. Nothing that runs a real world, as opposed to a dev-fixture test, is unblocked until the values on its path are set. This is the most pervasive gate in the project.
+- **Stay serial.** Every determinism item in Tier B is dormant only while the tick is a single stream. The first parallelised phase makes the whole cluster a live blocker at once.
+- **Tier consistency.** Any kernel that runs on both a promoted individual and a pool representative (the axiom kernel, the controller expression) must run identically on both, the invariant `R-TIER-CONSIST` guarantees and `R-PROJ-REGISTER` extends.
+
+## What I recommend you sign off on
+
+The order above is my synthesis of the consensus. The one genuine fork worth your explicit call is the head of Tier B: whether the immediate next work is (a) owner calibration so a real world can run, (b) wiring the cognition tick into the canonical runner so the built core drives a world at all, or (c) the determinism cluster so the world can later parallelise and persist. My recommendation is (b) then (a) then (c): make the built core run under the canonical runner first, calibrate against it, and hold the determinism cluster until just before parallelism, since the serial tick already replays bit for bit. The three consolidation debts (`R-CMD-ORDER`, `R-LANG-TYPOLOGY`, and the canonical-walk and reduce helpers) and the stale `ROADMAP.md` "Where we are" section are bookkeeping to reconcile whenever convenient, not blockers.
