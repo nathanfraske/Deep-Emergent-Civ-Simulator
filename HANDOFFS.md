@@ -46,6 +46,18 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): parallel perceive, the first real intra-phase per-being parallelism
+
+Following the World::tick scope, the honest finding was that PHASE-level scheduling of the cognition tick buys no parallelism: perceive, converse, gossip, and life_cadence all write the minds/belief hub, so they serialise, and the only independent phases (decide, naming game, drift) are the cheap ones. The owner chose the real throughput lever: INTRA-phase, per-being parallelism, over the population N. On `claude/parallel-perceive`.
+
+**Built.** `World::perceive` (`crates/sim/src/world.rs`) now parallelises its gather pass across `self.workers` threads, mirroring the converse phase's ActionStage pattern. The per-being notice roll is draw-keyed by `(being, trace, clock, PERCEPTION)`, so the hit set is a pure function of state; the inner mind loop is extracted into `gather_trace(&self, ...)` (a pure read of `&World`, which is Sync), the sorted traces are split into contiguous chunks gathered on `std::thread::scope` workers, and the chunks concatenate in order, reproducing the serial hit sequence exactly. The apply pass stays single-threaded in canonical order. Proven bit-identical to the serial gather at 2/3/8/16 workers (`perceive_is_bit_identical_across_worker_counts`, 24 co-located beings, 16 distinct traces), and the full-tick worker sweep still holds.
+
+**Why this is the pattern.** converse already proved the two-pass shape (pure read across workers, then a canonical-order apply); perceive is the second phase to take it, and gossip, decide, drift, and mortality are the remaining candidates (all already gather-then-apply with draw-keyed per-being rolls). converse_language stays serial by design (its intra-tick read-then-write on lexicons is the band-consensus mechanism).
+
+**Where it stopped.** Parallel perceive is green (fmt, workspace clippy, full sim suite) on `claude/parallel-perceive`. Next candidates for the same intra-phase pattern: gossip, decide, drift, mortality. A phase-level World::tick scheduler declaration (determinism documentation, no speedup) stays an optional minor exercise. Collision note: #58 (R-UNITS-PIN) is docs-only, orthogonal to world.rs; R-AGING edits the tick tail, separable from the perceive body edited here.
+
+---
+
 ## 2026-07-02 (continued): the deterministic scheduler's first real tick integration (the runner)
 
 The owner said go ahead. With `World::tick` hot from concurrent R-AGING work, the runner (`crates/sim/src/runner.rs`, low-collision, stable) was the clean surface for the scheduler's first REAL integration. On `claude/scheduler-runner-integration`.
