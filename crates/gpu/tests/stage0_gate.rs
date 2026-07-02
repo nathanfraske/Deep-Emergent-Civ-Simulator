@@ -89,11 +89,19 @@ fn stage0_multiply_is_bit_identical_to_fixed_oracle() {
         if got[i] != want {
             mism += 1;
             if mism <= 5 {
-                eprintln!("mul mismatch a={:#x} b={:#x} got={:#x} want={:#x}", a[i], b[i], got[i], want);
+                eprintln!(
+                    "mul mismatch a={:#x} b={:#x} got={:#x} want={:#x}",
+                    a[i], b[i], got[i], want
+                );
             }
         }
     }
-    assert_eq!(mism, 0, "GPU limb multiply must equal Fixed::mul over all {} cases", a.len());
+    assert_eq!(
+        mism,
+        0,
+        "GPU limb multiply must equal Fixed::mul over all {} cases",
+        a.len()
+    );
 }
 
 #[test]
@@ -122,11 +130,19 @@ fn stage0_divide_is_bit_identical_to_fixed_oracle() {
         if got[i] != want {
             mism += 1;
             if mism <= 5 {
-                eprintln!("div mismatch a={:#x} b={:#x} got={:#x} want={:#x}", a[i], b[i], got[i], want);
+                eprintln!(
+                    "div mismatch a={:#x} b={:#x} got={:#x} want={:#x}",
+                    a[i], b[i], got[i], want
+                );
             }
         }
     }
-    assert_eq!(mism, 0, "GPU limb divide must equal Fixed::div over all {} cases", a.len());
+    assert_eq!(
+        mism,
+        0,
+        "GPU limb divide must equal Fixed::div over all {} cases",
+        a.len()
+    );
 }
 
 #[test]
@@ -148,9 +164,17 @@ fn field_q32_mul_is_bit_identical_to_fixed_oracle() {
         if got[i] != want {
             mism += 1;
             if mism <= 5 {
-                eprintln!("q32_mul mismatch a={:#x} b={:#x} got={:#x} want={:#x}", a[i], b[i], got[i], want);
+                eprintln!(
+                    "q32_mul mismatch a={:#x} b={:#x} got={:#x} want={:#x}",
+                    a[i], b[i], got[i], want
+                );
             }
         }
     }
-    assert_eq!(mism, 0, "field q32_mul must equal Fixed::mul over all {} cases", a.len());
+    assert_eq!(
+        mism,
+        0,
+        "field q32_mul must equal Fixed::mul over all {} cases",
+        a.len()
+    );
 }

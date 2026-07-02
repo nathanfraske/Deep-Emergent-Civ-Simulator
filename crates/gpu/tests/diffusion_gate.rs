@@ -71,7 +71,14 @@ fn diffusion_field_is_bit_identical_cpu_vs_gpu() {
 
     let cpu = cpu_diffuse(&initial, w, h, iters, k);
     let client = cuda_client();
-    let gpu = gpu_diffuse(&client, &initial, w as u32, h as u32, iters as u32, k.to_bits());
+    let gpu = gpu_diffuse(
+        &client,
+        &initial,
+        w as u32,
+        h as u32,
+        iters as u32,
+        k.to_bits(),
+    );
 
     assert_eq!(gpu.len(), cpu.len());
     let mut mism = 0u64;
@@ -83,7 +90,12 @@ fn diffusion_field_is_bit_identical_cpu_vs_gpu() {
             }
         }
     }
-    assert_eq!(mism, 0, "GPU diffusion field must match the CPU reference in every one of {} cells", cpu.len());
+    assert_eq!(
+        mism,
+        0,
+        "GPU diffusion field must match the CPU reference in every one of {} cells",
+        cpu.len()
+    );
 }
 
 #[test]
@@ -101,9 +113,27 @@ fn diffusion_is_invariant_to_tile_size() {
     let initial = initial_field(w, h);
     let client = cuda_client();
 
-    let base = gpu_diffuse(&client, &initial, w as u32, h as u32, iters as u32, k.to_bits());
+    let base = gpu_diffuse(
+        &client,
+        &initial,
+        w as u32,
+        h as u32,
+        iters as u32,
+        k.to_bits(),
+    );
     for tile in [1u32, 4, 8, 32] {
-        let other = gpu_diffuse_tiled(&client, &initial, w as u32, h as u32, iters as u32, k.to_bits(), tile);
-        assert_eq!(other, base, "diffusion result changed with tile edge {tile}");
+        let other = gpu_diffuse_tiled(
+            &client,
+            &initial,
+            w as u32,
+            h as u32,
+            iters as u32,
+            k.to_bits(),
+            tile,
+        );
+        assert_eq!(
+            other, base,
+            "diffusion result changed with tile edge {tile}"
+        );
     }
 }
