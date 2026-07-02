@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): the pool-tier demography adopted into the two-tier world (R-AGING pool tier + R-PROJ-REGISTER), on `claude/find-unblocked-work-dwdpsj`
+
+After the demography substrate (`AgeHistogram`) merged as PR #35, the owner said to continue on (and surface any owner call as a question). The coherent continuation is adopting the substrate into the live two-tier world, so the age distribution is a first-class part of the aggregate tier and the age population is a conserved projection across the tier crossings. The runner-up R-REPRO stays queued (it needs the owner's one Principle-9 preference-direction call).
+
+**Built (`crates/sim/src/lod.rs`).** `Pool` gains an `ages: AgeHistogram` (dropping `Copy`, kept `Clone`); a tracked pool holds `count == ages.total()`, an untracked pool leaves `ages` empty and behaves exactly as before (full back-compat). `Individual` gains `age: Option<u32>`, carried across the tier boundary. New ops: `add_pool_aged`; `promote_at_age` (the member leaves its age bucket and the age travels with the individual); `demote` returns the age to the target pool; `merge_pools` combines the histograms; `age_pools(hazard, seed, cadence)` runs the aggregate demography (survive-then-age, mortality a conserving sink keyed per pool). `state_hash` folds the age fields canonically and `WorldSnapshot` (v2) round-trips them (age as `i64` with `-1` for none, the histogram as a TOML-friendly `(age,count)` vec).
+
+**The conserved projection (R-PROJ-REGISTER).** The invariants harness (`crates/sim/tests/invariants.rs`) registers `age_population` (pooled histogram totals plus aged individuals) and proves it conserved across promote-at-age, demote, and merge, and an exact sink across mortality, alongside the existing population and wealth projections. This is the first aggregate-tier age projection enforced in the standing conservation harness.
+
+**Self-audit caught a real seam before commit.** Mixing an age-tracked and an untracked pool (demoting an aged individual into a plain head-count pool, or merging the two kinds) would silently break `count == ages.total()`. Rather than document it, both paths now fail loud (`demote` and `merge_pools` assert compatibility; `split_pool` and plain `promote` reject an age-tracked pool, directing to the aged variants), each with a `should_panic` test. Age-tracked splitting (which needs an age-partition rule) is the one documented follow-on.
+
+**Gate-green.** 14 `lod` tests (+7) and 4 invariants tests (+1) plus the full sim suite pass; `cargo build` (default members), `fmt --all`, `clippy -D warnings`, and `rustdoc -D warnings` all clean; prose customs clean.
+
+**Where it stopped.** The adoption is built and gate-green. A focused red-team against the guiding star (conservation completeness, determinism and save-format fidelity, steering and guard completeness) runs next; findings fold before merge. R-AGING pool tier now runs inside the two-tier world; still open toward full resolution: the age-tracked split rule, and wiring the life cadence and the pool demography into the real cognition `World::tick` (open for the individual tier too). Counts unchanged (a build increment).
+
+---
+
 ## 2026-07-02 (continued): the pool-tier demography substrate built (R-AGING pool-tier half), on `claude/find-unblocked-work-dwdpsj`
 
 The owner asked to find a piece of work not being actively worked on (the three live threads are the physics kernels, the roadmap, and the GPU standup), surface it, and get it going, then run a red-team against the guiding star (physics in, emergent behaviour out, no authored steering).

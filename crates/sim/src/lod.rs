@@ -24,6 +24,8 @@
 //! The behaviour here (who promotes when, how wealth is apportioned) is not the
 //! point and is not calibrated; the point is that the structural invariants hold.
 
+use crate::decision::Curve;
+use crate::demography::AgeHistogram;
 use civsim_core::{EntityHandle, EntityLocation, Fixed, PoolId, Registry, StableId, StateHasher};
 use serde::{Deserialize, Serialize};
 
@@ -34,17 +36,44 @@ pub struct Individual {
     pub id: StableId,
     /// This individual's share of wealth.
     pub wealth: Fixed,
+    /// This individual's age in life-cadence steps, if it was promoted from an age-tracked
+    /// pool. `None` for an age-untracked individual, so a world that does not model age is
+    /// unchanged. Carried across the tier boundary so promotion and demotion conserve the
+    /// pool's age distribution (design Parts 20, 54; R-AGING pool tier, R-PROJ-REGISTER).
+    pub age: Option<u32>,
 }
 
-/// An aggregate pool of anonymous individuals, tracked as statistics.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An aggregate pool of anonymous individuals, tracked as statistics. A pool may carry an
+/// age distribution ([`AgeHistogram`]); when it does, `count` equals `ages.total()` and the
+/// pool ages and suffers mortality statistically (the aggregate-tier demography of design
+/// Parts 20, 25). An age-untracked pool leaves `ages` empty and behaves as a plain head
+/// count, so existing two-tier worlds are unchanged.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pool {
     /// Pool identity.
     pub id: PoolId,
-    /// How many anonymous individuals the pool represents.
+    /// How many anonymous individuals the pool represents. Equals `ages.total()` whenever the
+    /// pool is age-tracked.
     pub count: u32,
     /// The pool's total wealth.
     pub wealth: Fixed,
+    /// The pool's age distribution, empty for an age-untracked pool.
+    pub ages: AgeHistogram,
+}
+
+impl Pool {
+    /// Whether this pool tracks an age distribution (as opposed to a plain head count).
+    pub fn is_age_tracked(&self) -> bool {
+        self.ages.total() > 0
+    }
+
+    /// Whether this pool holds members but no age distribution (a plain head count). Distinct
+    /// from an empty pool, which can still become age-tracked. Mixing such a pool with an
+    /// age-tracked one would break the `count == ages.total()` invariant, so the operations
+    /// that could mix them reject it.
+    fn is_untracked_with_members(&self) -> bool {
+        self.ages.total() == 0 && self.count > 0
+    }
 }
 
 /// A world of two tiers, plus a set of relationship edges that must never dangle.
@@ -94,12 +123,57 @@ impl TwoTierWorld {
         ind + pool
     }
 
-    /// Add an aggregate pool, returning its id.
+    /// Add an age-untracked aggregate pool (a plain head count), returning its id.
     pub fn add_pool(&mut self, count: u32, wealth: Fixed) -> PoolId {
         let id = PoolId(self.next_pool);
         self.next_pool += 1;
-        self.pools.push(Pool { id, count, wealth });
+        self.pools.push(Pool {
+            id,
+            count,
+            wealth,
+            ages: AgeHistogram::new(),
+        });
         id
+    }
+
+    /// Add an age-tracked aggregate pool from an age distribution, returning its id. The
+    /// pool's head count is the distribution's total, so `count == ages.total()` holds by
+    /// construction (design Parts 20, 25; the aggregate-tier demography).
+    pub fn add_pool_aged(&mut self, ages: AgeHistogram, wealth: Fixed) -> PoolId {
+        let id = PoolId(self.next_pool);
+        self.next_pool += 1;
+        let count = ages.total() as u32;
+        self.pools.push(Pool {
+            id,
+            count,
+            wealth,
+            ages,
+        });
+        id
+    }
+
+    /// Advance the aggregate-tier demography one life cadence over every age-tracked pool,
+    /// returning the total deaths (design Part 20, the R-AGING life-process loop at the pool
+    /// tier). Each tracked pool suffers mortality at each cohort's current age against the
+    /// supplied hazard curve, then the survivors age one step (the standard survive-then-age
+    /// cohort life-table order). Population is conserved as a sink: the total before equals
+    /// the total after plus the returned deaths. The hazard is authored biology entering as
+    /// data (Principle 9); the demographic outcome emerges from it and the seed, keyed per
+    /// pool so two pools roll independently. An age-untracked pool is left untouched.
+    pub fn age_pools(&mut self, hazard: &Curve, seed: u64, cadence: u64) -> i128 {
+        let mut deaths: i128 = 0;
+        for pool in &mut self.pools {
+            if pool.ages.total() == 0 {
+                continue;
+            }
+            let died = pool
+                .ages
+                .apply_mortality(hazard, seed, pool.id.0 as u64, cadence);
+            pool.ages.age_step();
+            pool.count = pool.ages.total() as u32;
+            deaths += died;
+        }
+        deaths
     }
 
     fn pool_index(&self, id: PoolId) -> usize {
@@ -114,10 +188,15 @@ impl TwoTierWorld {
         self.edges.push((a, b));
     }
 
-    /// Promote one member of a pool into a full individual carrying `share` of the
-    /// pool's wealth. Conserves population and wealth.
+    /// Promote one member of an age-untracked pool into a full individual carrying `share`
+    /// of the pool's wealth. Conserves population and wealth. An age-tracked pool must use
+    /// [`Self::promote_at_age`] so the promoted member's age leaves the distribution.
     pub fn promote(&mut self, pool: PoolId, share: Fixed) -> StableId {
         let pi = self.pool_index(pool);
+        assert!(
+            !self.pools[pi].is_age_tracked(),
+            "an age-tracked pool must promote with promote_at_age so the age leaves the distribution"
+        );
         assert!(self.pools[pi].count >= 1, "promoting from an empty pool");
         assert!(share >= Fixed::ZERO, "a promoted share cannot be negative");
         assert!(
@@ -126,17 +205,52 @@ impl TwoTierWorld {
         );
         self.pools[pi].count -= 1;
         self.pools[pi].wealth -= share;
+        self.mint_promoted(share, None)
+    }
 
+    /// Promote one member of a given age out of an age-tracked pool, carrying `share` of the
+    /// pool's wealth and that age into the individual tier. Conserves population, wealth, and
+    /// the pool's age distribution: the member leaves its age bucket, so `count` stays equal
+    /// to `ages.total()`, and the age travels with the individual so a later demotion returns
+    /// it exactly (design Part 54, R-PROJ-REGISTER, the age projection across the tier
+    /// boundary).
+    pub fn promote_at_age(&mut self, pool: PoolId, share: Fixed, age: u32) -> StableId {
+        let pi = self.pool_index(pool);
+        assert!(
+            self.pools[pi].ages.count_at(age) >= 1,
+            "promoting an age the pool holds none of"
+        );
+        assert!(share >= Fixed::ZERO, "a promoted share cannot be negative");
+        assert!(
+            self.pools[pi].wealth >= share,
+            "share exceeds the pool's wealth; the partition would go negative"
+        );
+        let removed = self.pools[pi].ages.remove(age, 1);
+        debug_assert_eq!(removed, 1);
+        self.pools[pi].count -= 1;
+        self.pools[pi].wealth -= share;
+        self.mint_promoted(share, Some(age))
+    }
+
+    /// Mint a promoted individual with the given wealth share and optional age, registering
+    /// its location. The shared tail of [`Self::promote`] and [`Self::promote_at_age`].
+    fn mint_promoted(&mut self, share: Fixed, age: Option<u32>) -> StableId {
         let id = self.reg.mint();
         let handle = EntityHandle(self.next_handle);
         self.next_handle += 1;
         self.reg.set_location(id, EntityLocation::Promoted(handle));
-        self.individuals.push(Individual { id, wealth: share });
+        self.individuals.push(Individual {
+            id,
+            wealth: share,
+            age,
+        });
         id
     }
 
     /// Demote an individual back into a pool. Conserves population and wealth, and
-    /// keeps the id resolvable (now `Pooled`), so edges referencing it stay valid.
+    /// keeps the id resolvable (now `Pooled`), so edges referencing it stay valid. An
+    /// individual carrying an age (one promoted from an age-tracked pool) returns that age to
+    /// the target pool's distribution, so `count` stays equal to `ages.total()`.
     pub fn demote(&mut self, id: StableId, into: PoolId) {
         let idx = self
             .individuals
@@ -145,8 +259,24 @@ impl TwoTierWorld {
             .unwrap_or_else(|| panic!("no individual {id:?}"));
         let ind = self.individuals.swap_remove(idx);
         let pi = self.pool_index(into);
+        // Keep the count-equals-distribution-total invariant: an aged individual may only
+        // join an age-tracked (or empty) pool, and an unaged one only an untracked (or empty)
+        // pool. Mixing would leave count and ages.total() out of step.
+        match ind.age {
+            Some(_) => assert!(
+                !self.pools[pi].is_untracked_with_members(),
+                "cannot demote an age-tracked individual into an untracked pool"
+            ),
+            None => assert!(
+                self.pools[pi].ages.total() == 0,
+                "cannot demote an unaged individual into an age-tracked pool"
+            ),
+        }
         self.pools[pi].count += 1;
         self.pools[pi].wealth += ind.wealth;
+        if let Some(age) = ind.age {
+            self.pools[pi].ages.add(age, 1);
+        }
         self.reg.set_location(
             id,
             EntityLocation::Pooled {
@@ -156,24 +286,39 @@ impl TwoTierWorld {
         );
     }
 
-    /// Merge pool `b` into pool `a`, removing `b`. Conserves population and wealth,
-    /// and repoints any registry location that named `b` so a demoted entity's
-    /// reference does not dangle to a removed pool (audit C-06).
+    /// Merge pool `b` into pool `a`, removing `b`. Conserves population and wealth, combines
+    /// their age distributions age by age, and repoints any registry location that named `b`
+    /// so a demoted entity's reference does not dangle to a removed pool (audit C-06).
     pub fn merge_pools(&mut self, a: PoolId, b: PoolId) -> PoolId {
         let bi = self.pool_index(b);
         let moved = self.pools.remove(bi);
         let ai = self.pool_index(a);
+        // An age-tracked pool and an untracked one cannot merge without breaking the
+        // count-equals-distribution-total invariant (an empty pool is compatible with either).
+        let mixed = (self.pools[ai].is_age_tracked() && moved.is_untracked_with_members())
+            || (moved.is_age_tracked() && self.pools[ai].is_untracked_with_members());
+        assert!(
+            !mixed,
+            "cannot merge an age-tracked pool with an untracked one"
+        );
         self.pools[ai].count += moved.count;
         self.pools[ai].wealth += moved.wealth;
+        self.pools[ai].ages.merge(&moved.ages);
         self.reg.repoint_pool(b, a);
         a
     }
 
     /// Split a pool, moving `take_count` members and `take_wealth` into a new pool.
     /// Conserves population and wealth, and rejects a share that would drive the
-    /// source pool negative (audit C-07).
+    /// source pool negative (audit C-07). Age-tracked splitting (partitioning the age
+    /// distribution, which needs a rule for which ages move) is a follow-on, so this rejects
+    /// an age-tracked source.
     pub fn split_pool(&mut self, src: PoolId, take_count: u32, take_wealth: Fixed) -> PoolId {
         let si = self.pool_index(src);
+        assert!(
+            !self.pools[si].is_age_tracked(),
+            "splitting an age-tracked pool is not yet supported (the age partition rule is a follow-on)"
+        );
         assert!(
             self.pools[si].count >= take_count,
             "splitting more than the pool holds"
@@ -241,6 +386,10 @@ impl TwoTierWorld {
         for i in inds {
             h.write_stable(i.id);
             h.write_fixed(i.wealth);
+            // A presence flag then the value, so an absent age is distinct from a present
+            // age zero without a wrapping collision at the ceiling.
+            h.write_u32(i.age.is_some() as u32);
+            h.write_u32(i.age.unwrap_or(0));
         }
         let mut pools: Vec<&Pool> = self.pools.iter().collect();
         pools.sort_by_key(|p| p.id.0);
@@ -248,6 +397,7 @@ impl TwoTierWorld {
             h.write_u32(p.id.0);
             h.write_u32(p.count);
             h.write_fixed(p.wealth);
+            p.ages.hash_into(&mut h);
         }
         let mut edges = self.edges.clone();
         edges.sort();
@@ -275,6 +425,7 @@ impl TwoTierWorld {
                 .map(|i| IndRepr {
                     id: i.id.0,
                     wealth_bits: i.wealth.to_bits(),
+                    age: i.age.map(|a| a as i64).unwrap_or(-1),
                 })
                 .collect(),
             pools: self
@@ -284,6 +435,7 @@ impl TwoTierWorld {
                     id: p.id.0,
                     count: p.count,
                     wealth_bits: p.wealth.to_bits(),
+                    ages: p.ages.buckets().collect(),
                 })
                 .collect(),
             edges: self
@@ -313,6 +465,7 @@ impl TwoTierWorld {
                 .map(|i| Individual {
                     id: StableId(i.id),
                     wealth: Fixed::from_bits(i.wealth_bits),
+                    age: if i.age < 0 { None } else { Some(i.age as u32) },
                 })
                 .collect(),
             pools: s
@@ -322,6 +475,7 @@ impl TwoTierWorld {
                     id: PoolId(p.id),
                     count: p.count,
                     wealth: Fixed::from_bits(p.wealth_bits),
+                    ages: AgeHistogram::from_pairs(p.ages.iter().copied()),
                 })
                 .collect(),
             edges: s
@@ -351,23 +505,28 @@ pub struct WorldSnapshot {
 }
 
 impl WorldSnapshot {
-    /// The current snapshot schema version.
-    pub const VERSION: u32 = 1;
+    /// The current snapshot schema version. Version 2 adds per-individual age and per-pool
+    /// age distributions (the aggregate-tier demography).
+    pub const VERSION: u32 = 2;
 }
 
-/// A promoted individual in a snapshot.
+/// A promoted individual in a snapshot. `age` is the individual's age in life-cadence steps,
+/// or `-1` for an age-untracked individual (so the field is always present and TOML-friendly).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IndRepr {
     pub id: u64,
     pub wealth_bits: i64,
+    pub age: i64,
 }
 
-/// An aggregate pool in a snapshot.
+/// An aggregate pool in a snapshot. `ages` is the pool's age distribution as `(age, count)`
+/// pairs in ascending-age order, empty for an age-untracked pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PoolRepr {
     pub id: u32,
     pub count: u32,
     pub wealth_bits: i64,
+    pub ages: Vec<(u32, u64)>,
 }
 
 /// A relationship edge in a snapshot.
@@ -576,5 +735,126 @@ mod tests {
         assert_eq!(w.population(), pop0);
         assert_eq!(w.total_wealth(), wealth0);
         assert_eq!(w.pools.len(), 2);
+    }
+
+    fn flat_hazard(num: i64, den: i64) -> Curve {
+        Curve::new([(Fixed::from_int(0), Fixed::from_ratio(num, den))])
+    }
+
+    #[test]
+    fn aged_promote_then_demote_restores_the_distribution() {
+        // The age crosses the tier boundary and comes back: promoting a 40-year-old removes
+        // it from the pool's distribution, and demoting returns it, so the pool's age
+        // structure and head count are exactly as they started. (The registry legitimately
+        // retains the minted id as Pooled, so this checks the distribution, not the full
+        // state hash, the same conservation the untracked promote-then-demote test checks.)
+        let mut w = TwoTierWorld::new();
+        let ages0 = AgeHistogram::from_pairs([(10, 4), (40, 2)]);
+        let p = w.add_pool_aged(ages0.clone(), Fixed::from_int(60));
+        let wealth0 = w.total_wealth();
+
+        let x = w.promote_at_age(p, Fixed::from_int(5), 40);
+        assert_eq!(
+            w.pools[0].ages.count_at(40),
+            1,
+            "the promoted age left the pool"
+        );
+        assert_eq!(w.pools[0].count as i128, w.pools[0].ages.total());
+
+        w.demote(x, p);
+        assert_eq!(
+            w.pools[0].ages, ages0,
+            "demotion restores the exact age distribution"
+        );
+        assert_eq!(w.pools[0].count as i128, w.pools[0].ages.total());
+        assert_eq!(
+            w.total_wealth(),
+            wealth0,
+            "wealth is conserved across the round trip"
+        );
+    }
+
+    #[test]
+    fn age_pools_is_a_conserving_sink() {
+        let mut w = TwoTierWorld::new();
+        w.add_pool_aged(
+            AgeHistogram::from_pairs([(30, 500), (60, 500)]),
+            Fixed::ZERO,
+        );
+        let before = w.pools[0].ages.total();
+        let deaths = w.age_pools(&flat_hazard(3, 10), 0x5EED, 0);
+        assert!(deaths > 0);
+        assert_eq!(
+            w.pools[0].ages.total() + deaths,
+            before,
+            "survivors plus deaths equal the population before"
+        );
+        assert_eq!(
+            w.pools[0].count as i128,
+            w.pools[0].ages.total(),
+            "the head count follows the distribution"
+        );
+    }
+
+    #[test]
+    fn snapshot_round_trips_the_age_distribution() {
+        let mut w = TwoTierWorld::new();
+        let p = w.add_pool_aged(
+            AgeHistogram::from_pairs([(5, 3), (25, 7)]),
+            Fixed::from_int(40),
+        );
+        let x = w.promote_at_age(p, Fixed::from_int(4), 25);
+        w.add_edge(x, x);
+        let before = w.state_hash();
+
+        let snap = w.to_snapshot();
+        assert_eq!(snap.schema_version, WorldSnapshot::VERSION);
+        let text = toml::to_string(&snap).expect("aged snapshot serializes");
+        let parsed: WorldSnapshot = toml::from_str(&text).expect("aged snapshot parses");
+        let restored = TwoTierWorld::from_snapshot(&parsed);
+        assert_eq!(
+            restored.state_hash(),
+            before,
+            "the age distribution and the promoted age survive the round trip"
+        );
+        assert_eq!(restored.pools[0].ages.count_at(5), 3);
+        assert_eq!(restored.individuals[0].age, Some(25));
+    }
+
+    #[test]
+    #[should_panic]
+    fn splitting_an_age_tracked_pool_is_rejected() {
+        let mut w = TwoTierWorld::new();
+        let p = w.add_pool_aged(AgeHistogram::from_pairs([(10, 5)]), Fixed::ZERO);
+        w.split_pool(p, 2, Fixed::ZERO);
+    }
+
+    #[test]
+    #[should_panic]
+    fn plain_promote_on_an_age_tracked_pool_is_rejected() {
+        let mut w = TwoTierWorld::new();
+        let p = w.add_pool_aged(AgeHistogram::from_pairs([(10, 5)]), Fixed::ZERO);
+        w.promote(p, Fixed::ZERO);
+    }
+
+    #[test]
+    #[should_panic]
+    fn demoting_an_aged_individual_into_an_untracked_pool_is_rejected() {
+        // The invariant guard: an aged individual joining a plain head-count pool would leave
+        // count and ages.total() out of step, so it is a loud error, not a silent corruption.
+        let mut w = TwoTierWorld::new();
+        let tracked = w.add_pool_aged(AgeHistogram::from_pairs([(10, 3)]), Fixed::ZERO);
+        let untracked = w.add_pool(5, Fixed::ZERO);
+        let x = w.promote_at_age(tracked, Fixed::ZERO, 10);
+        w.demote(x, untracked);
+    }
+
+    #[test]
+    #[should_panic]
+    fn merging_a_tracked_and_an_untracked_pool_is_rejected() {
+        let mut w = TwoTierWorld::new();
+        let tracked = w.add_pool_aged(AgeHistogram::from_pairs([(10, 3)]), Fixed::ZERO);
+        let untracked = w.add_pool(5, Fixed::ZERO);
+        w.merge_pools(tracked, untracked);
     }
 }
