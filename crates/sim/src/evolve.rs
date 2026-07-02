@@ -212,6 +212,7 @@ fn scoring_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
+            backing_component: Some("bio.water_fraction".to_string()),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 60),
             exertion_drain: Fixed::from_ratio(1, 200),
@@ -246,6 +247,7 @@ fn scoring_body() -> BodyPlan {
         },
         senses: vec![],
         locomotion: vec![1],
+        organs: vec![],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -317,7 +319,7 @@ fn episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i3
     let reg = scoring_reg();
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
-    let homeo = Homeostasis::new(&reg, Fixed::ONE);
+    let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
     let mut walker = Walker::new(
         StableId(1),
         Coord3::ground(0, 0),
@@ -370,6 +372,7 @@ fn dawn_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
+            backing_component: Some("bio.water_fraction".to_string()),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 150),
             exertion_drain: Fixed::from_ratio(1, 300),
@@ -390,7 +393,7 @@ fn full_episode_survival_dir(
     let reg = dawn_reg();
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
-    let homeo = Homeostasis::new(&reg, Fixed::ONE);
+    let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 6, 9, 1) {
         field.add(WATER, c);
@@ -517,7 +520,7 @@ fn thermal_run(
             StableId(1),
             start,
             scoring_body(),
-            Homeostasis::new(&reg, Fixed::ONE),
+            Homeostasis::from_mass(&reg, Fixed::ONE),
             controller.clone(),
         ),
         BeingThermal {

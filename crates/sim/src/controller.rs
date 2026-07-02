@@ -481,7 +481,7 @@ mod tests {
     }
 
     fn drained(reg: &HomeostaticRegistry, ticks: usize) -> Homeostasis {
-        let mut h = Homeostasis::new(reg, Fixed::ONE);
+        let mut h = Homeostasis::from_mass(reg, Fixed::ONE);
         for _ in 0..ticks {
             h.metabolize(reg, Fixed::ZERO);
         }
@@ -534,7 +534,7 @@ mod tests {
         let l = layout(0);
         let c = Controller::zeros(&l);
         let reg = HomeostaticRegistry::dev_default();
-        let homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
         let input = l.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
         let (out, _) = c.evaluate(&input, &[]);
         // Every output is zero, so the top decision has zero activation: the being idles.
@@ -574,7 +574,7 @@ mod tests {
         }
         let c = Controller::from_weights(l.n_in(), l.n_out(), l.hidden(), w);
         let reg = HomeostaticRegistry::dev_default();
-        let homeo = Homeostasis::new(&reg, Fixed::from_ratio(3, 4));
+        let homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(3, 4));
         let mut dirs = BTreeMap::new();
         dirs.insert(ENERGY, (Fixed::from_ratio(1, 2), Fixed::from_ratio(-1, 2)));
         dirs.insert(WATER, (Fixed::from_ratio(-1, 3), Fixed::from_ratio(1, 3)));

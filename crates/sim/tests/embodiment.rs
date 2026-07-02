@@ -50,6 +50,7 @@ fn plan(mass: (i64, i64), legs: usize, weapons: usize) -> BodyPlan {
             development: Fixed::from_ratio(1, 2),
         }],
         locomotion: (0..legs).map(|_| 1u16).collect(),
+        organs: vec![],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -72,7 +73,7 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
     let fluids = FluidRegistry::dev_default();
 
     let mut body = Body::from_body_plan(&plan((3, 4), 4, 0), BLOOD, &params);
-    let mut homeo = Homeostasis::new(&reg, Fixed::from_ratio(3, 4));
+    let mut homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(3, 4));
 
     // Refresh integrity from the body (the derived mirror, design Part 35).
     homeo.set_level(INTEGRITY, body.integrity(&fluids));
@@ -143,7 +144,7 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
     w[4 * n_in + bias] = Fixed::ONE; // strike wants to fire (from the bias)
     let controller = Controller::from_weights(n_in, layout.n_out(), 0, w);
 
-    let homeo = Homeostasis::new(&reg, Fixed::from_ratio(1, 2));
+    let homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 2));
     let input = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
     let (out, _) = controller.evaluate(&input, &[]);
     let decision = layout.decide(&out, &afford.afforded(&armed)).unwrap();

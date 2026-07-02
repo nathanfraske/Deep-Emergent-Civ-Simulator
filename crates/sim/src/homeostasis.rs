@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use crate::anatomy::BodyPlan;
+use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::stocks::Stock;
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
@@ -64,9 +64,20 @@ pub struct HomeostaticAxisDef {
     pub id: HomeostaticAxisId,
     /// A legibility handle, never read by the mechanism.
     pub name: String,
-    /// The reserve capacity as a multiple of body mass: a bigger body holds a larger reserve.
-    /// RESERVED. Basis: the reserve size relative to body mass from the Part 20 physiology, per
-    /// axis (an energy store and a water store scale differently with mass).
+    /// The biology-floor axis id whose tissue this reserve is backed by (`bio.energy_density`,
+    /// `bio.water_fraction`, and the rest the floor declares), or `None` for a derived non-draining axis
+    /// (integrity, temperature) whose capacity is a fixed unit and whose level is sourced each tick from
+    /// elsewhere. On the canonical anatomy-derived path ([`Homeostasis::new`]) the reserve's capacity is
+    /// the development-weighted sum over the being's organs of their composition on this floor axis: a
+    /// being carries this reserve because it bears energy-dense (or water-rich) tissue, its function
+    /// DERIVED from composition, never a tag on an organ kind. The id is data (a floor axis, the
+    /// `Substance::vector` key convention), so a reserve backed by protein or a respiratory-surface axis
+    /// (R-MEDIUM) is a data edit, not a code change (Principle 11).
+    pub backing_component: Option<String>,
+    /// The reserve capacity as a multiple of body mass, used ONLY by the labelled development fallback
+    /// [`Homeostasis::from_mass`], never by the canonical anatomy-derived path. RESERVED. Basis: the
+    /// reserve size relative to body mass from the Part 20 physiology; retained so tests and fixtures
+    /// that do not model organs still run, not as a production default.
     pub capacity_per_mass: Fixed,
     /// The base drain per tick, as a fraction of capacity, from resting metabolism. RESERVED.
     /// Basis: the basal metabolic rate of Part 20 mapped onto the base tick the owner set (one
@@ -98,6 +109,7 @@ impl HomeostaticRegistry {
                 HomeostaticAxisDef {
                     id: ENERGY,
                     name: "energy".to_string(),
+                    backing_component: Some("bio.energy_density".to_string()),
                     capacity_per_mass: Fixed::ONE,
                     base_drain: Fixed::from_ratio(1, 400),
                     exertion_drain: Fixed::from_ratio(1, 100),
@@ -106,6 +118,7 @@ impl HomeostaticRegistry {
                 HomeostaticAxisDef {
                     id: WATER,
                     name: "water".to_string(),
+                    backing_component: Some("bio.water_fraction".to_string()),
                     capacity_per_mass: Fixed::from_ratio(6, 10),
                     base_drain: Fixed::from_ratio(1, 300),
                     exertion_drain: Fixed::from_ratio(1, 400),
@@ -124,6 +137,7 @@ impl HomeostaticRegistry {
         reg.axes.push(HomeostaticAxisDef {
             id: INTEGRITY,
             name: "integrity".to_string(),
+            backing_component: None,
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
@@ -145,6 +159,7 @@ impl HomeostaticRegistry {
             axes: vec![HomeostaticAxisDef {
                 id: TEMPERATURE,
                 name: "temperature".to_string(),
+                backing_component: None,
                 capacity_per_mass: Fixed::ONE,
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
@@ -182,10 +197,51 @@ pub struct Homeostasis {
 }
 
 impl Homeostasis {
-    /// A being at full reserves, capacities set from its body mass and the registry. A larger body
-    /// carries a larger reserve of each axis (`capacity_per_mass * body_mass`), so size buys
-    /// endurance, a consequence of the body rather than an authored trait.
-    pub fn new(reg: &HomeostaticRegistry, body_mass: Fixed) -> Homeostasis {
+    /// A being at full reserves, capacities derived from its ANATOMY (the canonical path). For each
+    /// axis backed by a biology-floor composition axis, the reserve capacity is the development-weighted
+    /// sum over the being's organs of that organ's composition on the axis: `Σ organ.development *
+    /// organs.organ_composition(organ.kind).component(axis_id)`. So a reserve exists to the extent the
+    /// body bears tissue that stores it, function DERIVED from composition against the biology floor,
+    /// never a tag (Principle 8). A huge, mostly-armored creature that rolled few or small organs holds
+    /// small metabolic reserves; a body with no organ contributing to an axis has zero capacity there
+    /// and fails that axis at once (the armored-giant case the owner raised). A non-backed axis
+    /// (integrity, temperature; `backing_component == None`) is a unit-capacity derived reserve whose
+    /// level is sourced each tick from elsewhere, not stored in tissue.
+    pub fn new(
+        reg: &HomeostaticRegistry,
+        plan: &BodyPlan,
+        organs: &BodyPlanRegistry,
+    ) -> Homeostasis {
+        let mut reserves = BTreeMap::new();
+        for axis in &reg.axes {
+            let cap = match &axis.backing_component {
+                Some(axis_id) => {
+                    let mut sum = Fixed::ZERO;
+                    for organ in &plan.organs {
+                        let share = organs
+                            .organ_composition(organ.kind)
+                            .map(|comp| comp.component(axis_id))
+                            .unwrap_or(Fixed::ZERO);
+                        let backed = organ.development.checked_mul(share).unwrap_or(Fixed::ZERO);
+                        sum = sum.saturating_add(backed);
+                    }
+                    sum
+                }
+                // A derived, non-stored axis (integrity, temperature): unit capacity, level set each tick.
+                None => Fixed::ONE,
+            };
+            // A reserve holds [0, cap], starts full, and does not regenerate on its own (rate 0).
+            reserves.insert(axis.id, Stock::new(cap, cap, Fixed::ZERO));
+        }
+        Homeostasis { reserves }
+    }
+
+    /// A labelled DEVELOPMENT FALLBACK: capacities set from body mass alone (`capacity_per_mass *
+    /// body_mass`), for tests and fixtures that do not model organs. This is the pre-anatomy path and
+    /// is NOT the production constructor: sourcing a reserve from body mass leaks size back into the
+    /// reserve, which is exactly what the anatomy-derived [`Homeostasis::new`] removes. Retained so the
+    /// physiology, locomotion, and thermal fixtures still run without building a full organ endowment.
+    pub fn from_mass(reg: &HomeostaticRegistry, body_mass: Fixed) -> Homeostasis {
         let mass = body_mass.clamp(Fixed::ZERO, Fixed::ONE);
         let mut reserves = BTreeMap::new();
         for axis in &reg.axes {
@@ -470,6 +526,7 @@ mod tests {
                 development: Fixed::from_ratio(1, 2),
             }],
             locomotion,
+            organs: vec![],
             temperament: Temperament {
                 boldness: Fixed::from_ratio(1, 2),
                 exploration: Fixed::from_ratio(1, 2),
@@ -483,7 +540,7 @@ mod tests {
     #[test]
     fn a_body_starts_at_full_reserves() {
         let reg = HomeostaticRegistry::dev_default();
-        let h = Homeostasis::new(&reg, Fixed::ONE);
+        let h = Homeostasis::from_mass(&reg, Fixed::ONE);
         assert_eq!(h.level(ENERGY), Fixed::ONE, "energy starts full");
         assert_eq!(h.level(WATER), Fixed::ONE, "water starts full");
         assert!(h.is_alive(&reg));
@@ -492,8 +549,8 @@ mod tests {
     #[test]
     fn a_bigger_body_holds_a_larger_reserve() {
         let reg = HomeostaticRegistry::dev_default();
-        let big = Homeostasis::new(&reg, Fixed::ONE);
-        let small = Homeostasis::new(&reg, Fixed::from_ratio(1, 4));
+        let big = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let small = Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 4));
         // Both start full (occupancy ONE), but the raw amount the big body holds is greater.
         assert!(
             big.amount(ENERGY) > small.amount(ENERGY),
@@ -504,7 +561,7 @@ mod tests {
     #[test]
     fn metabolism_drains_and_eventually_kills() {
         let reg = HomeostaticRegistry::dev_default();
-        let mut h = Homeostasis::new(&reg, Fixed::ONE);
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
         // Rest (no exertion): the reserves fall over time.
         let mut alive_ticks = 0;
         for _ in 0..100_000 {
@@ -521,8 +578,8 @@ mod tests {
     #[test]
     fn exertion_drains_energy_faster_than_rest() {
         let reg = HomeostaticRegistry::dev_default();
-        let mut resting = Homeostasis::new(&reg, Fixed::ONE);
-        let mut working = Homeostasis::new(&reg, Fixed::ONE);
+        let mut resting = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let mut working = Homeostasis::from_mass(&reg, Fixed::ONE);
         for _ in 0..50 {
             resting.metabolize(&reg, Fixed::ZERO);
             working.metabolize(&reg, Fixed::ONE);
@@ -536,7 +593,7 @@ mod tests {
     #[test]
     fn ingesting_restores_a_reserve() {
         let reg = HomeostaticRegistry::dev_default();
-        let mut h = Homeostasis::new(&reg, Fixed::ONE);
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
         for _ in 0..50 {
             h.metabolize(&reg, Fixed::ONE);
         }
@@ -549,7 +606,7 @@ mod tests {
     fn death_is_per_axis() {
         // A tiny water capacity relative to its drain kills by thirst though energy is fine.
         let reg = HomeostaticRegistry::dev_default();
-        let mut h = Homeostasis::new(&reg, Fixed::ONE);
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
         // Keep energy topped up while never drinking.
         let mut dead_of = None;
         for _ in 0..100_000 {
@@ -596,7 +653,7 @@ mod tests {
     fn physiology_is_deterministic() {
         let reg = HomeostaticRegistry::dev_default();
         let run = || {
-            let mut h = Homeostasis::new(&reg, Fixed::from_ratio(3, 4));
+            let mut h = Homeostasis::from_mass(&reg, Fixed::from_ratio(3, 4));
             for t in 0..200 {
                 let exertion = if t % 2 == 0 { Fixed::ONE } else { Fixed::ZERO };
                 h.metabolize(&reg, exertion);
@@ -607,5 +664,202 @@ mod tests {
             (h.amount(ENERGY).to_bits(), h.amount(WATER).to_bits())
         };
         assert_eq!(run(), run(), "the same body and intake replay bit for bit");
+    }
+
+    // The anatomy-derived (composition-derived) path: capacities come from the being's organs, not
+    // from body mass. Function is DERIVED from tissue composition against the biology floor, never a
+    // tag: an energy-dense organ backs the energy reserve, a water-rich one the hydration reserve.
+
+    /// An organ of a given registry kind and development (its size, the capacity-bearing quantity).
+    fn organ(kind: u16, dev: (i64, i64)) -> Part {
+        Part {
+            kind,
+            development: Fixed::from_ratio(dev.0, dev.1),
+        }
+    }
+
+    /// A body carrying a given organ set. Body mass is set independently and large on purpose, so the
+    /// tests can show reserves do NOT track mass. Locomotion is the rooted mark (irrelevant here).
+    fn organ_body(mass: (i64, i64), organs: Vec<Part>) -> BodyPlan {
+        let mut b = body(mass, vec![ROOTED_MODE]);
+        b.organs = organs;
+        b
+    }
+
+    #[test]
+    fn capacity_is_derived_from_organ_composition() {
+        // The dev registry: fat-body (id 0) is energy_density ONE, water_fraction 1/10; water-store
+        // (id 2) is energy_density ZERO, water_fraction ONE. A body with one full fat-body holds a
+        // full energy reserve and only a tenth of a water reserve, straight from the composition.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        let plan = organ_body((1, 2), vec![organ(0, (1, 1))]); // one fat-body at full development
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(
+            h.capacity(ENERGY),
+            Fixed::ONE,
+            "a full fat-body backs a full energy reserve (development ONE * energy_density ONE)"
+        );
+        assert_eq!(
+            h.capacity(WATER),
+            Fixed::from_ratio(1, 10),
+            "the same fat-body backs only a tenth of a water reserve (water_fraction 1/10)"
+        );
+    }
+
+    #[test]
+    fn an_energy_dense_organ_backs_energy_not_water() {
+        // A pure water-store (id 2): energy_density ZERO, water_fraction ONE. It backs the water
+        // reserve fully and the energy reserve not at all, so a creature of only water-store tissue has
+        // no energy reserve and fails the energy axis at once. Function is derived, never tagged.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        let plan = organ_body((1, 2), vec![organ(2, (1, 1))]); // one full water-store
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(
+            h.capacity(WATER),
+            Fixed::ONE,
+            "water-store backs water fully"
+        );
+        assert_eq!(
+            h.capacity(ENERGY),
+            Fixed::ZERO,
+            "and backs energy not at all: no energy-dense tissue, no energy reserve"
+        );
+        assert_eq!(
+            h.dead_axis(&reg),
+            Some(ENERGY),
+            "with no energy-backing organ it has no energy reserve and dies on that axis"
+        );
+    }
+
+    #[test]
+    fn an_armored_giant_with_few_organs_holds_small_reserves() {
+        // The owner's case: a huge, mostly-armored creature that rolled few or small organs holds SMALL
+        // metabolic reserves, while a small, organ-rich body holds large ones. Reserves derive from
+        // anatomy, not from body mass, so size does not buy endurance on its own.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        // A giant: maximum body mass, but a single tiny fat-body (development 1/8).
+        let giant = organ_body((1, 1), vec![organ(0, (1, 8))]);
+        // A small body: a quarter the mass, but a full fat-body.
+        let small_rich = organ_body((1, 4), vec![organ(0, (1, 1))]);
+        let hg = Homeostasis::new(&reg, &giant, &organs);
+        let hs = Homeostasis::new(&reg, &small_rich, &organs);
+        assert!(
+            giant.body_mass > small_rich.body_mass,
+            "the giant is by far the larger body"
+        );
+        assert!(
+            hg.capacity(ENERGY) < hs.capacity(ENERGY),
+            "yet the giant holds the smaller energy reserve: reserves derive from organs, not mass"
+        );
+    }
+
+    #[test]
+    fn a_body_with_no_organs_has_no_metabolic_reserves() {
+        // No organs contributing to a backed axis, no reserve of it. A body with an empty organ set
+        // has zero energy and water capacity and fails the first backed axis at once.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        let plan = organ_body((1, 1), vec![]);
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(h.capacity(ENERGY), Fixed::ZERO);
+        assert_eq!(h.capacity(WATER), Fixed::ZERO);
+        assert!(
+            !h.is_alive(&reg),
+            "an organ-less body carries no metabolic reserve and is not viable"
+        );
+    }
+
+    #[test]
+    fn organ_backed_capacity_sums_over_organs_and_scales_with_development() {
+        // Capacity is the development-weighted sum over organs: two energy-dense organs back more
+        // energy reserve than one, and a larger organ backs more than a smaller one of the same kind.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        // fat-body (id 0, energy_density ONE) at half development: energy capacity 1/2.
+        let one = Homeostasis::new(&reg, &organ_body((1, 2), vec![organ(0, (1, 2))]), &organs);
+        // two organs contributing to energy: fat-body 1/2 plus glycogen-store (id 1, energy_density
+        // 3/4) at 1/2, energy capacity 1/2 + 3/8 = 7/8.
+        let two = Homeostasis::new(
+            &reg,
+            &organ_body((1, 2), vec![organ(0, (1, 2)), organ(1, (1, 2))]),
+            &organs,
+        );
+        assert_eq!(one.capacity(ENERGY), Fixed::from_ratio(1, 2));
+        assert_eq!(two.capacity(ENERGY), Fixed::from_ratio(7, 8));
+        assert!(
+            two.capacity(ENERGY) > one.capacity(ENERGY),
+            "more energy-backing tissue, a larger energy reserve"
+        );
+    }
+
+    #[test]
+    fn a_derived_axis_has_unit_capacity_regardless_of_organs() {
+        // A non-backed axis (backing_component None), integrity or temperature, is a unit-capacity
+        // derived reserve whose level is sourced each tick from elsewhere. Its capacity does not depend
+        // on the organ set, so an organ-less body still carries a full integrity axis to be refreshed.
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_embodied();
+        let plan = organ_body((1, 1), vec![]); // no organs at all
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(
+            h.capacity(INTEGRITY),
+            Fixed::ONE,
+            "integrity is a derived unit-capacity axis, independent of organs"
+        );
+        assert_eq!(
+            h.capacity(ENERGY),
+            Fixed::ZERO,
+            "while the organ-backed metabolic axes are empty"
+        );
+    }
+
+    #[test]
+    fn anatomy_derived_reserves_are_deterministic() {
+        let organs = BodyPlanRegistry::dev_default();
+        let reg = HomeostaticRegistry::dev_default();
+        let plan = organ_body((3, 4), vec![organ(0, (1, 2)), organ(2, (1, 4))]);
+        let run = || {
+            let h = Homeostasis::new(&reg, &plan, &organs);
+            (h.capacity(ENERGY).to_bits(), h.capacity(WATER).to_bits())
+        };
+        assert_eq!(run(), run(), "the same anatomy derives the same reserves");
+    }
+
+    #[test]
+    fn a_reserve_can_key_off_any_floor_axis_as_pure_data() {
+        // The hardening proof (Principle 11): a reserve backed by a biology-floor axis the default
+        // fixtures never use (`bio.protein_fraction`) works with DATA ALONE. No enum variant, no match
+        // arm, no struct field is touched: the composition and the backing are keyed off floor axis
+        // ids, the `Substance::vector` convention, so the reserve vocabulary grows with the floor's
+        // data, never a code change. A future respiratory-surface axis (R-MEDIUM) enters the same way.
+        use crate::anatomy::{OrganKindDef, TissueComposition};
+        let mut organs = BodyPlanRegistry::dev_default();
+        organs.organs = vec![OrganKindDef {
+            id: 0,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[("bio.protein_fraction", Fixed::ONE)]),
+        }];
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: HomeostaticAxisId(9),
+                name: "protein".to_string(),
+                backing_component: Some("bio.protein_fraction".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let plan = organ_body((1, 2), vec![organ(0, (1, 1))]);
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(
+            h.capacity(HomeostaticAxisId(9)),
+            Fixed::ONE,
+            "a protein-backed reserve derives from a protein-rich organ, keyed off the floor axis id"
+        );
     }
 }
