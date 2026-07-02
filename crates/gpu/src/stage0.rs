@@ -32,6 +32,7 @@
 //! confined op set agrees bit-for-bit. The device gate (`tests/stage0_gate.rs`) is the empirical
 //! confirmation and the guard against an implementation bug in the emulation.
 
+use cubecl::cpu::{CpuDevice, CpuRuntime};
 use cubecl::cuda::{CudaDevice, CudaRuntime};
 use cubecl::prelude::*;
 
@@ -42,6 +43,16 @@ pub type CudaClient = ComputeClient<CudaRuntime>;
 /// call only when a device is present (the gate tests self-skip unless `CIVSIM_GPU` is set).
 pub fn cuda_client() -> CudaClient {
     CudaRuntime::client(&CudaDevice::default())
+}
+
+/// The concrete CubeCL CPU-backend compute client type.
+pub type CpuClient = ComputeClient<CpuRuntime>;
+
+/// A CubeCL CPU-backend compute client. It runs the same `#[cube]` kernels through a completely
+/// independent codegen path (MLIR/LLVM, no GPU), so agreement between this and the CUDA backend is
+/// cross-backend bit-identity evidence (the multi-vendor Stage 0 residual). Needs no device.
+pub fn cpu_client() -> CpuClient {
+    CpuRuntime::client(&CpuDevice)
 }
 
 /// The pinned Q32.32 multiply, `emu_mul` (see `crates/core/tests/gpu_emulation.rs`) as a `#[cube]`
@@ -254,7 +265,7 @@ fn join(lo: &[u32], hi: &[u32]) -> Vec<i64> {
 /// Elementwise pinned Q32.32 multiply on the GPU: `out[i]` = Fixed::mul bits of `a[i]` and `b[i]`,
 /// with `a`, `b`, and the result carried as raw `i64` Fixed bit patterns. Bit-identical to
 /// `Fixed::mul` (the Stage 0 contract). `a` and `b` must have equal length.
-pub fn gpu_mul(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
+pub fn gpu_mul<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
     assert_eq!(a.len(), b.len(), "gpu_mul: mismatched input lengths");
     let n = a.len();
     if n == 0 {
@@ -272,7 +283,7 @@ pub fn gpu_mul(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
     let threads = 256u32;
     let blocks = (n as u32).div_ceil(threads);
     unsafe {
-        emu_mul_kernel::launch::<CudaRuntime>(
+        emu_mul_kernel::launch::<R>(
             client,
             CubeCount::Static(blocks, 1, 1),
             CubeDim::new_1d(threads),
@@ -292,7 +303,7 @@ pub fn gpu_mul(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
 /// Elementwise pinned Q32.32 divide on the GPU: `out[i]` = Fixed::div bits of `a[i]` by `b[i]`,
 /// carried as raw `i64` Fixed bit patterns. Bit-identical to `Fixed::div`. Every `b[i]` must be
 /// non-zero (the divide-by-zero precondition mirrors `Fixed::div`). `a` and `b` must have equal length.
-pub fn gpu_div(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
+pub fn gpu_div<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
     assert_eq!(a.len(), b.len(), "gpu_div: mismatched input lengths");
     let n = a.len();
     if n == 0 {
@@ -310,7 +321,7 @@ pub fn gpu_div(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
     let threads = 256u32;
     let blocks = (n as u32).div_ceil(threads);
     unsafe {
-        emu_div_kernel::launch::<CudaRuntime>(
+        emu_div_kernel::launch::<R>(
             client,
             CubeCount::Static(blocks, 1, 1),
             CubeDim::new_1d(threads),

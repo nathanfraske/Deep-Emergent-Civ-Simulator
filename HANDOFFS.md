@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): the cross-backend determinism gate (CUDA vs CubeCL CPU backend), red-teamed
+
+The owner asked to scope and knock out the next GPU compute stand-up step with a red-team review after. The chosen step (in the GPU lane, not touching physics or the roadmap implementation) was the cross-backend determinism gate, which attacks R-GPU-CANON-PIN's standing "only CUDA is proven" residual. On `claude/gpu-cross-backend`.
+
+**Built.** Stood up the CubeCL CPU backend (the `cpu` feature, cubecl-cpu, an MLIR/LLVM host codegen path independent of CUDA/NVRTC) as a second backend: `cpu_client()`/`CpuClient` in `crates/gpu/src/stage0.rs`, and the mul/div/exp launchers made generic over `R: Runtime` (the CUDA path is unchanged; genericity only selects which backend compiles the same kernel). The gate `crates/gpu/tests/cross_backend.rs` runs the pinned multiply and divide on BOTH backends over 40k-plus corner-and-sweep cases and asserts each equals the `crates/core` Fixed oracle, so the two independent codegen paths agree bit for bit. Passes.
+
+**Honest finding from the gate.** The transcendental kernels do NOT yet run on the CPU backend: their more complex control flow trips a panic in cubecl-cpu's constant-propagation pass (`cubecl-opt`), which appears to be an upstream cubecl optimizer bug rather than a kernel defect (the CUDA backend proves the transcendentals bit-identical; the panic is inside cubecl's own pass). Not filed upstream or reduced to a reproducer here, so the gate's scope is limited to the arithmetic and the doc says "appears".
+
+**Red-team (adversarial review agent).** No bit-divergence found on the CUDA backend, the ports are faithful, verified by exhaustive/large-sample emulation of the corners the device sweeps miss (sin/cos `n` near the i64 extremes, the isqrt/`d==one` edge, powi overflow in the unconditional squaring, `scale_pow2` saturation across the full exp `k` range, the i32-vs-i64 seams). Three honesty notes folded: softened the "upstream compiler bug" claim to "appears to be"; added a module-doc caveat that where the oracle narrows an index to i32 (exp `k`, sin/cos `n`, ln `e`) the kernels keep i64 and bit-identity rests on a verified range bound; and documented the `powi(0, n<0)` divide-by-zero precondition. The arithmetic-shift assumption (`i64 >>` must be arithmetic) is covered by the existing cross-vendor Stage 0 caveat.
+
+**Docs.** `CONSENSUS_ROADMAP.md` reconciled (the Tier-A GPU item now states the cross-backend arithmetic proof and the transcendental CPU-backend limitation; R-GPU-CANON-PIN removed from the open determinism cluster, eight to seven, and from the R-TEMPORAL-LOD prereqs). A stop-gate hook enforces the roadmap update on any source/design change; banked to memory (`consensus-roadmap-gate`).
+
+**Where it stopped, and what is next.** The cross-backend arithmetic gate is merged. GPU-lane residuals still open: the transcendental cross-backend confirmation (awaits a cubecl-cpu fix or a wgpu backend), a general u128 `Fixed::sqrt` GPU primitive (asin uses a domain-limited u64 isqrt), and a true multi-vendor device run (Vulkan/Metal/DX12/ROCm). The mul/div DRY (three q32_mul copies) remains a noted cleanup.
+
+---
+
 ## 2026-07-02: anatomy-derived homeostatic reserves built, red-teamed, and merged (#28); R-MEDIUM scoped
 
 The owner-directed emergent-physiology item (roadmap Tier B, backlog task #21), reframed in the prior session: reserve capacity must derive from a being's organs rather than its body mass, and an organ's function must be DERIVED from its tissue composition against the biology floor, never an authored tag (a Principle 8 template). The owner signed off "Derived from tissue composition", on the condition a red-team agent review it. Built, red-teamed, hardened, and merged this session.
