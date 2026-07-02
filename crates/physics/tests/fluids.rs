@@ -33,13 +33,13 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // axes, so it merges onto the mechanical floor and the whole revalidates.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
-    // 38 mechanical + 17 fluids axes; 19 + 16 laws; 2 + 2 substances.
+    // 38 mechanical + 17 fluids axes; 20 + 16 laws; 2 + 2 substances.
     assert_eq!(
         reg.axis_count(),
         55,
         "the mechanical and fluids axes together"
     );
-    assert_eq!(reg.law_count(), 35, "the wave-1 and wave-2 fluid laws");
+    assert_eq!(reg.law_count(), 36, "the wave-1 and wave-2 fluid laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
     // water carry values only on existing axes and participate only in existing laws.

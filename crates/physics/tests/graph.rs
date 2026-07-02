@@ -215,12 +215,16 @@ dimension = "current"
 
 #[test]
 fn the_mechanical_floor_migrates_and_names_two_arms_on_one_axis() {
-    // The mechanical floor binds 18 kernels (law.impact stays legacy pending a compound split),
-    // and its monomial contracts all pass the dimensional check at load. law.lever names its two
-    // arms as distinct ports on the one arm-length axis, the mechanical two-participant case.
+    // The mechanical floor is fully migrated: all 20 laws bind a kernel (the former law.impact
+    // compound is now the monomial law.kinetic_energy and law.impulse), and every contract passes
+    // the dimensional check at load. law.lever names its two arms as distinct ports on the one
+    // arm-length axis, the mechanical two-participant case; law.impulse names its two masses.
     let reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     let bound = reg.laws().filter(|l| !l.kernel.is_empty()).count();
-    assert_eq!(bound, 18, "18 of the 19 mechanical laws are migrated");
+    assert_eq!(
+        bound, 20,
+        "all 20 mechanical laws are migrated, none legacy"
+    );
     let lever = reg.law("law.lever").unwrap();
     let arm_ports: Vec<&str> = lever
         .ports
@@ -233,9 +237,21 @@ fn the_mechanical_floor_migrates_and_names_two_arms_on_one_axis() {
         vec!["effort_arm", "load_arm"],
         "the lever reads the arm-length axis as two distinct roles"
     );
+    // law.impulse is the other two-participant case: the striker and target masses on the mass axis.
+    let impulse = reg.law("law.impulse").expect("law.impulse migrated");
+    let mass_roles: Vec<&str> = impulse
+        .ports
+        .iter()
+        .filter(|p| p.axis == "mech.mass")
+        .map(|p| p.role.as_str())
+        .collect();
+    assert_eq!(mass_roles, vec!["striker_mass", "target_mass"]);
     // The migrated mechanical laws read only ground axes (no produced-axis edges this pass), so
-    // they derive to tier 1.
+    // they derive to tier 1; the compound id is retired.
     assert_eq!(reg.derived_tier("law.contact_pressure"), Some(1));
+    assert_eq!(reg.derived_tier("law.kinetic_energy"), Some(1));
+    assert_eq!(reg.derived_tier("law.impulse"), Some(1));
+    assert!(reg.law("law.impact").is_none(), "the compound is retired");
 }
 
 #[test]

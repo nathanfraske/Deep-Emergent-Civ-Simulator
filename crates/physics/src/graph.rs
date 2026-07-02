@@ -102,9 +102,10 @@ const fn classset(role: &'static str, exponent: i8) -> PortContract {
 }
 
 /// The fixed contract for a kernel id, or `None` if the kernel has no contract yet (a legacy
-/// kernel whose laws are not checked). All five floors are migrated onto this table (biology,
-/// mechanics and materials, fluids, chemistry and optics, electricity and magnetism); the one
-/// legacy law is `law.impact`, held back pending its compound kinetic-energy-plus-impulse split.
+/// kernel whose laws are not checked). All five floors are fully migrated onto this table (biology,
+/// mechanics and materials, fluids, chemistry and optics, electricity and magnetism), including the
+/// former `law.impact` compound, now split into the monomial `law.kinetic_energy` and `law.impulse`.
+/// No law is legacy; every law binds a contract and is dimensionally checked at load.
 pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
     use OutputCheck::*;
     Some(match kernel {
@@ -164,7 +165,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
                     cur("contact_area", 0),
                 ]
             },
-            output: Asserted("depth = delivered_energy/(specific_cut_energy*area); delivered_energy is the composed output of law.impact, not a registry axis, so the output is not a monomial over the declared ports"),
+            output: Asserted("depth = delivered_energy/(specific_cut_energy*area); delivered_energy is the composed output of law.kinetic_energy, not a registry axis, so the output is not a monomial over the declared ports"),
         },
         "bend_stress" => KernelContract {
             ports: const {
@@ -199,6 +200,21 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
         },
         "kinetic_energy" => KernelContract {
             ports: const { &[cur("mass", 1), cur("velocity", 2)] },
+            output: Monomial,
+        },
+        "impulse" => KernelContract {
+            // The reduced mass mu = striker_mass/(1 + striker_mass/target_mass) is dimensionally a
+            // mass (the target-mass ratio is dimensionless), so the output momentum reduces to
+            // striker_mass^1 * velocity^1; target_mass and the restitution factor shape the
+            // magnitude but carry exponent 0. The two masses are two participants on the mass axis.
+            ports: const {
+                &[
+                    cur("striker_mass", 1),
+                    cur("target_mass", 0),
+                    cur("velocity", 1),
+                    cur("restitution", 0),
+                ]
+            },
             output: Monomial,
         },
         "lever" => KernelContract {
