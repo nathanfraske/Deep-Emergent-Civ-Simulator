@@ -36,12 +36,29 @@
 //! later field-to-cognition coupling reads the same-tick thermal state. The two sides carry disjoint
 //! mutable state and share only [`StableId`], so the composition is additive rather than a merge of
 //! contended state, and the composite [`Runner::state_hash`] folds the field-side hash and then the
-//! world's canonical hash in a pinned order. Honest limits held here: there is no field-to-cognition
-//! or cognition-to-field data flow yet (temperature is not a percept, and no chosen action moves a
-//! coordinate), and the world hash does not yet fold the being lifecycle (genomes, ages, affect) or
-//! the dialogue log, so the composite is not a complete canonical hash of all being state until those
-//! later increments land. The field layer is one field (temperature) so far, the pattern the moisture,
-//! wind, and resource fields follow.
+//! world's canonical hash in a pinned order. Honest limits held here for the cognition path: the
+//! cognition [`World`] reads no field state yet (a being's temperature is not a percept to the
+//! dialogue tier, and no dialogue move relocates a being), and the world hash does not yet fold the
+//! being lifecycle (genomes, ages, affect) or the dialogue log, so the composite is not a complete
+//! canonical hash of all being state until those later increments land. The field layer is one field
+//! (temperature) so far, the pattern the moisture, wind, and resource fields follow.
+//!
+//! A second sub-phase couples the field to embodied behaviour on the evolved-controller substrate, the
+//! physics-in-and-behaviour-out path (Part 8.4, R-BEHAVIOR-EVOLVE). A runner built with
+//! [`Runner::with_embodiment`] owns an [`Embodiment`]: a population of located beings whose movement is
+//! driven by their evolved controllers ([`crate::locomotion`], [`crate::controller`]), not an authored
+//! policy. Each tick, after the field step and the body-thermal exchange, a pure comfort-band map
+//! ([`comfort_fraction`]) turns each being's absolute core temperature into a temperature homeostatic
+//! reserve in `[0, 1]`, per being from its own reserved comfort band, and the being's controller reads
+//! that reserve and issues a movement affordance; the beings' new coordinates re-sync the located index
+//! so the next tick's thermal exchange reads where they moved. This closes the loop from physics to
+//! physiology to behaviour to physics with no authored heading. In this first increment the controller
+//! reads temperature only as a scalar comfort, with no directional thermal percept, so an uncomfortable
+//! being explores (an undirected, seed-keyed heading) and a comfortable one rests, and directed
+//! thermotaxis is an emergent consequence of moving-while-uncomfortable under survival rather than a
+//! wired rule. The comfort band's set point and half-range are reserved per-race physiology (Part 20),
+//! the beings' controllers are expressed and (in the full engine) selected by survival, and the
+//! composite hash folds each being's position, reserves, and controller state after the world fold.
 //!
 //! The steering boundary the canonical runner holds (Principle 9): the world phases it drives are the
 //! emergent, data-driven ones (belief, dialogue, gossip, language), and the emergent-behaviour source
@@ -53,7 +70,11 @@
 //! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
 //! deliberative tier is properly built on the evolved substrate.
 
+use crate::anatomy::BodyPlan;
+use crate::controller::ControllerLayout;
+use crate::homeostasis::{AffordanceRegistry, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
+use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::world::World;
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{Coord3, TileMap};
@@ -172,6 +193,144 @@ impl Field {
     }
 }
 
+/// A located being's reserved thermal physiology: the viable core-temperature band the comfort-band
+/// map reads, and the being's core temperature at spawn. Per being, so a world differentiates the band
+/// by race (Principle 11): the mechanism is fixed, these values are data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BeingThermal {
+    /// The set point of the viable core-temperature band, the temperature at which comfort is full.
+    /// RESERVED. Basis: the race's homeostatic core-temperature set point (Part 20 physiology).
+    pub setpoint: Fixed,
+    /// The half-range of the survivable band: comfort falls linearly from full at the set point to zero
+    /// a half-range away, and a being carried a full half-range past the set point has fallen through
+    /// its temperature floor and dies. RESERVED. Basis: the race's survivable core-temperature
+    /// half-range around the set point (Part 20 death conditions).
+    pub half_band: Fixed,
+    /// The being's absolute core temperature at spawn, a physical state (not a reserved calibration),
+    /// on the `therm.temperature` axis, from which the field-driven exchange proceeds.
+    pub initial_temp: Fixed,
+}
+
+/// The comfort-band map: an absolute core temperature and a viable band to a temperature homeostatic
+/// reserve fraction in `[0, 1]`. Full comfort (`ONE`) at the set point, falling linearly to zero a
+/// half-range away and clamped there, so it is even in the deviation from the set point (a temperature
+/// the same distance above or below the set point yields the same comfort) and authors no direction. A
+/// pure fixed-point function: no RNG, no camera, and no notion of what a being should do about being
+/// cold. A degenerate zero half-range reads as comfortable only exactly at the set point.
+pub fn comfort_fraction(body_temp: Fixed, band: &BeingThermal) -> Fixed {
+    let dev = (body_temp - band.setpoint).abs();
+    if band.half_band <= Fixed::ZERO {
+        return if dev == Fixed::ZERO {
+            Fixed::ONE
+        } else {
+            Fixed::ZERO
+        };
+    }
+    Fixed::ONE - dev.div(band.half_band).clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// A bounded open plane the size of the field: every in-bounds tile is passable at unit cost, and a
+/// tile off the field is impassable, so a being stays on the field its thermal exchange reads. Pure
+/// physics (a passability-and-cost gate), no route and no behaviour; the map-backed terrain with real
+/// biomes and elevation is the located-world increment that follows.
+struct BoundedPlane {
+    width: i32,
+    height: i32,
+}
+
+impl Terrain for BoundedPlane {
+    fn passable(&self, c: Coord3, _body: &BodyPlan) -> bool {
+        c.x >= 0 && c.x < self.width && c.y >= 0 && c.y < self.height
+    }
+
+    fn cost(&self, _c: Coord3) -> Fixed {
+        Fixed::ONE
+    }
+}
+
+/// The embodied-being population coupled to the field on the evolved-controller substrate (Part 8.4,
+/// R-BEHAVIOR-EVOLVE). It owns the located beings ([`Walker`], each with its evolved controller), the
+/// data-defined physiology and affordance registries and the controller layout derived from them, the
+/// movement-physics parameters, the resource field the beings perceive, per-being reserved thermal
+/// bands, and the locomotion RNG seed. The mechanism is fixed Rust; the controllers, the registries,
+/// the bands, and the parameters are data (Principle 11). The runner ticks this as a sub-phase after
+/// the field, and the embodiment never reaches back into the field beyond the coordinates it publishes.
+pub struct Embodiment {
+    walkers: Vec<Walker>,
+    thermal: BTreeMap<StableId, BeingThermal>,
+    homeo: HomeostaticRegistry,
+    afford: AffordanceRegistry,
+    layout: ControllerLayout,
+    params: LocomotionParams,
+    resources: ResourceField,
+    seed: u64,
+}
+
+impl Embodiment {
+    /// A new, empty embodiment over a temperature-bearing physiology registry, an affordance registry,
+    /// the movement parameters, a controller hidden width (zero for a reaction norm), and a locomotion
+    /// seed. The controller layout is derived from the two registries, so a caller builds or expresses
+    /// its beings' controllers against [`Embodiment::layout`]. The resource field starts empty: this
+    /// first increment gives the beings no directional thermal percept, so thermotaxis is emergent
+    /// rather than sensed.
+    ///
+    /// The registry must carry the [`TEMPERATURE`] axis, and that axis must not self-drain (its base
+    /// and exertion draws must be zero), because the reserve is set each tick from the body core
+    /// temperature rather than metabolised. Both are fail-loud here: the silent-zero hazard (an
+    /// unregistered axis would make the comfort-band map a no-op) and the double-drain hazard (a
+    /// self-draining axis would double-count the reserve the map already sets).
+    pub fn new(
+        homeo: HomeostaticRegistry,
+        afford: AffordanceRegistry,
+        params: LocomotionParams,
+        hidden: usize,
+        seed: u64,
+    ) -> Embodiment {
+        let axis = homeo.axis(TEMPERATURE).expect(
+            "the embodiment physiology registry must carry the TEMPERATURE axis, or the comfort-band \
+             map would write a reserve that is never read (the silent-zero hazard)",
+        );
+        assert!(
+            axis.base_drain == Fixed::ZERO && axis.exertion_drain == Fixed::ZERO,
+            "the TEMPERATURE axis must not self-drain: its reserve is set each tick from the body core \
+             temperature, so a nonzero metabolic draw would double-count (the double-drain hazard)"
+        );
+        let layout = ControllerLayout::new(&homeo, &afford, hidden);
+        Embodiment {
+            walkers: Vec::new(),
+            thermal: BTreeMap::new(),
+            homeo,
+            afford,
+            layout,
+            params,
+            resources: ResourceField::new(),
+            seed,
+        }
+    }
+
+    /// The controller layout derived from this embodiment's registries, against which a caller builds
+    /// or expresses its beings' controllers (their dimensions must match).
+    pub fn layout(&self) -> &ControllerLayout {
+        &self.layout
+    }
+
+    /// Add a located being with its evolved controller and its reserved thermal band. The being's
+    /// temperature reserve is seeded from its spawn core temperature through the comfort-band map, so it
+    /// begins physiologically consistent with the field it stands in.
+    pub fn add(&mut self, mut walker: Walker, band: BeingThermal) {
+        walker
+            .homeostasis
+            .set_level(TEMPERATURE, comfort_fraction(band.initial_temp, &band));
+        self.thermal.insert(walker.id, band);
+        self.walkers.push(walker);
+    }
+
+    /// The located beings, for reading and rendering (a pure read).
+    pub fn walkers(&self) -> &[Walker] {
+        &self.walkers
+    }
+}
+
 /// The canonical runner: the temperature field, the located population, and their deterministic
 /// coupling. Constructed with an explicit [`FieldCalib`] (no authored default).
 pub struct Runner {
@@ -188,10 +347,17 @@ pub struct Runner {
     /// ([`Runner::with_world`]). The world carries disjoint mutable state, its own seed, and its own
     /// canonical hash; this runner never reaches into it beyond ticking it and folding its hash.
     world: Option<World>,
+    /// The embodied-being population coupled to the field, ticked as a fixed sub-phase after the
+    /// body-thermal exchange and before the cognition world. `None` for a runner without embodied
+    /// beings, `Some` for the coupled runner ([`Runner::with_embodiment`]). Its beings share the
+    /// runner's `body_temp` and `index` (they are the located population), and the coupling reads the
+    /// field only through the comfort-band map, writing back only the beings' coordinates.
+    embodiment: Option<Embodiment>,
 }
 
 impl Runner {
-    /// A field-only runner over a field with the given reserved calibrations (no cognition world).
+    /// A field-only runner over a field with the given reserved calibrations (no cognition world, no
+    /// embodied beings).
     pub fn new(field: Field, calib: FieldCalib) -> Runner {
         Runner {
             clock: 0,
@@ -200,6 +366,7 @@ impl Runner {
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
             world: None,
+            embodiment: None,
         }
     }
 
@@ -230,6 +397,41 @@ impl Runner {
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
             world: Some(world),
+            embodiment: None,
+        }
+    }
+
+    /// A runner coupled to an embodied-being population on the evolved-controller substrate (Part 8.4,
+    /// R-BEHAVIOR-EVOLVE): its beings are the located population, their movement driven by their evolved
+    /// controllers, and the field drives their physiology through the comfort-band map each tick. The
+    /// beings' spawn coordinates and core temperatures seed the located index and the body-temperature
+    /// map, so the field-thermal exchange and the coupling act on the same population. This adds no
+    /// authored heading and no new RNG phase (locomotion's exploration keys on the existing
+    /// [`civsim_core::Phase::EXPLORE`]), so the coupled runner reproduces bit for bit.
+    ///
+    /// The behaviour source is the evolved controller, never an authored policy, so the Principle 9
+    /// steering boundary holds by construction: there is no drive-and-action repertoire on this path,
+    /// only the heritable controller each being carries.
+    pub fn with_embodiment(field: Field, calib: FieldCalib, embodiment: Embodiment) -> Runner {
+        let mut body_temp = BTreeMap::new();
+        let mut index = LocationIndex::new();
+        for w in &embodiment.walkers {
+            let init = embodiment
+                .thermal
+                .get(&w.id)
+                .map(|b| b.initial_temp)
+                .unwrap_or(Fixed::ZERO);
+            body_temp.insert(w.id, init);
+            index.place(OccupantId::being(w.id), w.coord());
+        }
+        Runner {
+            clock: 0,
+            field,
+            calib,
+            index,
+            body_temp,
+            world: None,
+            embodiment: Some(embodiment),
         }
     }
 
@@ -259,11 +461,17 @@ impl Runner {
         self.world.as_ref()
     }
 
+    /// The coupled embodied-being population, if any (a pure read, for tests and rendering).
+    pub fn embodiment(&self) -> Option<&Embodiment> {
+        self.embodiment.as_ref()
+    }
+
     /// One canonical tick, in a pinned within-tick order: step the field, let each located being
     /// exchange heat with its cell (Newton convective coupling toward the local field temperature,
-    /// beings walked in canonical id order), then tick the composed cognition world as the fixed next
-    /// sub-phase. The field phases run first so that a later field-to-cognition coupling reads the
-    /// same-tick thermal state; no input batch crosses the seam yet.
+    /// beings walked in canonical id order), run the embodiment coupling sub-phase (comfort-band map to
+    /// evolved-controller locomotion to index re-sync), then tick the composed cognition world as the
+    /// fixed final sub-phase. The field phases run first so the embodiment coupling reads the same-tick
+    /// thermal state; the cognition world runs last and shares no data across its seam yet.
     pub fn step(&mut self) {
         self.field.step(&self.calib);
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
@@ -275,16 +483,63 @@ impl Runner {
                 self.body_temp.insert(id, next);
             }
         }
+        if self.embodiment.is_some() {
+            self.step_embodiment();
+        }
         if let Some(world) = self.world.as_mut() {
             world.tick(&[]);
         }
         self.clock += 1;
     }
 
+    /// The embodiment coupling sub-phase: map each being's field-driven core temperature to its
+    /// temperature reserve through the comfort-band map (physics to physiology), let its evolved
+    /// controller drive one step of locomotion (physiology to behaviour), and re-sync the located index
+    /// to the beings' new coordinates (behaviour to physics). The comfort-band map is pure, and the
+    /// locomotion draws its exploration heading from the being-and-tick-keyed RNG, so the sub-phase
+    /// authors no heading and reproduces bit for bit. Distinct fields of the runner are borrowed
+    /// disjointly, so the field, the body-temperature map, the located index, and the embodiment are
+    /// touched without contention.
+    fn step_embodiment(&mut self) {
+        let (width, height) = self.field.dims();
+        let terrain = BoundedPlane { width, height };
+        let Some(emb) = self.embodiment.as_mut() else {
+            return;
+        };
+        // (1) Physics to physiology: the comfort-band map turns each being's core temperature into its
+        // temperature reserve, per being from its own reserved band. No behaviour, no RNG.
+        for w in emb.walkers.iter_mut() {
+            if let (Some(&bt), Some(band)) = (self.body_temp.get(&w.id), emb.thermal.get(&w.id)) {
+                w.homeostasis
+                    .set_level(TEMPERATURE, comfort_fraction(bt, band));
+            }
+        }
+        // (2) Physiology to behaviour: the evolved controllers drive one locomotion step over the being
+        // slice (move-or-rest, and when moving with no directional percept an undirected explore).
+        locomotion::step(
+            &mut emb.walkers,
+            &emb.homeo,
+            &emb.layout,
+            &emb.afford,
+            &terrain,
+            &emb.resources,
+            &emb.params,
+            emb.seed,
+            self.clock,
+        );
+        // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
+        // tick's thermal exchange reads where they moved.
+        for w in emb.walkers.iter() {
+            self.index.place(OccupantId::being(w.id), w.coord());
+        }
+    }
+
     /// The canonical state hash: the clock, the field, and every located being's temperature in id
-    /// order, then (for a composed runner) the world's canonical hash folded in a pinned position. A
-    /// run reproduces this bit for bit; it is independent of thread count and camera. The world hash
-    /// is left byte-identical to [`crate::world::World::state_hash`]; a field-only runner omits it.
+    /// order, then (for a composed runner) the world's canonical hash, then (for a coupled runner) each
+    /// embodied being's position, reserves, and controller hidden state in id order. A run reproduces
+    /// this bit for bit; it is independent of thread count and camera. The world hash is left
+    /// byte-identical to [`crate::world::World::state_hash`]; a runner without a world or an embodiment
+    /// omits that side, so a field-only runner's hash is unchanged by this composition.
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
@@ -297,6 +552,21 @@ impl Runner {
             let wh = world.state_hash();
             h.write_u64((wh >> 64) as u64);
             h.write_u64(wh as u64);
+        }
+        if let Some(emb) = &self.embodiment {
+            let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
+            ordered.sort_by_key(|w| w.id);
+            for w in ordered {
+                h.write_stable(w.id);
+                h.write_fixed(w.x);
+                h.write_fixed(w.y);
+                for axis in &emb.homeo.axes {
+                    h.write_fixed(w.homeostasis.level(axis.id));
+                }
+                for hv in &w.hidden {
+                    h.write_fixed(*hv);
+                }
+            }
         }
         h.finish()
     }

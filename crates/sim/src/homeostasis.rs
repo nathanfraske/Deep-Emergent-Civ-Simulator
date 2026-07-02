@@ -132,6 +132,27 @@ impl HomeostaticRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for the thermal coupling: a single temperature axis whose reserve is a
+    /// two-sided comfort band. Like integrity, it does not self-drain (its base and exertion draws are
+    /// zero); its level is set each tick from the located body core temperature through the comfort-band
+    /// map (`crate::runner`), so a temperature outside the viable band is a physical state the evolved
+    /// controller reads, and a body carried a full half-band past its set point (a zero comfort
+    /// fraction) has fallen through the floor and dies. Isolating temperature (no energy or water axis)
+    /// lets the thermal coupling be exercised and tested without a metabolic-starvation confound. Not
+    /// owner values.
+    pub fn dev_thermal() -> HomeostaticRegistry {
+        HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        }
+    }
+
     /// The axis definition for an id, if registered.
     pub fn axis(&self, id: HomeostaticAxisId) -> Option<&HomeostaticAxisDef> {
         self.axes.iter().find(|a| a.id == id)
