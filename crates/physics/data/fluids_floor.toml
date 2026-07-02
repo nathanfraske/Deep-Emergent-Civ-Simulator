@@ -298,8 +298,8 @@ ports = [
   { role = "hot", axis = "therm.temperature" },
   { role = "cold", axis = "therm.temperature" },
 ]
-output_measure = "convective heat flux (Newton cooling)"
-dimension = "energy"
+output_measure = "convective heat flux (Newton cooling), a power (explicit-rate convention)"
+dimension = "2,1,-3,0"
 interval_bound = "[0, FLUX_MAX]"
 tier = 0
 
@@ -326,8 +326,8 @@ ports = [
   { role = "viscosity", axis = "fluid.dynamic_viscosity" },
   { role = "length", axis = "mech.arm_length" },
 ]
-output_measure = "laminar volumetric flow rate"
-dimension = "volume"
+output_measure = "laminar volumetric flow rate (volume/time)"
+dimension = "3,0,-1,0"
 interval_bound = "[0, Q_MAX]"
 tier = 0
 
@@ -364,7 +364,7 @@ ports = [
   { role = "gravity", axis = "mech.gravitational_acceleration" },
 ]
 output_measure = "signed buoyant acceleration (natural convection)"
-dimension = "0,0,0,0"
+dimension = "1,0,-2,0"
 interval_bound = "[-A_MAX, A_MAX]"
 tier = 0
 
@@ -387,8 +387,8 @@ ports = [
   { role = "e_saturation", axis = "fluid.vapor_pressure" },
   { role = "wind", axis = "mech.velocity" },
 ]
-output_measure = "bidirectional evaporation/condensation mass flux"
-dimension = "0,1,-3,0"
+output_measure = "bidirectional evaporation/condensation mass flux (mass per area per time)"
+dimension = "-2,1,-1,0"
 interval_bound = "[0, E_MAX]"
 tier = 0
 # --- Substances (fluids as vectors over the axes) ---

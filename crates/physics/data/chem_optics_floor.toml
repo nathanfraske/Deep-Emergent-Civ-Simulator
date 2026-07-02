@@ -210,8 +210,8 @@ ports = [
   { role = "t_hot", axis = "therm.temperature" },
   { role = "t_cold", axis = "therm.temperature" },
 ]
-output_measure = "radiant heat exchange (Stefan-Boltzmann)"
-dimension = "energy"
+output_measure = "radiant heat exchange (Stefan-Boltzmann), a radiant power (explicit-rate convention)"
+dimension = "2,1,-3,0"
 interval_bound = "[0, FLUX_MAX]"
 tier = 0
 
