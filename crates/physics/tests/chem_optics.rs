@@ -47,6 +47,33 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
 }
 
 #[test]
+fn the_chem_optics_ranges_are_owner_set_and_read_back_exactly() {
+    // The owner ratified the wave-2 chemistry-and-optics ranges from their cited bounds (2026-07-02).
+    // A set range reads back exactly, and no chem or fluids axis stays reserved over the stack: the
+    // only reserved axis is the scale-pending geometry second moment of area (R-UNITS-PIN).
+    let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
+    reg.extend(data_path("fluids_floor.toml")).unwrap();
+    reg.extend(data_path("chem_optics_floor.toml")).unwrap();
+    let (lo, hi) = reg
+        .axis("opt.refractive_index")
+        .unwrap()
+        .range
+        .require("opt.refractive_index")
+        .unwrap();
+    assert_eq!(lo, Fixed::from_int(1), "refractive index of vacuum");
+    assert_eq!(
+        hi,
+        Fixed::from_int(5),
+        "the high-index headroom above diamond"
+    );
+    assert_eq!(
+        reg.reserved_axis_ids(),
+        vec!["mech.second_moment_of_area"],
+        "the fluids and chem ranges are graduated; only the scale-pending geometry axis stays reserved"
+    );
+}
+
+#[test]
 fn carnot_efficiency_is_the_temperature_ratio_and_bounded() {
     // A steam engine 500 K / 300 K: eta = 1 - 300/500 = 0.4.
     let eta = laws::carnot_limit(Fixed::from_int(500), Fixed::from_int(300)).to_f64_lossy();
