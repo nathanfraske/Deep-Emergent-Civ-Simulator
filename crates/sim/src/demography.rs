@@ -32,7 +32,7 @@
 //! demographic outcomes (the age structure, the survivorship curve, which cohorts thin and
 //! which persist) are never authored: they emerge from the supplied hazard and the seed
 //! alone. A flat zero hazard kills nobody, so the mechanism adds no mortality of its own,
-//! and swapping two populations' hazard curves swaps their demography exactly, so the
+//! and swapping two populations' hazard curves swaps their expected demography, so the
 //! hazard is the sole author. The tests below are the audit of that property.
 //!
 //! Tier consistency (design Part 54, record 62.9) is conservation plus distributional
@@ -53,11 +53,29 @@ use civsim_core::{DrawKey, Fixed, Phase, StateHasher};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Convert an age in life-cadence steps to the [`Fixed`] value a hazard curve is evaluated
+/// at, clamped to the representable positive range. An age beyond `i32::MAX` steps (roughly
+/// two billion cadences, far past any lifespan) reads the oldest curve point through the
+/// curve's monotone end clamp, rather than wrapping negative through a raw `age as i32` cast
+/// and reading the youngest, least-lethal point. A cast must never author the demographic
+/// outcome, only the hazard may (Principle 9). Both the aggregate tier here and the
+/// individual tier ([`crate::world::World::apply_mortality`]) evaluate the hazard through
+/// this one conversion, so the two never disagree at the age ceiling.
+pub fn hazard_age(age: u32) -> Fixed {
+    Fixed::from_int(age.min(i32::MAX as u32) as i32)
+}
+
 /// An aggregate-tier age distribution: a count of anonymous members per age, where age is
 /// measured in life-cadence steps exactly as the individual tier measures it. The map is
 /// keyed by age so every walk is canonical (ascending age, never hash-map order, design
 /// Part 3.5, R-CANON-WALK), and a zero-count age is never stored, so the histogram has one
 /// representation for one distribution and hashes identically however it was assembled.
+///
+/// A member count is a `u64` per age. The conservation guarantees below are exact for any
+/// total within `u64` per bucket, which is beyond reach at realistic populations (order 1e11
+/// against a ceiling near 1.8e19); a bucket driven past that ceiling saturates rather than
+/// wrapping, so the failure mode at that unreachable scale is a capped total, never a
+/// wrapped one.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct AgeHistogram {
     /// Age in life-cadence steps to the count of members at that age. Never holds a zero.
@@ -182,9 +200,7 @@ impl AgeHistogram {
         let mut deaths: i128 = 0;
         let mut survivors: BTreeMap<u32, u64> = BTreeMap::new();
         for (&age, &n) in &self.counts {
-            let chance = hazard
-                .eval(Fixed::from_int(age as i32))
-                .clamp(Fixed::ZERO, Fixed::ONE);
+            let chance = hazard.eval(hazard_age(age)).clamp(Fixed::ZERO, Fixed::ONE);
             let rng = DrawKey::pair(pool_id, age as u64, cadence, Phase::MORTALITY).rng(seed);
             let mut died: u64 = 0;
             for k in 0..n {
@@ -328,17 +344,50 @@ mod tests {
     #[test]
     fn mortality_differs_by_cadence_and_by_pool() {
         // The cohort in a bucket rotates each cadence, so the same bucket must roll
-        // differently across cadences; and two distinct pools must roll independently.
-        let start = AgeHistogram::from_pairs([(60, 2000)]);
+        // differently across cadences; and two distinct pools must roll independently. A
+        // multi-age distribution is compared by its full canonical hash, so a decorrelated
+        // stream is caught by the whole survivor distribution rather than one bucket's death
+        // count, which two independent streams could coincide on.
+        let start = AgeHistogram::from_pairs([(30, 2000), (60, 2000), (90, 2000)]);
+        let hz = flat_hazard(3, 10);
         let mut c0 = start.clone();
         let mut c1 = start.clone();
         let mut p2 = start.clone();
-        let hz = flat_hazard(3, 10);
-        let d_c0 = c0.apply_mortality(&hz, 0x11, 1, 0);
-        let d_c1 = c1.apply_mortality(&hz, 0x11, 1, 1);
-        let d_p2 = p2.apply_mortality(&hz, 0x11, 2, 0);
-        assert_ne!(d_c0, d_c1, "different cadences decorrelate the rolls");
-        assert_ne!(d_c0, d_p2, "different pools decorrelate the rolls");
+        c0.apply_mortality(&hz, 0x11, 1, 0);
+        c1.apply_mortality(&hz, 0x11, 1, 1);
+        p2.apply_mortality(&hz, 0x11, 2, 0);
+        assert_ne!(
+            c0.state_hash(),
+            c1.state_hash(),
+            "a different cadence decorrelates the survivor distribution"
+        );
+        assert_ne!(
+            c0.state_hash(),
+            p2.state_hash(),
+            "a different pool decorrelates the survivor distribution"
+        );
+    }
+
+    #[test]
+    fn mortality_at_the_age_ceiling_reads_the_oldest_hazard() {
+        // A cast must never author demography (Principle 9). A cohort at the numeric age
+        // ceiling faces the oldest, most-lethal point of a rising hazard through the curve's
+        // monotone end clamp, never wrapping negative to read the youngest, least-lethal
+        // point. This is the regression guard for the signedness-wrap the red-team found.
+        let n = 4000u64;
+        let hz = rising_hazard(); // 1% at age 0, certain by age 120
+        let mut ancient = AgeHistogram::from_pairs([(u32::MAX, n)]);
+        let mut young = AgeHistogram::from_pairs([(0, n)]);
+        let ancient_deaths = ancient.apply_mortality(&hz, 0xA9E, 1, 0);
+        let young_deaths = young.apply_mortality(&hz, 0xA9E, 1, 0);
+        assert_eq!(
+            ancient_deaths, n as i128,
+            "the age ceiling reads the certain oldest hazard, not the youngest"
+        );
+        assert!(
+            young_deaths < ancient_deaths,
+            "a rising hazard takes more at the ceiling than at age zero ({young_deaths} vs {ancient_deaths})"
+        );
     }
 
     #[test]
@@ -414,7 +463,7 @@ mod tests {
 
         // The individual tier: each being has its own id and rolls under Phase::MORTALITY on
         // its (id, age) key, exactly as World::apply_mortality does.
-        let p = chance.eval(Fixed::from_int(age as i32));
+        let p = chance.eval(hazard_age(age));
         let mut indiv_deaths = 0u64;
         for id in 0..n {
             let roll = DrawKey::entity(id, age as u64, Phase::MORTALITY)
