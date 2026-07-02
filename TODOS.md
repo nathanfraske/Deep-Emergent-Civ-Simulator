@@ -17,7 +17,7 @@ The build plan toward the first end-to-end emergent slice (generated map, seeded
 ## Open, ready to take (substrate or pattern already resolved)
 
 - **R-INFRA.** The etic-and-emic question applied to the buildings institutions inhabit (infrastructure). Ready: reuses the etic-and-emic substrate pattern resolved for institutions (R-INST). Couples to Parts 36, 46.
-- **R-LANG-TYPOLOGY.** Hardening the grammar typological parameters (word order, head direction, morphological type, alignment) from a closed enum to a data-defined substrate. Ready: reuses the data-substrate pattern; surfaced by the R-LANG-DET generalization audit. Couples to Parts 33, 25.
+- **R-LANG-TYPOLOGY. Scoped, awaiting sign-off.** Hardening the grammar typological parameters (word order, head direction, morphological type, alignment) from a closed enum to a data-defined substrate. A grounded scoped proposal is in `docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md` (the parameter/value registry, the data harmony model, per-race priors, the anchor-first sampling order, the grammatical-distance and drift consumers, every reserved value surfaced-with-basis as ordinal tiers over WALS/Dryer, the Steering seams, and five open owner decisions). Stays open and in the count until the owner signs off, then consolidate into 33.4/33.5, add the Part 62 record and Part 63 group, and update the audit counts. Reuses the R-LANG-MODALITY (62.13) data-substrate pattern already in `language.rs`. Couples to Parts 33, 25.
 - **R-WOUND.** Emergent wound representation without an authored wound enum. Ready: pairs with R-FLUID; both sit in Part 35. Couples to Part 35.
 - **R-FLUID.** Emergent body-fluid representation without an authored fluid enum. Ready: pairs with R-WOUND. Couples to Part 35.
 
