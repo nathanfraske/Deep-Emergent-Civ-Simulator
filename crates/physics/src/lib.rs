@@ -37,6 +37,7 @@
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
 
+pub mod graph;
 pub mod laws;
 
 use civsim_core::{Fixed, StateHasher};
@@ -289,15 +290,55 @@ pub struct QuantityAxis {
     pub provenance: Provenance,
 }
 
+/// When a port reads its axis value. A `Current` port reads this tick's value; a `Prior`
+/// port reads the previous tick's resident sample (the induction laws' finite difference);
+/// a `Dt` port is the tick-duration primitive itself, a time-dimension read with no axis.
+/// This is how a law that reads the same axis at two instants (a flux now and a flux prior)
+/// names them as two distinct ports, the temporal case of two participants of one axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Temporal {
+    /// This tick's value.
+    Current,
+    /// The previous tick's resident value.
+    Prior,
+    /// The tick duration, a time-dimension primitive with no axis.
+    Dt,
+}
+
+/// One input port of a law: a role name (free-form, unique within the law, so the mechanism
+/// is not a closed enum), the axis it reads, and when it reads it. The port's dimensional
+/// exponent is a property of the kernel, not the data, so it lives in the fixed-Rust contract
+/// ([`graph::kernel_contract`]) rather than here; the data only wires a role to an axis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LawPort {
+    /// The role this port fills, matched against the kernel contract.
+    pub role: String,
+    /// The axis id this port reads (empty for a `Dt` port).
+    pub axis: String,
+    /// When the value is read.
+    pub temporal: Temporal,
+}
+
 /// An interaction law: the metadata of a closed-form integer kernel over the quantity
 /// vectors of the participating entities, reporting an interval-bounded fixed-point
-/// consequence at a tier. The kernel itself is fixed Rust keyed by `id` (phase 2); this
-/// is the registry entry that names its inputs, its measured output, and its bound.
+/// consequence at a tier. The kernel itself is fixed Rust bound by [`InteractionLaw::kernel`]
+/// against the contract table; this is the registry entry that names its ports, the axes it
+/// produces, its measured output, and its bound.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteractionLaw {
     /// Stable identifier, for example `law.harm.dose_response`.
     pub id: String,
-    /// The axis ids the law reads.
+    /// The kernel id this law binds to (empty for a not-yet-migrated law). Checked against
+    /// the fixed-Rust contract table at load, so a law cannot declare inputs a kernel does
+    /// not take.
+    pub kernel: String,
+    /// The role-tagged, temporally-tagged input ports. When present, this supersedes the
+    /// flat `inputs` list, which is derived from the distinct port axes for compatibility.
+    pub ports: Vec<LawPort>,
+    /// The axis ids this law writes (the typed graph edges other laws read). The first, if
+    /// any, is the primary output whose dimension the kernel contract verifies.
+    pub produces: Vec<String>,
+    /// The axis ids the law reads (derived from `ports` when ports are declared).
     pub inputs: Vec<String>,
     /// The measured consequence it reports (never a verdict).
     pub output_measure: String,
@@ -305,7 +346,8 @@ pub struct InteractionLaw {
     pub output_dimension: Dimension,
     /// The interval bound on the output.
     pub interval_bound: String,
-    /// The tier.
+    /// The authored tier. Legacy: the substrate now derives tier from the law-output graph
+    /// ([`PhysicsRegistry::derived_tier`]); whether to drop this field is a reserved decision.
     pub tier: u8,
 }
 
@@ -399,6 +441,38 @@ pub enum PhysicsError {
     BadRange(String),
     /// An entry carries neither a real-with-source nor a fantasy-reserved tag.
     MissingProvenance(String),
+    /// A port declares an unparseable temporal or a malformed binding.
+    BadPort {
+        /// The law the port belongs to.
+        law: String,
+        /// What went wrong.
+        detail: String,
+    },
+    /// A law binds a kernel id that has no contract in the fixed-Rust table.
+    UnknownKernel {
+        /// The law.
+        law: String,
+        /// The unbound kernel id.
+        kernel: String,
+    },
+    /// A law's declared ports do not match its kernel's contract (a missing role, an extra
+    /// role, or a duplicated role): the binding the naming convention could not check.
+    PortContractMismatch {
+        /// The law.
+        law: String,
+        /// What is wrong.
+        detail: String,
+    },
+    /// A produced axis's dimension is not reachable from the law's input axes through the
+    /// kernel's declared dimensional relation.
+    DimensionUnreachable {
+        /// The law.
+        law: String,
+        /// What is wrong.
+        detail: String,
+    },
+    /// The law-output graph has a cycle, so a tier cannot be derived.
+    CyclicLawGraph(String),
 }
 
 impl fmt::Display for PhysicsError {
@@ -431,6 +505,22 @@ impl fmt::Display for PhysicsError {
                 f,
                 "'{id}' must declare provenance, either real-with-source or fantasy-reserved"
             ),
+            PhysicsError::BadPort { law, detail } => {
+                write!(f, "law '{law}' has a malformed port: {detail}")
+            }
+            PhysicsError::UnknownKernel { law, kernel } => write!(
+                f,
+                "law '{law}' binds kernel '{kernel}', which has no contract in the kernel table"
+            ),
+            PhysicsError::PortContractMismatch { law, detail } => {
+                write!(f, "law '{law}' does not match its kernel contract: {detail}")
+            }
+            PhysicsError::DimensionUnreachable { law, detail } => {
+                write!(f, "law '{law}' output dimension is unreachable: {detail}")
+            }
+            PhysicsError::CyclicLawGraph(detail) => {
+                write!(f, "the law-output graph has a cycle, so tier cannot be derived: {detail}")
+            }
         }
     }
 }
@@ -544,6 +634,18 @@ impl PhysicsRegistry {
                     });
                 }
             }
+            // A produced axis must exist, so an output edge cannot dangle.
+            for axis in &law.produces {
+                if !self.axes.contains_key(axis) {
+                    return Err(PhysicsError::UnknownAxis {
+                        context: law.id.clone(),
+                        axis: axis.clone(),
+                    });
+                }
+            }
+            // A migrated law is checked against its kernel contract: the binding, the temporal
+            // agreement, and the dimensional reachability of its output.
+            graph::check_law(law, &self.axes)?;
         }
         for sub in self.substances.values() {
             for axis in sub.vector.keys() {
@@ -563,7 +665,23 @@ impl PhysicsRegistry {
                 }
             }
         }
+        // The law-output graph must be acyclic so a tier can be derived.
+        graph::derive_tiers(&self.laws)?;
         Ok(())
+    }
+
+    /// The derived tier of a law: its depth in the law-output graph, computed rather than
+    /// authored (the composition-layer resolution). A law reading only ground axes is tier 1;
+    /// a law reading an axis a tier-1 law produces is tier 2; and so on. Returns `None` for an
+    /// unknown law. This is the honest layering that fills the empty middle the authored `tier`
+    /// stamps left; whether to drop the authored field is a reserved decision.
+    pub fn derived_tier(&self, law_id: &str) -> Option<u32> {
+        graph::derive_tiers(&self.laws).ok()?.get(law_id).copied()
+    }
+
+    /// Every law's derived tier, in sorted id order.
+    pub fn derived_tiers(&self) -> BTreeMap<String, u32> {
+        graph::derive_tiers(&self.laws).unwrap_or_default()
     }
 
     /// An axis by id.
@@ -640,7 +758,25 @@ impl PhysicsRegistry {
         h.write_u64(u64::MAX);
         for law in self.laws.values() {
             h.write_bytes(law.id.as_bytes());
+            h.write_u64(0);
+            h.write_bytes(law.kernel.as_bytes());
+            h.write_u64(0);
             for axis in &law.inputs {
+                h.write_bytes(axis.as_bytes());
+            }
+            h.write_u64(0);
+            // The role-tagged ports and produced axes are part of the law's canonical content.
+            for port in &law.ports {
+                h.write_bytes(port.role.as_bytes());
+                h.write_bytes(port.axis.as_bytes());
+                h.write_u32(match port.temporal {
+                    Temporal::Current => 0,
+                    Temporal::Prior => 1,
+                    Temporal::Dt => 2,
+                });
+            }
+            h.write_u64(0);
+            for axis in &law.produces {
                 h.write_bytes(axis.as_bytes());
             }
             let d = law.output_dimension;
@@ -839,6 +975,15 @@ struct LawDef {
     id: String,
     #[serde(default)]
     inputs: Vec<String>,
+    /// The kernel id this law binds to (new-format descriptor; empty for a legacy law).
+    #[serde(default)]
+    kernel: String,
+    /// The role-tagged ports (new-format descriptor).
+    #[serde(default)]
+    ports: Vec<PortDef>,
+    /// The axis ids this law produces (new-format descriptor).
+    #[serde(default)]
+    produces: Vec<String>,
     #[serde(default)]
     output_measure: String,
     dimension: String,
@@ -848,6 +993,16 @@ struct LawDef {
     tier: u8,
 }
 
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct PortDef {
+    role: String,
+    #[serde(default)]
+    axis: String,
+    /// One of `current` (default), `prior`, or `dt`.
+    #[serde(default)]
+    temporal: String,
+}
+
 impl LawDef {
     fn into_law(self) -> Result<InteractionLaw, PhysicsError> {
         let output_dimension =
@@ -855,9 +1010,47 @@ impl LawDef {
                 id: self.id.clone(),
                 detail,
             })?;
+        let mut ports = Vec::with_capacity(self.ports.len());
+        for p in self.ports {
+            let temporal = match p.temporal.trim().to_ascii_lowercase().as_str() {
+                "" | "current" => Temporal::Current,
+                "prior" => Temporal::Prior,
+                "dt" => Temporal::Dt,
+                other => {
+                    return Err(PhysicsError::BadPort {
+                        law: self.id.clone(),
+                        detail: format!(
+                            "unknown temporal '{other}' (expected current, prior, or dt)"
+                        ),
+                    });
+                }
+            };
+            ports.push(LawPort {
+                role: p.role,
+                axis: p.axis,
+                temporal,
+            });
+        }
+        // The flat input list is derived from the distinct non-Dt port axes when ports are
+        // declared, so the legacy `inputs` consumers keep working without duplication in data.
+        let inputs = if ports.is_empty() {
+            self.inputs
+        } else {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut derived = Vec::new();
+            for p in &ports {
+                if p.temporal != Temporal::Dt && !p.axis.is_empty() && seen.insert(p.axis.clone()) {
+                    derived.push(p.axis.clone());
+                }
+            }
+            derived
+        };
         Ok(InteractionLaw {
             id: self.id,
-            inputs: self.inputs,
+            kernel: self.kernel,
+            ports,
+            produces: self.produces,
+            inputs,
             output_measure: self.output_measure,
             output_dimension,
             interval_bound: self.interval_bound,
