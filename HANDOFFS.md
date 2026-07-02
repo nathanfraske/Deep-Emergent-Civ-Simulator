@@ -46,6 +46,22 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): closed the gossip-hyps order-dependence seam (emergent union candidate set)
+
+The determinism audit found the gossip conflict apply was order-dependent when competing assertions carried different candidate sets (first-writer-wins the belief frame's `hyps`, and `add_evidence` dropped evidence toward a value absent from it). The owner chose to fix it under the north star, even at more cost. On `claude/gossip-hyps-canonicalize`.
+
+**The fix.** A belief's candidate set is now the sorted UNION of every hypothesis set asserted about the question, not the first informant's set. `InferenceFrame::new` sorts and dedups its candidate set, a new `InferenceFrame::merge_hyps` unions further candidates in by binary search (parallel `totals` stay aligned, new hypotheses enter at zero), and both belief paths union before adding evidence: `Mind::consider` (first-order) and `Mind::model` via `NestedFrame::merge_hyps` (theory-of-mind). So `add_evidence` never drops by arrival order, the committed belief is a pure function of the evidence set, and the frame's hypothesis order is canonical (sorted), so the state hash is order-independent too.
+
+**Why this and not the barrier-only option.** The seam was rooted in an intentional design (`consider`'s doc said "once a question exists its hypothesis frame stands and the hyps argument is ignored"). Surfaced to the owner as a belief-model fork: union (grow the hypothesis space, truly order-independent) versus keep first-writer-wins and lean on the canonical barrier. The owner chose the most north-star-guiding option. Union is the more emergent and observer-independent model: the hypothesis space emerges from what the world asserts rather than being templated by who spoke first (Principle 8, Principle 10), and it makes the apply safe to parallelise (Principle 3), which is what the whole determinism cluster is for.
+
+**Blast radius.** Belief outcomes change only in the differing-candidate case; every one of the 371 sim lib tests and all integration suites passed unchanged. The reduce_order.rs seam test flipped from asserting order-dependence to asserting order-independence (both orders now see the union and tie), and its module doc records the audit finding and the fix. Both R-REDUCE-ORDER sites are now order-independent.
+
+**Verification.** fmt clean, clippy 0 across the workspace, the full default-members suite green. Roadmap DONE bullet re-corrected (the gossip seam is fixed, both reduce sites order-independent).
+
+**Where it stopped.** The seam fix is built and green on `claude/gossip-hyps-canonicalize`, pending merge. Next (owner-chosen): the deterministic-scheduler design, the keystone that unblocks the R-REDUCE-ORDER full form and the real parallel (Rayon) tick, a design pass for owner sign-off per Part 57. The flag-flip consolidation for the on-ramp items stays owner-gated.
+
+---
+
 ## 2026-07-02 (continued): the determinism parallelism on-ramp, built and adversarially audited (owner sign-off pending for the flag-flips)
 
 The owner chose to scope the determinism cluster completely, then implement and audit. On `claude/determinism-onramp`. A scope fan-out (7 readers + synthesis) split the cluster into a safe parallel-tick on-ramp and held research dives (R-PROJ-REGISTER has active concurrent work via R-AGING, R-SAVE-SCHEMA and R-UNITS-PIN need owner reserved values and collide with the physics fan-out, R-HARNESS-COVER's LOD-equivalence is blocked on unbuilt R-TEMPORAL-LOD). The owner approved the full on-ramp and the strictest R-CANON-WALK enforcement.

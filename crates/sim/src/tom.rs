@@ -207,6 +207,14 @@ impl NestedFrame {
         }
     }
 
+    /// Union additional candidate hypotheses into the nested frame (see
+    /// [`InferenceFrame::merge_hyps`]): the modelled belief's hypothesis space is the union of
+    /// every candidate set the modeller has seen asserted about the target, so it does not depend
+    /// on which access evidence arrived first.
+    pub fn merge_hyps(&mut self, hyps: impl IntoIterator<Item = ValueId>) {
+        self.frame.merge_hyps(hyps);
+    }
+
     /// Whose mind this models.
     pub fn of(&self) -> StableId {
         self.of
