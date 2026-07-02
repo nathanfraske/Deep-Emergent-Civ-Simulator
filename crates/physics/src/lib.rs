@@ -1112,6 +1112,17 @@ impl LawDef {
                     ),
                 });
             }
+            // A class-set port folds its members, so a stray single `axis` alongside them is a
+            // contradiction (which value does it read), not a silent extra input.
+            if !p.members.is_empty() && !p.axis.trim().is_empty() {
+                return Err(PhysicsError::BadPort {
+                    law: self.id.clone(),
+                    detail: format!(
+                        "class-set port '{}' must not also declare a single axis",
+                        p.role
+                    ),
+                });
+            }
             ports.push(LawPort {
                 role: p.role,
                 axis: p.axis,

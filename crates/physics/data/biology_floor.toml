@@ -215,7 +215,7 @@ scale = "1"
 tier = 0
 range_lo = "0"
 range_hi = "1"
-fantasy = "a derived engine output (the net-harm fold result), dimensionless in [0,1]; produced by law.harm, not an external datum, so reserved rather than cited"
+fantasy = "a derived engine output (the net-harm fold result), dimensionless; produced by law.harm, not an external datum, so reserved rather than cited. The [0,1] band presumes net_harm's total_cap is calibrated to 1 (the raw saturating sum over the toxin classes can reach the class count before the cap): the coupling 'net_harm total_cap = 1' is reserved for the owner alongside this range"
 
 # --- The three interaction laws (the kernels are fixed Rust in laws.rs) ---
 

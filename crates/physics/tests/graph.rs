@@ -369,6 +369,36 @@ dimension = "dimensionless"
 }
 
 #[test]
+fn a_class_set_port_with_a_stray_single_axis_fails_loud() {
+    // A class-set port folds its members, so also naming a single axis is a contradiction.
+    let toml = r#"
+[[axis]]
+id = "bio.a"
+dimension = "dimensionless"
+scale = "1"
+range_lo = "0"
+range_hi = "1"
+real = "x"
+
+[[law]]
+id = "law.bad_both"
+kernel = "net_nutrition"
+ports = [
+  { role = "supply", axis = "bio.a", members = ["bio.a"], fold = "min" },
+  { role = "requirement", axis = "bio.a" },
+  { role = "assimilation", axis = "bio.a" },
+  { role = "fermentation", axis = "bio.a" },
+]
+dimension = "dimensionless"
+"#;
+    let err = PhysicsRegistry::from_toml_str(toml).unwrap_err();
+    assert!(
+        matches!(err, PhysicsError::BadPort { .. }),
+        "a class-set port that also names a single axis must fail loud, got {err:?}"
+    );
+}
+
+#[test]
 fn the_migrated_floor_still_hashes_deterministically() {
     // The descriptor fields fold into the content hash; the same data still hashes identically.
     assert_eq!(full_registry().content_id(), full_registry().content_id());
