@@ -499,12 +499,35 @@ dimension = "pressure"
 interval_bound = "[stress_floor, STRESS_MAX]"
 tier = 0
 
+# The impact compound is split into its two independent outputs, each a clean monomial the
+# descriptor can bind and dimensionally check: the kinetic energy delivered and the reduced-mass
+# impulse transferred. Splitting was the only descriptor-compatible resolution, since one kernel
+# cannot take both output shapes without dropping an input. Both stay terminal (no produced axis):
+# the impact-to-cut composition edge is the separate reserved modelling decision.
 [[law]]
-id = "law.impact"
-inputs = ["mech.mass", "mech.velocity", "mech.restitution"]
-output_measure = "kinetic energy and reduced-mass impulse"
+id = "law.kinetic_energy"
+kernel = "kinetic_energy"
+ports = [
+  { role = "mass", axis = "mech.mass" },
+  { role = "velocity", axis = "mech.velocity" },
+]
+output_measure = "delivered kinetic energy E = (1/2) m v^2"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.impulse"
+kernel = "impulse"
+ports = [
+  { role = "striker_mass", axis = "mech.mass" },
+  { role = "target_mass", axis = "mech.mass" },
+  { role = "velocity", axis = "mech.velocity" },
+  { role = "restitution", axis = "mech.restitution" },
+]
+output_measure = "reduced-mass impulse J = mu*v*(1 + e), the two masses two participants on the mass axis"
+dimension = "1,1,-1,0"
+interval_bound = "[0, J_MAX]"
 tier = 0
 
 [[law]]
