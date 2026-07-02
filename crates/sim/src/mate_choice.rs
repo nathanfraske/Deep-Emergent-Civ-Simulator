@@ -66,10 +66,19 @@
 //! selection on the genome-derived offspring fitness from RANDOM founder weights with no bias,
 //! and produces a heterophilic weight under overdominance and a homophilic one when homozygous
 //! offspring are fitter. So the direction is not merely favoured in a gradient, it is what
-//! selection converges to, from no bias, on the engine's own genetics. What remains is the
-//! feature-weighted version over both the heterosis and incompatibility axes on the shared
-//! `evolve_with` substrate (once its input registry carries a candidate-percept family) and the
-//! `World::birth` choosing call site.
+//! selection converges to, from no bias, on the engine's own genetics.
+//!
+//! Fifth, the feature-weighted preference over BOTH axes is now built: a [`FeaturedPreference`]
+//! carries a distance weight (the heterosis and inbreeding axis) and a prospective-viability
+//! weight (the incompatibility axis a distance cue cannot carry), [`choose_featured`] scores a
+//! candidate by both, and [`evolve_featured_preference`] runs the same truncation selection over
+//! both weights under a combined genome-derived fitness (heterozygosity times viability, so an
+//! offspring must be both heterozygous AND viable to score). When the fittest mate by distance is
+//! a Dobzhansky-Muller incompatible cross, selection from random founders discovers to weight the
+//! prospective-viability feature, so the feature set the resolved mechanism needs is a selected
+//! consequence rather than an authored one. What remains is folding this feature-weighted loop
+//! onto the shared `evolve_with` plus `Controller` substrate (once its input registry carries a
+//! candidate-percept family) and the `World::birth` choosing call site.
 //!
 //! Compute: this is the cheap "matching rule / magic trait / one-allele" case (Felsenstein
 //! 1981; Servedio et al 2011; Kopp et al 2018), where the mating cue is the fitness-relevant
@@ -78,8 +87,9 @@
 //! over the existing evolution loop, so emergence is tractable and is the recommendation, not
 //! the fallback. Honest follow-ons, each named: the selection loop over the genome-derived fitness
 //! is built ([`evolve_preference_weight`], the distance axis); the feature-weighted version over
-//! both axes rides the shared `evolve_with` plus `Controller` substrate once its input registry
-//! carries a candidate-percept family; the value and axiom distances are added as further
+//! both axes is built as a standalone selection loop ([`evolve_featured_preference`]) and its
+//! folding onto the shared `evolve_with` plus `Controller` substrate rides that substrate's input
+//! registry carrying a candidate-percept family; the value and axiom distances are added as further
 //! features; and the `World::birth` call site, which today takes both parents pre-chosen, does
 //! the choosing. The reserved values the resolved mechanism surfaces (none fabricated) are the
 //! cost of choosiness, the preference mutation variance, and, for the deep-time pure-frequency
@@ -386,6 +396,167 @@ pub fn evolve_preference_weight(
     // The fittest evolved weight, ties to the lower weight for determinism.
     let mut ranked: Vec<(Fixed, Fixed)> = pop.iter().map(|&w| (score(w), w)).collect();
     ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    ranked[0].1
+}
+
+// --- The resolved feature set: a preference over both the distance and the incompatibility
+// axes, and selection over it (the feature-weighted follow-on) ---
+
+/// A mate preference over two candidate features: the genetic distance (the heterosis and
+/// inbreeding axis) and the prospective hybrid viability (the incompatibility axis a distance
+/// feature cannot carry, because viability is non-monotone in distance). The general form the
+/// resolved mechanism needs. As with [`MatePreference`], nothing here authors a direction: the
+/// two weights are the selected quantities, and their signs and magnitudes are what selection
+/// over the offspring physics settles on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FeaturedPreference {
+    /// The weight on the candidate genetic distance (its sign is the assortment direction).
+    pub distance_weight: Fixed,
+    /// The weight on the prospective hybrid viability (a positive weight avoids incompatible
+    /// mates).
+    pub viability_weight: Fixed,
+}
+
+impl FeaturedPreference {
+    /// A preference with the given feature weights.
+    pub fn new(distance_weight: Fixed, viability_weight: Fixed) -> Self {
+        FeaturedPreference {
+            distance_weight,
+            viability_weight,
+        }
+    }
+}
+
+/// The prospective hybrid viability of a chooser-candidate pairing: form the candidate offspring
+/// through `scheme` and read its [`hybrid_viability`] against `table`. The incompatibility-axis
+/// feature a featured preference reads before choosing, the cue [`genetic_distance`] cannot
+/// supply.
+pub fn prospective_viability(
+    chooser: &Genome,
+    candidate: &Genome,
+    scheme: &GeneticScheme,
+    gene_count: usize,
+    table: &IncompatibilityTable,
+    seed: u64,
+) -> Fixed {
+    let child = scheme.reproduce(chooser, 0, candidate, 1, gene_count, seed, 0);
+    hybrid_viability(&child, table)
+}
+
+/// Choose the most-preferred candidate under a two-feature preference, ties to the lower index;
+/// `None` for an empty set. The score is `distance_weight` times the genetic distance plus
+/// `viability_weight` times the prospective viability, so a preference can weight the
+/// incompatibility axis the distance feature cannot carry.
+#[allow(clippy::too_many_arguments)]
+pub fn choose_featured(
+    pref: &FeaturedPreference,
+    chooser: &Genome,
+    candidates: &[Genome],
+    scheme: &GeneticScheme,
+    gene_count: usize,
+    table: &IncompatibilityTable,
+    seed: u64,
+) -> Option<usize> {
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let d = genetic_distance(chooser, c);
+            let v = prospective_viability(chooser, c, scheme, gene_count, table, seed);
+            (
+                pref.distance_weight.mul(d) + pref.viability_weight.mul(v),
+                i,
+            )
+        })
+        .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
+        .map(|(_, i)| i)
+}
+
+/// Evolve a two-feature mate preference under a combined genome-derived offspring fitness
+/// (heterozygosity times viability, so a fit offspring must be both heterozygous AND viable),
+/// from random founders. This is the resolved-feature-set demonstration: when the fittest mate
+/// by distance is a Dobzhansky-Muller incompatible one (an inviable cross), selection discovers
+/// to weight the prospective-viability feature, not distance alone, so the feature set the
+/// mechanism needs emerges rather than being authored. Same deterministic truncation-and-mutation
+/// discipline as [`evolve_preference_weight`], keyed under [`Phase::MATE_CHOICE`]; returns the
+/// fittest evolved preference.
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_featured_preference(
+    chooser: &Genome,
+    candidates: &[Genome],
+    scheme: &GeneticScheme,
+    gene_count: usize,
+    table: &IncompatibilityTable,
+    seed: u64,
+    pop_size: usize,
+    generations: u64,
+) -> FeaturedPreference {
+    assert!(pop_size >= 2, "selection needs at least two lineages");
+    let signed = |u: Fixed| Fixed::from_int(2).mul(u) - Fixed::ONE;
+    // A preference's fitness: its chooser picks a mate, forms an offspring, and the score is the
+    // offspring's heterozygosity times its viability, so an inviable cross scores zero however
+    // heterozygous it would have been.
+    let score = |pref: FeaturedPreference| -> Fixed {
+        match choose_featured(&pref, chooser, candidates, scheme, gene_count, table, seed) {
+            None => Fixed::ZERO,
+            Some(i) => {
+                let child = scheme.reproduce(
+                    chooser,
+                    0,
+                    &candidates[i],
+                    (i as u64) + 1,
+                    gene_count,
+                    seed,
+                    0,
+                );
+                offspring_heterozygosity(&child).mul(hybrid_viability(&child, table))
+            }
+        }
+    };
+    // Founders: random (distance_weight, viability_weight) per lineage, two counters in the
+    // lineage's stream.
+    let mut pop: Vec<FeaturedPreference> = (0..pop_size as u64)
+        .map(|lineage| {
+            let rng = DrawKey::entity(lineage, 0, Phase::MATE_CHOICE).rng(seed);
+            FeaturedPreference::new(signed(rng.unit_fixed(0)), signed(rng.unit_fixed(1)))
+        })
+        .collect();
+    let mut next_lineage = pop_size as u64;
+
+    for g in 0..generations {
+        let mut scored: Vec<(Fixed, usize)> = pop
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| (score(p), i))
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let keep = (pop.len() / 2).max(1);
+        let survivors: Vec<FeaturedPreference> =
+            scored[..keep].iter().map(|&(_, i)| pop[i]).collect();
+        let mut next = survivors.clone();
+        let mut s = 0usize;
+        let bound = Fixed::from_ratio(1, 4);
+        while next.len() < pop.len() {
+            let parent = survivors[s % survivors.len()];
+            let rng = DrawKey::entity(next_lineage, g, Phase::MATE_CHOICE).rng(seed);
+            let clamp = |w: Fixed| w.clamp(Fixed::from_int(-1), Fixed::from_int(1));
+            next.push(FeaturedPreference::new(
+                clamp(parent.distance_weight + signed(rng.unit_fixed(0)).mul(bound)),
+                clamp(parent.viability_weight + signed(rng.unit_fixed(1)).mul(bound)),
+            ));
+            next_lineage += 1;
+            s += 1;
+        }
+        pop = next;
+    }
+
+    // The fittest evolved preference, ties broken by the weight pair for determinism.
+    let mut ranked: Vec<(Fixed, FeaturedPreference)> = pop.iter().map(|&p| (score(p), p)).collect();
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(a.1.distance_weight.cmp(&b.1.distance_weight))
+            .then(a.1.viability_weight.cmp(&b.1.viability_weight))
+    });
     ranked[0].1
 }
 
@@ -909,5 +1080,45 @@ mod tests {
             6,
         );
         assert_eq!(a, b, "same seed, same evolved weight");
+    }
+
+    #[test]
+    fn selection_weights_the_viability_feature_when_the_fittest_by_distance_mate_is_incompatible() {
+        // The resolved feature set emerging: the fitness rewards a heterozygous AND viable
+        // offspring (heterozygosity times viability), and the farthest mate (the one a distance
+        // heterophile would pick) is Dobzhansky-Muller incompatible, so a distance-only
+        // preference forms an inviable, zero-fitness offspring. From random founders over both
+        // weights, selection discovers to weight the prospective-viability feature, and its
+        // chosen offspring is viable. Nothing authored the feature weighting; selection found it.
+        let scheme = diploid_scheme(10, Fixed::ZERO);
+        let table = IncompatibilityTable::with(vec![Incompatibility {
+            locus_a: 0,
+            state_a: AlleleState(1),
+            locus_b: 1,
+            state_b: AlleleState(1),
+            kind: IncompatibilityKind::Lethal,
+        }]);
+        let chooser = one_at(10, &[0]); // carries the DM allele at locus 0
+                                        // The farthest candidate carries the complementary allele at locus 1: incompatible.
+        let far_incompatible = one_at(10, &[1, 2, 3, 4, 5, 6, 7]);
+        // A compatible mate at a moderate distance (more heterozygous than the near one).
+        let mid_compatible = one_at(10, &[2, 3, 4]);
+        let near_compatible = one_at(10, &[2]);
+        let candidates = vec![far_incompatible, mid_compatible, near_compatible];
+
+        let evolved =
+            evolve_featured_preference(&chooser, &candidates, &scheme, 10, &table, 0xF00D, 24, 12);
+        assert!(
+            evolved.viability_weight > Fixed::ZERO,
+            "selection weights the prospective-viability feature ({evolved:?})"
+        );
+        let pick =
+            choose_featured(&evolved, &chooser, &candidates, &scheme, 10, &table, 0xF00D).unwrap();
+        let child = scheme.reproduce(&chooser, 1, &candidates[pick], 2, 10, 0xF00D, 0);
+        assert_eq!(
+            hybrid_viability(&child, &table),
+            Fixed::ONE,
+            "the evolved preference avoids the incompatible mate"
+        );
     }
 }
