@@ -22,6 +22,11 @@
 //! Like the diffusion field kernel, these use native `i64` at the boundary (the per-kernel layout the
 //! proposal leaves to the author), so the bit-identity is proven on the CUDA backend and cross-vendor
 //! identity on a backend without native 64-bit is a Stage 0 gate matter. No float appears anywhere.
+//!
+//! One composition caveat: where the oracle narrows an index to `i32` (the exp multiplier `k`, the
+//! sin/cos quadrant `n`, the ln exponent `e`), these kernels keep it as `i64`. The result is
+//! bit-identical because those values provably fit `i32` within each function's guarded domain, a
+//! range bound the composition argument relies on rather than the ops being literally the same.
 
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
@@ -280,7 +285,7 @@ fn exp_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
 
 /// Run `Fixed::exp` on the GPU over a slice of `i64` Q32.32 bit patterns. Bit-identical to the CPU
 /// `Fixed::exp` oracle (CUDA backend).
-pub fn gpu_exp(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+pub fn gpu_exp<R: Runtime>(client: &ComputeClient<R>, x: &[i64]) -> Vec<i64> {
     let n = x.len();
     if n == 0 {
         return Vec::new();
@@ -290,7 +295,7 @@ pub fn gpu_exp(client: &CudaClient, x: &[i64]) -> Vec<i64> {
     let threads = 256u32;
     let blocks = (n as u32).div_ceil(threads);
     unsafe {
-        exp_kernel::launch::<CudaRuntime>(
+        exp_kernel::launch::<R>(
             client,
             CubeCount::Static(blocks, 1, 1),
             CubeDim::new_1d(threads),
@@ -728,6 +733,8 @@ pub fn gpu_asin(client: &CudaClient, x: &[i64]) -> Vec<i64> {
 /// exponent takes the reciprocal first). The 32-step squaring is manually unrolled straight-line (the
 /// DSL rejects an accumulator carried across an `#[unroll]` loop that calls a `#[cube]` fn); squaring
 /// past the top set bit of `|n|` is harmless because the corresponding bit does not touch `acc`.
+/// Precondition: a zero base with a negative exponent divides by zero (the oracle panics; the GPU
+/// yields a defined-but-meaningless value), the same divide-by-zero precondition as `q32_div`.
 #[cube]
 fn fixed_powi(x: i64, n: i32) -> i64 {
     let one = 4294967296i64;

@@ -56,7 +56,7 @@ pub mod stage0;
 pub mod transcendental;
 
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
-pub use stage0::{cuda_client, gpu_div, gpu_mul, CudaClient};
+pub use stage0::{cpu_client, cuda_client, gpu_div, gpu_mul, CpuClient, CudaClient};
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin,
 };
