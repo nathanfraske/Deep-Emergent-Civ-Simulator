@@ -4,7 +4,9 @@ The owner directed the R-UNITS-PIN resolution built in two arcs, Phase 1 the abs
 canonical layer and Phase 2 the emic layer, taking whichever option is best for the long
 haul even where it is more work now. This document is the design-of-record that fixes the
 architecture before the code touches the numeric foundation, in the same convention as the
-mechanical, fluids, and electromagnetism substrate proposals.
+mechanical, fluids, and electromagnetism substrate proposals. It has been revised after an
+adversarial red-team of its first draft, whose findings are folded into the scope, the
+derivation rule, the determinism rule, and the honest limits below.
 
 ## The directive it answers
 
@@ -57,47 +59,78 @@ the authored set.
 
 What does not yet exist is the bridge from that mechanism to the running physics. The physics
 crate computes in `civsim_core::Fixed`, a Q32.32 fixed-point (32 fractional bits, i64
-backing), used pervasively (429 sites in `laws.rs` alone). Nothing maps a physics axis to a
-`QuantityDef`, nothing derives a per-quantity scale, and nothing lets a kernel read or write
-at a scale other than Q32.32. The one place a non-Q32.32 scale is handled today is the Coulomb
-kernel, by hand: `k_coulomb` is passed on a reserved times-ten-to-the-nine output scale and
-the kernel does the alignment shifts inline (`laws.rs`, `coulomb_force`). Generalizing that
-one ad-hoc trick into a declared per-quantity scale is the heart of Phase 1.
+backing, one sign bit and sixty-three magnitude bits, integer ceiling about `2.1e9`, and a
+fractional floor `2^-32` about `2.3e-10`), used pervasively (429 sites in `laws.rs` alone).
+Nothing maps a physics axis to a `QuantityDef`, nothing derives a per-quantity scale, and
+nothing lets a kernel read or write at a scale other than Q32.32. The one place a non-Q32.32
+scale is handled today is the Coulomb kernel, by hand: `k_coulomb` is passed on a reserved
+times-ten-to-the-nine output scale and the kernel does the alignment shifts inline (`laws.rs`,
+`coulomb_force`). Generalizing that one ad-hoc trick into a declared per-quantity scale is the
+heart of Phase 1.
 
-## The seam auditing the input surfaced: uniform Q32.32 cannot hold the wide-range quantities
+## Why per-quantity scale_bits (Option B) over a per-quantity base unit (Option A)
 
-Auditing the premise rather than the flag alone: the reason the unit system needs per-quantity
-scales at all, and the reason Option A (one uniform scale for every quantity, choosing a base
-unit per quantity so the numbers land in the Q32.32 window) is not adequate for the long haul,
-is that several electromagnetic quantities span a dynamic range no single fixed-point scale
-can hold with usable precision at both ends.
+Both options can *represent* a wide-range quantity: a per-quantity base unit at the uniform
+Q32.32 scale and a per-quantity scale at the SI base unit are the same bits reached two ways
+(choosing a charge base unit of `2^-14` coulomb at scale 32 is arithmetically the Q17.46 scale
+at the coulomb). The red-team was right to reject a representability argument between them: the
+case for Option B is not that Option A cannot hold the numbers.
 
-Electric charge is the sharp case. The floor's proposed envelope is `[1e-9, 1e5]` coulombs
-(`em_floor.toml`, `elec.charge`), fourteen orders of magnitude. In Q32.32 the fractional
-resolution is `2^-32` (about `2.3e-10`), so the low end `1e-9` is representable but carries
-only about two bits of significance, and in the Coulomb computation the intermediate `|q|/r`
-underflows the Q32.32 floor at unit separation (the note the axis already carries). No choice
-of base unit fixes this under one scale: shifting the unit to lift the low end pushes the high
-end `1e5` toward or past the integer ceiling. Resistivity (windowed `[1e-8, 1e3]`),
-capacitance (`[1e-12, 1e3]`), magnetic flux density (`[1e-5, 50]`), and several others carry
-the same shape, and optics already flagged it too: `opt.source_power` keeps a per-quantity
-scale reserved for its full envelope, the set Q32.32 range being only the representable
-working subset.
+The case for Option B is that it keeps the SI base units intact and makes the scale an
+explicit, declared, per-quantity reserved number, where Option A smuggles the scale into the
+choice of base unit. Under Option A a "coulomb" silently becomes some non-SI count of internal
+charge units, so the authored physics constants (`k_coulomb`), the cross-quantity compositions
+(a charge times a potential is an energy), and the emic conversions of Phase 2 all have to
+carry and reconcile a hidden unit factor per quantity. Under Option B every quantity stays in
+its SI base unit, the scale is one declared integer the loader reads, the conversions between
+scales are the explicit rescales Part 55 asks for, and the composition of two quantities
+tracks their declared scales by a clean integer sum of fractional bits. Option B is the
+long-haul design because the scale is data in the open rather than a factor hidden in a unit
+choice, which is exactly the Principle-11 discipline the rest of the substrate holds to.
 
-A per-quantity scale holds these cleanly. Charge at Q17.46 (seventeen integer bits, so `1e5`
-fits with headroom, and forty-six fractional bits) represents `1e-9` with about five
-significant figures while still holding `1e5`. This is the concrete reason Option B
-(per-quantity `scale_bits`, which the `units` crate already carries) is the long-haul design
-and Option A is not: the wide-range quantities are unrepresentable under any single scale, and
-Option B also directly unblocks the electromagnetism ranges, which have stayed reserved on
-exactly this pin.
+The genuine representability limit is separate and stands: charge at `[1e-9, 1e5]` (fourteen
+orders) or capacitance at `[1e-12, 1e3]` cannot be held at usable low-end precision at the
+*uniform* Q32.32 scale (charge's `1e-9` lands at about two significant bits, capacitance's
+`1e-12` underflows the `2^-32` fractional floor to zero), so those quantities need a scale
+other than 32 under either option. Option B is where that scale lives as a declared number.
+
+## The seam auditing the input surfaced: the scale-reserved set spans six domains, not EM alone
+
+Auditing the premise rather than the flag alone, and correcting the first draft's scope error:
+the axes that need a scale other than the canonical 32 are not the electromagnetism axes as a
+block. Seven of the fourteen electromagnetism axes carry an explicit per-quantity-scale
+reservation (`elec.charge`, `elec.current`, `elec.resistance`, `elec.resistivity`,
+`elec.capacitance`, `mag.magnetic_moment`, `mag.inductance`); the other seven
+(`elec.potential`, `elec.emf`, `elec.electric_field`, `mag.flux_density`, `mag.flux`,
+`mag.permeability`, `mag.coupling_coefficient`) fit one scale and carry no scale reservation,
+though all fourteen carry a range reservation awaiting the owner's set. And several
+scale-reserved axes live outside electromagnetism entirely, each flagged R-UNITS-PIN at its
+site:
+
+- `opt.source_power` (`chem_optics_floor.toml`), the sub-microwatt low end.
+- `acoustic.source_power` (`fluids_floor.toml`), the same sub-microwatt shape.
+- `fluid.dynamic_viscosity` (`fluids_floor.toml`), the gas-to-glass envelope spanning about
+  sixteen orders.
+- `fluid.channel_radius` (`fluids_floor.toml`), the capillary-to-aorta radius that underflows
+  the Poiseuille `r^4`.
+- `mech.second_moment_of_area` (`mechanical_floor.toml`), where a small section underflows
+  `m^4`.
+- `bio.consumer.reference_tolerance` (`biology_floor.toml`), whose picogram-per-kilogram to
+  gram-per-kilogram envelope exceeds one Q32.32 scale, and which reserves its scale *per toxin
+  class* (a case the section on per-class scales below addresses), with the sibling
+  `bio.consumer.requirement` trace-class deficiency floor and `bio.respiratory_surface`
+  carrying the same shape.
+
+Phase 1 pinning the absolute layer therefore covers this whole scale-reserved set across the
+six domains, not the electromagnetism axes alone. This is the wider, more-work scope the owner
+signed up for, and it is the correct one: leaving a scale-reserved axis in another floor
+unpinned would leave R-UNITS-PIN half-resolved.
 
 ## Phase 1 architecture (Option B, per-quantity scale_bits)
 
-The design has four moving parts, ordered so each lands as its own red-teamed, CI-green,
-merged increment.
+The design has four moving parts.
 
-### 1. The canonical physics quantity catalogue
+### 1. The canonical physics quantity catalogue, with the scale defaulting to 32
 
 The `units` `QuantityRegistry` becomes the canonical catalogue of the physics quantities: one
 `QuantityDef` per physics axis (and per derived law-output quantity that is not itself an
@@ -107,104 +140,157 @@ with the world and stays a registry sibling to the value, semantic, and institut
 substrates. The base-dimension membership is the five bases the floors already use (length,
 mass, time, temperature, current), registered in a fixed canonical order.
 
-The `scale_bits` for a quantity is *derived from its declared range by a fixed rule*, not
-authored per quantity: with `i64` backing there is one sign bit and sixty-three magnitude
-bits, so `integer_bits = ceil(log2(max(|range_lo|, |range_hi|))) + guard` and `scale_bits =
-63 - integer_bits`, clamped to `[0, 62]`. The owner sets the physical envelope (the range,
-already surfaced reserved-with-basis in the floor data); the scale follows by the rule. This
-keeps Principle 11 clean: the derivation is fixed Rust, the envelope is data, and the crate
-authors no scale. Quantities whose envelope fits Q32.32 with usable precision (the fluids,
-chemistry, and mechanical axes, ranges within roughly `[1e-3, 1e6]`) derive `scale_bits = 32`,
-so their `Fixed` representation and their `AbsoluteQuantity` representation coincide and
-nothing about them changes. Only the wide-range quantities derive a different scale.
+The `scale_bits` for a quantity defaults to 32, the canonical scale coincident with `Fixed`,
+and deviates only when the declared envelope cannot be held there. The rule, correcting the
+first draft's maximize-the-fraction error: let `lo` be the smallest nonzero magnitude of
+interest in the range and `hi` the largest, let `P` be the required low-end significance in
+bits, and let `guard` be the integer headroom bits above the top. The quantity keeps
+`scale_bits = 32` when the top fits (`ceil(log2(hi)) + guard <= 31`) and thirty-two fractional
+bits already resolve the bottom to `P` significant bits (`floor(log2(lo)) + 32 >= P`).
+Otherwise the scale is derived to hold both ends: `integer_bits = ceil(log2(hi)) + guard`,
+`frac_bits` set so `floor(log2(lo)) + frac_bits >= P`, and `scale_bits = frac_bits` subject to
+`integer_bits + frac_bits <= 63`. When that budget cannot be met (the conductor-to-insulator
+resistivity envelope spans about twenty-four orders and exceeds sixty-three magnitude bits),
+the envelope is windowed to a representable sub-range with the tail clamped or reserved, the
+honest windowing the floor data already documents. Under this rule the bulk of the substrate
+(the fluids, chemistry, mechanical, and the seven one-scale electromagnetism axes, whose tops
+fit `2^31` and whose bottoms resolve at scale 32) derives `scale_bits = 32` and is unchanged:
+their `Fixed` representation and their `AbsoluteQuantity` representation coincide. Only the
+scale-reserved set derives a different scale. The owner sets the physical envelope and the
+significance target; the scale follows by the rule, so the crate authors no scale (Principle
+11).
 
-The bridge between `Fixed` and `AbsoluteQuantity` is a pair of total conversions: a `Fixed`
-(always Q32.32) maps to an `AbsoluteQuantity` at a quantity's `scale_bits` by the same checked
-rescale `checked_convert` already implements (left shift up, round-half-even divide down, i128
+The bridge between `Fixed` and `AbsoluteQuantity` is a pair of total conversions in the
+canonical rounding discipline (below): a `Fixed` (always Q32.32) maps to an `AbsoluteQuantity`
+at a quantity's `scale_bits` by a checked rescale (left shift up, truncating shift down, i128
 intermediate, `None` on out-of-range), and back. For a `scale_bits = 32` quantity the bridge
 is the identity on the raw bits.
 
-### 2. Scale-aware arithmetic, bounded to the wide-range kernels
+### 2. Scale-aware arithmetic over the declared port scales
 
-A kernel computing a monomial (a product of powers of its input axes, which the physics graph
-already declares per law as its `OutputCheck::Monomial` with the port axes and exponents) has
-a determined output scale: the net fractional-bit exponent is the sum over inputs of
-`scale_bits * exponent`, and the kernel then rescales that raw result to the declared output
-quantity's `scale_bits`. This is exactly what the Coulomb kernel does by hand with its fixed
-shifts; the generalization is a small set of raw-bit helpers (align two operands to a working
-exponent, track the exponent through a checked multiply or divide, rescale to a target
-`scale_bits` with round-half-even), which the wide-range kernels call in place of the inline
-`<< 32` and `>> 32`. The helpers live in the physics crate and operate on i128 raw bits, the
-totality discipline the kernels already use (every overflow and zero divisor routes to the
-physical extreme).
+A kernel computes a consequence from its input axes whose scales are now declared. The physics
+graph already declares each law's port exponents on its `PortContract` (present on every law,
+including the ones whose output check is `Asserted` rather than `Monomial`), so the output
+scale of a product-of-powers kernel is a determined integer: the net fractional-bit exponent
+is the sum over inputs of `scale_bits * exponent`, plus the `scale_bits` any dimensional
+constant carries (this is the `k_coulomb` term the first draft's formula omitted), and the
+kernel then rescales that raw result to the declared output quantity's `scale_bits`. Four of
+the fifteen electromagnetism kernels are `Asserted` because a dimensional constant or a
+finite-difference rate sits outside the port monomial (`coulomb_force`, `solenoid_field`,
+`faraday_emf`, `inductive_emf`, confirmed in `graph.rs`); the scale tracking still works for
+them off the declared port exponents and the constant's declared scale, so the `Asserted`
+output check is about dimensional homogeneity, not about whether the scale is derivable.
 
-This work is bounded to the electromagnetism kernels and the one optics kernel
-(`inverse_square_falloff`, reading `opt.source_power`). The fluids, chemistry, and mechanical
-kernels keep `scale_bits = 32` throughout and are not touched, so the change does not rewrite
-the roughly sixty-three kernels: it touches the ten or so that read or write a wide-range
-quantity. The kernels stay bespoke closed-form integer functions; they become
-scale-parameterized rather than scale-hardcoded.
+The generalization of the Coulomb kernel is therefore more than a find-and-replace, and the
+red-team was right to flag it: the kernel's inline `<< 32` and `>> 32` hardcode the assumption
+that both operands are Q32.32, which fails when charge is (say) Q17.46 and the separation is
+Q32.32. The helpers replace the fixed shifts with shifts computed from the operands' declared
+scales and the target output scale (for `|q| / r` the alignment shift is a function of the
+charge scale, the radius scale, and the working scale), tracking the fractional-bit exponent
+through each checked multiply and divide and rescaling once to the output scale at the end. The
+helpers live in the physics crate and operate on i128 raw bits, the totality discipline the
+kernels already use (every overflow and zero divisor routes to the physical extreme).
 
-### 3. The electromagnetism ranges, unblocked
+This work follows the wide-range quantity set, not a domain boundary, and it is larger than
+the first draft claimed: it touches every kernel that reads or writes a scale-reserved axis,
+which spans electromagnetism (`coulomb_force`, `ohm_voltage`, `circuit_current`,
+`power_dissipation`, the resistance and capacitance and inductance kernels), fluids
+(`reynolds_number`, `poiseuille_flow` reading viscosity and channel radius, `laplace_pressure`
+reading channel radius), mechanics (`euler_buckle` reading the second moment of area), optics
+(`inverse_square_falloff` reading source power), acoustics (the source-power kernel), and
+biology (the kernels reading the consumer tolerance and respiratory surface). The kernels that
+read only `scale_bits = 32` quantities are untouched and stay bit-identical; the blast radius
+is the wide-range readers, a bounded but cross-domain set rather than an electromagnetism-only
+one.
 
-With the scale derived from the envelope, the fourteen electromagnetism axes graduate from
-`range_reserved` to set `range_lo`/`range_hi`, the same graduation the fluids and chemistry
-floors already took (`em_floor.toml` today carries every axis as a proposed window with a
-cited basis, awaiting exactly this pin). The set range is the owner's envelope; the
-`scale_bits` is its derived consequence. This is the concrete payoff that makes Phase 1 worth
-its cost: the electromagnetism floor becomes owner-set data rather than a reserved sketch.
+### 3. The ranges set and the scales pinned
+
+Two owner-set actions land here, kept distinct. The range graduation sets the fourteen
+electromagnetism axes (and any other `range_reserved` axis in scope) from `range_reserved` to
+`range_lo`/`range_hi`, the same graduation the fluids and chemistry floors already took; the
+set range is the owner's declared envelope. The scale pinning then derives and records the
+`scale_bits` for each scale-reserved axis from its now-set envelope and significance target by
+the rule above. Setting the envelope is the prerequisite for deriving the scale, so the two
+run together, and the electromagnetism floor becomes owner-set data rather than a reserved
+sketch, the concrete payoff of the arc.
 
 ### 4. The constants reconciled onto the pinned scales
 
-The reserved electromagnetism constants are re-expressed on the pinned scales rather than the
-ad-hoc ones. `k_coulomb` is today passed on a reserved times-ten-to-the-nine output scale that
-absorbs the charge-scale mismatch; once charge carries a declared `scale_bits`, the coefficient
-is expressed against that scale and the ad-hoc factor is retired. `MU_0` (vacuum permeability),
-the induction tick duration `DT`, and the caps `F_MAX`, `V_MAX`, `I_MAX`, `B_MAX`, `PHI_MAX`
-are each reconciled to the pinned scales. Each stays the caller's reserved value passed in,
-never fabricated inline, and each is surfaced with its basis for the owner to set.
+The reserved constants are re-expressed on the pinned scales rather than the ad-hoc ones.
+`k_coulomb` is today passed on a reserved times-ten-to-the-nine output scale that absorbs the
+charge-scale mismatch; once charge carries a declared `scale_bits`, the coefficient is
+expressed against that scale (and enters the output-scale sum as the dimensional constant's own
+`scale_bits`) and the ad-hoc factor is retired. `MU_0` (vacuum permeability), the induction
+tick duration `DT`, and the caps `F_MAX`, `V_MAX`, `I_MAX`, `B_MAX`, `PHI_MAX` are each
+reconciled to the pinned scales. Each stays the caller's reserved value passed in, never
+fabricated inline, and each is surfaced with its basis for the owner to set.
+
+## Per-class scales (the `bio.consumer.reference_tolerance` case)
+
+One scale-reserved axis reserves its scale *per toxin class*, and a single `scale_bits` per
+`QuantityDef` cannot express a scale that varies by class. The resolution respects the
+data-driven substrate rather than widening the struct: where the physics of an axis truly
+demands a different scale per class, the class is the quantity granularity, so the catalogue
+registers one `QuantityDef` per class (a tolerance-for-class-X quantity, a tolerance-for-class-Y
+quantity), the membership being data that grows with the world exactly as the rest of the
+registry does (Principle 11). The mechanism stays one scale per `QuantityDef`; the world grows
+the set of quantities to the granularity its physics needs. This keeps the toxin-class set
+open and emergent rather than authoring a closed enum of classes into the type. The same holds
+for the `bio.consumer.requirement` trace-class deficiency floor.
 
 ## Determinism (held under review, the load-bearing constraint)
 
-R-UNITS-PIN is a determinism-cluster item, so the bar is bit-reproducibility, not plausibility.
-The design holds it three ways. The scale derivation is a pure integer function of declared
-data, so it is identical on every machine and every run. The scale-aware helpers are integer
-i128 arithmetic with a fixed rounding rule (round-half-to-even, the rule the canonical
-quantizer and `checked_convert` already use), so no float enters and no ordering ambiguity
-arises. The accumulation paths use the crate's order-independent `sum` (exact i128 total,
-policy applied once at read), which is the clamp-at-read discipline the evidence engine and the
+R-UNITS-PIN is a determinism-cluster item, so the bar is bit-reproducibility, and the
+first draft carried a real inconsistency the red-team caught: it promised round-half-to-even
+rescaling in the helpers *and* bit-identity with the current kernels, which truncate. The two
+cannot both hold. The resolution follows the pinned oracle: the canonical fixed-point path uses
+the same truncate-toward-zero and floor discipline the `Fixed` oracle and R-GPU-CANON-PIN
+already pin (the Q32.32 multiply floors and the divide truncates, the owner's ratified
+asymmetry, record 62.23), so every scale-32 kernel stays bit-identical to its current output
+and every wide-range kernel is proven against a recomputed oracle in the same truncating
+discipline. The `units` crate's round-half-to-even `checked_convert` is retained for the emic
+conversion layer of Phase 2 (a culture's unit to the absolute system), which is a distinct,
+non-oracle path and not on the bit-identity path; the canonical Phase 1 bridge and the
+kernel-internal rescales truncate. Determinism holds either way (both roundings are
+deterministic); bit-identity with the already-merged kernels requires the truncating one, so
+that is the canonical rule.
+
+The design holds determinism three further ways. The scale derivation is a pure integer
+function of declared data, identical on every machine and run. The scale-aware helpers are
+integer i128 arithmetic with a fixed rounding rule, so no float enters and no ordering
+ambiguity arises. The accumulation paths use the crate's order-independent `sum` (exact i128
+total, policy applied once at read), the clamp-at-read discipline the evidence engine and the
 Part 57 order-independent reductions already rely on, so a fold of magnitudes is independent of
-arrival order even under saturation. Every wide-range kernel change is proven bit-identical to
-its current output where the derived scale is 32, and re-proven against a recomputed oracle
-where the scale differs, in the physics determinism harness.
+arrival order even under saturation.
 
 ## Reserved values, surfaced with basis (nothing fabricated)
 
 Phase 1 surfaces these for the owner to set; none is invented here.
 
-- **The per-quantity envelopes for the fourteen electromagnetism axes** (charge, current,
-  potential, emf, resistance, resistivity, capacitance, electric field, flux density, flux,
-  permeability, magnetic moment, inductance, coupling coefficient). Basis: the cited datasheet
-  and theory bounds each axis already carries in its `real` field and its proposed window
-  (CRC, Griffiths, Kittel, Horowitz and Hill, Fink and Beaty, and the others named per axis).
-  The owner confirms the window; the `scale_bits` follows by the derivation rule.
-- **The scale-derivation guard bits** (how many integer bits above the envelope top the rule
-  reserves before assigning the rest to the fraction). Basis: the headroom a law's product of
-  in-range inputs can reach before the output cap catches it, a representability bound rather
-  than a physical one; a small fixed guard (one or two bits) is the natural default and is the
-  owner's to set.
-- **The reconciled electromagnetism constants** (`k_coulomb` on the pinned charge scale, `MU_0`,
-  the induction `DT`, and the caps `F_MAX`, `V_MAX`, `I_MAX`, `B_MAX`, `PHI_MAX`). Basis: the
-  physical constant expressed against the now-pinned scales, and each cap the declared range's
-  top routed through the law, a derivation from the envelope and the scale rather than a free
+- **The per-quantity envelopes for the range-reserved axes** (the fourteen electromagnetism
+  axes; `mech.second_moment_of_area`; the biology consumer tolerance and requirement axes).
+  Basis: the cited datasheet and theory bounds each axis already carries in its `real` field
+  and its proposed window (CRC, Griffiths, Kittel, Horowitz and Hill, Fink and Beaty, White,
+  Fung, and the others named per axis). The owner confirms the window.
+- **The low-end significance target `P`** (the significant bits a quantity's smallest
+  meaningful value must retain). Basis: the resolution the consuming kernels need at the
+  bottom of the envelope, a precision requirement the owner sets per quantity or as a substrate
+  default; it trades against the guard and the top of the envelope within the sixty-three-bit
+  budget.
+- **The scale-derivation guard bits** (the integer headroom above the envelope top before the
+  rest is assigned to the fraction). Basis: the headroom a law's product of in-range inputs can
+  reach before the output cap catches it, a representability bound rather than a physical one;
+  a small fixed guard is the natural default, and the worked charge example (Q17.46) corresponds
+  to `guard = 0` at `P = 16`, so the guard and `P` are surfaced together against the budget.
+- **The reconciled constants** (`k_coulomb` on the pinned charge scale, `MU_0`, the induction
+  `DT`, and the caps `F_MAX`, `V_MAX`, `I_MAX`, `B_MAX`, `PHI_MAX`). Basis: the physical
+  constant expressed against the now-pinned scales, and each cap the declared range's top
+  routed through the law, a derivation from the envelope and the scale rather than a free
   choice.
 - **The overflow policy per quantity** (saturate or wrap). Basis: whether the quantity is a
   gate-thresholded magnitude (saturate, the default, so a runaway reads as the bound) or a
   modular accumulator whose wrap is intended (wrap). Every physics quantity is expected to
   saturate; the field is surfaced so the choice is declared rather than assumed.
-- **The `opt.source_power` full-envelope scale** (the optics axis that already reserves a
-  per-quantity scale for its sub-microwatt low end). Basis: the same envelope-to-scale
-  derivation as the electromagnetism axes.
 
 The reserved list seeds `calibration/reserved.toml` when the engine consumes it, in step with
 the design record, per the manifest discipline.
@@ -224,44 +310,51 @@ non-power-of-two factor), and a sorted unit store so any canonical walk over it 
 Phase 1 leaves both open in the right way. The absolute layer is the fixed pin the emic
 conversions resolve against, so pinning it first is the prerequisite. The round-trip rule is a
 Phase 2 mechanism (a canonical direction plus a stored residual, or a rational conversion
-factor held exactly rather than as a single rounded multiply), and Phase 1's `checked_convert`
-already establishes the round-half-even rescale it will build on. The sorted unit store is a
-Phase 2 container keyed by a stable id, the canonical-walk discipline (R-CANON-WALK) the engine
-already applies elsewhere. Phase 2 couples to Parts 9 and 40 (the culture and belief layers)
-and is the second arc; it is not built here.
+factor held exactly rather than as a single rounded multiply), and the crate's round-half-even
+`checked_convert` is the rescale it will build on, retained for exactly this emic path. The
+sorted unit store is a Phase 2 container keyed by a stable id, the canonical-walk discipline
+(R-CANON-WALK) the engine already applies elsewhere. Phase 2 couples to Parts 9 and 40 (the
+culture and belief layers) and is the second arc; it is not built here.
 
 ## Honest limits (surfaced, not hidden)
 
 - Phase 1 pins the absolute layer only. The emic round-trip loss and the sorted unit store, the
   two defects the flag names by number, are Phase 2 and remain open until that arc lands.
-- The scale-derivation rule assigns a scale from the declared envelope. A quantity whose true
-  physical range exceeds what sixty-three magnitude bits can hold at usable precision (the
-  conductor-to-insulator resistivity envelope spans about twenty-four orders, the axis is
-  windowed to fit) is represented over a windowed sub-range, with the extreme tail clamped or
-  reserved, the same honest windowing the floor data already documents. Per-quantity scales
-  widen the representable window; they do not make it unbounded.
-- Scale-aware arithmetic is bounded to the wide-range kernels by design. A future domain that
-  introduces a new wide-range quantity inherits the mechanism but must have its kernel made
+- The scale-derivation rule assigns a scale from the declared envelope and significance target.
+  A quantity whose true physical range exceeds what sixty-three magnitude bits can hold at the
+  required significance (resistivity's full twenty-four orders, dynamic viscosity's sixteen) is
+  represented over a windowed sub-range with the tail clamped or reserved, the same honest
+  windowing the floor data documents. Per-quantity scales widen the representable window; they
+  do not make it unbounded.
+- Scale-aware arithmetic is cross-domain, not electromagnetism-only: the blast radius is every
+  kernel reading a scale-reserved axis, across six domains. A future domain that introduces a
+  new wide-range quantity inherits the mechanism but must have its reader kernels made
   scale-aware, the deliberate audited extension rather than a silent one.
+- A per-class scale is expressed by registering one quantity per class, so a quantity whose
+  scale varies over a large class set grows the catalogue by that many entries. This is the
+  data-driven cost of keeping the class set open rather than authoring a closed enum.
 - The derived scale is a representability choice, not a physical claim. Two quantities of the
-  same dimension at different scales convert through the checked rescale, which rounds; a
-  conversion that does not divide evenly loses up to one unit at the target scale, reported
-  through the `checked` contract rather than hidden.
+  same dimension at different scales convert through the checked rescale, which under the
+  canonical truncating discipline drops the sub-scale remainder rather than rounding it,
+  reported through the `checked` contract rather than hidden.
 
 ## The increment plan (each a red-teamed, CI-green, merged PR)
 
-1. **PR-0: this design-of-record.** Lands the architecture as the arc's vehicle (docs only).
-2. **PR-1: the canonical quantity catalogue and the Fixed bridge.** Build the catalogue from
-   the floor axis set, the scale-derivation rule, and the total `Fixed`-to-`AbsoluteQuantity`
-   bridge, with the fluids/chem/mechanical quantities deriving `scale_bits = 32` and proven
-   unchanged. Mechanism, no behavior change to any kernel.
-3. **PR-2: scale-aware electromagnetism kernels.** Generalize the Coulomb inline scaling into
-   the raw-bit helpers, and route the wide-range electromagnetism and `source_power` kernels
-   through them, proven bit-identical where the scale is 32 and against a recomputed oracle
-   where it differs.
-4. **PR-3: set the electromagnetism ranges and reconcile the constants.** Graduate the fourteen
-   axes from `range_reserved` to set, reconcile `k_coulomb`, `MU_0`, `DT`, and the caps onto the
-   pinned scales, and surface the reserved decisions for owner ratification.
+1. **PR-0: this design-of-record.** Lands the corrected architecture as the arc's vehicle
+   (docs only).
+2. **PR-1: the canonical quantity catalogue, the scale-derivation rule, and the Fixed bridge.**
+   Build the catalogue from the floor axis set, the default-32 derivation rule, and the total
+   truncating `Fixed`-to-`AbsoluteQuantity` bridge, with every fitting quantity deriving
+   `scale_bits = 32` and proven unchanged. Mechanism, no behavior change to any kernel.
+3. **PR-2: scale-aware arithmetic and the electromagnetism readers.** Build the raw-bit helpers
+   (scales-in, output-scale-out, truncating) generalizing the Coulomb inline shifts, and route
+   the electromagnetism wide-range kernels through them, proven bit-identical where the scale is
+   32 and against a recomputed truncating oracle where it differs.
+4. **PR-3: the remaining wide-range readers, the ranges, and the constants.** Route the fluids,
+   mechanics, optics, acoustics, and biology wide-range kernels through the helpers; graduate
+   the range-reserved axes to set; pin each scale-reserved axis's `scale_bits`; reconcile
+   `k_coulomb`, `MU_0`, `DT`, and the caps; and surface the reserved decisions for owner
+   ratification. Larger scale-reserved sets may split PR-3 by domain.
 
 On the arc's completion, R-UNITS-PIN's absolute half is consolidated into design.md (Part 55,
 a `Decided and reserved` blockquote, a Part 62 record, a Part 63 bibliography group) and the
@@ -275,20 +368,25 @@ Part 55 (the flag and the two-layer spec), Part 58 (the physics-substrate repres
 states every quantity is fixed-point with a declared range and a per-quantity scale), Part 41
 (the authored physics layer the scales serve), Parts 3, 9, 40 (the flag's declared couplings:
 the fixed-point discipline, the belief layer the emic understanding rides, the seeded start
-variables), and the audit's determinism cluster (R-UNITS-PIN as one of the seven, roadmap Tier
-B item 4). The electromagnetism floor's `R-UNITS-PIN` scale-pending notes and the optics
-`opt.source_power` note reconcile to set on PR-3.
+variables), the R-GPU-CANON-PIN record 62.23 (the pinned truncating arithmetic this arc's
+canonical rounding follows), and the audit's determinism cluster (R-UNITS-PIN as one of the
+seven, roadmap Tier B item 4). Every floor's `R-UNITS-PIN` scale-pending note reconciles to set
+on PR-3: the electromagnetism, `opt.source_power`, `acoustic.source_power`,
+`fluid.dynamic_viscosity`, `fluid.channel_radius`, `mech.second_moment_of_area`, and the
+biology consumer-axis notes.
 
 ## Citations
 
-The physical envelopes and their bases are the citations the floor axes already carry per
-axis: CRC Handbook of Chemistry and Physics (charge, resistivity, capacitance, dielectric
-strength, magnetic properties, refractive index, emissivity); Griffiths, Introduction to
+The physical envelopes and their bases are the citations the floor axes already carry per axis:
+CRC Handbook of Chemistry and Physics (charge, resistivity, capacitance, dielectric strength,
+magnetic properties, refractive index, emissivity, viscosity); Griffiths, Introduction to
 Electrodynamics (charge, current, potential, resistance, capacitance, flux, magnetic moment);
 Kittel, Introduction to Solid State Physics (resistivity, permeability); Horowitz and Hill, The
 Art of Electronics (current, capacitance, inductance, coupling); Fink and Beaty, Standard
 Handbook for Electrical Engineers (flux, inductance, coupling); Jiles, Magnetism and Magnetic
-Materials (permeability); Purcell and Morin, Electricity and Magnetism (flux density); NIST
+Materials (permeability); Purcell and Morin, Electricity and Magnetism (flux density); White,
+Viscous Fluid Flow (dynamic viscosity); Fung, Biomechanics: Circulation (channel radius); NIST
 CODATA (the constants). The fixed-point discipline is design Parts 3 and 55; the substrate
-representation is Part 58; the order-independent reduction discipline is Part 57
-(R-REDUCE-ORDER); the canonical-walk discipline is Part 3.5 (R-CANON-WALK).
+representation is Part 58; the pinned truncating arithmetic is Parts 3.4 and 5.4 (record
+62.23); the order-independent reduction discipline is Part 57 (R-REDUCE-ORDER); the
+canonical-walk discipline is Part 3.5 (R-CANON-WALK).
