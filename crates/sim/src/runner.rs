@@ -82,9 +82,30 @@ use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegis
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::world::{TickInput, World};
+use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{Coord3, TileMap};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+// The runner tick's phases as deterministic-scheduler systems over the resources they contend for
+// (design Part 57). The resource ids name the field, the body-temperature map, the located index,
+// and the cognition world; the system ids are the canonical order the scheduler tie-breaks on.
+const RES_FIELD: ResourceId = ResourceId(0);
+const RES_BODY: ResourceId = ResourceId(1);
+const RES_INDEX: ResourceId = ResourceId(2);
+const RES_WORLD: ResourceId = ResourceId(3);
+const SYS_FIELD: SystemId = SystemId(0);
+const SYS_BODY: SystemId = SystemId(1);
+const SYS_EMBODIMENT: SystemId = SystemId(2);
+const SYS_WORLD: SystemId = SystemId(3);
+
+/// A declared access from resource-id slices (a small local convenience over [`Access::new`]).
+fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
+    Access {
+        reads: reads.iter().copied().collect::<BTreeSet<_>>(),
+        writes: writes.iter().copied().collect::<BTreeSet<_>>(),
+    }
+}
 
 /// The reserved field-layer calibrations. There is deliberately no `Default`: on a canonical run
 /// these are read from the manifest and are fail-loud if unset, and a test must name each as a
@@ -556,6 +577,20 @@ impl Runner {
     /// points cannot diverge.
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.field.step(&self.calib);
+        self.phase_body_exchange();
+        if self.embodiment.is_some() {
+            self.step_embodiment();
+        }
+        if let Some(world) = self.world.as_mut() {
+            world.tick(world_inputs);
+        }
+        self.clock += 1;
+    }
+
+    /// The body-thermal exchange phase: every located being pulls its core temperature toward its
+    /// cell's field temperature (the discrete Newton-cooling coupling), beings walked in canonical id
+    /// order. Reads the field and the located index, writes the body temperatures.
+    fn phase_body_exchange(&mut self) {
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
         for id in ids {
             if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
@@ -565,12 +600,53 @@ impl Runner {
                 self.body_temp.insert(id, next);
             }
         }
+    }
+
+    /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
+    /// touch (design Part 57): the field step writes the field; the body-thermal exchange reads the
+    /// field and the located index and writes the body temperatures; the embodiment coupling reads the
+    /// field and writes the body temperatures and the index; the cognition world reads and writes only
+    /// the world. Only the phases this runner actually runs are declared, so a field-only runner
+    /// declares two systems and a fully composed one declares four.
+    pub fn tick_systems(&self) -> BTreeMap<SystemId, Access> {
+        let mut sys = BTreeMap::new();
+        sys.insert(SYS_FIELD, access(&[], &[RES_FIELD]));
+        sys.insert(SYS_BODY, access(&[RES_FIELD, RES_INDEX], &[RES_BODY]));
         if self.embodiment.is_some() {
+            sys.insert(SYS_EMBODIMENT, access(&[RES_FIELD], &[RES_BODY, RES_INDEX]));
+        }
+        if self.world.is_some() {
+            sys.insert(SYS_WORLD, access(&[RES_WORLD], &[RES_WORLD]));
+        }
+        sys
+    }
+
+    /// Run one tick phase by its [`SystemId`], the dispatch the scheduled executor drives.
+    fn run_phase(&mut self, sid: SystemId, world_inputs: &[TickInput]) {
+        if sid == SYS_FIELD {
+            self.field.step(&self.calib);
+        } else if sid == SYS_BODY {
+            self.phase_body_exchange();
+        } else if sid == SYS_EMBODIMENT {
             self.step_embodiment();
+        } else if sid == SYS_WORLD {
+            if let Some(world) = self.world.as_mut() {
+                world.tick(world_inputs);
+            }
         }
-        if let Some(world) = self.world.as_mut() {
-            world.tick(world_inputs);
-        }
+    }
+
+    /// One tick run through the deterministic scheduler (design Part 57): the phases are declared as
+    /// systems over their resources, the scheduler derives conflict-free batches from the
+    /// declarations, and the flattened schedule runs them. The scheduler discovers that the cognition
+    /// world shares no resource with the field phases, so it places the world tick in the first batch
+    /// alongside the field step (a parallelisable pair), yet the result is bit-identical to the
+    /// pinned-order [`step`](Self::step): the reordered phases do not conflict, and the counter RNG is
+    /// draw-keyed rather than sequential (R-RNG-COORD), so the reorder cannot change any draw. This is
+    /// the runner as the scheduler's first real tick, proven equivalent to the hand-pinned order.
+    pub fn step_scheduled(&mut self, world_inputs: &[TickInput]) {
+        let sch = schedule(&self.tick_systems());
+        run_serial(&sch, |sid| self.run_phase(sid, world_inputs));
         self.clock += 1;
     }
 

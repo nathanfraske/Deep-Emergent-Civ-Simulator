@@ -488,3 +488,50 @@ fn the_canonical_runner_refuses_an_authored_behaviour_repertoire() {
     });
     let _ = Runner::with_world(field_fixture(), field_calib(), world);
 }
+
+#[test]
+fn the_runner_tick_runs_through_the_scheduler_bit_identically() {
+    // The deterministic scheduler's first real tick (design Part 57): the runner's phases declared as
+    // systems over their resources, scheduled into conflict-free batches, and run through the serial
+    // executor must reproduce the hand-pinned tick bit for bit. Two identical composed runners, one
+    // stepped in the pinned order and one through the scheduler, must track exactly.
+    let build = || {
+        let mut runner =
+            Runner::with_world(field_fixture(), field_calib(), dawn_world(24, 4, 0x5C4E).0);
+        for k in 0..3u64 {
+            let coord = Coord3::ground((k as i32) % 8, (k as i32) % 6);
+            runner.place_being(StableId(10_000 + k), coord, Fixed::from_int(37));
+        }
+        runner
+    };
+    let mut pinned = build();
+    let mut scheduled = build();
+    for _ in 0..40 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            scheduled.state_hash(),
+            pinned.state_hash(),
+            "the scheduled tick diverged from the pinned order"
+        );
+    }
+    // The payoff the schedule demonstrates: the cognition world shares no resource with the field
+    // phases, so it lands in the first batch alongside the field step (a parallelisable pair), while
+    // the field-reading body exchange serialises after into a second batch.
+    let sch = civsim_core::schedule::schedule(&pinned.tick_systems());
+    assert_eq!(
+        sch.len(),
+        2,
+        "field and world parallelise, the body exchange follows"
+    );
+    assert_eq!(
+        sch[0].len(),
+        2,
+        "the field step and the independent world tick share the first batch"
+    );
+    assert_eq!(
+        sch[1].len(),
+        1,
+        "the field-reading body exchange serialises after"
+    );
+}
