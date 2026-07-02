@@ -155,7 +155,12 @@ real = "Fink and Beaty; Horowitz and Hill"
 
 [[law]]
 id = "law.coulomb_force"
-inputs = ["elec.charge", "mech.arm_length"]
+kernel = "coulomb_force"
+ports = [
+  { role = "q1", axis = "elec.charge" },
+  { role = "q2", axis = "elec.charge" },
+  { role = "r", axis = "mech.arm_length" },
+]
 output_measure = "electrostatic force and the attractive/repulsive condition"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -163,7 +168,11 @@ tier = 2
 
 [[law]]
 id = "law.ohm_voltage"
-inputs = ["elec.current", "elec.resistance"]
+kernel = "ohm_voltage"
+ports = [
+  { role = "current", axis = "elec.current" },
+  { role = "resistance", axis = "elec.resistance" },
+]
 output_measure = "potential difference V = I*R"
 dimension = "voltage"
 interval_bound = "[0, V_MAX]"
@@ -171,7 +180,11 @@ tier = 2
 
 [[law]]
 id = "law.circuit_current"
-inputs = ["elec.emf", "elec.resistance"]
+kernel = "circuit_current"
+ports = [
+  { role = "emf", axis = "elec.emf" },
+  { role = "r_total", axis = "elec.resistance" },
+]
 output_measure = "current I = emf/R_total (a short is the cap)"
 dimension = "current"
 interval_bound = "[0, I_MAX]"
@@ -179,7 +192,11 @@ tier = 2
 
 [[law]]
 id = "law.power_dissipation"
-inputs = ["elec.current", "elec.potential"]
+kernel = "power_dissipation"
+ports = [
+  { role = "current", axis = "elec.current" },
+  { role = "voltage", axis = "elec.potential" },
+]
 output_measure = "Joule power P = I*V"
 dimension = "2,1,-3,0,0"
 interval_bound = "[0, POWER_MAX]"
@@ -187,7 +204,11 @@ tier = 2
 
 [[law]]
 id = "law.capacitor_energy"
-inputs = ["elec.capacitance", "elec.potential"]
+kernel = "capacitor_energy"
+ports = [
+  { role = "capacitance", axis = "elec.capacitance" },
+  { role = "voltage", axis = "elec.potential" },
+]
 output_measure = "stored electric-field energy U = (1/2)C*V^2"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
@@ -195,7 +216,11 @@ tier = 2
 
 [[law]]
 id = "law.battery_emf"
-inputs = ["chem.standard_potential"]
+kernel = "battery_emf"
+ports = [
+  { role = "cathode", axis = "chem.standard_potential" },
+  { role = "anode", axis = "chem.standard_potential" },
+]
 output_measure = "galvanic cell EMF = E_cathode - E_anode"
 dimension = "voltage"
 interval_bound = "[-10, 10]"
@@ -203,7 +228,12 @@ tier = 2
 
 [[law]]
 id = "law.resistance"
-inputs = ["elec.resistivity", "mech.arm_length", "mech.contact_area"]
+kernel = "resistance"
+ports = [
+  { role = "resistivity", axis = "elec.resistivity" },
+  { role = "length", axis = "mech.arm_length" },
+  { role = "area", axis = "mech.contact_area" },
+]
 output_measure = "element resistance R = rho*L/A (an open is the cap)"
 dimension = "2,1,-3,0,-2"
 interval_bound = "[0, R_MAX]"
@@ -213,7 +243,12 @@ tier = 2
 
 [[law]]
 id = "law.solenoid_field"
-inputs = ["mag.permeability", "elec.current"]
+kernel = "solenoid_field"
+ports = [
+  { role = "permeability", axis = "mag.permeability" },
+  { role = "current", axis = "elec.current" },
+]
+produces = ["mag.flux_density"]
 output_measure = "solenoid flux density B = mu_0*mu_r*n*I"
 dimension = "0,1,-2,0,-1"
 interval_bound = "[0, B_MAX]"
@@ -221,7 +256,12 @@ tier = 2
 
 [[law]]
 id = "law.flux_linkage"
-inputs = ["mag.flux_density", "mech.contact_area"]
+kernel = "flux_linkage"
+ports = [
+  { role = "flux_density", axis = "mag.flux_density" },
+  { role = "area", axis = "mech.contact_area" },
+]
+produces = ["mag.flux"]
 output_measure = "magnetic flux Phi = B*A"
 dimension = "2,1,-2,0,-1"
 interval_bound = "[0, PHI_MAX]"
@@ -229,7 +269,12 @@ tier = 2
 
 [[law]]
 id = "law.motor_force"
-inputs = ["mag.flux_density", "elec.current", "mech.arm_length"]
+kernel = "motor_force"
+ports = [
+  { role = "flux_density", axis = "mag.flux_density" },
+  { role = "current", axis = "elec.current" },
+  { role = "length", axis = "mech.arm_length" },
+]
 output_measure = "force on a current-carrying conductor F = B*I*L"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -237,7 +282,12 @@ tier = 2
 
 [[law]]
 id = "law.lorentz_force"
-inputs = ["elec.charge", "mech.velocity", "mag.flux_density"]
+kernel = "lorentz_force"
+ports = [
+  { role = "charge", axis = "elec.charge" },
+  { role = "velocity", axis = "mech.velocity" },
+  { role = "flux_density", axis = "mag.flux_density" },
+]
 output_measure = "force on a moving charge F = q*v*B"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -245,7 +295,11 @@ tier = 2
 
 [[law]]
 id = "law.dipole_torque"
-inputs = ["mag.magnetic_moment", "mag.flux_density"]
+kernel = "dipole_torque"
+ports = [
+  { role = "moment", axis = "mag.magnetic_moment" },
+  { role = "flux_density", axis = "mag.flux_density" },
+]
 output_measure = "maximum magnetic dipole torque tau = m*B (the sin theta factor deferred)"
 dimension = "2,1,-2,0,0"
 interval_bound = "[0, TORQUE_MAX]"
@@ -253,7 +307,12 @@ tier = 2
 
 [[law]]
 id = "law.faraday_emf"
-inputs = ["mag.flux"]
+kernel = "faraday_emf"
+ports = [
+  { role = "flux_now", axis = "mag.flux" },
+  { role = "flux_prev", axis = "mag.flux", temporal = "prior" },
+  { role = "dt", temporal = "dt" },
+]
 output_measure = "induced EMF = -N*dPhi/dt (the per-tick flux delta, signed by Lenz)"
 dimension = "voltage"
 interval_bound = "[-V_MAX, V_MAX]"
@@ -261,7 +320,12 @@ tier = 2
 
 [[law]]
 id = "law.inductive_emf"
-inputs = ["mag.inductance", "elec.current"]
+kernel = "inductive_emf"
+ports = [
+  { role = "current_now", axis = "elec.current" },
+  { role = "current_prev", axis = "elec.current", temporal = "prior" },
+  { role = "dt", temporal = "dt" },
+]
 output_measure = "inductive EMF = -L*dI/dt (self back-EMF or mutual step-up)"
 dimension = "voltage"
 interval_bound = "[-V_MAX, V_MAX]"
@@ -269,7 +333,11 @@ tier = 2
 
 [[law]]
 id = "law.inductor_energy"
-inputs = ["mag.inductance", "elec.current"]
+kernel = "inductor_energy"
+ports = [
+  { role = "inductance", axis = "mag.inductance" },
+  { role = "current", axis = "elec.current" },
+]
 output_measure = "stored magnetic-field energy U = (1/2)L*I^2"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
