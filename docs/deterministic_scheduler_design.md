@@ -189,7 +189,13 @@ cores): the `perceive` gather scales to about 1.8x and plateaus near eight worke
 memory-bound (each worker walks the shared `minds` `BTreeMap`, so a few cores saturate memory
 bandwidth). Heterogeneous scheduling buys throughput on compute-bound work; a memory-bound phase is
 capped by bandwidth whatever the core mix, and its lever is data layout (a cache-friendly structure, or
-a spatial index so a trace visits only co-located beings) rather than more cores. An early per-hit sort
+a spatial index so a trace visits only co-located beings) rather than more cores. The other lever is
+the GPU, whose memory bandwidth is an order of magnitude higher (about 1.7 TB/s on the reference 5090
+against 50 to 90 GB/s on the CPU): the perceive notice roll is proven bit-identical on the GPU
+(`crates/gpu`, `perceive_gate`), because it is draw-keyed (R-RNG-COORD) and fixed-point
+(R-GPU-CANON-PIN), so a memory-bound gather can move to the GPU as a canonical offload rather than an
+approximation. The full offload (a struct-of-arrays extraction, a resident cross-tick buffer per Part
+5.6, and a stream compaction of the hits) is scoped, not built. An early per-hit sort
 merge cost more than it saved: sorting the whole hit set single-threaded Amdahl-capped the phase, which
 is why the merge sorts at work-unit granularity. The compute-bound phases (the `converse` dialogue
 reasoning, and `gossip`'s per-speaker deception judgement) are where per-core throughput and a P-core

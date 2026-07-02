@@ -46,6 +46,20 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): canonical GPU perceive spike, the memory-bound gather runs on the GPU bit-for-bit
+
+The owner asked whether the memory-bound perceive could run on the GPU, where the memory bandwidth is an order of magnitude higher. The answer is yes, and it is the convergence of this session's two GPU-enabling threads: the pinned Q32.32 arithmetic (R-GPU-CANON-PIN) and the draw-keyed counter RNG (R-RNG-COORD). On `claude/gpu-perceive-spike`.
+
+**Built (the de-risking spike).** `crates/gpu/src/perceive.rs`: the perceive notice roll ported to a `#[cube]` kernel, `gpu_notice`. It reproduces the CPU `perceive` decision bit-for-bit: the same `splitmix64` counter RNG on native u64, the same `DrawKey::pair` coordinate fold (`[ABSENT, being, trace, clock, PERCEPTION, slot]` with rotate_left((i%63)+1)), the same `unit_fixed(0) = at(0) >> 32`, and the chance `clamp(q32_mul(salience, acuity), 0, 1)`. Gated bit-identical over 7200 (being, trace) pairs on the 5090 with a real hit fraction (`tests/perceive_gate.rs`). Bit-identity is what makes it a CANONICAL offload (an authoritative replacement), not a quantized approximation.
+
+**DSL findings banked** (in the gpu-canon-pin-status memory): native u64 multiply DOES work in the cube DSL on CUDA, and u64 add/mul wrap (matching `wrapping_add`/`wrapping_mul`); there is NO `rotate_left` intrinsic (write it by hand, `#[allow(clippy::manual_rotate)]`); scalar kernel args are passed by value to `launch` (no `ScalarArg` wrapper, since a scalar `T: LaunchArg` with `RuntimeArg = T`). One bug caught and fixed: the SplitMix64 golden-gamma constant was mis-transcribed (borderline hit mismatches until corrected to `0x9E3779B97F4A7C15`); using hex literals directly avoids the conversion error.
+
+**Why this matters.** perceive is the near-ideal GPU workload for this engine: massively parallel (being x trace), memory-bound (the CPU bottleneck the 265K timing exposed), draw-keyed (each thread computes its own roll, no shared stream), and fixed-point (the exact GPU-proven arithmetic). So the whole GPU canon-pin plus draw-keyed-RNG effort exists precisely so a canonical workload like perceive CAN run on the GPU bit-for-bit.
+
+**Where it stopped, and the scoped follow-on.** The spike is green (fmt, clippy, rustdoc, the full ten-gate GPU suite) on `claude/gpu-perceive-spike`. The full offload is scoped, not built: a struct-of-arrays extraction of the being/trace fields from the BTreeMaps, a resident cross-tick GPU buffer (design Part 5.6, the CPU-to-GPU seam), a stream compaction of the sparse hits, and wiring into `World::perceive` behind the same width-invariant proof. The gate for it is a profile showing the extraction plus transfer is worth the bandwidth win, which needs a realistic (spread, not all-co-located) population.
+
+---
+
 ## 2026-07-02 (continued): dynamic (heterogeneous-core-aware) load balancing for parallel perceive, stood up on the 265K
 
 The owner asked whether the parallel scheme can efficiently use hybrid CPUs (Intel P and E cores, AMD X3D CCDs with and without V-cache), and noted this system has a Core Ultra 7 265K, so it could be stood up for real. On `claude/perceive-dynamic-balance`.
