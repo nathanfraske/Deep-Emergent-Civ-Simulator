@@ -23,17 +23,22 @@
 //!
 //! A dial direction is a token ([`Direction`]), not a magnitude: `real` (a plausible
 //! real-world analogue, the baseline), `high` (cranked toward volatility), or `low` (damped).
-//! Resolving a direction to a concrete value needs the reserved magnitudes the owner sets in
-//! `calibration/reserved.toml`, so this loader is the parse-and-represent step; layering a
-//! scenario's directions over the manifest into a runnable `World` is the next step, gated on
-//! those magnitudes being set (the prime directive that the engine never fabricates a value).
-//! Magic intensity and several change dials are posture tokens here and become reserved ids as
-//! their systems (Part 34 and the change systems) are built.
+//! [`Scenario::resolve`] layers a scenario over the calibration manifest, the bulk lever: it maps
+//! each dial to the manifest entry behind its direction (the base id for `real`, a `.high`/`.low`
+//! sibling for a pushed dial) and surfaces which magnitudes the world still needs the owner to set
+//! ([`ScenarioResolution::reserved_ids`]). It never reads a magnitude, so it never fabricates one:
+//! a still-reserved dial stays reserved and is carried into the review queue. Instantiating a
+//! runnable `World` from the resolved values is the next step, gated on those magnitudes being set
+//! (the prime directive that the engine never fabricates a value). Magic intensity and several
+//! change dials are posture tokens here and become reserved ids as their systems (Part 34 and the
+//! change systems) are built.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+use crate::calibration::{CalibrationError, CalibrationManifest, ReservedValue};
 
 /// The direction a scenario pushes a dial: a token, not a magnitude.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -132,6 +137,109 @@ impl Scenario {
     pub fn dial(&self, id: &str) -> Option<Direction> {
         self.dials.get(id).copied()
     }
+
+    /// Resolve this scenario against a base calibration manifest: the bulk lever. Pull one
+    /// scenario and its whole dial set resolves at once, each dial to the manifest entry behind
+    /// its direction ([`dial_manifest_id`]). Every resolved id must exist in the manifest, so a
+    /// dial the manifest cannot satisfy (a missing direction sibling, a typo) fails loud as a
+    /// dangling reference rather than silently doing nothing. This never reads a magnitude and so
+    /// never fails on a reserved value: a still-reserved dial is carried through and surfaced in
+    /// the resolution's review queue ([`ScenarioResolution::reserved_ids`]), the correct output
+    /// under the prime directive that the engine never fabricates a value.
+    pub fn resolve(
+        &self,
+        manifest: &CalibrationManifest,
+    ) -> Result<ScenarioResolution, CalibrationError> {
+        let mut dials = Vec::with_capacity(self.dials.len());
+        for (dial, direction) in &self.dials {
+            let manifest_id = dial_manifest_id(dial, *direction);
+            let entry = manifest
+                .get(&manifest_id)
+                .ok_or_else(|| CalibrationError::Unknown(manifest_id.clone()))?
+                .clone();
+            dials.push(ResolvedDial {
+                dial: dial.clone(),
+                direction: *direction,
+                manifest_id,
+                entry,
+            });
+        }
+        Ok(ScenarioResolution {
+            scenario: self.scenario.id.clone(),
+            dials,
+        })
+    }
+}
+
+/// The calibration-manifest id a dial resolves to under a direction: the base id for `real`, and
+/// the `.high`/`.low` sibling for a pushed dial. The magnitude behind that id stays the owner's
+/// reserved value; this is the wiring from a scenario's direction token to a manifest entry, never
+/// a magnitude. A dial pushed the same direction by two worlds resolves to the same sibling, which
+/// is the [`Direction`] abstraction: `high` is one reserved end, shared, not a per-world number.
+pub fn dial_manifest_id(dial: &str, direction: Direction) -> String {
+    match direction {
+        Direction::Real => dial.to_string(),
+        Direction::High => format!("{dial}.high"),
+        Direction::Low => format!("{dial}.low"),
+    }
+}
+
+/// One dial resolved against the manifest: the scenario dial id, the direction the scenario pushes
+/// it, the manifest id that direction resolves to, and the entry found there (set or reserved).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedDial {
+    /// The scenario dial id (the base, for example `genome.mutation_rates`).
+    pub dial: String,
+    /// The direction this scenario pushes it.
+    pub direction: Direction,
+    /// The manifest id the direction resolves to (the base id, or a `.high`/`.low` sibling).
+    pub manifest_id: String,
+    /// The manifest entry found at `manifest_id`, set or still reserved.
+    pub entry: ReservedValue,
+}
+
+/// A scenario resolved against a base manifest: the whole override set the scenario pulls, with
+/// each dial mapped to its manifest entry. The caller reads the set dials and takes the reserved
+/// ones to the owner ([`reserved_ids`](Self::reserved_ids)), the per-scenario review queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScenarioResolution {
+    /// The scenario id this resolution is for.
+    pub scenario: String,
+    /// Each dial the scenario pushes, resolved to its manifest entry, in dial-id order.
+    pub dials: Vec<ResolvedDial>,
+}
+
+impl ScenarioResolution {
+    /// The manifest ids for the `[dials]` this scenario pushes that the owner has not set yet: the
+    /// per-scenario dial review queue. This scopes to the change-and-extremes dials only; a world's
+    /// magic-intensity and race postures ([`MagicPosture`], [`RacePosture`]) are not manifest-backed
+    /// yet and are resolved separately once Part 34 lands, so an empty queue here means the dials are
+    /// set, not that a magical world is fully calibrated.
+    pub fn reserved_ids(&self) -> Vec<&str> {
+        self.dials
+            .iter()
+            .filter(|d| !d.entry.is_set())
+            .map(|d| d.manifest_id.as_str())
+            .collect()
+    }
+
+    /// Whether every `[dials]` entry this scenario pushes has a set magnitude. This covers the
+    /// change-and-extremes dials only, not the magic-intensity or race postures (not manifest-backed
+    /// until Part 34), so it is necessary but not sufficient for a magical world to run under
+    /// [`Profile::Calibrated`](crate::calibration::Profile); a grounded world (Mirror) with no magic
+    /// postures is fully calibrated when this holds.
+    pub fn is_fully_set(&self) -> bool {
+        self.dials.iter().all(|d| d.entry.is_set())
+    }
+
+    /// The manifest id a given base dial resolves to under this scenario, or `None` if the scenario
+    /// does not push that dial.
+    pub fn manifest_id(&self, dial: &str) -> Option<&str> {
+        self.dials
+            .iter()
+            .find(|d| d.dial == dial)
+            .map(|d| d.manifest_id.as_str())
+    }
 }
 
 /// A scenario load or parse error.
@@ -203,6 +311,144 @@ name = "X"
             Scenario::from_toml_str(bad),
             Err(ScenarioError::Parse(_))
         ));
+    }
+
+    const RESOLVE_MANIFEST: &str = r#"
+[[reserved]]
+id = "genome.mutation_rates"
+basis = "b"
+status = "reserved"
+value = ""
+unit = "x"
+source = "s"
+[[reserved]]
+id = "genome.mutation_rates.high"
+basis = "b"
+status = "set"
+value = "0.01"
+unit = "x"
+source = "s"
+[[reserved]]
+id = "genome.effective_population_size"
+basis = "b"
+status = "set"
+value = "200"
+unit = "individuals"
+source = "s"
+[[reserved]]
+id = "genome.effective_population_size.low"
+basis = "b"
+status = "reserved"
+value = ""
+unit = "individuals"
+source = "s"
+"#;
+
+    #[test]
+    fn a_direction_resolves_to_the_base_or_a_sibling_id() {
+        assert_eq!(
+            dial_manifest_id("genome.mutation_rates", Direction::Real),
+            "genome.mutation_rates"
+        );
+        assert_eq!(
+            dial_manifest_id("genome.mutation_rates", Direction::High),
+            "genome.mutation_rates.high"
+        );
+        assert_eq!(
+            dial_manifest_id("genome.effective_population_size", Direction::Low),
+            "genome.effective_population_size.low"
+        );
+    }
+
+    #[test]
+    fn resolving_maps_each_dial_to_its_manifest_entry_and_queues_the_reserved_ones() {
+        let manifest = CalibrationManifest::from_toml_str(RESOLVE_MANIFEST).unwrap();
+        let scenario = Scenario::from_toml_str(
+            r#"
+[scenario]
+id = "probe"
+name = "Probe"
+
+[dials]
+"genome.mutation_rates" = "high"
+"genome.effective_population_size" = "low"
+"#,
+        )
+        .unwrap();
+        let r = scenario.resolve(&manifest).unwrap();
+        // The high dial resolves to its set sibling; the low dial to its reserved sibling.
+        assert_eq!(
+            r.manifest_id("genome.mutation_rates"),
+            Some("genome.mutation_rates.high")
+        );
+        assert_eq!(
+            r.manifest_id("genome.effective_population_size"),
+            Some("genome.effective_population_size.low")
+        );
+        // The reserved sibling is the per-scenario review queue; the set one is not in it.
+        assert_eq!(
+            r.reserved_ids(),
+            vec!["genome.effective_population_size.low"]
+        );
+        assert!(!r.is_fully_set(), "one dial is still reserved");
+    }
+
+    #[test]
+    fn a_dial_with_no_manifest_sibling_fails_loud_rather_than_doing_nothing() {
+        let manifest = CalibrationManifest::from_toml_str(RESOLVE_MANIFEST).unwrap();
+        // The manifest has no `genome.mutation_step.high` sibling, so pushing it high is a dangling
+        // reference the resolver must reject, not silently drop.
+        let scenario = Scenario::from_toml_str(
+            r#"
+[scenario]
+id = "probe"
+name = "Probe"
+
+[dials]
+"genome.mutation_step" = "high"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scenario.resolve(&manifest).unwrap_err(),
+            CalibrationError::Unknown("genome.mutation_step.high".to_string())
+        );
+    }
+
+    #[test]
+    fn every_canonical_scenario_resolves_against_the_real_manifest() {
+        // The bulk lever's completeness guarantee: every dial each of the four worlds pushes maps
+        // to a real manifest entry (a base id or a direction sibling), so pulling a scenario lever
+        // surfaces a defined reserved value for every dial rather than a dangling reference. This
+        // keeps scenarios/*.toml and calibration/reserved.toml in step.
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        for world in ["mirror", "tempest", "arcanum", "confluence"] {
+            let scenario = Scenario::load(format!("{dir}{world}.toml")).unwrap();
+            let r = scenario
+                .resolve(&manifest)
+                .unwrap_or_else(|e| panic!("{world} has a dangling dial: {e}"));
+            assert_eq!(
+                r.dials.len(),
+                scenario.dials.len(),
+                "{world} resolves every dial it pushes"
+            );
+        }
+        // Tempest cranks change, so its direction siblings are the stress-world ends, all reserved:
+        // the per-scenario review queue includes the high mutation and the low effective size.
+        let tempest = Scenario::load(format!("{dir}tempest.toml")).unwrap();
+        let queue = tempest.resolve(&manifest).unwrap();
+        let reserved = queue.reserved_ids();
+        assert!(reserved.contains(&"genome.mutation_rates.high"));
+        assert!(reserved.contains(&"genome.effective_population_size.low"));
+        assert!(
+            !queue.is_fully_set(),
+            "Tempest's stress-world ends are reserved for the owner"
+        );
     }
 
     #[test]
