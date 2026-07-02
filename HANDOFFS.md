@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): R-AGING life cadence wired into World::tick, the world now lives on the clock, on `claude/find-unblocked-work-dwdpsj`
+
+The owner picked the R-AGING keystone from a cited three-way fork (over finishing the R-REPRO choose-site viability axis or the pool-tier split rule). The gap: the per-entity aging and mortality methods existed but nothing drove them on the clock, so `World::tick` advanced cognition only. This closes that root blocker.
+
+**Built (`crates/sim/src/world.rs`).** `World::tick` now runs a pinned `life_cadence` sub-phase after the six cognition phases: on a tick whose clock is a whole multiple of the cadence period it ages every tracked being (`age_step`) and then, if an owner hazard is installed, rolls mortality (`apply_mortality`), so a world left running turns its generations over on the clock. Aging precedes mortality, matching the established generational-turnover order (a being faces the hazard at its new age). The beat is serial and counter-keyed (`DrawKey::entity(id, age, Phase::MORTALITY)`, the record-62.9 individual-tier keying, each being reaching an age once), so it replays bit for bit and is independent of the field-worker width; off the period it is a no-op, so the cognition-only tests that predate it are undisturbed. Two new fields: `life_cadence_ticks` (defaulting to the owner-set `LIFE_CADENCE_TICKS`, one in-world year, overridable per world by `set_life_cadence`, a canonical calibration override like the base tick, clamped to at least 1) and `mortality_hazard: Option<Curve>` (installed by `set_mortality_hazard`; mortality is a no-op until set, so the hazard shape is never fabricated: aging beats regardless, a being dies only against an owner curve). `tick_timed` also runs the beat (untimed) to keep its documented state-equivalence with `tick`.
+
+**Determinism and state.** Aging changes `self.ages`, which is not folded into the tick `state_hash` (consistent with genomes/intrinsic/mate_prefs, all mutated inside the tick or at setup but deliberately unhashed); mortality removes beings via `remove_being`, which drops them from `self.minds` (hashed), so deaths are observable in the hash and aging is proven directly. Three tests: `the_life_cadence_beats_aging_only_on_its_period` (a cadence of four beats only on ticks 4 and 8), `the_default_cadence_does_not_beat_in_a_short_run` (the year-long default leaves a hundred-tick run un-aged), and `the_tick_ages_and_culls_on_the_cadence_and_replays` (a flat-zero-below-fifty hazard so the three youngest are guaranteed survivors and the eldest a guaranteed death, every survivor aged exactly one step per beat, the aged-and-culled world replaying bit for bit on the surviving ages).
+
+**Gate-green.** fmt, clippy `-D warnings`, rustdoc `-D warnings` clean (the `life_cadence` intra-doc link demoted to plain code since the method is private); full sim and core suites green: 371 sim lib (+3), 58 core lib, determinism harness (8) and world determinism (3) unchanged. Module doc, TODOS, CONSENSUS_ROADMAP updated. R-AGING stays open; the individual-tier tick wiring is done, with the age-tracked split rule and the pool-tier tick wiring the remaining follow-ons, and the hazard shape still reserved.
+
+**Where it stopped.** Built, gated, and committed on `claude/find-unblocked-work-dwdpsj`, pending push, PR, and merge (self-merge when CI is green, per the owner's standing authorization this session).
+
+---
+
 ## 2026-07-02 (continued): R-REPRO two named follow-ons built, the feature-weighted selection and the World::birth choose site, on `claude/find-unblocked-work-dwdpsj`
 
 The owner said to scope the follow-ons and execute. The two the module and proposal named were the feature-weighted preference over both axes (A) and the `World::birth` choosing call site (B). Both are now built, on fresh `origin/main` (branch reset to 36ecfe4), as two commits.
