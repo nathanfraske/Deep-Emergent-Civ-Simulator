@@ -107,6 +107,11 @@ impl Phase {
     /// canonical position in the anchor-first sampling order, so a culture's grammar is a
     /// reproducible function of the seed, the culture, and the registry data (design 33.4).
     pub const LANG_TYPOLOGY: Phase = Phase(0x14);
+    /// A mate-choice draw (R-REPRO): the random founder preference weights and their bounded
+    /// mutation in the prototype selection loop that shows a mate-preference direction emerge
+    /// under genome-derived offspring fitness, keyed on the lineage and the generation so a
+    /// run replays bit for bit (design Part 25, the R-BEHAVIOR-EVOLVE selection precedent).
+    pub const MATE_CHOICE: Phase = Phase(0x15);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

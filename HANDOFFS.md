@@ -4,6 +4,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): R-REPRO selection loop built, the emergence capstone (selection produces the direction), on `claude/find-unblocked-work-dwdpsj`
+
+The owner said to keep on. The R-REPRO emergence arc had proven the mechanism authors no direction and that the genome-derived fitness rewards the physics-favoured direction, but not that selection, from a population with no bias, PRODUCES it. This closes that gap.
+
+**Built (`crates/sim/src/mate_choice.rs` plus a new `Phase::MATE_CHOICE` in `crates/core/src/keys.rs`).** `evolve_preference_weight`: a minimal, deterministic selection loop over the distance weight of a mate preference. Founders are random weights in [-1, 1], counter-keyed on the lineage under `Phase::MATE_CHOICE`; each generation scores every preference by the fitness of the offspring its chooser forms with its picked mate (read off the real offspring genotype via `GeneticScheme::reproduce`, so the selection pressure is the engine's own genetics), keeps the fitter half (truncation, ties to the lower index), and refills with bounded counter-keyed mutants, mirroring the R-BEHAVIOR-EVOLVE discipline. Three tests: from random founders, selection produces a heterophilic weight under overdominance (a heterozygous offspring is fitter) and a homophilic weight when a homozygous offspring is fitter (local adaptation), and the run replays bit for bit. So the direction is what selection converges to from no bias, not merely what a gradient favours.
+
+**Scope stated plainly.** This evolves the one distance weight, so it demonstrates the heterosis and inbreeding axis distance carries; the incompatibility axis (non-monotone in distance) is handled by the viability-aware `most_viable_mate`, and evolving a feature-weighted preference over both axes on the shared `evolve_with` substrate (once its input registry carries a candidate-percept family) plus the `World::birth` call site are the remaining follow-ons.
+
+**Gate-green.** 15 mate_choice tests (+3), the full sim and core suites green, `Phase::MATE_CHOICE` added with no collision; fmt, clippy and rustdoc `-D warnings` clean (the eight-arg loop carries an `#[allow(clippy::too_many_arguments)]`, the `reproduce` precedent), prose customs clean. Module doc, proposal, HANDOFFS, TODOS updated. R-REPRO stays open; the emergence claim is now complete short of the feature-weighted `evolve_with` integration and `World::birth`. Counts unchanged.
+
+---
+
 ## 2026-07-02 (continued): the wgpu/SPIR-V backend, a third codegen path for the arithmetic (item 1)
 
 The last GPU-lane residual: confirm the transcendentals cross-backend. The CPU backend could not (it panics in cubecl-opt), so a background probe stood up the cubecl-wgpu (Vulkan/SPIR-V) path. On `claude/gpu-wgpu-backend`.
@@ -15,7 +27,6 @@ The last GPU-lane residual: confirm the transcendentals cross-backend. The CPU b
 **Docs.** `CONSENSUS_ROADMAP.md`, record 62.23, audit block 1y, and the lib doc reconciled to the three-codegen-path arithmetic proof and the precise transcendental status. R-GPU-CANON-PIN stays resolved; counts unchanged.
 
 **Where it stopped.** Item 1 built and gated on `claude/gpu-wgpu-backend` (arithmetic three-path proof landed; transcendental cross-backend characterized as hardware-gated), pending commit and merge. That closes the owner's items 1, 2, and 4; item 3 (multi-vendor hardware) is not doable on this single-vendor box.
-
 ---
 
 ## 2026-07-02 (continued): R-REPRO genome-derived mate-choice fitness built (the red-team's proxy gap closed), on `claude/find-unblocked-work-dwdpsj`
