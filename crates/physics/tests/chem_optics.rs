@@ -114,15 +114,22 @@ fn reaction_enthalpy_signs_exothermic_and_gates_on_the_barrier() {
 }
 
 #[test]
-fn corrosion_needs_a_favourable_potential_and_rises_with_acidity() {
+fn corrosion_needs_a_favourable_potential_and_rises_as_ph_falls() {
     let cap = Fixed::from_int(1000);
-    // Oxidiser above the material potential attacks; acidity worsens it.
-    let mild = laws::corrosion(f(12, 10), f(-4, 10), f(5, 10), Fixed::ONE, cap).to_f64_lossy();
-    let acidic =
-        laws::corrosion(f(12, 10), f(-4, 10), f(5, 10), Fixed::from_int(3), cap).to_f64_lossy();
+    // Oxidiser above the material potential attacks; acid attack rises as pH falls, so a strongly
+    // acidic pH 1 fluid corrodes faster than a near-neutral pH 6 one at the same favourable potential.
+    let acidic = laws::corrosion(f(12, 10), f(-4, 10), f(5, 10), Fixed::ONE, cap).to_f64_lossy(); // pH 1
+    let mild =
+        laws::corrosion(f(12, 10), f(-4, 10), f(5, 10), Fixed::from_int(6), cap).to_f64_lossy(); // pH 6
     assert!(
         acidic > mild,
-        "a more aggressive (acid) fluid corrodes faster"
+        "a more acidic (lower pH) fluid corrodes faster"
+    );
+    // A basic pH 14 fluid is the least aggressive: it reaches the zero-aggressiveness floor.
+    assert_eq!(
+        laws::corrosion(f(12, 10), f(-4, 10), f(5, 10), Fixed::from_int(14), cap),
+        Fixed::ZERO,
+        "at the pH ceiling the acid-attack aggressiveness is zero"
     );
     // A noble material (higher potential than the oxidiser) does not corrode.
     assert_eq!(

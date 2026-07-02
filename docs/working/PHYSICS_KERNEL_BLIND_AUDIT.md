@@ -60,33 +60,32 @@ In-range logic:
   transmittance to the budget reflectance leaves, so reflected plus absorbed plus transmitted
   equals the incident flux.
 
-## Deferred for an owner decision
+## corrosion (resolved: literal pH, on the owner's call)
 
-- `corrosion`: the kernel multiplies the driving margin by the raw `chem.acidity` value, so
-  corrosion is maximal at pH fourteen (basic) and zero at pH zero (most acidic), the inverse of the
-  acid-attack physics the cited source describes; the existing test shares the inversion. The fix
-  depends on intent, and it was left unchanged rather than guessed. Either the axis is literal pH
-  (the citation and the `pH` unit say so), and the kernel should make aggressiveness rise as pH
-  falls, which also means baking the pH-scale ceiling into the kernel; or the axis is a loosely
-  labelled aggressiveness lever where a higher value already means more corrosive, and the label and
-  citation should change instead. The owner picks the reading; the fix follows in one edit.
+The kernel multiplied the driving margin by the raw `chem.acidity` value, so corrosion peaked at
+pH fourteen (basic) and was zero at pH zero (most acidic), the inverse of the acid-attack physics
+the cited source describes, and the test shared the inversion. On the owner's decision the axis is
+literal pH, so the kernel now takes the aggressiveness as the distance below the pH ceiling
+(`sat_sub(14, pH)`, the fourteen being the definitional pH-scale maximum the axis range carries, a
+scale bound and not a fabricated value), and the test is rewritten to assert that corrosion rises
+as pH falls. Fixed.
 
-## The latent overflow-direction class (a systemic pattern for a follow-on sweep)
+## The latent overflow-direction class (resolved: one sweep)
 
-The panel found one mechanical pattern across every domain: an overflow or a degenerate branch
-that routes to the wrong physical extreme or is blind to sign. Each is reachable only on an
-overflow or an out-of-range input, so none is wrong in normal operation, but each is a real
-totality-discipline inconsistency, and the correct pattern already exists in the file (the
-sign-aware `unwrap_or` of `faraday_emf`, and `sat_sub`). The instances: `satisfaction` (a positive
-product overflow routes to zero rather than full), `contact_pressure` (an area overflow routes to
-maximum pressure rather than near-zero), `sensible_energy` (a capacity overflow routes to the
-positive cap regardless of sign, and a cooling returns a negative against a declared non-negative
-bound), `ideal_gas_density` (a large gas-constant-times-temperature routes to maximum density
-rather than minimum), `thermal_buoyancy` and `evaporation_rate` (sign-blind or baseline-reverting
-overflow branches), and `ohm_voltage`, `solenoid_field`, `flux_linkage` (a signed product overflow
-routes to the positive cap). Plus bare subtractions that can panic on extreme operands in
-`bend_stress`, `axial_stress`, and `friction`. A single sweep replacing each with the established
-sign-aware or saturating idiom closes the class.
+The panel found one mechanical pattern across every domain: an overflow or a degenerate branch that
+routes to the wrong physical extreme or is blind to sign. Each was reachable only on an overflow or
+an out-of-range input, so none was wrong in normal operation, but each was a real totality-discipline
+inconsistency. The whole class is now closed with the established sign-aware and saturating idioms:
+`satisfaction` (an overflowing supply product now reads full, not starving), `contact_pressure` (an
+overflowing area now reads zero pressure, not the max), `sensible_energy` (a non-positive gradient
+now reads zero over its [0, E_MAX] law, which also keeps its overflow branch sign-correct),
+`ideal_gas_density` (an overflowing R*T now reads the minimum density, not the maximum),
+`thermal_buoyancy` (the division overflow now routes by the gradient sign like its sibling branch),
+`evaporation_rate` (an overflowing wind term now saturates at the cap, not the still-air baseline),
+`ohm_voltage` and `solenoid_field` (now magnitudes over their non-negative axes, so the overflow cap
+is sign-correct), and `flux_linkage` (now bounded to the signed interval with a sign-routed
+overflow, since the flux is differentiated for the Lenz sign). The bare subtractions in
+`bend_stress`, `axial_stress`, and `friction` are now saturating. Each carries a regression test.
 
 ## Specification and wiring seams (not kernel arithmetic)
 
@@ -103,7 +102,8 @@ sign-aware or saturating idiom closes the class.
 
 ## Recommended order
 
-The scale, precision, and logic fixes are landed. Next: the owner's `corrosion` decision (one
-edit either way); then the latent overflow-direction sweep as one focused change across the named
-instances; then the energy-wire-scale pin and the four specification seams, which touch the floor
-data and the graph descriptor rather than the kernels.
+The scale, precision, and logic fixes are landed; `corrosion` and the latent overflow-direction
+class are now closed as well. Remaining, in order: the energy-wire-scale pin and the four
+specification seams (which touch the floor data and the graph descriptor rather than the kernels),
+folded in alongside the R-UNITS-PIN arc, since `harm_class`'s per-toxin-class tolerance scale is a
+quantity-per-class registry entry that arc settles.

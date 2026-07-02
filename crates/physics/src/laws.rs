@@ -103,7 +103,12 @@ pub fn satisfaction(supply: Fixed, assimilation: Fixed, requirement: Option<Fixe
         Some(r) if r == ZERO => return ONE,
         Some(r) => r,
     };
-    let num = supply.checked_mul(assimilation).unwrap_or(ZERO);
+    let num = match supply.checked_mul(assimilation) {
+        // Both factors are non-negative fractions, so an overflowing product is abundant supply:
+        // route to full satisfaction, the same extreme the divide-overflow below reaches, not to zero.
+        Some(x) => x,
+        None => return ONE,
+    };
     match num.checked_div(req) {
         Some(s) => s.clamp(ZERO, ONE),
         None => ONE,
@@ -213,7 +218,9 @@ pub fn edibility(
 pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixed {
     let den = match contact_area.checked_mul(C_PA) {
         Some(d) => d,
-        None => return p_max,
+        // A contact area so large it overflows spreads the force to a negligible pressure: route to
+        // zero, not the maximum-pressure cap (which is the zero-area extreme just below).
+        None => return ZERO,
     };
     if den == ZERO {
         return p_max;
@@ -279,7 +286,7 @@ pub fn bend_stress(
             None => stress_max,
         }
     };
-    (sigma, yield_strength - sigma)
+    (sigma, sat_sub(yield_strength, sigma))
 }
 
 /// Axial stress (MPa) and the collapse margin: force over cross-section.
@@ -301,7 +308,7 @@ pub fn axial_stress(
             None => stress_max,
         }
     };
-    (sigma, yield_strength - sigma)
+    (sigma, sat_sub(yield_strength, sigma))
 }
 
 /// The dual fracture criterion: a stress margin against the fracture strength and an
@@ -469,7 +476,7 @@ pub fn friction(
         Some(f) => f,
         None => force_max,
     };
-    let slip_margin = f_s_max - tangential;
+    let slip_margin = sat_sub(f_s_max, tangential);
     let kinetic_force = match kinetic_coefficient.checked_mul(normal) {
         Some(f) => f,
         None => force_max,
@@ -484,7 +491,7 @@ pub fn friction(
     let efficiency = if input_power == ZERO {
         ZERO
     } else {
-        let net = (input_power - power_loss).max(ZERO);
+        let net = sat_sub(input_power, power_loss).max(ZERO);
         match net.checked_div(input_power) {
             Some(e) => e.clamp(ZERO, ONE),
             None => ONE,
@@ -690,6 +697,13 @@ pub fn sensible_energy(
     delta_t: Fixed,
     energy_max: Fixed,
 ) -> Fixed {
+    // The law reports a non-negative sensible energy over [0, E_MAX] (a cooling contributes no
+    // positive sensible heat), so a non-positive gradient reads zero. This also keeps the overflow
+    // branch below sign-correct: it is reached only for a positive gradient, so the positive cap is
+    // the right extreme rather than a sign-blind one.
+    if delta_t <= ZERO {
+        return ZERO;
+    }
     let capacity = match mass.checked_mul(specific_heat) {
         Some(c) => c,
         None => return energy_max,
@@ -1184,7 +1198,9 @@ pub fn ideal_gas_density(
     };
     let rt = match gas_constant.checked_mul(temperature) {
         Some(x) => x,
-        None => return rho_max,
+        // rho = P/(R*T): an overflowing R*T denominator drives the density toward zero, so route to
+        // the minimum, not the maximum. A vanishing R*T (below) is the dense extreme.
+        None => return rho_min,
     };
     if rt <= ZERO {
         return rho_max;
@@ -1201,12 +1217,14 @@ pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max
     if t_ambient <= ZERO {
         return ZERO;
     }
+    let lo = sat_sub(ZERO, a_max);
     let dt = sat_sub(t_parcel, t_ambient);
     let ratio = match dt.checked_div(t_ambient) {
         Some(x) => x,
-        None => return ZERO,
+        // A huge |dt|/T is a large signed acceleration: route by the sign of dt, matching the
+        // multiply-overflow branch below, rather than to zero (which reads as no buoyancy).
+        None => return if dt < ZERO { lo } else { a_max },
     };
-    let lo = ZERO - a_max;
     match ratio.checked_mul(gravity) {
         Some(a) => a.clamp(lo, a_max),
         None => {
@@ -1260,7 +1278,9 @@ pub fn evaporation_rate(
     }
     let wind_fn = match b_wind.checked_mul(sat_abs(wind)) {
         Some(x) => a_still.saturating_add(x),
-        None => a_still,
+        // An overflowing wind term is an unbounded transfer coefficient over a positive deficit, so
+        // the evaporation saturates at the cap, not back down to the still-air baseline.
+        None => return e_max,
     };
     match wind_fn.checked_mul(vpd) {
         Some(e) => e.min(e_max),
@@ -1306,7 +1326,11 @@ pub fn corrosion(
         Some(x) => x,
         None => return corrosion_max,
     };
-    match r1.checked_mul(acidity_factor) {
+    // `acidity_factor` is the pH (0 most acidic, 14 most basic); acid attack rises as pH falls, so
+    // the aggressiveness is the distance below the pH ceiling. The 14 is the definitional pH scale
+    // maximum (the chem.acidity axis range), a scale bound, not a fabricated realism value.
+    let aggressiveness = sat_sub(Fixed::from_int(14), acidity_factor).max(ZERO);
+    match r1.checked_mul(aggressiveness) {
         Some(x) => x.min(corrosion_max),
         None => corrosion_max,
     }
@@ -1551,9 +1575,11 @@ pub fn coulomb_force(
     }
 }
 
-/// Ohm's law V = I*R (V).
+/// Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
+/// magnitude, so the current's sign carries no meaning here), which also keeps the overflow cap
+/// sign-correct.
 pub fn ohm_voltage(current: Fixed, resistance: Fixed, v_max: Fixed) -> Fixed {
-    match current.checked_mul(resistance) {
+    match sat_abs(current).checked_mul(resistance) {
         Some(v) => v.min(v_max),
         None => v_max,
     }
@@ -1630,7 +1656,10 @@ pub fn solenoid_field(
     mu_0: Fixed,
     b_max: Fixed,
 ) -> Fixed {
-    let ni = match turn_density.checked_mul(current) {
+    // The flux-density axis is a non-negative magnitude, and the other factors are non-negative, so
+    // take the current's magnitude: the field strength does not carry the current's sign here, and
+    // the overflow cap stays sign-correct.
+    let ni = match turn_density.checked_mul(sat_abs(current)) {
         Some(x) => x,
         None => return b_max,
     };
@@ -1645,10 +1674,20 @@ pub fn solenoid_field(
 }
 
 /// Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+/// Flux is signed (the differentiation recovers the Lenz-law sign), so it is bounded to the signed
+/// interval and an overflow routes by the flux-density sign (the area is a non-negative magnitude),
+/// not blindly to the positive cap.
 pub fn flux_linkage(flux_density: Fixed, area: Fixed, phi_max: Fixed) -> Fixed {
+    let lo = sat_sub(ZERO, phi_max);
     match flux_density.checked_mul(area) {
-        Some(p) => p.min(phi_max),
-        None => phi_max,
+        Some(p) => p.clamp(lo, phi_max),
+        None => {
+            if flux_density < ZERO {
+                lo
+            } else {
+                phi_max
+            }
+        }
     }
 }
 
@@ -2353,6 +2392,68 @@ mod tests {
         assert_eq!(
             a, ZERO,
             "the residual is fully consumed, no negative absorbed"
+        );
+    }
+
+    // --- Overflow-direction and sign corrections (blind-audit latent-class sweep) ---
+
+    #[test]
+    fn overflowing_and_degenerate_branches_route_to_the_correct_physical_extreme() {
+        // satisfaction: an overflowing supply*assimilation is abundance, so full satisfaction.
+        assert_eq!(
+            satisfaction(Fixed::MAX, Fixed::MAX, Some(Fixed::ONE)),
+            ONE,
+            "an overflowing supply product is fully satisfied, not starving"
+        );
+        // contact_pressure: an overflowing contact area spreads the force to zero pressure.
+        assert_eq!(
+            contact_pressure(Fixed::ONE, Fixed::MAX, cap(2_000_000_000)),
+            ZERO,
+            "a vast contact area gives negligible pressure, not the max"
+        );
+        // sensible_energy: a cooling (negative gradient) is zero over the [0, E_MAX] law.
+        assert_eq!(
+            sensible_energy(
+                Fixed::ONE,
+                Fixed::from_int(4186),
+                Fixed::from_int(-10),
+                cap(2_000_000_000)
+            ),
+            ZERO,
+            "a negative temperature gradient contributes no positive sensible heat"
+        );
+        // ideal_gas_density: an overflowing R*T denominator drives density to its minimum.
+        assert_eq!(
+            ideal_gas_density(
+                Fixed::ONE,
+                Fixed::from_int(100_000),
+                Fixed::from_int(30_000),
+                Fixed::from_int(1),
+                cap(2_000_000_000),
+            ),
+            Fixed::from_int(1),
+            "a huge R*T gives a vanishing density (rho_min), not rho_max"
+        );
+    }
+
+    #[test]
+    fn signed_em_kernels_carry_sign_correctly() {
+        // ohm_voltage is a magnitude: a negative current gives a positive voltage.
+        assert_eq!(
+            ohm_voltage(Fixed::from_int(-5), Fixed::from_int(10), cap(2_000_000_000)),
+            Fixed::from_int(50),
+            "V = |I|*R is non-negative"
+        );
+        // flux_linkage is signed and bounded to [-phi_max, phi_max]: a large negative flux clamps to
+        // the negative bound rather than staying unbounded or flipping to the positive cap.
+        assert_eq!(
+            flux_linkage(
+                Fixed::from_int(-100),
+                Fixed::from_int(10),
+                Fixed::from_int(500)
+            ),
+            Fixed::from_int(-500),
+            "a large negative flux clamps to -phi_max"
         );
     }
 
