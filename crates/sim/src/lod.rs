@@ -138,11 +138,17 @@ impl TwoTierWorld {
 
     /// Add an age-tracked aggregate pool from an age distribution, returning its id. The
     /// pool's head count is the distribution's total, so `count == ages.total()` holds by
-    /// construction (design Parts 20, 25; the aggregate-tier demography).
+    /// construction (design Parts 20, 25; the aggregate-tier demography). The head count is a
+    /// `u32` in this demonstration model (the whole two-tier model is u32-scaled: `PoolId`,
+    /// the pooled slot), so a distribution whose total exceeds `u32::MAX` fails loud here
+    /// rather than truncating the count and desyncing it from the distribution. The
+    /// `AgeHistogram` substrate itself is u64-capable; a production pool tier would carry a
+    /// wider count.
     pub fn add_pool_aged(&mut self, ages: AgeHistogram, wealth: Fixed) -> PoolId {
         let id = PoolId(self.next_pool);
         self.next_pool += 1;
-        let count = ages.total() as u32;
+        let count = u32::try_from(ages.total())
+            .expect("pool age total exceeds the u32 head-count ceiling of the two-tier model");
         self.pools.push(Pool {
             id,
             count,
@@ -160,6 +166,13 @@ impl TwoTierWorld {
     /// the total after plus the returned deaths. The hazard is authored biology entering as
     /// data (Principle 9); the demographic outcome emerges from it and the seed, keyed per
     /// pool so two pools roll independently. An age-untracked pool is left untouched.
+    ///
+    /// The caller supplies a `cadence` ordinal that must strictly increase across calls (the
+    /// same contract [`AgeHistogram::apply_mortality`] documents): a bucket holds a rotated
+    /// cohort each cadence, so a repeated cadence would re-roll the same stream. Mortality
+    /// only removes members and aging conserves, so the recomputed head count never exceeds
+    /// the count set at construction, and the `u32::try_from` below cannot fail once the pool
+    /// was admitted by [`Self::add_pool_aged`].
     pub fn age_pools(&mut self, hazard: &Curve, seed: u64, cadence: u64) -> i128 {
         let mut deaths: i128 = 0;
         for pool in &mut self.pools {
@@ -170,7 +183,8 @@ impl TwoTierWorld {
                 .ages
                 .apply_mortality(hazard, seed, pool.id.0 as u64, cadence);
             pool.ages.age_step();
-            pool.count = pool.ages.total() as u32;
+            pool.count =
+                u32::try_from(pool.ages.total()).expect("pool head count exceeds the u32 ceiling");
             deaths += died;
         }
         deaths
@@ -301,7 +315,10 @@ impl TwoTierWorld {
             !mixed,
             "cannot merge an age-tracked pool with an untracked one"
         );
-        self.pools[ai].count += moved.count;
+        self.pools[ai].count = self.pools[ai]
+            .count
+            .checked_add(moved.count)
+            .expect("merged pool head count exceeds the u32 ceiling");
         self.pools[ai].wealth += moved.wealth;
         self.pools[ai].ages.merge(&moved.ages);
         self.reg.repoint_pool(b, a);
@@ -378,11 +395,14 @@ impl TwoTierWorld {
     /// A deterministic hash of the whole two-tier world, walked in canonical order
     /// (individuals and pools by ascending id, edges sorted, then the registry in
     /// id order). Built only through the sorted accessors, never hash-map order, so
-    /// it is bit-identical across runs and machines (design Part 3.5, R-CANON-WALK).
+    /// it is bit-identical across runs and machines (design Part 3.5, R-CANON-WALK). Each
+    /// variable-length collection is length-prefixed so its boundary is unambiguous and two
+    /// different worlds cannot fold to the same bytes.
     pub fn state_hash(&self) -> u128 {
         let mut h = StateHasher::new();
         let mut inds: Vec<&Individual> = self.individuals.iter().collect();
         inds.sort_by_key(|i| i.id);
+        h.write_u64(inds.len() as u64);
         for i in inds {
             h.write_stable(i.id);
             h.write_fixed(i.wealth);
@@ -393,14 +413,17 @@ impl TwoTierWorld {
         }
         let mut pools: Vec<&Pool> = self.pools.iter().collect();
         pools.sort_by_key(|p| p.id.0);
+        h.write_u64(pools.len() as u64);
         for p in pools {
             h.write_u32(p.id.0);
             h.write_u32(p.count);
             h.write_fixed(p.wealth);
+            h.write_u64(p.ages.occupied_ages() as u64);
             p.ages.hash_into(&mut h);
         }
         let mut edges = self.edges.clone();
         edges.sort();
+        h.write_u64(edges.len() as u64);
         for (a, b) in edges {
             h.write_stable(a);
             h.write_stable(b);
@@ -520,7 +543,10 @@ pub struct IndRepr {
 }
 
 /// An aggregate pool in a snapshot. `ages` is the pool's age distribution as `(age, count)`
-/// pairs in ascending-age order, empty for an age-untracked pool.
+/// pairs in ascending-age order, empty for an age-untracked pool. A bucket count is a `u64`,
+/// but a TOML integer is signed `i64`, so serializing errors loudly (it does not corrupt)
+/// above `i64::MAX`; in a well-formed two-tier world a bucket count cannot exceed the pool's
+/// `u32` head count, far below that ceiling, so the save is lossless in reach.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PoolRepr {
     pub id: u32,
@@ -856,5 +882,17 @@ mod tests {
         let tracked = w.add_pool_aged(AgeHistogram::from_pairs([(10, 3)]), Fixed::ZERO);
         let untracked = w.add_pool(5, Fixed::ZERO);
         w.merge_pools(tracked, untracked);
+    }
+
+    #[test]
+    #[should_panic(expected = "u32 head-count ceiling")]
+    fn an_age_total_above_u32_fails_loud_rather_than_truncating() {
+        // The red-team seam: a distribution whose total exceeds u32::MAX must not silently
+        // truncate the head count and desync it from the distribution. It fails loud.
+        let mut w = TwoTierWorld::new();
+        w.add_pool_aged(
+            AgeHistogram::from_pairs([(30, u32::MAX as u64 + 1)]),
+            Fixed::ZERO,
+        );
     }
 }
