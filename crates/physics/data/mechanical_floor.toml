@@ -436,7 +436,11 @@ real = "Turns, An Introduction to Combustion, stoichiometry (wood 1.2, methane 4
 
 [[law]]
 id = "law.contact_pressure"
-inputs = ["mech.force", "mech.contact_area"]
+kernel = "contact_pressure"
+ports = [
+  { role = "force", axis = "mech.force" },
+  { role = "contact_area", axis = "mech.contact_area" },
+]
 output_measure = "contact pressure"
 dimension = "pressure"
 interval_bound = "[0, P_MAX]"
@@ -444,7 +448,12 @@ tier = 0
 
 [[law]]
 id = "law.cut_penetrate"
-inputs = ["mat.indentation_hardness", "mat.specific_cut_energy", "mech.contact_area"]
+kernel = "cut_penetrate"
+ports = [
+  { role = "hardness", axis = "mat.indentation_hardness" },
+  { role = "specific_cut_energy", axis = "mat.specific_cut_energy" },
+  { role = "contact_area", axis = "mech.contact_area" },
+]
 output_measure = "cut depth"
 dimension = "length"
 interval_bound = "[0, D_MAX]"
@@ -452,7 +461,13 @@ tier = 0
 
 [[law]]
 id = "law.bend_stress"
-inputs = ["mech.force", "mech.section_modulus", "mech.arm_length", "mat.yield_strength"]
+kernel = "bend_stress"
+ports = [
+  { role = "force", axis = "mech.force" },
+  { role = "span", axis = "mech.arm_length" },
+  { role = "section_modulus", axis = "mech.section_modulus" },
+  { role = "yield_strength", axis = "mat.yield_strength" },
+]
 output_measure = "bending stress and collapse margin"
 dimension = "pressure"
 interval_bound = "[0, STRESS_MAX]"
@@ -460,7 +475,12 @@ tier = 0
 
 [[law]]
 id = "law.axial_stress"
-inputs = ["mech.force", "mech.cross_section_area", "mat.yield_strength"]
+kernel = "axial_stress"
+ports = [
+  { role = "force", axis = "mech.force" },
+  { role = "cross_section", axis = "mech.cross_section_area" },
+  { role = "yield_strength", axis = "mat.yield_strength" },
+]
 output_measure = "axial stress and collapse margin"
 dimension = "pressure"
 interval_bound = "[0, STRESS_MAX]"
@@ -468,7 +488,12 @@ tier = 0
 
 [[law]]
 id = "law.fracture_onset"
-inputs = ["mat.fracture_strength", "mat.fracture_energy", "mech.cross_section_area"]
+kernel = "fracture_onset"
+ports = [
+  { role = "fracture_strength", axis = "mat.fracture_strength" },
+  { role = "fracture_energy", axis = "mat.fracture_energy" },
+  { role = "crack_area", axis = "mech.cross_section_area" },
+]
 output_measure = "stress margin and energy margin"
 dimension = "pressure"
 interval_bound = "[stress_floor, STRESS_MAX]"
@@ -484,7 +509,12 @@ tier = 0
 
 [[law]]
 id = "law.lever"
-inputs = ["mech.force", "mech.arm_length"]
+kernel = "lever"
+ports = [
+  { role = "force", axis = "mech.force" },
+  { role = "effort_arm", axis = "mech.arm_length" },
+  { role = "load_arm", axis = "mech.arm_length" },
+]
 output_measure = "torque, mechanical advantage, and output force"
 dimension = "1,1,-2,0"
 interval_bound = "[0, TORQUE_MAX]"
@@ -492,7 +522,14 @@ tier = 0
 
 [[law]]
 id = "law.friction"
-inputs = ["mech.static_friction", "mech.kinetic_friction", "mech.force", "mech.velocity"]
+kernel = "friction"
+ports = [
+  { role = "static_coefficient", axis = "mech.static_friction" },
+  { role = "kinetic_coefficient", axis = "mech.kinetic_friction" },
+  { role = "normal", axis = "mech.force" },
+  { role = "tangential", axis = "mech.force" },
+  { role = "slip_velocity", axis = "mech.velocity" },
+]
 output_measure = "kinetic friction force, slip margin, power loss, and efficiency"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -500,7 +537,10 @@ tier = 0
 
 [[law]]
 id = "law.reach"
-inputs = ["mech.arm_length"]
+kernel = "reach"
+ports = [
+  { role = "segments", axis = "mech.arm_length" },
+]
 output_measure = "the additive grip-to-tip extent"
 dimension = "length"
 interval_bound = "[0, the saturating-sum cap]"
@@ -508,7 +548,11 @@ tier = 0
 
 [[law]]
 id = "law.weight"
-inputs = ["mech.mass", "mech.gravitational_acceleration"]
+kernel = "weight"
+ports = [
+  { role = "mass", axis = "mech.mass" },
+  { role = "gravity", axis = "mech.gravitational_acceleration" },
+]
 output_measure = "the load force from mass and gravity"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -516,7 +560,11 @@ tier = 0
 
 [[law]]
 id = "law.power"
-inputs = ["mech.force", "mech.velocity"]
+kernel = "power"
+ports = [
+  { role = "force", axis = "mech.force" },
+  { role = "velocity", axis = "mech.velocity" },
+]
 output_measure = "mechanical power"
 dimension = "2,1,-3,0"
 interval_bound = "[0, P_POWER_MAX]"
@@ -524,7 +572,13 @@ tier = 0
 
 [[law]]
 id = "law.euler_buckle"
-inputs = ["mat.elastic_modulus", "mech.second_moment_of_area", "mech.effective_length_factor", "mech.arm_length"]
+kernel = "euler_buckle"
+ports = [
+  { role = "modulus", axis = "mat.elastic_modulus" },
+  { role = "second_moment", axis = "mech.second_moment_of_area" },
+  { role = "effective_length_factor", axis = "mech.effective_length_factor" },
+  { role = "length", axis = "mech.arm_length" },
+]
 output_measure = "the Euler critical buckling load"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -532,7 +586,13 @@ tier = 0
 
 [[law]]
 id = "law.shear"
-inputs = ["mech.force", "mech.cross_section_area", "mat.shear_strength", "mat.yield_strength"]
+kernel = "shear"
+ports = [
+  { role = "shear_force", axis = "mech.force" },
+  { role = "shear_area", axis = "mech.cross_section_area" },
+  { role = "independent_shear_strength", axis = "mat.shear_strength" },
+  { role = "yield_strength", axis = "mat.yield_strength" },
+]
 output_measure = "shear stress and the shear margin"
 dimension = "pressure"
 interval_bound = "[0, STRESS_MAX]"
@@ -540,7 +600,13 @@ tier = 0
 
 [[law]]
 id = "law.wear"
-inputs = ["mat.wear_coefficient", "mech.force", "mech.slide_distance", "mat.indentation_hardness"]
+kernel = "wear"
+ports = [
+  { role = "wear_coefficient", axis = "mat.wear_coefficient" },
+  { role = "force", axis = "mech.force" },
+  { role = "distance", axis = "mech.slide_distance" },
+  { role = "hardness", axis = "mat.indentation_hardness" },
+]
 output_measure = "Archard worn volume"
 dimension = "volume"
 interval_bound = "[0, WEAR_MAX]"
@@ -548,7 +614,12 @@ tier = 0
 
 [[law]]
 id = "law.conduction"
-inputs = ["therm.conductivity", "mech.contact_area", "mech.arm_length"]
+kernel = "conduction"
+ports = [
+  { role = "conductivity", axis = "therm.conductivity" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "path_length", axis = "mech.arm_length" },
+]
 output_measure = "steady conductive heat flux"
 dimension = "2,1,-3,0"
 interval_bound = "[0, MAX_FLUX]"
@@ -556,7 +627,11 @@ tier = 0
 
 [[law]]
 id = "law.sensible_heat"
-inputs = ["mech.mass", "therm.specific_heat"]
+kernel = "sensible_energy"
+ports = [
+  { role = "mass", axis = "mech.mass" },
+  { role = "specific_heat", axis = "therm.specific_heat" },
+]
 output_measure = "the energy for a temperature change, or the rise from a delivered energy"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
@@ -564,7 +639,13 @@ tier = 0
 
 [[law]]
 id = "law.phase_change"
-inputs = ["mech.mass", "therm.specific_heat", "therm.melting_temperature", "therm.latent_heat"]
+kernel = "phase_change_energy"
+ports = [
+  { role = "mass", axis = "mech.mass" },
+  { role = "specific_heat", axis = "therm.specific_heat" },
+  { role = "transition_temperature", axis = "therm.melting_temperature" },
+  { role = "latent_heat", axis = "therm.latent_heat" },
+]
 output_measure = "the sensible-plus-latent energy of a phase transition"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
@@ -572,7 +653,13 @@ tier = 0
 
 [[law]]
 id = "law.combustion"
-inputs = ["therm.fuel_value", "therm.oxidiser_demand", "therm.ignition_temperature", "mech.mass"]
+kernel = "combustion"
+ports = [
+  { role = "fuel_value", axis = "therm.fuel_value" },
+  { role = "oxidiser_demand", axis = "therm.oxidiser_demand" },
+  { role = "ignition_temperature", axis = "therm.ignition_temperature" },
+  { role = "mass", axis = "mech.mass" },
+]
 output_measure = "released energy, the ignition crossing, and the limiting reactant"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
@@ -580,7 +667,13 @@ tier = 0
 
 [[law]]
 id = "law.thermal_stress"
-inputs = ["mat.elastic_modulus", "therm.expansion", "mech.constraint_factor", "mat.fracture_strength"]
+kernel = "thermal_stress"
+ports = [
+  { role = "modulus", axis = "mat.elastic_modulus" },
+  { role = "expansion", axis = "therm.expansion" },
+  { role = "constraint", axis = "mech.constraint_factor" },
+  { role = "fracture_strength", axis = "mat.fracture_strength" },
+]
 output_measure = "constrained thermal stress and the fracture crossing"
 dimension = "pressure"
 interval_bound = "[-STRESS_MAX, STRESS_MAX]"

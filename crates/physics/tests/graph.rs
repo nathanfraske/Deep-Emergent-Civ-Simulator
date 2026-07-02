@@ -214,6 +214,31 @@ dimension = "current"
 }
 
 #[test]
+fn the_mechanical_floor_migrates_and_names_two_arms_on_one_axis() {
+    // The mechanical floor binds 18 kernels (law.impact stays legacy pending a compound split),
+    // and its monomial contracts all pass the dimensional check at load. law.lever names its two
+    // arms as distinct ports on the one arm-length axis, the mechanical two-participant case.
+    let reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
+    let bound = reg.laws().filter(|l| !l.kernel.is_empty()).count();
+    assert_eq!(bound, 18, "18 of the 19 mechanical laws are migrated");
+    let lever = reg.law("law.lever").unwrap();
+    let arm_ports: Vec<&str> = lever
+        .ports
+        .iter()
+        .filter(|p| p.axis == "mech.arm_length")
+        .map(|p| p.role.as_str())
+        .collect();
+    assert_eq!(
+        arm_ports,
+        vec!["effort_arm", "load_arm"],
+        "the lever reads the arm-length axis as two distinct roles"
+    );
+    // The migrated mechanical laws read only ground axes (no produced-axis edges this pass), so
+    // they derive to tier 1.
+    assert_eq!(reg.derived_tier("law.contact_pressure"), Some(1));
+}
+
+#[test]
 fn the_migrated_floor_still_hashes_deterministically() {
     // The descriptor fields fold into the content hash; the same data still hashes identically.
     assert_eq!(full_registry().content_id(), full_registry().content_id());
