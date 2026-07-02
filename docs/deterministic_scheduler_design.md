@@ -157,13 +157,15 @@ stays a switch to throw when profiling demands it; both are unblocked, not requi
 The substrate that used to be the "build now" list is now built and merged: the `canonical_sorted`
 and `canonical_reduce` primitives, the R-CANON-WALK enforcement (clippy deny plus the source-scan
 backstop and the ordered `EventLog` accessor), the R-CMD-ORDER duplicate-key guard, and the two
-order-independent reduce sites. So the immediate next build, on this pass's sign-off, is the scheduler
-core itself: the one `schedule.rs` module above (`ResourceId`, `SystemId`, `Access`, the layered
-`schedule`, and the serial executor), still over the serial tick, with the phase methods expressed as
-declared-access systems so the schedule is exercised and proven against the current tick without yet
-parallelising. R-CMD-ORDER's command key is specified and its barrier built; it is wired to the
-scheduler's write batches when the parallel command stage lands. Adopting hecs and switching on Rayon
-stay separate later decisions this substrate unblocks.
+order-independent reduce sites. The scheduler core is now built and signed off: the `schedule.rs` module above (`ResourceId`,
+`SystemId`, `Access`, the layered `schedule` derivation, `flatten`, and the serial executor) lives in
+`crates/core`, with the determinism proof tests green (the schedule is a pure function of the
+declarations, every batch is conflict-free, every conflicting pair runs in `SystemId` order, and the
+serial executor reproduces a dependency-respecting order). What remains is the integration: express
+the world tick's phases as declared-access systems and prove the flattened schedule reproduces the
+current tick's canonical state hash bit for bit, then wire R-CMD-ORDER's command key to the write
+batches when the parallel command stage lands, and switch on a Rayon executor when a profile demands
+it. Adopting hecs and switching on Rayon stay separate later decisions this substrate unblocks.
 
 ## Reserved values and honest limits
 

@@ -46,6 +46,16 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): the deterministic scheduler core built (the keystone)
+
+The owner signed off the scheduler design and said to build the core. Built `crates/core/src/schedule.rs`: `ResourceId` and `SystemId` (stable canonical ids), `Access` (declared read/write sets over resources), `Access::conflicts_with` (a writer conflicts with any reader or writer of the same resource, symmetric), the layered `schedule` derivation (walk systems in `SystemId` order, place each in the earliest batch after every lower-id system it conflicts with, so batches are conflict-free and conflicting pairs run in id order), `flatten`, and `run_serial`. A pure function of the sorted declarations, so deterministic and observer-independent (Principles 3, 10), storage-agnostic (hecs later), and Rayon-ready (a parallel executor runs a batch concurrently, sound because a batch holds no conflicting pair). Data-defined resources and systems (Principle 11), no reserved values.
+
+Eight proof tests green: the conflict relation, independent systems share the first batch (max parallelism), a conflict chain layers and orders by id, the schedule is a pure function of the declarations, every batch is conflict-free and conflicts respect id order, and the serial executor reproduces a dependency-respecting computation. Full core suite, clippy `-D warnings`, and rustdoc clean.
+
+**Where it stopped, and what is next.** The scheduler core is built and green on `claude/scheduler-core`. The next increment is the integration: express the world tick's phases as declared-access systems and prove the flattened schedule reproduces the current tick's canonical state hash bit for bit (a `world.rs`/`runner.rs` step, hotter, so a careful one), then wire R-CMD-ORDER's command key to the write batches, then the Rayon executor when a profile shows the serial tick is the limit. The flag-flip consolidation for the on-ramp items and the held research dives (R-PROJ-REGISTER, R-SAVE-SCHEMA, R-UNITS-PIN) stay owner-gated.
+
+---
+
 ## 2026-07-02 (continued): the deterministic-scheduler design reconciled and made buildable (owner sign-off pending)
 
 The owner chose the deterministic-scheduler design as the next step, the keystone that unblocks the R-REDUCE-ORDER full form and the real parallel (Rayon) tick. On `claude/scheduler-design-signoff`.
