@@ -220,7 +220,11 @@ pub fn gpu_diffuse_tiled(
     tile: u32,
 ) -> Vec<i64> {
     let n = (width as usize) * (height as usize);
-    assert_eq!(initial.len(), n, "gpu_diffuse: initial field must cover width*height cells");
+    assert_eq!(
+        initial.len(),
+        n,
+        "gpu_diffuse: initial field must cover width*height cells"
+    );
     assert!(tile > 0, "gpu_diffuse: tile edge must be positive");
     if n == 0 {
         return Vec::new();
