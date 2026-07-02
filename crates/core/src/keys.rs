@@ -102,6 +102,11 @@ impl Phase {
     /// individual and the controller-parameter locus so a lineage's evolved behaviour is a
     /// reproducible function of the seed and its ancestry (design Part 8, the evolved-behaviour work).
     pub const CONTROLLER: Phase = Phase(0x13);
+    /// A grammar-typology draw (R-LANG-TYPOLOGY): one parameter of a culture's typology
+    /// profile sampled at culture genesis, keyed on the culture and the parameter's
+    /// canonical position in the anchor-first sampling order, so a culture's grammar is a
+    /// reproducible function of the seed, the culture, and the registry data (design 33.4).
+    pub const LANG_TYPOLOGY: Phase = Phase(0x14);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

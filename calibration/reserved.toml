@@ -334,6 +334,40 @@ value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
 
+# --- R-LANG-TYPOLOGY: the typological substrate (Part 33.4; scoped proposal) ---
+
+[[reserved]]
+id = "lang.typology_harmony_strong"
+basis = "the strong-tier multiplicative harmony tilt; the typological record reports proportions of genera rather than coefficients, so the tier is ordinal and its numeric tilt is the owner's, anchored on the adposition axis running about 94 to 97 percent harmonic (WALS 95A: 472 OV-postpositional and 456 VO-prepositional against 14 and 42 disharmonic)"
+status = "reserved"
+value = ""
+unit = "tilt"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_harmony_weak"
+basis = "the weak-tier multiplicative harmony tilt; anchored on the genitive pair, which correlates weakly and one-sidedly (Dryer 1992: 0.89 of OV genera Genitive-Noun against 0.45 of VO genera)"
+status = "reserved"
+value = ""
+unit = "tilt"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_disharmony"
+basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_distance_weights"
+basis = "the per-parameter weights of the 33.5 grammatical distance component over the typology profile; basis the contribution each typological dimension makes to measured mutual intelligibility, consistent with the three-component weighting where lexical distance dominates"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 33.5 grammatical distance; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
 # --- R-LANG-DET: order-sensitive language procedures pinned (Part 33, record 62.12) ---
 
 [[reserved]]

@@ -81,6 +81,7 @@ pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
 pub mod tom;
+pub mod typology;
 pub mod value;
 pub mod world;
 
@@ -141,6 +142,12 @@ pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use typology::{
+    sample_profile, tilted_weights, typology_distance, validate as validate_typology,
+    wals_seed, HarmonyBias, HarmonyModel, TypologyError, TypologyParamDef, TypologyParamId,
+    TypologyParams, TypologyPrior, TypologyProfile, TypologyRegistry, TypologyValueDef,
+    TypologyValueId, ValueMetric,
 };
 pub use value::{
     conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
