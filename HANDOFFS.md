@@ -4,6 +4,24 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): the general u128 GPU sqrt and the limb-primitive DRY (items 2 and 4)
+
+The owner picked GPU-lane residuals 1, 2, and 4 (dropping item 3, the multi-vendor device run, since there is no second GPU vendor on the box). On `claude/gpu-sqrt-and-dry`; items 2 and 4 built and gated, item 1 in a background probe.
+
+**Item 4 (DRY), done.** The i64 `q32_mul` was duplicated in `field.rs` and `transcendental.rs` and `q32_div` sat in `transcendental.rs`. Consolidated all three into a shared `crates/gpu/src/prim.rs` (pub(crate) `#[cube]`) and rewired the callers via `use crate::prim::{...}`. Cross-module `#[cube]` calls work (a pub(crate) `#[cube]` fn in one module is callable from a `#[cube]` kernel in another). All ten gates stay bit-identical, so the refactor preserved behaviour.
+
+**Item 2 (general u128 sqrt), done.** `isqrt_u96` in `prim.rs`: a 96-bit integer square root over three u32 limbs, bit-by-bit, no multiply and no native 64-bit (the confined op set, like `emu_div`), matching `u128::isqrt` and so `Fixed::sqrt` (radicand `(bits as u128) << 32`, below 2^95). The trial bit is at a compile-time position each of the 48 unrolled steps, so `res + bit` and its limb are comptime (the DSL `comptime!(if ...)` works). `fixed_sqrt`, `sqrt_kernel`, and `gpu_sqrt` are in `transcendental.rs`; gated bit-identical on the 5090 over the full magnitude sweep (radicand to ~2^95, plus zero, negatives, exact squares). That clears "the one remaining GPU primitive"; the arcsine keeps its faster domain-limited u64 isqrt.
+
+**Item 1 (transcendental cross-backend), in progress.** A background probe stands up the cubecl-wgpu (Vulkan) path in an isolated worktree, a third codegen path (the CPU backend could not carry the transcendentals: it panicked in cubecl-opt). The 5090 is not Vulkan-exposed under WSL2 (no NVIDIA Vulkan ICD), so the probe uses lavapipe software Vulkan. Result pending.
+
+**Verification.** An adversarial-verification workflow (three skeptics re-deriving `isqrt_u96` against `math.isqrt` on perfect-square boundaries, the Fixed-domain radicand shapes, and the limb carry/borrow edges, plus one checking the DRY extraction is byte-faithful) is running; findings fold before merge.
+
+**Docs.** `CONSENSUS_ROADMAP.md`, record 62.23, and audit block 1y reconciled: the general sqrt is built and the shared limb primitives consolidated, so the remaining GPU-lane residuals are the transcendental cross-backend confirmation and a true multi-vendor device run. Counts unchanged (engineering follow-ons under the resolved R-GPU-CANON-PIN).
+
+**Where it stopped.** Items 2 and 4 built, gated, and doc-reconciled on `claude/gpu-sqrt-and-dry`, awaiting the verification workflow before commit and merge. Item 1 awaits the wgpu probe.
+
+---
+
 ## 2026-07-02 (continued): the pool-tier demography adopted into the two-tier world (R-AGING pool tier + R-PROJ-REGISTER), on `claude/find-unblocked-work-dwdpsj`
 
 After the demography substrate (`AgeHistogram`) merged as PR #35, the owner said to continue on (and surface any owner call as a question). The coherent continuation is adopting the substrate into the live two-tier world, so the age distribution is a first-class part of the aggregate tier and the age population is a conserved projection across the tier crossings. The runner-up R-REPRO stays queued (it needs the owner's one Principle-9 preference-direction call).

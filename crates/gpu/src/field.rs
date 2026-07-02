@@ -39,92 +39,9 @@
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
 
+use crate::prim::q32_mul;
+
 use crate::stage0::CudaClient;
-
-/// The pinned Q32.32 multiply on `i64` operands: bits [32, 96) of the exact signed 128-bit product
-/// (arithmetic floor + two's-complement narrow), matching `Fixed::mul`. The core is the same
-/// sign-magnitude u16-partial digit accumulation as the Stage 0 `emu_mul` kernel (no i128, and the
-/// product itself uses only u32 arithmetic), differing only at the boundary: it decomposes each `i64`
-/// operand into `u32` limbs with `cast_from` and a signed `>> 32`, and recomposes the `i64` result,
-/// rather than taking and returning the limbs as the Stage 0 kernel does. Proven bit-identical to
-/// `Fixed::mul` over corners + a 1M sweep on CUDA (`gpu_fixed_mul` in `tests/stage0_gate`).
-#[cube]
-fn q32_mul(a: i64, b: i64) -> i64 {
-    let alo = u32::cast_from(a);
-    let ahi = u32::cast_from(a >> 32u32);
-    let blo = u32::cast_from(b);
-    let bhi = u32::cast_from(b >> 32u32);
-
-    let a_neg = ahi >> 31u32;
-    let b_neg = bhi >> 31u32;
-    let neg = a_neg ^ b_neg;
-
-    // magnitudes
-    let na_lo = (!alo) + 1u32;
-    let ca = select(alo == 0u32, 1u32, 0u32);
-    let na_hi = (!ahi) + ca;
-    let ma_lo = select(a_neg == 1u32, na_lo, alo);
-    let ma_hi = select(a_neg == 1u32, na_hi, ahi);
-
-    let nb_lo = (!blo) + 1u32;
-    let cb = select(blo == 0u32, 1u32, 0u32);
-    let nb_hi = (!bhi) + cb;
-    let mb_lo = select(b_neg == 1u32, nb_lo, blo);
-    let mb_hi = select(b_neg == 1u32, nb_hi, bhi);
-
-    // 16-bit sub-limbs
-    let mut aa = Array::<u32>::new(4usize);
-    aa[0usize] = ma_lo & 0xFFFFu32;
-    aa[1usize] = ma_lo >> 16u32;
-    aa[2usize] = ma_hi & 0xFFFFu32;
-    aa[3usize] = ma_hi >> 16u32;
-    let mut bb = Array::<u32>::new(4usize);
-    bb[0usize] = mb_lo & 0xFFFFu32;
-    bb[1usize] = mb_lo >> 16u32;
-    bb[2usize] = mb_hi & 0xFFFFu32;
-    bb[3usize] = mb_hi >> 16u32;
-
-    // 16 partials into 8 digit slots, then one normalization pass
-    let mut acc = Array::<u32>::new(8usize);
-    #[unroll]
-    for i in 0usize..8usize {
-        acc[i] = 0u32;
-    }
-    #[unroll]
-    for i in 0usize..4usize {
-        #[unroll]
-        for j in 0usize..4usize {
-            let p = aa[i] * bb[j];
-            acc[i + j] = acc[i + j] + (p & 0xFFFFu32);
-            acc[i + j + 1usize] = acc[i + j + 1usize] + (p >> 16u32);
-        }
-    }
-    let mut carry = 0u32;
-    #[unroll]
-    for d in 0usize..8usize {
-        let t = acc[d] + carry;
-        acc[d] = t & 0xFFFFu32;
-        carry = t >> 16u32;
-    }
-    let w0 = acc[0usize] | (acc[1usize] << 16u32);
-    let w1 = acc[2usize] | (acc[3usize] << 16u32);
-    let w2 = acc[4usize] | (acc[5usize] << 16u32);
-
-    // 128-bit negate of words 0..2 when signs differ (enough for the [32, 96) result)
-    let v0 = !w0;
-    let s0 = v0 + 1u32;
-    let k0 = select(s0 < v0, 1u32, 0u32);
-    let v1 = !w1;
-    let s1 = v1 + k0;
-    let k1 = select(s1 < v1, 1u32, 0u32);
-    let v2 = !w2;
-    let s2 = v2 + k1;
-
-    let use_neg = neg == 1u32;
-    let lo = select(use_neg, s1, w1); // bits [32, 64)
-    let hi = select(use_neg, s2, w2); // bits [64, 96)
-    (i64::cast_from(hi) << 32u32) | i64::cast_from(lo)
-}
 
 /// Elementwise wrapper over `q32_mul`, so the diffusion kernel's coefficient multiply can be gated
 /// over the full corner and sweep range against the oracle (not only over the narrow field values a

@@ -19,6 +19,7 @@
 use civsim_core::Fixed;
 use civsim_gpu::{
     cuda_client, gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin,
+    gpu_sqrt,
 };
 
 fn gpu_enabled() -> bool {
@@ -432,5 +433,57 @@ fn powi_is_bit_identical_to_fixed_oracle() {
         0,
         "GPU powi must equal Fixed::powi over all {} pairs",
         x.len()
+    );
+}
+
+/// Positive-bit magnitudes across every exponent (radicand up to ~2^95), plus zero, negatives, and
+/// some exact squares.
+fn sqrt_inputs() -> Vec<i64> {
+    let mut xs = vec![0i64, -1i64, i64::MIN, i64::MAX];
+    for f in [
+        Fixed::ONE,
+        Fixed::from_int(2),
+        Fixed::from_int(4),
+        Fixed::from_int(9),
+        Fixed::from_ratio(1, 4),
+        Fixed::from_int(1_000_000),
+    ] {
+        xs.push(f.to_bits());
+    }
+    let mut b = 1i64;
+    while b < i64::MAX / 2 {
+        xs.push(b);
+        b += (b >> 5) + 1;
+    }
+    xs
+}
+
+#[test]
+fn sqrt_is_bit_identical_to_fixed_oracle() {
+    if !gpu_enabled() {
+        eprintln!("civsim-gpu: skipping sqrt device gate (set CIVSIM_GPU=1 to run)");
+        return;
+    }
+    let client = cuda_client();
+    let xs = sqrt_inputs();
+    let got = gpu_sqrt(&client, &xs);
+    let mut mism = 0u64;
+    for i in 0..xs.len() {
+        let want = Fixed::from_bits(xs[i]).sqrt().to_bits();
+        if got[i] != want {
+            mism += 1;
+            if mism <= 8 {
+                eprintln!(
+                    "sqrt mismatch x={:#x} got={:#x} want={:#x}",
+                    xs[i], got[i], want
+                );
+            }
+        }
+    }
+    assert_eq!(
+        mism,
+        0,
+        "GPU sqrt must equal Fixed::sqrt over all {} inputs",
+        xs.len()
     );
 }
