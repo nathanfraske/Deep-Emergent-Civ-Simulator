@@ -46,6 +46,16 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): the deterministic-scheduler design reconciled and made buildable (owner sign-off pending)
+
+The owner chose the deterministic-scheduler design as the next step, the keystone that unblocks the R-REDUCE-ORDER full form and the real parallel (Rayon) tick. On `claude/scheduler-design-signoff`.
+
+An earlier session had already written `docs/deterministic_scheduler_design.md` (the four items resolve as one substrate: declared read/write sets to deterministic layered batches by stable system id, hold off on hecs and Rayon, build the storage-agnostic serial-safe scheduler). That pass predated this session's work, so its "where the code stands" and "what to build now" sections were stale: they listed the canonical primitives and the R-CANON-WALK / R-CMD-ORDER / R-REDUCE-ORDER hardening as the "build now" list, but the on-ramp built all of it. Reconciled: the substrate is now in place, and the one remaining unbuilt piece is the scheduler core itself. Added a concrete buildable spec (a `schedule.rs` module: `ResourceId`, `SystemId`, `Access` read/write sets, the layered `schedule` derivation, a serial executor, and the determinism-harness proof obligations), so the keystone is ready to build on the owner's sign-off.
+
+**Where it stopped, and the decision surfaced.** The design pass is reconciled and sign-off-ready. Per its own terms (and Part 57's "a full brainstorm before it is locked"), the scheduler core is built after the owner signs off, so this awaits the owner's go. The agent-execution-model second foundation (poll-every-tick versus event-driven wakeup) stays out of scope, coupled to R-TEMPORAL-LOD.
+
+---
+
 ## 2026-07-02 (continued): closed the gossip-hyps order-dependence seam (emergent union candidate set)
 
 The determinism audit found the gossip conflict apply was order-dependent when competing assertions carried different candidate sets (first-writer-wins the belief frame's `hyps`, and `add_evidence` dropped evidence toward a value absent from it). The owner chose to fix it under the north star, even at more cost. On `claude/gossip-hyps-canonicalize`.
