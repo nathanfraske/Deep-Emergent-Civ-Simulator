@@ -728,8 +728,10 @@ source = "Part 33 procedural language; record 62.6"
 [[reserved]]
 id = "language.sound_change_rate"
 basis = "the per-generation probability a lineage innovates one regular form change, the drift operator rate of 33.4; basis the attested pace of regular sound change in the historical record, set so a lineage drifts over many generations rather than every one"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.02"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-02"
 unit = "probability"
 source = "Part 33.4 drift; record 62.12; audit section 1n"
 
