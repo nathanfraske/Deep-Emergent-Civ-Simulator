@@ -42,6 +42,74 @@ pub fn organism_color(layer: u16, species_id: u32) -> Rgb {
     Rgb::new(jitter(br, 0), jitter(bg, 8), jitter(bb, 16))
 }
 
+/// A physics-derived terrain colour: the tile's own `elevation`, `moisture`, and `temperature`
+/// fields (the physical quantities worldgen computed, each in `[0, 1]`) mapped to colour, so terrain
+/// looks like its physics rather than an authored biome swatch. Presentation only, a pure read of
+/// canon (Principle 10). This is the first slice of the visual-projection substrate: the palette
+/// anchors below (sea level, the tan/green/snow/ochre/rock endpoints) are the tunable projection, an
+/// aesthetic call the owner reserves, not physics.
+pub fn physics_terrain_color(elevation: Fixed, moisture: Fixed, temperature: Fixed) -> Rgb {
+    fn unit_to_255(f: Fixed) -> i32 {
+        f.checked_mul(Fixed::from_int(255))
+            .map(|v| v.to_int())
+            .unwrap_or(0)
+            .clamp(0, 255)
+    }
+    fn mix(a: i32, b: i32, num: i32, den: i32) -> i32 {
+        a + (b - a) * num.clamp(0, den) / den.max(1)
+    }
+    let (e, m, t) = (
+        unit_to_255(elevation),
+        unit_to_255(moisture),
+        unit_to_255(temperature),
+    );
+    const SEA: i32 = 77; // elevation 0.30: below it the cell is water
+    if e < SEA {
+        // Water: teal at the warm shallows deepening to cold abyssal blue.
+        let d = SEA - e;
+        return Rgb::new(
+            mix(22, 6, d, SEA) as u8,
+            mix(104, 44, d, SEA) as u8,
+            mix(176, 92, d, SEA) as u8,
+        );
+    }
+    // Land base: dry tan to wet green by moisture.
+    let mut r = mix(196, 58, m, 255);
+    let mut g = mix(176, 132, m, 255);
+    let mut b = mix(120, 58, m, 255);
+    // Cold tints toward snow; heat tints toward arid ochre.
+    if t < SEA {
+        let c = SEA - t;
+        r = mix(r, 236, c, SEA);
+        g = mix(g, 240, c, SEA);
+        b = mix(b, 246, c, SEA);
+    } else if t > 255 - SEA {
+        let hh = t - (255 - SEA);
+        r = mix(r, 206, hh, SEA);
+        g = mix(g, 150, hh, SEA);
+        b = mix(b, 92, hh, SEA);
+    }
+    // High ground lightens toward rock, quadratic so lowlands keep their colour.
+    let land = e - SEA;
+    let hl = (land * land) / (255 - SEA);
+    r = mix(r, 206, hl, 255 - SEA);
+    g = mix(g, 210, hl, 255 - SEA);
+    b = mix(b, 214, hl, 255 - SEA);
+    Rgb::new(
+        r.clamp(0, 255) as u8,
+        g.clamp(0, 255) as u8,
+        b.clamp(0, 255) as u8,
+    )
+}
+
+/// Blend colour `a` toward `b` by `num/den`. Presentation only.
+fn blend(a: Rgb, b: Rgb, num: i32, den: i32) -> Rgb {
+    let mix = |x: u8, y: u8| -> u8 {
+        (x as i32 + (y as i32 - x as i32) * num.clamp(0, den) / den.max(1)).clamp(0, 255) as u8
+    };
+    Rgb::new(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b))
+}
+
 #[inline]
 fn fill_rect(buf: &mut [u32], w: usize, x0: usize, y0: usize, rw: usize, rh: usize, color: u32) {
     for y in y0..(y0 + rh).min(buf.len() / w.max(1)) {
@@ -293,12 +361,17 @@ pub fn superfine(
             let coord = Coord3::ground(ox + c, oy + r);
             let px0 = c as usize * tile_px;
             let py0 = r as usize * tile_px;
-            // Biome background, or the empty-space colour off the map.
+            // Physics-derived terrain colour (the tile's own elevation, moisture, and temperature),
+            // with a light accent of the biome swatch for identity, or the empty-space colour off
+            // the map. Terrain looks like its physics rather than an authored swatch.
             let tile_color = if topo.contains(coord) {
                 living
                     .map
                     .tile(coord)
-                    .map(|t| biomes.color(t.biome))
+                    .map(|t| {
+                        let physics = physics_terrain_color(t.elevation, t.moisture, t.temperature);
+                        blend(physics, biomes.color(t.biome), 46, 255) // about 18% biome accent
+                    })
                     .unwrap_or(bg)
             } else {
                 bg
@@ -403,6 +476,32 @@ mod tests {
         assert!(
             buf.iter().any(|&p| p != Rgb::new(8, 9, 14).pack()),
             "something is drawn"
+        );
+    }
+    #[test]
+    fn physics_terrain_colour_reflects_the_fields() {
+        let p = |n: i64| Fixed::from_ratio(n, 100);
+        // A deterministic pure read of the tile's physical fields.
+        assert_eq!(
+            physics_terrain_color(p(60), p(50), p(50)),
+            physics_terrain_color(p(60), p(50), p(50)),
+        );
+        // Low elevation is water: blue-dominant.
+        let water = physics_terrain_color(p(10), p(50), p(50));
+        assert!(water.b > water.r && water.b > water.g, "water reads blue");
+        // Wet temperate land is green-dominant; drier ground at the same elevation is warmer.
+        let meadow = physics_terrain_color(p(50), p(80), p(50));
+        assert!(
+            meadow.g > meadow.r && meadow.g > meadow.b,
+            "wet temperate land reads green"
+        );
+        let dry = physics_terrain_color(p(50), p(10), p(50));
+        assert!(dry.r > meadow.r, "drier ground is warmer than a meadow");
+        // A cold high peak lightens toward snow and rock.
+        let peak = physics_terrain_color(p(95), p(40), p(10));
+        assert!(
+            peak.r > 180 && peak.g > 180 && peak.b > 180,
+            "a cold peak reads pale"
         );
     }
 }
