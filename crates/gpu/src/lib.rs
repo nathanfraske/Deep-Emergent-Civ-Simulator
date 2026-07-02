@@ -40,12 +40,23 @@
 //!   counterpart of `civsim_sim`'s `Field::step` and `crates/core`'s `diffusion_bench`), a real
 //!   physics field kernel whose per-cell op sequence is fixed and whose one multiply is the pinned
 //!   limb multiply.
+//! - [`transcendental`]: the full set (`exp`, `ln`, `powf`, `powi`, and the CORDIC `sin`/`cos`/`atan`/
+//!   `asin`) as `#[cube]` kernels, reproducing the `crates/core` `Fixed` oracle bit-for-bit by running
+//!   the same integer algorithm over the limb `mul`/`div` primitives (a barrel shifter stands in for
+//!   the DSL's lack of a runtime-amount shift; `asin` uses a u64 isqrt over its zero-to-one radicand).
+//!   These unblock the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron,
+//!   Beer-Lambert, Nernst, Snell, Rayleigh, and general scaling). A general u128 `Fixed::sqrt` is the
+//!   one remaining GPU primitive.
 //!
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
 //! working device only when actually called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
 pub mod field;
 pub mod stage0;
+pub mod transcendental;
 
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
 pub use stage0::{cuda_client, gpu_div, gpu_mul, CudaClient};
+pub use transcendental::{
+    gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin,
+};
