@@ -347,6 +347,72 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             output: Asserted("E = (a + b*|wind|)*(e_s - e_a); a difference of vapor pressures scaled by a wind function with dimensional constants, not a port monomial"),
         },
 
+        // === Chemistry and optics (wave 2) ===
+        "reaction" => KernelContract {
+            ports: const {
+                &[
+                    cur("products_sum", 0),
+                    cur("reactants_sum", 0),
+                    cur("temperature", 0),
+                ]
+            },
+            output: SameAs("products_sum"),
+        },
+        "corrosion" => KernelContract {
+            ports: const {
+                &[
+                    cur("fluid_potential", 0),
+                    cur("material_potential", 0),
+                    cur("susceptibility", 0),
+                    cur("acidity_factor", 0),
+                ]
+            },
+            output: Asserted("driving = (fluid_potential - material_potential)*susceptibility*acidity; a difference of potentials, and the declared dimensionless output treats the susceptibility as carrying the inverse-voltage scale, a reserved question"),
+        },
+        "carnot_limit" => KernelContract {
+            ports: const { &[cur("hot", 0), cur("cold", 0)] },
+            output: Dimensionless,
+        },
+        "dissolution" => KernelContract {
+            ports: const { &[cur("solute_affinity", 0)] },
+            output: Dimensionless,
+        },
+        "radiant_emission" => KernelContract {
+            ports: const {
+                &[
+                    cur("emissivity", 0),
+                    cur("area", 0),
+                    cur("t_hot", 0),
+                    cur("t_cold", 0),
+                ]
+            },
+            output: Asserted("j = emissivity*sigma*(T_hot^4 - T_cold^4); the Stefan-Boltzmann sigma carries residual dimension and the fourth-power difference is not a monomial"),
+        },
+        "wien_peak" => KernelContract {
+            ports: const { &[cur("temperature", 0)] },
+            output: Asserted("lambda = wien_b/T; Wien's displacement constant carries residual dimension m*K, outside the port monomial"),
+        },
+        "inverse_square_falloff" => KernelContract {
+            ports: const { &[cur("power", 1), cur("distance", -2)] },
+            output: Monomial,
+        },
+        "interface_split" => KernelContract {
+            ports: const { &[cur("reflectance", 0), cur("transmittance", 0)] },
+            output: Asserted("the reflected/absorbed/transmitted split is a fraction of the composed incident flux, not a monomial over the dimensionless partition coefficients"),
+        },
+        "optical_depth" => KernelContract {
+            ports: const { &[cur("absorption_coefficient", 1), cur("path", 1)] },
+            output: Monomial,
+        },
+        "refractive_contrast" => KernelContract {
+            ports: const { &[cur("n1", 0), cur("n2", 0)] },
+            output: Dimensionless,
+        },
+        "radiative_equilibrium" => KernelContract {
+            ports: const { &[cur("emissivity", 0)] },
+            output: Asserted("T_eq = (E_abs/(emissivity*sigma))^(1/4); a fourth root with the dimensional Stefan-Boltzmann sigma, outside the integer monomial algebra"),
+        },
+
         // === Electricity and magnetism (wave 3) ===
         "coulomb_force" => KernelContract {
             ports: const { &[cur("q1", 1), cur("q2", 1), cur("r", -2)] },
