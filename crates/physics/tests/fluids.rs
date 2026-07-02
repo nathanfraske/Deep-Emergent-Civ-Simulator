@@ -49,6 +49,28 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
 }
 
 #[test]
+fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
+    // The owner ratified the wave-2 fluids ranges from their cited bounds (2026-07-02). A set range
+    // now reads back exactly, and no fluids axis stays reserved: the only reserved axis over the
+    // mechanical-and-fluids stack is the scale-pending geometry second moment of area (R-UNITS-PIN).
+    let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
+    reg.extend(data_path("fluids_floor.toml")).unwrap();
+    let (lo, hi) = reg
+        .axis("fluid.dynamic_viscosity")
+        .unwrap()
+        .range
+        .require("fluid.dynamic_viscosity")
+        .unwrap();
+    assert_eq!(lo, Fixed::from_ratio(1, 100000), "0.00001 Pa*s (air)");
+    assert_eq!(hi, Fixed::from_int(100), "100 Pa*s (lava end)");
+    assert_eq!(
+        reg.reserved_axis_ids(),
+        vec!["mech.second_moment_of_area"],
+        "the fluids ranges are graduated; only the scale-pending geometry axis stays reserved"
+    );
+}
+
+#[test]
 fn a_standalone_fluids_floor_fails_because_it_reads_the_mechanical_axes() {
     // The fluids floor is not self-contained by design: loading it alone must error on the missing
     // mechanical axes rather than silently skip the dangling reference.
