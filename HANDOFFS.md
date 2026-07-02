@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): physics-kernel review and hardening, and the CI fmt gate
+
+Two follow-on threads after the GPU merge, both merged to main.
+
+**The fmt CI break I caused, fixed (PR #22).** PR #20 landed `crates/gpu` without rustfmt, tripping `cargo fmt --check` on main and every branch off it. Formatted the three files (whitespace only); main is fmt-clean again. Banked the rule to memory (`ci-fmt-gate`): run `cargo fmt --all` before every commit and PR, the same tier as clippy, rustdoc, and the tests.
+
+**Physics-kernel review and hardening.** The owner asked to check out the physics kernels (waves 0 to 3 in `crates/physics/src/laws.rs`, about sixty closed-form integer Q32.32 laws, plus the new `graph.rs` Stage-1 dataflow descriptor that PR #19 and the EM/mechanical commits migrate each floor onto: role-tagged ports with signed dimension exponents, an OutputCheck of monomial/same-as/dimensionless/asserted, and tier derived as depth in the law-output graph). An adversarial review workflow (six domains, map plus high-effort verify, 12 agents) mapped them and found a real cluster of seams, several verified against the code.
+
+Fixed this session (in `laws.rs`, each with a new boundary test, fmt and clippy clean): three product-before-divide kernels that routed a representable in-range result to the max cap (`wear` the HIGH one, `coulomb_force`, `resistance`, reassociated to divide-before-multiply on the wave-1 reduce-before-grow discipline); eight difference-taking kernels whose raw i64 subtract or abs panicked at the representable extremes under `overflow-checks` (now the saturating `sat_sub`/`sat_abs`: `convective_flux`, `thermal_buoyancy`, `saturation_vapor_pressure`, `evaporation_rate`, `corrosion`, `carnot_limit`, `conduction`, `fracture_onset`); and a fabricated circle constant in `poiseuille_flow` (`355/113`, now the canonical `Fixed::PI`).
+
+Documented, not fixed (folded into the open R-DIM-HOMO backlog bullet, audit Section 3, no count change): the concrete dimensional-declaration mismatches the descriptor check must catch (`radiant_emission` and `convective_flux` declare energy but form power; `poiseuille_flow` volume versus flow rate; `thermal_buoyancy` dimensionless versus acceleration; `evaporation_rate` the wrong monomial for a mass flux; `law.lever` force versus torque), to correct as the Stage-1 migration reaches biology and chem-optics; and a determinism seam in the migration itself (`into_law` includes `Temporal::Prior` ports in the derived same-tick `inputs`, so `derive_tiers` builds a false same-tick edge and can mis-derive a tier).
+
+**Where it stopped.** The physics-hardening and documentation change is a PR to main (fmt-checked this time); counts unchanged (a hardening pass, no resolve or flag). Next physics follow-ons, all open: the R-DIM-HOMO descriptor migration for the biology and chem-optics floors with the dimensional corrections above and the `Prior`-port tier fix; and, the R-GPU-CANON-PIN follow-on, porting the physics-law field kernels to CubeCL, which will need the u32-limb `q32_mul`/`emu_div` already in `crates/gpu`, since the kernels bottom out in i128 intermediates a GPU integer field has no native type for.
+
+---
+
 ## 2026-07-02: the GPU stood up with CubeCL (`crates/gpu`), R-GPU-CANON-PIN signed off, consolidated, and rebased onto the moved main
 
 The owner asked to stand up the GPU with CubeCL now that it is available and the RTX 5090 is a working part of the compute, and then to consolidate cleanly and PR and merge. On `claude/physics-substrate-fanout`.

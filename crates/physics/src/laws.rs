@@ -315,12 +315,12 @@ pub fn fracture_onset(
     delivered_energy: Fixed,
     energy_max: Fixed,
 ) -> (Fixed, Fixed) {
-    let stress_margin = fracture_strength - applied_stress;
+    let stress_margin = sat_sub(fracture_strength, applied_stress);
     let g_avail = match fracture_energy.checked_mul(crack_area) {
         Some(g) => g.min(energy_max),
         None => energy_max,
     };
-    (stress_margin, g_avail - delivered_energy)
+    (stress_margin, sat_sub(g_avail, delivered_energy))
 }
 
 /// Delivered kinetic energy on the kilojoule scale. The half is applied before the
@@ -605,22 +605,26 @@ pub fn wear(
     hardness: Fixed,
     wear_max: Fixed,
 ) -> Fixed {
-    let fs = match force.checked_mul(distance) {
-        Some(x) => x,
-        None => return wear_max,
-    };
-    let kfs = match wear_coefficient_scaled.checked_mul(fs) {
-        Some(x) => x,
-        None => return wear_max,
-    };
-    let unscaled = match kfs.checked_div(coefficient_scale) {
-        Some(x) => x,
-        None => return wear_max,
-    };
     if hardness == ZERO {
         return wear_max;
     }
-    match unscaled.checked_div(hardness) {
+    // Reduce by the coefficient scale before the growing multiplies (the wave-1 reduce-before-grow
+    // discipline): the scaled coefficient over its scale is the true (sub-unit) Archard coefficient,
+    // so K*F*s never forms above the ceiling for an in-range result. Reassociating the reducing
+    // divide ahead of the product changes the floor rounding but removes the false-cap overflow.
+    let k = match wear_coefficient_scaled.checked_div(coefficient_scale) {
+        Some(x) => x,
+        None => return wear_max,
+    };
+    let kf = match k.checked_mul(force) {
+        Some(x) => x,
+        None => return wear_max,
+    };
+    let kfs = match kf.checked_mul(distance) {
+        Some(x) => x,
+        None => return wear_max,
+    };
+    match kfs.checked_div(hardness) {
         Some(v) => v.min(wear_max),
         None => wear_max,
     }
@@ -639,7 +643,7 @@ pub fn conduction(
     path_length: Fixed,
     max_flux: Fixed,
 ) -> Fixed {
-    let delta_t = (hot_temperature - cold_temperature).abs();
+    let delta_t = sat_abs(sat_sub(hot_temperature, cold_temperature));
     let k_dt = match conductivity.checked_mul(delta_t) {
         Some(x) => x,
         None => return max_flux,
@@ -1019,7 +1023,7 @@ pub fn compressibility(pressure: Fixed, bulk_modulus: Fixed, strain_max: Fixed) 
 /// Newton convective cooling q = h*A*|T_hot - T_cold| (W), the body arc's convective exchange. The
 /// absolute-value gradient matches conduction.
 pub fn convective_flux(h: Fixed, area: Fixed, hot: Fixed, cold: Fixed, flux_max: Fixed) -> Fixed {
-    let dt = (hot - cold).abs();
+    let dt = sat_abs(sat_sub(hot, cold));
     let ha = match h.checked_mul(area) {
         Some(x) => x,
         None => return flux_max,
@@ -1065,7 +1069,7 @@ pub fn poiseuille_flow(
             None => return ZERO,
         };
     }
-    match b.checked_mul(Fixed::from_ratio(355, 113)) {
+    match b.checked_mul(Fixed::PI) {
         Some(q) => q.min(q_max),
         None => q_max,
     }
@@ -1120,7 +1124,7 @@ pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max
     if t_ambient <= ZERO {
         return ZERO;
     }
-    let dt = t_parcel - t_ambient;
+    let dt = sat_sub(t_parcel, t_ambient);
     let ratio = match dt.checked_div(t_ambient) {
         Some(x) => x,
         None => return ZERO,
@@ -1148,7 +1152,7 @@ pub fn saturation_vapor_pressure(
     e_ref: Fixed,
     es_cap: Fixed,
 ) -> Fixed {
-    let dt = temperature - t_ref;
+    let dt = sat_sub(temperature, t_ref);
     let term = match slope.checked_mul(dt) {
         Some(x) => x,
         None => {
@@ -1159,7 +1163,7 @@ pub fn saturation_vapor_pressure(
             }
         }
     };
-    (e_ref + term).clamp(ZERO, es_cap)
+    e_ref.saturating_add(term).clamp(ZERO, es_cap)
 }
 
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
@@ -1173,7 +1177,7 @@ pub fn evaporation_rate(
     b_wind: Fixed,
     e_max: Fixed,
 ) -> Fixed {
-    let vpd = e_saturation - e_ambient;
+    let vpd = sat_sub(e_saturation, e_ambient);
     if vpd <= ZERO {
         return ZERO;
     }
@@ -1217,7 +1221,7 @@ pub fn corrosion(
     acidity_factor: Fixed,
     corrosion_max: Fixed,
 ) -> Fixed {
-    let driving = fluid_potential - material_potential;
+    let driving = sat_sub(fluid_potential, material_potential);
     if driving <= ZERO {
         return ZERO;
     }
@@ -1242,7 +1246,7 @@ pub fn carnot_limit(hot: Fixed, cold: Fixed) -> Fixed {
         Some(x) => x,
         None => return ZERO,
     };
-    (Fixed::ONE - ratio).clamp(ZERO, Fixed::ONE)
+    sat_sub(Fixed::ONE, ratio).clamp(ZERO, Fixed::ONE)
 }
 
 /// Dissolution leach fraction: the fraction of a solute extracted into a solvent, its solute affinity
@@ -1434,15 +1438,19 @@ pub fn coulomb_force(
     if r <= ZERO {
         return (f_max, repulsive);
     }
-    let r2 = match r.checked_mul(r) {
-        Some(x) => x,
-        None => return (ZERO, repulsive),
-    };
-    let qq = match sat_abs(q1).checked_mul(sat_abs(q2)) {
+    // Divide each charge magnitude by the separation before the product (reduce before grow), so a
+    // distant large-charge pair does not overflow |q1|*|q2| before the r^2 divide would reduce it; a
+    // close pair whose true force exceeds the ceiling still routes to f_max, and a far one goes to
+    // zero as |q|/r underflows. This forms k*(|q1|/r)*(|q2|/r) = k*|q1||q2|/r^2.
+    let a = match sat_abs(q1).checked_div(r) {
         Some(x) => x,
         None => return (f_max, repulsive),
     };
-    let base = match qq.checked_div(r2) {
+    let b = match sat_abs(q2).checked_div(r) {
+        Some(x) => x,
+        None => return (f_max, repulsive),
+    };
+    let base = match a.checked_mul(b) {
         Some(x) => x,
         None => return (f_max, repulsive),
     };
@@ -1510,11 +1518,13 @@ pub fn resistance(resistivity: Fixed, length: Fixed, area: Fixed, r_max: Fixed) 
     if area <= ZERO {
         return r_max;
     }
-    let rl = match resistivity.checked_mul(length) {
+    // Divide the length by the area before the resistivity multiply (reduce before grow), so an
+    // in-range resistance whose rho*length would overflow the ceiling is computed rather than capped.
+    let geometry = match length.checked_div(area) {
         Some(x) => x,
         None => return r_max,
     };
-    match rl.checked_div(area) {
+    match resistivity.checked_mul(geometry) {
         Some(r) => r.min(r_max),
         None => r_max,
     }
@@ -1991,5 +2001,85 @@ mod tests {
         // caps are test stand-ins for the owner's reserved values, never canon.
         assert_eq!(F_INT(7), Fixed::from_int(7));
         assert_eq!(cap(3), Fixed::from_int(3));
+    }
+
+    // --- Hardening: product-before-divide reassociation (the wave-1 discipline, extended) ---
+
+    #[test]
+    fn wear_reassociates_the_scale_before_the_product() {
+        // In-range axes (force 1e8, slide 10, coefficient 1000 stored x1e6, hardness 1) whose
+        // K_scaled*F*s would overflow the ceiling must yield the true ~1e6 wear, not the false cap.
+        let wear_max = cap(2_000_000_000);
+        let w = wear(
+            F_INT(1000),        // wear_coefficient_scaled (K x 1e6)
+            F_INT(1_000_000),   // coefficient_scale
+            F_INT(100_000_000), // force 1e8
+            F_INT(10),          // slide distance
+            F_INT(1),           // hardness
+            wear_max,
+        );
+        assert!(
+            w > F_INT(900_000) && w < wear_max,
+            "wear = {w:?} should be the true ~1e6, not the cap"
+        );
+    }
+
+    #[test]
+    fn coulomb_divides_by_separation_before_the_charge_product() {
+        // A distant large-charge pair (q=1e5 each, r=100) whose |q1|*|q2| would overflow must yield
+        // the true modest force, not the max cap; and the sign is repulsive for like charges.
+        let f_max = cap(2_000_000_000);
+        let (f, repulsive) = coulomb_force(
+            F_INT(100_000),
+            F_INT(100_000),
+            F_INT(100),
+            Fixed::ONE,
+            f_max,
+        );
+        assert!(
+            f > ZERO && f < f_max,
+            "force = {f:?} should be the true ~1e6, not the cap"
+        );
+        assert!(repulsive, "like charges repel");
+    }
+
+    #[test]
+    fn resistance_divides_by_area_before_the_resistivity() {
+        // In-range axes (resistivity 1000, length 2.2e6, area 1e6) whose rho*length would overflow
+        // must yield the true ~2200 ohm, not the open-circuit cap.
+        let r_max = cap(2_000_000_000);
+        let r = resistance(F_INT(1000), F_INT(2_200_000), F_INT(1_000_000), r_max);
+        assert!(
+            r > F_INT(2000) && r < r_max,
+            "resistance = {r:?} should be the true ~2200, not the cap"
+        );
+    }
+
+    // --- Hardening: temperature/potential differences saturate rather than panic ---
+
+    #[test]
+    fn difference_kernels_saturate_at_the_extremes_without_panicking() {
+        // Under overflow-checks (on in debug and release), a raw i64 subtract of MIN/MAX inputs
+        // would panic. Every difference-taking kernel must instead route to a defined saturated
+        // value. Reaching the assertions at all proves no panic; the ranges prove the result is sane.
+        let m = cap(1_000_000_000);
+        assert!(convective_flux(F_INT(10), F_INT(10), Fixed::MAX, Fixed::MIN, m) <= m);
+        let a_max = cap(100);
+        let a = thermal_buoyancy(Fixed::MIN, F_INT(288), F_INT(10), a_max);
+        assert!(a >= ZERO - a_max && a <= a_max);
+        assert!(saturation_vapor_pressure(Fixed::MIN, Fixed::ONE, F_INT(300), F_INT(1), m) >= ZERO);
+        assert_eq!(
+            evaporation_rate(Fixed::MAX, Fixed::MIN, ZERO, ZERO, ZERO, m),
+            ZERO
+        );
+        assert!(corrosion(Fixed::MAX, Fixed::MIN, Fixed::ONE, Fixed::ONE, m) <= m);
+        let eta = carnot_limit(F_INT(300), Fixed::MIN);
+        assert!(eta >= ZERO && eta <= Fixed::ONE);
+        assert!(conduction(F_INT(1), F_INT(1), Fixed::MAX, Fixed::MIN, F_INT(1), m) <= m);
+        let (margin, _g) = fracture_onset(Fixed::MIN, Fixed::MAX, F_INT(1), F_INT(1), ZERO, m);
+        assert!(
+            margin > ZERO,
+            "MAX strength minus MIN stress saturates positive"
+        );
     }
 }
