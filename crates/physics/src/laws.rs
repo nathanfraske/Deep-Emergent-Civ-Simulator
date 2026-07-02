@@ -1044,6 +1044,42 @@ pub fn convective_flux(h: Fixed, area: Fixed, hot: Fixed, cold: Fixed, flux_max:
     }
 }
 
+/// Fick's-law membrane gas exchange in the mass-transfer (Sherwood) form: J = k*A*(c_medium -
+/// c_internal) (kg/s), the signed rate at which a respiratory surface exchanges the respirable species
+/// with the medium it sits in (R-MEDIUM). Positive is uptake from a richer medium; negative is loss to
+/// a poorer one (a water-breather in air off-gassing and suffocating). The concentration difference is
+/// a signed saturating subtract over `fluid.respirable_content` (both ports read that one axis, as
+/// `convective_flux` differences one temperature axis), so equal concentrations are zero flux
+/// (equilibrium, no authored preference) and the sign is the exchange direction. The magnitude is
+/// capped at the reserved representability limit; a zero coefficient or area (no exchange surface) reads
+/// zero. Nothing here reads a medium label: only the respirable content of the medium the surface sits
+/// in, so a gill in water and a lung in air are the same kernel over different concentrations
+/// (Principle 9).
+pub fn membrane_gas_flux(
+    coefficient: Fixed,
+    area: Fixed,
+    c_medium: Fixed,
+    c_internal: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
+    let lo = ZERO - flux_max;
+    let dc = sat_sub(c_medium, c_internal);
+    let ka = match coefficient.checked_mul(area) {
+        Some(x) => x,
+        None => return if dc < ZERO { lo } else { flux_max },
+    };
+    match ka.checked_mul(dc) {
+        Some(j) => j.clamp(lo, flux_max),
+        None => {
+            if dc < ZERO {
+                lo
+            } else {
+                flux_max
+            }
+        }
+    }
+}
+
 /// Hagen-Poiseuille laminar flow Q = pi*dP*r^4/(8*mu*L) (m^3/s). The driving pressure is bridged to
 /// pascals and divided down before the four radius multiplies, so the underflowing r^4 shrinks an
 /// already-reduced base; an underflow is the correct choked (zero) direction. A frictionless or

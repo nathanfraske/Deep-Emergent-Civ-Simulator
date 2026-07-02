@@ -370,6 +370,17 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             },
             output: Asserted("q = h*A*|hot-cold|; the two temperatures are a composed difference over therm.temperature, and the flux-versus-per-tick-energy scale is a reserved unit convention"),
         },
+        "membrane_gas_flux" => KernelContract {
+            ports: const {
+                &[
+                    cur("coefficient", 0),
+                    cur("area", 0),
+                    cur("medium", 0),
+                    cur("internal", 0),
+                ]
+            },
+            output: Asserted("J = k*A*(c_medium - c_internal); the two concentrations are a composed signed difference over fluid.respirable_content, and the mass-flux-versus-per-tick-uptake scale is a reserved unit convention, as with convective_flux"),
+        },
         "poiseuille_flow" => KernelContract {
             ports: const {
                 &[cur("dp", 0), cur("radius", 0), cur("viscosity", 0), cur("length", 0)]
