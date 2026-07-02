@@ -36,27 +36,31 @@
 //!   `#[cube]` kernels, over the confined op set (u32 wrapping add/sub, u16*u16->u32, bitwise,
 //!   constant shifts, comparisons, branchless `select`; no native 64-bit, no divide, no float). These
 //!   reproduce `Fixed::mul`/`Fixed::div` bit-for-bit and are the load-bearing arithmetic contract.
+//! - `prim` (internal): the shared i64-boundary limb primitives, the pinned multiply `q32_mul`, the
+//!   divide `q32_div`, and the 96-bit `isqrt_u96`, reproducing `Fixed::mul`/`div`/`sqrt`. The field
+//!   stencil and the transcendentals call these rather than each carrying a private copy.
 //! - [`field`]: the canonical fixed-point diffusion stencil (the Part 5.5 workload, the GPU
 //!   counterpart of `civsim_sim`'s `Field::step` and `crates/core`'s `diffusion_bench`), a real
 //!   physics field kernel whose per-cell op sequence is fixed and whose one multiply is the pinned
 //!   limb multiply.
-//! - [`transcendental`]: the full set (`exp`, `ln`, `powf`, `powi`, and the CORDIC `sin`/`cos`/`atan`/
-//!   `asin`) as `#[cube]` kernels, reproducing the `crates/core` `Fixed` oracle bit-for-bit by running
-//!   the same integer algorithm over the limb `mul`/`div` primitives (a barrel shifter stands in for
-//!   the DSL's lack of a runtime-amount shift; `asin` uses a u64 isqrt over its zero-to-one radicand).
-//!   These unblock the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron,
-//!   Beer-Lambert, Nernst, Snell, Rayleigh, and general scaling). A general u128 `Fixed::sqrt` is the
-//!   one remaining GPU primitive.
+//! - [`transcendental`]: the full set (`exp`, `ln`, `powf`, `powi`, `sqrt`, and the CORDIC
+//!   `sin`/`cos`/`atan`/`asin`) as `#[cube]` kernels, reproducing the `crates/core` `Fixed` oracle
+//!   bit-for-bit by running the same integer algorithm over the limb primitives (a barrel shifter
+//!   stands in for the DSL's lack of a runtime-amount shift). The general `sqrt` is the 96-bit limb
+//!   `isqrt_u96`; `asin` keeps a domain-limited u64 isqrt over its zero-to-one radicand. These unblock
+//!   the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron, Beer-Lambert,
+//!   Nernst, Snell, Rayleigh, and general scaling).
 //!
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
 //! working device only when actually called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
 pub mod field;
+mod prim;
 pub mod stage0;
 pub mod transcendental;
 
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
 pub use stage0::{cpu_client, cuda_client, gpu_div, gpu_mul, CpuClient, CudaClient};
 pub use transcendental::{
-    gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin,
+    gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,
 };

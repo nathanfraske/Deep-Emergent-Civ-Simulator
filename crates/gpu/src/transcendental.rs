@@ -31,163 +31,13 @@
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
 
+use crate::prim::{isqrt_u96, q32_div, q32_mul};
 use crate::stage0::CudaClient;
 
 // The Q32.32 constants are the oracle's exact bit patterns (crates/core/src/fixed.rs), inlined as
 // `let` literals inside each `#[cube]` function so they lift to DSL values.
 
-// --- The limb primitives, bit-identical to Fixed::mul / Fixed::div ---
-
-/// The pinned Q32.32 multiply on `i64` operands (bits [32, 96) of the exact signed 128-bit product,
-/// floor). Same sign-magnitude u16-partial accumulation as the Stage 0 `emu_mul`, decomposed at the
-/// i64 boundary with `cast_from`.
-#[cube]
-fn q32_mul(a: i64, b: i64) -> i64 {
-    let alo = u32::cast_from(a);
-    let ahi = u32::cast_from(a >> 32u32);
-    let blo = u32::cast_from(b);
-    let bhi = u32::cast_from(b >> 32u32);
-
-    let a_neg = ahi >> 31u32;
-    let b_neg = bhi >> 31u32;
-    let neg = a_neg ^ b_neg;
-
-    let na_lo = (!alo) + 1u32;
-    let ca = select(alo == 0u32, 1u32, 0u32);
-    let na_hi = (!ahi) + ca;
-    let ma_lo = select(a_neg == 1u32, na_lo, alo);
-    let ma_hi = select(a_neg == 1u32, na_hi, ahi);
-
-    let nb_lo = (!blo) + 1u32;
-    let cb = select(blo == 0u32, 1u32, 0u32);
-    let nb_hi = (!bhi) + cb;
-    let mb_lo = select(b_neg == 1u32, nb_lo, blo);
-    let mb_hi = select(b_neg == 1u32, nb_hi, bhi);
-
-    let mut aa = Array::<u32>::new(4usize);
-    aa[0usize] = ma_lo & 0xFFFFu32;
-    aa[1usize] = ma_lo >> 16u32;
-    aa[2usize] = ma_hi & 0xFFFFu32;
-    aa[3usize] = ma_hi >> 16u32;
-    let mut bb = Array::<u32>::new(4usize);
-    bb[0usize] = mb_lo & 0xFFFFu32;
-    bb[1usize] = mb_lo >> 16u32;
-    bb[2usize] = mb_hi & 0xFFFFu32;
-    bb[3usize] = mb_hi >> 16u32;
-
-    let mut acc = Array::<u32>::new(8usize);
-    #[unroll]
-    for i in 0usize..8usize {
-        acc[i] = 0u32;
-    }
-    #[unroll]
-    for i in 0usize..4usize {
-        #[unroll]
-        for j in 0usize..4usize {
-            let p = aa[i] * bb[j];
-            acc[i + j] = acc[i + j] + (p & 0xFFFFu32);
-            acc[i + j + 1usize] = acc[i + j + 1usize] + (p >> 16u32);
-        }
-    }
-    let mut carry = 0u32;
-    #[unroll]
-    for d in 0usize..8usize {
-        let t = acc[d] + carry;
-        acc[d] = t & 0xFFFFu32;
-        carry = t >> 16u32;
-    }
-    let w0 = acc[0usize] | (acc[1usize] << 16u32);
-    let w1 = acc[2usize] | (acc[3usize] << 16u32);
-    let w2 = acc[4usize] | (acc[5usize] << 16u32);
-
-    let v0 = !w0;
-    let s0 = v0 + 1u32;
-    let k0 = select(s0 < v0, 1u32, 0u32);
-    let v1 = !w1;
-    let s1 = v1 + k0;
-    let k1 = select(s1 < v1, 1u32, 0u32);
-    let v2 = !w2;
-    let s2 = v2 + k1;
-
-    let use_neg = neg == 1u32;
-    let lo = select(use_neg, s1, w1);
-    let hi = select(use_neg, s2, w2);
-    (i64::cast_from(hi) << 32u32) | i64::cast_from(lo)
-}
-
-/// The pinned Q32.32 divide on `i64` operands (sign-magnitude 96-step restoring long division,
-/// truncate toward zero). Same algorithm as the Stage 0 `emu_div`, decomposed at the i64 boundary.
-/// The divisor must be non-zero (the oracle precondition).
-#[cube]
-fn q32_div(a: i64, b: i64) -> i64 {
-    let alo = u32::cast_from(a);
-    let ahi = u32::cast_from(a >> 32u32);
-    let blo = u32::cast_from(b);
-    let bhi = u32::cast_from(b >> 32u32);
-
-    let a_neg = ahi >> 31u32;
-    let b_neg = bhi >> 31u32;
-    let neg = a_neg ^ b_neg;
-
-    let na_lo = (!alo) + 1u32;
-    let ca = select(alo == 0u32, 1u32, 0u32);
-    let na_hi = (!ahi) + ca;
-    let malo = select(a_neg == 1u32, na_lo, alo);
-    let mahi = select(a_neg == 1u32, na_hi, ahi);
-
-    let nb_lo = (!blo) + 1u32;
-    let cb = select(blo == 0u32, 1u32, 0u32);
-    let nb_hi = (!bhi) + cb;
-    let mdlo = select(b_neg == 1u32, nb_lo, blo);
-    let mdhi = select(b_neg == 1u32, nb_hi, bhi);
-
-    let mut num = Array::<u32>::new(3usize);
-    num[0usize] = 0u32;
-    num[1usize] = malo;
-    num[2usize] = mahi;
-    let mut q = Array::<u32>::new(3usize);
-    q[0usize] = 0u32;
-    q[1usize] = 0u32;
-    q[2usize] = 0u32;
-    let mut r0 = 0u32;
-    let mut r1 = 0u32;
-    let mut r2 = 0u32;
-    #[unroll]
-    for step in 0usize..96usize {
-        let ii = comptime!(95usize - step);
-        let widx = comptime!(ii / 32usize);
-        let sh = comptime!((ii % 32usize) as u32);
-        let bit = (num[widx] >> sh) & 1u32;
-        r2 = (r2 << 1u32) | (r1 >> 31u32);
-        r1 = (r1 << 1u32) | (r0 >> 31u32);
-        r0 = (r0 << 1u32) | bit;
-        let r2nz = select(r2 != 0u32, 1u32, 0u32);
-        let hi_gt = select(r1 > mdhi, 1u32, 0u32);
-        let hi_eq = select(r1 == mdhi, 1u32, 0u32);
-        let lo_ge = select(r0 >= mdlo, 1u32, 0u32);
-        let ge = (r2nz | hi_gt | (hi_eq & lo_ge)) == 1u32;
-        let borrow0 = select(r0 < mdlo, 1u32, 0u32);
-        let sub_r0 = r0 - mdlo;
-        let b1a = select(r1 < mdhi, 1u32, 0u32);
-        let t1 = r1 - mdhi;
-        let b1b = select(t1 < borrow0, 1u32, 0u32);
-        let sub_r1 = t1 - borrow0;
-        let sub_r2 = r2 - (b1a | b1b);
-        r0 = select(ge, sub_r0, r0);
-        r1 = select(ge, sub_r1, r1);
-        r2 = select(ge, sub_r2, r2);
-        q[widx] = q[widx] | select(ge, 1u32 << sh, 0u32);
-    }
-    let q0 = q[0usize];
-    let q1 = q[1usize];
-    let nq_lo = (!q0) + 1u32;
-    let cq = select(q0 == 0u32, 1u32, 0u32);
-    let nq_hi = (!q1) + cq;
-    let use_neg = neg == 1u32;
-    let out_lo = select(use_neg, nq_lo, q0);
-    let out_hi = select(use_neg, nq_hi, q1);
-    (i64::cast_from(out_hi) << 32u32) | i64::cast_from(out_lo)
-}
+// The limb primitives q32_mul / q32_div live in crate::prim (shared with the field kernel).
 
 /// Variable left shift by a runtime amount (< 64), as a barrel shifter of constant shifts, since the
 /// DSL supports only compile-time-constant shift amounts. Conditions each stage on a bit of `amt`.
@@ -837,6 +687,49 @@ pub fn gpu_powi(client: &CudaClient, x: &[i64], n: &[i32]) -> Vec<i64> {
             ArrayArg::from_raw_parts(xin.clone(), count),
             ArrayArg::from_raw_parts(nin.clone(), count),
             ArrayArg::from_raw_parts(out.clone(), count),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// `sqrt(x)`, the oracle's `Fixed::sqrt`: `isqrt((x as u128) << 32)` for `x > 0`, else zero. The
+/// left shift by 32 zeros the radicand's low limb, so the radicand is `(0, x_lo, x_hi)` fed to the
+/// 96-bit limb isqrt. General (any positive `Fixed`), unlike the asin-domain u64 isqrt.
+#[cube]
+fn fixed_sqrt(v: i64) -> i64 {
+    let vlo = u32::cast_from(v);
+    let vhi = u32::cast_from(v >> 32u32);
+    let r = isqrt_u96(0u32, vlo, vhi);
+    select(v <= 0i64, 0i64, r)
+}
+
+/// Elementwise `sqrt(x)` over `i64` Q32.32 bit patterns on the GPU, bit-identical to `Fixed::sqrt`.
+#[cube(launch)]
+fn sqrt_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_sqrt(x_in[pos]);
+    }
+}
+
+/// Run `Fixed::sqrt` on the GPU over a slice of `i64` Q32.32 bit patterns (CUDA backend).
+pub fn gpu_sqrt(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+    let n = x.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        sqrt_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), n),
+            ArrayArg::from_raw_parts(out.clone(), n),
         );
     }
     let bytes = client.read_one_unchecked(out);
