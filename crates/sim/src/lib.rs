@@ -74,6 +74,7 @@ pub mod lineage;
 pub mod located;
 pub mod locomotion;
 pub mod lod;
+pub mod mate_choice;
 pub mod primes;
 pub mod race;
 pub mod runner;
@@ -134,6 +135,7 @@ pub use language::{
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
+pub use mate_choice::{choose, genetic_distance, realised_fitness, MatePreference};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
