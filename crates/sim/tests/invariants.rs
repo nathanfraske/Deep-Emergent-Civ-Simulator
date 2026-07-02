@@ -21,6 +21,21 @@
 use civsim_core::{Fixed, StableId};
 use civsim_sim::conservation::ConservationRegistry;
 use civsim_sim::lod::TwoTierWorld;
+use civsim_sim::{AgeHistogram, Curve};
+
+/// The total age-tracked population across both tiers: the members held in pool age
+/// distributions plus the promoted individuals carrying an age. The conserved projection the
+/// aggregate-tier demography must preserve across every tier crossing.
+fn age_population(w: &TwoTierWorld) -> i128 {
+    let pooled: i128 = w.pools.iter().map(|p| p.ages.total()).sum();
+    let promoted: i128 = w.individuals.iter().filter(|i| i.age.is_some()).count() as i128;
+    pooled + promoted
+}
+
+/// A harsh flat age hazard as data (a test fixture, never a fabricated calibration).
+fn harsh_hazard() -> Curve {
+    Curve::new([(Fixed::from_int(0), Fixed::from_ratio(3, 10))])
+}
 
 /// Build the registry of conserved projections for the two-tier world. Population
 /// and wealth are the present entries; a future projection (an institution feature
@@ -105,6 +120,7 @@ fn a_deliberate_leak_is_caught() {
     w.individuals.push(civsim_sim::lod::Individual {
         id,
         wealth: Fixed::from_int(1),
+        age: None,
     });
     w.reg.set_location(
         id,
@@ -129,4 +145,63 @@ fn a_dangling_reference_is_caught() {
         !w.referential_integrity_ok(),
         "an edge to an unminted id is a dangling reference"
     );
+}
+
+#[test]
+fn age_population_is_conserved_across_the_tier_boundary() {
+    // R-AGING pool tier + R-PROJ-REGISTER: the age-tracked population is a conserved
+    // projection across promotion, demotion, and merge (the tier crossings), and an exact
+    // sink across mortality. The aggregate-tier demography runs inside the two-tier world
+    // with the conservation invariant enforced, the same way population and wealth are.
+    let mut reg = ConservationRegistry::new();
+    reg.register("age_population", age_population);
+
+    let mut w = TwoTierWorld::new();
+    let pa = w.add_pool_aged(
+        AgeHistogram::from_pairs([(10, 8), (40, 5), (70, 3)]),
+        Fixed::from_int(160),
+    );
+    let pb = w.add_pool_aged(
+        AgeHistogram::from_pairs([(20, 6), (40, 4)]),
+        Fixed::from_int(100),
+    );
+    let baseline = reg.snapshot(&w);
+
+    // Promote a 40-year-old out of pa: the member leaves the pool's distribution and the
+    // age travels with the individual, so the total is unchanged.
+    let x = w.promote_at_age(pa, Fixed::from_int(5), 40);
+    reg.check_against(&baseline, &w)
+        .expect("promotion conserves the age population");
+    assert_eq!(w.pools[0].count as i128, w.pools[0].ages.total());
+    w.add_edge(x, x);
+    assert!(w.referential_integrity_ok());
+
+    // Demote it into pb: the age returns to a pool distribution, still conserved.
+    w.demote(x, pb);
+    reg.check_against(&baseline, &w)
+        .expect("demotion returns the age and conserves the population");
+
+    // Merge pb into pa: the histograms combine age by age, the total is unchanged.
+    w.merge_pools(pa, pb);
+    reg.check_against(&baseline, &w)
+        .expect("merge conserves the age population");
+    assert!(w.referential_integrity_ok());
+
+    // Mortality is a sink: the age population drops by exactly the deaths, no leak, and each
+    // pool's head count still equals its distribution total.
+    let before = age_population(&w);
+    let deaths = w.age_pools(&harsh_hazard(), 0xD3, 0);
+    assert!(deaths > 0, "a harsh hazard over a real cohort takes some");
+    assert_eq!(
+        age_population(&w) + deaths,
+        before,
+        "mortality removes exactly the deaths, no leak"
+    );
+    for p in &w.pools {
+        assert_eq!(
+            p.count as i128,
+            p.ages.total(),
+            "count tracks the distribution after mortality"
+        );
+    }
 }
