@@ -358,6 +358,42 @@ pub fn step<T: Terrain>(
     seed: u64,
     tick: u64,
 ) -> usize {
+    step_with_field_dirs(
+        walkers,
+        homeo,
+        layout,
+        afford,
+        terrain,
+        resources,
+        p,
+        seed,
+        tick,
+        &BTreeMap::new(),
+    )
+}
+
+/// As [`step`], but with an additional per-being map of field-derived percept directions, keyed by
+/// stable id then by homeostatic axis. This is a directional percept a being senses from a physical
+/// field rather than from a remembered point source: the temperature comfort gradient the runner
+/// supplies for the TEMPERATURE axis (the unit direction of increasing comfort at the being's cell),
+/// and later a moisture or wind field, merged into that axis's direction slot of the controller input
+/// alongside the known-source percept. It is a percept, not a heading: the controller must evolve to
+/// follow it (Principle 9), and it draws no randomness, so determinism and camera-freedom hold. A
+/// field direction for an axis overrides the known-source direction for that axis, since the field
+/// percept is the live signal for a diffuse quantity that has no discrete source tile.
+#[allow(clippy::too_many_arguments)]
+pub fn step_with_field_dirs<T: Terrain>(
+    walkers: &mut [Walker],
+    homeo: &HomeostaticRegistry,
+    layout: &ControllerLayout,
+    afford: &AffordanceRegistry,
+    terrain: &T,
+    resources: &ResourceField,
+    p: &LocomotionParams,
+    seed: u64,
+    tick: u64,
+    field_dirs: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>>,
+) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
     for w in walkers.iter_mut() {
@@ -369,7 +405,15 @@ pub fn step<T: Terrain>(
         let here = w.coord();
         let here_axes: BTreeSet<HomeostaticAxisId> =
             resources.axes_here(here).into_iter().collect();
-        let dirs = source_dirs(w);
+        let mut dirs = source_dirs(w);
+        // Merge the field-derived percept for this being: a directional signal it senses from a
+        // physical field (the temperature comfort gradient), overriding the known-source direction for
+        // that axis since a diffuse field has no discrete source tile to remember.
+        if let Some(fd) = field_dirs.get(&w.id) {
+            for (&axis, &d) in fd {
+                dirs.insert(axis, d);
+            }
+        }
         let input = layout.build_input(&w.homeostasis, &here_axes, &dirs);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;

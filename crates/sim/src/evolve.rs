@@ -490,48 +490,43 @@ fn thermal_scoring_calib() -> FieldCalib {
     }
 }
 
-/// One thermal episode of the scorer: run a being carrying `controller` through the field-to-behaviour
-/// coupling ([`crate::runner::Runner::with_embodiment`]) in the warm-border, cold-centre field, and
-/// return how many ticks it keeps its temperature reserve off the floor (capped at `ticks`). A being
-/// whose controller moves while cold and rests while warm reaches the surrounding warmth and holds it;
-/// one that never moves cools and dies at the centre. Nobody scores "seek warmth": the being that does
-/// survives, and survival is what is counted. Fully deterministic and seed-keyed.
-fn thermal_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
-    let setpoint = Fixed::from_int(37);
-    let half_band = Fixed::from_int(8);
-    // A full half-band and more below the set point: the centre is lethal over time.
-    let cold = Fixed::from_int(37 - 16);
+/// The shared core of the thermal scorers: run a being carrying `controller` through the field-to-
+/// behaviour coupling ([`crate::runner::Runner::with_embodiment`]) over an explicit field and start
+/// tile, and return how many ticks it keeps its temperature reserve off the floor (capped at `ticks`).
+/// Nobody scores "seek warmth": the being that keeps its body in the viable band survives, and survival
+/// is what is counted. Fully deterministic and seed-keyed.
+fn thermal_run(
+    controller: &Controller,
+    ticks: u32,
+    seed: u64,
+    field: Field,
+    start: Coord3,
+    setpoint: Fixed,
+    half_band: Fixed,
+) -> u32 {
     let reg = HomeostaticRegistry::dev_thermal();
-    let afford = AffordanceRegistry::dev_default();
     let mut emb = Embodiment::new(
         reg.clone(),
-        afford,
+        AffordanceRegistry::dev_default(),
         LocomotionParams::dev_default(),
         controller.hidden(),
         seed,
     );
-    let centre = Coord3::ground(THERMAL_SIDE / 2, THERMAL_SIDE / 2);
-    let homeo = Homeostasis::new(&reg, Fixed::ONE);
-    let walker = Walker::new(
-        StableId(1),
-        centre,
-        scoring_body(),
-        homeo,
-        controller.clone(),
-    );
     emb.add(
-        walker,
+        Walker::new(
+            StableId(1),
+            start,
+            scoring_body(),
+            Homeostasis::new(&reg, Fixed::ONE),
+            controller.clone(),
+        ),
         BeingThermal {
             setpoint,
             half_band,
             initial_temp: setpoint,
         },
     );
-    let mut runner = Runner::with_embodiment(
-        thermal_scoring_field(setpoint, cold),
-        thermal_scoring_calib(),
-        emb,
-    );
+    let mut runner = Runner::with_embodiment(field, thermal_scoring_calib(), emb);
     let mut survived = 0u32;
     for t in 0..ticks {
         runner.step();
@@ -548,6 +543,25 @@ fn thermal_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u
     survived
 }
 
+/// The undirected (kinesis) thermal scorer: a being started at the cold centre of the warm-border
+/// field, where the interior is flat so the temperature gradient is zero and only move-or-rest matters.
+/// This is the environment the kinesis result (retiring the hand-built fixture) was proven in.
+fn thermal_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    let setpoint = Fixed::from_int(37);
+    let half_band = Fixed::from_int(8);
+    let cold = Fixed::from_int(37 - 16); // a full half-band and more below: the centre is lethal
+    let centre = Coord3::ground(THERMAL_SIDE / 2, THERMAL_SIDE / 2);
+    thermal_run(
+        controller,
+        ticks,
+        seed,
+        thermal_scoring_field(setpoint, cold),
+        centre,
+        setpoint,
+        half_band,
+    )
+}
+
 /// Evolve a population of controllers under THERMAL homeostatic-survival selection: the same selection
 /// machinery as [`evolve`], scored by `thermal_episode_survival` rather than the water scorer. From
 /// random controllers, this produces a being that moves while cold and rests while warm, a thermotaxis
@@ -555,6 +569,102 @@ fn thermal_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u
 /// It retires the hand-built thermotaxis fixture the coupling increment used: selection produces it.
 pub fn evolve_thermal(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> EvolveReport {
     evolve_with(layout, params, seed, thermal_episode_survival)
+}
+
+// --- The sensed-taxis scorer: a smooth thermal bowl where a gradient percept beats a random walk ---
+
+/// The labelled bowl geometry, not owner canon. A square field with a smooth radial temperature
+/// gradient: coldest (and lethal) at the centre, warming to the set point at the rim, so the
+/// temperature gradient is nonzero everywhere off-centre and a being can sense which way is warmer from
+/// a distance (unlike the sharp-border field, whose interior is flat). Odd side, so the centre is a
+/// single cell.
+const BOWL_SIDE: i32 = 21;
+/// The radius at which the bowl reaches the set point; beyond it (including the corners) the field is at
+/// the set point.
+const BOWL_RADIUS: i32 = 9;
+/// The distance off-centre a being starts, inside the lethal cold zone, so it must climb outward to the
+/// survivable ring. A balanced set of four cardinal offsets at this radius is the start wheel.
+const BOWL_START: i32 = 4;
+
+/// A smooth radial thermal bowl: `temp = cold + (setpoint - cold) * min(dist^2 / radius^2, 1)`, cold and
+/// lethal at the centre, warming to the set point at the rim. Frozen (see [`thermal_scoring_calib`]), so
+/// the gradient is a fixed field the whole episode. The squared radial distance is invariant under a
+/// 90-degree rotation about the centre, so the field authors no direction (R-EVOLVE-STEER; guarded by
+/// `the_bowl_scorer_field_favours_no_direction`). Pure fixed-point. A labelled scoring fixture.
+fn thermal_bowl_field(setpoint: Fixed, cold: Fixed) -> Field {
+    let s = BOWL_SIDE;
+    let c = s / 2;
+    let r2 = (BOWL_RADIUS * BOWL_RADIUS) as i64;
+    let span = setpoint - cold;
+    let baseline: Vec<Fixed> = (0..(s * s))
+        .map(|k| {
+            let x = k % s;
+            let y = k / s;
+            let dx = (x - c) as i64;
+            let dy = (y - c) as i64;
+            let d2 = dx * dx + dy * dy;
+            let frac = if d2 >= r2 {
+                Fixed::ONE
+            } else {
+                Fixed::from_ratio(d2, r2)
+            };
+            cold + span.mul(frac)
+        })
+        .collect();
+    Field::new(s, s, baseline)
+}
+
+/// The four cardinal off-centre start tiles of the bowl (a balanced set: they sum to the centre and are
+/// equidistant from it), so aggregating survival over them privileges no compass direction. A
+/// gradient-following being climbs outward from every start; a fixed-heading being only survives the
+/// start whose outward direction happens to match its heading.
+fn bowl_starts() -> [Coord3; 4] {
+    let c = BOWL_SIDE / 2;
+    let r = BOWL_START;
+    [
+        Coord3::ground(c + r, c),
+        Coord3::ground(c - r, c),
+        Coord3::ground(c, c + r),
+        Coord3::ground(c, c - r),
+    ]
+}
+
+/// The sensed-taxis thermal scorer: aggregate survival over the four cardinal starts in the bowl. A
+/// being that reads the temperature-gradient percept and climbs it reaches the survivable ring from any
+/// start; one that cannot sense direction must random-walk out and often dies first; one that commits to
+/// a fixed heading survives only the fraction of starts where that heading points outward. Each start
+/// keys its RNG on a per-start salt so the aggregate is a pure function of the seed.
+fn thermal_sensed_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    let setpoint = Fixed::from_int(37);
+    let half_band = Fixed::from_int(8);
+    let cold = Fixed::from_int(37 - 16);
+    let starts = bowl_starts();
+    let mut total = 0u64;
+    for (i, &start) in starts.iter().enumerate() {
+        total += thermal_run(
+            controller,
+            ticks,
+            seed ^ SCORING_DIR_SALT[i],
+            thermal_bowl_field(setpoint, cold),
+            start,
+            setpoint,
+            half_band,
+        ) as u64;
+    }
+    (total / starts.len() as u64) as u32
+}
+
+/// Evolve controllers under the sensed-taxis thermal scorer: the same selection machinery as
+/// [`evolve`], scored by `thermal_sensed_survival`. With the temperature-gradient percept available
+/// (the runner supplies it), selection produces a being that climbs the gradient toward warmth, a
+/// directed thermotaxis that reaches safety faster than an undirected random walk, without any heading
+/// being authored.
+pub fn evolve_thermal_sensed(
+    layout: &ControllerLayout,
+    params: &EvolveParams,
+    seed: u64,
+) -> EvolveReport {
+    evolve_with(layout, params, seed, thermal_sensed_survival)
 }
 
 /// The report of an evolutionary run: the mean and best homeostatic-survival fitness at each
@@ -1104,6 +1214,163 @@ mod tests {
         w[bias] = Fixed::from_int(3);
         w[0] = Fixed::from_int(-4);
         Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
+    }
+
+    /// A hand-built thermal TAXIS: move while cold (as the kinesis), and follow the temperature-gradient
+    /// percept (move_dx from dir_x, move_dy from dir_y), so it climbs toward warmer surroundings. This is
+    /// the behaviour the gradient percept makes possible; selection then discovers it on its own. Input
+    /// layout (one axis): [level(0), here(1), dir_x(2), dir_y(3), bias(4)]; outputs [move_act(0),
+    /// move_dx(1), move_dy(2), ingest(3)]; weight index = out*n_in + in.
+    fn thermal_taxis(l: &ControllerLayout) -> Controller {
+        let n_in = l.n_in();
+        let bias = n_in - 1;
+        let mut w = vec![Fixed::ZERO; l.weight_count()];
+        w[bias] = Fixed::from_int(3); // move_act: move while uncomfortable,
+        w[0] = Fixed::from_int(-4); //   suppressed as comfort rises.
+        w[n_in + 2] = Fixed::ONE; // move_dx follows the gradient dir_x,
+        w[2 * n_in + 3] = Fixed::ONE; // move_dy follows the gradient dir_y.
+        Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
+    }
+
+    /// A hand-built FIXED-HEADING controller: move while cold, but always head +x, ignoring the gradient
+    /// percept (move_dx from the bias, move_dy zero). The thermal analogue of the retired eastward-water
+    /// overfit: it reaches warmth only from the start whose outward direction happens to be +x.
+    fn thermal_fixed_heading(l: &ControllerLayout) -> Controller {
+        let n_in = l.n_in();
+        let bias = n_in - 1;
+        let mut w = vec![Fixed::ZERO; l.weight_count()];
+        w[bias] = Fixed::from_int(3);
+        w[0] = Fixed::from_int(-4);
+        w[n_in + bias] = Fixed::ONE; // move_dx from the bias: a constant +x heading, gradient-blind.
+        Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
+    }
+
+    /// The four bowl starts scored per-episode for a controller and seed (the per-start survival that
+    /// the aggregate scorer averages), so a test can inspect the directional profile.
+    fn bowl_per_start(controller: &Controller, seed: u64) -> Vec<u32> {
+        let (setpoint, half_band, cold) =
+            (Fixed::from_int(37), Fixed::from_int(8), Fixed::from_int(21));
+        bowl_starts()
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                thermal_run(
+                    controller,
+                    200,
+                    seed ^ SCORING_DIR_SALT[i],
+                    thermal_bowl_field(setpoint, cold),
+                    s,
+                    setpoint,
+                    half_band,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_bowl_scorer_field_favours_no_direction() {
+        // Anti-steering (R-EVOLVE-STEER), bit-exact: the radial bowl is invariant under a 90-degree
+        // rotation about its centre (squared radial distance is), so warmth lies the same distance in
+        // every direction and no compass heading is privileged.
+        let field = thermal_bowl_field(Fixed::from_int(37), Fixed::from_int(21));
+        let (w, h) = field.dims();
+        assert_eq!(w, h, "the bowl is square");
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(
+                    field.at(x, y),
+                    field.at(h - 1 - y, x),
+                    "the bowl is not invariant under a 90-degree rotation at ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sensed_taxis_outlives_undirected_kinesis() {
+        // The proof the gradient percept unlocks. A controller that reads the temperature-gradient
+        // percept and climbs it (taxis) reaches the warm ring from every start and survives to the cap;
+        // an otherwise-identical controller that cannot sense a direction (kinesis) must random-walk out
+        // and often dies first. Directed beats undirected, and the only difference is reading the
+        // percept, so it is the percept, not merely selection pressure, that unlocks directed taxis.
+        let l = thermal_layout(0);
+        let taxis = thermal_taxis(&l);
+        let kin = thermal_kinesis(&l);
+        for seed in [0xA1u64, 0xB2, 0xC3] {
+            let t = thermal_sensed_survival(&taxis, 200, seed);
+            let k = thermal_sensed_survival(&kin, 200, seed);
+            assert!(
+                t >= 190,
+                "the gradient-follower reaches warmth from every start ({t})"
+            );
+            assert!(
+                t >= k + 40,
+                "and outlives the undirected random walk ({t} vs {k}) at seed {seed:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gradient_scorer_rewards_the_percept_follower_over_a_fixed_heading() {
+        // The other half of the anti-steering discipline, the thermal analogue of the water fixed-
+        // heading-versus-percept-follower test: a controller committed to a fixed heading has a
+        // directional blind spot (it dies at the start whose outward direction opposes its heading),
+        // while the percept-follower climbs outward from every start. So the scorer rewards reading the
+        // gradient, not a fixed compass heading.
+        let l = thermal_layout(0);
+        let taxis = thermal_taxis(&l);
+        let fixed = thermal_fixed_heading(&l);
+        let tp = bowl_per_start(&taxis, 0xA1);
+        let fp = bowl_per_start(&fixed, 0xA1);
+        assert!(
+            tp.iter().all(|&s| s >= 190),
+            "the percept-follower survives every start ({tp:?})"
+        );
+        assert!(
+            fp.iter().any(|&s| s <= 60),
+            "the fixed heading has a dead start, a directional blind spot ({fp:?})"
+        );
+        let ta = thermal_sensed_survival(&taxis, 200, 0xA1);
+        let fa = thermal_sensed_survival(&fixed, 200, 0xA1);
+        assert!(
+            ta >= fa + 30,
+            "the percept-follower outscores the fixed heading in aggregate ({ta} vs {fa})"
+        );
+    }
+
+    #[test]
+    fn thermotaxis_by_gradient_evolves() {
+        // From random controllers, thermal-survival selection with the gradient percept available
+        // produces beings that climb the gradient toward warmth (a directed taxis), reaching safety from
+        // every start, without any heading being authored. Survival to the cap requires reaching the
+        // warm ring, so a near-cap evolved fitness is the behavioural proof.
+        let l = thermal_layout(0);
+        let params = EvolveParams::dev_default();
+        let report = evolve_thermal_sensed(&l, &params, 0x1234);
+        let first = report.mean_fitness.first().copied().unwrap();
+        let last = report.mean_fitness.last().copied().unwrap();
+        assert!(
+            last > first,
+            "mean survival rose under selection ({} -> {})",
+            first.to_f64_lossy(),
+            last.to_f64_lossy()
+        );
+        let best_last = *report.best_fitness.last().unwrap();
+        assert!(
+            best_last >= 190,
+            "an evolved lineage climbs to safety from every start ({best_last})"
+        );
+    }
+
+    #[test]
+    fn thermal_sensed_survival_is_deterministic() {
+        let l = thermal_layout(0);
+        let taxis = thermal_taxis(&l);
+        assert_eq!(
+            thermal_sensed_survival(&taxis, 150, 0xBEEF),
+            thermal_sensed_survival(&taxis, 150, 0xBEEF),
+            "the same controller and seed replay the same sensed-taxis survival"
+        );
     }
 
     #[test]

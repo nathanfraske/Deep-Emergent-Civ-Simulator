@@ -462,3 +462,25 @@ fn thermotaxis_emerges_and_favours_no_direction() {
         adv_right.to_f64_lossy()
     );
 }
+
+#[test]
+fn the_field_gradient_points_toward_warmer_and_is_flat_on_a_uniform_field() {
+    // The raw percept the runner feeds each being: Field::gradient_at, a pure integer central-difference
+    // stencil (the GPU-portable counterpart of Field::step). On a ramp warming toward +x it points
+    // toward warmer (+x, no y component); on a uniform field it is zero everywhere, so the being reads
+    // no thermal direction and explores. Bit-exact; it is a physical field quantity, not a heading.
+    let (w, h) = (6i32, 4i32);
+    let ramp: Vec<Fixed> = (0..(w * h)).map(|i| Fixed::from_int(i % w)).collect(); // temp = x
+    let field = Field::new(w, h, ramp);
+    let (gx, gy) = field.gradient_at(2, 1);
+    assert!(gx > Fixed::ZERO, "the gradient points toward warmer (+x)");
+    assert_eq!(gy, Fixed::ZERO, "no y-gradient on an x-only ramp");
+    let flat = uniform_field(6, 4, Fixed::from_int(20));
+    assert_eq!(
+        flat.gradient_at(3, 2),
+        (Fixed::ZERO, Fixed::ZERO),
+        "a uniform field has no gradient, so no thermal direction to follow"
+    );
+    // Off the field reads a zero gradient rather than panicking.
+    assert_eq!(field.gradient_at(-1, 0), (Fixed::ZERO, Fixed::ZERO));
+}
