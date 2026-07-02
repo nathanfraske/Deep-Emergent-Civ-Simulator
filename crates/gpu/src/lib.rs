@@ -35,7 +35,9 @@
 //! - [`stage0`]: the pinned Q32.32 sign-magnitude limb multiply and 96-step restoring divide as
 //!   `#[cube]` kernels, over the confined op set (u32 wrapping add/sub, u16*u16->u32, bitwise,
 //!   constant shifts, comparisons, branchless `select`; no native 64-bit, no divide, no float). These
-//!   reproduce `Fixed::mul`/`Fixed::div` bit-for-bit and are the load-bearing arithmetic contract.
+//!   reproduce `Fixed::mul`/`Fixed::div` bit-for-bit and are the load-bearing arithmetic contract,
+//!   proven bit-identical across three independent codegen paths (CUDA/NVRTC, the CPU backend/MLIR-LLVM,
+//!   and wgpu/SPIR-V) in `tests/cross_backend.rs`.
 //! - `prim` (internal): the shared i64-boundary limb primitives, the pinned multiply `q32_mul`, the
 //!   divide `q32_div`, and the 96-bit `isqrt_u96`, reproducing `Fixed::mul`/`div`/`sqrt`. The field
 //!   stencil and the transcendentals call these rather than each carrying a private copy.
@@ -52,7 +54,7 @@
 //!   Nernst, Snell, Rayleigh, and general scaling).
 //!
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
-//! working device only when actually called. The gate tests self-skip unless `CIVSIM_GPU` is set.
+//! working device only when called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
 pub mod field;
 mod prim;
@@ -60,7 +62,9 @@ pub mod stage0;
 pub mod transcendental;
 
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
-pub use stage0::{cpu_client, cuda_client, gpu_div, gpu_mul, CpuClient, CudaClient};
+pub use stage0::{
+    cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client, CpuClient, CudaClient, WgpuClient,
+};
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,
 };

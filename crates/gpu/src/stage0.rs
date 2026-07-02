@@ -35,6 +35,7 @@
 use cubecl::cpu::{CpuDevice, CpuRuntime};
 use cubecl::cuda::{CudaDevice, CudaRuntime};
 use cubecl::prelude::*;
+use cubecl::wgpu::{init_setup, RuntimeOptions, Vulkan, WgpuDevice, WgpuRuntime};
 
 /// The concrete CUDA compute client type used by the launchers in this crate.
 pub type CudaClient = ComputeClient<CudaRuntime>;
@@ -53,6 +54,22 @@ pub type CpuClient = ComputeClient<CpuRuntime>;
 /// cross-backend bit-identity evidence (the multi-vendor Stage 0 residual). Needs no device.
 pub fn cpu_client() -> CpuClient {
     CpuRuntime::client(&CpuDevice)
+}
+
+/// The concrete CubeCL wgpu (Vulkan/SPIR-V) compute client type.
+pub type WgpuClient = ComputeClient<WgpuRuntime>;
+
+/// A CubeCL wgpu compute client on the Vulkan/SPIR-V backend, a third independent codegen path (direct
+/// SPIR-V via cubecl-spirv, distinct from CUDA/NVRTC and the CPU MLIR/LLVM path). On this WSL2 box the
+/// only Vulkan adapter is lavapipe (software Mesa), which runs the Stage 0 arithmetic bit-identically
+/// but is too slow to compile and run the large unrolled transcendental shaders in practical time; a
+/// hardware Vulkan ICD would carry those too, since SPIR-V Int64 is supported (a native-i64 probe ran
+/// in milliseconds). Call only where a Vulkan adapter is present (the wgpu gate opts in via env).
+pub fn wgpu_client() -> WgpuClient {
+    let device = WgpuDevice::DefaultDevice;
+    // Force the Vulkan backend and register the client for this device key (synchronous).
+    let _ = init_setup::<Vulkan>(&device, RuntimeOptions::default());
+    WgpuRuntime::client(&device)
 }
 
 /// The pinned Q32.32 multiply, `emu_mul` (see `crates/core/tests/gpu_emulation.rs`) as a `#[cube]`
