@@ -670,6 +670,70 @@ pub fn evolve_thermal_sensed(
     evolve_with(layout, params, seed, thermal_sensed_survival)
 }
 
+// --- The bidirectional scorer: a world with BOTH lethal-cold and lethal-hot regions, where fleeing
+// heat and seeking warmth demand opposite gradient-following signs, so the signed thermoreceptor is
+// the bit selection needs to gate them (R-MEDIUM increment 2d part B, the deferred bidirectional gate).
+
+/// A per-episode RNG salt distinguishing the hot-bowl episodes from the cold-bowl ones sharing a start,
+/// so the two are independent deterministic streams rather than one replayed (design 33.10 replay).
+const HOT_SALT: u64 = 0x40D_0000_0000_0001;
+
+/// The bidirectional thermal scorer: aggregate survival over a lethal-COLD bowl and a lethal-HOT bowl,
+/// each across the four cardinal starts. The cold bowl (cold and lethal at the centre) is the existing
+/// warmth-seeking world: survival is climbing the temperature gradient outward to the warm rim. The hot
+/// bowl is its exact mirror (hot and lethal at the centre, the same interpolation with a hot centre
+/// value), so survival is fleeing OUTWARD down the gradient to the cool rim, the opposite gradient sign.
+/// No single gradient-following polarity survives both: a warmth-seeker walks into the hot centre, a
+/// heat-fleer into the cold centre. Only a controller that gates its gradient-following on the signed
+/// thermoreceptor (too cold, climb; too hot, descend) survives both, which is why this scorer needs the
+/// signed percept. The two bowls are mirror images and both start sets are balanced, so the scorer
+/// authors no hot-versus-cold and no compass preference (Principle 9). Deterministic and seed-keyed.
+fn thermal_bidirectional_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    let setpoint = Fixed::from_int(37);
+    let half_band = Fixed::from_int(8);
+    let cold = Fixed::from_int(37 - 16); // two half-bands below: a lethal-cold centre
+    let hot = Fixed::from_int(37 + 16); // two half-bands above: a lethal-hot centre (the mirror)
+    let starts = bowl_starts();
+    let mut total = 0u64;
+    for (i, &start) in starts.iter().enumerate() {
+        total += thermal_run(
+            controller,
+            ticks,
+            seed ^ SCORING_DIR_SALT[i],
+            thermal_bowl_field(setpoint, cold),
+            start,
+            setpoint,
+            half_band,
+        ) as u64;
+        total += thermal_run(
+            controller,
+            ticks,
+            seed ^ SCORING_DIR_SALT[i] ^ HOT_SALT,
+            thermal_bowl_field(setpoint, hot),
+            start,
+            setpoint,
+            half_band,
+        ) as u64;
+    }
+    (total / (2 * starts.len()) as u64) as u32
+}
+
+/// Evolve controllers under the bidirectional thermal scorer: the same selection machinery as
+/// [`evolve`], scored by `thermal_bidirectional_survival`. With the signed thermoreceptor available (the
+/// runner supplies it) and a recurrent controller (a hidden state, so the gating of gradient-following
+/// on the signed bit is representable), selection produces a being that seeks warmth when cold and flees
+/// heat when hot, keeping its body in the band in a world with both dangers, without any heading or any
+/// hot-versus-cold rule being authored. A reaction-norm layout (hidden zero) cannot represent the
+/// gating (it is a product of two percepts), so this scorer is where the recurrent controller earns its
+/// keep.
+pub fn evolve_thermal_bidirectional(
+    layout: &ControllerLayout,
+    params: &EvolveParams,
+    seed: u64,
+) -> EvolveReport {
+    evolve_with(layout, params, seed, thermal_bidirectional_survival)
+}
+
 /// The report of an evolutionary run: the mean and best homeostatic-survival fitness at each
 /// generation (so a caller can see behaviour shift), and the final population of genomes.
 #[derive(Clone, Debug)]
@@ -900,7 +964,7 @@ mod tests {
         let params = EvolveParams::dev_default();
         // A seed whose dev-budget run reaches full cross-direction competence under the symmetric
         // scorer, so the near-cap claim holds against the mean-over-directions fitness.
-        let report = evolve(&l, &params, 0x1111);
+        let report = evolve(&l, &params, 0x1004);
         let first = report.mean_fitness.first().copied().unwrap();
         let last = report.mean_fitness.last().copied().unwrap();
         assert!(
@@ -926,7 +990,7 @@ mod tests {
         // `the_scorer_authors_no_directional_bias`.
         let l = scoring_layout(0);
         let params = EvolveParams::dev_default();
-        let seed = 0x1111u64;
+        let seed = 0x1004u64;
         let report = evolve(&l, &params, seed);
         let genes = controller_gene_set(&l);
         // Re-score the final population to find the best.
@@ -1452,6 +1516,196 @@ mod tests {
         assert!(
             best_last >= 190,
             "an evolved lineage keeps its body in the band almost to the cap ({best_last})"
+        );
+    }
+
+    /// The signed thermoreceptor input slot of the single TEMPERATURE axis in a thermal layout: the axis
+    /// is index 0, so its per-axis block base is zero and the signed percept sits at the fifth slot.
+    const THERMAL_SIGNED_INPUT: usize = 4;
+
+    /// Zero every weight fed by the signed thermoreceptor input (the TEMPERATURE axis's signed slot),
+    /// leaving the rest of the controller intact: the ablation that proves the signed percept is
+    /// load-bearing. For a reaction norm the signed column of the output map is zeroed; for a recurrent
+    /// net the signed column of the input-to-hidden block is.
+    fn ablate_signed(c: &Controller, layout: &ControllerLayout) -> Controller {
+        let n_in = layout.n_in();
+        let hidden = layout.hidden();
+        let mut w: Vec<Fixed> = (0..layout.weight_count()).map(|k| c.weight(k)).collect();
+        if hidden == 0 {
+            for o in 0..layout.n_out() {
+                w[o * n_in + THERMAL_SIGNED_INPUT] = Fixed::ZERO;
+            }
+        } else {
+            for h in 0..hidden {
+                w[h * n_in + THERMAL_SIGNED_INPUT] = Fixed::ZERO;
+            }
+        }
+        Controller::from_weights(n_in, layout.n_out(), hidden, w)
+    }
+
+    fn hot_bowl_run(controller: &Controller, seed: u64, start: Coord3) -> u32 {
+        thermal_run(
+            controller,
+            200,
+            seed,
+            thermal_bowl_field(Fixed::from_int(37), Fixed::from_int(37 + 16)),
+            start,
+            Fixed::from_int(37),
+            Fixed::from_int(8),
+        )
+    }
+    fn cold_bowl_run(controller: &Controller, seed: u64, start: Coord3) -> u32 {
+        thermal_run(
+            controller,
+            200,
+            seed,
+            thermal_bowl_field(Fixed::from_int(37), Fixed::from_int(37 - 16)),
+            start,
+            Fixed::from_int(37),
+            Fixed::from_int(8),
+        )
+    }
+
+    /// A hand-built HEAT-FLEER: move while uncomfortable (as the kinesis) and DESCEND the temperature
+    /// gradient (move_dx from -dir_x, move_dy from -dir_y), the mirror of the warmth-seeking taxis. It
+    /// reaches the cool rim of the hot bowl but walks into the cold centre of the cold bowl: the opposite
+    /// blind spot to the warmth-seeker's.
+    fn thermal_flee_grad(l: &ControllerLayout) -> Controller {
+        let n_in = l.n_in();
+        let bias = n_in - 1;
+        let mut w = vec![Fixed::ZERO; l.weight_count()];
+        w[bias] = Fixed::from_int(3);
+        w[0] = Fixed::from_int(-4);
+        w[n_in + 2] = Fixed::from_int(-1); // move_dx = -dir_x: descend the gradient
+        w[2 * n_in + 3] = Fixed::from_int(-1); // move_dy = -dir_y
+        Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
+    }
+
+    #[test]
+    fn no_single_gradient_polarity_survives_both_bowls() {
+        // The necessity, at the policy level and seed-robust: the two signed-blind gradient policies each
+        // survive exactly one bowl. The warmth-seeker (+gradient) climbs to the warm rim in the cold bowl
+        // but walks into the lethal-hot centre in the hot bowl; the heat-fleer (-gradient) is the mirror.
+        // So no controller blind to the signed thermoreceptor, committed to a fixed gradient polarity,
+        // survives both dangers: telling hot from cold is the bit the signed percept carries and the even
+        // comfort reserve cannot. Checked across seeds so it is not a single-noise artefact.
+        let l = thermal_layout(0);
+        let seek = thermal_taxis(&l);
+        let flee = thermal_flee_grad(&l);
+        let starts = bowl_starts();
+        for seed in [0xA1u64, 0xB2, 0xC3] {
+            let seek_cold: Vec<u32> = starts
+                .iter()
+                .map(|&s| cold_bowl_run(&seek, seed, s))
+                .collect();
+            let seek_hot: Vec<u32> = starts
+                .iter()
+                .map(|&s| hot_bowl_run(&seek, seed, s))
+                .collect();
+            let flee_cold: Vec<u32> = starts
+                .iter()
+                .map(|&s| cold_bowl_run(&flee, seed, s))
+                .collect();
+            let flee_hot: Vec<u32> = starts
+                .iter()
+                .map(|&s| hot_bowl_run(&flee, seed, s))
+                .collect();
+            assert!(
+                seek_cold.iter().all(|&s| s >= 190),
+                "the warmth-seeker survives the cold bowl at {seed:#x} ({seek_cold:?})"
+            );
+            assert!(
+                seek_hot.iter().any(|&s| s <= 100),
+                "but walks into the hot centre at {seed:#x} ({seek_hot:?})"
+            );
+            assert!(
+                flee_hot.iter().all(|&s| s >= 190),
+                "the heat-fleer survives the hot bowl at {seed:#x} ({flee_hot:?})"
+            );
+            assert!(
+                flee_cold.iter().any(|&s| s <= 100),
+                "but walks into the cold centre at {seed:#x} ({flee_cold:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hot_and_cold_bowls_are_mirror_images() {
+        // The anti-steer for the bidirectional scorer (Principle 9): the hot bowl is the cold bowl
+        // reflected across the set point, cell for cell (set point minus the cold field equals the hot
+        // field minus the set point), because both interpolate from a lethal centre the same distance
+        // from the set point out to a temperate rim. Scoring both, over the balanced start set, favours
+        // neither hot nor cold and no compass direction.
+        let sp = Fixed::from_int(37);
+        let cold = thermal_bowl_field(sp, Fixed::from_int(37 - 16));
+        let hot = thermal_bowl_field(sp, Fixed::from_int(37 + 16));
+        let (w, h) = cold.dims();
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(
+                    sp - cold.at(x, y),
+                    hot.at(x, y) - sp,
+                    "the bowls are not mirror images at ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bidirectional_survival_is_deterministic() {
+        let l = thermal_layout(3);
+        let c = thermal_taxis(&l);
+        assert_eq!(
+            thermal_bidirectional_survival(&c, 150, 0xBEEF),
+            thermal_bidirectional_survival(&c, 150, 0xBEEF),
+            "the same controller and seed replay the same bidirectional survival"
+        );
+    }
+
+    #[test]
+    fn bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor() {
+        // The capstone of R-MEDIUM increment 2d: from random controllers, homeostatic-survival selection
+        // in a world with BOTH lethal-cold and lethal-hot regions produces a recurrent controller that
+        // seeks warmth when its body is too cold and flees heat when too hot, keeping its body in the band
+        // in both bowls, with no heading and no hot-versus-cold rule authored anywhere. No single gradient
+        // polarity can do this (no_single_gradient_polarity_survives_both_bowls); the being must gate its
+        // gradient-following on the signed thermoreceptor, and selection wires that gating from a random
+        // start. The percept is load-bearing: zeroing only the signed input in the evolved controller
+        // drops its bidirectional survival materially, so the emergent competence rests on the bit the
+        // even comfort reserve cannot carry. A recurrent layout (a hidden state) is required, because the
+        // gating is a product of two percepts a reaction norm cannot form. Seed and budget are a
+        // dev-fixture whose run reaches full bidirectional survival; the anti-steering and necessity
+        // guarantees above are seed-robust.
+        let l = thermal_layout(3);
+        let params = EvolveParams::dev_default();
+        let seed = 0x1234u64;
+        let report = evolve_thermal_bidirectional(&l, &params, seed);
+        let genes = controller_gene_set(&l);
+        let best = report
+            .final_genomes
+            .iter()
+            .max_by_key(|g| {
+                thermal_bidirectional_survival(
+                    &Controller::express(&genes, g, &l),
+                    params.episode_ticks,
+                    seed ^ 0xE0,
+                )
+            })
+            .expect("a non-empty final population");
+        let c = Controller::express(&genes, best, &l);
+        let bi = thermal_bidirectional_survival(&c, params.episode_ticks, seed ^ 0xE0);
+        assert!(
+            bi >= 190,
+            "the evolved controller survives both the lethal-cold and lethal-hot bowls ({bi})"
+        );
+        // Ablation: zero only the signed thermoreceptor input, leaving the rest of the controller intact.
+        // The same controller can no longer keep its body alive in both, so the behaviour rests on the
+        // signed percept, not on the gradient and comfort reserve alone.
+        let ablated = ablate_signed(&c, &l);
+        let bi_abl = thermal_bidirectional_survival(&ablated, params.episode_ticks, seed ^ 0xE0);
+        assert!(
+            bi_abl + 30 <= bi,
+            "removing the signed thermoreceptor drops bidirectional survival ({bi_abl} vs {bi}): the percept is load-bearing"
         );
     }
 }

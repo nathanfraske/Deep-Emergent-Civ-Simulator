@@ -83,10 +83,11 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
         "a whole body reads full integrity"
     );
 
-    // The integrity input the controller sees (axis index 2 -> input base 4*2 = 8, the level slot).
-    let input_before = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
+    // The integrity input the controller sees (axis index 2 -> input base 5*2 = 10, the level slot).
+    let input_before =
+        layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new(), &BTreeMap::new());
     assert_eq!(
-        input_before[8],
+        input_before[10],
         Fixed::ONE,
         "the percept carries full integrity"
     );
@@ -109,9 +110,10 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
         homeo.level(INTEGRITY) < Fixed::ONE,
         "the wound lowered the integrity reserve"
     );
-    let input_after = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
+    let input_after =
+        layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new(), &BTreeMap::new());
     assert!(
-        input_after[8] < input_before[8],
+        input_after[10] < input_before[10],
         "and the controller's percept now carries the wound"
     );
 }
@@ -145,7 +147,7 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
     let controller = Controller::from_weights(n_in, layout.n_out(), 0, w);
 
     let homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 2));
-    let input = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
+    let input = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new(), &BTreeMap::new());
     let (out, _) = controller.evaluate(&input, &[]);
     let decision = layout.decide(&out, &afford.afforded(&armed)).unwrap();
     assert_eq!(

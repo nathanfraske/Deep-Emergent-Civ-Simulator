@@ -28,8 +28,13 @@
 //!
 //! The layout is data, derived from the two Stage-1 registries so neither the percept nor the option
 //! set is a closed enum in the mechanism. The inputs are, per homeostatic axis (canonical order),
-//! the reserve level, a flag for whether a source of that axis is on the current tile (matter within
-//! reach), and the unit direction to the nearest known source, plus a constant bias. The outputs are,
+//! the reserve level (the even comfort magnitude), a flag for whether a source of that axis is on the
+//! current tile (matter within reach), the unit direction to the nearest known source, and the axis's
+//! signed setpoint deviation (a raw interoceptive percept of which side of its comfort band the axis
+//! sits on, the thermoreceptive warm-versus-cold bit for a two-sided axis), plus a constant bias. The
+//! signed deviation is a percept, not a heading: it says the body is too hot, not which way to flee,
+//! so the controller must still combine it with the direction percept to act (Principle 9). The
+//! outputs are,
 //! per affordance (canonical id order), an activation and, for a directional operation, a heading,
 //! the shape given by [`crate::homeostasis::AffordanceParam`]. The weight matrix connects every input
 //! to every output, so an adaptive coupling (low water to the water-source heading, or ingesting the
@@ -64,11 +69,20 @@ use crate::homeostasis::{
 /// Minus one, the low clamp of the activation.
 const NEG_ONE: Fixed = Fixed::from_int(-1);
 
-/// The number of controller inputs each homeostatic axis contributes: its reserve level, a flag for
-/// whether a source of it is on the current tile (matter within reach, so the being can tell food
-/// underfoot from food in the distance), and the two components of the unit direction to its nearest
-/// known source.
-const INPUTS_PER_AXIS: usize = 4;
+/// The number of controller inputs each homeostatic axis contributes: its reserve level (the even
+/// comfort magnitude, sign-blind), a flag for whether a source of it is on the current tile (matter
+/// within reach, so the being can tell food underfoot from food in the distance), the two components
+/// of the unit direction to its nearest known source, and its signed setpoint deviation (the raw
+/// interoceptive percept of which side of the comfort band the axis sits on: for a two-sided axis such
+/// as temperature, whether the body is too hot (+) or too cold (-), the bit the even level cannot
+/// carry). The signed deviation is supplied per being alongside the field-derived directions
+/// ([`build_input`]'s `signed`), zero where no such percept exists (a one-sided axis, or a being whose
+/// physiology does not surface it), so an axis with no signed percept reads the same as before.
+const INPUTS_PER_AXIS: usize = 5;
+
+/// The per-axis input slot of the signed setpoint-deviation percept (the raw thermoreceptor for a
+/// two-sided axis), placed after the reserve level, the here flag, and the two direction components.
+const SIGNED_SLOT: usize = 4;
 
 /// A saturating fixed-point product: on overflow it saturates to the signed extreme rather than
 /// wrapping, so a large heritable weight against a bounded input stays deterministic and bounded
@@ -184,14 +198,19 @@ impl ControllerLayout {
     }
 
     /// Build the input vector for a being: per axis (canonical order) its reserve level, a flag for
-    /// whether a source of that axis is on the current tile (`here`), and the unit direction to its
-    /// nearest known source (zero if none is known), then the bias. A pure read of the being's
-    /// physiology and its earned knowledge (Principle 10).
+    /// whether a source of that axis is on the current tile (`here`), the unit direction to its
+    /// nearest known source (zero if none is known), and its signed setpoint deviation (zero where no
+    /// such percept is supplied), then the bias. A pure read of the being's physiology and its earned
+    /// knowledge (Principle 10). The signed deviation is the raw interoceptive percept, clamped to
+    /// `[-1, 1]` by its supplier, delivered as its own input rather than folded into the direction, so
+    /// the controller (not the mechanism) decides how to combine "which side of the band am I on" with
+    /// "which way is the gradient" (Principle 9).
     pub fn build_input(
         &self,
         homeo: &Homeostasis,
         here: &BTreeSet<HomeostaticAxisId>,
         source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
     ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
@@ -202,6 +221,9 @@ impl ControllerLayout {
             if let Some(&(dx, dy)) = source_dirs.get(&axis) {
                 v[INPUTS_PER_AXIS * a + 2] = dx;
                 v[INPUTS_PER_AXIS * a + 3] = dy;
+            }
+            if let Some(&s) = signed.get(&axis) {
+                v[INPUTS_PER_AXIS * a + SIGNED_SLOT] = s;
             }
         }
         v[INPUTS_PER_AXIS * self.axes.len()] = Fixed::ONE; // the bias input
@@ -442,41 +464,44 @@ mod tests {
     #[test]
     fn the_layout_dims_follow_the_registries() {
         let l = layout(0);
-        // Two axes (energy, water) -> 4*2 + 1 bias = 9 inputs.
-        assert_eq!(l.n_in(), 9);
+        // Two axes (energy, water) -> 5*2 + 1 bias = 11 inputs (the fifth per-axis input is the
+        // signed setpoint-deviation percept).
+        assert_eq!(l.n_in(), 11);
         // MOVE (directional, 3 outputs) + INGEST (scalar, 1) = 4 outputs.
         assert_eq!(l.n_out(), 4);
         // Reaction norm: n_out * n_in weights.
-        assert_eq!(l.weight_count(), 36);
+        assert_eq!(l.weight_count(), 44);
     }
 
     #[test]
     fn a_recurrent_layout_sizes_its_weight_blocks() {
         let l = layout(3);
-        // hidden*n_in + hidden*hidden + n_out*hidden = 3*9 + 3*3 + 4*3 = 27 + 9 + 12 = 48.
-        assert_eq!(l.weight_count(), 48);
+        // hidden*n_in + hidden*hidden + n_out*hidden = 3*11 + 3*3 + 4*3 = 33 + 9 + 12 = 54.
+        assert_eq!(l.weight_count(), 54);
         assert_eq!(l.hidden(), 3);
     }
 
     /// A reaction-norm controller whose non-zero weights make it move toward known water while it is
     /// away from it and ingest the water underfoot when its reserve is low. The input layout, in the
-    /// dev registry order (energy, water), is per axis [level, here, dir_x, dir_y] then a bias:
-    /// indices 0..3 energy, 4..7 water, 8 bias. The output layout is [move_act, move_dx, move_dy,
-    /// ingest_act].
+    /// dev registry order (energy, water), is per axis [level, here, dir_x, dir_y, signed] then a
+    /// bias, so the water block starts at `INPUTS_PER_AXIS` (water is axis 1). The output layout is
+    /// [move_act, move_dx, move_dy, ingest_act].
     fn taxis_controller(l: &ControllerLayout) -> Controller {
         let n_in = l.n_in();
+        let bias = n_in - 1;
+        let water = INPUTS_PER_AXIS; // the water axis's input block base (axis index 1)
+        let (w_lvl, w_here, w_dx, w_dy) = (water, water + 1, water + 2, water + 3);
         let mut w = vec![Fixed::ZERO; l.weight_count()];
-        // move_act (output 0): a desire to move (bias, index 8), suppressed when water is underfoot
-        // (water-here, index 5), so a being on the water does not wander off it.
-        w[8] = Fixed::ONE;
-        w[5] = Fixed::from_int(-1);
-        // move_dx / move_dy (outputs 1, 2): follow the water source direction (indices 6, 7).
-        w[n_in + 6] = Fixed::ONE;
-        w[2 * n_in + 7] = Fixed::ONE;
-        // ingest_act (output 3): fire when water is underfoot (index 5) and the water reserve
-        // (index 4) is low.
-        w[3 * n_in + 5] = Fixed::ONE;
-        w[3 * n_in + 4] = Fixed::from_int(-1);
+        // move_act (output 0): a desire to move (bias), suppressed when water is underfoot, so a being
+        // on the water does not wander off it.
+        w[bias] = Fixed::ONE;
+        w[w_here] = Fixed::from_int(-1);
+        // move_dx / move_dy (outputs 1, 2): follow the water source direction.
+        w[n_in + w_dx] = Fixed::ONE;
+        w[2 * n_in + w_dy] = Fixed::ONE;
+        // ingest_act (output 3): fire when water is underfoot and the water reserve is low.
+        w[3 * n_in + w_here] = Fixed::ONE;
+        w[3 * n_in + w_lvl] = Fixed::from_int(-1);
         Controller::from_weights(l.n_in(), l.n_out(), l.hidden(), w)
     }
 
@@ -497,7 +522,7 @@ mod tests {
                                         // Knows of water to the east (unit direction (1, 0)); it is not standing on it.
         let mut dirs = BTreeMap::new();
         dirs.insert(WATER, (Fixed::ONE, Fixed::ZERO));
-        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
+        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs, &BTreeMap::new());
         let (out, hidden) = c.evaluate(&input, &[]);
         assert!(hidden.is_empty(), "a reaction norm carries no hidden state");
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
@@ -519,7 +544,7 @@ mod tests {
         // Standing on the water (its source is on the current tile).
         let mut here = BTreeSet::new();
         here.insert(WATER);
-        let input = l.build_input(&homeo, &here, &BTreeMap::new());
+        let input = l.build_input(&homeo, &here, &BTreeMap::new(), &BTreeMap::new());
         let (out, _) = c.evaluate(&input, &[]);
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
         assert_eq!(
@@ -535,7 +560,7 @@ mod tests {
         let c = Controller::zeros(&l);
         let reg = HomeostaticRegistry::dev_default();
         let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
-        let input = l.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
+        let input = l.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new(), &BTreeMap::new());
         let (out, _) = c.evaluate(&input, &[]);
         // Every output is zero, so the top decision has zero activation: the being idles.
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
@@ -555,7 +580,7 @@ mod tests {
         let homeo = drained(&reg, 200);
         let mut dirs = BTreeMap::new();
         dirs.insert(WATER, (Fixed::ONE, Fixed::ZERO));
-        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
+        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs, &BTreeMap::new());
         let (out, _) = c.evaluate(&input, &[]);
         let d = l.decide(&out, &[INGEST]).unwrap(); // only INGEST afforded (a rooted body)
         assert_eq!(
@@ -578,7 +603,7 @@ mod tests {
         let mut dirs = BTreeMap::new();
         dirs.insert(ENERGY, (Fixed::from_ratio(1, 2), Fixed::from_ratio(-1, 2)));
         dirs.insert(WATER, (Fixed::from_ratio(-1, 3), Fixed::from_ratio(1, 3)));
-        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
+        let input = l.build_input(&homeo, &BTreeSet::new(), &dirs, &BTreeMap::new());
         let h0 = c.fresh_hidden();
         let (a_out, a_h) = c.evaluate(&input, &h0);
         let (b_out, b_h) = c.evaluate(&input, &h0);
