@@ -319,23 +319,6 @@ pub struct LawPort {
     pub temporal: Temporal,
 }
 
-/// How a produced axis's declared dimension is verified against the kernel that writes it.
-/// The discriminant is a property of the kernel and lives in its contract; a law never
-/// chooses it, so a kernel cannot be silently mislabelled. `Asserted` is the fail-loud
-/// waiver for the transcendental and additive-difference kernels the monomial algebra
-/// cannot model, and it always carries a basis, never a silent skip.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DimCheck {
-    /// The product of each port's axis dimension raised to the kernel's exponent equals the output.
-    Monomial,
-    /// The output shares the dimension of the named role's axis (a same-dimension fold or clamp).
-    SameAs(String),
-    /// The output is the all-zero monomial (a ratio).
-    Dimensionless,
-    /// The monomial algebra cannot model this kernel; the stated basis is the fail-loud waiver.
-    Asserted(String),
-}
-
 /// An interaction law: the metadata of a closed-form integer kernel over the quantity
 /// vectors of the participating entities, reporting an interval-bounded fixed-point
 /// consequence at a tier. The kernel itself is fixed Rust bound by [`InteractionLaw::kernel`]
@@ -353,7 +336,7 @@ pub struct InteractionLaw {
     /// flat `inputs` list, which is derived from the distinct port axes for compatibility.
     pub ports: Vec<LawPort>,
     /// The axis ids this law writes (the typed graph edges other laws read). The first, if
-    /// any, is the primary output whose dimension the contract's [`DimCheck`] verifies.
+    /// any, is the primary output whose dimension the kernel contract verifies.
     pub produces: Vec<String>,
     /// The axis ids the law reads (derived from `ports` when ports are declared).
     pub inputs: Vec<String>,
@@ -775,7 +758,9 @@ impl PhysicsRegistry {
         h.write_u64(u64::MAX);
         for law in self.laws.values() {
             h.write_bytes(law.id.as_bytes());
+            h.write_u64(0);
             h.write_bytes(law.kernel.as_bytes());
+            h.write_u64(0);
             for axis in &law.inputs {
                 h.write_bytes(axis.as_bytes());
             }
