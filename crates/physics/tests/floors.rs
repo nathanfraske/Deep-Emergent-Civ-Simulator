@@ -56,8 +56,8 @@ fn the_biology_floor_loads_with_its_axes_and_three_laws() {
     let reg = biology();
     assert_eq!(
         reg.axis_count(),
-        18,
-        "the composition, toxin, and consumer axes plus the two derived score axes"
+        19,
+        "the composition, toxin, and consumer axes, the respiratory-surface axis, plus the two derived score axes"
     );
     assert_eq!(reg.law_count(), 3, "net nutrition, harm, and edibility");
     // edibility reads the produced net-nutrition and net-harm scores, so it derives one tier
@@ -131,8 +131,11 @@ fn ranges_are_set_with_only_the_scale_pending_axes_reserved() {
     let bio = biology();
     assert_eq!(
         bio.reserved_axis_ids(),
-        vec!["bio.consumer.reference_tolerance"],
-        "only the per-class-scale tolerance stays reserved"
+        vec![
+            "bio.consumer.reference_tolerance",
+            "bio.respiratory_surface"
+        ],
+        "the per-class-scale tolerance and the respiratory-surface axis (its m^2 per-quantity scale is R-UNITS-PIN) stay reserved"
     );
 }
 
