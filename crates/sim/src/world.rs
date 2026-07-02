@@ -47,6 +47,7 @@ use crate::genome::Genome;
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
+use crate::mate_choice::{choose, MatePreference};
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
@@ -319,6 +320,13 @@ pub struct World {
     genomes: BTreeMap<StableId, Genome>,
     /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
     intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
+    /// Per-being heritable mate preference, the direction of assortment as a per-being trait
+    /// (R-REPRO). Seeded at the dawn with unbiased variation (symmetric about indifference, so
+    /// no direction is authored) and inherited at birth by midparent plus bounded mutation, so
+    /// which way a being assorts is shaped by differential reproduction rather than a per-race
+    /// lever. Used by [`World::choose_mate`]; the selection that shapes it is proven in
+    /// [`crate::mate_choice`].
+    mate_prefs: BTreeMap<StableId, MatePreference>,
     /// Per-being transient affect, the event-driven emotional state (the R-EMOTION gap).
     affect: BTreeMap<StableId, AffectState>,
     /// Per-being age in life-cadence ticks, for the aging-and-mortality loop (the R-AGING gap).
@@ -392,6 +400,7 @@ impl World {
             place_of: BTreeMap::new(),
             genomes: BTreeMap::new(),
             intrinsic: BTreeMap::new(),
+            mate_prefs: BTreeMap::new(),
             affect: BTreeMap::new(),
             ages: BTreeMap::new(),
             sensorium: BTreeMap::new(),
@@ -670,6 +679,15 @@ impl World {
                 self.minds.insert(id, mind);
                 self.genomes.insert(id, genome);
                 self.intrinsic.insert(id, race.intrinsic.clone());
+                // Seed the mate preference with unbiased variation: a weight in [-1, 1] drawn per
+                // being under Phase::MATE_CHOICE. The draw is symmetric about zero (indifference),
+                // so the dawn population carries variation without an authored direction; which
+                // way selection later pushes it is a consequence, not a seed.
+                let unit = DrawKey::entity(id.0, 0, Phase::MATE_CHOICE)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                let weight = Fixed::from_int(2).mul(unit) - Fixed::ONE;
+                self.mate_prefs.insert(id, MatePreference::new(weight));
                 self.place_of.insert(id, band.place);
                 self.ages.insert(id, 0);
                 seeded.push(id);
@@ -698,6 +716,48 @@ impl World {
     /// tools and tests). The being need not already hold beliefs.
     pub fn set_intrinsic(&mut self, id: StableId, beliefs: IntrinsicBeliefs) {
         self.intrinsic.insert(id, beliefs);
+    }
+
+    /// A being's mate preference by id, if one has been set (for inspection). Populated at the
+    /// dawn and inherited at birth.
+    pub fn mate_pref_of(&self, id: StableId) -> Option<&MatePreference> {
+        self.mate_prefs.get(&id)
+    }
+
+    /// Set a being's mate preference (used by the dawn seeding, by birth inheritance, and by
+    /// tools and tests). The being need not already hold one.
+    pub fn set_mate_pref(&mut self, id: StableId, pref: MatePreference) {
+        self.mate_prefs.insert(id, pref);
+    }
+
+    /// Choose a mate for `chooser` from a band of `candidates` under the chooser's own heritable
+    /// [`MatePreference`] over the genetic distance to each candidate (design Part 25; R-REPRO).
+    /// The chooser is excluded from its own candidate set, and a candidate with no recorded
+    /// genome is skipped. Returns the chosen candidate's id, or `None` if the chooser has no
+    /// genome or preference or no eligible candidate remains.
+    ///
+    /// This is the call site the R-REPRO follow-on named: births today take both parents
+    /// pre-chosen, and this lets the chooser pick under its inherited preference. The mechanism
+    /// authors no direction: it reads the chooser's own preference weight, whose sign is the
+    /// heritable, dawn-seeded, birth-inherited trait selection shapes. The incompatibility axis
+    /// (the viability cue a distance preference cannot carry) is proven in [`crate::mate_choice`]
+    /// and rides a further change that gives the choose site a Dobzhansky-Muller table.
+    pub fn choose_mate(&self, chooser: StableId, candidates: &[StableId]) -> Option<StableId> {
+        let pref = self.mate_prefs.get(&chooser)?;
+        let chooser_genome = self.genomes.get(&chooser)?;
+        let mut ids = Vec::with_capacity(candidates.len());
+        let mut genomes = Vec::with_capacity(candidates.len());
+        for &c in candidates {
+            if c == chooser {
+                continue;
+            }
+            if let Some(g) = self.genomes.get(&c) {
+                ids.push(c);
+                genomes.push(g.clone());
+            }
+        }
+        let idx = choose(pref, chooser_genome, &genomes)?;
+        Some(ids[idx])
     }
 
     /// Run one round of enculturation over a band on one axiom axis (design Part 28): each
@@ -985,6 +1045,29 @@ impl World {
         self.genomes.insert(child, child_genome);
         self.intrinsic.insert(child, beliefs);
         self.ages.insert(child, 0);
+        // Inherit the mate preference as a quantitative trait: the midparent of the two parents'
+        // weights plus a bounded mutation drawn under Phase::MATE_CHOICE keyed on the child,
+        // scaled by the same `mutation_spread` the belief inheritance uses (so no new value is
+        // introduced). A parent with no recorded preference contributes indifference (zero). The
+        // child is clamped to [-1, 1], and only the sign it inherits, not the mechanism, carries
+        // a direction.
+        let a_w = self
+            .mate_prefs
+            .get(&parent_a)
+            .map(|p| p.distance_weight)
+            .unwrap_or(Fixed::ZERO);
+        let b_w = self
+            .mate_prefs
+            .get(&parent_b)
+            .map(|p| p.distance_weight)
+            .unwrap_or(Fixed::ZERO);
+        let midparent = (a_w + b_w).mul(Fixed::from_ratio(1, 2));
+        let unit = DrawKey::pair(child.0, 0, generation, Phase::MATE_CHOICE)
+            .rng(self.seed)
+            .unit_fixed(0);
+        let mutation = (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(mutation_spread);
+        let child_w = (midparent + mutation).clamp(Fixed::from_int(-1), Fixed::from_int(1));
+        self.mate_prefs.insert(child, MatePreference::new(child_w));
         Some(child)
     }
 
@@ -1140,6 +1223,7 @@ impl World {
         self.place_of.remove(&id);
         self.genomes.remove(&id);
         self.intrinsic.remove(&id);
+        self.mate_prefs.remove(&id);
         self.affect.remove(&id);
         self.ages.remove(&id);
         self.sensorium.remove(&id);

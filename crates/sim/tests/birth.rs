@@ -19,11 +19,12 @@
 use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
+use civsim_core::StableId;
 use civsim_sim::{
-    AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, DominanceMode,
-    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
-    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, SchemeId, SourceModeId,
-    ValueAxisId, ValueProfile, World,
+    genetic_distance, AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel,
+    DominanceMode, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet,
+    GeneticScheme, InferenceParams, IntrinsicBeliefs, MatePreference, Race, RaceId,
+    ReproductionMode, SchemeId, SourceModeId, ValueAxisId, ValueProfile, World,
 };
 
 const AXIS: AxiomAxisId = AxiomAxisId(0);
@@ -167,6 +168,205 @@ fn birth_replays_deterministically() {
         run(),
         "the same parents and seed bear the same child"
     );
+}
+
+// --- Follow-on B: the heritable mate preference at the choose site (R-REPRO) ---
+
+/// A race with many independent genes, so dawn-promoted genomes spread across a range of
+/// genetic distances (the two-gene `a_race` gives too few distinct distances to tell a
+/// nearest-mate pick from a farthest one).
+fn diverse_race() -> Race {
+    const N: usize = 8;
+    let genes = GeneSet {
+        genes: (0..N)
+            .map(|i| GeneDef {
+                id: GeneId(i as u32),
+                effects: vec![GeneEffect {
+                    channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
+                    weight: Fixed::ZERO,
+                }],
+                dominance: DominanceMode::additive(),
+            })
+            .collect(),
+    };
+    let pool = GenePool::new(SchemeId(0), 20, vec![Fixed::from_ratio(1, 2); N]);
+    let scheme = GeneticScheme {
+        id: SchemeId(0),
+        reproduction: ReproductionMode::SexualDiploid,
+        linkage_groups: Vec::new(),
+        mutation_rate: Fixed::ZERO,
+    };
+    let intrinsic = IntrinsicBeliefs {
+        values: ValueProfile::with([(ValueAxisId(0), 2)]),
+        axioms: Vec::new(),
+        epistemic: EpistemicStance::new(
+            [(SourceModeId(1), Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+        ),
+    };
+    Race::new(
+        RaceId(0),
+        genes,
+        pool,
+        scheme,
+        intrinsic,
+        Fixed::from_int(2),
+    )
+}
+
+/// Seed one diverse-race band of `members` onto a place; return the world, the race, and the ids.
+fn dawn_band(seed: u64, members: usize) -> (World, Race, Vec<StableId>) {
+    let race = diverse_race();
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), diverse_race());
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members,
+    }];
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+    let seeded = w.seed_dawn_populations(&races, &bands);
+    (w, race, seeded)
+}
+
+#[test]
+fn the_dawn_seeds_a_mate_preference_with_unbiased_variation() {
+    let (w, _race, seeded) = dawn_band(0xA11CE, 12);
+    // Every seeded being carries a preference.
+    let weights: Vec<Fixed> = seeded
+        .iter()
+        .map(|id| {
+            w.mate_pref_of(*id)
+                .expect("a dawn being has a mate preference")
+                .distance_weight
+        })
+        .collect();
+    // The population carries variation (the preferences are not all one value), the raw
+    // material selection needs. A vacuous all-equal seeding would author no variation to select
+    // over, so this guards against it.
+    let first = weights[0];
+    assert!(
+        weights.iter().any(|w| *w != first),
+        "the dawn preferences vary across the band"
+    );
+    // The variation is unbiased: at least one homophile (negative) and one heterophile
+    // (positive), so no single direction is seeded into the whole population.
+    assert!(
+        weights.iter().any(|w| *w < Fixed::ZERO) && weights.iter().any(|w| *w > Fixed::ZERO),
+        "the dawn seeds both directions, not one authored sign"
+    );
+    // The seeding replays bit for bit.
+    let (w2, _r2, seeded2) = dawn_band(0xA11CE, 12);
+    let weights2: Vec<Fixed> = seeded2
+        .iter()
+        .map(|id| w2.mate_pref_of(*id).unwrap().distance_weight)
+        .collect();
+    assert_eq!(weights, weights2, "same seed, same dawn preferences");
+}
+
+#[test]
+fn choose_mate_honours_the_preference_sign_and_excludes_self() {
+    let (mut w, _race, seeded) = dawn_band(0xBEEF, 8);
+    let chooser = seeded[0];
+    let candidates: Vec<StableId> = seeded.clone();
+    // The real genetic distances from the chooser to the other members.
+    let chooser_genome = w.genome_of(chooser).unwrap().clone();
+    let dists: Vec<(StableId, Fixed)> = seeded
+        .iter()
+        .filter(|id| **id != chooser)
+        .map(|id| {
+            (
+                *id,
+                genetic_distance(&chooser_genome, w.genome_of(*id).unwrap()),
+            )
+        })
+        .collect();
+    let min_d = dists.iter().map(|(_, d)| *d).min().unwrap();
+    let max_d = dists.iter().map(|(_, d)| *d).max().unwrap();
+    // Guard against a vacuous test: the band must actually spread in distance, or nearest and
+    // farthest are the same pick and the preference sign proves nothing.
+    assert!(min_d != max_d, "the candidates spread in genetic distance");
+
+    // A homophile picks a nearest-distance mate; a heterophile picks a farthest-distance one.
+    w.set_mate_pref(chooser, MatePreference::homophilic());
+    let near = w
+        .choose_mate(chooser, &candidates)
+        .expect("a mate is chosen");
+    assert_ne!(
+        near, chooser,
+        "the chooser is excluded from its own candidates"
+    );
+    let near_d = genetic_distance(&chooser_genome, w.genome_of(near).unwrap());
+    assert_eq!(near_d, min_d, "the homophile picks a nearest mate");
+
+    w.set_mate_pref(chooser, MatePreference::heterophilic());
+    let far = w
+        .choose_mate(chooser, &candidates)
+        .expect("a mate is chosen");
+    let far_d = genetic_distance(&chooser_genome, w.genome_of(far).unwrap());
+    assert_eq!(far_d, max_d, "the heterophile picks a farthest mate");
+
+    // The choice replays bit for bit.
+    let (mut w2, _r2, _s2) = dawn_band(0xBEEF, 8);
+    w2.set_mate_pref(chooser, MatePreference::heterophilic());
+    assert_eq!(
+        w2.choose_mate(chooser, &candidates),
+        Some(far),
+        "same seed and preference, same chosen mate"
+    );
+}
+
+#[test]
+fn birth_inherits_the_mate_preference_by_midparent_and_replays() {
+    // With mutation off, the child's weight is the exact midparent of the two parents', so the
+    // inheritance is the quantitative-genetics midparent rule and authors no drift of its own.
+    let (mut w, race, seeded) = dawn_band(0xF00D, 2);
+    let (pa, pb) = (seeded[0], seeded[1]);
+    w.set_mate_pref(pa, MatePreference::new(Fixed::from_ratio(1, 2)));
+    w.set_mate_pref(
+        pb,
+        MatePreference::new(Fixed::from_int(-1) + Fixed::from_ratio(1, 2)),
+    );
+    let child = w
+        .birth(
+            &race,
+            pa,
+            pb,
+            &[pa, pb],
+            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        w.mate_pref_of(child).unwrap().distance_weight,
+        Fixed::ZERO,
+        "midparent of +1/2 and -1/2 is zero with mutation off"
+    );
+
+    // With mutation on, the child's weight replays bit for bit under the same seed.
+    let run = || {
+        let (mut w, race, seeded) = dawn_band(0x1234, 2);
+        let (pa, pb) = (seeded[0], seeded[1]);
+        w.set_mate_pref(pa, MatePreference::homophilic());
+        w.set_mate_pref(pb, MatePreference::heterophilic());
+        let child = w
+            .birth(
+                &race,
+                pa,
+                pb,
+                &[pa, pb],
+                Fixed::from_ratio(1, 2),
+                Fixed::from_ratio(1, 8),
+                1,
+            )
+            .unwrap();
+        w.mate_pref_of(child).unwrap().distance_weight
+    };
+    assert_eq!(run(), run(), "same seed, same inherited preference");
 }
 
 #[test]
