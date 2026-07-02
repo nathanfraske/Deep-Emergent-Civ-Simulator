@@ -36,7 +36,9 @@ use civsim_world::{BiomeSet, Coord3, FlatBounded, QuadTree, TileMap, WorldgenPar
 fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
     arg.and_then(|s| {
         if let Some(hex) = s.strip_prefix("0x") {
-            u64::from_str_radix(hex, 16).ok().and_then(|v| v.to_string().parse().ok())
+            u64::from_str_radix(hex, 16)
+                .ok()
+                .and_then(|v| v.to_string().parse().ok())
         } else {
             s.parse().ok()
         }
@@ -82,7 +84,10 @@ fn main() {
     }
 
     // A camera viewport: a 48x18 window at a mid zoom, centred on the world.
-    let cam = Camera::new(Coord3::ground(width / 2, height / 2), depth.saturating_sub(1));
+    let cam = Camera::new(
+        Coord3::ground(width / 2, height / 2),
+        depth.saturating_sub(1),
+    );
     println!(
         "== camera viewport 48x18 at zoom {} centred on ({}, {}) ==",
         cam.zoom,

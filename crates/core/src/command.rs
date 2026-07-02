@@ -323,7 +323,11 @@ mod tests {
 
         let due = q.drain_due(10);
         let got: Vec<&str> = due.iter().map(|(_, v)| *v).collect();
-        assert_eq!(got, vec!["d", "a", "b"], "everything through tick 10, in order");
+        assert_eq!(
+            got,
+            vec!["d", "a", "b"],
+            "everything through tick 10, in order"
+        );
         assert_eq!(q.len(), 1, "the tick-20 event remains");
         assert_eq!(q.pop().unwrap().1, "c");
     }

@@ -274,7 +274,11 @@ mod tests {
         let set = BiomeSet::dev_default();
         assert_eq!(set.glyph(BiomeId(999)), '?');
         assert_eq!(set.name(BiomeId(999)), "?");
-        assert_eq!(set.color(BiomeId(999)), Rgb::new(128, 128, 128), "a neutral grey");
+        assert_eq!(
+            set.color(BiomeId(999)),
+            Rgb::new(128, 128, 128),
+            "a neutral grey"
+        );
     }
 
     #[test]
@@ -282,7 +286,10 @@ mod tests {
         let set = BiomeSet::dev_default();
         let mut seen = std::collections::BTreeSet::new();
         for i in 0..set.len() as u16 {
-            assert!(seen.insert(set.color(BiomeId(i)).pack()), "colours are distinct");
+            assert!(
+                seen.insert(set.color(BiomeId(i)).pack()),
+                "colours are distinct"
+            );
         }
     }
 

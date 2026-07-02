@@ -74,7 +74,12 @@ impl Composition {
     /// the last class takes the rest), so it sums to one exactly with no divide and no product
     /// exceeding the remainder, and the toxin doses are independent draws in `[0, ONE]`. Keyed
     /// on the species and `Phase::GENESIS`, so the composition is reproducible.
-    pub fn genesis(seed: u64, species_id: u64, nutrient_classes: usize, toxin_classes: usize) -> Composition {
+    pub fn genesis(
+        seed: u64,
+        species_id: u64,
+        nutrient_classes: usize,
+        toxin_classes: usize,
+    ) -> Composition {
         let rng = DrawKey::entity(species_id, 0, Phase::GENESIS).rng(seed);
         let mut nutrients = Vec::with_capacity(nutrient_classes);
         let mut remainder = Fixed::ONE;
@@ -141,10 +146,14 @@ pub fn assess(comp: &Composition, phys: &Physiology, caps: &FloorCaps) -> Edibil
 
     // Aggregate dose and tolerance for the safety margin (an applicable tolerance only).
     let dose_aggregate = Fixed::saturating_sum(comp.toxins.iter().copied());
-    let tolerance_aggregate = Fixed::saturating_sum(
-        harm_classes.iter().filter_map(|&(_, t, _)| t),
-    );
-    laws::edibility(net_nutrition, net_harm, tolerance_aggregate, dose_aggregate, caps.margin_cap)
+    let tolerance_aggregate = Fixed::saturating_sum(harm_classes.iter().filter_map(|&(_, t, _)| t));
+    laws::edibility(
+        net_nutrition,
+        net_harm,
+        tolerance_aggregate,
+        dose_aggregate,
+        caps.margin_cap,
+    )
 }
 
 /// A read-time band over the measured tuple, for display and for the agent layer to key its
@@ -186,7 +195,11 @@ mod tests {
         assert!((c.nutrient_total() - Fixed::ONE).abs() <= Fixed::from_ratio(1, 100000));
         // Deterministic.
         assert_eq!(c, Composition::genesis(0xED1B, 3, 5, 3));
-        assert_ne!(c, Composition::genesis(0xED1B, 4, 5, 3), "a different species differs");
+        assert_ne!(
+            c,
+            Composition::genesis(0xED1B, 4, 5, 3),
+            "a different species differs"
+        );
     }
 
     #[test]
@@ -211,19 +224,41 @@ mod tests {
         };
         let ea = assess(&comp, &a, &caps);
         let eb = assess(&comp, &b, &caps);
-        assert!(eb.net_harm > ea.net_harm, "the low-tolerance consumer takes more harm");
-        assert_eq!(verdict(&ea, f(1, 10), f(1, 2)), Verdict::Food, "food to the tolerant one");
-        assert_eq!(verdict(&eb, f(1, 10), f(1, 2)), Verdict::Poison, "poison to the sensitive one");
+        assert!(
+            eb.net_harm > ea.net_harm,
+            "the low-tolerance consumer takes more harm"
+        );
+        assert_eq!(
+            verdict(&ea, f(1, 10), f(1, 2)),
+            Verdict::Food,
+            "food to the tolerant one"
+        );
+        assert_eq!(
+            verdict(&eb, f(1, 10), f(1, 2)),
+            Verdict::Poison,
+            "poison to the sensitive one"
+        );
     }
 
     #[test]
     fn a_not_applicable_tolerance_takes_no_harm() {
         let caps = FloorCaps::dev_default();
-        let comp = Composition { nutrients: vec![Fixed::ONE], toxins: vec![f(9, 10)] };
+        let comp = Composition {
+            nutrients: vec![Fixed::ONE],
+            toxins: vec![f(9, 10)],
+        };
         // No tolerance entry for the toxin class: not-applicable, so zero harm (distinct from
         // a present zero tolerance).
-        let phys = Physiology { requirements: vec![f(5, 10)], tolerances: vec![None], hill: vec![2] };
+        let phys = Physiology {
+            requirements: vec![f(5, 10)],
+            tolerances: vec![None],
+            hill: vec![2],
+        };
         let e = assess(&comp, &phys, &caps);
-        assert_eq!(e.net_harm, Fixed::ZERO, "a not-applicable toxin class does no harm");
+        assert_eq!(
+            e.net_harm,
+            Fixed::ZERO,
+            "a not-applicable toxin class does no harm"
+        );
     }
 }

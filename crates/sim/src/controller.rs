@@ -398,8 +398,8 @@ impl Controller {
                 let hh_row = hh + h * self.hidden;
                 let from_input =
                     (0..self.n_in).map(|i| (self.weights[ih_row + i], input_at(input, i)));
-                let from_hidden = (0..self.hidden)
-                    .map(|j| (self.weights[hh_row + j], input_at(prev_hidden, j)));
+                let from_hidden =
+                    (0..self.hidden).map(|j| (self.weights[hh_row + j], input_at(prev_hidden, j)));
                 new_hidden.push(activate(from_input.chain(from_hidden)));
             }
             let mut out = Vec::with_capacity(self.n_out);
@@ -427,7 +427,9 @@ mod tests {
     use crate::genome::{
         Allele, AlleleState, DominanceMode, GeneDef, GeneEffect, GeneId, Haplotype, SchemeId,
     };
-    use crate::homeostasis::{AffordanceRegistry, HomeostaticRegistry, ENERGY, INGEST, MOVE, WATER};
+    use crate::homeostasis::{
+        AffordanceRegistry, HomeostaticRegistry, ENERGY, INGEST, MOVE, WATER,
+    };
 
     fn layout(hidden: usize) -> ControllerLayout {
         ControllerLayout::new(
@@ -492,7 +494,7 @@ mod tests {
         let c = taxis_controller(&l);
         let reg = HomeostaticRegistry::dev_default();
         let homeo = drained(&reg, 200); // water somewhat below full
-        // Knows of water to the east (unit direction (1, 0)); it is not standing on it.
+                                        // Knows of water to the east (unit direction (1, 0)); it is not standing on it.
         let mut dirs = BTreeMap::new();
         dirs.insert(WATER, (Fixed::ONE, Fixed::ZERO));
         let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
@@ -501,7 +503,10 @@ mod tests {
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
         assert_eq!(d.affordance, MOVE, "away from water, the being moves");
         let (hx, hy) = d.heading.unwrap();
-        assert!(hx > Fixed::ZERO, "the heading points toward the known water (east)");
+        assert!(
+            hx > Fixed::ZERO,
+            "the heading points toward the known water (east)"
+        );
         assert_eq!(hy, Fixed::ZERO, "and not north or south");
     }
 
@@ -517,7 +522,10 @@ mod tests {
         let input = l.build_input(&homeo, &here, &BTreeMap::new());
         let (out, _) = c.evaluate(&input, &[]);
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
-        assert_eq!(d.affordance, INGEST, "on the water and dry, the being drinks rather than wanders");
+        assert_eq!(
+            d.affordance, INGEST,
+            "on the water and dry, the being drinks rather than wanders"
+        );
         assert!(d.activation > Fixed::ZERO, "and it wants to");
     }
 
@@ -531,7 +539,11 @@ mod tests {
         let (out, _) = c.evaluate(&input, &[]);
         // Every output is zero, so the top decision has zero activation: the being idles.
         let d = l.decide(&out, &[MOVE, INGEST]).unwrap();
-        assert_eq!(d.activation, Fixed::ZERO, "a blank controller issues no positive drive");
+        assert_eq!(
+            d.activation,
+            Fixed::ZERO,
+            "a blank controller issues no positive drive"
+        );
     }
 
     #[test]
@@ -546,7 +558,10 @@ mod tests {
         let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
         let (out, _) = c.evaluate(&input, &[]);
         let d = l.decide(&out, &[INGEST]).unwrap(); // only INGEST afforded (a rooted body)
-        assert_eq!(d.affordance, INGEST, "a body that cannot move never decides to move");
+        assert_eq!(
+            d.affordance, INGEST,
+            "a body that cannot move never decides to move"
+        );
     }
 
     #[test]
@@ -571,7 +586,10 @@ mod tests {
         assert_eq!(a_h, b_h, "and the same hidden state");
         // The hidden state carries: a second step from the first step's hidden differs from the first.
         let (c_out, _) = c.evaluate(&input, &a_h);
-        assert_ne!(a_out, c_out, "a recurrent controller's output depends on its carried state");
+        assert_ne!(
+            a_out, c_out,
+            "a recurrent controller's output depends on its carried state"
+        );
     }
 
     #[test]

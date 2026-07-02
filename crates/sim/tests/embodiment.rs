@@ -21,7 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::Fixed;
 use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
-use civsim_sim::body::{apply_insult, Body, BodyParams, DamageModeRegistry, FluidRegistry, Insult, TissueRegistry, BLOOD, CUT};
+use civsim_sim::body::{
+    apply_insult, Body, BodyParams, DamageModeRegistry, FluidRegistry, Insult, TissueRegistry,
+    BLOOD, CUT,
+};
 use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticRegistry, INTEGRITY, MOVE, STRIKE,
@@ -32,9 +35,20 @@ fn plan(mass: (i64, i64), legs: usize, weapons: usize) -> BodyPlan {
         body_mass: Fixed::from_ratio(mass.0, mass.1),
         encephalization: Fixed::from_ratio(1, 2),
         diet_breadth: Fixed::from_ratio(1, 2),
-        weapons: (0..weapons).map(|i| Part { kind: i as u16, development: Fixed::from_ratio(3, 4) }).collect(),
-        covering: Part { kind: 0, development: Fixed::from_ratio(1, 2) },
-        senses: vec![Part { kind: 0, development: Fixed::from_ratio(1, 2) }],
+        weapons: (0..weapons)
+            .map(|i| Part {
+                kind: i as u16,
+                development: Fixed::from_ratio(3, 4),
+            })
+            .collect(),
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
+        senses: vec![Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        }],
         locomotion: (0..legs).map(|_| 1u16).collect(),
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
@@ -62,23 +76,43 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
 
     // Refresh integrity from the body (the derived mirror, design Part 35).
     homeo.set_level(INTEGRITY, body.integrity(&fluids));
-    assert_eq!(homeo.level(INTEGRITY), Fixed::ONE, "a whole body reads full integrity");
+    assert_eq!(
+        homeo.level(INTEGRITY),
+        Fixed::ONE,
+        "a whole body reads full integrity"
+    );
 
     // The integrity input the controller sees (axis index 2 -> input base 4*2 = 8, the level slot).
     let input_before = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
-    assert_eq!(input_before[8], Fixed::ONE, "the percept carries full integrity");
+    assert_eq!(
+        input_before[8],
+        Fixed::ONE,
+        "the percept carries full integrity"
+    );
 
     // Wound the torso.
     let modes = DamageModeRegistry::dev_default();
     let tissues = TissueRegistry::dev_default();
     let torso = body.parts.iter().position(|p| p.name == "torso").unwrap();
-    let insult = Insult { mode: CUT, force: Fixed::from_int(200), contact_area: Fixed::from_ratio(1, 100_000), delivered_energy: Fixed::from_int(1), delta_t: Fixed::ZERO };
+    let insult = Insult {
+        mode: CUT,
+        force: Fixed::from_int(200),
+        contact_area: Fixed::from_ratio(1, 100_000),
+        delivered_energy: Fixed::from_int(1),
+        delta_t: Fixed::ZERO,
+    };
     apply_insult(&mut body, torso, &insult, &modes, &tissues, &params);
 
     homeo.set_level(INTEGRITY, body.integrity(&fluids));
-    assert!(homeo.level(INTEGRITY) < Fixed::ONE, "the wound lowered the integrity reserve");
+    assert!(
+        homeo.level(INTEGRITY) < Fixed::ONE,
+        "the wound lowered the integrity reserve"
+    );
     let input_after = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
-    assert!(input_after[8] < input_before[8], "and the controller's percept now carries the wound");
+    assert!(
+        input_after[8] < input_before[8],
+        "and the controller's percept now carries the wound"
+    );
 }
 
 #[test]
@@ -91,8 +125,14 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
 
     let armed = plan((1, 1), 4, 1); // bears a weapon
     let unarmed = plan((1, 1), 4, 0);
-    assert!(afford.afforded(&armed).contains(&STRIKE), "a body with a weapon affords a strike");
-    assert!(!afford.afforded(&unarmed).contains(&STRIKE), "a weaponless body affords no strike");
+    assert!(
+        afford.afforded(&armed).contains(&STRIKE),
+        "a body with a weapon affords a strike"
+    );
+    assert!(
+        !afford.afforded(&unarmed).contains(&STRIKE),
+        "a weaponless body affords no strike"
+    );
 
     // A controller that drives the strike output high: with strike afforded, it decides to strike.
     // Output layout (canonical id order): move [act,dx,dy], ingest [act], strike [act,dx,dy].
@@ -107,10 +147,16 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
     let input = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new());
     let (out, _) = controller.evaluate(&input, &[]);
     let decision = layout.decide(&out, &afford.afforded(&armed)).unwrap();
-    assert_eq!(decision.affordance, STRIKE, "the controller decides to strike");
+    assert_eq!(
+        decision.affordance, STRIKE,
+        "the controller decides to strike"
+    );
     // Against a body that cannot strike, the same controller falls back to another afforded act.
     let decision2 = layout.decide(&out, &afford.afforded(&unarmed)).unwrap();
-    assert_ne!(decision2.affordance, STRIKE, "a body that cannot strike does not decide to");
+    assert_ne!(
+        decision2.affordance, STRIKE,
+        "a body that cannot strike does not decide to"
+    );
     // MOVE is the lowest-id fallback with zero activation.
     assert_eq!(decision2.affordance, MOVE);
 }

@@ -266,8 +266,16 @@ fn command_application_is_thread_count_independent() {
         .map(|p| p.get())
         .unwrap_or(4);
     assert_eq!(one, run(4), "command application diverged at 4 workers");
-    assert_eq!(one, run(3), "command application diverged at 3 workers (uneven)");
-    assert_eq!(one, run(width), "command application diverged at machine width");
+    assert_eq!(
+        one,
+        run(3),
+        "command application diverged at 3 workers (uneven)"
+    );
+    assert_eq!(
+        one,
+        run(width),
+        "command application diverged at machine width"
+    );
     // The minted spawn ids follow the canonical order, densely from the base.
     let spawn_ids: Vec<u64> = one.iter().filter_map(|(_, id)| *id).collect();
     assert_eq!(spawn_ids.len(), n as usize, "every spawn minted one id");

@@ -168,7 +168,10 @@ impl Homeostasis {
         let mass = body_mass.clamp(Fixed::ZERO, Fixed::ONE);
         let mut reserves = BTreeMap::new();
         for axis in &reg.axes {
-            let cap = axis.capacity_per_mass.checked_mul(mass).unwrap_or(Fixed::ZERO);
+            let cap = axis
+                .capacity_per_mass
+                .checked_mul(mass)
+                .unwrap_or(Fixed::ZERO);
             // A reserve holds [0, cap], starts full, and does not regenerate on its own (rate 0).
             reserves.insert(axis.id, Stock::new(cap, cap, Fixed::ZERO));
         }
@@ -178,18 +181,27 @@ impl Homeostasis {
     /// The current level of an axis as a fraction of its capacity, in `[0, ONE]`, the normalised
     /// read a controller and a view see. An unregistered axis reads as zero.
     pub fn level(&self, axis: HomeostaticAxisId) -> Fixed {
-        self.reserves.get(&axis).map(|s| s.occupancy()).unwrap_or(Fixed::ZERO)
+        self.reserves
+            .get(&axis)
+            .map(|s| s.occupancy())
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// The raw reserve amount of an axis (for intake accounting).
     pub fn amount(&self, axis: HomeostaticAxisId) -> Fixed {
-        self.reserves.get(&axis).map(|s| s.amount()).unwrap_or(Fixed::ZERO)
+        self.reserves
+            .get(&axis)
+            .map(|s| s.amount())
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// The capacity of an axis's reserve (for sizing a fractional intake against a bite yield). An
     /// unregistered axis reads as zero.
     pub fn capacity(&self, axis: HomeostaticAxisId) -> Fixed {
-        self.reserves.get(&axis).map(|s| s.capacity()).unwrap_or(Fixed::ZERO)
+        self.reserves
+            .get(&axis)
+            .map(|s| s.capacity())
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// Set a derived axis's level to a fraction of its capacity, for an axis whose value is sourced
@@ -198,7 +210,10 @@ impl Homeostasis {
     /// axis. The fraction is clamped to `[0, ONE]`.
     pub fn set_level(&mut self, axis: HomeostaticAxisId, fraction: Fixed) {
         if let Some(stock) = self.reserves.get_mut(&axis) {
-            let target = fraction.clamp(Fixed::ZERO, Fixed::ONE).checked_mul(stock.capacity()).unwrap_or(Fixed::ZERO);
+            let target = fraction
+                .clamp(Fixed::ZERO, Fixed::ONE)
+                .checked_mul(stock.capacity())
+                .unwrap_or(Fixed::ZERO);
             let current = stock.amount();
             if target >= current {
                 stock.deposit(target - current);
@@ -218,9 +233,11 @@ impl Homeostasis {
             if let Some(stock) = self.reserves.get_mut(&axis.id) {
                 let cap = stock.capacity();
                 // Drain is a fraction of capacity: (base + exertion_coupling * exertion) * capacity.
-                let frac = axis
-                    .base_drain
-                    .saturating_add(axis.exertion_drain.checked_mul(exertion).unwrap_or(Fixed::ZERO));
+                let frac = axis.base_drain.saturating_add(
+                    axis.exertion_drain
+                        .checked_mul(exertion)
+                        .unwrap_or(Fixed::ZERO),
+                );
                 let draw = frac.checked_mul(cap).unwrap_or(Fixed::ZERO);
                 stock.step(draw);
             }
@@ -233,7 +250,10 @@ impl Homeostasis {
     /// axis (net nutrition for energy, water content for water; R-PHYS-BIO, `crate::edibility`), so
     /// the physiology stays floor-agnostic and the caller resolves what a bite is worth.
     pub fn ingest(&mut self, axis: HomeostaticAxisId, amount: Fixed) -> Fixed {
-        self.reserves.get_mut(&axis).map(|s| s.deposit(amount)).unwrap_or(Fixed::ZERO)
+        self.reserves
+            .get_mut(&axis)
+            .map(|s| s.deposit(amount))
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// Whether every reserve is above its death floor. A body fails the moment one axis falls
@@ -247,7 +267,10 @@ impl Homeostasis {
     pub fn dead_axis(&self, reg: &HomeostaticRegistry) -> Option<HomeostaticAxisId> {
         for axis in &reg.axes {
             if let Some(stock) = self.reserves.get(&axis.id) {
-                let floor = axis.death_floor.checked_mul(stock.capacity()).unwrap_or(Fixed::ZERO);
+                let floor = axis
+                    .death_floor
+                    .checked_mul(stock.capacity())
+                    .unwrap_or(Fixed::ZERO);
                 if stock.amount() <= floor {
                     return Some(axis.id);
                 }
@@ -395,8 +418,14 @@ fn affords(body: &BodyPlan, a: &AffordanceDef) -> bool {
             // until it is (the honest limit, noted in the design pass).
             body.locomotion.iter().any(|&m| m != ROOTED_MODE)
         }
-        MorphCategory::Weapon => body.weapons.iter().any(|p| p.development >= a.min_development),
-        MorphCategory::Sense => body.senses.iter().any(|p| p.development >= a.min_development),
+        MorphCategory::Weapon => body
+            .weapons
+            .iter()
+            .any(|p| p.development >= a.min_development),
+        MorphCategory::Sense => body
+            .senses
+            .iter()
+            .any(|p| p.development >= a.min_development),
     }
 }
 
@@ -411,8 +440,14 @@ mod tests {
             encephalization: Fixed::from_ratio(1, 2),
             diet_breadth: Fixed::from_ratio(1, 2),
             weapons: vec![],
-            covering: Part { kind: 0, development: Fixed::from_ratio(1, 2) },
-            senses: vec![Part { kind: 1, development: Fixed::from_ratio(1, 2) }],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![Part {
+                kind: 1,
+                development: Fixed::from_ratio(1, 2),
+            }],
             locomotion,
             temperament: Temperament {
                 boldness: Fixed::from_ratio(1, 2),
@@ -439,7 +474,10 @@ mod tests {
         let big = Homeostasis::new(&reg, Fixed::ONE);
         let small = Homeostasis::new(&reg, Fixed::from_ratio(1, 4));
         // Both start full (occupancy ONE), but the raw amount the big body holds is greater.
-        assert!(big.amount(ENERGY) > small.amount(ENERGY), "size buys a larger energy reserve");
+        assert!(
+            big.amount(ENERGY) > small.amount(ENERGY),
+            "size buys a larger energy reserve"
+        );
     }
 
     #[test]
@@ -468,7 +506,10 @@ mod tests {
             resting.metabolize(&reg, Fixed::ZERO);
             working.metabolize(&reg, Fixed::ONE);
         }
-        assert!(working.level(ENERGY) < resting.level(ENERGY), "working burns energy faster");
+        assert!(
+            working.level(ENERGY) < resting.level(ENERGY),
+            "working burns energy faster"
+        );
     }
 
     #[test]
@@ -498,7 +539,11 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(dead_of, Some(WATER), "it dies of thirst while its energy is kept full");
+        assert_eq!(
+            dead_of,
+            Some(WATER),
+            "it dies of thirst while its energy is kept full"
+        );
     }
 
     #[test]
@@ -506,7 +551,10 @@ mod tests {
         let reg = AffordanceRegistry::dev_default();
         let rooted = body((1, 2), vec![ROOTED_MODE]);
         let afforded = reg.afforded(&rooted);
-        assert!(!afforded.contains(&MOVE), "a rooted body affords no movement");
+        assert!(
+            !afforded.contains(&MOVE),
+            "a rooted body affords no movement"
+        );
         assert!(afforded.contains(&INGEST), "but it still takes matter in");
         assert!(!reg.affords_id(&rooted, MOVE));
     }
@@ -516,7 +564,10 @@ mod tests {
         let reg = AffordanceRegistry::dev_default();
         let walking_tree = body((1, 2), vec![3]); // an autotroph body with a mobile organ
         let afforded = reg.afforded(&walking_tree);
-        assert!(afforded.contains(&MOVE), "a body with a locomotion organ can move");
+        assert!(
+            afforded.contains(&MOVE),
+            "a body with a locomotion organ can move"
+        );
         assert!(afforded.contains(&INGEST));
     }
 

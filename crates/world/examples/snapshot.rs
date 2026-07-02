@@ -36,7 +36,9 @@ use civsim_world::{BiomeSet, Coord3, FlatBounded, QuadTree, Rgb, TileMap, Worldg
 fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
     arg.and_then(|s| {
         if let Some(hex) = s.strip_prefix("0x") {
-            u64::from_str_radix(hex, 16).ok().and_then(|v| v.to_string().parse().ok())
+            u64::from_str_radix(hex, 16)
+                .ok()
+                .and_then(|v| v.to_string().parse().ok())
         } else {
             s.parse().ok()
         }
@@ -46,7 +48,10 @@ fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    let path = argv.get(1).cloned().unwrap_or_else(|| "world.ppm".to_string());
+    let path = argv
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "world.ppm".to_string());
     let seed: u64 = parse(argv.get(2), 0xEA27);
     let width: i32 = parse(argv.get(3), 96);
     let height: i32 = parse(argv.get(4), 64);
@@ -77,5 +82,8 @@ fn main() {
     std::fs::File::create(&path)
         .and_then(|mut f| f.write_all(&out))
         .expect("write the PPM snapshot");
-    println!("wrote {path} ({px_w}x{px_h}, map hash {:032x})", map.state_hash());
+    println!(
+        "wrote {path} ({px_w}x{px_h}, map hash {:032x})",
+        map.state_hash()
+    );
 }

@@ -267,11 +267,26 @@ mod tests {
 
     #[test]
     fn chunk_of_floors_into_the_right_block() {
-        assert_eq!(ChunkCoord::of(Coord3::ground(0, 0)), ChunkCoord { cx: 0, cy: 0 });
-        assert_eq!(ChunkCoord::of(Coord3::ground(CHUNK - 1, 0)), ChunkCoord { cx: 0, cy: 0 });
-        assert_eq!(ChunkCoord::of(Coord3::ground(CHUNK, 0)), ChunkCoord { cx: 1, cy: 0 });
-        assert_eq!(ChunkCoord::of(Coord3::ground(-1, 0)), ChunkCoord { cx: -1, cy: 0 });
-        assert_eq!(ChunkCoord { cx: 2, cy: 3 }.origin(), Coord3::ground(2 * CHUNK, 3 * CHUNK));
+        assert_eq!(
+            ChunkCoord::of(Coord3::ground(0, 0)),
+            ChunkCoord { cx: 0, cy: 0 }
+        );
+        assert_eq!(
+            ChunkCoord::of(Coord3::ground(CHUNK - 1, 0)),
+            ChunkCoord { cx: 0, cy: 0 }
+        );
+        assert_eq!(
+            ChunkCoord::of(Coord3::ground(CHUNK, 0)),
+            ChunkCoord { cx: 1, cy: 0 }
+        );
+        assert_eq!(
+            ChunkCoord::of(Coord3::ground(-1, 0)),
+            ChunkCoord { cx: -1, cy: 0 }
+        );
+        assert_eq!(
+            ChunkCoord { cx: 2, cy: 3 }.origin(),
+            Coord3::ground(2 * CHUNK, 3 * CHUNK)
+        );
     }
 
     #[test]
@@ -291,7 +306,11 @@ mod tests {
         let b = QuadTree::build(&map(0xEA27, 48, 24));
         assert_eq!(a.state_hash(), b.state_hash());
         let c = QuadTree::build(&map(0x1234, 48, 24));
-        assert_ne!(a.state_hash(), c.state_hash(), "a different seed, a different tree");
+        assert_ne!(
+            a.state_hash(),
+            c.state_hash(),
+            "a different seed, a different tree"
+        );
     }
 
     #[test]
@@ -312,7 +331,10 @@ mod tests {
         // is partly off the 24-high world; the node covering only off-world tiles is None.
         let t = QuadTree::build(&map(0xEA27, 48, 24));
         // Level 1 node (0,1) covers y in [32,64): entirely below the 24-tall world.
-        assert!(t.node(1, 0, 1).is_none(), "a fully off-world node has no summary");
+        assert!(
+            t.node(1, 0, 1).is_none(),
+            "a fully off-world node has no summary"
+        );
         assert!(t.node(1, 0, 0).is_some(), "an in-world node is summarised");
     }
 
@@ -326,13 +348,17 @@ mod tests {
         let mut counts: BTreeMap<BiomeId, u32> = BTreeMap::new();
         for y in 0..side {
             for x in 0..side {
-                *counts.entry(m.tile(Coord3::ground(x, y)).unwrap().biome).or_insert(0) += 1;
+                *counts
+                    .entry(m.tile(Coord3::ground(x, y)).unwrap().biome)
+                    .or_insert(0) += 1;
             }
         }
-        let hand = counts.iter().fold(None, |acc: Option<(BiomeId, u32)>, (&id, &n)| match acc {
-            Some((_, bn)) if n <= bn => acc,
-            _ => Some((id, n)),
-        });
+        let hand = counts
+            .iter()
+            .fold(None, |acc: Option<(BiomeId, u32)>, (&id, &n)| match acc {
+                Some((_, bn)) if n <= bn => acc,
+                _ => Some((id, n)),
+            });
         assert_eq!(t.node(1, 0, 0).unwrap().dominant, hand.unwrap().0);
     }
 }

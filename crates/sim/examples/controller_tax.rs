@@ -56,7 +56,9 @@ fn main() {
     let (n_in, n_out) = (base.n_in(), base.n_out());
 
     println!("Compute tax of the controller representation (R-BEHAVIOR-EVOLVE).");
-    println!("Dev registry: {n_in} inputs, {n_out} outputs. Baseline is the reaction norm (h = 0).\n");
+    println!(
+        "Dev registry: {n_in} inputs, {n_out} outputs. Baseline is the reaction norm (h = 0).\n"
+    );
 
     // A representative percept and pseudo-weights, held fixed across widths so only the width varies.
     let mut here = BTreeSet::new();
@@ -139,11 +141,19 @@ fn main() {
     // --- World-scale extrapolation of the per-tick evaluation cost. ---
     println!("Per-tick evaluation at world scale (measured eval ns x beings), reaction norm vs a small net:");
     let eval_h0 = time_eval(&homeo, &afford, 0, &homeo_state, &here, &dirs);
-    for (label, h) in [("reaction norm h=0", 0usize), ("recurrent h=4", 4), ("recurrent h=8", 8), ("recurrent h=16", 16)] {
+    for (label, h) in [
+        ("reaction norm h=0", 0usize),
+        ("recurrent h=4", 4),
+        ("recurrent h=8", 8),
+        ("recurrent h=16", 16),
+    ] {
         let ns = time_eval(&homeo, &afford, h, &homeo_state, &here, &dirs);
         for &n in &[10_000usize, 100_000, 1_000_000] {
             let ms = ns * n as f64 / 1e6;
-            println!("  {label:<18} {n:>9} beings: {ms:>8.2} ms/tick  ({:.1}x baseline)", ns / eval_h0);
+            println!(
+                "  {label:<18} {n:>9} beings: {ms:>8.2} ms/tick  ({:.1}x baseline)",
+                ns / eval_h0
+            );
         }
     }
 
@@ -182,7 +192,9 @@ fn time_eval(
 ) -> f64 {
     let layout = ControllerLayout::new(homeo, afford, h);
     let wc = weight_count(layout.n_in(), layout.n_out(), h);
-    let weights: Vec<Fixed> = (0..wc).map(|k| Fixed::from_ratio((k as i64 % 7) - 3, 5)).collect();
+    let weights: Vec<Fixed> = (0..wc)
+        .map(|k| Fixed::from_ratio((k as i64 % 7) - 3, 5))
+        .collect();
     let controller = Controller::from_weights(layout.n_in(), layout.n_out(), h, weights);
     let input = layout.build_input(homeo_state, here, dirs);
     let mut hidden = controller.fresh_hidden();

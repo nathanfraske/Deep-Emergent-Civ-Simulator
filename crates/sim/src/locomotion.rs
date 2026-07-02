@@ -199,7 +199,13 @@ pub struct Walker {
 impl Walker {
     /// A walker placed at the centre of a tile with the given reserves and controller, no knowledge
     /// yet: it has seen nothing and must perceive or explore to learn the world.
-    pub fn new(id: StableId, tile: Coord3, body: BodyPlan, homeostasis: Homeostasis, controller: Controller) -> Walker {
+    pub fn new(
+        id: StableId,
+        tile: Coord3,
+        body: BodyPlan,
+        homeostasis: Homeostasis,
+        controller: Controller,
+    ) -> Walker {
         let hidden = controller.fresh_hidden();
         Walker {
             id,
@@ -271,7 +277,8 @@ pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionPara
     let size = body.body_mass.clamp(Fixed::ZERO, Fixed::ONE).sqrt();
     // Activity factor between the reserved floor and one.
     let activity = p.activity_floor
-        + (Fixed::ONE - p.activity_floor).mul(body.temperament.activity.clamp(Fixed::ZERO, Fixed::ONE));
+        + (Fixed::ONE - p.activity_floor)
+            .mul(body.temperament.activity.clamp(Fixed::ZERO, Fixed::ONE));
     // Terrain divisor: 1 + terrain_penalty * (cost - 1), never below one.
     let over = if terrain_cost > Fixed::ONE {
         terrain_cost - Fixed::ONE
@@ -280,7 +287,11 @@ pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionPara
     };
     let divisor = Fixed::ONE + p.terrain_penalty.mul(over);
     let raw = p.base_speed.mul(size).mul(activity);
-    let speed = if divisor > Fixed::ZERO { raw.div(divisor) } else { raw };
+    let speed = if divisor > Fixed::ZERO {
+        raw.div(divisor)
+    } else {
+        raw
+    };
     speed.clamp(Fixed::ZERO, p.base_speed)
 }
 
@@ -356,7 +367,8 @@ pub fn step<T: Terrain>(
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
         perceive(w, resources, p.sense_range);
         let here = w.coord();
-        let here_axes: BTreeSet<HomeostaticAxisId> = resources.axes_here(here).into_iter().collect();
+        let here_axes: BTreeSet<HomeostaticAxisId> =
+            resources.axes_here(here).into_iter().collect();
         let dirs = source_dirs(w);
         let input = layout.build_input(&w.homeostasis, &here_axes, &dirs);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
@@ -462,13 +474,7 @@ fn explore<T: Terrain>(
 /// Step a walker one step of `speed` along a heading vector, normalising the heading and entering
 /// only a passable tile. Returns whether it moved. A blocked step holds the being in place (routing
 /// is Part 13, future).
-fn walk_dir<T: Terrain>(
-    w: &mut Walker,
-    hx: Fixed,
-    hy: Fixed,
-    speed: Fixed,
-    terrain: &T,
-) -> bool {
+fn walk_dir<T: Terrain>(w: &mut Walker, hx: Fixed, hy: Fixed, speed: Fixed, terrain: &T) -> bool {
     let mag = (hx.mul(hx) + hy.mul(hy)).sqrt();
     if mag <= Fixed::ZERO {
         return false;
@@ -562,7 +568,10 @@ mod tests {
             encephalization: Fixed::from_ratio(1, 2),
             diet_breadth: Fixed::from_ratio(1, 2),
             weapons: vec![],
-            covering: Part { kind: 0, development: Fixed::from_ratio(1, 2) },
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
             senses: vec![],
             locomotion: vec![1], // a mobile mode (not the rooted mark 0), so it can walk
             temperament: Temperament {
@@ -592,7 +601,16 @@ mod tests {
 
     /// A walker with a taxis-for-water controller over the water-only registry, pre-drained so it is
     /// thirsty enough to drink on arrival.
-    fn water_walker(id: u64, tile: Coord3, body: BodyPlan) -> (Walker, HomeostaticRegistry, ControllerLayout, AffordanceRegistry) {
+    fn water_walker(
+        id: u64,
+        tile: Coord3,
+        body: BodyPlan,
+    ) -> (
+        Walker,
+        HomeostaticRegistry,
+        ControllerLayout,
+        AffordanceRegistry,
+    ) {
         let reg = water_reg();
         let afford = AffordanceRegistry::dev_default();
         let l = layout_for(&reg);
@@ -601,7 +619,12 @@ mod tests {
         for _ in 0..120 {
             homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty
         }
-        (Walker::new(StableId(id), tile, body, homeo, c), reg, l, afford)
+        (
+            Walker::new(StableId(id), tile, body, homeo, c),
+            reg,
+            l,
+            afford,
+        )
     }
 
     #[test]
@@ -616,7 +639,11 @@ mod tests {
         for t in 0..40 {
             step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
         }
-        assert_eq!(ws[0].coord(), start, "a rooted body stays put whatever its kingdom");
+        assert_eq!(
+            ws[0].coord(),
+            start,
+            "a rooted body stays put whatever its kingdom"
+        );
     }
 
     #[test]
@@ -631,7 +658,11 @@ mod tests {
         for t in 0..60 {
             step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
         }
-        assert_ne!(ws[0].coord(), start, "a walking tree moves: mobility is the body, not the kingdom");
+        assert_ne!(
+            ws[0].coord(),
+            start,
+            "a walking tree moves: mobility is the body, not the kingdom"
+        );
     }
 
     #[test]
@@ -650,13 +681,26 @@ mod tests {
                 reached = true;
                 // give it a few ticks to drink
                 for t2 in t + 1..t + 6 {
-                    step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t2);
+                    step(
+                        &mut ws,
+                        &reg,
+                        &l,
+                        &afford,
+                        &OpenGround,
+                        &field,
+                        &p,
+                        SEED,
+                        t2,
+                    );
                 }
                 break;
             }
         }
         assert!(reached, "the being walked to the water it knew of");
-        assert!(ws[0].homeostasis.level(WATER) > thirst_before, "and drank, restoring its water");
+        assert!(
+            ws[0].homeostasis.level(WATER) > thirst_before,
+            "and drank, restoring its water"
+        );
     }
 
     #[test]
@@ -668,13 +712,23 @@ mod tests {
         let mut field = ResourceField::new();
         field.add(WATER, Coord3::ground(40, 0));
         let p = LocomotionParams::dev_default();
-        assert!(!ws[0].known.contains_key(&WATER), "it starts knowing of no water");
+        assert!(
+            !ws[0].known.contains_key(&WATER),
+            "it starts knowing of no water"
+        );
         step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, 0);
         assert!(
-            ws[0].known.get(&WATER).map(|s| s.is_empty()).unwrap_or(true),
+            ws[0]
+                .known
+                .get(&WATER)
+                .map(|s| s.is_empty())
+                .unwrap_or(true),
             "it did not learn of water outside its senses"
         );
-        assert!(ws[0].coord().x < 5, "it did not make a beeline for water it cannot know about");
+        assert!(
+            ws[0].coord().x < 5,
+            "it did not make a beeline for water it cannot know about"
+        );
     }
 
     #[test]
@@ -702,7 +756,10 @@ mod tests {
                 break;
             }
         }
-        assert!(learned, "the being discovered water by exploring, not by reading the map");
+        assert!(
+            learned,
+            "the being discovered water by exploring, not by reading the map"
+        );
         assert!(drank, "and having found it, drank");
     }
 
@@ -716,8 +773,14 @@ mod tests {
         let p = LocomotionParams::dev_default();
         step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, 0);
         let known = ws[0].known.get(&WATER).cloned().unwrap_or_default();
-        assert!(known.contains(&Coord3::ground(2, 0)), "it perceived the near water");
-        assert!(!known.contains(&Coord3::ground(40, 0)), "it did not perceive the far water");
+        assert!(
+            known.contains(&Coord3::ground(2, 0)),
+            "it perceived the near water"
+        );
+        assert!(
+            !known.contains(&Coord3::ground(40, 0)),
+            "it did not perceive the far water"
+        );
     }
 
     #[test]
@@ -731,7 +794,10 @@ mod tests {
         for t in 0..80 {
             step(&mut ws, &reg, &l, &afford, &Walled, &field, &p, SEED, t);
         }
-        assert!(ws[0].coord().x < 5, "the wall stops the straight-line mover short of the water");
+        assert!(
+            ws[0].coord().x < 5,
+            "the wall stops the straight-line mover short of the water"
+        );
     }
 
     #[test]
@@ -757,9 +823,18 @@ mod tests {
             for t in 0..80 {
                 step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
             }
-            (ws[0].x.to_bits(), ws[0].y.to_bits(), ws[1].x.to_bits(), ws[1].y.to_bits())
+            (
+                ws[0].x.to_bits(),
+                ws[0].y.to_bits(),
+                ws[1].x.to_bits(),
+                ws[1].y.to_bits(),
+            )
         };
-        assert_eq!(run(), run(), "the same setup, including exploration, replays bit for bit");
+        assert_eq!(
+            run(),
+            run(),
+            "the same setup, including exploration, replays bit for bit"
+        );
     }
 
     #[test]
@@ -771,7 +846,13 @@ mod tests {
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = taxis_controller(&l, 4); // water block starts at input 4 in the two-axis layout
         let homeo = Homeostasis::new(&reg, Fixed::ONE);
-        let mut ws = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body(), homeo, c)];
+        let mut ws = vec![Walker::new(
+            StableId(1),
+            Coord3::ground(0, 0),
+            mobile_body(),
+            homeo,
+            c,
+        )];
         let field = ResourceField::new(); // barren
         let p = LocomotionParams::dev_default();
         let mut died_at = None;
@@ -796,7 +877,10 @@ mod tests {
         big.temperament.activity = Fixed::ONE;
         let vs = locomotion_speed(&small, Fixed::ONE, &p);
         let vb = locomotion_speed(&big, Fixed::ONE, &p);
-        assert!(vb > vs, "the larger, more active body has the greater ground speed");
+        assert!(
+            vb > vs,
+            "the larger, more active body has the greater ground speed"
+        );
     }
 
     #[test]
@@ -818,14 +902,27 @@ mod tests {
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = Controller::zeros(&l);
         let homeo = Homeostasis::new(&reg, Fixed::ONE);
-        let mut ws = vec![Walker::new(StableId(1), Coord3::ground(0, 0), mobile_body(), homeo, c)];
+        let mut ws = vec![Walker::new(
+            StableId(1),
+            Coord3::ground(0, 0),
+            mobile_body(),
+            homeo,
+            c,
+        )];
         let field = ResourceField::new();
         let p = LocomotionParams::dev_default();
         for t in 0..10 {
             step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
         }
-        assert!(ws[0].alive, "a two-axis being steps without dying over a short unfed horizon");
-        assert_eq!(reg.axes.len(), 2, "the dev registry carries both energy and water axes");
+        assert!(
+            ws[0].alive,
+            "a two-axis being steps without dying over a short unfed horizon"
+        );
+        assert_eq!(
+            reg.axes.len(),
+            2,
+            "the dev registry carries both energy and water axes"
+        );
         let _ = (ENERGY, WATER);
     }
 }

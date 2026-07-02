@@ -193,7 +193,11 @@ mod tests {
         let d2 = lin.speciate(root, 2).unwrap();
         assert_eq!(lin.parent(d1), Some(root));
         assert_eq!(lin.children(root), &[d1, d2]);
-        assert_eq!(lin.speciate(SpeciesId(999), 9), None, "unknown parent is rejected");
+        assert_eq!(
+            lin.speciate(SpeciesId(999), 9),
+            None,
+            "unknown parent is rejected"
+        );
     }
 
     #[test]
@@ -236,9 +240,14 @@ mod tests {
             let b = lin.speciate(a, 11).unwrap();
             lin.speciate(b, 12);
             lin.found(13);
-            lin.ids().map(|id| (id, *lin.get(id).unwrap(), lin.parent(id).map(|p| p.0)))
+            lin.ids()
+                .map(|id| (id, *lin.get(id).unwrap(), lin.parent(id).map(|p| p.0)))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(build(), build(), "a deterministic epoch builds a reproducible phylogeny");
+        assert_eq!(
+            build(),
+            build(),
+            "a deterministic epoch builds a reproducible phylogeny"
+        );
     }
 }

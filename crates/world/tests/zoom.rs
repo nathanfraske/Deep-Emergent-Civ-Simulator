@@ -36,8 +36,16 @@ fn world(seed: u64, w: i32, h: i32) -> (TileMap, QuadTree, BiomeSet) {
 fn the_same_seed_reproduces_the_whole_pipeline() {
     let (map_a, tree_a, _b) = world(0xC117, 96, 64);
     let (map_b, tree_b, _b2) = world(0xC117, 96, 64);
-    assert_eq!(map_a.state_hash(), map_b.state_hash(), "the map is deterministic");
-    assert_eq!(tree_a.state_hash(), tree_b.state_hash(), "the tree is deterministic");
+    assert_eq!(
+        map_a.state_hash(),
+        map_b.state_hash(),
+        "the map is deterministic"
+    );
+    assert_eq!(
+        tree_a.state_hash(),
+        tree_b.state_hash(),
+        "the tree is deterministic"
+    );
 }
 
 #[test]
@@ -63,7 +71,11 @@ fn the_zoom_ladder_runs_from_one_glyph_to_per_tile() {
         prev = rows;
     }
     let deepest = whole_map_frame(&tree, &biomes, tree.depth());
-    assert_eq!(deepest.lines().count(), 64, "the deepest overview has a row per tile row");
+    assert_eq!(
+        deepest.lines().count(),
+        64,
+        "the deepest overview has a row per tile row"
+    );
 }
 
 #[test]
@@ -73,5 +85,9 @@ fn the_camera_pans_and_replays_bit_identically() {
     let frame = cam.frame(&tree, &biomes, 24, 12);
     assert_eq!(frame.lines().count(), 12);
     assert!(frame.lines().all(|l| l.chars().count() == 24));
-    assert_eq!(frame, cam.frame(&tree, &biomes, 24, 12), "a view is a pure read");
+    assert_eq!(
+        frame,
+        cam.frame(&tree, &biomes, 24, 12),
+        "a view is a pure read"
+    );
 }

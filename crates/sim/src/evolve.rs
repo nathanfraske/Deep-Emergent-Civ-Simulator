@@ -143,7 +143,9 @@ pub fn random_controller_genome(
     seed: u64,
     id: u64,
 ) -> Genome {
-    let rng = DrawKey::entity(id, 0, Phase::CONTROLLER).slot(SLOT_INIT).rng(seed);
+    let rng = DrawKey::entity(id, 0, Phase::CONTROLLER)
+        .slot(SLOT_INIT)
+        .rng(seed);
     let spread = params.init_spread;
     let alleles = (0..layout.weight_count())
         .map(|k| {
@@ -189,7 +191,8 @@ pub fn mutate(
                     .rng(seed)
                     .unit_fixed(0);
                 // u in [0, ONE) -> [-step, step).
-                let delta = u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
+                let delta =
+                    u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
                 allele.additive += delta;
             }
         }
@@ -314,7 +317,13 @@ fn episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i3
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
     let homeo = Homeostasis::new(&reg, Fixed::ONE);
-    let mut walker = Walker::new(StableId(1), Coord3::ground(0, 0), scoring_body(), homeo, controller.clone());
+    let mut walker = Walker::new(
+        StableId(1),
+        Coord3::ground(0, 0),
+        scoring_body(),
+        homeo,
+        controller.clone(),
+    );
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 3, 7, 2) {
         field.add(WATER, c);
@@ -324,7 +333,9 @@ fn episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i3
     let mut ws = vec![walker];
     let mut survived = 0u32;
     for t in 0..ticks {
-        locomotion::step(&mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64);
+        locomotion::step(
+            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+        );
         if !ws[0].alive {
             break;
         }
@@ -369,7 +380,12 @@ fn dawn_reg() -> HomeostaticRegistry {
 /// One directional episode of the full-episode (dawn) scorer: the water band lies in `dir`, near but
 /// outside the being's initial perception, and the being does NOT know of it, so it must explore to
 /// discover it before foraging. Deterministic and seed-keyed; returns ticks survived.
-fn full_episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i32, i32)) -> u32 {
+fn full_episode_survival_dir(
+    controller: &Controller,
+    ticks: u32,
+    seed: u64,
+    dir: (i32, i32),
+) -> u32 {
     let reg = dawn_reg();
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
@@ -378,12 +394,20 @@ fn full_episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir
     for c in scoring_water_cells(dir, 6, 9, 1) {
         field.add(WATER, c);
     }
-    let walker = Walker::new(StableId(1), Coord3::ground(0, 0), scoring_body(), homeo, controller.clone());
+    let walker = Walker::new(
+        StableId(1),
+        Coord3::ground(0, 0),
+        scoring_body(),
+        homeo,
+        controller.clone(),
+    );
     let p = LocomotionParams::dev_default();
     let mut ws = vec![walker];
     let mut survived = 0u32;
     for t in 0..ticks {
-        locomotion::step(&mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64);
+        locomotion::step(
+            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+        );
         if !ws[0].alive {
             break;
         }
@@ -403,7 +427,8 @@ pub fn full_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> 
     let set = scoring_set(seed);
     let mut total = 0u64;
     for (i, &dir) in set.iter().enumerate() {
-        total += full_episode_survival_dir(controller, ticks, seed ^ SCORING_DIR_SALT[i], dir) as u64;
+        total +=
+            full_episode_survival_dir(controller, ticks, seed ^ SCORING_DIR_SALT[i], dir) as u64;
     }
     (total / set.len() as u64) as u32
 }
@@ -465,7 +490,10 @@ pub fn evolve(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> Ev
         // index (deterministic).
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         let keep = (pop.len() / 2).max(1);
-        let survivors: Vec<Genome> = scored[..keep].iter().map(|&(_, i)| pop[i].clone()).collect();
+        let survivors: Vec<Genome> = scored[..keep]
+            .iter()
+            .map(|&(_, i)| pop[i].clone())
+            .collect();
 
         // Next generation: the survivors (elitism), then a bounded mutant of each until the
         // population is refilled.
@@ -587,8 +615,14 @@ mod tests {
         let blank = Controller::zeros(&l);
         let fit_good = episode_survival(&good, 200, 0xF00D);
         let fit_blank = episode_survival(&blank, 200, 0xF00D);
-        assert!(fit_good > fit_blank, "the forager outlives the blank controller ({fit_good} vs {fit_blank})");
-        assert!(fit_good >= 190, "the competent forager survives almost to the cap ({fit_good})");
+        assert!(
+            fit_good > fit_blank,
+            "the forager outlives the blank controller ({fit_good} vs {fit_blank})"
+        );
+        assert!(
+            fit_good >= 190,
+            "the competent forager survives almost to the cap ({fit_good})"
+        );
     }
 
     #[test]
@@ -620,7 +654,10 @@ mod tests {
             last.to_f64_lossy()
         );
         let best_last = *report.best_fitness.last().unwrap();
-        assert!(best_last >= 190, "an evolved lineage survives almost to the cap ({best_last})");
+        assert!(
+            best_last >= 190,
+            "an evolved lineage survives almost to the cap ({best_last})"
+        );
     }
 
     #[test]
@@ -642,7 +679,10 @@ mod tests {
             .iter()
             .map(|g| {
                 let c = Controller::express(&genes, g, &l);
-                (g.clone(), episode_survival(&c, params.episode_ticks, seed ^ 0xE0))
+                (
+                    g.clone(),
+                    episode_survival(&c, params.episode_ticks, seed ^ 0xE0),
+                )
             })
             .collect();
         let best = scored.iter().max_by_key(|(_, f)| *f).unwrap();
@@ -659,7 +699,10 @@ mod tests {
                 (seed ^ 0xE0) ^ SCORING_DIR_SALT[i],
                 dir,
             );
-            assert!(s >= 190, "the evolved being survives water lying {dir:?} ({s} ticks)");
+            assert!(
+                s >= 190,
+                "the evolved being survives water lying {dir:?} ({s} ticks)"
+            );
         }
     }
 
@@ -693,7 +736,9 @@ mod tests {
             let per: Vec<u32> = set
                 .iter()
                 .enumerate()
-                .map(|(i, &dir)| episode_survival_dir(&good, 200, 0xF00D ^ SCORING_DIR_SALT[i], dir))
+                .map(|(i, &dir)| {
+                    episode_survival_dir(&good, 200, 0xF00D ^ SCORING_DIR_SALT[i], dir)
+                })
                 .collect();
             assert!(
                 per.iter().all(|&s| s >= 190),
@@ -717,11 +762,23 @@ mod tests {
         let good = competent(&l);
         let horiz = horizontal_only(&l);
         // It would have passed an east-only scorer: full survival following dir_x, either sign.
-        assert!(episode_survival_dir(&horiz, 200, 0xF00D, (1, 0)) >= 190, "the overfit thrives east");
-        assert!(episode_survival_dir(&horiz, 200, 0xF00D, (-1, 0)) >= 190, "and west");
+        assert!(
+            episode_survival_dir(&horiz, 200, 0xF00D, (1, 0)) >= 190,
+            "the overfit thrives east"
+        );
+        assert!(
+            episode_survival_dir(&horiz, 200, 0xF00D, (-1, 0)) >= 190,
+            "and west"
+        );
         // But it is blind to the directions the old scorer never tested.
-        assert!(episode_survival_dir(&horiz, 200, 0xF00D, (0, 1)) <= 100, "it starves north");
-        assert!(episode_survival_dir(&horiz, 200, 0xF00D, (0, -1)) <= 100, "and south");
+        assert!(
+            episode_survival_dir(&horiz, 200, 0xF00D, (0, 1)) <= 100,
+            "it starves north"
+        );
+        assert!(
+            episode_survival_dir(&horiz, 200, 0xF00D, (0, -1)) <= 100,
+            "and south"
+        );
         // So the aggregate separates them, the distinction the east-only scorer could not make.
         let good_mean = episode_survival(&good, 200, 0xF00D);
         let horiz_mean = episode_survival(&horiz, 200, 0xF00D);
@@ -742,14 +799,22 @@ mod tests {
         for seed in 0..2000u64 {
             let set = scoring_set(seed);
             let sum = set.iter().fold((0i32, 0i32), |a, d| (a.0 + d.0, a.1 + d.1));
-            assert_eq!(sum, (0, 0), "the scored set sums to zero (no favoured direction)");
+            assert_eq!(
+                sum,
+                (0, 0),
+                "the scored set sums to zero (no favoured direction)"
+            );
             let len2 = |d: (i32, i32)| d.0 * d.0 + d.1 * d.1;
             assert!(
                 set.iter().all(|&d| len2(d) == len2(set[0])),
                 "every direction of the set is equidistant ({set:?})"
             );
             // Determinism: the same seed always yields the same set.
-            assert_eq!(scoring_set(seed), set, "the set is a pure function of the seed");
+            assert_eq!(
+                scoring_set(seed),
+                set,
+                "the set is a pure function of the seed"
+            );
             bases_seen.insert(set[0]);
         }
         assert_eq!(
@@ -769,14 +834,22 @@ mod tests {
         let blank = Controller::zeros(&l);
         let sel_strength = Fixed::from_ratio(1, 5);
         let coeff = homeostatic_coefficient(&good, &blank, 200, sel_strength, 0xC0FFEE);
-        assert!(coeff > Fixed::ZERO, "surviving longer is a positive selection coefficient");
+        assert!(
+            coeff > Fixed::ZERO,
+            "surviving longer is a positive selection coefficient"
+        );
         let mut pool = controller_pool(&l, 200, Fixed::from_ratio(1, 2));
         let before = pool.freq(0).unwrap();
         for _ in 0..20 {
             pool.select(&vec![coeff; pool.loci()]);
         }
         let after = pool.freq(0).unwrap();
-        assert!(after > before, "the adaptive controller allele rises in the pool ({} -> {})", before.to_f64_lossy(), after.to_f64_lossy());
+        assert!(
+            after > before,
+            "the adaptive controller allele rises in the pool ({} -> {})",
+            before.to_f64_lossy(),
+            after.to_f64_lossy()
+        );
     }
 
     #[test]
@@ -790,13 +863,23 @@ mod tests {
             .iter()
             .map(|g| {
                 let c = Controller::express(&genes, g, &l);
-                (g.clone(), episode_survival(&c, params.episode_ticks, 0x1111 ^ 0xE0))
+                (
+                    g.clone(),
+                    episode_survival(&c, params.episode_ticks, 0x1111 ^ 0xE0),
+                )
             })
             .collect();
         let grad_a = selection_gradient(&scored, &l, &genes);
         let grad_b = selection_gradient(&scored, &l, &genes);
-        assert_eq!(grad_a, grad_b, "the gradient is a deterministic function of the population");
-        assert_eq!(grad_a.len(), l.weight_count(), "one gradient entry per controller weight");
+        assert_eq!(
+            grad_a, grad_b,
+            "the gradient is a deterministic function of the population"
+        );
+        assert_eq!(
+            grad_a.len(),
+            l.weight_count(),
+            "one gradient entry per controller weight"
+        );
     }
 
     #[test]
@@ -826,7 +909,11 @@ mod tests {
         // shown-water proxy that drives selection is isotropic, per
         // `the_scorer_authors_no_directional_bias`), so the carryover is demonstrated where the
         // fixture can search.
-        assert_eq!(scoring_set(0x4444)[0], (1, 0), "this seed draws the axis-aligned base");
+        assert_eq!(
+            scoring_set(0x4444)[0],
+            (1, 0),
+            "this seed draws the axis-aligned base"
+        );
         let l = scoring_layout(0);
         let good = competent(&l);
         let blank = Controller::zeros(&l);
