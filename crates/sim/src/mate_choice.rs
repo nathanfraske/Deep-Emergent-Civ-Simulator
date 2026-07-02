@@ -61,20 +61,24 @@
 //! axis) rises when a heterophilic chooser picks the farther mate, and [`hybrid_viability`]
 //! (the incompatibility axis, via `hybrid_outcome`) shows the viability-aware
 //! [`most_viable_mate`] avoiding a Dobzhansky-Muller cross a distance preference walks into.
-//! What remains, the last follow-on, is running the full selection loop over a feature-weighted
-//! preference (on `evolve_with`, once its input registry carries a candidate-percept family)
-//! and the `World::birth` choosing call site.
+//!
+//! Fourth, the selection loop is now built: [`evolve_preference_weight`] runs truncation
+//! selection on the genome-derived offspring fitness from RANDOM founder weights with no bias,
+//! and produces a heterophilic weight under overdominance and a homophilic one when homozygous
+//! offspring are fitter. So the direction is not merely favoured in a gradient, it is what
+//! selection converges to, from no bias, on the engine's own genetics. What remains is the
+//! feature-weighted version over both the heterosis and incompatibility axes on the shared
+//! `evolve_with` substrate (once its input registry carries a candidate-percept family) and the
+//! `World::birth` choosing call site.
 //!
 //! Compute: this is the cheap "matching rule / magic trait / one-allele" case (Felsenstein
 //! 1981; Servedio et al 2011; Kopp et al 2018), where the mating cue is the fitness-relevant
 //! genome itself, so no separate preference dimension must be coevolved and held in linkage
 //! against recombination. A preference over an already-computed genome distance is order-1
 //! over the existing evolution loop, so emergence is tractable and is the recommendation, not
-//! the fallback. Honest follow-ons, each named: the genome-derived offspring fitness above still
-//! runs through the fitness-of-distance proxy in the sign-agnostic proof (the proxy remains the
-//! cheap, controlled way to state the anti-steering invariant), while the real-genotype fitness
-//! is proven separately; unifying them under one selection loop is the next step. The preference
-//! is reused on the shared `evolve_with` plus `Controller` substrate once its input registry
+//! the fallback. Honest follow-ons, each named: the selection loop over the genome-derived fitness
+//! is built ([`evolve_preference_weight`], the distance axis); the feature-weighted version over
+//! both axes rides the shared `evolve_with` plus `Controller` substrate once its input registry
 //! carries a candidate-percept family; the value and axiom distances are added as further
 //! features; and the `World::birth` call site, which today takes both parents pre-chosen, does
 //! the choosing. The reserved values the resolved mechanism surfaces (none fabricated) are the
@@ -82,7 +86,7 @@
 //! fallback only, a per-race assortment-bias scalar.
 
 use crate::genome::{GeneticScheme, Genome, HybridOutcome, IncompatibilityTable};
-use civsim_core::Fixed;
+use civsim_core::{DrawKey, Fixed, Phase};
 
 /// The genetic distance between two genomes over their discrete allele states, in `[0, 1]`:
 /// the mean over loci of the allele-sharing distance, `(ploidy - shared) / ploidy`, where
@@ -287,6 +291,102 @@ pub fn most_viable_mate(
         })
         .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
         .map(|(_, i)| i)
+}
+
+/// Evolve the distance weight of a mate preference under a genome-derived offspring fitness,
+/// from RANDOM founders, and return the fittest evolved weight (whose sign is the emergent
+/// direction). This is the capstone of the emergence claim: the earlier proofs show the
+/// mechanism authors no direction and that the physics-favoured direction is fitter; this shows
+/// selection, starting from a population with no preference bias, PRODUCES it. Each generation
+/// scores every preference by the fitness of the offspring its chooser forms with its picked
+/// mate (read off the real offspring genotype via `scheme.reproduce`, so the selection pressure
+/// is the engine's own genetics, not an authored fitness-of-distance), keeps the fitter half
+/// (truncation, ties to the lower index), and refills with bounded mutants. Deterministic and
+/// observer-independent: founders and mutations are counter-keyed on the seed, the lineage, and
+/// the generation under [`Phase::MATE_CHOICE`], mirroring the R-BEHAVIOR-EVOLVE selection loop.
+///
+/// This evolves the one distance weight, so it demonstrates the heterosis and inbreeding axis
+/// that distance carries; the incompatibility axis needs the prospective-hybrid-viability cue
+/// [`most_viable_mate`] reads, and evolving a feature-weighted preference over both axes on the
+/// shared `evolve_with` substrate is the named follow-on.
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_preference_weight(
+    chooser: &Genome,
+    candidates: &[Genome],
+    scheme: &GeneticScheme,
+    gene_count: usize,
+    fitness_of_offspring: fn(&Genome) -> Fixed,
+    seed: u64,
+    pop_size: usize,
+    generations: u64,
+) -> Fixed {
+    assert!(pop_size >= 2, "selection needs at least two lineages");
+    // Map a unit draw in [0, 1) to a signed weight in [-1, 1].
+    let signed = |u: Fixed| Fixed::from_int(2).mul(u) - Fixed::ONE;
+    // The fitness of a preference: its chooser picks a mate, forms an offspring, and the
+    // offspring's genome-derived fitness is the score. An empty candidate set scores zero.
+    let score = |weight: Fixed| -> Fixed {
+        match choose(&MatePreference::new(weight), chooser, candidates) {
+            None => Fixed::ZERO,
+            Some(i) => {
+                let child = scheme.reproduce(
+                    chooser,
+                    0,
+                    &candidates[i],
+                    (i as u64) + 1,
+                    gene_count,
+                    seed,
+                    0,
+                );
+                fitness_of_offspring(&child)
+            }
+        }
+    };
+
+    // Founders: one random weight per lineage.
+    let mut pop: Vec<Fixed> = (0..pop_size as u64)
+        .map(|lineage| {
+            signed(
+                DrawKey::entity(lineage, 0, Phase::MATE_CHOICE)
+                    .rng(seed)
+                    .unit_fixed(0),
+            )
+        })
+        .collect();
+    let mut next_lineage = pop_size as u64;
+
+    for g in 0..generations {
+        let mut scored: Vec<(Fixed, usize)> = pop
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| (score(w), i))
+            .collect();
+        // Fitter first, ties to the lower index (deterministic).
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let keep = (pop.len() / 2).max(1);
+        let survivors: Vec<Fixed> = scored[..keep].iter().map(|&(_, i)| pop[i]).collect();
+        // Next generation: the survivors, then bounded mutants of them until refilled.
+        let mut next = survivors.clone();
+        let mut s = 0usize;
+        while next.len() < pop.len() {
+            let parent = survivors[s % survivors.len()];
+            let delta = signed(
+                DrawKey::entity(next_lineage, g, Phase::MATE_CHOICE)
+                    .rng(seed)
+                    .unit_fixed(0),
+            )
+            .mul(Fixed::from_ratio(1, 4));
+            next.push((parent + delta).clamp(Fixed::from_int(-1), Fixed::from_int(1)));
+            next_lineage += 1;
+            s += 1;
+        }
+        pop = next;
+    }
+
+    // The fittest evolved weight, ties to the lower weight for determinism.
+    let mut ranked: Vec<(Fixed, Fixed)> = pop.iter().map(|&w| (score(w), w)).collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    ranked[0].1
 }
 
 #[cfg(test)]
@@ -721,5 +821,93 @@ mod tests {
             Fixed::ONE,
             "the viability-aware choice avoids the incompatibility"
         );
+    }
+
+    // Two genome-derived offspring-fitness worlds for the selection loop, each a fn pointer
+    // over the formed offspring: overdominance rewards a heterozygous offspring, local
+    // adaptation (homozygous advantage) rewards a homozygous one.
+    fn overdominance_fitness(offspring: &Genome) -> Fixed {
+        offspring_heterozygosity(offspring)
+    }
+    fn homozygous_advantage_fitness(offspring: &Genome) -> Fixed {
+        Fixed::ONE - offspring_heterozygosity(offspring)
+    }
+
+    #[test]
+    fn selection_produces_heterophily_under_overdominance_from_random_founders() {
+        // The capstone: from a population of RANDOM preference weights with no bias, selection on
+        // the genome-derived offspring fitness produces a heterophilic weight when a heterozygous
+        // offspring is fitter (overdominance). The direction is not authored and not merely
+        // favoured in a gradient, it is what selection converges to.
+        let scheme = diploid_scheme(10, Fixed::ZERO);
+        let chooser = genome(10, 0);
+        let candidates = vec![genome(10, 1), genome(10, 5), genome(10, 9)];
+        let evolved = evolve_preference_weight(
+            &chooser,
+            &candidates,
+            &scheme,
+            10,
+            overdominance_fitness,
+            0xC0FFEE,
+            16,
+            8,
+        );
+        assert!(
+            evolved > Fixed::ZERO,
+            "selection produces a heterophilic weight under overdominance ({evolved:?})"
+        );
+    }
+
+    #[test]
+    fn selection_produces_homophily_when_homozygous_offspring_are_fitter() {
+        // The mirror: reverse the offspring fitness (a homozygous offspring is fitter, the local-
+        // adaptation regime) and selection over the same machinery produces a homophilic weight.
+        // The direction tracks the physics, from random founders, with nothing authored.
+        let scheme = diploid_scheme(10, Fixed::ZERO);
+        let chooser = genome(10, 0);
+        let candidates = vec![genome(10, 1), genome(10, 5), genome(10, 9)];
+        let evolved = evolve_preference_weight(
+            &chooser,
+            &candidates,
+            &scheme,
+            10,
+            homozygous_advantage_fitness,
+            0xC0FFEE,
+            16,
+            8,
+        );
+        assert!(
+            evolved < Fixed::ZERO,
+            "selection produces a homophilic weight when homozygous offspring are fitter ({evolved:?})"
+        );
+    }
+
+    #[test]
+    fn the_selection_loop_replays_bit_identically() {
+        // Determinism (Principle 3): the whole selection run is a pure function of the seed.
+        let scheme = diploid_scheme(10, Fixed::ZERO);
+        let chooser = genome(10, 0);
+        let candidates = vec![genome(10, 1), genome(10, 5), genome(10, 9)];
+        let a = evolve_preference_weight(
+            &chooser,
+            &candidates,
+            &scheme,
+            10,
+            overdominance_fitness,
+            0x1234,
+            12,
+            6,
+        );
+        let b = evolve_preference_weight(
+            &chooser,
+            &candidates,
+            &scheme,
+            10,
+            overdominance_fitness,
+            0x1234,
+            12,
+            6,
+        );
+        assert_eq!(a, b, "same seed, same evolved weight");
     }
 }
