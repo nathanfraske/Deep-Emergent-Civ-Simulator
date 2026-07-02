@@ -62,7 +62,7 @@ mod prim;
 pub mod stage0;
 pub mod transcendental;
 
-pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
+pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul};
 pub use perceive::gpu_notice;
 pub use stage0::{
     cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client, CpuClient, CudaClient, WgpuClient,
