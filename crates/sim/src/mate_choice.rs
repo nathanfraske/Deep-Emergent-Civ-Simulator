@@ -53,26 +53,35 @@
 //! is a positive design finding rather than a hole: a distance-only preference handles the
 //! inbreeding-heterosis axis but not the incompatibility axis, so the resolved feature set
 //! must also carry a prospective-hybrid-viability cue (which the scorer computes from
-//! [`crate::genome::IncompatibilityTable::hybrid_outcome`]). Showing the sign emerge under the
-//! full genome-derived fitness through selection (`reproduce` plus `hybrid_outcome` plus
-//! offspring heterozygosity, run on `evolve_with`) is the named follow-on below.
+//! [`crate::genome::IncompatibilityTable::hybrid_outcome`]).
+//!
+//! Third, the genome-derived offspring fitness is now built, closing the proxy gap: the
+//! fitness is read off the offspring genotype the engine's own `GeneticScheme::reproduce`
+//! forms, not authored as a function of distance. [`offspring_heterozygosity`] (the heterosis
+//! axis) rises when a heterophilic chooser picks the farther mate, and [`hybrid_viability`]
+//! (the incompatibility axis, via `hybrid_outcome`) shows the viability-aware
+//! [`most_viable_mate`] avoiding a Dobzhansky-Muller cross a distance preference walks into.
+//! What remains, the last follow-on, is running the full selection loop over a feature-weighted
+//! preference (on `evolve_with`, once its input registry carries a candidate-percept family)
+//! and the `World::birth` choosing call site.
 //!
 //! Compute: this is the cheap "matching rule / magic trait / one-allele" case (Felsenstein
 //! 1981; Servedio et al 2011; Kopp et al 2018), where the mating cue is the fitness-relevant
 //! genome itself, so no separate preference dimension must be coevolved and held in linkage
 //! against recombination. A preference over an already-computed genome distance is order-1
 //! over the existing evolution loop, so emergence is tractable and is the recommendation, not
-//! the fallback. Honest follow-ons, each named and not built here: the offspring fitness is a
-//! supplied function of distance in this proof, to be replaced by the genome-derived fitness
-//! (form the child with [`crate::genome::GeneticScheme::reproduce`], read hybrid viability
-//! and offspring heterozygosity); the preference reused on the shared `evolve_with` plus
-//! `Controller` substrate once its input registry carries a candidate-percept family; the
-//! value and axiom distances added as further features; and the `World::birth` call site,
-//! which today takes both parents pre-chosen. The reserved values the resolved mechanism
-//! surfaces (none fabricated) are the cost of choosiness, the preference mutation variance,
-//! and, for the deep-time pure-frequency fallback only, a per-race assortment-bias scalar.
+//! the fallback. Honest follow-ons, each named: the genome-derived offspring fitness above still
+//! runs through the fitness-of-distance proxy in the sign-agnostic proof (the proxy remains the
+//! cheap, controlled way to state the anti-steering invariant), while the real-genotype fitness
+//! is proven separately; unifying them under one selection loop is the next step. The preference
+//! is reused on the shared `evolve_with` plus `Controller` substrate once its input registry
+//! carries a candidate-percept family; the value and axiom distances are added as further
+//! features; and the `World::birth` call site, which today takes both parents pre-chosen, does
+//! the choosing. The reserved values the resolved mechanism surfaces (none fabricated) are the
+//! cost of choosiness, the preference mutation variance, and, for the deep-time pure-frequency
+//! fallback only, a per-race assortment-bias scalar.
 
-use crate::genome::Genome;
+use crate::genome::{GeneticScheme, Genome, HybridOutcome, IncompatibilityTable};
 use civsim_core::Fixed;
 
 /// The genetic distance between two genomes over their discrete allele states, in `[0, 1]`:
@@ -211,13 +220,113 @@ pub fn realised_fitness(
     }
 }
 
+// --- Genome-derived offspring fitness (the follow-on that closes the proxy gap) ---
+//
+// The functions above score a pairing through an authored fitness-of-distance map. The
+// functions below score the actual offspring GENOTYPE, formed by the engine's own
+// `GeneticScheme::reproduce`, so the fitness is real physics on the real genome rather than a
+// reduced-form proxy. The two axes the literature names are covered: offspring heterozygosity
+// (the heterosis and overdominance axis) and hybrid viability (the Dobzhansky-Muller
+// incompatibility axis, which the distance feature cannot carry because it is non-monotone in
+// distance).
+
+/// The heterozygosity of a diploid offspring: the fraction of loci where its two haplotypes
+/// carry different allele states (the same locus-heterozygous predicate
+/// [`crate::genome::GeneSet::express`] uses to apply the dominance deviation). A real genome
+/// property, read off a formed offspring, so under overdominance a more heterozygous offspring
+/// is a fitter one. Zero for a haploid or empty genome.
+pub fn offspring_heterozygosity(offspring: &Genome) -> Fixed {
+    if offspring.haps.len() < 2 {
+        return Fixed::ZERO;
+    }
+    let loci = offspring.haps[0].alleles.len();
+    if loci == 0 {
+        return Fixed::ZERO;
+    }
+    let mut het: i64 = 0;
+    for locus in 0..loci {
+        if offspring.haps[0].alleles[locus].state != offspring.haps[1].alleles[locus].state {
+            het += 1;
+        }
+    }
+    Fixed::from_ratio(het, loci as i64)
+}
+
+/// The viability of a formed offspring against a Dobzhansky-Muller incompatibility table, as a
+/// fitness scalar in `[0, 1]`: viable is one, sterile one half, inviable zero
+/// ([`crate::genome::IncompatibilityTable::hybrid_outcome`]). Genome-derived offspring fitness
+/// on the incompatibility axis, a step function of which complementary alleles the cross
+/// unites rather than of the parents' distance.
+pub fn hybrid_viability(offspring: &Genome, table: &IncompatibilityTable) -> Fixed {
+    match table.hybrid_outcome(offspring) {
+        HybridOutcome::Viable => Fixed::ONE,
+        HybridOutcome::Sterile => Fixed::from_ratio(1, 2),
+        HybridOutcome::Inviable => Fixed::ZERO,
+    }
+}
+
+/// Choose the candidate whose offspring with `chooser` is most viable against `table`, ties to
+/// the lower index; `None` for an empty set. This is the viability-aware choice the
+/// incompatibility axis needs: it reads prospective hybrid viability by forming each candidate
+/// offspring through `scheme`, the cue a distance-only preference lacks. It is deterministic
+/// and observer-independent (the offspring is a pure function of the seed and the parents).
+pub fn most_viable_mate(
+    chooser: &Genome,
+    candidates: &[Genome],
+    scheme: &GeneticScheme,
+    gene_count: usize,
+    table: &IncompatibilityTable,
+    seed: u64,
+) -> Option<usize> {
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let child = scheme.reproduce(chooser, 0, c, i as u64 + 1, gene_count, seed, 0);
+            (hybrid_viability(&child, table), i)
+        })
+        .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
+        .map(|(_, i)| i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::genome::{
-        Allele, AlleleState, Genome, Haplotype, HybridOutcome, Incompatibility,
-        IncompatibilityKind, IncompatibilityTable, SchemeId,
+        Allele, AlleleState, Haplotype, Incompatibility, IncompatibilityKind, LinkageGroup,
+        ReproductionMode, SchemeId,
     };
+
+    /// A sexual-diploid scheme over `loci` loci in one linkage group, at the given per-locus
+    /// mutation rate (zero for clean segregation in the offspring-fitness tests).
+    fn diploid_scheme(loci: usize, mutation: Fixed) -> GeneticScheme {
+        GeneticScheme {
+            id: SchemeId(0),
+            reproduction: ReproductionMode::SexualDiploid,
+            linkage_groups: vec![LinkageGroup {
+                loci: (0..loci as u32).collect(),
+                recombination: vec![Fixed::ZERO; loci.saturating_sub(1)],
+            }],
+            mutation_rate: mutation,
+        }
+    }
+
+    /// A homozygous diploid genome carrying allele state 1 at the given loci and 0 elsewhere.
+    fn one_at(loci: usize, ones: &[usize]) -> Genome {
+        let hap = || Haplotype {
+            alleles: (0..loci)
+                .map(|i| Allele {
+                    additive: Fixed::ZERO,
+                    state: AlleleState(if ones.contains(&i) { 1 } else { 0 }),
+                    origin: 0,
+                })
+                .collect(),
+        };
+        Genome {
+            scheme: SchemeId(0),
+            haps: vec![hap(), hap()],
+        }
+    }
 
     /// A diploid genome over `loci` loci where the first `divergent` loci carry allele state 1
     /// on both haplotypes and the rest state 0. Its genetic distance from the all-zero genome
@@ -491,22 +600,6 @@ mod tests {
             state_b: AlleleState(1),
             kind: IncompatibilityKind::Lethal,
         }]);
-        // A homozygous diploid genome with state 1 at the given loci and 0 elsewhere.
-        let g = |loci: usize, ones: &[usize]| {
-            let hap = || Haplotype {
-                alleles: (0..loci)
-                    .map(|i| Allele {
-                        additive: Fixed::ZERO,
-                        state: AlleleState(if ones.contains(&i) { 1 } else { 0 }),
-                        origin: 0,
-                    })
-                    .collect(),
-            };
-            Genome {
-                scheme: SchemeId(0),
-                haps: vec![hap(), hap()],
-            }
-        };
         // A hybrid carrying one strand from each parent (homozygous parents transmit their
         // identical strand).
         let cross = |p1: &Genome, p2: &Genome| Genome {
@@ -516,14 +609,14 @@ mod tests {
 
         // Near cross: one parent carries the DM allele at locus 0, the other at locus 1, so the
         // hybrid unites the incompatible pair. They differ at two loci.
-        let near = cross(&g(10, &[0]), &g(10, &[1]));
+        let near = cross(&one_at(10, &[0]), &one_at(10, &[1]));
         // Far cross: one parent carries state 1 at four loci that never include locus 1, the
         // other is all zero, so the hybrid never unites the pair. They differ at four loci.
-        let far = cross(&g(10, &[0, 2, 3, 4]), &g(10, &[]));
+        let far = cross(&one_at(10, &[0, 2, 3, 4]), &one_at(10, &[]));
 
         assert!(
-            genetic_distance(&g(10, &[0]), &g(10, &[1]))
-                < genetic_distance(&g(10, &[0, 2, 3, 4]), &g(10, &[])),
+            genetic_distance(&one_at(10, &[0]), &one_at(10, &[1]))
+                < genetic_distance(&one_at(10, &[0, 2, 3, 4]), &one_at(10, &[])),
             "the near cross has the smaller parental genetic distance"
         );
         assert_eq!(
@@ -559,6 +652,74 @@ mod tests {
             choose(&MatePreference::indifferent(), &chooser, &descending),
             Some(0),
             "and the farthest in a descending panel: the order, not the preference, decides"
+        );
+    }
+
+    #[test]
+    fn heterophily_raises_offspring_heterozygosity_measured_on_the_formed_genome() {
+        // The follow-on that closes the proxy gap on the heterosis axis: the fitness is read off
+        // the offspring GENOTYPE formed by reproduce, not authored as a function of distance. A
+        // heterophilic chooser (picks the farther mate) yields a more heterozygous offspring than
+        // a homophilic one (picks the nearer), so under overdominance selection favours
+        // heterophily, with the fitness grounded in the engine's own genetics.
+        let scheme = diploid_scheme(10, Fixed::ZERO); // no mutation: clean segregation
+        let chooser = genome(10, 0);
+        let candidates = vec![genome(10, 1), genome(10, 5), genome(10, 9)];
+
+        let near_i = choose(&MatePreference::homophilic(), &chooser, &candidates).unwrap();
+        let far_i = choose(&MatePreference::heterophilic(), &chooser, &candidates).unwrap();
+        let homo_child = scheme.reproduce(&chooser, 1, &candidates[near_i], 2, 10, 0x5EED, 0);
+        let hetero_child = scheme.reproduce(&chooser, 1, &candidates[far_i], 3, 10, 0x5EED, 0);
+
+        assert!(
+            offspring_heterozygosity(&hetero_child) > offspring_heterozygosity(&homo_child),
+            "the heterophile's offspring is more heterozygous ({:?} vs {:?})",
+            offspring_heterozygosity(&hetero_child),
+            offspring_heterozygosity(&homo_child)
+        );
+    }
+
+    #[test]
+    fn a_distance_preference_cannot_avoid_an_incompatible_near_mate_but_viability_choice_can() {
+        // The red-team's insight built out over the real reproduce and hybrid_outcome physics. On
+        // the incompatibility axis a homophilic (distance) preference picks the NEAR mate, which
+        // here is the incompatible one, so its offspring is inviable; the viability-aware choice
+        // (which reads prospective hybrid viability, the cue the distance feature lacks) picks the
+        // farther, compatible mate. This is why the resolved feature set must carry a
+        // prospective-hybrid-viability cue, not distance alone.
+        let scheme = diploid_scheme(10, Fixed::ZERO);
+        let table = IncompatibilityTable::with(vec![Incompatibility {
+            locus_a: 0,
+            state_a: AlleleState(1),
+            locus_b: 1,
+            state_b: AlleleState(1),
+            kind: IncompatibilityKind::Lethal,
+        }]);
+        let chooser = one_at(10, &[0]); // carries the DM allele at locus 0
+        let near = one_at(10, &[0, 1]); // the complementary allele at locus 1: a near, incompatible mate
+        let far = one_at(10, &[0, 2, 3, 4, 5]); // far, but never carries state 1 at locus 1: compatible
+        let candidates = vec![near, far];
+        assert!(
+            genetic_distance(&chooser, &candidates[0]) < genetic_distance(&chooser, &candidates[1]),
+            "the incompatible mate is the nearer one"
+        );
+
+        // The homophile picks the near mate and forms an inviable offspring.
+        let homo_i = choose(&MatePreference::homophilic(), &chooser, &candidates).unwrap();
+        let homo_child = scheme.reproduce(&chooser, 1, &candidates[homo_i], 2, 10, 0xD3, 0);
+        assert_eq!(
+            hybrid_viability(&homo_child, &table),
+            Fixed::ZERO,
+            "the distance preference cannot avoid the incompatible near mate"
+        );
+
+        // The viability-aware choice picks the compatible mate and forms a viable offspring.
+        let via_i = most_viable_mate(&chooser, &candidates, &scheme, 10, &table, 0xD3).unwrap();
+        let via_child = scheme.reproduce(&chooser, 1, &candidates[via_i], 2, 10, 0xD3, 0);
+        assert_eq!(
+            hybrid_viability(&via_child, &table),
+            Fixed::ONE,
+            "the viability-aware choice avoids the incompatibility"
         );
     }
 }
