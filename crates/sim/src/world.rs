@@ -1212,6 +1212,15 @@ impl World {
         self.behaviour = Some(behaviour);
     }
 
+    /// Whether an authored decision repertoire (drives, curves, actions) is installed. This is the
+    /// sentient deliberative tier of design Part 8.1, an AUTHORED action-and-drive policy that Part
+    /// 8.4 marks as steering at the level of behaviour, distinct from the emergent evolved controller.
+    /// The canonical runner reads this to keep that authored path off its emergent-behaviour spine
+    /// (`crate::runner::Runner::with_world`).
+    pub fn has_behaviour(&self) -> bool {
+        self.behaviour.is_some()
+    }
+
     /// A mind's current level of a drive, or `None` if it has none.
     pub fn drive_level(&self, mind: StableId, drive: DriveId) -> Option<Fixed> {
         self.drive_levels.get(&mind)?.get(&drive).copied()
