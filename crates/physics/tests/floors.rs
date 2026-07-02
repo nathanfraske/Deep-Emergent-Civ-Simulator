@@ -56,10 +56,19 @@ fn the_biology_floor_loads_with_its_axes_and_three_laws() {
     let reg = biology();
     assert_eq!(
         reg.axis_count(),
-        16,
-        "the composition, toxin, and consumer axes"
+        18,
+        "the composition, toxin, and consumer axes plus the two derived score axes"
     );
     assert_eq!(reg.law_count(), 3, "net nutrition, harm, and edibility");
+    // edibility reads the produced net-nutrition and net-harm scores, so it derives one tier
+    // above the two folds: the biology floor now carries an internal composition edge.
+    assert_eq!(reg.derived_tier("law.net_nutrition"), Some(1));
+    assert_eq!(reg.derived_tier("law.harm"), Some(1));
+    assert_eq!(
+        reg.derived_tier("law.edibility"),
+        Some(2),
+        "edibility composes the two fold outputs, so it is tier 2"
+    );
     assert_eq!(
         reg.substance_count(),
         0,

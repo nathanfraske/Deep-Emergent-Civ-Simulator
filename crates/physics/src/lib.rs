@@ -305,18 +305,39 @@ pub enum Temporal {
     Dt,
 }
 
-/// One input port of a law: a role name (free-form, unique within the law, so the mechanism
-/// is not a closed enum), the axis it reads, and when it reads it. The port's dimensional
-/// exponent is a property of the kernel, not the data, so it lives in the fixed-Rust contract
-/// ([`graph::kernel_contract`]) rather than here; the data only wires a role to an axis.
+/// The open-arity aggregation a class-set port folds its members by. The mechanism is fixed
+/// Rust; the class membership is data (Principle 11), so a new nutrient or toxin class is a new
+/// axis added to a port's member set, never a code change. The set is deliberately small: these
+/// are the folds the substrate's kernels actually perform (the Liebig minimum and the saturating
+/// sum), and it grows only when a kernel introduces a new order-independent reduction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fold {
+    /// The limiting-member minimum (the Liebig nutrition fold).
+    Min,
+    /// The saturating sum (the additive harm fold).
+    Sum,
+}
+
+/// One input port of a law: a role name (free-form, unique within the law, so the mechanism is
+/// not a closed enum), the axis (or axes) it reads, and when it reads it. A single port names one
+/// axis; a class-set port (a non-empty `members` with a `fold`) names an open-arity set of same-
+/// dimension axes the kernel folds, the variadic case the fixed-arity list could not express (the
+/// nutrient classes of the Liebig minimum, the toxin classes of the harm sum). The port's
+/// dimensional exponent is a property of the kernel and lives in the fixed-Rust contract
+/// ([`graph::kernel_contract`]); the data only wires a role to its axis or class set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LawPort {
     /// The role this port fills, matched against the kernel contract.
     pub role: String,
-    /// The axis id this port reads (empty for a `Dt` port).
+    /// The axis id a single port reads (empty for a `Dt` port or a class-set port).
     pub axis: String,
     /// When the value is read.
     pub temporal: Temporal,
+    /// The class-set members: a non-empty list marks a variadic (open-arity) fold over these
+    /// same-dimension axes. Empty for a single port.
+    pub members: Vec<String>,
+    /// The fold a class-set port aggregates its members by; `None` for a single port.
+    pub fold: Option<Fold>,
 }
 
 /// An interaction law: the metadata of a closed-form integer kernel over the quantity
@@ -643,6 +664,34 @@ impl PhysicsRegistry {
                     });
                 }
             }
+            // A class-set port's members must all exist and share one dimension, so a fold folds
+            // over a homogeneous quantity (the Liebig minimum over nutrient fractions, the harm
+            // sum over toxin concentrations) rather than a dimensional mixture.
+            for port in &law.ports {
+                if port.members.is_empty() {
+                    continue;
+                }
+                let mut member_dim: Option<Dimension> = None;
+                for m in &port.members {
+                    let axis = self.axes.get(m).ok_or_else(|| PhysicsError::UnknownAxis {
+                        context: law.id.clone(),
+                        axis: m.clone(),
+                    })?;
+                    match member_dim {
+                        None => member_dim = Some(axis.dimension),
+                        Some(d) if d != axis.dimension => {
+                            return Err(PhysicsError::BadPort {
+                                law: law.id.clone(),
+                                detail: format!(
+                                    "class-set port '{}' folds axes of differing dimensions ({:?} and {:?})",
+                                    port.role, d, axis.dimension
+                                ),
+                            });
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
             // A migrated law is checked against its kernel contract: the binding, the temporal
             // agreement, and the dimensional reachability of its output.
             graph::check_law(law, &self.axes)?;
@@ -774,6 +823,15 @@ impl PhysicsRegistry {
                     Temporal::Prior => 1,
                     Temporal::Dt => 2,
                 });
+                h.write_u32(match port.fold {
+                    None => 0,
+                    Some(Fold::Min) => 1,
+                    Some(Fold::Sum) => 2,
+                });
+                for m in &port.members {
+                    h.write_bytes(m.as_bytes());
+                }
+                h.write_u64(0);
             }
             h.write_u64(0);
             for axis in &law.produces {
@@ -1001,6 +1059,12 @@ struct PortDef {
     /// One of `current` (default), `prior`, or `dt`.
     #[serde(default)]
     temporal: String,
+    /// The class-set members: a non-empty list makes this a variadic fold port.
+    #[serde(default)]
+    members: Vec<String>,
+    /// The fold for a class-set port: `min` or `sum`.
+    #[serde(default)]
+    fold: String,
 }
 
 impl LawDef {
@@ -1025,22 +1089,56 @@ impl LawDef {
                     });
                 }
             };
+            let fold = match p.fold.trim().to_ascii_lowercase().as_str() {
+                "" => None,
+                "min" => Some(Fold::Min),
+                "sum" => Some(Fold::Sum),
+                other => {
+                    return Err(PhysicsError::BadPort {
+                        law: self.id.clone(),
+                        detail: format!("unknown fold '{other}' (expected min or sum)"),
+                    });
+                }
+            };
+            // A class-set port declares members and a fold; a single port declares neither. A
+            // half-declared port (members without a fold, or a fold without members) is a load
+            // error, not a silent single port.
+            if p.members.is_empty() != fold.is_none() {
+                return Err(PhysicsError::BadPort {
+                    law: self.id.clone(),
+                    detail: format!(
+                        "port '{}' must declare both members and a fold, or neither",
+                        p.role
+                    ),
+                });
+            }
             ports.push(LawPort {
                 role: p.role,
                 axis: p.axis,
                 temporal,
+                members: p.members,
+                fold,
             });
         }
-        // The flat input list is derived from the distinct non-Dt port axes when ports are
-        // declared, so the legacy `inputs` consumers keep working without duplication in data.
+        // The flat input list is derived from the distinct non-Dt port axes (a single port's axis
+        // and a class-set port's members) when ports are declared, so the legacy `inputs`
+        // consumers keep working without duplication in data.
         let inputs = if ports.is_empty() {
             self.inputs
         } else {
             let mut seen = std::collections::BTreeSet::new();
             let mut derived = Vec::new();
             for p in &ports {
-                if p.temporal != Temporal::Dt && !p.axis.is_empty() && seen.insert(p.axis.clone()) {
+                if p.temporal == Temporal::Dt {
+                    continue;
+                }
+                if !p.axis.is_empty() && seen.insert(p.axis.clone()) {
                     derived.push(p.axis.clone());
+                }
+                for m in &p.members {
+                    if seen.insert(m.clone()) {
+                        derived.push(m.clone());
+                    }
                 }
             }
             derived
