@@ -78,6 +78,35 @@ impl Phase {
     /// A worldgen lattice draw (terrain genesis). Genesis-time, so its draws carry no
     /// tick; the field being sampled is the draw-site slot and the octave the region.
     pub const WORLDGEN: Phase = Phase(0x10);
+    /// A biosphere generate-and-validate species-sample draw (R-BIOSPHERE): sampling a
+    /// candidate species over the trait axes, keyed on the niche locus and the pre-dawn
+    /// generation, with the axis at its own counter and the resample attempt on its own slot.
+    pub const BIOSPHERE_SAMPLE: Phase = Phase(0x0D);
+    /// A biosphere genesis draw: an organism's per-tissue composition or a consumer's
+    /// physiology vector drawn at genesis, keyed on the species and the axis ordinal.
+    pub const GENESIS: Phase = Phase(0x0E);
+    /// A founder-fork draw (the founder effect): binomial-sampling a founder pool off a
+    /// parent at a small effective size, keyed on the founder id, locus, and generation.
+    pub const FOUND: Phase = Phase(0x0F);
+    /// A speciation draw: the Orr-snowball roll growing a Dobzhansky-Muller incompatibility
+    /// as lineages diverge, keyed on the ordered pair, the locus pair, and the generation so
+    /// the count accumulates per sweep rather than re-rolling once.
+    pub const SPECIATE: Phase = Phase(0x11);
+    /// An exploration draw: the heading a being takes when it is searching for a resource it does
+    /// not yet know of, keyed on the being and the exploration period so its search is a
+    /// reproducible function of the seed, the being, and the tick, never of the camera (a being
+    /// discovers the world by moving through it, it does not read the map like a god).
+    pub const EXPLORE: Phase = Phase(0x12);
+    /// A behaviour-controller draw (R-BEHAVIOR-EVOLVE): the initial random controller weights of a
+    /// founder lineage and the bounded mutation of a controller weight on inheritance, keyed on the
+    /// individual and the controller-parameter locus so a lineage's evolved behaviour is a
+    /// reproducible function of the seed and its ancestry (design Part 8, the evolved-behaviour work).
+    pub const CONTROLLER: Phase = Phase(0x13);
+    /// A grammar-typology draw (R-LANG-TYPOLOGY): one parameter of a culture's typology
+    /// profile sampled at culture genesis, keyed on the culture and the parameter's
+    /// canonical position in the anchor-first sampling order, so a culture's grammar is a
+    /// reproducible function of the seed, the culture, and the registry data (design 33.4).
+    pub const LANG_TYPOLOGY: Phase = Phase(0x14);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

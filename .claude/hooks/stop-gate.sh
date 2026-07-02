@@ -6,7 +6,9 @@
 # Stop completion gate (AGENTIC_ADDENDUM.md section 2d). The turn cannot end while
 # the documents are dirty or the memory files are stale. It runs the full
 # verification suite and checks that, if either maintained document changed, the
-# memory files were updated. To avoid a loop it first honours stop_hook_active.
+# memory files were updated, and that, if source or design files changed, the
+# consensus roadmap was kept current. To avoid a loop it first honours
+# stop_hook_active.
 
 set -u
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -38,6 +40,21 @@ if [ -n "$docs_changed" ] && [ -z "$mem_changed" ]; then
   echo "stop-gate: a maintained document changed but HANDOFFS.md / TODOS.md were not updated." >&2
   echo "Append a dated HANDOFFS entry and update TODOS before finishing (CLAUDE.md section 10)." >&2
   exit 2
+fi
+
+# Roadmap living-document gate. If source (crates/**) or the design and roadmap
+# documents changed this session but the consensus roadmap was not touched, prompt
+# an update. Only fires when the roadmap exists, so it is inert until the roadmap is
+# in the tree.
+roadmap_file="docs/working/CONSENSUS_ROADMAP.md"
+if [ -f "$roadmap_file" ]; then
+  work_changed="$(git -C "$ROOT" status --porcelain -- crates docs/design.md docs/audit.md ROADMAP.md 2>/dev/null)"
+  roadmap_changed="$(git -C "$ROOT" status --porcelain -- "$roadmap_file" 2>/dev/null)"
+  if [ -n "$work_changed" ] && [ -z "$roadmap_changed" ]; then
+    echo "stop-gate: source or design files changed but $roadmap_file was not updated." >&2
+    echo "Review the roadmap and update it as work is done: cite each item's gate (an R-item, a Part number, or a file), and tombstone a completed or removed item by rewriting it in place rather than deleting it." >&2
+    exit 2
+  fi
 fi
 
 exit 0

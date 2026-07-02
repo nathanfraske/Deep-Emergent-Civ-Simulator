@@ -51,21 +51,37 @@
 
 pub mod affect;
 pub mod agent;
+pub mod anatomy;
 pub mod axiom;
+pub mod biosphere;
+pub mod body;
 pub mod calibration;
+pub mod clock;
 pub mod conservation;
+pub mod controller;
 pub mod decision;
 pub mod dialogue;
+pub mod edibility;
+pub mod epoch;
 pub mod evidence;
+pub mod evolve;
+pub mod genesis;
 pub mod genome;
+pub mod homeostasis;
 pub mod language;
+pub mod lineage;
+pub mod located;
+pub mod locomotion;
 pub mod lod;
 pub mod primes;
 pub mod race;
+pub mod runner;
 pub mod scenario;
 pub mod sensorium;
+pub mod stocks;
 pub mod substrate;
 pub mod tom;
+pub mod typology;
 pub mod value;
 pub mod world;
 
@@ -77,8 +93,16 @@ pub use axiom::{
     AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
     EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
 };
+pub use body::{
+    apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
+    DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
+    MeasureKind, PartCondition, TissueLayer, TissueMaterial, TissueMaterialId, TissueRegistry,
+    WoundRecord,
+};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
+pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
+pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
 pub use dialogue::{
     conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
@@ -86,17 +110,27 @@ pub use dialogue::{
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
 pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use evolve::{
+    controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
+    selection_gradient, EvolveParams, EvolveReport,
+};
 pub use genome::{
-    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, DominanceKind, DominanceMode,
-    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype,
-    HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable,
-    LifeHistoryChannel, LinkageGroup, ReproductionMode, SchemeId, TraitId,
+    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, CompositionAxisId,
+    ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect, GeneId, GenePool,
+    GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel, Incompatibility,
+    IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup, ReproductionMode,
+    SchemeId, TraitId,
+};
+pub use homeostasis::{
+    AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
+    HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
     FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
     Word,
 };
+pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
@@ -106,6 +140,12 @@ pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use typology::{
+    sample_profile, tilted_weights, typology_distance, validate as validate_typology, wals_seed,
+    HarmonyBias, HarmonyModel, TypologyError, TypologyParamDef, TypologyParamId, TypologyParams,
+    TypologyPrior, TypologyProfile, TypologyRegistry, TypologyValueDef, TypologyValueId,
+    ValueMetric,
 };
 pub use value::{
     conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,

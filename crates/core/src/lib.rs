@@ -44,6 +44,7 @@
 pub mod arena;
 pub mod cacheline;
 pub mod canonical;
+pub mod command;
 pub mod event;
 pub mod fixed;
 pub mod hash;
@@ -53,7 +54,10 @@ pub mod rng;
 
 pub use arena::{Arena, Slab, SlabHandle};
 pub use cacheline::CacheLine;
-pub use canonical::{quantize_depth_mm, quantize_unit, Canonical, NonCanonical};
+pub use canonical::{
+    canonical_reduce, canonical_sorted, quantize_depth_mm, quantize_unit, Canonical, NonCanonical,
+};
+pub use command::{content_id, CommandBuffer, CommandKey, EventQueue};
 pub use event::{Event, EventId, EventKindId, EventLog};
 pub use fixed::{Fixed, FRAC_BITS};
 pub use hash::StateHasher;

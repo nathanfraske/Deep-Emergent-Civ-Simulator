@@ -1,0 +1,307 @@
+# The fluids floor (wave 2 of the physics substrate, R-PHYS-W2; design Part 41, Part 58,
+# record 62.21). Extends the registry with the fluid.*, acoustic.*, and the therm.temperature
+# state axes, and the closed-form fixed-point laws over them (kernels in crates/physics/src/laws.rs).
+# Every range is reserved-with-basis; nothing here is an owner-set value. Ranges are held inside the
+# Q32.32 representable window (epsilon ~2.3e-10 to ceiling ~2.1e9); a quantity whose true envelope
+# underflows carries a reserved per-quantity scale (R-UNITS-PIN), noted in its basis.
+
+# --- The temperature state axis, owned by the energy sub-domain, read cross-domain (unification 2.2) ---
+
+[[axis]]
+id = "therm.temperature"
+measures = "absolute temperature state (the field convection, reactions, and radiant emission read)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_reserved = "proposed bounds [1, 100000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "the K envelope from cryogenic to stellar/forge; grounds the wave-1 conduction and combustion temperature inputs"
+
+# --- Fluid axes ---
+
+[[axis]]
+id = "fluid.dynamic_viscosity"
+measures = "shear viscosity mu, the flow-rate and Reynolds lever"
+unit = "Pa*s"
+dimension = "-1,1,-1,0"
+scale = "Pa*s (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "proposed bounds [0.00001, 100], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC viscosity tables; White, Viscous Fluid Flow (air 1.8e-5, water 1e-3, blood 3.5e-3, lava ~1e2); the full gas-to-glass envelope spans ~16 orders and reserves a per-quantity scale"
+
+[[axis]]
+id = "fluid.surface_tension"
+measures = "surface tension gamma of a liquid-gas interface"
+unit = "N/m"
+dimension = "0,1,-2,0"
+scale = "N/m"
+tier = 0
+range_reserved = "proposed bounds [0.01, 2.0], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC surface-tension tables (ethanol 0.022, water 0.0728, molten iron ~1.8)"
+
+[[axis]]
+id = "fluid.bulk_modulus"
+measures = "isentropic bulk modulus K (inverse compressibility), and the sound-speed lever"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_reserved = "proposed bounds [0.1, 300000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC; Batchelor (gas ~0.1, water ~2200, dense liquids to ~3e5)"
+
+[[axis]]
+id = "fluid.drag_coefficient"
+measures = "dimensionless drag shape factor Cd"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0.01, 2.5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Hoerner; White (streamlined 0.04, sphere 0.47, plate 1.28, parachute 2.0); a lumped shape factor, the steering seam kept as cited per-shape data"
+
+[[axis]]
+id = "fluid.lift_coefficient"
+measures = "dimensionless lift shape factor CL"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 2.5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Anderson, Fundamentals of Aerodynamics; Abbott and von Doenhoff (flat plate ~0, cambered airfoil ~1.2, near stall ~1.5, high-lift to 2.5)"
+
+[[axis]]
+id = "fluid.convective_coefficient"
+measures = "convective heat-transfer coefficient h of a surface-fluid-flow triple"
+unit = "W/(m^2*K)"
+dimension = "0,1,-3,-1"
+scale = "W/(m^2*K)"
+tier = 0
+range_reserved = "proposed bounds [1, 100000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Incropera and DeWitt Table 1.1 (free-gas 2-25, forced-liquid 50-20000, boiling to 1e5)"
+
+[[axis]]
+id = "fluid.channel_radius"
+measures = "internal radius of a flow channel (vessel, capillary, pipe)"
+unit = "m"
+dimension = "length"
+scale = "m (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "proposed bounds [0.000001, 0.1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Fung, Biomechanics: Circulation; the Poiseuille r^4 across capillary-to-aorta underflows Q32.32, reserving a per-quantity radius scale"
+
+[[axis]]
+id = "fluid.immersed_volume"
+measures = "volume of fluid displaced by an immersed body (buoyancy)"
+unit = "m^3"
+dimension = "volume"
+scale = "m^3"
+tier = 0
+range_reserved = "proposed bounds [0.000001, 100000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "definitional (Archimedes); droplet to large hull"
+
+[[axis]]
+id = "fluid.column_height"
+measures = "vertical height of a fluid column (hydrostatic, capillary rise)"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_reserved = "proposed bounds [0.001, 11000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "definitional (hydrostatics); a body column ~2 to Challenger Deep ~10935"
+
+[[axis]]
+id = "fluid.driving_pressure"
+measures = "imposed delta-P driving a flow, or the local absolute pressure the gas law reads"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_reserved = "proposed bounds [0.0001, 100], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Fung; Munson (arterial ~0.016 = 120 mmHg, industrial heads to ~100)"
+
+[[axis]]
+id = "fluid.vapor_pressure"
+measures = "partial pressure of the vapour phase, the moisture state the water cycle transports"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_reserved = "proposed bounds [0, 0.01], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "psychrometric saturation tables (saturation ~7.4 kPa at 40C); a resident moisture state sibling to therm.temperature"
+
+# --- Acoustic axes (a mechanical wave in a fluid medium) ---
+
+[[axis]]
+id = "acoustic.frequency"
+measures = "sound frequency f, the physical carrier the emergent phoneme and tone space cluster over"
+unit = "Hz"
+dimension = "0,0,-1,0"
+scale = "Hz"
+tier = 0
+range_reserved = "proposed bounds [1, 200000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "acoustics/audition ranges (infrasound to ultrasound; human ~20-20000)"
+
+[[axis]]
+id = "acoustic.source_power"
+measures = "acoustic source power, how far a call, shout, or song carries"
+unit = "W"
+dimension = "2,1,-3,0"
+scale = "W (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "proposed bounds [0.000001, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "acoustic source-power ranges; the sub-microwatt low end reserves a per-quantity scale"
+
+[[axis]]
+id = "acoustic.absorption_coefficient"
+measures = "medium absorption of sound per unit path (air absorbing high frequencies over distance)"
+unit = "1/m"
+dimension = "-1,0,0,0"
+scale = "1/m"
+tier = 0
+range_reserved = "proposed bounds [0, 10], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "atmospheric and material acoustic absorption tables (Kinsler et al.)"
+
+# --- Fluid and acoustic laws (metadata; kernels in laws.rs) ---
+
+[[law]]
+id = "law.hydrostatic_pressure"
+inputs = ["mat.density", "mech.gravitational_acceleration", "fluid.column_height"]
+output_measure = "hydrostatic pressure"
+dimension = "pressure"
+interval_bound = "[0, P_MAX]"
+tier = 0
+
+[[law]]
+id = "law.buoyant_force"
+inputs = ["mat.density", "mech.gravitational_acceleration", "fluid.immersed_volume"]
+output_measure = "buoyant force"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.dynamic_pressure"
+inputs = ["mat.density", "mech.velocity"]
+output_measure = "dynamic pressure"
+dimension = "pressure"
+interval_bound = "[0, P_MAX]"
+tier = 0
+
+[[law]]
+id = "law.drag_force"
+inputs = ["fluid.drag_coefficient", "mat.density", "mech.contact_area", "mech.velocity"]
+output_measure = "drag force"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.aerodynamic_lift"
+inputs = ["fluid.lift_coefficient", "mat.density", "mech.contact_area", "mech.velocity"]
+output_measure = "lift force"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.reynolds_number"
+inputs = ["mat.density", "mech.velocity", "mech.arm_length", "fluid.dynamic_viscosity"]
+output_measure = "Reynolds number (a laminar/turbulent regime gate)"
+dimension = "dimensionless"
+interval_bound = "[0, RE_MAX]"
+tier = 0
+
+[[law]]
+id = "law.laplace_pressure"
+inputs = ["fluid.surface_tension", "fluid.channel_radius"]
+output_measure = "Laplace curvature pressure"
+dimension = "pressure"
+interval_bound = "[0, P_MAX]"
+tier = 0
+
+[[law]]
+id = "law.compressibility"
+inputs = ["fluid.driving_pressure", "fluid.bulk_modulus"]
+output_measure = "volumetric strain"
+dimension = "dimensionless"
+interval_bound = "[0, STRAIN_MAX]"
+tier = 0
+
+[[law]]
+id = "law.convective_flux"
+inputs = ["fluid.convective_coefficient", "mech.contact_area", "therm.temperature"]
+output_measure = "convective heat flux (Newton cooling)"
+dimension = "energy"
+interval_bound = "[0, FLUX_MAX]"
+tier = 0
+
+[[law]]
+id = "law.poiseuille_flow"
+inputs = ["fluid.driving_pressure", "fluid.channel_radius", "fluid.dynamic_viscosity", "mech.arm_length"]
+output_measure = "laminar volumetric flow rate"
+dimension = "volume"
+interval_bound = "[0, Q_MAX]"
+tier = 0
+
+[[law]]
+id = "law.speed_of_sound"
+inputs = ["fluid.bulk_modulus", "mat.density"]
+output_measure = "speed of sound in the medium"
+dimension = "velocity"
+interval_bound = "[0, C_SOUND_MAX]"
+tier = 0
+
+[[law]]
+id = "law.ideal_gas_density"
+inputs = ["fluid.driving_pressure", "therm.temperature"]
+output_measure = "gas density (couples temperature to the density field)"
+dimension = "-3,1,0,0"
+interval_bound = "[RHO_MIN, RHO_MAX]"
+tier = 0
+
+[[law]]
+id = "law.thermal_buoyancy"
+inputs = ["therm.temperature", "mech.gravitational_acceleration"]
+output_measure = "signed buoyant acceleration (natural convection)"
+dimension = "0,0,0,0"
+interval_bound = "[-A_MAX, A_MAX]"
+tier = 0
+
+[[law]]
+id = "law.saturation_vapor_pressure"
+inputs = ["therm.temperature"]
+output_measure = "saturation vapour pressure (affine Clausius-Clapeyron proxy)"
+dimension = "pressure"
+interval_bound = "[0, ES_CAP]"
+tier = 0
+
+[[law]]
+id = "law.evaporation_rate"
+inputs = ["fluid.vapor_pressure", "mech.velocity"]
+output_measure = "bidirectional evaporation/condensation mass flux"
+dimension = "0,1,-3,0"
+interval_bound = "[0, E_MAX]"
+tier = 0
+
+# --- Substances (fluids as vectors over the axes) ---
+
+[[substance]]
+id = "air"
+participates_in = ["law.dynamic_pressure", "law.drag_force", "law.aerodynamic_lift", "law.ideal_gas_density", "law.speed_of_sound", "law.convective_flux"]
+real = "CRC (dry air at 15C, 1 atm)"
+values = [
+  { axis = "mat.density", value = "1.225" },
+  { axis = "fluid.dynamic_viscosity", value = "0.0000178" },
+  { axis = "fluid.bulk_modulus", value = "0.142" },
+]
+
+[[substance]]
+id = "water"
+participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure"]
+real = "CRC (liquid water at 20C)"
+values = [
+  { axis = "mat.density", value = "998" },
+  { axis = "fluid.dynamic_viscosity", value = "0.001" },
+  { axis = "fluid.bulk_modulus", value = "2200" },
+  { axis = "fluid.surface_tension", value = "0.0728" },
+]

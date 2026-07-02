@@ -1,0 +1,614 @@
+# The wave-1 mechanical-and-materials substrate floor (R-PHYS-MECH), expressed as data
+# over the QuantityAxis / InteractionLaw registry. The axis ranges below are SET to the
+# owner's confirmed values (2026-06-30, select-confirm), each the cited datasheet maximum
+# with headroom or a theory-fixed interval, every value a tunable lever revisable on the
+# owner's signoff. Two axes stay reserved because their per-quantity scale is unsettled
+# (R-UNITS-PIN): second_moment_of_area (a small section underflows m^4) and the consumer
+# reference_tolerance (its pg/kg-to-g/kg envelope exceeds one Q32.32 scale, so the scale
+# is per toxin class). Pressure-class axes are on the pinned megapascal. The decimal
+# substance values are cited real data. Mechanism: design Part 41 and the working proposal
+# docs/working/MECHANICAL_MATERIALS_SUBSTRATE_PROPOSAL.md.
+
+# --- Shared mechanical and kinematic axes ---
+
+[[axis]]
+id = "mech.force"
+measures = "an applied force magnitude, read in role as effort, normal, tangential, or load"
+unit = "N"
+dimension = "force"
+scale = "N"
+tier = 0
+range_lo = "0.01"
+range_hi = "100000000"
+real = "Ashby and Jones, Engineering Materials 1; biomechanics force tables (structural-load envelope)"
+
+[[axis]]
+id = "mech.mass"
+measures = "the inertial mass of a striker or a loaded body"
+unit = "kg"
+dimension = "mass"
+scale = "kg"
+tier = 0
+range_lo = "0.001"
+range_hi = "100000"
+real = "CRC Handbook of Chemistry and Physics, density tables (dense-body high end)"
+
+[[axis]]
+id = "mech.velocity"
+measures = "a relative speed at contact or slip"
+unit = "m/s"
+dimension = "velocity"
+scale = "m/s"
+tier = 0
+range_lo = "0.01"
+range_hi = "1000"
+real = "exterior-ballistics literature (muzzle velocities to ~1000 m/s); the engine squaring ceiling 46340 sits far above"
+
+[[axis]]
+id = "mech.contact_area"
+measures = "the bearing area over which a force acts at an edge or tip"
+unit = "m^2"
+dimension = "area"
+scale = "m^2"
+tier = 0
+range_lo = "0.00000001"
+range_hi = "10"
+real = "Johnson, Contact Mechanics (Hertz contact); jointly owned with the geometry domain"
+
+[[axis]]
+id = "mech.cross_section_area"
+measures = "the load-bearing cross-sectional area of a member"
+unit = "m^2"
+dimension = "area"
+scale = "m^2"
+tier = 0
+range_lo = "0.00000001"
+range_hi = "100"
+real = "Gere and Goodno, Mechanics of Materials; Roark's Formulas; jointly owned with geometry"
+
+[[axis]]
+id = "mech.section_modulus"
+measures = "the geometric bending resistance of a cross-section"
+unit = "m^3"
+dimension = "volume"
+scale = "m^3"
+tier = 0
+range_lo = "0.000000001"
+range_hi = "1"
+real = "Young and Budynas, Roark's Formulas for Stress and Strain; jointly owned with geometry"
+
+[[axis]]
+id = "mech.second_moment_of_area"
+measures = "the second moment of area governing Euler buckling"
+unit = "m^4"
+dimension = "4,0,0,0"
+scale = "m^4"
+tier = 0
+range_reserved = "the structural-section envelope; reserved because a small section's m^4 underflows Q32.32, so a per-quantity scale is settled under R-UNITS-PIN, jointly with the geometry domain"
+real = "Timoshenko, Theory of Elastic Stability"
+
+[[axis]]
+id = "mech.arm_length"
+measures = "a moment arm or form-segment length along the principal axis"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_lo = "0.001"
+range_hi = "100"
+real = "classical statics and lever mechanics (Meriam and Kraige, Engineering Mechanics: Statics)"
+
+[[axis]]
+id = "mech.slide_distance"
+measures = "the per-step sliding distance a rubbing contact travels"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_lo = "0.000001"
+range_hi = "10"
+real = "Archard 1953; Rabinowicz, Friction and Wear of Materials"
+
+[[axis]]
+id = "mech.edge_radius"
+measures = "the apex radius of a worked edge, the physics-grounded successor to sharpness"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_lo = "0.00000005"
+range_hi = "0.01"
+real = "Atkins, The Science and Engineering of Cutting (2009); cutting-edge metrology"
+
+[[axis]]
+id = "mech.effective_length_factor"
+measures = "the end-condition factor of a buckling column"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0.5"
+range_hi = "2.0"
+real = "Timoshenko, Theory of Elastic Stability (standard end-condition K, theory-fixed interval)"
+
+[[axis]]
+id = "mech.constraint_factor"
+measures = "the degree of restraint of a thermally loaded member, 0 free to 1 fully restrained"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "Boley and Weiner, Theory of Thermal Stresses (definitional interval)"
+
+[[axis]]
+id = "mech.static_friction"
+measures = "the ratio of maximum static friction force to normal force"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "2.0"
+real = "Bowden and Tabor, The Friction and Lubrication of Solids"
+
+[[axis]]
+id = "mech.kinetic_friction"
+measures = "the ratio of kinetic friction force to normal force"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "2.0"
+real = "Bowden and Tabor (generally below the static value for the same pair)"
+
+[[axis]]
+id = "mech.restitution"
+measures = "the ratio of separation to approach speed in a collision"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "Goldsmith, Impact (definitional interval, plastic to elastic)"
+
+[[axis]]
+id = "mech.gravitational_acceleration"
+measures = "the local gravitational acceleration, the shared weight-law input (terran default 9.80665, per-world override under Part 40)"
+unit = "m/s^2"
+dimension = "1,0,-2,0"
+scale = "m/s^2"
+tier = 0
+range_lo = "0.1"
+range_hi = "30"
+real = "NIST standard gravity g0 = 9.80665 m/s^2 (CGPM); planetary envelope ~1.6 lunar to ~25 jovian"
+
+# --- Bulk material axes (the pressure-class axes share the pinned megapascal scale) ---
+
+[[axis]]
+id = "mat.density"
+measures = "bulk mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "CRC Handbook of Chemistry and Physics, density tables; the low bound widened to the lightest simulated gas (hydrogen ~0.0899) so atmospheric buoyancy, hydrostatics, and wind are expressible (wave-2 unification 2.1, owner-signed 2026-07-01), osmium ~22590 the high end"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "Vickers and Brinell hardness tables; Ashby and Jones (diamond Vickers to ~150 GPa)"
+
+[[axis]]
+id = "mat.yield_strength"
+measures = "the stress at the onset of permanent plastic deformation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "ASM Metals Handbook; Ashby strength chart (maraging steel ~2400 MPa, whisker headroom)"
+
+[[axis]]
+id = "mat.ultimate_tensile_strength"
+measures = "the maximum tensile stress before tensile fracture"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "7000"
+real = "ASM Metals Handbook; Ashby strength chart; Wood Handbook FPL-GTR-190 (carbon fibre ~7 GPa)"
+
+[[axis]]
+id = "mat.compressive_strength"
+measures = "the maximum compressive stress before crushing"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "6000"
+real = "ASM Metals Handbook; concrete and masonry standards (SiC and B4C ~6 GPa)"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the maximum shear stress before shear failure (independent for anisotropic and brittle substances)"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "2000"
+real = "Wood Handbook FPL-GTR-190; ASM Metals Handbook; rock-mechanics shear data"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress at which brittle fracture initiates (the shared thermal-fracture read)"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "Ashby and Jones; brittle-fracture literature (whisker and theoretical headroom)"
+
+[[axis]]
+id = "mat.elastic_modulus"
+measures = "Young's modulus, the stress per unit elastic strain"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "1200000"
+real = "Ashby modulus chart; ASM Metals Handbook (diamond ~1200 GPa, in the pinned megapascal)"
+
+[[axis]]
+id = "mat.fracture_energy"
+measures = "the critical strain-energy release rate to advance a crack"
+unit = "J/m^2"
+dimension = "0,1,-2,0"
+scale = "J/m^2"
+tier = 0
+range_lo = "1"
+range_hi = "1000000"
+real = "Ashby fracture-toughness chart; Griffith (1921), Irwin (1957) (tough steel ~1e6 J/m^2)"
+
+[[axis]]
+id = "mat.ductility"
+measures = "tensile strain to failure"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0.0001"
+range_hi = "1.0"
+real = "ASM Metals Handbook elongation data (brittle ceramic ~0.0001 to ductile metal ~1.0)"
+
+[[axis]]
+id = "mat.poisson_ratio"
+measures = "the ratio of transverse contraction to axial extension under load"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "-1.0"
+range_hi = "0.5"
+real = "ASM Metals Handbook; Landau and Lifshitz, Theory of Elasticity (isotropic stability bound)"
+
+[[axis]]
+id = "mat.wear_coefficient"
+measures = "the Archard dimensionless wear coefficient, stored at scale x1e6 (the kernel divides it back out)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "x1e6"
+tier = 0
+range_lo = "0.001"
+range_hi = "1000"
+real = "Archard 1953; Rabinowicz (severe adhesive 1e-3 to mild lubricated 1e-9, stored scaled per R-PHYS-WEAR-RANGE)"
+
+[[axis]]
+id = "mat.specific_cut_energy"
+measures = "the energy to remove or part unit volume (energy density, reducing to pressure)"
+unit = "MJ/m^3"
+dimension = "pressure"
+scale = "MJ/m^3"
+tier = 0
+range_lo = "1"
+range_hi = "7000"
+real = "Atkins, The Science and Engineering of Cutting (2009); soft-tissue low end a flagged extension"
+
+# --- Energy-and-thermal axes (the energy sub-domain owns these) ---
+
+[[axis]]
+id = "therm.conductivity"
+measures = "the conductive heat transfer rate per unit area per unit gradient"
+unit = "W/(m*K)"
+dimension = "1,1,-3,-1"
+scale = "W/(m*K)"
+tier = 0
+range_lo = "0.01"
+range_hi = "3000"
+real = "CRC Handbook thermal data; Incropera and DeWitt (diamond ~2200 to 3300, cleared)"
+
+[[axis]]
+id = "therm.specific_heat"
+measures = "the energy to raise unit mass by one degree"
+unit = "J/(kg*K)"
+dimension = "2,0,-2,-1"
+scale = "J/(kg*K)"
+tier = 0
+range_lo = "100"
+range_hi = "50000"
+real = "CRC Handbook specific-heat tables (lead ~128 to gaseous hydrogen ~14300, exotic reserve)"
+
+[[axis]]
+id = "therm.melting_temperature"
+measures = "the solid-to-liquid transition temperature"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "100"
+range_hi = "10000"
+real = "CRC Handbook melting-point tables (tungsten 3695, Ta4HfC5 4215, forge and stellar headroom)"
+
+[[axis]]
+id = "therm.boiling_temperature"
+measures = "the liquid-to-gas transition temperature at reference pressure"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "100"
+range_hi = "10000"
+real = "CRC Handbook boiling-point tables (tungsten 5828; pressure-dependence deferred to fluids)"
+
+[[axis]]
+id = "therm.ignition_temperature"
+measures = "the lowest temperature that sustains combustion without a spark"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "350"
+range_hi = "3000"
+real = "Babrauskas, Ignition Handbook; NFPA data (CS2 363, wood 570; non-igniters above the source range)"
+
+[[axis]]
+id = "therm.expansion"
+measures = "the fractional length change per degree, stored in ppm/K (the x1e6 scale)"
+unit = "ppm/K"
+dimension = "0,0,0,-1"
+scale = "ppm/K"
+tier = 0
+range_lo = "0.5"
+range_hi = "200"
+real = "CRC Handbook; Ashby expansion charts (invar ~0.5 to polymers ~200; negative-expansion exotics signed)"
+
+[[axis]]
+id = "therm.latent_heat"
+measures = "the energy per unit mass of a phase change, stored in kJ/kg"
+unit = "kJ/kg"
+dimension = "2,0,-2,0"
+scale = "kJ/kg"
+tier = 0
+range_lo = "334"
+range_hi = "10000"
+real = "CRC Handbook enthalpy-of-transition tables (water fusion 334 to metal vaporization ~1e4)"
+
+[[axis]]
+id = "therm.fuel_value"
+measures = "the chemical energy released per unit mass on complete combustion, stored in kJ/kg (the energy sub-domain owns this; Materials reads it cross-domain)"
+unit = "kJ/kg"
+dimension = "2,0,-2,0"
+scale = "kJ/kg"
+tier = 0
+range_lo = "15000"
+range_hi = "120000"
+real = "Turns, An Introduction to Combustion (dry wood 1.5e4 to hydrogen 1.2e5; exotic reserved)"
+
+[[axis]]
+id = "therm.oxidiser_demand"
+measures = "the stoichiometric oxidiser-to-fuel mass ratio (0 for a self-oxidiser)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "20"
+real = "Turns, An Introduction to Combustion, stoichiometry (wood 1.2, methane 4, hydrogen 8)"
+
+# --- The interaction laws (the kernels are fixed Rust in laws.rs, keyed by these ids) ---
+
+[[law]]
+id = "law.contact_pressure"
+inputs = ["mech.force", "mech.contact_area"]
+output_measure = "contact pressure"
+dimension = "pressure"
+interval_bound = "[0, P_MAX]"
+tier = 0
+
+[[law]]
+id = "law.cut_penetrate"
+inputs = ["mat.indentation_hardness", "mat.specific_cut_energy", "mech.contact_area"]
+output_measure = "cut depth"
+dimension = "length"
+interval_bound = "[0, D_MAX]"
+tier = 0
+
+[[law]]
+id = "law.bend_stress"
+inputs = ["mech.force", "mech.section_modulus", "mech.arm_length", "mat.yield_strength"]
+output_measure = "bending stress and collapse margin"
+dimension = "pressure"
+interval_bound = "[0, STRESS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.axial_stress"
+inputs = ["mech.force", "mech.cross_section_area", "mat.yield_strength"]
+output_measure = "axial stress and collapse margin"
+dimension = "pressure"
+interval_bound = "[0, STRESS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.fracture_onset"
+inputs = ["mat.fracture_strength", "mat.fracture_energy", "mech.cross_section_area"]
+output_measure = "stress margin and energy margin"
+dimension = "pressure"
+interval_bound = "[stress_floor, STRESS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.impact"
+inputs = ["mech.mass", "mech.velocity", "mech.restitution"]
+output_measure = "kinetic energy and reduced-mass impulse"
+dimension = "energy"
+interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.lever"
+inputs = ["mech.force", "mech.arm_length"]
+output_measure = "torque, mechanical advantage, and output force"
+dimension = "1,1,-2,0"
+interval_bound = "[0, TORQUE_MAX]"
+tier = 0
+
+[[law]]
+id = "law.friction"
+inputs = ["mech.static_friction", "mech.kinetic_friction", "mech.force", "mech.velocity"]
+output_measure = "kinetic friction force, slip margin, power loss, and efficiency"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.reach"
+inputs = ["mech.arm_length"]
+output_measure = "the additive grip-to-tip extent"
+dimension = "length"
+interval_bound = "[0, the saturating-sum cap]"
+tier = 0
+
+[[law]]
+id = "law.weight"
+inputs = ["mech.mass", "mech.gravitational_acceleration"]
+output_measure = "the load force from mass and gravity"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.power"
+inputs = ["mech.force", "mech.velocity"]
+output_measure = "mechanical power"
+dimension = "2,1,-3,0"
+interval_bound = "[0, P_POWER_MAX]"
+tier = 0
+
+[[law]]
+id = "law.euler_buckle"
+inputs = ["mat.elastic_modulus", "mech.second_moment_of_area", "mech.effective_length_factor", "mech.arm_length"]
+output_measure = "the Euler critical buckling load"
+dimension = "force"
+interval_bound = "[0, F_MAX]"
+tier = 0
+
+[[law]]
+id = "law.shear"
+inputs = ["mech.force", "mech.cross_section_area", "mat.shear_strength", "mat.yield_strength"]
+output_measure = "shear stress and the shear margin"
+dimension = "pressure"
+interval_bound = "[0, STRESS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.wear"
+inputs = ["mat.wear_coefficient", "mech.force", "mech.slide_distance", "mat.indentation_hardness"]
+output_measure = "Archard worn volume"
+dimension = "volume"
+interval_bound = "[0, WEAR_MAX]"
+tier = 0
+
+[[law]]
+id = "law.conduction"
+inputs = ["therm.conductivity", "mech.contact_area", "mech.arm_length"]
+output_measure = "steady conductive heat flux"
+dimension = "2,1,-3,0"
+interval_bound = "[0, MAX_FLUX]"
+tier = 0
+
+[[law]]
+id = "law.sensible_heat"
+inputs = ["mech.mass", "therm.specific_heat"]
+output_measure = "the energy for a temperature change, or the rise from a delivered energy"
+dimension = "energy"
+interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.phase_change"
+inputs = ["mech.mass", "therm.specific_heat", "therm.melting_temperature", "therm.latent_heat"]
+output_measure = "the sensible-plus-latent energy of a phase transition"
+dimension = "energy"
+interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.combustion"
+inputs = ["therm.fuel_value", "therm.oxidiser_demand", "therm.ignition_temperature", "mech.mass"]
+output_measure = "released energy, the ignition crossing, and the limiting reactant"
+dimension = "energy"
+interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.thermal_stress"
+inputs = ["mat.elastic_modulus", "therm.expansion", "mech.constraint_factor", "mat.fracture_strength"]
+output_measure = "constrained thermal stress and the fracture crossing"
+dimension = "pressure"
+interval_bound = "[-STRESS_MAX, STRESS_MAX]"
+tier = 0
+
+# --- A few real substances as vectors over the axes (cited real data) ---
+
+[[substance]]
+id = "iron"
+participates_in = ["law.contact_pressure", "law.bend_stress", "law.axial_stress", "law.fracture_onset"]
+real = "ASM Metals Handbook; CRC Handbook"
+values = [
+  { axis = "mat.density", value = "7870" },
+  { axis = "mat.indentation_hardness", value = "1500" },
+  { axis = "mat.yield_strength", value = "250" },
+  { axis = "mat.elastic_modulus", value = "200000" },
+  { axis = "therm.conductivity", value = "80" },
+  { axis = "therm.melting_temperature", value = "1811" },
+]
+
+[[substance]]
+id = "oak"
+participates_in = ["law.cut_penetrate", "law.bend_stress", "law.shear", "law.combustion"]
+real = "Wood Handbook FPL-GTR-190; wood-energy literature"
+values = [
+  { axis = "mat.density", value = "700" },
+  { axis = "mat.ultimate_tensile_strength", value = "90" },
+  { axis = "mat.shear_strength", value = "12" },
+  { axis = "therm.fuel_value", value = "15000" },
+  { axis = "therm.ignition_temperature", value = "570" },
+]

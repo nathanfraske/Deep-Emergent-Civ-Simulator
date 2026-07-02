@@ -39,6 +39,7 @@
 use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::typology::TypologyProfile;
 use civsim_core::{Fixed, Rng};
 
 /// The reserved calibration the naming game needs: how often a speaker coins a fresh
@@ -482,17 +483,33 @@ pub struct Language {
     parent: Option<LangId>,
     form_system: FormSystem,
     change_log: Vec<FormChangeRule>,
+    typology: TypologyProfile,
 }
 
 impl Language {
-    /// A root lineage with no parent.
+    /// A root lineage with no parent. The typology profile starts empty; a culture-genesis
+    /// caller samples one over the typological registry (R-LANG-TYPOLOGY) and attaches it
+    /// with [`Language::set_typology`].
     pub fn new(id: LangId, form_system: FormSystem) -> Self {
         Language {
             id,
             parent: None,
             form_system,
             change_log: Vec::new(),
+            typology: TypologyProfile::default(),
         }
+    }
+
+    /// This lineage's typology profile: its grammar as a canonical vector over the
+    /// typological parameter registry, the data-defined replacement for the design's
+    /// closed `GrammarParams` (33.4, R-LANG-TYPOLOGY).
+    pub fn typology(&self) -> &TypologyProfile {
+        &self.typology
+    }
+
+    /// Attach a sampled typology profile.
+    pub fn set_typology(&mut self, typology: TypologyProfile) {
+        self.typology = typology;
     }
 
     /// This lineage's id.
@@ -526,6 +543,7 @@ impl Language {
             parent: Some(self.id),
             form_system: self.form_system.clone(),
             change_log: self.change_log.clone(),
+            typology: self.typology.clone(),
         }
     }
 

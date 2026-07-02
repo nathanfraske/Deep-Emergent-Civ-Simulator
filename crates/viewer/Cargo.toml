@@ -1,0 +1,21 @@
+[package]
+name = "civsim-viewer"
+description = "A windowed, colour map viewer for the Emergent Civilization Simulator: opens a desktop window onto a generated world and pans and zooms it (design Part 14). The window is an observer that only reads canon (Principle 10); it depends on no determinism-critical crate beyond the spatial layer it draws."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+civsim-world = { path = "../world" }
+# The superfine zoom draws the living world: the biosphere the simulation genesis produces
+# and places on the map. sim depends on core/world/physics only, no GPU or ECS stack.
+civsim-sim = { path = "../sim" }
+# minifb opens a simple framebuffer window with keyboard input on Windows, macOS, Linux,
+# and WSLg, and takes a buffer of 0x00RRGGBB pixels directly, which is exactly the shape
+# `Camera::paint` produces. It is an observer-side rendering dependency only; no
+# determinism-critical crate (core, physics, sim) depends on it.
+minifb = "0.27"

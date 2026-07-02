@@ -138,7 +138,38 @@ pub enum Channel {
     Imbued(ImbuedChannel),
     /// A life-history channel.
     LifeHistory(LifeHistoryChannel),
+    /// A heritable tissue-composition coordinate, by composition-axis id (R-BIOSPHERE, fork
+    /// F10). The heritable payload is a stick-breaking coordinate of the composition simplex
+    /// rather than an absolute mass fraction, so additivity stays exact under drift and
+    /// selection and defensive toxins (and their loss under domestication) fall out of
+    /// selection. The variant is the fixed engine interface; which composition axes exist,
+    /// and which genes reach them, is data.
+    Composition(CompositionAxisId),
+    /// A heritable behaviour-controller weight, by controller-parameter id (R-BEHAVIOR-EVOLVE,
+    /// design Part 8; the evolved-behaviour work whose pass is `docs/emergent_behavior_design.md`).
+    /// The controller is the mapping from a being's homeostatic state and percept to which
+    /// morphological affordance it issues; its parameters are the heritable data expressed here,
+    /// one weight per controller-parameter id, so behaviour is a lineage's inheritance the way
+    /// its size and acuity are, evolving under the pre-dawn epoch's selection rather than being
+    /// authored (Principle 9). The variant is the fixed engine interface; the controller's
+    /// topology and how many parameters it has are data ([`crate::controller`]).
+    Controller(ControllerParamId),
 }
+
+/// A controller-parameter id, an index into a being's behaviour controller's flat weight vector
+/// ([`crate::controller`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
+/// and the topology it indexes are data, sibling to the composition-axis registry. It is a `u32`
+/// (not a `u16`), so a large controller (a wide recurrent network over a rich registry) cannot
+/// silently collide two weights on one channel by truncation; `Channel` is already `u32`-sized
+/// through [`TraitId`], so the width costs nothing.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ControllerParamId(pub u32);
+
+/// A composition-axis id, an index into the biosphere composition-axis registry (the floor
+/// axes an organism's tissue varies over). A numeric id keeps [`Channel`] `Copy` and `Ord`;
+/// the axis-name-to-id mapping is data in the biosphere registry.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct CompositionAxisId(pub u16);
 
 /// One phenotypic effect of a gene: the channel it feeds and the additive weight with
 /// which the locus's allele values push that channel. A gene may carry several effects
@@ -608,6 +639,44 @@ impl GenePool {
                     .clamp(Fixed::ZERO, Fixed::ONE);
             }
         }
+    }
+
+    /// Fork a founder pool off this one, the founder effect (R-BIOSPHERE): each locus's
+    /// frequency is resampled as the fraction of `2 * founder_size` colonising gametes that
+    /// carry state 1, so drift at the small founder size shifts the daughter off the parent,
+    /// and the daughter then carries `recovery_size` as its effective size (the colonisers
+    /// grow into a full population). Exact per-locus Bernoulli sampling keyed on the founder
+    /// id, the locus, and the generation (`Phase::FOUND`), so a deterministic pre-dawn epoch
+    /// forks reproducibly. A zero founder size copies the parent frequencies unchanged.
+    pub fn found(
+        &self,
+        seed: u64,
+        founder_id: u64,
+        generation: u64,
+        founder_size: u32,
+        recovery_size: u32,
+    ) -> GenePool {
+        let two_ne = founder_size.saturating_mul(2);
+        let freqs = if two_ne == 0 {
+            self.freqs.clone()
+        } else {
+            self.freqs
+                .iter()
+                .enumerate()
+                .map(|(locus, &p)| {
+                    let rng =
+                        DrawKey::pair(founder_id, locus as u64, generation, Phase::FOUND).rng(seed);
+                    let mut count: u32 = 0;
+                    for k in 0..two_ne {
+                        if rng.unit_fixed(k as u64) < p {
+                            count += 1;
+                        }
+                    }
+                    Fixed::from_ratio(count as i64, two_ne as i64)
+                })
+                .collect()
+        };
+        GenePool::new(self.scheme, recovery_size, freqs)
     }
 
     /// A fixed-point genetic distance to another pool: the mean over shared loci of the
@@ -1272,6 +1341,29 @@ mod tests {
             Some(Fixed::from_ratio(1, 2)),
             "no coefficient, no change"
         );
+    }
+
+    #[test]
+    fn founder_fork_drifts_off_the_parent_and_recovers_size() {
+        let parent = GenePool::new(SCHEME, 500, vec![Fixed::from_ratio(1, 2); 8]);
+        // A small founder size (5) drifts the daughter off the 0.5 parent frequencies; the
+        // daughter carries the recovery size.
+        let d = parent.found(0xF00D, 42, 3, 5, 200);
+        assert_eq!(d.loci(), parent.loci());
+        assert_eq!(
+            d.effective_size, 200,
+            "the daughter recovers to the recovery size"
+        );
+        let moved = (0..8).any(|i| d.freq(i) != parent.freq(i));
+        assert!(moved, "founder drift at a small size shifts some frequency");
+        // Deterministic: the same fork replays identically.
+        let d2 = parent.found(0xF00D, 42, 3, 5, 200);
+        assert_eq!(d, d2, "a founder-fork is a pure function of the key");
+        // A fixed locus stays fixed through the fork.
+        let fixed_parent = GenePool::new(SCHEME, 500, vec![Fixed::ONE, Fixed::ZERO]);
+        let fd = fixed_parent.found(0xF00D, 1, 0, 5, 200);
+        assert_eq!(fd.freq(0), Some(Fixed::ONE));
+        assert_eq!(fd.freq(1), Some(Fixed::ZERO));
     }
 
     #[test]

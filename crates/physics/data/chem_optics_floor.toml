@@ -1,0 +1,240 @@
+# The chemistry and optics floors (wave 2 of the physics substrate, R-PHYS-W2; design Part 41,
+# record 62.21). Extends the registry with the chem.* and opt.* axes and the closed-form kernels over
+# them (in crates/physics/src/laws.rs). Loads onto the mechanical and fluids floors (it reads
+# mech.contact_area, mech.arm_length, and the fluids therm.temperature). Every range is
+# reserved-with-basis; nothing is an owner-set value. Ranges stay in the Q32.32 window; a quantity
+# whose true envelope underflows carries a reserved per-quantity scale (R-UNITS-PIN).
+
+# --- Chemistry axes ---
+
+[[axis]]
+id = "chem.formation_enthalpy"
+measures = "standard enthalpy of formation per unit mass (the reaction-energy substrate)"
+unit = "kJ/kg"
+dimension = "2,0,-2,0"
+scale = "kJ/kg"
+tier = 0
+range_reserved = "proposed bounds [-50000, 50000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC thermochemical tables; Atkins, Physical Chemistry (fuel and oxide enthalpies, tens of MJ/kg)"
+
+[[axis]]
+id = "chem.standard_potential"
+measures = "standard electrode potential, the reduction potential relative to the standard hydrogen electrode (promoted to the volt by wave 3, unified with elec.potential and elec.emf)"
+unit = "V"
+dimension = "voltage"
+scale = "V (the volt, wave-3 promotion, dimension-and-scale only, no numeric re-fit; unified with elec.potential and elec.emf)"
+tier = 0
+range_reserved = "proposed bounds [-5, 5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC standard electrode-potential (electromotive) series"
+
+[[axis]]
+id = "chem.acidity"
+measures = "acidity pH of a solution (the corrosion aggressiveness lever)"
+unit = "pH"
+dimension = "dimensionless"
+scale = "pH"
+tier = 0
+range_reserved = "proposed bounds [0, 14], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "definitional pH scale (CRC)"
+
+[[axis]]
+id = "chem.corrosion_susceptibility"
+measures = "a material's susceptibility to corrosive attack"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "relative corrosion-rate ordering (Fontana, Corrosion Engineering); a per-material reserved datum"
+
+[[axis]]
+id = "chem.activation_energy"
+measures = "the reaction activation barrier per unit mass (threshold-gated at Tier 0; the Arrhenius rate deferred)"
+unit = "kJ/kg"
+dimension = "2,0,-2,0"
+scale = "kJ/kg"
+tier = 0
+range_reserved = "proposed bounds [0, 50000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Atkins (activation energies); its quantitative Arrhenius use is deferred to R-GPU-CANON-PIN"
+
+[[axis]]
+id = "chem.solute_affinity"
+measures = "affinity of a solute for a solvent (the leach fraction lever)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "relative solubility ordering (CRC solubility tables); a per-pair reserved datum"
+
+# --- Optics axes ---
+
+[[axis]]
+id = "opt.emissivity"
+measures = "surface emissivity (and absorptance by Kirchhoff), the radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC emissivity tables (Incropera Table A.11)"
+
+[[axis]]
+id = "opt.reflectance"
+measures = "broadband reflectance (albedo), the reflected fraction of incident flux"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC optical-constants and albedo tables"
+
+[[axis]]
+id = "opt.transmittance"
+measures = "broadband transmittance, the transmitted fraction of incident flux"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC optical-constants tables"
+
+[[axis]]
+id = "opt.absorption_coefficient"
+measures = "medium absorption per unit path (the optical-depth lever)"
+unit = "1/m"
+dimension = "-1,0,0,0"
+scale = "1/m"
+tier = 0
+range_reserved = "proposed bounds [0, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Beer-Lambert absorption coefficients (Hecht); the exp transform deferred to R-GPU-CANON-PIN"
+
+[[axis]]
+id = "opt.refractive_index"
+measures = "refractive index n of a medium (the refraction and total-internal-reflection lever)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_reserved = "proposed bounds [1, 5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CRC refractive-index tables (vacuum 1, water 1.33, diamond 2.42)"
+
+[[axis]]
+id = "opt.source_power"
+measures = "radiant or luminous source power (the inverse-square reach lever)"
+unit = "W"
+dimension = "2,1,-3,0"
+scale = "W (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "proposed bounds [0.000001, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "radiometric source-power ranges; the sub-microwatt low end reserves a per-quantity scale"
+
+[[axis]]
+id = "opt.spectral_band"
+measures = "per-band reflectance or emitted power over a data-defined band basis (colour, not a hardcoded RGB triple)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio (per band)"
+tier = 0
+range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "CIE tristimulus partition and reflectance spectra (Wyszecki and Stiles; Hecht Ch 4); the band edges and per-race receptor sensitivities are reserved data"
+
+[[axis]]
+id = "opt.scattering_coefficient"
+measures = "medium scattering per unit path (sky brightness, twilight, diffuse ambient)"
+unit = "1/m"
+dimension = "-1,0,0,0"
+scale = "1/m"
+tier = 0
+range_reserved = "proposed bounds [0, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+real = "atmospheric scattering coefficients; the Rayleigh lambda^-4 spectral shape is reserved data, deferred as a computed transcendental"
+
+# --- Chemistry and optics laws (metadata; kernels in laws.rs) ---
+
+[[law]]
+id = "law.reaction"
+inputs = ["chem.formation_enthalpy", "therm.temperature"]
+output_measure = "reaction enthalpy per kg and the barrier-crossed condition"
+dimension = "2,0,-2,0"
+interval_bound = "[-E_RXN_MAX, E_RXN_MAX]"
+tier = 0
+
+[[law]]
+id = "law.corrosion"
+inputs = ["chem.standard_potential", "chem.acidity", "chem.corrosion_susceptibility"]
+output_measure = "corrosion driving margin (a rate proxy)"
+dimension = "dimensionless"
+interval_bound = "[0, CORROSION_MAX]"
+tier = 0
+
+[[law]]
+id = "law.carnot_limit"
+inputs = ["therm.temperature"]
+output_measure = "ideal heat-to-work efficiency"
+dimension = "dimensionless"
+interval_bound = "[0, 1]"
+tier = 0
+
+[[law]]
+id = "law.dissolution"
+inputs = ["chem.solute_affinity"]
+output_measure = "leached fraction of a solute"
+dimension = "dimensionless"
+interval_bound = "[0, 1]"
+tier = 0
+
+[[law]]
+id = "law.radiant_emission"
+inputs = ["opt.emissivity", "mech.contact_area", "therm.temperature"]
+output_measure = "radiant heat exchange (Stefan-Boltzmann)"
+dimension = "energy"
+interval_bound = "[0, FLUX_MAX]"
+tier = 0
+
+[[law]]
+id = "law.wien_peak"
+inputs = ["therm.temperature"]
+output_measure = "peak emission wavelength (Wien)"
+dimension = "length"
+interval_bound = "[0, WAVELENGTH_MAX]"
+tier = 0
+
+[[law]]
+id = "law.inverse_square_falloff"
+inputs = ["opt.source_power", "mech.arm_length"]
+output_measure = "irradiance at a distance (geometric spreading)"
+dimension = "0,1,-3,0"
+interval_bound = "[0, IRRAD_MAX]"
+tier = 0
+
+[[law]]
+id = "law.interface_split"
+inputs = ["opt.reflectance", "opt.transmittance"]
+output_measure = "the reflected, absorbed, and transmitted flux triple"
+dimension = "energy"
+interval_bound = "[0, incident]"
+tier = 0
+
+[[law]]
+id = "law.optical_depth"
+inputs = ["opt.absorption_coefficient", "mech.arm_length"]
+output_measure = "optical depth tau (the exp transform deferred)"
+dimension = "dimensionless"
+interval_bound = "[0, TAU_MAX]"
+tier = 0
+
+[[law]]
+id = "law.refractive_contrast"
+inputs = ["opt.refractive_index"]
+output_measure = "the refractive contrast ratio and the total-internal-reflection condition"
+dimension = "dimensionless"
+interval_bound = "[0, CONTRAST_MAX]"
+tier = 0
+
+[[law]]
+id = "law.radiative_equilibrium"
+inputs = ["opt.emissivity"]
+output_measure = "the equilibrium temperature absorbed irradiance sets (inverse Stefan-Boltzmann)"
+dimension = "temperature"
+interval_bound = "[0, T_MAX]"
+tier = 0

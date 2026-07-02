@@ -32,14 +32,22 @@
 //!   over data-defined field ranges rather than a closed enum.
 //! - [`worldgen`]: worldgen pass one and the tile map (design Parts 12, 6, 14), a seed
 //!   turned into a bit-identical tile grid with a headless glyph render to view it.
+//! - [`lod`]: the chunk grid and the canonical level-of-detail quadtree (design Part 6),
+//!   one tree over the tile map summarising each region by its dominant biome.
+//! - [`view`]: the camera and the multi-zoom glyph view (design Parts 14, 11, 54), a pure
+//!   read of the quadtree that draws the world at any zoom without writing canon.
 //!
-//! The chunk grid and quadtree LOD structure and the multi-scale GPU view land here next.
+//! The multi-scale GPU view (Part 14) is a later swap of the same [`view`] reads.
 
+pub mod lod;
 pub mod noise;
 pub mod terrain;
 pub mod topology;
+pub mod view;
 pub mod worldgen;
 
-pub use terrain::{BiomeDef, BiomeId, BiomeSet};
+pub use lod::{ChunkCoord, NodeSummary, QuadTree, CHUNK};
+pub use terrain::{BiomeDef, BiomeId, BiomeSet, Rgb};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
+pub use view::Camera;
 pub use worldgen::{Tile, TileMap, WorldgenParams};

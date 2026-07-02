@@ -1,0 +1,18 @@
+[package]
+name = "civsim-physics"
+description = "The authored physics-and-materials substrate (design Principle 9, Parts 41 and 58): the QuantityAxis / InteractionLaw / Substance registry the biology floor (R-PHYS-BIO) and the mechanical-and-materials floor (R-PHYS-MECH) load into, with closed-form fixed-point law kernels. The one bounded place the designer's hand may enter; every axis range and law constant is data, reserved-with-basis until the owner sets it."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+# serde and toml only, the mature stable pair (not the fast-moving GPU/ECS stack),
+# used to load the data-driven axis, law, and substance definitions. Values are
+# carried as decimal strings and parsed to Fixed by integer arithmetic, so no
+# floating point reaches canonical state through them.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

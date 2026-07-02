@@ -195,16 +195,20 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 [[reserved]]
 id = "genome.narrow_sense_heritability"
 basis = "the per-channel narrow-sense heritability; Part 20 already centres it near one half"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
 [[reserved]]
 id = "genome.loci_per_channel"
 basis = "the loci-per-channel counts"
-status = "reserved"
-value = ""
+status = "set"
+value = "8"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "count"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
@@ -329,6 +333,40 @@ status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
+
+# --- R-LANG-TYPOLOGY: the typological substrate (Part 33.4; scoped proposal) ---
+
+[[reserved]]
+id = "lang.typology_harmony_strong"
+basis = "the strong-tier multiplicative harmony tilt; the typological record reports proportions of genera rather than coefficients, so the tier is ordinal and its numeric tilt is the owner's, anchored on the adposition axis running about 94 to 97 percent harmonic (WALS 95A: 472 OV-postpositional and 456 VO-prepositional against 14 and 42 disharmonic)"
+status = "reserved"
+value = ""
+unit = "tilt"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_harmony_weak"
+basis = "the weak-tier multiplicative harmony tilt; anchored on the genitive pair, which correlates weakly and one-sidedly (Dryer 1992: 0.89 of OV genera Genitive-Noun against 0.45 of VO genera)"
+status = "reserved"
+value = ""
+unit = "tilt"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_disharmony"
+basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+
+[[reserved]]
+id = "lang.typology_distance_weights"
+basis = "the per-parameter weights of the 33.5 grammatical distance component over the typology profile; basis the contribution each typological dimension makes to measured mutual intelligibility, consistent with the three-component weighting where lexical distance dominates"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 33.5 grammatical distance; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 
 # --- R-LANG-DET: order-sensitive language procedures pinned (Part 33, record 62.12) ---
 
@@ -711,40 +749,50 @@ source = "Part 33.4 drift; record 62.12; audit section 1n"
 [[reserved]]
 id = "genome.effective_population_size"
 basis = "Ne, the drift strength of a pool: smaller Ne drifts harder (founder effects, neutral divergence). Set per the modelled census size and the breeding structure; the molecular-clock divergence pace follows from it (Wright-Fisher; Kimura neutral theory)"
-status = "reserved"
-value = ""
+status = "set"
+value = "200"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "individuals"
 source = "Part 25.7-25.8; biosphere candidate; audit follow-up"
 
 [[reserved]]
 id = "genome.speciation_distance"
 basis = "the genetic distance at which two diverged pools are declared distinct species; set against the chosen distance measure so a cross stays fertile below it and fails above it (declared rather than scripted speciation; Coyne and Orr)"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.30"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "distance"
 source = "Part 25.7; biosphere candidate"
 
 [[reserved]]
 id = "genome.selection_scaling"
 basis = "the per-locus selection-coefficient scale that maps a fitness difference to an allele-frequency response (the breeder's-equation response = h2 * S); set so domestication and disease resistance shift at the historical pace the targets in Part 17 and 22 expect"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "coefficient"
 source = "Part 25.7"
 
 [[reserved]]
 id = "genome.point_mutation_rate"
 basis = "the per-locus per-reproduction probability that a point mutation flips a discrete allele state; set so the molecular clock and standing variation match the targets, far below 1 so a lineage is stable across a generation (Kimura)"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.0001"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "probability"
 source = "Part 25.5"
 
 [[reserved]]
 id = "genome.recombination_default"
 basis = "the default per-interval crossover fraction of the genetic map where a gene does not override it; set per the desired linkage disequilibrium and hitchhiking (0 fully linked, 0.5 unlinked); the Haldane and Kosambi mapping functions are design-time tools, never runtime"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 25.4"
 
@@ -759,23 +807,252 @@ source = "Part 25.5, 25.10"
 [[reserved]]
 id = "biosphere.predawn_generations"
 basis = "how many generations the biosphere evolves at the aggregate tier before the dawn, so plants and animals seed, radiate, co-evolve, and go extinct into a mature ecology the people inherit; set so diversity reaches the target without collapsing onto the selection optimum (owner direction: let life really take hold first)"
-status = "reserved"
-value = ""
+status = "set"
+value = "40"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "generations"
 source = "Part 25.7; biosphere candidate"
 
 [[reserved]]
 id = "genome.speciation_incompatibilities"
 basis = "how many active Dobzhansky-Muller incompatibilities across two pools declare reproductive isolation on their own, independent of frequency distance; set so a single complementary allele pair can raise a genetic firewall between still-close pools where the design wants discrete speciation, higher where only accumulated divergence should isolate (Coyne and Orr, Dobzhansky-Muller)"
-status = "reserved"
-value = ""
+status = "set"
+value = "2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "count"
 source = "Part 25.7"
 
 [[reserved]]
 id = "genome.allele_presence_threshold"
 basis = "the allele-state frequency at or above which a pool counts as carrying that state for the cross-pool incompatibility test; set near fixation so a pair is active only when each pool reliably contributes its partner allele to a hybrid, lower if a polymorphic pool should still trip the firewall (the presence input to the active-incompatibility count)"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.9"
+set_by = "Nathan M. Fraske"
+set_date = "2026-06-30"
 unit = "frequency"
 source = "Part 25.7"
+
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "the base tick as the finest canonical timestep, short enough in world-time that people and animals move smoothly rather than jittering (design.md line 3058) and matching R-VIEW-ELAB's near-one-second view target; one in-world second per tick, so playback speed 1.0 plays one in-world second per real second"
+status = "set"
+value = "1"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "seconds_per_tick"
+source = "Part 14.6, Part 54; docs/time_and_playback.md"
+
+[[reserved]]
+id = "time.life_cadence_ticks"
+basis = "the period between aging-and-mortality beats, the unit the age-hazard curve is scaled to (Part 20, R-AGING); set to one in-world year, the demographic unit real life tables use, which at a one-second base tick is 31536000 ticks. Note: revisit one in-world month (2592000 ticks) if it is within the compute budget, for smoother visible aging"
+status = "set"
+value = "31536000"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "ticks"
+source = "Part 20; crates/sim/src/world.rs age_step/apply_mortality"
+
+[[reserved]]
+id = "time.years_per_generation"
+basis = "the in-world years one pre-dawn radiation generation represents, for the deep-time readout only (never canonical state); set to 10000 years, matching deep speciation timescales, so the default forty-generation radiation spans about 400000 years"
+status = "set"
+value = "10000"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "years_per_generation"
+source = "Part 25, Part 32; docs/time_and_playback.md"
+
+# --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
+
+[[reserved]]
+id = "physiology.reserve_capacity_per_mass"
+basis = "the reserve capacity of a homeostatic axis (energy, water) as a multiple of body mass, so a bigger body carries a larger reserve and more endurance; per axis, from the Part 20 physiology (an energy store and a water store scale differently with mass)"
+status = "reserved"
+value = ""
+unit = "capacity_per_body_mass"
+source = "Part 15, Part 20; crates/sim/src/homeostasis.rs; docs/emergent_behavior_design.md"
+
+[[reserved]]
+id = "physiology.base_metabolic_drain"
+basis = "the resting per-tick drain of a homeostatic axis as a fraction of its capacity, the basal metabolic rate of Part 20 mapped onto the base tick (one in-world second, owner-set); per axis, since water is lost slower than energy is burnt"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick"
+source = "Part 20; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "physiology.exertion_drain_coupling"
+basis = "how much body exertion (a unit-interval activity signal) adds to a homeostatic axis's per-tick drain, the movement-and-work energy cost of Part 20; per axis, since energy couples strongly to exertion and water less"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick_per_exertion"
+source = "Part 20; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "physiology.death_floor"
+basis = "the viable floor of a homeostatic axis as a fraction of capacity, at or below which the body fails on that axis and dies; per axis, from the Part 20 death conditions (the physiological reserve at which the body can no longer function)"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity"
+source = "Part 20; crates/sim/src/homeostasis.rs"
+
+# --- R-BEHAVIOR-EVOLVE Stages 2 to 4: the evolved behaviour controller (Part 8; record 62.19;
+# docs/emergent_behavior_design.md) ---
+
+[[reserved]]
+id = "physiology.intake_yield"
+basis = "the fraction of a reserve's capacity restored by one tick of ingesting a source of it; the interim stand-in for the net-nutrition and water-content per bite the resolved edibility floor measures (R-PHYS-BIO), until the floor's measure is wired to the located matter"
+status = "reserved"
+value = ""
+unit = "fraction_of_capacity_per_tick"
+source = "Part 41 (R-PHYS-BIO), Part 8; crates/sim/src/locomotion.rs"
+
+[[reserved]]
+id = "behavior.controller_hidden_width"
+basis = "the hidden width of the behaviour controller: zero is a linear reaction norm (the substrate and determinism proof), positive a recurrent network that can gate a response on internal state; the smallest hidden state that represents the conditional foraging and predator-prey behaviours the ecology needs, against the per-tick evaluation budget, a performance-and-expressiveness bound found by trial. Set to 4: the compute-tax probe (crates/sim/examples/controller_tax.rs) put the per-tick evaluation cost of a small recurrent net at about 2x the reaction norm at h=4 and negligible at focus scale, and the evolved-controller literature (Beer CTRNNs, ~2 to 10 interneurons, ~5 canonical for state-dependent behaviour) places the useful hidden layer squarely there; the h^2 evaluation wall and the O(weight_count^2) expression cost only bite past single digits. A tuneable lever, raised for more expressive behaviour or lowered for compute; raising past single digits wants the express channel-index optimization first"
+status = "set"
+value = "4"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-01"
+unit = "hidden_units"
+source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
+
+[[reserved]]
+id = "behavior.controller_init_spread"
+basis = "the half-range of a founder lineage's initial random controller weights; the weight scale at which the activation's clamp is neither always saturated nor always near zero, so behavioural variation is expressible from the start (a representational bound)"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 8; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.controller_mutation_rate"
+basis = "the per-controller-weight probability of a bounded mutation on inheritance; the mutation scale the pre-dawn epoch uses for the other genome channels (epoch EpochParams), adjusted for the larger controller parameter space"
+status = "reserved"
+value = ""
+unit = "probability_per_weight"
+source = "Part 8, Part 25; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.controller_mutation_step"
+basis = "the bounded magnitude of a controller-weight mutation; small enough that a small weight change is a small behaviour change (smooth evolution) yet large enough to explore the weight space, a stress-test tunable"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 8; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.selection_pop_size"
+basis = "the number of controller lineages under homeostatic-survival selection each generation; the sample size that resolves the fitness ranking against the per-generation evaluation budget, a performance bound on the significance-and-time gradient (Part 54)"
+status = "reserved"
+value = ""
+unit = "lineages"
+source = "Part 8, Part 54; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.selection_generations"
+basis = "the number of generations behaviour is allowed to adapt before the dawn; the deep-time depth, tied to the pre-dawn radiation depth (EpochParams generations)"
+status = "reserved"
+value = ""
+unit = "generations"
+source = "Part 8, Part 25; crates/sim/src/evolve.rs"
+
+[[reserved]]
+id = "behavior.episode_ticks"
+basis = "the length in ticks of a homeostatic-survival scoring episode; long enough that a viable controller's survival separates from an unviable one under the metabolic timescale, against the evaluation budget (a proxy-versus-episode length on the Part 54 significance gradient)"
+status = "reserved"
+value = ""
+unit = "ticks"
+source = "Part 8, Part 54; crates/sim/src/evolve.rs"
+
+# --- The body arc: R-BUILD-PHYS, R-WOUND, R-FLUID (Part 35; record 62.20; docs/working/BODY_ARC_SCOPE.md) ---
+
+[[reserved]]
+id = "body.tissue_properties"
+basis = "the material property vector per tissue material (indentation hardness, fracture strength and energy, specific cutting energy, elastic modulus, thermal expansion), the values the resolved R-PHYS-MECH wound laws read; from real material datasheets (Yamada, Strength of Biological Materials; Currey, Bones), the floor's real-with-source provenance discipline, per tissue"
+status = "reserved"
+value = ""
+unit = "material_axes"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.damage_caps"
+basis = "the contact-pressure, delivered-energy, and stress caps the wound laws saturate to (MPa, floor energy, MPa); from the floor's own axis maxima, a representability bound rather than a realism one"
+status = "reserved"
+value = ""
+unit = "floor_axis_maxima"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.fracture_damage"
+basis = "the integrity a clean fracture removes from a part, in [0,1]; the loss of structural function when a load-bearing part breaks (near-total), the mapping from the measured fracture margin to the condition"
+status = "reserved"
+value = ""
+unit = "fraction_of_integrity"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.burn_scale"
+basis = "the temperature rise (floor units) that a full-severity burn corresponds to; the tissue's thermal-damage threshold (protein denaturation), the mapping from the measured thermal stress and delta-T to the condition"
+status = "reserved"
+value = ""
+unit = "temperature_rise"
+source = "Part 35, Part 41; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.fluid_critical_fraction"
+basis = "the fraction of a fluid pool that may be lost before the body fails on it (Part 35's critical fraction), per fluid; the survivable fractional loss (for a mammal, roughly a third of blood volume, Guyton and Hall)"
+status = "reserved"
+value = ""
+unit = "fraction_of_volume"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.clot_and_breach_rates"
+basis = "how fast a breach seals per tick (the clot rate, per fluid) and the bleed volume a full-depth breach opens per tick (the breach rate); the coagulation and haemorrhage timescales of the fluid, per race"
+status = "reserved"
+value = ""
+unit = "volume_fraction_per_tick"
+source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.promotion_shape"
+basis = "the body-promotion parameters (the torso mass fraction and the base tissue thickness at unit body mass); real body-segment mass fractions and tissue depths scaled allometrically"
+status = "reserved"
+value = ""
+unit = "body_shape"
+source = "Part 35, Part 20; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.strike_energetics"
+basis = "the force, velocity, and contact area of a natural-weapon strike; the wielder's derived strength and the weapon's geometry (a sharp weapon a small contact area), the inputs the kinetic-energy and contact laws consume"
+status = "reserved"
+value = ""
+unit = "strike_inputs"
+source = "Part 35, Part 8; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "field.diffusion"
+basis = "the medium's thermal diffusivity over the cell size and the base tick, kept below the four-neighbour stencil's explicit 0.25 stability bound; a conduction rate, not a taste value"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
+
+[[reserved]]
+id = "field.relaxation"
+basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
+
+[[reserved]]
+id = "field.body_exchange"
+basis = "the body-to-environment convective coupling per tick, the discrete Newton-cooling rate from the fluids-floor convective coefficient and the body surface-to-thermal-mass ratio (law.convective_flux); the body core-temperature exchange the body arc deferred until a located world existed"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
