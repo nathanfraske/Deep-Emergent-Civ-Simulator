@@ -64,6 +64,7 @@ use crate::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, WATER,
 };
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
 
 // Draw-site slots within the CONTROLLER phase, so the init and the two mutation rolls of one lineage
 // do not collide on counter zero (the R-RNG-COORD slot rule).
@@ -433,6 +434,129 @@ pub fn full_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> 
     (total / set.len() as u64) as u32
 }
 
+// --- The thermal-survival scorer: evolve the thermotaxis controller in-situ on the coupled runner ---
+
+/// The controller layout for the thermal environment: the temperature-only development physiology and
+/// the standard affordances. A caller evolves against this layout; its beings carry one homeostatic
+/// axis (temperature) and can move or ingest.
+pub fn thermal_layout(hidden: usize) -> ControllerLayout {
+    ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        hidden,
+    )
+}
+
+/// The labelled thermal scoring geometry, not owner canon: a square field with a warm border this many
+/// cells thick and a lethally cold interior, so a being started at the cold centre must move OUT to the
+/// surrounding warmth and hold it. The side is odd so there is a single centre cell.
+const THERMAL_SIDE: i32 = 11;
+const THERMAL_BORDER: i32 = 4;
+
+/// A frozen thermal scoring field: a square with a warm border at the set point and a lethally cold
+/// interior. Frozen (zero diffusion and relaxation in [`thermal_scoring_calib`]) so the gradient the
+/// controller faces does not smear over the episode. Warmth lies on every side of the centre, so the
+/// field is invariant under a 90-degree rotation and no direction is favoured (the R-EVOLVE-STEER
+/// discipline; the `the_thermal_scorer_field_favours_no_direction` test guards the invariant). A
+/// labelled scoring fixture.
+fn thermal_scoring_field(setpoint: Fixed, cold: Fixed) -> Field {
+    let s = THERMAL_SIDE;
+    let baseline: Vec<Fixed> = (0..(s * s))
+        .map(|k| {
+            let x = k % s;
+            let y = k / s;
+            let interior = x >= THERMAL_BORDER
+                && x < s - THERMAL_BORDER
+                && y >= THERMAL_BORDER
+                && y < s - THERMAL_BORDER;
+            if interior {
+                cold
+            } else {
+                setpoint
+            }
+        })
+        .collect();
+    Field::new(s, s, baseline)
+}
+
+/// Labelled thermal scoring calibrations, not owner canon: a frozen field (zero diffusion and
+/// relaxation), and a body-to-environment exchange slow enough that a being started warm at the cold
+/// centre has time to reach the warm border before its core temperature crosses the lethal floor.
+fn thermal_scoring_calib() -> FieldCalib {
+    FieldCalib {
+        diffusion: Fixed::ZERO,
+        relaxation: Fixed::ZERO,
+        exchange: Fixed::from_ratio(1, 20),
+    }
+}
+
+/// One thermal episode of the scorer: run a being carrying `controller` through the field-to-behaviour
+/// coupling ([`crate::runner::Runner::with_embodiment`]) in the warm-border, cold-centre field, and
+/// return how many ticks it keeps its temperature reserve off the floor (capped at `ticks`). A being
+/// whose controller moves while cold and rests while warm reaches the surrounding warmth and holds it;
+/// one that never moves cools and dies at the centre. Nobody scores "seek warmth": the being that does
+/// survives, and survival is what is counted. Fully deterministic and seed-keyed.
+fn thermal_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    let setpoint = Fixed::from_int(37);
+    let half_band = Fixed::from_int(8);
+    // A full half-band and more below the set point: the centre is lethal over time.
+    let cold = Fixed::from_int(37 - 16);
+    let reg = HomeostaticRegistry::dev_thermal();
+    let afford = AffordanceRegistry::dev_default();
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        afford,
+        LocomotionParams::dev_default(),
+        controller.hidden(),
+        seed,
+    );
+    let centre = Coord3::ground(THERMAL_SIDE / 2, THERMAL_SIDE / 2);
+    let homeo = Homeostasis::new(&reg, Fixed::ONE);
+    let walker = Walker::new(
+        StableId(1),
+        centre,
+        scoring_body(),
+        homeo,
+        controller.clone(),
+    );
+    emb.add(
+        walker,
+        BeingThermal {
+            setpoint,
+            half_band,
+            initial_temp: setpoint,
+        },
+    );
+    let mut runner = Runner::with_embodiment(
+        thermal_scoring_field(setpoint, cold),
+        thermal_scoring_calib(),
+        emb,
+    );
+    let mut survived = 0u32;
+    for t in 0..ticks {
+        runner.step();
+        if !runner
+            .embodiment()
+            .expect("the scoring runner carries an embodiment")
+            .walkers()[0]
+            .alive
+        {
+            break;
+        }
+        survived = t + 1;
+    }
+    survived
+}
+
+/// Evolve a population of controllers under THERMAL homeostatic-survival selection: the same selection
+/// machinery as [`evolve`], scored by `thermal_episode_survival` rather than the water scorer. From
+/// random controllers, this produces a being that moves while cold and rests while warm, a thermotaxis
+/// (a kinesis) that keeps its body in the viable band, without that behaviour being authored anywhere.
+/// It retires the hand-built thermotaxis fixture the coupling increment used: selection produces it.
+pub fn evolve_thermal(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> EvolveReport {
+    evolve_with(layout, params, seed, thermal_episode_survival)
+}
+
 /// The report of an evolutionary run: the mean and best homeostatic-survival fitness at each
 /// generation (so a caller can see behaviour shift), and the final population of genomes.
 #[derive(Clone, Debug)]
@@ -446,12 +570,31 @@ pub struct EvolveReport {
 }
 
 /// Evolve a population of controllers under homeostatic-survival selection (design Part 8, Part 25;
-/// R-BEHAVIOR-EVOLVE Stage 3). From random founders, each generation scores every controller by
-/// [`episode_survival`], keeps the fitter half (truncation, ties broken by the lower id so the choice
-/// is deterministic), and refills the population with bounded mutants of the survivors ([`mutate`]).
-/// The whole run is a pure function of the seed. Returns the per-generation fitness so a caller can
-/// see behaviour improve; the physics scores survival, and adaptive behaviour is what survives.
+/// R-BEHAVIOR-EVOLVE Stage 3), scored by [`episode_survival`] (the water-foraging environment). This
+/// is [`evolve_with`] with the water scorer; the thermal environment is [`evolve_thermal`].
 pub fn evolve(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> EvolveReport {
+    evolve_with(layout, params, seed, episode_survival)
+}
+
+/// Evolve a population of controllers under homeostatic-survival selection, scored by an arbitrary
+/// survival `scorer` (design Part 8, Part 25; R-BEHAVIOR-EVOLVE Stage 3). The scoring ENVIRONMENT is a
+/// parameter, not hardcoded, so which world a controller is selected in is data the caller supplies
+/// (Principle 11): the water-foraging scorer ([`episode_survival`]), the thermal-survival scorer
+/// (`thermal_episode_survival`), or any other `Fn(&Controller, ticks, seed) -> ticks_survived`. From
+/// random founders, each generation scores every controller, keeps the fitter half (truncation, ties
+/// broken by the lower id so the choice is deterministic), and refills the population with bounded
+/// mutants of the survivors ([`mutate`]). The whole run is a pure function of the seed. Returns the
+/// per-generation fitness so a caller can see behaviour improve; the physics scores survival, and
+/// adaptive behaviour is what survives, never an authored objective.
+pub fn evolve_with<F>(
+    layout: &ControllerLayout,
+    params: &EvolveParams,
+    seed: u64,
+    scorer: F,
+) -> EvolveReport
+where
+    F: Fn(&Controller, u32, u64) -> u32,
+{
     // A degenerate empty population has nothing to select; return an empty report rather than
     // indexing an empty slice.
     if params.pop_size == 0 {
@@ -478,7 +621,7 @@ pub fn evolve(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> Ev
             .enumerate()
             .map(|(i, genome)| {
                 let controller = Controller::express(&genes, genome, layout);
-                let fit = episode_survival(&controller, params.episode_ticks, seed ^ 0xE0);
+                let fit = scorer(&controller, params.episode_ticks, seed ^ 0xE0);
                 (fit, i)
             })
             .collect();
@@ -946,6 +1089,99 @@ mod tests {
             "the recurrent controller's behaviour evolves under selection too ({} -> {})",
             first.to_f64_lossy(),
             last.to_f64_lossy()
+        );
+    }
+
+    // --- The thermal-survival scorer and the thermotaxis-evolution proof ---
+
+    /// A hand-built thermal kinesis: move while cold, rest once comfortable (move_act = 3 - 4*level),
+    /// with no directional output. Used only to show the scoring environment rewards the behaviour that
+    /// selection then discovers on its own; not the thing under test.
+    fn thermal_kinesis(l: &ControllerLayout) -> Controller {
+        let n_in = l.n_in();
+        let bias = n_in - 1;
+        let mut w = vec![Fixed::ZERO; l.weight_count()];
+        w[bias] = Fixed::from_int(3);
+        w[0] = Fixed::from_int(-4);
+        Controller::from_weights(n_in, l.n_out(), l.hidden(), w)
+    }
+
+    #[test]
+    fn the_thermal_scorer_field_favours_no_direction() {
+        // The anti-steering property of the scoring environment (R-EVOLVE-STEER), bit-exact: the warm-
+        // border field is invariant under a 90-degree rotation about its centre, so warmth lies the
+        // same distance in every direction and no compass heading is privileged. A being at the centre
+        // faces an isotropic problem; selection cannot reward a fixed heading the way the retired
+        // eastward water scorer did.
+        let field = thermal_scoring_field(Fixed::from_int(37), Fixed::from_int(21));
+        let (w, h) = field.dims();
+        assert_eq!(w, h, "the scoring field is square");
+        for y in 0..h {
+            for x in 0..w {
+                // A 90-degree rotation about the centre maps (x, y) to (h - 1 - y, x).
+                assert_eq!(
+                    field.at(x, y),
+                    field.at(h - 1 - y, x),
+                    "the scoring field is not invariant under a 90-degree rotation at ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_thermotaxis_controller_outlives_an_idle_one_in_the_cold() {
+        // The scoring environment rewards the behaviour: a being that moves while cold reaches the
+        // surrounding warmth and holds it (surviving to the cap), while an idle being cools and dies at
+        // the centre. This is the gradient selection climbs; it is not the proof (that is below).
+        let l = thermal_layout(0);
+        let kin = thermal_kinesis(&l);
+        let blank = Controller::zeros(&l);
+        let fit_kin = thermal_episode_survival(&kin, 200, 0xA1);
+        let fit_blank = thermal_episode_survival(&blank, 200, 0xA1);
+        assert!(
+            fit_kin >= 190,
+            "the mover reaches warmth and holds it ({fit_kin})"
+        );
+        assert!(
+            fit_kin > fit_blank + 100,
+            "and far outlives the idle being, which dies of cold at the centre ({fit_kin} vs {fit_blank})"
+        );
+    }
+
+    #[test]
+    fn thermal_episode_survival_is_deterministic() {
+        let l = thermal_layout(0);
+        let kin = thermal_kinesis(&l);
+        assert_eq!(
+            thermal_episode_survival(&kin, 150, 0xBEEF),
+            thermal_episode_survival(&kin, 150, 0xBEEF),
+            "the same controller and seed replay the same thermal survival"
+        );
+    }
+
+    #[test]
+    fn thermotaxis_evolves_under_thermal_survival_selection() {
+        // The proof, the in-situ analogue of the water-seeking result: from random controllers, THERMAL
+        // homeostatic-survival selection on the coupled runner produces beings that keep their bodies in
+        // the viable band, moving to the surrounding warmth and holding it, without thermotaxis being
+        // authored anywhere. Survival to the cap in this environment requires reaching and holding the
+        // warmth (an idle being dies at the centre in a fraction of the episode), so a near-cap evolved
+        // fitness is the behavioural proof. This retires the hand-built thermotaxis fixture.
+        let l = thermal_layout(0);
+        let params = EvolveParams::dev_default();
+        let report = evolve_thermal(&l, &params, 0x1234);
+        let first = report.mean_fitness.first().copied().unwrap();
+        let last = report.mean_fitness.last().copied().unwrap();
+        assert!(
+            last > first,
+            "mean thermal survival rose under selection ({} -> {})",
+            first.to_f64_lossy(),
+            last.to_f64_lossy()
+        );
+        let best_last = *report.best_fitness.last().unwrap();
+        assert!(
+            best_last >= 190,
+            "an evolved lineage keeps its body in the band almost to the cap ({best_last})"
         );
     }
 }
