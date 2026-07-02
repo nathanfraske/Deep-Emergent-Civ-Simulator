@@ -33,13 +33,13 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // axes, so it merges onto the mechanical floor and the whole revalidates.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
-    // 38 mechanical + 15 fluids axes; 19 + 15 laws; 2 + 2 substances.
+    // 38 mechanical + 17 fluids axes; 19 + 16 laws; 2 + 2 substances.
     assert_eq!(
         reg.axis_count(),
-        53,
+        55,
         "the mechanical and fluids axes together"
     );
-    assert_eq!(reg.law_count(), 34, "the wave-1 and wave-2 fluid laws");
+    assert_eq!(reg.law_count(), 35, "the wave-1 and wave-2 fluid laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
     // water carry values only on existing axes and participate only in existing laws.
@@ -140,6 +140,86 @@ fn thermal_buoyancy_lifts_warm_air_and_sinks_cold() {
         laws::thermal_buoyancy(Fixed::from_int(288), Fixed::from_int(288), g, a_max),
         Fixed::ZERO,
         "equal temperature, no buoyancy"
+    );
+}
+
+#[test]
+fn membrane_gas_flux_takes_up_from_a_richer_medium_and_off_gasses_to_a_poorer_one() {
+    // The R-MEDIUM gas exchange: a respiratory surface exchanges the respirable species with the medium
+    // it sits in, at a rate set by the transfer coefficient, the surface area, and the concentration
+    // difference. Nothing tags the medium as air or water: only its respirable content differs, so the
+    // same surface respires a rich medium and off-gasses to a poor one (Principle 9, emergence).
+    let k = f(1, 100); // a transfer coefficient in range
+    let area = f(1, 2); // an exchange area
+    let internal = f(1, 20); // the body's internal concentration
+    let j_max = Fixed::from_int(1000);
+
+    let rich = f(27, 100); // an oxygen-rich medium (air-like)
+    let poor = f(1, 100); // a poor medium (below the body's internal level)
+
+    let uptake = laws::membrane_gas_flux(k, area, rich, internal, j_max);
+    let loss = laws::membrane_gas_flux(k, area, poor, internal, j_max);
+    let rest = laws::membrane_gas_flux(k, area, internal, internal, j_max);
+
+    assert!(uptake > Fixed::ZERO, "a richer medium drives uptake");
+    assert!(
+        loss < Fixed::ZERO,
+        "a poorer medium drives loss (off-gassing)"
+    );
+    assert_eq!(
+        rest,
+        Fixed::ZERO,
+        "at equilibrium the flux is zero: no authored preference for a medium"
+    );
+
+    // The exchange is symmetric in the concentration gap: an equal gap up or down gives an equal and
+    // opposite flux, so the law bakes in no direction of its own. The equality holds to within one
+    // fixed-point unit, since the pinned multiply floors (a real arithmetic property, not a kernel
+    // bias): floor(x) and floor(-x) differ by a ULP when x is not exactly representable.
+    let up = laws::membrane_gas_flux(k, area, internal + f(1, 100), internal, j_max);
+    let down = laws::membrane_gas_flux(k, area, internal - f(1, 100), internal, j_max);
+    assert!(
+        up > Fixed::ZERO && down < Fixed::ZERO,
+        "opposite gaps, opposite signs"
+    );
+    assert!(
+        (up.to_bits() + down.to_bits()).abs() <= 1,
+        "uptake and loss are symmetric in the concentration gap to within a fixed-point unit"
+    );
+}
+
+#[test]
+fn membrane_gas_flux_needs_a_surface_and_saturates_at_the_signed_cap() {
+    let k = f(1, 100);
+    let area = f(1, 2);
+    let internal = f(1, 20);
+    let j_max = Fixed::from_int(1000);
+
+    // No exchange surface (zero area or zero coefficient) means no exchange, whatever the medium: a
+    // body with no respiratory organ cannot breathe, the physical basis the sim-side reserve leans on.
+    assert_eq!(
+        laws::membrane_gas_flux(k, Fixed::ZERO, Fixed::ONE, internal, j_max),
+        Fixed::ZERO,
+        "no area, no exchange"
+    );
+    assert_eq!(
+        laws::membrane_gas_flux(Fixed::ZERO, area, Fixed::ONE, internal, j_max),
+        Fixed::ZERO,
+        "no transfer coefficient, no exchange"
+    );
+
+    // A huge coefficient and gap saturate to the signed cap rather than overflow or wrap.
+    let big = Fixed::from_int(1_000_000);
+    let cap = Fixed::from_int(5);
+    assert_eq!(
+        laws::membrane_gas_flux(big, big, big, Fixed::ZERO, cap),
+        cap,
+        "an unbounded uptake saturates at +J_MAX"
+    );
+    assert_eq!(
+        laws::membrane_gas_flux(big, big, Fixed::ZERO, big, cap),
+        Fixed::ZERO - cap,
+        "an unbounded loss saturates at -J_MAX"
     );
 }
 

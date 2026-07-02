@@ -33,13 +33,13 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     reg.extend(data_path("chem_optics_floor.toml")).unwrap();
-    // 38 mech + 15 fluids + 14 chem/optics axes; 19 + 15 + 11 laws; 2 + 2 + 0 substances.
+    // 38 mech + 17 fluids + 14 chem/optics axes; 19 + 16 + 11 laws; 2 + 2 + 0 substances.
     assert_eq!(
         reg.axis_count(),
-        67,
+        69,
         "the mechanical, fluids, and chem/optics axes"
     );
-    assert_eq!(reg.law_count(), 45, "the wave-1 and wave-2 laws");
+    assert_eq!(reg.law_count(), 46, "the wave-1 and wave-2 laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     assert!(reg.law("law.radiative_equilibrium").is_some());
     assert!(reg.axis("chem.formation_enthalpy").is_some());

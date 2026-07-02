@@ -38,9 +38,9 @@ fn full_registry() -> PhysicsRegistry {
 #[test]
 fn the_em_floor_loads_onto_the_earlier_floors() {
     let reg = full_registry();
-    // 38 mech + 15 fluids + 14 chem/optics + 14 em axes; 19 + 15 + 11 + 15 laws; 2 + 2 + 0 + 2 subs.
-    assert_eq!(reg.axis_count(), 81, "the four floors' axes together");
-    assert_eq!(reg.law_count(), 60, "the four floors' laws together");
+    // 38 mech + 17 fluids + 14 chem/optics + 14 em axes; 19 + 16 + 11 + 15 laws; 2 + 2 + 0 + 2 subs.
+    assert_eq!(reg.axis_count(), 83, "the four floors' axes together");
+    assert_eq!(reg.law_count(), 61, "the four floors' laws together");
     assert_eq!(
         reg.substance_count(),
         6,

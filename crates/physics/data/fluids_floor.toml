@@ -129,6 +129,28 @@ tier = 0
 range_reserved = "proposed bounds [0, 0.01], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
 real = "psychrometric saturation tables (saturation ~7.4 kPa at 40C); a resident moisture state sibling to therm.temperature"
 
+# --- Respirable-medium axes (R-MEDIUM: the gas a body exchanges with the medium it sits in) ---
+
+[[axis]]
+id = "fluid.respirable_content"
+measures = "mass concentration of the respirable species dissolved or present in a medium (the gas a respiratory surface exchanges across a membrane)"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_reserved = "proposed bounds [0, 1.5], reserved-with-basis pending the owner's set (the R-MEDIUM floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Battino, IUPAC Solubility Data Series, Oxygen and Ozone; an anoxic medium reads 0, air-borne oxygen mass concentration ~0.27, dissolved-oxygen saturation of water ~0.008 to 0.014 (single-digit mg/L), pure oxygen at one atmosphere ~1.31; a magical or lava medium sets its own respirable content as data"
+
+[[axis]]
+id = "fluid.gas_transfer_coefficient"
+measures = "mass-transfer coefficient of a respiratory surface-medium interface (the lumped membrane permeance and boundary-layer conductance)"
+unit = "m/s"
+dimension = "1,0,-1,0"
+scale = "m/s"
+tier = 0
+range_reserved = "proposed bounds [0, 0.1], reserved-with-basis pending the owner's set (the R-MEDIUM floor is not yet owner-calibrated; basis in the real citation below)"
+real = "Piiper and Scheid, Respiration Physiology gas-exchange models; respiratory-membrane gas-transfer (diffusing-capacity-per-area) velocities span roughly 1e-5 to 1e-2 m/s across gill and alveolar surfaces; a reduced-order lumped coefficient, the organism-side specific surface and membrane permeance are the sim-side R-MEDIUM organ extension"
+
 # --- Acoustic axes (a mechanical wave in a fluid medium) ---
 
 [[axis]]
@@ -279,6 +301,20 @@ ports = [
 output_measure = "convective heat flux (Newton cooling)"
 dimension = "energy"
 interval_bound = "[0, FLUX_MAX]"
+tier = 0
+
+[[law]]
+id = "law.membrane_gas_flux"
+kernel = "membrane_gas_flux"
+ports = [
+  { role = "coefficient", axis = "fluid.gas_transfer_coefficient" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "medium", axis = "fluid.respirable_content" },
+  { role = "internal", axis = "fluid.respirable_content" },
+]
+output_measure = "signed respiratory gas mass flux (Fick membrane exchange: uptake positive, loss negative)"
+dimension = "0,1,-1,0"
+interval_bound = "[-J_MAX, J_MAX]"
 tier = 0
 
 [[law]]
