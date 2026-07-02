@@ -23,6 +23,17 @@
 
 use cubecl::prelude::*;
 
+/// The oracle's `splitmix64` counter mixer (`crates/core/src/rng.rs`), on native `u64`. CUDA `u64` add
+/// and multiply wrap, matching the oracle's `wrapping_add`/`wrapping_mul`. Shared by the draw-keyed GPU
+/// consumers (the perceive notice roll and the worldgen noise fold) so there is one definition.
+#[cube]
+pub(crate) fn splitmix64(x: u64) -> u64 {
+    let mut z = x + 0x9E3779B97F4A7C15u64; // the SplitMix64 golden gamma
+    z = (z ^ (z >> 30u32)) * 0xBF58476D1CE4E5B9u64;
+    z = (z ^ (z >> 27u32)) * 0x94D049BB133111EBu64;
+    z ^ (z >> 31u32)
+}
+
 /// The pinned Q32.32 multiply on `i64` operands: bits [32, 96) of the exact signed 128-bit product
 /// (arithmetic floor + two's-complement narrow), matching `Fixed::mul`. Sign-magnitude u16-partial
 /// digit accumulation (the product itself uses only u32 arithmetic, no i128), decomposing each `i64`

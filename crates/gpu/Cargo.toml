@@ -19,6 +19,11 @@ rust-version.workspace = true
 civsim-core = { path = "../core" }
 cubecl = { version = "0.10", features = ["cuda", "cpu", "vulkan"] }
 
+[dev-dependencies]
+# The worldgen gate compares the GPU noise kernel to the CPU oracle `noise::fractal` directly (world
+# does not depend on gpu, so there is no cycle). Test-only, so the crate's runtime deps stay minimal.
+civsim-world = { path = "../world" }
+
 [lints.clippy]
 # R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);
 # this crate holds no hashable simulation state, so the ordered-container lint is off here.
