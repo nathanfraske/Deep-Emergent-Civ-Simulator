@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): GPU transcendentals built (exp, ln, powf), bit-identical on the 5090
+
+The owner asked what valuable GPU-lane work (staying out of the physics kernels and the roadmap track) uses the real hardware, and chose the GPU transcendentals, the biggest R-GPU-CANON-PIN follow-on. Built in `crates/gpu/src/transcendental.rs` and merged to main.
+
+**What is built.** `exp`, `ln`, and `powf` as CubeCL `#[cube]` kernels, each reproducing the `crates/core` `Fixed` oracle bit-for-bit by running the same integer algorithm over the limb `q32_mul`/`q32_div` primitives, with the adds, shifts, and constants mirrored. PROVEN bit-identical on the RTX 5090 (`tests/transcendental_gate.rs`): the exponential over ~48k inputs across its domain and the saturating edges, the logarithm over ~2700 across every exponent (the leading-bit normalization), and the real power over 81 base-and-exponent pairs including the sentinel cases. These unblock the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron, Beer-Lambert, Nernst, Tafel, log-domain LC, Rayleigh, general scaling). fmt, clippy, and rustdoc `-D warnings` clean; the full six-gate GPU suite stays green.
+
+**DSL findings (banked in memory).** The cube DSL rejects an i64 accumulator carried across an `#[unroll]` loop whose body calls a `#[cube]` fn, so the Horner series are manually unrolled as straight-line shadowed statements; it supports only compile-time-constant shift amounts, so a barrel shifter (`shl_var`/`shr_var`, constant shifts conditioned on the amount's bits) stands in for `scale_pow2` and the ln normalization; module-level `const i64` does not lift into the DSL, so constants are inline `let` literals; `leading_zeros` is available as an int intrinsic; and native i64 is the per-kernel layout (CUDA-proven, cross-vendor a Stage 0 matter, as with the field kernel).
+
+**Docs.** Record 62.23 and audit block 1y reconciled (the transcendental GPU kernels were "not yet built"; exp/ln/powf now are, the trig family and asin the remaining follow-on). R-GPU-CANON-PIN stays resolved (this is progress on its named follow-on), counts unchanged.
+
+**Where it stopped, and what is next.** exp/ln/powf are built, gated, and merged. The remaining transcendentals are the trig family (`sin`/`cos`/`atan` via CORDIC, a 32-iteration manual unroll on the same primitives) and `asin` (needs a limb u128 `isqrt`), a clear next increment. Also open: the multi-vendor Stage 0 run (only CUDA proven), and porting the physics-law field kernels to CubeCL (they bottom out in i128 intermediates, so they ride the limb primitives). The physics agent's kernel review and the roadmap track stay separate.
+
+---
+
 ## 2026-07-02 (continued): physics-kernel review and hardening, and the CI fmt gate
 
 Two follow-on threads after the GPU merge, both merged to main.
