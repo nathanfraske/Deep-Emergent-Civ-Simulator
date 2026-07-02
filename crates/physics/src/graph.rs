@@ -384,7 +384,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const {
                 &[cur("h", 0), cur("area", 0), cur("hot", 0), cur("cold", 0)]
             },
-            output: Asserted("q = h*A*|hot-cold|; the two temperatures are a composed difference over therm.temperature, and the flux-versus-per-tick-energy scale is a reserved unit convention"),
+            output: Asserted("q = h*A*|hot-cold|; the output is declared power (energy/time) under the explicit-rate convention, but the two temperatures are a composed difference over therm.temperature, so the port product is a thermal conductance, not a monomial over the ports"),
         },
         "membrane_gas_flux" => KernelContract {
             ports: const {
@@ -395,13 +395,22 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
                     cur("internal", 0),
                 ]
             },
-            output: Asserted("J = k*A*(c_medium - c_internal); the two concentrations are a composed signed difference over fluid.respirable_content, and the mass-flux-versus-per-tick-uptake scale is a reserved unit convention, as with convective_flux"),
+            output: Asserted("J = k*A*(c_medium - c_internal); the output is declared a mass flux (mass/time) under the explicit-rate convention, but the two concentrations are a composed signed difference over fluid.respirable_content, so the port product is not a monomial over the ports"),
         },
         "poiseuille_flow" => KernelContract {
+            // Q = pi*dP*r^4/(8*mu*L). Under the explicit-rate convention the law declares the
+            // volumetric flow rate the kernel forms, so the port monomial closes: pressure^1 *
+            // length^4 (radius) * viscosity^-1 * length^-1 = L^3*T^-1 = volume/time. The pi/8 is a
+            // dimensionless factor.
             ports: const {
-                &[cur("dp", 0), cur("radius", 0), cur("viscosity", 0), cur("length", 0)]
+                &[
+                    cur("dp", 1),
+                    cur("radius", 4),
+                    cur("viscosity", -1),
+                    cur("length", -1),
+                ]
             },
-            output: Asserted("Q = pi*dP*r^4/(8*mu*L); the kernel computes a volumetric flow rate (volume/time) while the law declares volume, the rate-versus-per-tick convention a reserved decision"),
+            output: Monomial,
         },
         "speed_of_sound" => KernelContract {
             ports: const { &[cur("bulk_modulus", 0), cur("density", 0)] },
@@ -412,10 +421,14 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             output: Asserted("rho = P/(R_s*T); the specific gas constant R_s carries residual dimension, outside the port monomial"),
         },
         "thermal_buoyancy" => KernelContract {
+            // a = g*(T_parcel-T_ambient)/T_ambient. The temperature difference over ambient is a
+            // composed dimensionless ratio, so the buoyant acceleration carries exactly the gravity
+            // port's dimension: SameAs("gravity") verifies the output is an acceleration (the former
+            // dimensionless declaration omitted the gravity factor).
             ports: const {
                 &[cur("t_parcel", 0), cur("t_ambient", 0), cur("gravity", 0)]
             },
-            output: Asserted("a = g*(T_parcel-T_ambient)/T_ambient; the two temperatures are a composed difference and ratio over therm.temperature, and the declared dimensionless output omits the gravity factor, a reserved convention"),
+            output: SameAs("gravity"),
         },
         "saturation_vapor_pressure" => KernelContract {
             ports: const { &[cur("temperature", 0)] },
@@ -425,7 +438,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const {
                 &[cur("e_ambient", 0), cur("e_saturation", 0), cur("wind", 0)]
             },
-            output: Asserted("E = (a + b*|wind|)*(e_s - e_a); a difference of vapor pressures scaled by a wind function with dimensional constants, not a port monomial"),
+            output: Asserted("E = (a + b*|wind|)*(e_s - e_a); the output is declared a mass flux (mass per area per time) under the explicit-rate convention, formed from a vapor-pressure difference scaled by a wind function with dimensional constants, not a port monomial"),
         },
 
         // === Chemistry and optics (wave 2) ===
@@ -467,7 +480,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
                     cur("t_cold", 0),
                 ]
             },
-            output: Asserted("j = emissivity*sigma*(T_hot^4 - T_cold^4); the Stefan-Boltzmann sigma carries residual dimension and the fourth-power difference is not a monomial"),
+            output: Asserted("q = emissivity*area*sigma*(T_hot^4 - T_cold^4); the output is declared a radiant power (energy/time) under the explicit-rate convention (the area factor makes it a total power, not a per-area exitance), but the Stefan-Boltzmann sigma carries residual dimension and the fourth-power difference is not a monomial"),
         },
         "wien_peak" => KernelContract {
             ports: const { &[cur("temperature", 0)] },
