@@ -165,7 +165,12 @@ real = "atmospheric and material acoustic absorption tables (Kinsler et al.)"
 
 [[law]]
 id = "law.hydrostatic_pressure"
-inputs = ["mat.density", "mech.gravitational_acceleration", "fluid.column_height"]
+kernel = "hydrostatic_pressure"
+ports = [
+  { role = "density", axis = "mat.density" },
+  { role = "gravity", axis = "mech.gravitational_acceleration" },
+  { role = "height", axis = "fluid.column_height" },
+]
 output_measure = "hydrostatic pressure"
 dimension = "pressure"
 interval_bound = "[0, P_MAX]"
@@ -173,7 +178,12 @@ tier = 0
 
 [[law]]
 id = "law.buoyant_force"
-inputs = ["mat.density", "mech.gravitational_acceleration", "fluid.immersed_volume"]
+kernel = "buoyant_force"
+ports = [
+  { role = "density", axis = "mat.density" },
+  { role = "gravity", axis = "mech.gravitational_acceleration" },
+  { role = "volume", axis = "fluid.immersed_volume" },
+]
 output_measure = "buoyant force"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -181,7 +191,11 @@ tier = 0
 
 [[law]]
 id = "law.dynamic_pressure"
-inputs = ["mat.density", "mech.velocity"]
+kernel = "dynamic_pressure"
+ports = [
+  { role = "density", axis = "mat.density" },
+  { role = "velocity", axis = "mech.velocity" },
+]
 output_measure = "dynamic pressure"
 dimension = "pressure"
 interval_bound = "[0, P_MAX]"
@@ -189,7 +203,13 @@ tier = 0
 
 [[law]]
 id = "law.drag_force"
-inputs = ["fluid.drag_coefficient", "mat.density", "mech.contact_area", "mech.velocity"]
+kernel = "drag_force"
+ports = [
+  { role = "drag_coefficient", axis = "fluid.drag_coefficient" },
+  { role = "density", axis = "mat.density" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "velocity", axis = "mech.velocity" },
+]
 output_measure = "drag force"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -197,7 +217,13 @@ tier = 0
 
 [[law]]
 id = "law.aerodynamic_lift"
-inputs = ["fluid.lift_coefficient", "mat.density", "mech.contact_area", "mech.velocity"]
+kernel = "aerodynamic_lift"
+ports = [
+  { role = "lift_coefficient", axis = "fluid.lift_coefficient" },
+  { role = "density", axis = "mat.density" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "velocity", axis = "mech.velocity" },
+]
 output_measure = "lift force"
 dimension = "force"
 interval_bound = "[0, F_MAX]"
@@ -205,7 +231,13 @@ tier = 0
 
 [[law]]
 id = "law.reynolds_number"
-inputs = ["mat.density", "mech.velocity", "mech.arm_length", "fluid.dynamic_viscosity"]
+kernel = "reynolds_number"
+ports = [
+  { role = "density", axis = "mat.density" },
+  { role = "velocity", axis = "mech.velocity" },
+  { role = "length", axis = "mech.arm_length" },
+  { role = "viscosity", axis = "fluid.dynamic_viscosity" },
+]
 output_measure = "Reynolds number (a laminar/turbulent regime gate)"
 dimension = "dimensionless"
 interval_bound = "[0, RE_MAX]"
@@ -213,7 +245,11 @@ tier = 0
 
 [[law]]
 id = "law.laplace_pressure"
-inputs = ["fluid.surface_tension", "fluid.channel_radius"]
+kernel = "laplace_pressure"
+ports = [
+  { role = "surface_tension", axis = "fluid.surface_tension" },
+  { role = "radius", axis = "fluid.channel_radius" },
+]
 output_measure = "Laplace curvature pressure"
 dimension = "pressure"
 interval_bound = "[0, P_MAX]"
@@ -221,7 +257,11 @@ tier = 0
 
 [[law]]
 id = "law.compressibility"
-inputs = ["fluid.driving_pressure", "fluid.bulk_modulus"]
+kernel = "compressibility"
+ports = [
+  { role = "pressure", axis = "fluid.driving_pressure" },
+  { role = "bulk_modulus", axis = "fluid.bulk_modulus" },
+]
 output_measure = "volumetric strain"
 dimension = "dimensionless"
 interval_bound = "[0, STRAIN_MAX]"
@@ -229,7 +269,13 @@ tier = 0
 
 [[law]]
 id = "law.convective_flux"
-inputs = ["fluid.convective_coefficient", "mech.contact_area", "therm.temperature"]
+kernel = "convective_flux"
+ports = [
+  { role = "h", axis = "fluid.convective_coefficient" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "hot", axis = "therm.temperature" },
+  { role = "cold", axis = "therm.temperature" },
+]
 output_measure = "convective heat flux (Newton cooling)"
 dimension = "energy"
 interval_bound = "[0, FLUX_MAX]"
@@ -237,7 +283,13 @@ tier = 0
 
 [[law]]
 id = "law.poiseuille_flow"
-inputs = ["fluid.driving_pressure", "fluid.channel_radius", "fluid.dynamic_viscosity", "mech.arm_length"]
+kernel = "poiseuille_flow"
+ports = [
+  { role = "dp", axis = "fluid.driving_pressure" },
+  { role = "radius", axis = "fluid.channel_radius" },
+  { role = "viscosity", axis = "fluid.dynamic_viscosity" },
+  { role = "length", axis = "mech.arm_length" },
+]
 output_measure = "laminar volumetric flow rate"
 dimension = "volume"
 interval_bound = "[0, Q_MAX]"
@@ -245,7 +297,11 @@ tier = 0
 
 [[law]]
 id = "law.speed_of_sound"
-inputs = ["fluid.bulk_modulus", "mat.density"]
+kernel = "speed_of_sound"
+ports = [
+  { role = "bulk_modulus", axis = "fluid.bulk_modulus" },
+  { role = "density", axis = "mat.density" },
+]
 output_measure = "speed of sound in the medium"
 dimension = "velocity"
 interval_bound = "[0, C_SOUND_MAX]"
@@ -253,7 +309,11 @@ tier = 0
 
 [[law]]
 id = "law.ideal_gas_density"
-inputs = ["fluid.driving_pressure", "therm.temperature"]
+kernel = "ideal_gas_density"
+ports = [
+  { role = "pressure", axis = "fluid.driving_pressure" },
+  { role = "temperature", axis = "therm.temperature" },
+]
 output_measure = "gas density (couples temperature to the density field)"
 dimension = "-3,1,0,0"
 interval_bound = "[RHO_MIN, RHO_MAX]"
@@ -261,7 +321,12 @@ tier = 0
 
 [[law]]
 id = "law.thermal_buoyancy"
-inputs = ["therm.temperature", "mech.gravitational_acceleration"]
+kernel = "thermal_buoyancy"
+ports = [
+  { role = "t_parcel", axis = "therm.temperature" },
+  { role = "t_ambient", axis = "therm.temperature" },
+  { role = "gravity", axis = "mech.gravitational_acceleration" },
+]
 output_measure = "signed buoyant acceleration (natural convection)"
 dimension = "0,0,0,0"
 interval_bound = "[-A_MAX, A_MAX]"
@@ -269,7 +334,10 @@ tier = 0
 
 [[law]]
 id = "law.saturation_vapor_pressure"
-inputs = ["therm.temperature"]
+kernel = "saturation_vapor_pressure"
+ports = [
+  { role = "temperature", axis = "therm.temperature" },
+]
 output_measure = "saturation vapour pressure (affine Clausius-Clapeyron proxy)"
 dimension = "pressure"
 interval_bound = "[0, ES_CAP]"
@@ -277,12 +345,16 @@ tier = 0
 
 [[law]]
 id = "law.evaporation_rate"
-inputs = ["fluid.vapor_pressure", "mech.velocity"]
+kernel = "evaporation_rate"
+ports = [
+  { role = "e_ambient", axis = "fluid.vapor_pressure" },
+  { role = "e_saturation", axis = "fluid.vapor_pressure" },
+  { role = "wind", axis = "mech.velocity" },
+]
 output_measure = "bidirectional evaporation/condensation mass flux"
 dimension = "0,1,-3,0"
 interval_bound = "[0, E_MAX]"
 tier = 0
-
 # --- Substances (fluids as vectors over the axes) ---
 
 [[substance]]
