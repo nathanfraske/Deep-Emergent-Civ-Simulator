@@ -81,7 +81,7 @@ use crate::controller::ControllerLayout;
 use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::world::World;
+use crate::world::{TickInput, World};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{Coord3, TileMap};
 use std::collections::BTreeMap;
@@ -536,6 +536,25 @@ impl Runner {
     /// fixed final sub-phase. The field phases run first so the embodiment coupling reads the same-tick
     /// thermal state; the cognition world runs last and shares no data across its seam yet.
     pub fn step(&mut self) {
+        self.step_inner(&[]);
+    }
+
+    /// Like [`step`](Self::step), but feeds the composed cognition world a batch of tick
+    /// inputs (the observations that drive its beings to form beliefs) rather than the
+    /// empty batch. The field and embodiment sub-phases are untouched, since they carry no
+    /// cognition inputs; only the final cognition sub-phase receives the batch. This exists
+    /// so the determinism harness can keep the converse phase, and therefore the CommandKey
+    /// barrier, exercised over a non-empty dialogue-move set rather than an empty one
+    /// (R-HARNESS-COVER, R-CMD-ORDER); a runner with no world simply ignores the inputs.
+    pub fn step_with_world_inputs(&mut self, world_inputs: &[TickInput]) {
+        self.step_inner(world_inputs);
+    }
+
+    /// The shared body of [`step`](Self::step): step the field, exchange body heat, run the
+    /// embodiment coupling, then tick the composed cognition world with `world_inputs` as
+    /// the fixed final sub-phase. Kept private so the empty-batch and driven-batch entry
+    /// points cannot diverge.
+    fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.field.step(&self.calib);
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
         for id in ids {
@@ -550,7 +569,7 @@ impl Runner {
             self.step_embodiment();
         }
         if let Some(world) = self.world.as_mut() {
-            world.tick(&[]);
+            world.tick(world_inputs);
         }
         self.clock += 1;
     }
