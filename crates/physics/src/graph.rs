@@ -92,6 +92,170 @@ const fn dt(role: &'static str) -> PortContract {
 pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
     use OutputCheck::*;
     Some(match kernel {
+        // === Mechanics and materials (wave 1) ===
+        // Primary-output contracts: each verifies the law's primary measured consequence. A
+        // secondary consequence (a margin, a mechanical advantage, an impulse) and a caller-
+        // composed input (a delivered energy, a temperature difference) are a follow-on; where
+        // the primary output itself depends on a composed input, the contract is a fail-loud
+        // Asserted with that basis, never a lazy skip of a checkable monomial.
+        "contact_pressure" => KernelContract {
+            ports: const { &[cur("force", 1), cur("contact_area", -1)] },
+            output: Monomial,
+        },
+        "cut_penetrate" => KernelContract {
+            ports: const {
+                &[
+                    cur("hardness", 0),
+                    cur("specific_cut_energy", 0),
+                    cur("contact_area", 0),
+                ]
+            },
+            output: Asserted("depth = delivered_energy/(specific_cut_energy*area); delivered_energy is the composed output of law.impact, not a registry axis, so the output is not a monomial over the declared ports"),
+        },
+        "bend_stress" => KernelContract {
+            ports: const {
+                &[
+                    cur("force", 1),
+                    cur("span", 1),
+                    cur("section_modulus", -1),
+                    cur("yield_strength", 0),
+                ]
+            },
+            output: Monomial,
+        },
+        "axial_stress" => KernelContract {
+            ports: const {
+                &[
+                    cur("force", 1),
+                    cur("cross_section", -1),
+                    cur("yield_strength", 0),
+                ]
+            },
+            output: Monomial,
+        },
+        "fracture_onset" => KernelContract {
+            ports: const {
+                &[
+                    cur("fracture_strength", 0),
+                    cur("fracture_energy", 0),
+                    cur("crack_area", 0),
+                ]
+            },
+            output: Asserted("the stress margin is a same-dimension difference and the energy margin subtracts a composed delivered_energy; not a port monomial"),
+        },
+        "kinetic_energy" => KernelContract {
+            ports: const { &[cur("mass", 1), cur("velocity", 2)] },
+            output: Monomial,
+        },
+        "lever" => KernelContract {
+            // The law's primary declared output is the output force F*(effort/load), so load_arm
+            // carries exponent -1; the torque and the dimensionless advantage are secondary.
+            ports: const {
+                &[cur("force", 1), cur("effort_arm", 1), cur("load_arm", -1)]
+            },
+            output: Monomial,
+        },
+        "friction" => KernelContract {
+            ports: const {
+                &[
+                    cur("static_coefficient", 0),
+                    cur("kinetic_coefficient", 1),
+                    cur("normal", 1),
+                    cur("tangential", 0),
+                    cur("slip_velocity", 0),
+                ]
+            },
+            output: Monomial,
+        },
+        "reach" => KernelContract {
+            ports: const { &[cur("segments", 0)] },
+            output: Asserted("an open-arity sum over the segment-length axis; the variadic port kind is a reserved decision, so the fold is not a fixed-arity port monomial"),
+        },
+        "weight" => KernelContract {
+            ports: const { &[cur("mass", 1), cur("gravity", 1)] },
+            output: Monomial,
+        },
+        "power" => KernelContract {
+            ports: const { &[cur("force", 1), cur("velocity", 1)] },
+            output: Monomial,
+        },
+        "euler_buckle" => KernelContract {
+            ports: const {
+                &[
+                    cur("modulus", 1),
+                    cur("second_moment", 1),
+                    cur("effective_length_factor", 0),
+                    cur("length", -2),
+                ]
+            },
+            output: Monomial,
+        },
+        "shear" => KernelContract {
+            ports: const {
+                &[
+                    cur("shear_force", 1),
+                    cur("shear_area", -1),
+                    cur("independent_shear_strength", 0),
+                    cur("yield_strength", 0),
+                ]
+            },
+            output: Monomial,
+        },
+        "wear" => KernelContract {
+            ports: const {
+                &[
+                    cur("wear_coefficient", 1),
+                    cur("force", 1),
+                    cur("distance", 1),
+                    cur("hardness", -1),
+                ]
+            },
+            output: Monomial,
+        },
+        "conduction" => KernelContract {
+            ports: const {
+                &[cur("conductivity", 1), cur("area", 1), cur("path_length", -1)]
+            },
+            output: Asserted("q = k*(A/L)*dT; the hot and cold temperatures are caller-composed values, not registry axes, so the port product is a thermal conductance, not the flux output"),
+        },
+        "sensible_energy" => KernelContract {
+            ports: const { &[cur("mass", 1), cur("specific_heat", 1)] },
+            output: Asserted("Q = m*c*dT; dT is a composed temperature difference supplied by the caller, not a registry axis, so the port product is a heat capacity, not the energy output"),
+        },
+        "phase_change_energy" => KernelContract {
+            ports: const {
+                &[
+                    cur("mass", 1),
+                    cur("specific_heat", 0),
+                    cur("transition_temperature", 0),
+                    cur("latent_heat", 0),
+                ]
+            },
+            output: Asserted("E = m*c*(T_trans - T_start) + m*L; T_start is composed and the result sums a sensible and a latent term; not a port monomial"),
+        },
+        "combustion" => KernelContract {
+            ports: const {
+                &[
+                    cur("fuel_value", 1),
+                    cur("oxidiser_demand", 0),
+                    cur("ignition_temperature", 0),
+                    cur("mass", 1),
+                ]
+            },
+            output: Monomial,
+        },
+        "thermal_stress" => KernelContract {
+            ports: const {
+                &[
+                    cur("modulus", 0),
+                    cur("expansion", 0),
+                    cur("constraint", 0),
+                    cur("fracture_strength", 0),
+                ]
+            },
+            output: Asserted("sigma = E*alpha*dT*constraint; dT is a composed temperature difference, not a registry axis, so the output is not a port monomial"),
+        },
+
         // === Electricity and magnetism (wave 3) ===
         "coulomb_force" => KernelContract {
             ports: const { &[cur("q1", 1), cur("q2", 1), cur("r", -2)] },
