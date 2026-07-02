@@ -755,9 +755,32 @@ pub fn derive_tiers(
             return Err(PhysicsError::CyclicLawGraph(law_id.to_string()));
         }
         let law = &laws[law_id];
+        // Gather this-tick data-dependency axes. A legacy law (no ports) reads its flat `inputs`,
+        // all ground. A migrated law reads its Current-tagged ports (a single axis or class-set
+        // members): a Prior port reads last tick's resident sample and a Dt port reads the clock,
+        // so neither is a producer edge. That is the point of the temporal tag, and it is what keeps
+        // a legitimate feedback read (a law consuming this tick what another law wrote last tick)
+        // from being mis-derived as a same-tick edge and manufacturing a false cycle.
+        let same_tick: Vec<&str> = if law.ports.is_empty() {
+            law.inputs.iter().map(|s| s.as_str()).collect()
+        } else {
+            let mut v = Vec::new();
+            for port in &law.ports {
+                if port.temporal != Temporal::Current {
+                    continue;
+                }
+                if !port.axis.is_empty() {
+                    v.push(port.axis.as_str());
+                }
+                for m in &port.members {
+                    v.push(m.as_str());
+                }
+            }
+            v
+        };
         let mut max_input_tier: u32 = 0;
-        for axis in &law.inputs {
-            let axis_tier = match producer.get(axis.as_str()) {
+        for axis in same_tick {
+            let axis_tier = match producer.get(axis) {
                 // A produced axis inherits its producing law's tier (unless the law reads its
                 // own output, which self-cycles and is caught by the visiting set).
                 Some(prod) => tier_of(prod, laws, producer, law_tier, visiting)?,
@@ -776,4 +799,102 @@ pub fn derive_tiers(
         tier_of(id, laws, &producer, &mut law_tier, &mut visiting)?;
     }
     Ok(law_tier)
+}
+
+#[cfg(test)]
+mod tier_graph_tests {
+    use super::*;
+    use crate::LawPort;
+
+    fn port(role: &str, axis: &str, temporal: Temporal) -> LawPort {
+        LawPort {
+            role: role.to_string(),
+            axis: axis.to_string(),
+            temporal,
+            members: Vec::new(),
+            fold: None,
+        }
+    }
+
+    fn law(id: &str, ports: Vec<LawPort>, produces: &[&str], inputs: &[&str]) -> InteractionLaw {
+        InteractionLaw {
+            id: id.to_string(),
+            kernel: "test.kernel".to_string(),
+            ports,
+            produces: produces.iter().map(|s| s.to_string()).collect(),
+            inputs: inputs.iter().map(|s| s.to_string()).collect(),
+            output_measure: String::new(),
+            output_dimension: Dimension::DIMENSIONLESS,
+            interval_bound: String::new(),
+            tier: 0,
+        }
+    }
+
+    #[test]
+    fn a_prior_only_feedback_read_does_not_manufacture_a_cycle() {
+        // A reads Y this tick and writes X; B reads X's PRIOR sample (last tick) and writes Y. The
+        // data cycle is broken by the last-tick read, so the tiers are finite: B (a prior read, no
+        // same-tick edge) is tier 1, A (reads B's this-tick Y) is tier 2. `inputs` carries the
+        // prior axis (its complete read-set), so deriving tier from `inputs` would see A -> B -> A
+        // and wrongly reject a valid feedback loop; deriving from the Current ports does not.
+        let mut laws: BTreeMap<String, InteractionLaw> = BTreeMap::new();
+        laws.insert(
+            "law.a".to_string(),
+            law(
+                "law.a",
+                vec![port("y", "ax.y", Temporal::Current)],
+                &["ax.x"],
+                &["ax.y"],
+            ),
+        );
+        laws.insert(
+            "law.b".to_string(),
+            law(
+                "law.b",
+                vec![port("x_prev", "ax.x", Temporal::Prior)],
+                &["ax.y"],
+                &["ax.x"],
+            ),
+        );
+        let tiers = derive_tiers(&laws).expect("a prior-broken feedback loop has finite tiers");
+        assert_eq!(
+            tiers.get("law.b"),
+            Some(&1),
+            "B's only read is a prior sample, so it is tier 1"
+        );
+        assert_eq!(
+            tiers.get("law.a"),
+            Some(&2),
+            "A reads B's this-tick output, so it is tier 2"
+        );
+    }
+
+    #[test]
+    fn a_real_same_tick_cycle_is_still_a_load_error() {
+        // The dual guard: if both reads are this-tick (Current), the cycle is real and must remain
+        // a load error. The fix removes only the false prior edge, never real cycle detection.
+        let mut laws: BTreeMap<String, InteractionLaw> = BTreeMap::new();
+        laws.insert(
+            "law.a".to_string(),
+            law(
+                "law.a",
+                vec![port("y", "ax.y", Temporal::Current)],
+                &["ax.x"],
+                &["ax.y"],
+            ),
+        );
+        laws.insert(
+            "law.b".to_string(),
+            law(
+                "law.b",
+                vec![port("x", "ax.x", Temporal::Current)],
+                &["ax.y"],
+                &["ax.x"],
+            ),
+        );
+        assert!(matches!(
+            derive_tiers(&laws),
+            Err(PhysicsError::CyclicLawGraph(_))
+        ));
+    }
 }

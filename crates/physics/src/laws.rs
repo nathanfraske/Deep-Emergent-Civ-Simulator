@@ -605,28 +605,38 @@ pub fn wear(
     hardness: Fixed,
     wear_max: Fixed,
 ) -> Fixed {
-    if hardness == ZERO {
+    if hardness == ZERO || coefficient_scale == ZERO {
+        // A zero hardness abrades without bound; an open (zero) coefficient scale is an
+        // unconfigured coefficient. Both route to the reserved ceiling.
         return wear_max;
     }
-    // Reduce by the coefficient scale before the growing multiplies (the wave-1 reduce-before-grow
-    // discipline): the scaled coefficient over its scale is the true (sub-unit) Archard coefficient,
-    // so K*F*s never forms above the ceiling for an in-range result. Reassociating the reducing
-    // divide ahead of the product changes the floor rounding but removes the false-cap overflow.
-    let k = match wear_coefficient_scaled.checked_div(coefficient_scale) {
+    // V = K_scaled*F*s/(scale*H), evaluated in i128 raw bits so the only cap is on the true
+    // result. The reduced coefficient K = K_scaled/scale is never materialised as a Fixed (that
+    // would floor a sub-2^-32 Archard coefficient toward zero and lose the low bits of a
+    // mild-wear coefficient); instead the scale divides the grown K_scaled*F, keeping full
+    // precision, and the whole chain stays in i128, which the declared ranges never exhaust. The
+    // two divisions truncate toward zero, matching the Fixed floor-division convention.
+    let ks = wear_coefficient_scaled.to_bits() as i128;
+    let sc = coefficient_scale.to_bits() as i128; // != 0 (guarded)
+    let f = force.to_bits() as i128;
+    let s = distance.to_bits() as i128;
+    let h = hardness.to_bits() as i128; // != 0 (guarded)
+    let wmb = wear_max.to_bits() as i128;
+    // n1 = K_scaled*F (raw), reduced by the scale before the slide distance grows it.
+    let n1 = match ks.checked_mul(f) {
         Some(x) => x,
         None => return wear_max,
     };
-    let kf = match k.checked_mul(force) {
+    let n2 = n1 / sc; // = K*F as a Fixed raw, full precision
+    let n3 = match n2.checked_mul(s) {
         Some(x) => x,
         None => return wear_max,
     };
-    let kfs = match kf.checked_mul(distance) {
-        Some(x) => x,
-        None => return wear_max,
-    };
-    match kfs.checked_div(hardness) {
-        Some(v) => v.min(wear_max),
-        None => wear_max,
+    let v = n3 / h;
+    if v >= wmb {
+        wear_max
+    } else {
+        Fixed::from_bits(v as i64)
     }
 }
 
@@ -1438,25 +1448,33 @@ pub fn coulomb_force(
     if r <= ZERO {
         return (f_max, repulsive);
     }
-    // Divide each charge magnitude by the separation before the product (reduce before grow), so a
-    // distant large-charge pair does not overflow |q1|*|q2| before the r^2 divide would reduce it; a
-    // close pair whose true force exceeds the ceiling still routes to f_max, and a far one goes to
-    // zero as |q|/r underflows. This forms k*(|q1|/r)*(|q2|/r) = k*|q1||q2|/r^2.
-    let a = match sat_abs(q1).checked_div(r) {
-        Some(x) => x,
-        None => return (f_max, repulsive),
-    };
-    let b = match sat_abs(q2).checked_div(r) {
-        Some(x) => x,
-        None => return (f_max, repulsive),
-    };
+    // F = k*|q1|*|q2|/r^2, evaluated in i128 raw bits so the only cap is on the true force. Each
+    // charge magnitude is reduced by the separation before the product (a = |q1|/r, b = |q2|/r,
+    // base = a*b), keeping every intermediate inside i128 across the declared ranges; because the
+    // reduction happens in i128 rather than a Fixed, no representable in-range force routes to the
+    // ceiling regardless of where the (reserved) charge scale is later set. A genuinely huge force
+    // (charges so large or separations so small that the i128 product overflows, or a result at or
+    // above the reserved ceiling) still routes to f_max. Inputs are Fixed, so every raw magnitude is
+    // bounded by i64::MAX and the `<<32` never overflows i128; the checked multiplies catch the rest.
+    let q1b = sat_abs(q1).to_bits() as i128;
+    let q2b = sat_abs(q2).to_bits() as i128;
+    let rb = r.to_bits() as i128; // > 0 (guarded)
+    let kb = k_coulomb.to_bits() as i128;
+    let fmb = f_max.to_bits() as i128;
+    let a = (q1b << 32) / rb; // |q1|/r as a Fixed raw, full precision
+    let b = (q2b << 32) / rb; // |q2|/r as a Fixed raw
     let base = match a.checked_mul(b) {
-        Some(x) => x,
+        Some(x) => x >> 32, // |q1||q2|/r^2 as a Fixed raw
         None => return (f_max, repulsive),
     };
-    match base.checked_mul(k_coulomb) {
-        Some(f) => (f.min(f_max), repulsive),
-        None => (f_max, repulsive),
+    let force = match base.checked_mul(kb) {
+        Some(x) => x >> 32,
+        None => return (f_max, repulsive),
+    };
+    if force >= fmb {
+        (f_max, repulsive)
+    } else {
+        (Fixed::from_bits(force as i64), repulsive)
     }
 }
 
@@ -2052,6 +2070,48 @@ mod tests {
         assert!(
             r > F_INT(2000) && r < r_max,
             "resistance = {r:?} should be the true ~2200, not the cap"
+        );
+    }
+
+    #[test]
+    fn coulomb_wide_form_keeps_the_true_force_beyond_the_reserved_charge_range() {
+        // The wide i128 evaluation caps only on the true force, so it holds even for an asymmetric
+        // large-and-small charge pair whose |q1|/r overflows a Fixed (the reassociated form's
+        // false-cap corner). q1 = 2e9, q2 = 1e-6, r = 0.5, k = 1: the true force is
+        // k*|q1||q2|/r^2 = 2e9*1e-6/0.25 = 8000, well below the 2e9 ceiling.
+        let f_max = cap(2_000_000_000);
+        let (f, repulsive) = coulomb_force(
+            F_INT(2_000_000_000),
+            Fixed::from_ratio(1, 1_000_000),
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            f_max,
+        );
+        assert!(
+            f > F_INT(7_900) && f < F_INT(8_100),
+            "force = {f:?} should be the true ~8000, not the cap"
+        );
+        assert!(repulsive, "like-signed charges repel");
+    }
+
+    #[test]
+    fn wear_wide_form_keeps_full_precision_for_a_sub_unit_coefficient() {
+        // At the mild-lubricated low end of the coefficient axis (K_scaled = 0.001 stored x1e6, so
+        // true K = 1e-9), the wide i128 evaluation must reconstruct the true wear rather than lose
+        // the low bits: K*F*s/H = 1e-9 * 1e8 * 10 / 1 = 1.0. Materialising K = K_scaled/scale as a
+        // Fixed would floor it and read back ~0.93; the scale-divides-the-product form reads 1.0.
+        let wear_max = cap(2_000_000_000);
+        let w = wear(
+            Fixed::from_ratio(1, 1_000), // wear_coefficient_scaled = 0.001 (true K = 1e-9)
+            F_INT(1_000_000),            // coefficient_scale
+            F_INT(100_000_000),          // force 1e8
+            F_INT(10),                   // slide distance
+            F_INT(1),                    // hardness
+            wear_max,
+        );
+        assert!(
+            w > Fixed::from_ratio(999, 1000) && w < Fixed::from_ratio(1001, 1000),
+            "wear = {w:?} should be the true ~1.0, not the ~0.93 a Fixed-reduced coefficient gives"
         );
     }
 

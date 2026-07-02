@@ -1133,7 +1133,10 @@ impl LawDef {
         }
         // The flat input list is derived from the distinct non-Dt port axes (a single port's axis
         // and a class-set port's members) when ports are declared, so the legacy `inputs`
-        // consumers keep working without duplication in data.
+        // consumers keep working without duplication in data. This is the complete read-set (a
+        // Prior port's axis is included) for the load-time cross-reference check and the content
+        // hash; the derived-tier graph, not this list, is where a Prior read is treated as the
+        // acausal edge it is (see `graph::derive_tiers`).
         let inputs = if ports.is_empty() {
             self.inputs
         } else {
