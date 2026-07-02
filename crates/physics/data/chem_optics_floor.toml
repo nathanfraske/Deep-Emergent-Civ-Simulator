@@ -153,7 +153,12 @@ real = "atmospheric scattering coefficients; the Rayleigh lambda^-4 spectral sha
 
 [[law]]
 id = "law.reaction"
-inputs = ["chem.formation_enthalpy", "therm.temperature"]
+kernel = "reaction"
+ports = [
+  { role = "products_sum", axis = "chem.formation_enthalpy" },
+  { role = "reactants_sum", axis = "chem.formation_enthalpy" },
+  { role = "temperature", axis = "therm.temperature" },
+]
 output_measure = "reaction enthalpy per kg and the barrier-crossed condition"
 dimension = "2,0,-2,0"
 interval_bound = "[-E_RXN_MAX, E_RXN_MAX]"
@@ -161,7 +166,13 @@ tier = 0
 
 [[law]]
 id = "law.corrosion"
-inputs = ["chem.standard_potential", "chem.acidity", "chem.corrosion_susceptibility"]
+kernel = "corrosion"
+ports = [
+  { role = "fluid_potential", axis = "chem.standard_potential" },
+  { role = "material_potential", axis = "chem.standard_potential" },
+  { role = "susceptibility", axis = "chem.corrosion_susceptibility" },
+  { role = "acidity_factor", axis = "chem.acidity" },
+]
 output_measure = "corrosion driving margin (a rate proxy)"
 dimension = "dimensionless"
 interval_bound = "[0, CORROSION_MAX]"
@@ -169,7 +180,11 @@ tier = 0
 
 [[law]]
 id = "law.carnot_limit"
-inputs = ["therm.temperature"]
+kernel = "carnot_limit"
+ports = [
+  { role = "hot", axis = "therm.temperature" },
+  { role = "cold", axis = "therm.temperature" },
+]
 output_measure = "ideal heat-to-work efficiency"
 dimension = "dimensionless"
 interval_bound = "[0, 1]"
@@ -177,7 +192,10 @@ tier = 0
 
 [[law]]
 id = "law.dissolution"
-inputs = ["chem.solute_affinity"]
+kernel = "dissolution"
+ports = [
+  { role = "solute_affinity", axis = "chem.solute_affinity" },
+]
 output_measure = "leached fraction of a solute"
 dimension = "dimensionless"
 interval_bound = "[0, 1]"
@@ -185,7 +203,13 @@ tier = 0
 
 [[law]]
 id = "law.radiant_emission"
-inputs = ["opt.emissivity", "mech.contact_area", "therm.temperature"]
+kernel = "radiant_emission"
+ports = [
+  { role = "emissivity", axis = "opt.emissivity" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "t_hot", axis = "therm.temperature" },
+  { role = "t_cold", axis = "therm.temperature" },
+]
 output_measure = "radiant heat exchange (Stefan-Boltzmann)"
 dimension = "energy"
 interval_bound = "[0, FLUX_MAX]"
@@ -193,7 +217,10 @@ tier = 0
 
 [[law]]
 id = "law.wien_peak"
-inputs = ["therm.temperature"]
+kernel = "wien_peak"
+ports = [
+  { role = "temperature", axis = "therm.temperature" },
+]
 output_measure = "peak emission wavelength (Wien)"
 dimension = "length"
 interval_bound = "[0, WAVELENGTH_MAX]"
@@ -201,7 +228,11 @@ tier = 0
 
 [[law]]
 id = "law.inverse_square_falloff"
-inputs = ["opt.source_power", "mech.arm_length"]
+kernel = "inverse_square_falloff"
+ports = [
+  { role = "power", axis = "opt.source_power" },
+  { role = "distance", axis = "mech.arm_length" },
+]
 output_measure = "irradiance at a distance (geometric spreading)"
 dimension = "0,1,-3,0"
 interval_bound = "[0, IRRAD_MAX]"
@@ -209,7 +240,11 @@ tier = 0
 
 [[law]]
 id = "law.interface_split"
-inputs = ["opt.reflectance", "opt.transmittance"]
+kernel = "interface_split"
+ports = [
+  { role = "reflectance", axis = "opt.reflectance" },
+  { role = "transmittance", axis = "opt.transmittance" },
+]
 output_measure = "the reflected, absorbed, and transmitted flux triple"
 dimension = "energy"
 interval_bound = "[0, incident]"
@@ -217,7 +252,11 @@ tier = 0
 
 [[law]]
 id = "law.optical_depth"
-inputs = ["opt.absorption_coefficient", "mech.arm_length"]
+kernel = "optical_depth"
+ports = [
+  { role = "absorption_coefficient", axis = "opt.absorption_coefficient" },
+  { role = "path", axis = "mech.arm_length" },
+]
 output_measure = "optical depth tau (the exp transform deferred)"
 dimension = "dimensionless"
 interval_bound = "[0, TAU_MAX]"
@@ -225,7 +264,11 @@ tier = 0
 
 [[law]]
 id = "law.refractive_contrast"
-inputs = ["opt.refractive_index"]
+kernel = "refractive_contrast"
+ports = [
+  { role = "n1", axis = "opt.refractive_index" },
+  { role = "n2", axis = "opt.refractive_index" },
+]
 output_measure = "the refractive contrast ratio and the total-internal-reflection condition"
 dimension = "dimensionless"
 interval_bound = "[0, CONTRAST_MAX]"
@@ -233,7 +276,10 @@ tier = 0
 
 [[law]]
 id = "law.radiative_equilibrium"
-inputs = ["opt.emissivity"]
+kernel = "radiative_equilibrium"
+ports = [
+  { role = "emissivity", axis = "opt.emissivity" },
+]
 output_measure = "the equilibrium temperature absorbed irradiance sets (inverse Stefan-Boltzmann)"
 dimension = "temperature"
 interval_bound = "[0, T_MAX]"

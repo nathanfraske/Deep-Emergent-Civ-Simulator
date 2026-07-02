@@ -239,6 +239,48 @@ fn the_mechanical_floor_migrates_and_names_two_arms_on_one_axis() {
 }
 
 #[test]
+fn the_chem_optics_floor_migrates_with_a_same_dimension_difference() {
+    // The chem-and-optics floor extends the mechanical and fluids floors (it reads their axes), so
+    // it loads onto the stack, not standalone. All 11 of its laws bind their kernel; law.reaction
+    // reports an enthalpy difference verified SameAs its formation-enthalpy input (two ports on one
+    // axis), and its derived input dedups the two enthalpy ports to one axis.
+    let reg = full_registry();
+    let chem = [
+        "law.reaction",
+        "law.corrosion",
+        "law.carnot_limit",
+        "law.dissolution",
+        "law.radiant_emission",
+        "law.wien_peak",
+        "law.inverse_square_falloff",
+        "law.interface_split",
+        "law.optical_depth",
+        "law.refractive_contrast",
+        "law.radiative_equilibrium",
+    ];
+    for id in chem {
+        assert!(!reg.law(id).unwrap().kernel.is_empty(), "{id} is migrated");
+    }
+    let reaction = reg.law("law.reaction").unwrap();
+    let enthalpy_roles: Vec<&str> = reaction
+        .ports
+        .iter()
+        .filter(|p| p.axis == "chem.formation_enthalpy")
+        .map(|p| p.role.as_str())
+        .collect();
+    assert_eq!(enthalpy_roles, vec!["products_sum", "reactants_sum"]);
+    assert_eq!(
+        reaction
+            .inputs
+            .iter()
+            .filter(|a| *a == "chem.formation_enthalpy")
+            .count(),
+        1,
+        "the two enthalpy ports dedup to one derived input axis"
+    );
+}
+
+#[test]
 fn the_migrated_floor_still_hashes_deterministically() {
     // The descriptor fields fold into the content hash; the same data still hashes identically.
     assert_eq!(full_registry().content_id(), full_registry().content_id());
