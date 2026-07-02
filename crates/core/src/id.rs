@@ -23,6 +23,7 @@
 //! promotion and not suitable for serialization. The [`Registry`] bridges them.
 
 use crate::hash::StateHasher;
+#[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
 use std::collections::HashMap;
 
 /// A process-wide, monotonically assigned id that names a conceptual entity (a
@@ -61,6 +62,9 @@ pub struct StableRef(pub StableId);
 #[derive(Default)]
 pub struct Registry {
     next_id: u64,
+    // The registry is walked only via entries_sorted / hash_into, which iterate in
+    // StableId order; a bare walk of this map never reaches a state hash (R-CANON-WALK).
+    #[allow(clippy::disallowed_types)]
     locations: HashMap<StableId, EntityLocation>,
 }
 
@@ -152,6 +156,7 @@ impl Registry {
         next_id: u64,
         entries: impl IntoIterator<Item = (StableId, EntityLocation)>,
     ) -> Self {
+        #[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
         let mut locations = HashMap::new();
         for (id, loc) in entries {
             locations.insert(id, loc);

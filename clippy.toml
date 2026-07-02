@@ -1,0 +1,12 @@
+# R-CANON-WALK: canonical simulation state must live in ordered containers so iteration
+# order (and thus the state hash and any parallel fold) is deterministic. A std HashMap or
+# HashSet iterates in a per-instance random order, which breaks reproducibility even
+# single-threaded. These are denied in the canonical crates (core, sim, world) via a
+# per-crate [lints.clippy] disallowed_types = "deny"; the non-canonical crates (physics,
+# units, gpu, viewer) do not enable the lint. A proven-safe canonical site (single-key
+# lookup only, or one carrying a sorted accessor) opts out with an explicit
+# #[allow(clippy::disallowed_types)] and a comment naming why it cannot leak order.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "canonical state must use BTreeMap for deterministic iteration (R-CANON-WALK); opt out a proven-safe site with #[allow(clippy::disallowed_types)]" },
+    { path = "std::collections::HashSet", reason = "canonical state must use BTreeSet for deterministic iteration (R-CANON-WALK); opt out a proven-safe site with #[allow(clippy::disallowed_types)]" },
+]

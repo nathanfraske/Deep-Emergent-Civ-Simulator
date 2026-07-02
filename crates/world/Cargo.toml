@@ -15,3 +15,7 @@ civsim-core = { path = "../core" }
 # canonical state through them; worldgen fields stay fixed-point integer.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[lints.clippy]
+# R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
+disallowed_types = "deny"

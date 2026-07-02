@@ -30,3 +30,7 @@ toml = "0.8"
 # generated map. The library will take this as a regular dependency at the deep M2
 # placement step (when a place becomes a map coordinate); for now only examples need it.
 civsim-world = { path = "../world" }
+
+[lints.clippy]
+# R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
+disallowed_types = "deny"

@@ -29,6 +29,7 @@
 //! schema without changing this storage mechanism.
 
 use crate::id::StableId;
+#[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
 use std::collections::HashMap;
 
 /// A never-reused identifier for a logged event.
@@ -98,6 +99,9 @@ impl Event {
 #[derive(Default)]
 pub struct EventLog {
     events: Vec<Event>,
+    // Single-key provenance index (history_of), never iterated as a whole into a state
+    // hash; the ordered accessor by_entity_sorted exists for any future ordered fold.
+    #[allow(clippy::disallowed_types)]
     by_entity: HashMap<StableId, Vec<EventId>>,
     next: u64,
 }
@@ -151,6 +155,18 @@ impl EventLog {
             .into_iter()
             .flatten()
             .map(move |eid| self.get(*eid))
+    }
+
+    /// The provenance index walked in ascending [`StableId`] order, each entity paired with
+    /// its events (already in append order). The single-key [`Self::history_of`] is the usual
+    /// access; this canonical accessor exists so that any future fold of the whole index into
+    /// a state hash walks in a deterministic order rather than the map's random order
+    /// (R-CANON-WALK), the one named provenance container the flag calls out.
+    pub fn by_entity_sorted(&self) -> impl Iterator<Item = (StableId, &[EventId])> + '_ {
+        let mut keys: Vec<StableId> = self.by_entity.keys().copied().collect();
+        keys.sort();
+        keys.into_iter()
+            .map(move |k| (k, self.by_entity[&k].as_slice()))
     }
 
     /// All events in append order.
