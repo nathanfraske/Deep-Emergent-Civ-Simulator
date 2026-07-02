@@ -26,11 +26,15 @@
 //! optimizer bug rather than a kernel defect: the panic is inside cubecl's own pass, and the CUDA
 //! backend proves the transcendentals bit-identical (`transcendental_gate.rs`). It is not filed
 //! upstream or reduced to a reproducer here, so "appears" is the honest word.
-//! Cross-backend confirmation of the transcendentals awaits a cubecl fix or a wgpu backend, so this
-//! gate covers the load-bearing arithmetic.
+//! A third codegen path, the wgpu Vulkan/SPIR-V backend (cubecl-spirv), is gated separately below and
+//! also reproduces the arithmetic bit-for-bit. Its transcendental confirmation is blocked only by this
+//! box's hardware: the sole Vulkan adapter is lavapipe (software), too slow for the large unrolled
+//! transcendental shaders, though SPIR-V Int64 is supported (a native-i64 probe ran in milliseconds),
+//! so a hardware Vulkan device would carry them. The transcendental cross-backend thus awaits either a
+//! cubecl-cpu optimizer fix or a hardware Vulkan ICD; this gate covers the load-bearing arithmetic.
 
 use civsim_core::Fixed;
-use civsim_gpu::{cpu_client, cuda_client, gpu_div, gpu_mul};
+use civsim_gpu::{cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client};
 
 fn gpu_enabled() -> bool {
     std::env::var("CIVSIM_GPU").is_ok()
@@ -141,6 +145,73 @@ fn stage0_arithmetic_agrees_across_cuda_and_cpu_backends() {
         dmism,
         0,
         "div: CUDA and CPU backends must both equal the oracle over {} cases",
+        ka.len()
+    );
+}
+
+/// Opt-in for the wgpu/SPIR-V gate. Unlike the CUDA gate it needs no CUDA device, but it needs a
+/// Vulkan adapter (lavapipe suffices), so it is off by default and enabled with `CIVSIM_GPU_WGPU=1`.
+fn wgpu_enabled() -> bool {
+    std::env::var("CIVSIM_GPU_WGPU").is_ok()
+}
+
+#[test]
+fn stage0_arithmetic_agrees_on_wgpu_spirv_backend() {
+    if !wgpu_enabled() {
+        eprintln!(
+            "civsim-gpu: skipping wgpu/SPIR-V gate (set CIVSIM_GPU_WGPU=1; needs a Vulkan adapter)"
+        );
+        return;
+    }
+    let wgpu = wgpu_client();
+
+    // Multiply: a third independent codegen path (SPIR-V) must match the oracle bit-for-bit.
+    let (a, b) = cases(0x1234_5678_9ABC_DEF1, 5_000);
+    let m = gpu_mul(&wgpu, &a, &b);
+    let mut mism = 0u64;
+    for i in 0..a.len() {
+        let oracle = Fixed::from_bits(a[i]).mul(Fixed::from_bits(b[i])).to_bits();
+        if m[i] != oracle {
+            mism += 1;
+            if mism <= 5 {
+                eprintln!(
+                    "wgpu mul a={:#x} b={:#x} got={:#x} want={:#x}",
+                    a[i], b[i], m[i], oracle
+                );
+            }
+        }
+    }
+    assert_eq!(
+        mism,
+        0,
+        "wgpu/SPIR-V mul must equal the oracle over {} cases",
+        a.len()
+    );
+
+    // Divide (drop zero divisors).
+    let (da, db) = cases(0x0FED_CBA9_8765_4321, 5_000);
+    let mut ka = Vec::new();
+    let mut kb = Vec::new();
+    for i in 0..da.len() {
+        if db[i] != 0 {
+            ka.push(da[i]);
+            kb.push(db[i]);
+        }
+    }
+    let d = gpu_div(&wgpu, &ka, &kb);
+    let mut dmism = 0u64;
+    for i in 0..ka.len() {
+        let oracle = Fixed::from_bits(ka[i])
+            .div(Fixed::from_bits(kb[i]))
+            .to_bits();
+        if d[i] != oracle {
+            dmism += 1;
+        }
+    }
+    assert_eq!(
+        dmism,
+        0,
+        "wgpu/SPIR-V div must equal the oracle over {} cases",
         ka.len()
     );
 }

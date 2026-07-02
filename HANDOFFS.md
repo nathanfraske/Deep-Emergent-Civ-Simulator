@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): the wgpu/SPIR-V backend, a third codegen path for the arithmetic (item 1)
+
+The last GPU-lane residual: confirm the transcendentals cross-backend. The CPU backend could not (it panics in cubecl-opt), so a background probe stood up the cubecl-wgpu (Vulkan/SPIR-V) path. On `claude/gpu-wgpu-backend`.
+
+**What the probe found, and what was built.** cubecl-wgpu builds here (the `vulkan` feature); the only Vulkan adapter is lavapipe (software Mesa, `llvmpipe`), reported as `wgpu<spirv>`, an independent third codegen path (direct SPIR-V, distinct from CUDA/NVRTC and the CPU MLIR/LLVM). Stood it up in the main tree: `wgpu_client()`/`WgpuClient` in `stage0.rs` (via `init_setup::<Vulkan>(&WgpuDevice::DefaultDevice, RuntimeOptions::default())` then `WgpuRuntime::client(&device)`), and a `cross_backend.rs` gate `stage0_arithmetic_agrees_on_wgpu_spirv_backend` (opt-in via `CIVSIM_GPU_WGPU`, needs no CUDA). The pinned multiply and divide are bit-identical to the oracle on lavapipe. So the Stage 0 arithmetic is now proven across THREE independent codegen paths (CUDA, CPU/MLIR-LLVM, wgpu/SPIR-V).
+
+**The honest transcendental result.** The i64 `exp` does not complete on lavapipe, but not for a code or backend reason: SPIR-V Int64 works (a native-i64 probe `a*b+a` ran in 13 ms on the same wgpu/SPIR-V path), and the cubecl-cpu constant_prop panic does NOT recur here. The sole blocker is that lavapipe is a software driver and cannot compile/run the large unrolled transcendental shader in practical time (it pinned a CPU thread and never returned for 9 elements over 9 minutes). A box with a hardware Vulkan ICD would carry them. So the transcendental cross-backend confirmation awaits a hardware Vulkan device or a cubecl-cpu optimizer fix, and that is a machine limitation, stated as such.
+
+**Docs.** `CONSENSUS_ROADMAP.md`, record 62.23, audit block 1y, and the lib doc reconciled to the three-codegen-path arithmetic proof and the precise transcendental status. R-GPU-CANON-PIN stays resolved; counts unchanged.
+
+**Where it stopped.** Item 1 built and gated on `claude/gpu-wgpu-backend` (arithmetic three-path proof landed; transcendental cross-backend characterized as hardware-gated), pending commit and merge. That closes the owner's items 1, 2, and 4; item 3 (multi-vendor hardware) is not doable on this single-vendor box.
+
+---
+
 ## 2026-07-02 (continued): R-REPRO genome-derived mate-choice fitness built (the red-team's proxy gap closed), on `claude/find-unblocked-work-dwdpsj`
 
 The owner said to take the R-REPRO follow-on. The load-bearing one, named by both the red-team and the module, was to replace the authored fitness-of-distance proxy with fitness read off the real offspring genotype, so the emergence claim rests on the engine's own genetics rather than a reduced-form proxy.
