@@ -14,8 +14,12 @@ ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 cd "$ROOT" || exit 0
 
 verify_out="$(bash scripts/verify.sh 2>&1)"
-handoff="$(sed -n '1,60p' HANDOFFS.md 2>/dev/null)"
-todos="$(grep '^- \*\*R-' TODOS.md 2>/dev/null | head -40)"
+# Bound each block on its own so all sections survive the overall cap below: the
+# HANDOFFS entries and the TODOS bullets are long, and left unbounded either one alone
+# fills the budget and silently drops the sections after it. The top HANDOFFS entry is
+# the priority (recover state), so it gets the largest share.
+handoff="$(sed -n '1,60p' HANDOFFS.md 2>/dev/null | head -c 3500)"
+todos="$(grep '^- \*\*R-' TODOS.md 2>/dev/null | head -40 | head -c 2500)"
 
 # The consensus roadmap is the ground-truth order of work. Inject its section
 # headers and near-term frontier so the agent starts oriented and remembers to keep
@@ -37,6 +41,8 @@ roadmap="$(printf '%s' "$roadmap" | head -c 2000)"
 
 ctx="$(cat <<EOF
 Session memory loaded by the SessionStart hook.
+
+Method available: the fully-blind audit (AGENTIC_ADDENDUM.md section 7). When a correctness or reserved-value verdict must not be contaminated by the repo's own tests, comments, or prior reviews, assemble a scratchpad packet (substrate contract + code + declared spec, no tests or docs) and run repo-walled independent auditors; pilot one agent for sufficiency first, then verify every finding against the source. Panelists on the cheapest model that fits (Sonnet; Haiku for mass; Opus for the hardest cases).
 
 === docs/working/CONSENSUS_ROADMAP.md (the ground-truth order of work; review it at the start, and as work is done keep it current: cite each item's gate as an R-item, a Part number, or a file, and tombstone a completed or removed item by rewriting it in place, never by deleting it silently) ===
 $roadmap
