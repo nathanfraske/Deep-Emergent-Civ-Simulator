@@ -46,6 +46,22 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): dynamic (heterogeneous-core-aware) load balancing for parallel perceive, stood up on the 265K
+
+The owner asked whether the parallel scheme can efficiently use hybrid CPUs (Intel P and E cores, AMD X3D CCDs with and without V-cache), and noted this system has a Core Ultra 7 265K, so it could be stood up for real. On `claude/perceive-dynamic-balance`.
+
+**The enabler.** Determinism decouples correctness from scheduling: the per-being rolls are draw-keyed and the merge is canonical, so the result is bit-identical whatever cores run the work. Heterogeneous scheduling is a pure throughput tuning that cannot break a run or a test, a rare freedom.
+
+**Built.** `World::perceive`'s gather went from static contiguous chunks (bounded by the slowest core) to DYNAMIC load balancing: workers pull the next trace index from a shared atomic counter, so a faster core does more traces and none idles at the barrier. The pooled output is re-canonicalised by a cheap work-unit (trace index) sort, not a per-hit sort, so the balanced gather stays a pure function of state. Bit-identical across 2/3/8/16 workers still holds.
+
+**The honest finding on the 265K (8 P + 12 E).** A per-hit sort merge cost more than it saved (sorting ~2M hits single-threaded Amdahl-capped the phase, workers=1 436ms -> workers=16 386ms, only 1.13x); switching to the work-unit-granularity merge fixed that (387 -> 218ms, about 1.8x). But it plateaus near eight workers because perceive is MEMORY-BOUND (each worker walks the shared minds BTreeMap, so a few cores saturate memory bandwidth). Heterogeneous scheduling buys throughput on compute-bound work; a memory-bound phase is capped by bandwidth whatever the core mix, and its lever is data layout, not more cores. The compute-bound phases (converse dialogue reasoning, gossip deception judgement) are where per-core throughput and a P-core preference will show. An ignored `perceive_timing_across_workers` bench records this on the machine.
+
+**Design.** Folded a "Heterogeneous cores and dynamic scheduling" section into `docs/deterministic_scheduler_design.md`: the determinism-decouples-scheduling freedom, dynamic balancing plus canonical merge, the memory-bound-vs-compute-bound distinction with the 265K numbers, and the opt-in later refinements (a rayon work-stealing pool; hwloc topology-aware pinning to keep a cache-sensitive phase on the V-cache CCD, with the honest snag that no clean API reports which CCD has V-cache), all gated behind a profile that shows the parallel tick is the limit, which it is not yet.
+
+**Where it stopped.** On `claude/perceive-dynamic-balance`, green. Next: apply the same intra-phase pattern to the compute-bound phases (converse is already structured for it; gossip, decide, drift, mortality follow), where the heterogeneous-core win appears.
+
+---
+
 ## 2026-07-02 (continued): parallel perceive, the first real intra-phase per-being parallelism
 
 Following the World::tick scope, the honest finding was that PHASE-level scheduling of the cognition tick buys no parallelism: perceive, converse, gossip, and life_cadence all write the minds/belief hub, so they serialise, and the only independent phases (decide, naming game, drift) are the cheap ones. The owner chose the real throughput lever: INTRA-phase, per-being parallelism, over the population N. On `claude/parallel-perceive`.

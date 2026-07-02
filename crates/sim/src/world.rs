@@ -2233,41 +2233,57 @@ impl World {
         let mut traces: Vec<&Trace> = self.traces.iter().collect();
         traces.sort_by_key(|t| t.id);
         let workers = self.workers.max(1);
-        let hits: Vec<PerceptionHit> = if workers == 1 || traces.len() <= 1 {
+        let n = traces.len();
+        let hits: Vec<PerceptionHit> = if workers == 1 || n <= 1 {
             let mut out = Vec::new();
             for t in &traces {
                 self.gather_trace(t, &mut out);
             }
             out
         } else {
-            let chunk = traces.len().div_ceil(workers);
-            let chunks: Vec<&[&Trace]> = traces.chunks(chunk).collect();
-            // A shared immutable reborrow, so every worker reads the same frozen `&World` (the gather
-            // writes nothing); the mutable borrow resumes for the apply pass after the scope.
+            // Dynamic load balancing, heterogeneous-core aware: each worker pulls the next trace
+            // index from a shared counter, so a faster core (an Intel P-core, or an AMD V-cache CCD)
+            // gathers more traces than a slower one, and no thread idles at the barrier on an equal
+            // static slice. The gather writes nothing (a pure read of the frozen `&World`, which is
+            // Sync). Each worker tags its output with the trace index; the merge sorts by that index
+            // (a `traces`-length key, not a per-hit one, so it is cheap) and flattens, which
+            // reproduces the serial trace-then-being order exactly. So the result is a pure function
+            // of state whatever core gathered which trace: that is what lets the schedule adapt to a
+            // hybrid CPU without touching correctness, and without a per-hit sort that would Amdahl-
+            // cap the phase.
             let this: &World = &*self;
-            let parts: Vec<Vec<PerceptionHit>> = std::thread::scope(|sc| {
-                let handles: Vec<_> = chunks
-                    .iter()
-                    .map(|&ch| {
-                        sc.spawn(move || {
-                            let mut out = Vec::new();
-                            for t in ch {
-                                this.gather_trace(t, &mut out);
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let mut indexed: Vec<(usize, Vec<PerceptionHit>)> = std::thread::scope(|sc| {
+                let handles: Vec<_> = (0..workers)
+                    .map(|_| {
+                        sc.spawn(|| {
+                            let mut local: Vec<(usize, Vec<PerceptionHit>)> = Vec::new();
+                            loop {
+                                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                if i >= n {
+                                    break;
+                                }
+                                let mut out = Vec::new();
+                                this.gather_trace(traces[i], &mut out);
+                                if !out.is_empty() {
+                                    local.push((i, out));
+                                }
                             }
-                            out
+                            local
                         })
                     })
                     .collect();
                 handles
                     .into_iter()
-                    .map(|h| h.join().expect("a perceive worker panicked"))
+                    .flat_map(|h| h.join().expect("a perceive worker panicked"))
                     .collect()
             });
-            parts.into_iter().flatten().collect()
+            indexed.sort_by_key(|(i, _)| *i);
+            indexed.into_iter().flat_map(|(_, v)| v).collect()
         };
         // Apply pass (single-threaded): each noticed being integrates the evidence into its beliefs,
-        // in the canonical hit order. `consider` is order-independent, but the hit order is already
-        // canonical (trace id, then being id) so the apply reproduces the serial walk exactly.
+        // in the canonical trace-then-being order the gather reproduced. `consider` is
+        // order-independent, so this apply is bit-identical whatever the worker count.
         for hit in hits {
             if let Some(mind) = self.minds.get_mut(&hit.mind) {
                 mind.consider(
@@ -2598,6 +2614,35 @@ source = "Part 9"
                 serial,
                 "parallel perceive at {workers} workers diverged from the serial gather"
             );
+        }
+    }
+
+    #[test]
+    #[ignore] // a manual throughput check on the actual machine, not a CI gate
+    fn perceive_timing_across_workers() {
+        use std::time::Instant;
+        let make = || {
+            let mut w = world().with_seed(0xB16_B00C);
+            let place = 1u32;
+            for _ in 0..2000 {
+                let m = w.spawn(Fixed::ONE);
+                w.set_place(m, place);
+            }
+            for k in 0..2000u64 {
+                let value = if k % 2 == 0 { 10 } else { 20 };
+                let mut t = trace(place, value, Fixed::from_ratio(1, 2));
+                t.id = StableId(100_000 + k);
+                t.from = StableId(100_000 + k);
+                w.emit_trace(t);
+            }
+            w
+        };
+        for workers in [1usize, 2, 4, 8, 16, 20] {
+            let mut w = make();
+            w.set_workers(workers);
+            let t0 = Instant::now();
+            w.perceive();
+            eprintln!("perceive workers={:2}: {:?}", workers, t0.elapsed());
         }
     }
 

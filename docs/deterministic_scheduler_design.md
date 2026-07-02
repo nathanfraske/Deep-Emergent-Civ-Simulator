@@ -167,6 +167,43 @@ current tick's canonical state hash bit for bit, then wire R-CMD-ORDER's command
 batches when the parallel command stage lands, and switch on a Rayon executor when a profile demands
 it. Adopting hecs and switching on Rayon stay separate later decisions this substrate unblocks.
 
+## Heterogeneous cores and dynamic scheduling (Intel P and E cores, AMD X3D CCDs)
+
+The determinism cluster gives a rare freedom: the parallel result is bit-identical whatever cores run
+the work and however many, because the per-being rolls are draw-keyed and the merge is canonical. So
+correctness is decoupled from scheduling, and mapping work onto a hybrid CPU (Intel P and E cores, or
+an AMD X3D chip where one CCD carries the 3D V-cache and the other does not) is a pure throughput
+tuning that cannot break a run or a test. Most engines cannot schedule heterogeneously because it
+changes results; this one cannot be changed by it.
+
+Static equal partitioning is the wrong default on such a CPU: a phase split into one contiguous slice
+per worker is bounded by its slowest core, so a P-core or a V-cache CCD finishes early and idles at the
+barrier waiting for an E-core. The parallelised phases therefore use dynamic load balancing: the
+workers pull the next unit of work (a trace, for `perceive`) from a shared atomic counter, so a faster
+core does more units and none idles. The pooled output is re-canonicalised by a cheap index sort (a
+work-unit-length key, not a per-item one), so the dynamically balanced gather stays a pure function of
+state. That is what lets the schedule adapt to the CPU with no topology query.
+
+The honest limit, measured on the reference hybrid CPU (an Intel Core Ultra 7 265K, 8 P plus 12 E
+cores): the `perceive` gather scales to about 1.8x and plateaus near eight workers, because it is
+memory-bound (each worker walks the shared `minds` `BTreeMap`, so a few cores saturate memory
+bandwidth). Heterogeneous scheduling buys throughput on compute-bound work; a memory-bound phase is
+capped by bandwidth whatever the core mix, and its lever is data layout (a cache-friendly structure, or
+a spatial index so a trace visits only co-located beings) rather than more cores. An early per-hit sort
+merge cost more than it saved: sorting the whole hit set single-threaded Amdahl-capped the phase, which
+is why the merge sorts at work-unit granularity. The compute-bound phases (the `converse` dialogue
+reasoning, and `gossip`'s per-speaker deception judgement) are where per-core throughput and a P-core
+preference will show.
+
+Two later, opt-in refinements, gated behind a profile that shows they matter: a work-stealing pool
+(`rayon`) subsumes the manual atomic counter and balances across an even wider spread; and
+topology-aware pinning keeps a cache-sensitive phase on one CCD (the V-cache one on X3D, to share its L3
+and avoid Infinity Fabric traffic) or prefers P-cores for the latency-bound apply pass. Detecting the
+topology wants `hwloc` (efficiency classes and cache-sharing groups); the snag is that no clean API
+reports "this CCD has V-cache," so it is inferred from per-CCD L3 size, a heuristic behind a runtime
+probe. Neither is worth building until a profile shows the parallel tick is the limit, which it is not
+yet.
+
 ## Reserved values and honest limits
 
 The scheduling substrate carries no calibration values: it is structural, a function of declared
