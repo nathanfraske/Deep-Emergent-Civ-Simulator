@@ -416,3 +416,422 @@ pub fn gpu_powf(client: &CudaClient, base: &[i64], y: &[i64]) -> Vec<i64> {
     let bytes = client.read_one_unchecked(out);
     i64::from_bytes(&bytes).to_vec()
 }
+
+/// Fill a 32-entry local array with the CORDIC `atan(2^-i)` table (the oracle's `CORDIC_ATAN`).
+#[cube]
+fn cordic_atan_table() -> Array<i64> {
+    let mut a = Array::<i64>::new(32usize);
+    a[0usize] = 3373259426i64;
+    a[1usize] = 1991351318i64;
+    a[2usize] = 1052175346i64;
+    a[3usize] = 534100635i64;
+    a[4usize] = 268086748i64;
+    a[5usize] = 134174063i64;
+    a[6usize] = 67103403i64;
+    a[7usize] = 33553749i64;
+    a[8usize] = 16777131i64;
+    a[9usize] = 8388597i64;
+    a[10usize] = 4194303i64;
+    a[11usize] = 2097152i64;
+    a[12usize] = 1048576i64;
+    a[13usize] = 524288i64;
+    a[14usize] = 262144i64;
+    a[15usize] = 131072i64;
+    a[16usize] = 65536i64;
+    a[17usize] = 32768i64;
+    a[18usize] = 16384i64;
+    a[19usize] = 8192i64;
+    a[20usize] = 4096i64;
+    a[21usize] = 2048i64;
+    a[22usize] = 1024i64;
+    a[23usize] = 512i64;
+    a[24usize] = 256i64;
+    a[25usize] = 128i64;
+    a[26usize] = 64i64;
+    a[27usize] = 32i64;
+    a[28usize] = 16i64;
+    a[29usize] = 8i64;
+    a[30usize] = 4i64;
+    a[31usize] = 2i64;
+    a
+}
+
+/// CORDIC vectoring: `atan(y0/x0)` for `x0 > 0`, driving `y` to zero and accumulating the angle. The
+/// oracle's `cordic_vectoring`, an `#[unroll]` loop of shift-add with the sign branch made branchless
+/// by `select` (no `#[cube]` call in the body, so the loop-carried i64 state is allowed).
+#[cube]
+fn cordic_vectoring(x0: i64, y0: i64) -> i64 {
+    let atan = cordic_atan_table();
+    let mut x = x0;
+    let mut y = y0;
+    let mut z = 0i64;
+    #[unroll]
+    for i in 0usize..32usize {
+        let sh = comptime!(i as u32);
+        let dx = x >> sh;
+        let dy = y >> sh;
+        let ypos = y >= 0i64;
+        let ai = atan[i];
+        x = select(ypos, x + dy, x - dy);
+        y = select(ypos, y - dx, y + dx);
+        z = select(ypos, z + ai, z - ai);
+    }
+    z
+}
+
+/// `atan(x)` in radians, the oracle's `Fixed::atan` (CORDIC vectoring from `(1, x)`), saturating toward
+/// the right angle for a very large magnitude.
+#[cube]
+fn fixed_atan(x: i64) -> i64 {
+    let one = 4294967296i64;
+    let half_pi = 6746518852i64;
+    let bound = 1152921504606846976i64; // from_int(1 << 28) = 2^60
+    let v = cordic_vectoring(one, x);
+    let hi = select(x > bound, half_pi, v);
+    select(x < (0i64 - bound), 0i64 - half_pi, hi)
+}
+
+/// Elementwise `atan(x)` over `i64` Q32.32 bit patterns on the GPU, bit-identical to `Fixed::atan`.
+#[cube(launch)]
+fn atan_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_atan(x_in[pos]);
+    }
+}
+
+/// Run `Fixed::atan` on the GPU over a slice of `i64` Q32.32 bit patterns (CUDA backend).
+pub fn gpu_atan(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+    let n = x.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        atan_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), n),
+            ArrayArg::from_raw_parts(out.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// CORDIC circular rotation: for an angle in about `[-pi/4, pi/4]`, returns `[cos, sin]` (a 2-element
+/// array to avoid a tuple return). The oracle's `cordic_rotation`, an `#[unroll]` shift-add loop with
+/// the sign branch made branchless by `select`.
+#[cube]
+fn cordic_rotation(theta: i64) -> Array<i64> {
+    let atan = cordic_atan_table();
+    let mut x = 2608131496i64; // CORDIC_INV_GAIN (the prescale 1/A_32)
+    let mut y = 0i64;
+    let mut z = theta;
+    #[unroll]
+    for i in 0usize..32usize {
+        let sh = comptime!(i as u32);
+        let dx = x >> sh;
+        let dy = y >> sh;
+        let zpos = z >= 0i64;
+        let ai = atan[i];
+        x = select(zpos, x - dy, x + dy);
+        y = select(zpos, y + dx, y - dx);
+        z = select(zpos, z - ai, z + ai);
+    }
+    let mut out = Array::<i64>::new(2usize);
+    out[0usize] = x; // cos
+    out[1usize] = y; // sin
+    out
+}
+
+/// `sin(x)`, the oracle's `Fixed::sin`: reduce the angle to `[-pi/4, pi/4]` by quadrant, CORDIC rotate,
+/// and map back. Quadrant `n rem_euclid 4` is `n & 3` in two's complement.
+#[cube]
+fn fixed_sin(x: i64) -> i64 {
+    let half_pi = 6746518852i64;
+    let half = 2147483648i64; // 0.5 for round-to-nearest
+    let n = (q32_div(x, half_pi) + half) >> 32u32; // round(x / (pi/2))
+    let r = x - q32_mul(n << 32u32, half_pi);
+    let cs = cordic_rotation(r);
+    let c = cs[0usize];
+    let s = cs[1usize];
+    let neg_s = 0i64 - s;
+    let neg_c = 0i64 - c;
+    let q = n & 3i64;
+    let out = neg_c; // q == 3
+    let out = select(q == 2i64, neg_s, out);
+    let out = select(q == 1i64, c, out);
+    select(q == 0i64, s, out)
+}
+
+/// `cos(x)`, the oracle's `Fixed::cos` (the cosine component of the same reduction and rotation).
+#[cube]
+fn fixed_cos(x: i64) -> i64 {
+    let half_pi = 6746518852i64;
+    let half = 2147483648i64;
+    let n = (q32_div(x, half_pi) + half) >> 32u32;
+    let r = x - q32_mul(n << 32u32, half_pi);
+    let cs = cordic_rotation(r);
+    let c = cs[0usize];
+    let s = cs[1usize];
+    let neg_s = 0i64 - s;
+    let neg_c = 0i64 - c;
+    let q = n & 3i64;
+    let out = s; // q == 3
+    let out = select(q == 2i64, neg_c, out);
+    let out = select(q == 1i64, neg_s, out);
+    select(q == 0i64, c, out)
+}
+
+/// Elementwise `sin(x)` over `i64` Q32.32 bit patterns on the GPU, bit-identical to `Fixed::sin`.
+#[cube(launch)]
+fn sin_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_sin(x_in[pos]);
+    }
+}
+
+/// Elementwise `cos(x)` over `i64` Q32.32 bit patterns on the GPU, bit-identical to `Fixed::cos`.
+#[cube(launch)]
+fn cos_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_cos(x_in[pos]);
+    }
+}
+
+/// Run `Fixed::sin` on the GPU over a slice of `i64` Q32.32 bit patterns (CUDA backend).
+pub fn gpu_sin(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+    let n = x.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        sin_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), n),
+            ArrayArg::from_raw_parts(out.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// Run `Fixed::cos` on the GPU over a slice of `i64` Q32.32 bit patterns (CUDA backend).
+pub fn gpu_cos(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+    let n = x.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        cos_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), n),
+            ArrayArg::from_raw_parts(out.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// Integer square root of a `u64` (floor), bit-by-bit with no multiply (add/sub/compare/shift only),
+/// 32 iterations. Matches `u64::isqrt`, so `Fixed::sqrt` over a `[0, 1]` radicand (the asin case, where
+/// the radicand `(1 - x*x) << 32` is below 2^64) is reproduced bit-for-bit. Not a general `Fixed::sqrt`
+/// (that needs a u128 radicand); this is the asin-domain sqrt.
+#[cube]
+fn isqrt_u64(radicand: u64) -> u64 {
+    let mut n = radicand;
+    let mut res = 0u64;
+    let mut bit = 4611686018427387904u64; // 2^62, the largest 4^k below 2^64
+    #[unroll]
+    for _i in 0usize..32usize {
+        let t = res + bit;
+        let ge = n >= t;
+        n = select(ge, n - t, n);
+        res = select(ge, (res >> 1u32) + bit, res >> 1u32);
+        bit >>= 2u32;
+    }
+    res
+}
+
+/// `asin(x)` in radians, the oracle's `Fixed::asin` = `atan(x / sqrt(1 - x*x))`, saturating to the
+/// right angle outside `[-1, 1]` (the total-internal-reflection boundary).
+#[cube]
+fn fixed_asin(x: i64) -> i64 {
+    let one = 4294967296i64;
+    let half_pi = 6746518852i64;
+    let neg_one = 0i64 - 4294967296i64; // from_int(-1)
+                                        // denom = sqrt(1 - x^2); the radicand (1 - x^2) << 32 is below 2^64 for |x| < 1, x != 0.
+    let d = one - q32_mul(x, x);
+    let radicand = u64::cast_from(d) << 32u32;
+    // When x^2 rounds to zero (x == 0, or |x| small enough that q32_mul(x, x) underflows), d == one
+    // and the radicand is exactly 2^64, which overflows u64; the square root is one there. Otherwise
+    // the radicand is below 2^64 and the u64 isqrt applies. Note the oracle does not special-case
+    // x == 0: asin(0) is cordic_vectoring(one, 0), the small CORDIC residual, not exactly zero.
+    let denom = select(d == one, one, i64::cast_from(isqrt_u64(radicand)));
+    let v = cordic_vectoring(denom, x);
+    let hi = select(x >= one, half_pi, v);
+    select(x <= neg_one, 0i64 - half_pi, hi)
+}
+
+/// Elementwise `asin(x)` over `i64` Q32.32 bit patterns on the GPU, bit-identical to `Fixed::asin`.
+#[cube(launch)]
+fn asin_kernel(x_in: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_asin(x_in[pos]);
+    }
+}
+
+/// Run `Fixed::asin` on the GPU over a slice of `i64` Q32.32 bit patterns (CUDA backend).
+pub fn gpu_asin(client: &CudaClient, x: &[i64]) -> Vec<i64> {
+    let n = x.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        asin_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), n),
+            ArrayArg::from_raw_parts(out.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// `x^n` for an integer `n`, the oracle's `Fixed::powi` by exponentiation-by-squaring (a negative
+/// exponent takes the reciprocal first). The 32-step squaring is manually unrolled straight-line (the
+/// DSL rejects an accumulator carried across an `#[unroll]` loop that calls a `#[cube]` fn); squaring
+/// past the top set bit of `|n|` is harmless because the corresponding bit does not touch `acc`.
+#[cube]
+fn fixed_powi(x: i64, n: i32) -> i64 {
+    let one = 4294967296i64;
+    let e = u32::cast_from(select(n < 0i32, 0i32 - n, n)); // |n|
+    let base = select(n < 0i32, q32_div(one, x), x);
+    let acc = one;
+    let acc = select((e & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 1u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 2u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 3u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 4u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 5u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 6u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 7u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 8u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 9u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 10u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 11u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 12u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 13u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 14u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 15u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 16u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 17u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 18u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 19u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 20u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 21u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 22u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 23u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 24u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 25u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 26u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 27u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 28u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 29u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    let acc = select(((e >> 30u32) & 1u32) == 1u32, q32_mul(acc, base), acc);
+    let base = q32_mul(base, base);
+    select(((e >> 31u32) & 1u32) == 1u32, q32_mul(acc, base), acc)
+}
+
+/// Elementwise integer power `x[i]^n[i]` on the GPU, bit-identical to `Fixed::powi` on CUDA. `x` and
+/// `n` must have equal length.
+#[cube(launch)]
+fn powi_kernel(x_in: &Array<i64>, n_in: &Array<i32>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = fixed_powi(x_in[pos], n_in[pos]);
+    }
+}
+
+/// Run `Fixed::powi` on the GPU: `out[i] = x[i]^n[i]`, bit-identical to `Fixed::powi` (CUDA). `x` and
+/// `n` must have equal length.
+pub fn gpu_powi(client: &CudaClient, x: &[i64], n: &[i32]) -> Vec<i64> {
+    assert_eq!(x.len(), n.len(), "gpu_powi: mismatched input lengths");
+    let count = x.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let xin = client.create_from_slice(i64::as_bytes(x));
+    let nin = client.create_from_slice(i32::as_bytes(n));
+    let out = client.empty(core::mem::size_of_val(x));
+    let threads = 256u32;
+    let blocks = (count as u32).div_ceil(threads);
+    unsafe {
+        powi_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(xin.clone(), count),
+            ArrayArg::from_raw_parts(nin.clone(), count),
+            ArrayArg::from_raw_parts(out.clone(), count),
+        );
+    }
+    let bytes = client.read_one_unchecked(out);
+    i64::from_bytes(&bytes).to_vec()
+}
