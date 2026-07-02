@@ -4,6 +4,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): the full GPU transcendental set built (exp/ln/powf/powi + CORDIC sin/cos/atan/asin)
+
+The owner asked to take on all the remaining GPU transcendental families. Built in `crates/gpu/src/transcendental.rs` on the limb `q32_mul`/`q32_div` primitives, all merged to main and PROVEN bit-identical to the `crates/core` `Fixed` oracle on the 5090 (`tests/transcendental_gate.rs`, eight device gates): `exp`, `ln`, `powf`, `powi`, and the CORDIC `sin`, `cos`, `atan`, `asin`. That completes the transcendental families; the one remaining GPU primitive is a general u128 `Fixed::sqrt` (asin uses a domain-limited u64 isqrt over its zero-to-one radicand).
+
+More cube DSL findings (banked in the gpu-canon-pin-status memory): an `#[unroll]` loop with i64 loop-carried state works when the body has no `#[cube]` call (the CORDIC), and needs manual straight-line unroll when it does (the Horner and powi squaring); a `#[cube]` fn can return a local `Array` (used to return `[cos, sin]`); `u64` is a DSL type but `1u64 << 62u32` will not lift (use the `2^62` literal); `n & 3` is `rem_euclid(4)` in two's complement; and `asin(0)` is the CORDIC residual, not zero, so there is no `x == 0` special case (only `denom == one` for the 2^64-radicand edge). `>>=` compiles in the DSL.
+
+Docs: record 62.23, audit block 1y, and the lib doc reconciled to the full set. R-GPU-CANON-PIN stays resolved; counts unchanged. fmt/clippy/rustdoc clean; the full ten-gate GPU suite is green.
+
+**Next (the owner's follow-up ask): scope and knock out the next GPU compute stand-up step with a red-team review.** The chosen step is the cross-backend determinism gate (a second CubeCL backend as an independent integer path, proving the canonical kernels bit-identical across backends and to the oracle), which attacks the standing "only CUDA is proven" residual and stays in the GPU lane.
+
+---
+
 ## 2026-07-02 (continued): GPU transcendentals built (exp, ln, powf), bit-identical on the 5090
 
 The owner asked what valuable GPU-lane work (staying out of the physics kernels and the roadmap track) uses the real hardware, and chose the GPU transcendentals, the biggest R-GPU-CANON-PIN follow-on. Built in `crates/gpu/src/transcendental.rs` and merged to main.
