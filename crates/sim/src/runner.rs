@@ -42,6 +42,16 @@
 //! the dialogue log, so the composite is not a complete canonical hash of all being state until those
 //! later increments land. The field layer is one field (temperature) so far, the pattern the moisture,
 //! wind, and resource fields follow.
+//!
+//! The steering boundary the canonical runner holds (Principle 9): the world phases it drives are the
+//! emergent, data-driven ones (belief, dialogue, gossip, language), and the emergent-behaviour source
+//! for a located being is the evolved controller (Part 8.4), not an authored policy. The world's
+//! `decide` phase runs an AUTHORED drive-and-action repertoire only when one is installed
+//! ([`crate::world::World::set_behaviour`]); that is the sentient deliberative tier of Part 8.1, which
+//! Part 8.4 names as steering at the level of behaviour, and it must not ride the canonical spine as
+//! if it were emergent. [`Runner::with_world`] therefore refuses a world that carries an authored
+//! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
+//! deliberative tier is properly built on the evolved substrate.
 
 use crate::located::{LocationIndex, OccupantId};
 use crate::world::World;
@@ -198,7 +208,21 @@ impl Runner {
     /// value, per the world's own manifest discipline); this runner adds no authored number, no new
     /// RNG draw, and no new phase, so the composite reproduces bit for bit exactly as each side already
     /// does.
+    ///
+    /// The canonical steering boundary is fail-loud here (Principle 9): the world must not carry an
+    /// authored decision repertoire ([`crate::world::World::set_behaviour`]). That repertoire is the
+    /// sentient deliberative tier of Part 8.1, an authored action-and-drive policy Part 8.4 names as
+    /// steering at the level of behaviour, and the canonical-emergent runner's behaviour source is the
+    /// evolved controller, never an authored policy. A world with one installed is rejected so the
+    /// authored path cannot ride the canonical spine as if it were emergent.
     pub fn with_world(field: Field, calib: FieldCalib, world: World) -> Runner {
+        assert!(
+            !world.has_behaviour(),
+            "the canonical runner refuses a world carrying an authored decision repertoire: that is \
+             the sentient deliberative tier (Part 8.1), steering at the level of behaviour (Part 8.4), \
+             and the canonical-emergent behaviour source is the evolved controller, not an authored \
+             policy"
+        );
         Runner {
             clock: 0,
             field,

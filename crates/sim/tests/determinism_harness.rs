@@ -37,6 +37,7 @@
 //! produced it. The sweep runs the same replay at widths 1, 2, 3, and 8.
 
 use civsim_core::{Fixed, StableId};
+use civsim_sim::decision::Behaviour;
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
@@ -367,4 +368,21 @@ fn composed_runner_tick_is_bit_identical_across_worker_counts() {
             "the composed tick diverged at {workers} workers"
         );
     }
+}
+
+#[test]
+#[should_panic(expected = "authored decision repertoire")]
+fn the_canonical_runner_refuses_an_authored_behaviour_repertoire() {
+    // The Principle 9 steering boundary the canonical runner holds: an authored drive-and-action
+    // repertoire (the sentient deliberative tier, Part 8.1) is steering at the level of behaviour
+    // (Part 8.4) and must not ride the canonical-emergent spine, whose behaviour source is the evolved
+    // controller. Installing one (even an empty one, which still sets has_behaviour) and composing it
+    // onto the canonical runner is a fail-loud steering leak.
+    let mut world = dawn_world(4, 2, 0x5EED);
+    world.set_behaviour(Behaviour {
+        drives: vec![],
+        curves: vec![],
+        actions: vec![],
+    });
+    let _ = Runner::with_world(field_fixture(), field_calib(), world);
 }
