@@ -193,11 +193,42 @@ range_lo = "1"
 range_hi = "3"
 real = "the Hill equation (Alon, Appendix A); the small-integer set is engine-imposed, the specific n the owner's per-class call"
 
+# --- Derived score axes (the produced outputs of the two fold laws, read by edibility) ---
+
+[[axis]]
+id = "bio.net_nutrition"
+measures = "the net-nutrition adequacy score, the Liebig minimum over per-class satisfaction"
+unit = "fraction"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+fantasy = "a derived engine output (the net-nutrition fold result), dimensionless in [0,1]; produced by law.net_nutrition, not an external datum, so reserved rather than cited"
+
+[[axis]]
+id = "bio.net_harm"
+measures = "the net-harm score, the saturating sum over per-class integer-Hill dose response"
+unit = "fraction"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+fantasy = "a derived engine output (the net-harm fold result), dimensionless; produced by law.harm, not an external datum, so reserved rather than cited. The [0,1] band presumes net_harm's total_cap is calibrated to 1 (the raw saturating sum over the toxin classes can reach the class count before the cap): the coupling 'net_harm total_cap = 1' is reserved for the owner alongside this range"
+
 # --- The three interaction laws (the kernels are fixed Rust in laws.rs) ---
 
 [[law]]
 id = "law.net_nutrition"
-inputs = ["bio.protein_fraction", "bio.lipid_fraction", "bio.nonstructural_carbohydrate_fraction", "bio.consumer.requirement", "bio.consumer.assimilation", "bio.consumer.fermentation"]
+kernel = "net_nutrition"
+ports = [
+  { role = "supply", members = ["bio.protein_fraction", "bio.lipid_fraction", "bio.nonstructural_carbohydrate_fraction"], fold = "min" },
+  { role = "requirement", axis = "bio.consumer.requirement" },
+  { role = "assimilation", axis = "bio.consumer.assimilation" },
+  { role = "fermentation", axis = "bio.consumer.fermentation" },
+]
+produces = ["bio.net_nutrition"]
 output_measure = "net nutrition by the Liebig minimum over per-class satisfaction"
 dimension = "dimensionless"
 interval_bound = "[0, 1]"
@@ -205,7 +236,13 @@ tier = 0
 
 [[law]]
 id = "law.harm"
-inputs = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac_glycoside", "bio.consumer.reference_tolerance", "bio.consumer.hill_exponent"]
+kernel = "net_harm"
+ports = [
+  { role = "dose", members = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac_glycoside"], fold = "sum" },
+  { role = "tolerance", axis = "bio.consumer.reference_tolerance" },
+  { role = "hill_exponent", axis = "bio.consumer.hill_exponent" },
+]
+produces = ["bio.net_harm"]
 output_measure = "net harm by the per-(class, consumer) integer-Hill dose response"
 dimension = "dimensionless"
 interval_bound = "[0, harm_cap]"
@@ -213,7 +250,13 @@ tier = 0
 
 [[law]]
 id = "law.edibility"
-inputs = ["bio.consumer.requirement", "bio.consumer.reference_tolerance"]
+kernel = "edibility"
+ports = [
+  { role = "net_nutrition", axis = "bio.net_nutrition" },
+  { role = "net_harm", axis = "bio.net_harm" },
+  { role = "tolerance_aggregate", axis = "bio.consumer.reference_tolerance" },
+  { role = "dose_aggregate", axis = "bio.consumer.requirement" },
+]
 output_measure = "the measured edibility tuple (net nutrition, net harm, margin); the valuation lives in the agent layer"
 dimension = "dimensionless"
 interval_bound = "[-1, 1] read-time band over the tuple"

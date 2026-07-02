@@ -40,6 +40,9 @@ pub struct PortContract {
     pub temporal: Temporal,
     /// The port's contribution to a `Monomial` output.
     pub exponent: i8,
+    /// Whether the kernel folds this role over an open-arity class set (the law's port must then
+    /// declare `members` and a fold); a single-value role must be bound by a single port.
+    pub variadic: bool,
 }
 
 /// How a kernel's primary output dimension is verified against the axis it writes.
@@ -69,6 +72,7 @@ const fn cur(role: &'static str, exponent: i8) -> PortContract {
         role,
         temporal: Temporal::Current,
         exponent,
+        variadic: false,
     }
 }
 const fn prior(role: &'static str, exponent: i8) -> PortContract {
@@ -76,6 +80,7 @@ const fn prior(role: &'static str, exponent: i8) -> PortContract {
         role,
         temporal: Temporal::Prior,
         exponent,
+        variadic: false,
     }
 }
 const fn dt(role: &'static str) -> PortContract {
@@ -83,15 +88,64 @@ const fn dt(role: &'static str) -> PortContract {
         role,
         temporal: Temporal::Dt,
         exponent: -1,
+        variadic: false,
+    }
+}
+/// A class-set (variadic) port role: the kernel folds an open-arity set of same-dimension axes.
+const fn classset(role: &'static str, exponent: i8) -> PortContract {
+    PortContract {
+        role,
+        temporal: Temporal::Current,
+        exponent,
+        variadic: true,
     }
 }
 
 /// The fixed contract for a kernel id, or `None` if the kernel has no contract yet (a legacy
-/// kernel whose laws are not checked). Electricity and magnetism (wave 3) is migrated; the
-/// other floors bind their kernels as they are migrated onto this table.
+/// kernel whose laws are not checked). All five floors are migrated onto this table (biology,
+/// mechanics and materials, fluids, chemistry and optics, electricity and magnetism); the one
+/// legacy law is `law.impact`, held back pending its compound kinetic-energy-plus-impulse split.
 pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
     use OutputCheck::*;
     Some(match kernel {
+        // === Biology (wave 0) ===
+        // The two folds read a class set (the nutrient fractions, the toxin concentrations) as an
+        // open-arity variadic port and a handful of single consumer parameters; both report a
+        // dimensionless adequacy or harm ratio. edibility composes the two: it reads the produced
+        // net-nutrition and net-harm scores, so it derives one tier above them.
+        "net_nutrition" => KernelContract {
+            ports: const {
+                &[
+                    classset("supply", 0),
+                    cur("requirement", 0),
+                    cur("assimilation", 0),
+                    cur("fermentation", 0),
+                ]
+            },
+            output: Dimensionless,
+        },
+        "net_harm" => KernelContract {
+            ports: const {
+                &[
+                    classset("dose", 0),
+                    cur("tolerance", 0),
+                    cur("hill_exponent", 0),
+                ]
+            },
+            output: Dimensionless,
+        },
+        "edibility" => KernelContract {
+            ports: const {
+                &[
+                    cur("net_nutrition", 0),
+                    cur("net_harm", 0),
+                    cur("tolerance_aggregate", 0),
+                    cur("dose_aggregate", 0),
+                ]
+            },
+            output: Dimensionless,
+        },
+
         // === Mechanics and materials (wave 1) ===
         // Primary-output contracts: each verifies the law's primary measured consequence. A
         // secondary consequence (a margin, a mechanical advantage, an impulse) and a caller-
@@ -509,13 +563,11 @@ pub fn check_law(
         kernel: law.kernel.clone(),
     })?;
 
-    // Binding: the law's port roles must be exactly the contract's roles, each once.
-    let mut law_roles: BTreeMap<&str, &Temporal> = BTreeMap::new();
+    // Binding: the law's port roles must be exactly the contract's roles, each once, agreeing on
+    // when the value is read and on whether the role is a single value or an open-arity class set.
+    let mut law_roles: BTreeMap<&str, &crate::LawPort> = BTreeMap::new();
     for port in &law.ports {
-        if law_roles
-            .insert(port.role.as_str(), &port.temporal)
-            .is_some()
-        {
+        if law_roles.insert(port.role.as_str(), port).is_some() {
             return Err(PhysicsError::PortContractMismatch {
                 law: law.id.clone(),
                 detail: format!("role '{}' is declared more than once", port.role),
@@ -533,14 +585,31 @@ pub fn check_law(
                     ),
                 });
             }
-            Some(temporal) => {
-                if *temporal != pc.temporal {
+            Some(port) => {
+                if port.temporal != pc.temporal {
                     return Err(PhysicsError::PortContractMismatch {
                         law: law.id.clone(),
                         detail: format!(
                             "role '{}' reads at {:?}, but kernel '{}' reads it at {:?}",
-                            pc.role, temporal, law.kernel, pc.temporal
+                            pc.role, port.temporal, law.kernel, pc.temporal
                         ),
+                    });
+                }
+                let is_classset = !port.members.is_empty();
+                if is_classset != pc.variadic {
+                    return Err(PhysicsError::PortContractMismatch {
+                        law: law.id.clone(),
+                        detail: if pc.variadic {
+                            format!(
+                                "role '{}' of kernel '{}' folds a class set, but the port declares a single axis",
+                                pc.role, law.kernel
+                            )
+                        } else {
+                            format!(
+                                "role '{}' of kernel '{}' reads a single value, but the port declares a class set",
+                                pc.role, law.kernel
+                            )
+                        },
                     });
                 }
             }
@@ -582,11 +651,19 @@ fn port_axis_dimension(
     if port.temporal == Temporal::Dt {
         return Ok(TICK_DIMENSION);
     }
-    axes.get(&port.axis)
+    // A class-set port's dimension is its members' shared dimension (validate() has already
+    // proven the members exist and agree), so a fold contributes that one dimension to the
+    // monomial; a single port contributes its axis's dimension.
+    let axis_id = if port.members.is_empty() {
+        &port.axis
+    } else {
+        &port.members[0]
+    };
+    axes.get(axis_id)
         .map(|a| a.dimension)
         .ok_or_else(|| PhysicsError::UnknownAxis {
             context: law.id.clone(),
-            axis: port.axis.clone(),
+            axis: axis_id.clone(),
         })
 }
 

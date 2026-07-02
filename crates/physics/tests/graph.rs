@@ -281,6 +281,124 @@ fn the_chem_optics_floor_migrates_with_a_same_dimension_difference() {
 }
 
 #[test]
+fn the_biology_folds_are_class_set_ports_and_edibility_composes_them() {
+    // The biology floor loads standalone (self-contained). net_nutrition folds a class set of
+    // nutrient fractions by min and net_harm folds a toxin class set by sum; each produces a
+    // derived score axis, and edibility reads both, so it derives one tier above them.
+    let reg = PhysicsRegistry::load(data_path("biology_floor.toml")).unwrap();
+    let nut = reg.law("law.net_nutrition").unwrap();
+    let supply = nut.ports.iter().find(|p| p.role == "supply").unwrap();
+    assert_eq!(supply.members.len(), 3, "three nutrient classes folded");
+    assert!(
+        supply.axis.is_empty(),
+        "a class-set port names no single axis"
+    );
+    assert_eq!(supply.fold, Some(civsim_physics::Fold::Min));
+    // The fold members are all in the derived input set.
+    assert!(nut.inputs.contains(&"bio.protein_fraction".to_string()));
+    assert_eq!(reg.derived_tier("law.edibility"), Some(2));
+}
+
+#[test]
+fn a_class_set_folding_mixed_dimensions_fails_loud() {
+    // A class set must fold same-dimension axes; mixing a fraction with a length is a load error.
+    let toml = r#"
+[[axis]]
+id = "bio.a"
+dimension = "dimensionless"
+scale = "1"
+range_lo = "0"
+range_hi = "1"
+real = "x"
+
+[[axis]]
+id = "mech.len"
+dimension = "length"
+scale = "m"
+range_lo = "0"
+range_hi = "1"
+real = "y"
+
+[[law]]
+id = "law.bad_fold"
+kernel = "net_nutrition"
+ports = [
+  { role = "supply", members = ["bio.a", "mech.len"], fold = "min" },
+  { role = "requirement", axis = "bio.a" },
+  { role = "assimilation", axis = "bio.a" },
+  { role = "fermentation", axis = "bio.a" },
+]
+dimension = "dimensionless"
+"#;
+    let err = PhysicsRegistry::from_toml_str(toml).unwrap_err();
+    assert!(
+        matches!(err, PhysicsError::BadPort { .. }),
+        "a class set of differing dimensions must fail loud, got {err:?}"
+    );
+}
+
+#[test]
+fn a_single_port_where_the_kernel_folds_a_class_set_fails_loud() {
+    // net_nutrition's supply role is a class-set fold; declaring it as a single axis is a
+    // contract mismatch the binding catches.
+    let toml = r#"
+[[axis]]
+id = "bio.a"
+dimension = "dimensionless"
+scale = "1"
+range_lo = "0"
+range_hi = "1"
+real = "x"
+
+[[law]]
+id = "law.bad_single"
+kernel = "net_nutrition"
+ports = [
+  { role = "supply", axis = "bio.a" },
+  { role = "requirement", axis = "bio.a" },
+  { role = "assimilation", axis = "bio.a" },
+  { role = "fermentation", axis = "bio.a" },
+]
+dimension = "dimensionless"
+"#;
+    let err = PhysicsRegistry::from_toml_str(toml).unwrap_err();
+    assert!(
+        matches!(err, PhysicsError::PortContractMismatch { .. }),
+        "a single port where the kernel folds a class set must fail loud, got {err:?}"
+    );
+}
+
+#[test]
+fn a_class_set_port_with_a_stray_single_axis_fails_loud() {
+    // A class-set port folds its members, so also naming a single axis is a contradiction.
+    let toml = r#"
+[[axis]]
+id = "bio.a"
+dimension = "dimensionless"
+scale = "1"
+range_lo = "0"
+range_hi = "1"
+real = "x"
+
+[[law]]
+id = "law.bad_both"
+kernel = "net_nutrition"
+ports = [
+  { role = "supply", axis = "bio.a", members = ["bio.a"], fold = "min" },
+  { role = "requirement", axis = "bio.a" },
+  { role = "assimilation", axis = "bio.a" },
+  { role = "fermentation", axis = "bio.a" },
+]
+dimension = "dimensionless"
+"#;
+    let err = PhysicsRegistry::from_toml_str(toml).unwrap_err();
+    assert!(
+        matches!(err, PhysicsError::BadPort { .. }),
+        "a class-set port that also names a single axis must fail loud, got {err:?}"
+    );
+}
+
+#[test]
 fn the_migrated_floor_still_hashes_deterministically() {
     // The descriptor fields fold into the content hash; the same data still hashes identically.
     assert_eq!(full_registry().content_id(), full_registry().content_id());
