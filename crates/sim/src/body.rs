@@ -968,6 +968,7 @@ mod tests {
                 development: Fixed::from_ratio(1, 2),
             }],
             locomotion: (0..legs).map(|_| 1u16).collect(),
+            organs: vec![],
             temperament: Temperament {
                 boldness: Fixed::from_ratio(1, 2),
                 exploration: Fixed::from_ratio(1, 2),

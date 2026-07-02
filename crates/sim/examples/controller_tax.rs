@@ -65,7 +65,7 @@ fn main() {
     here.insert(WATER);
     let mut dirs = BTreeMap::new();
     dirs.insert(WATER, (Fixed::from_ratio(3, 5), Fixed::from_ratio(-4, 5)));
-    let homeo_state = Homeostasis::new(&homeo, Fixed::from_ratio(1, 2));
+    let homeo_state = Homeostasis::from_mass(&homeo, Fixed::from_ratio(1, 2));
 
     let widths = [0usize, 1, 2, 4, 8, 16, 32, 64];
 

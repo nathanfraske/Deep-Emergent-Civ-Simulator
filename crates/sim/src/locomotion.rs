@@ -539,7 +539,7 @@ fn walk_dir<T: Terrain>(w: &mut Walker, hx: Fixed, hy: Fixed, speed: Fixed, terr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, Part, Temperament};
+    use crate::anatomy::{BodyPlan, Part, Temperament, TissueComponent};
     use crate::controller::ControllerLayout;
     use crate::homeostasis::{
         AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
@@ -574,6 +574,7 @@ mod tests {
             axes: vec![HomeostaticAxisDef {
                 id: WATER,
                 name: "water".to_string(),
+                backing_component: Some(TissueComponent::WaterFraction),
                 capacity_per_mass: Fixed::ONE,
                 base_drain: Fixed::from_ratio(1, 300),
                 exertion_drain: Fixed::from_ratio(1, 400),
@@ -618,6 +619,7 @@ mod tests {
             },
             senses: vec![],
             locomotion: vec![1], // a mobile mode (not the rooted mark 0), so it can walk
+            organs: vec![],
             temperament: Temperament {
                 boldness: Fixed::from_ratio(1, 2),
                 exploration: Fixed::from_ratio(1, 2),
@@ -659,7 +661,7 @@ mod tests {
         let afford = AffordanceRegistry::dev_default();
         let l = layout_for(&reg);
         let c = taxis_controller(&l, 0); // water is axis 0 in this registry
-        let mut homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let mut homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
         for _ in 0..120 {
             homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty
         }
@@ -856,7 +858,7 @@ mod tests {
                 field.add(WATER, Coord3::ground(x, 3));
             }
             let mk = |id: u64, tile: Coord3| {
-                let mut h = Homeostasis::new(&reg, Fixed::ONE);
+                let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
                 for _ in 0..80 {
                     h.metabolize(&reg, Fixed::ZERO);
                 }
@@ -889,7 +891,7 @@ mod tests {
         let afford = AffordanceRegistry::dev_default();
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = taxis_controller(&l, 4); // water block starts at input 4 in the two-axis layout
-        let homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
         let mut ws = vec![Walker::new(
             StableId(1),
             Coord3::ground(0, 0),
@@ -945,7 +947,7 @@ mod tests {
         let afford = AffordanceRegistry::dev_default();
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = Controller::zeros(&l);
-        let homeo = Homeostasis::new(&reg, Fixed::ONE);
+        let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
         let mut ws = vec![Walker::new(
             StableId(1),
             Coord3::ground(0, 0),

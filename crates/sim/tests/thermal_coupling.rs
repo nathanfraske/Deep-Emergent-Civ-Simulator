@@ -109,6 +109,7 @@ fn mobile_body() -> BodyPlan {
         },
         senses: vec![],
         locomotion: vec![1],
+        organs: vec![],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -153,7 +154,7 @@ fn walker(id: u64, tile: Coord3, controller: Controller) -> Walker {
         StableId(id),
         tile,
         mobile_body(),
-        Homeostasis::new(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2)),
+        Homeostasis::from_mass(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2)),
         controller,
     )
 }
@@ -202,7 +203,8 @@ fn the_thermotaxis_controller_authors_no_heading() {
     let emb = embodiment(0);
     let l = emb.layout().clone();
     let c = thermotaxis(&l);
-    let mut homeo = Homeostasis::new(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2));
+    let mut homeo =
+        Homeostasis::from_mass(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2));
     homeo.set_level(TEMPERATURE, Fixed::from_ratio(1, 4)); // uncomfortable, so it wants to move
     let here: BTreeSet<HomeostaticAxisId> = BTreeSet::new();
     let mut dirs = BTreeMap::new();

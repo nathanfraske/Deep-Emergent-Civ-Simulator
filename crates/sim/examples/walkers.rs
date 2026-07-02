@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::anatomy::{BodyPlan, Part, Temperament, TissueComponent};
 use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, WATER,
@@ -83,6 +83,7 @@ fn water_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
+            backing_component: Some(TissueComponent::WaterFraction),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 120),
             exertion_drain: Fixed::from_ratio(1, 300),
@@ -138,6 +139,7 @@ fn body(mass: (i64, i64), activity: (i64, i64)) -> BodyPlan {
         },
         senses: vec![],
         locomotion: vec![1], // has legs, so it can walk (but not swim: no SWIM mode)
+        organs: vec![],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -229,7 +231,7 @@ fn main() {
     // controller; the fourth (D) carries a blank one, wanting nothing.
     let home = start_tile(&map, &biomes);
     let names = ['A', 'B', 'C', 'D'];
-    let full = || Homeostasis::new(&reg, Fixed::ONE);
+    let full = || Homeostasis::from_mass(&reg, Fixed::ONE);
     let mut walkers = vec![
         Walker::new(
             StableId(1),

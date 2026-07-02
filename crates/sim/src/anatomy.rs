@@ -37,6 +37,54 @@ pub struct KindDef {
     pub fantasy: bool,
 }
 
+/// An organ's tissue composition: its value on each biology-floor material axis, in `[0, ONE]`. This
+/// is the same "composition over the biology floor" shape the body's fluids already use ([`crate::body`]
+/// `FluidDef`). The organ's physiological function is NOT tagged: which reserve it backs is DERIVED
+/// from this composition against the floor (an energy-dense tissue is an energy store, a water-rich one
+/// a water store), so nobody authors "fat-body is metabolic"; the mechanism reads the composition. The
+/// components are the authored physics-floor material axes (Principle 9), the vocabulary the floor
+/// grows; extend the struct as the floor gains axes (a respiratory-surface component arrives with
+/// R-MEDIUM). A labelled development-fixture composition here, grounded in the cited floor axes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct TissueComposition {
+    /// Stored-energy density, from `bio.energy_density` (biology floor). A fat body sits high here.
+    pub energy_density: Fixed,
+    /// Water content, from `bio.water_fraction` (biology floor). A water-storage tissue sits high here.
+    pub water_fraction: Fixed,
+}
+
+impl TissueComposition {
+    /// The value of one composition component (which reserve reads which is set by the axis).
+    pub fn component(&self, c: TissueComponent) -> Fixed {
+        match c {
+            TissueComponent::EnergyDensity => self.energy_density,
+            TissueComponent::WaterFraction => self.water_fraction,
+        }
+    }
+}
+
+/// A composition component: which biology-floor material axis an organ-backed reserve reads to derive
+/// its capacity. Mirrors the physics-floor axes (authored physics), so it is a fixed vocabulary that
+/// grows with the floor, not authored behaviour. A reserve names the component it is backed by; the
+/// organ's contribution is its composition on that component (function derived, not tagged).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum TissueComponent {
+    EnergyDensity,
+    WaterFraction,
+}
+
+/// One organ kind as data: an id, a legibility name, a fantasy gate, and its tissue composition. The
+/// name is cosmetic; the mechanism reads only the composition, from which the organ's reserve-backing
+/// function is derived. Membership is data and grows with the world (Principle 11); the composition is
+/// grounded in the biology-floor material axes.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct OrganKindDef {
+    pub id: u16,
+    pub name: String,
+    pub fantasy: bool,
+    pub composition: TissueComposition,
+}
+
 /// The data-defined registries a body plan is drawn from. A development fixture supplies a
 /// starting real set plus the magical kinds; a TOML loader is the next increment, the way the
 /// biome set grew.
@@ -46,6 +94,9 @@ pub struct BodyPlanRegistry {
     pub coverings: Vec<KindDef>,
     pub senses: Vec<KindDef>,
     pub locomotion: Vec<KindDef>,
+    /// The organ kinds a body may bear, each a tissue composition. Which reserve an organ backs is
+    /// derived from its composition against the floor, never a tag.
+    pub organs: Vec<OrganKindDef>,
 }
 
 fn defs(entries: &[(&str, bool)]) -> Vec<KindDef> {
@@ -57,6 +108,26 @@ fn defs(entries: &[(&str, bool)]) -> Vec<KindDef> {
             name: name.to_string(),
             fantasy,
         })
+        .collect()
+}
+
+/// Build organ kinds from (name, fantasy, energy_density, water_fraction) tuples. The compositions are
+/// LABELLED DEVELOPMENT FIXTURE values grounded in the cited biology-floor axes, not owner canon.
+fn organ_defs(entries: &[(&str, bool, Fixed, Fixed)]) -> Vec<OrganKindDef> {
+    entries
+        .iter()
+        .enumerate()
+        .map(
+            |(i, &(name, fantasy, energy_density, water_fraction))| OrganKindDef {
+                id: i as u16,
+                name: name.to_string(),
+                fantasy,
+                composition: TissueComposition {
+                    energy_density,
+                    water_fraction,
+                },
+            },
+        )
         .collect()
 }
 
@@ -121,6 +192,33 @@ impl BodyPlanRegistry {
                 // Magical.
                 ("levitate", true),
                 ("blink", true),
+            ]),
+            organs: organ_defs(&[
+                // (name, fantasy, energy_density, water_fraction). Function is derived from the
+                // composition: an energy-dense tissue backs the energy reserve, a water-rich one the
+                // hydration reserve, both to the extent of their composition. Nothing here is tagged.
+                ("fat-body", false, Fixed::ONE, Fixed::from_ratio(1, 10)),
+                (
+                    "glycogen-store",
+                    false,
+                    Fixed::from_ratio(3, 4),
+                    Fixed::from_ratio(1, 4),
+                ),
+                ("water-store", false, Fixed::ZERO, Fixed::ONE),
+                (
+                    "generalist-viscera",
+                    false,
+                    Fixed::from_ratio(1, 2),
+                    Fixed::from_ratio(1, 2),
+                ),
+                // Magical (Part 34): a mana-storing tissue, a fixture stand-in until an arcane floor
+                // grounds its composition.
+                (
+                    "mana-sac",
+                    true,
+                    Fixed::from_ratio(1, 2),
+                    Fixed::from_ratio(1, 4),
+                ),
             ]),
         }
     }
@@ -192,8 +290,25 @@ pub struct BodyPlan {
     pub senses: Vec<Part>,
     /// The locomotion modes it moves by (registry ids).
     pub locomotion: Vec<u16>,
+    /// The internal organs it bears (kind and development, where development is the organ's size, the
+    /// capacity-bearing quantity), each drawn independently of body mass, covering, and trophic layer.
+    /// Its reserve capacities derive from these organs' compositions, not from body mass: a huge,
+    /// mostly-armored creature that rolls few or small organs holds small metabolic reserves, and a
+    /// body with no organ contributing to a reserve has none of it (the owner-directed, composition-
+    /// derived anatomy-derived reserves).
+    pub organs: Vec<Part>,
     /// Its temperament personality.
     pub temperament: Temperament,
+}
+
+impl BodyPlanRegistry {
+    /// The tissue composition of an organ kind, by registry id, if known.
+    pub fn organ_composition(&self, kind: u16) -> Option<TissueComposition> {
+        self.organs
+            .iter()
+            .find(|o| o.id == kind)
+            .map(|o| o.composition)
+    }
 }
 
 /// The gated kinds of a registry list for a profile (real always, fantasy only under magic).
@@ -216,6 +331,40 @@ fn pick(rng: &Rng, base: u64, list: &[KindDef], profile: WorldProfile, n: usize)
         let kind = pool[idx].id;
         if out.iter().any(|p| p.kind == kind) {
             continue; // a repeat pick collapses, so a creature can bear fewer than n
+        }
+        out.push(Part {
+            kind,
+            development: rng.unit_fixed(base + slot as u64 * 2 + 1),
+        });
+    }
+    out
+}
+
+/// Pick `n` distinct organ kinds, each with an independently drawn development (its size, the capacity-
+/// bearing quantity). Mirrors [`pick`] over organ kinds. Keyed off a base counter with NO functional
+/// coupling to body mass, covering, or trophic layer, so a body's organ endowment is an independent
+/// draw: the load-bearing anti-steering invariant that lets a huge armored creature roll few or small
+/// organs and so hold small metabolic reserves (Principle 8).
+fn pick_organs(
+    rng: &Rng,
+    base: u64,
+    list: &[OrganKindDef],
+    profile: WorldProfile,
+    n: usize,
+) -> Vec<Part> {
+    let pool: Vec<&OrganKindDef> = list
+        .iter()
+        .filter(|k| !k.fantasy || profile.magic)
+        .collect();
+    if pool.is_empty() || n == 0 {
+        return Vec::new();
+    }
+    let mut out: Vec<Part> = Vec::new();
+    for slot in 0..n {
+        let idx = rng.range_u32(base + slot as u64 * 2, pool.len() as u32) as usize;
+        let kind = pool[idx].id;
+        if out.iter().any(|p| p.kind == kind) {
+            continue; // a repeat pick collapses, so a body can bear fewer than n organs, or none
         }
         out.push(Part {
             kind,
@@ -293,6 +442,10 @@ pub fn sample_body_plan(
             .map(|p| p.kind)
             .collect()
     };
+    // Organs: one to four, drawn independently of body mass, covering, and layer (the anti-steering
+    // invariant), so a body's reserve endowment is not a function of its size.
+    let want_organs = 1 + (rng.range_u32(base + 100, 4)) as usize;
+    let organs = pick_organs(rng, base + 102, &reg.organs, profile, want_organs);
     BodyPlan {
         body_mass,
         encephalization,
@@ -301,6 +454,7 @@ pub fn sample_body_plan(
         covering,
         senses,
         locomotion,
+        organs,
         temperament,
     }
 }
@@ -393,6 +547,58 @@ mod tests {
             !a.senses.is_empty() && !a.locomotion.is_empty(),
             "a creature has senses and moves"
         );
+    }
+
+    #[test]
+    fn a_body_plan_draws_organs_from_the_registry() {
+        let reg = BodyPlanRegistry::dev_default();
+        let plan = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
+        assert!(!plan.organs.is_empty(), "a body draws at least one organ");
+        for o in &plan.organs {
+            assert!(
+                reg.organs.iter().any(|k| k.id == o.kind),
+                "every drawn organ is a registered kind"
+            );
+            assert!(
+                reg.organ_composition(o.kind).is_some(),
+                "and its composition is readable, so a reserve can derive its capacity"
+            );
+        }
+    }
+
+    #[test]
+    fn organ_composition_reads_the_registry() {
+        let reg = BodyPlanRegistry::dev_default();
+        // The fat-body fixture (id 0) is energy-dense (ONE) and nearly dry (1/10). Its function is not
+        // tagged anywhere; the mechanism reads this composition to derive which reserve it backs.
+        let fat = reg.organ_composition(0).expect("fat-body is registered");
+        assert_eq!(fat.energy_density, Fixed::ONE);
+        assert_eq!(fat.water_fraction, Fixed::from_ratio(1, 10));
+        assert_eq!(
+            fat.component(TissueComponent::EnergyDensity),
+            Fixed::ONE,
+            "the component accessor reads the same value the reserve derivation will"
+        );
+        assert!(
+            reg.organ_composition(9999).is_none(),
+            "an unknown organ kind has no composition"
+        );
+    }
+
+    #[test]
+    fn a_grounded_world_draws_no_magical_organs() {
+        // The mana-sac (fantasy) organ is gated on a magic profile, like every other fantasy kind.
+        let reg = BodyPlanRegistry::dev_default();
+        for s in 0..80u64 {
+            let r = DrawKey::entity(s, 0, Phase::BIOSPHERE_SAMPLE).rng(0xB0D1);
+            let plan = sample_body_plan(&r, 2, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
+            for o in &plan.organs {
+                assert!(
+                    !reg.organs.iter().find(|k| k.id == o.kind).unwrap().fantasy,
+                    "no magical organ in a grounded world"
+                );
+            }
+        }
     }
 
     #[test]
