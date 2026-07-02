@@ -1115,7 +1115,7 @@ impl World {
             .iter()
             .filter_map(|(&id, &age)| {
                 let chance = hazard
-                    .eval(Fixed::from_int(age as i32))
+                    .eval(crate::demography::hazard_age(age))
                     .clamp(Fixed::ZERO, Fixed::ONE);
                 let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
                     .rng(self.seed)
