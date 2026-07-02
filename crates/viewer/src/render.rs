@@ -30,9 +30,9 @@ use civsim_world::{BiomeSet, Coord3, Rgb, TopologySpace};
 /// kind is a distinct individual form. Presentation only, never canonical state.
 pub fn organism_color(layer: u16, species_id: u32) -> Rgb {
     let (br, bg, bb) = match layer {
-        0 => (46, 176, 74),   // producers: the plants, green
-        1 => (214, 176, 58),  // first consumers: herbivores, amber
-        _ => (206, 74, 58),   // higher consumers: carnivores, red
+        0 => (46, 176, 74),  // producers: the plants, green
+        1 => (214, 176, 58), // first consumers: herbivores, amber
+        _ => (206, 74, 58),  // higher consumers: carnivores, red
     };
     let h = splitmix64(species_id as u64 ^ 0x9E37_79B9_7F4A_7C15);
     let jitter = |base: i32, shift: u32| -> u8 {
@@ -57,53 +57,147 @@ fn fill_rect(buf: &mut [u32], w: usize, x0: usize, y0: usize, rw: usize, rh: usi
 fn glyph_rows(c: char) -> [u8; 7] {
     match c.to_ascii_uppercase() {
         ' ' => [0; 7],
-        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-        'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
-        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111],
-        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'I' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111],
-        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
-        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
-        'N' => [0b10001, 0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001],
-        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
-        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-        'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
-        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
-        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
-        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
-        '3' => [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
-        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
-        '#' => [0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010],
-        '(' => [0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
-        ')' => [0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
-        ',' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100, 0b01000],
-        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
-        ':' => [0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000],
-        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
-        '/' => [0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000],
-        '+' => [0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
-        '|' => [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        _ => [0b01110, 0b10001, 0b00010, 0b00100, 0b00100, 0b00000, 0b00100], // '?'
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        'D' => [
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+        ],
+        '#' => [
+            0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010,
+        ],
+        '(' => [
+            0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010,
+        ],
+        ')' => [
+            0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000,
+        ],
+        ',' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100, 0b01000,
+        ],
+        '.' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100,
+        ],
+        ':' => [
+            0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '/' => [
+            0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000,
+        ],
+        '+' => [
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+        ],
+        '|' => [
+            0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        _ => [
+            0b01110, 0b10001, 0b00010, 0b00100, 0b00100, 0b00000, 0b00100,
+        ], // '?'
     }
 }
 
@@ -111,7 +205,17 @@ fn glyph_rows(c: char) -> [u8; 7] {
 /// (the on-canvas names of what the selector points at). `scale` is pixels per font pixel.
 /// The panel is clamped to stay on screen.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_label(buf: &mut [u32], w: usize, h: usize, x: i32, y: i32, text: &str, scale: usize, fg: Rgb, bg: Rgb) {
+pub fn draw_label(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    x: i32,
+    y: i32,
+    text: &str,
+    scale: usize,
+    fg: Rgb,
+    bg: Rgb,
+) {
     let scale = scale.max(1);
     let cw = (5 + 1) * scale; // glyph width plus one-column gap
     let pad = scale * 2;
@@ -139,7 +243,15 @@ pub fn draw_label(buf: &mut [u32], w: usize, h: usize, x: i32, y: i32, text: &st
 
 /// Draw a one-pixel outline around a cell rectangle, the cursor the tile selector uses to
 /// indicate the hovered cell. Presentation only.
-pub fn draw_outline(buf: &mut [u32], w: usize, x0: usize, y0: usize, rw: usize, rh: usize, color: Rgb) {
+pub fn draw_outline(
+    buf: &mut [u32],
+    w: usize,
+    x0: usize,
+    y0: usize,
+    rw: usize,
+    rh: usize,
+    color: Rgb,
+) {
     let h = buf.len() / w.max(1);
     let c = color.pack();
     let x1 = (x0 + rw).min(w);
@@ -207,9 +319,14 @@ pub fn superfine(
                     .unwrap_or(Rgb::new(240, 240, 240));
                 // Mark size scales with body mass: a quarter-tile at the smallest up to about
                 // eight-tenths of a tile at the largest (integer, via the Fixed body-mass value).
-                let bm = info.map(|inf| inf.body_mass).unwrap_or(Fixed::from_ratio(1, 2));
+                let bm = info
+                    .map(|inf| inf.body_mass)
+                    .unwrap_or(Fixed::from_ratio(1, 2));
                 let span = Fixed::from_int((tile_px * 3 / 5) as i32);
-                let extra = bm.checked_mul(span).map(|v| v.to_int().max(0) as usize).unwrap_or(0);
+                let extra = bm
+                    .checked_mul(span)
+                    .map(|v| v.to_int().max(0) as usize)
+                    .unwrap_or(0);
                 let mark = (tile_px / 4 + extra).clamp(2, tile_px);
                 // Centre a lone occupant; nudge several so they stay distinct.
                 let base = (tile_px.saturating_sub(mark)) / 2;
@@ -234,7 +351,11 @@ mod tests {
 
     #[test]
     fn organism_colour_is_deterministic_and_layer_keyed() {
-        assert_eq!(organism_color(0, 7), organism_color(0, 7), "same inputs, same colour");
+        assert_eq!(
+            organism_color(0, 7),
+            organism_color(0, 7),
+            "same inputs, same colour"
+        );
         // Plants (layer 0) are greener than carnivores (layer 2): more green, less red.
         let plant = organism_color(0, 1);
         let carnivore = organism_color(2, 1);
@@ -250,11 +371,38 @@ mod tests {
         let living = genesis(0xEA27, &params);
         let (w, h, tile_px) = (240usize, 160usize, 18usize);
         // Centre on an occupied tile so at least one organism mark is drawn.
-        let center = living.occupants.occupied().next().expect("an occupied tile");
-        let buf = super::superfine(&living, &BiomeSet::dev_default(), center, tile_px, w, h, Rgb::new(8, 9, 14));
+        let center = living
+            .occupants
+            .occupied()
+            .next()
+            .expect("an occupied tile");
+        let buf = super::superfine(
+            &living,
+            &BiomeSet::dev_default(),
+            center,
+            tile_px,
+            w,
+            h,
+            Rgb::new(8, 9, 14),
+        );
         assert_eq!(buf.len(), w * h, "one word per pixel");
-        assert_eq!(buf, super::superfine(&living, &BiomeSet::dev_default(), center, tile_px, w, h, Rgb::new(8, 9, 14)), "a pure read replays");
+        assert_eq!(
+            buf,
+            super::superfine(
+                &living,
+                &BiomeSet::dev_default(),
+                center,
+                tile_px,
+                w,
+                h,
+                Rgb::new(8, 9, 14)
+            ),
+            "a pure read replays"
+        );
         // The centre tile's block carries a mark distinct from the background colour.
-        assert!(buf.iter().any(|&p| p != Rgb::new(8, 9, 14).pack()), "something is drawn");
+        assert!(
+            buf.iter().any(|&p| p != Rgb::new(8, 9, 14).pack()),
+            "something is drawn"
+        );
     }
 }

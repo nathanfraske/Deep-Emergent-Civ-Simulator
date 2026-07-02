@@ -57,16 +57,55 @@ fn params() -> InferenceParams {
 fn substrate() -> (ForceFloor, MoveRegistry) {
     let floor = ForceFloor {
         effects: vec![
-            ForceEffectDef { id: ForceEffectId(1), kind: ForceKind::TellEvidence, sign: EffectSign::Neutral, name: "assert".to_string() },
-            ForceEffectDef { id: ForceEffectId(2), kind: ForceKind::RegisterUptake, sign: EffectSign::Positive, name: "accept".to_string() },
-            ForceEffectDef { id: ForceEffectId(3), kind: ForceKind::RegisterUptake, sign: EffectSign::Negative, name: "refuse".to_string() },
+            ForceEffectDef {
+                id: ForceEffectId(1),
+                kind: ForceKind::TellEvidence,
+                sign: EffectSign::Neutral,
+                name: "assert".to_string(),
+            },
+            ForceEffectDef {
+                id: ForceEffectId(2),
+                kind: ForceKind::RegisterUptake,
+                sign: EffectSign::Positive,
+                name: "accept".to_string(),
+            },
+            ForceEffectDef {
+                id: ForceEffectId(3),
+                kind: ForceKind::RegisterUptake,
+                sign: EffectSign::Negative,
+                name: "refuse".to_string(),
+            },
         ],
     };
     let registry = MoveRegistry {
         moves: vec![
-            MoveKindDef { id: MoveKindId(1), name: "assertion".to_string(), force: vec![ForceEffectId(1)], expects: vec![MoveKindId(2), MoveKindId(3)], sincerity_judged: true, felicity: vec![], gloss: "tells".to_string() },
-            MoveKindDef { id: MoveKindId(2), name: "acceptance".to_string(), force: vec![ForceEffectId(2)], expects: vec![], sincerity_judged: false, felicity: vec![], gloss: "agrees".to_string() },
-            MoveKindDef { id: MoveKindId(3), name: "refusal".to_string(), force: vec![ForceEffectId(3)], expects: vec![], sincerity_judged: false, felicity: vec![], gloss: "doubts".to_string() },
+            MoveKindDef {
+                id: MoveKindId(1),
+                name: "assertion".to_string(),
+                force: vec![ForceEffectId(1)],
+                expects: vec![MoveKindId(2), MoveKindId(3)],
+                sincerity_judged: true,
+                felicity: vec![],
+                gloss: "tells".to_string(),
+            },
+            MoveKindDef {
+                id: MoveKindId(2),
+                name: "acceptance".to_string(),
+                force: vec![ForceEffectId(2)],
+                expects: vec![],
+                sincerity_judged: false,
+                felicity: vec![],
+                gloss: "agrees".to_string(),
+            },
+            MoveKindDef {
+                id: MoveKindId(3),
+                name: "refusal".to_string(),
+                force: vec![ForceEffectId(3)],
+                expects: vec![],
+                sincerity_judged: false,
+                felicity: vec![],
+                gloss: "doubts".to_string(),
+            },
         ],
     };
     (floor, registry)
@@ -93,8 +132,14 @@ fn main() {
     .with_seed(seed);
     w.set_channels(AccessChannelRegistry {
         channels: vec![
-            AccessChannelDef { id: WITNESSED, name: "witnessed".to_string() },
-            AccessChannelDef { id: SAID, name: "said".to_string() },
+            AccessChannelDef {
+                id: WITNESSED,
+                name: "witnessed".to_string(),
+            },
+            AccessChannelDef {
+                id: SAID,
+                name: "said".to_string(),
+            },
         ],
     });
     w.set_gossip(GossipParams {
@@ -105,9 +150,12 @@ fn main() {
     w.set_concepts(nsm_concept_ids());
     let (_substr, forms) = ArticulationSubstrate::syllabic(SYLLABLES.map(String::from), 2, 3);
     w.set_form_system(forms);
-    w.set_language(LanguageParams { innovation_rate: Fixed::ZERO });
+    w.set_language(LanguageParams {
+        innovation_rate: Fixed::ZERO,
+    });
     let (floor, registry) = substrate();
-    w.set_dialogue(registry, floor).expect("the dialogue substrate passes the content gate");
+    w.set_dialogue(registry, floor)
+        .expect("the dialogue substrate passes the content gate");
 
     // Seed `beings` minds spread across `bands` co-located groups, so gossip, the naming game, and
     // dialogue all have partners in each place. Promote everyone to move-by-move dialogue so the
@@ -128,7 +176,9 @@ fn main() {
         w.tick(&[]);
     }
 
-    let phase_names = ["perceive", "decide", "converse", "gossip", "language", "drift"];
+    let phase_names = [
+        "perceive", "decide", "converse", "gossip", "language", "drift",
+    ];
     let mut phase_ns = [0u128; 6];
     let start = Instant::now();
     for _ in 0..ticks {
@@ -155,7 +205,11 @@ fn main() {
     let total_ns: u128 = phase_ns.iter().sum();
     println!("  per-phase breakdown (share of tick time):");
     for (name, ns) in phase_names.iter().zip(phase_ns) {
-        let share = if total_ns > 0 { 100.0 * ns as f64 / total_ns as f64 } else { 0.0 };
+        let share = if total_ns > 0 {
+            100.0 * ns as f64 / total_ns as f64
+        } else {
+            0.0
+        };
         let us_per_tick = ns as f64 / 1000.0 / ticks as f64;
         println!("    {name:<9} {share:5.1}%   {us_per_tick:7.2} us/tick");
     }

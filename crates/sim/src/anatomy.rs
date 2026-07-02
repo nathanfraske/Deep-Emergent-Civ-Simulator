@@ -127,7 +127,9 @@ impl BodyPlanRegistry {
 
     /// The name of a kind in a registry list, or `"?"` if unknown.
     pub fn name(list: &[KindDef], id: u16) -> &str {
-        list.iter().find(|k| k.id == id).map_or("?", |k| k.name.as_str())
+        list.iter()
+            .find(|k| k.id == id)
+            .map_or("?", |k| k.name.as_str())
     }
 }
 
@@ -196,7 +198,9 @@ pub struct BodyPlan {
 
 /// The gated kinds of a registry list for a profile (real always, fantasy only under magic).
 fn gated(list: &[KindDef], profile: WorldProfile) -> Vec<&KindDef> {
-    list.iter().filter(|k| !k.fantasy || profile.magic).collect()
+    list.iter()
+        .filter(|k| !k.fantasy || profile.magic)
+        .collect()
 }
 
 /// Pick `n` distinct kinds from a gated registry list, each with a development drawn from the
@@ -254,7 +258,11 @@ pub fn sample_body_plan(
     let is_rooted = rng.unit_fixed(base + 79) < rooted_prior;
     // Weapon count: a rooted body bears at most one (structural, like spines); a mobile one bears
     // more at higher trophic layers. This keys off the drawn morphology, not the kingdom.
-    let want_weapons = if is_rooted { (rng.range_u32(base + 19, 2)) as usize } else { (layer as usize).min(3) };
+    let want_weapons = if is_rooted {
+        (rng.range_u32(base + 19, 2)) as usize
+    } else {
+        (layer as usize).min(3)
+    };
     let weapons = pick(rng, base + 20, &reg.weapons, profile, want_weapons);
     // One primary covering (always present; real coverings include bare hide).
     let covering = pick(rng, base + 40, &reg.coverings, profile, 1)
@@ -273,7 +281,12 @@ pub fn sample_body_plan(
     let locomotion = if is_rooted {
         vec![0]
     } else {
-        let mobile: Vec<KindDef> = reg.locomotion.iter().filter(|k| k.id != 0).cloned().collect();
+        let mobile: Vec<KindDef> = reg
+            .locomotion
+            .iter()
+            .filter(|k| k.id != 0)
+            .cloned()
+            .collect();
         let want_loco = 1 + (rng.range_u32(base + 80, 2)) as usize;
         pick(rng, base + 82, &mobile, profile, want_loco)
             .into_iter()
@@ -317,18 +330,34 @@ mod tests {
         let reg = BodyPlanRegistry::dev_default();
         let plan = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
         for w in &plan.weapons {
-            assert!(!reg.weapons.iter().find(|k| k.id == w.kind).unwrap().fantasy, "no magic weapon in a grounded world");
+            assert!(
+                !reg.weapons.iter().find(|k| k.id == w.kind).unwrap().fantasy,
+                "no magic weapon in a grounded world"
+            );
         }
-        assert!(!reg.coverings.iter().find(|k| k.id == plan.covering.kind).unwrap().fantasy);
+        assert!(
+            !reg.coverings
+                .iter()
+                .find(|k| k.id == plan.covering.kind)
+                .unwrap()
+                .fantasy
+        );
     }
 
     #[test]
     fn a_predator_bears_more_weapons_than_a_plant() {
         let reg = BodyPlanRegistry::dev_default();
         let rooted = sample_body_plan(&rng(), 0, Fixed::ONE, &reg, WorldProfile::grounded(), 200);
-        let predator = sample_body_plan(&rng(), 3, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
-        assert!(rooted.weapons.len() <= 1, "a rooted body bears at most one, structural weapon");
-        assert!(predator.weapons.len() >= rooted.weapons.len(), "a mobile predator bears more");
+        let predator =
+            sample_body_plan(&rng(), 3, Fixed::ZERO, &reg, WorldProfile::grounded(), 200);
+        assert!(
+            rooted.weapons.len() <= 1,
+            "a rooted body bears at most one, structural weapon"
+        );
+        assert!(
+            predator.weapons.len() >= rooted.weapons.len(),
+            "a mobile predator bears more"
+        );
     }
 
     #[test]
@@ -348,7 +377,10 @@ mod tests {
                 mobile_producers += 1;
             }
         }
-        assert!(mobile_producers > 0, "a walking tree can emerge: mobility is drawn, not decreed");
+        assert!(
+            mobile_producers > 0,
+            "a walking tree can emerge: mobility is drawn, not decreed"
+        );
     }
 
     #[test]
@@ -357,7 +389,10 @@ mod tests {
         let a = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::magical(), 200);
         let b = sample_body_plan(&rng(), 2, Fixed::ZERO, &reg, WorldProfile::magical(), 200);
         assert_eq!(a, b, "same key, same body plan");
-        assert!(!a.senses.is_empty() && !a.locomotion.is_empty(), "a creature has senses and moves");
+        assert!(
+            !a.senses.is_empty() && !a.locomotion.is_empty(),
+            "a creature has senses and moves"
+        );
     }
 
     #[test]
@@ -372,7 +407,12 @@ mod tests {
                 .weapons
                 .iter()
                 .any(|w| reg.weapons.iter().find(|k| k.id == w.kind).unwrap().fantasy);
-            let magic_cover = reg.coverings.iter().find(|k| k.id == plan.covering.kind).unwrap().fantasy;
+            let magic_cover = reg
+                .coverings
+                .iter()
+                .find(|k| k.id == plan.covering.kind)
+                .unwrap()
+                .fantasy;
             if magic_weapon || magic_cover {
                 saw_magic = true;
                 break;

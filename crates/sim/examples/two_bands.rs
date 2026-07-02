@@ -50,7 +50,12 @@ fn main() {
 
     // A generated world for the bands to live on.
     let biomes = BiomeSet::dev_default();
-    let map = TileMap::generate(seed, FlatBounded::new(64, 48, 1), &biomes, &WorldgenParams::dev_default());
+    let map = TileMap::generate(
+        seed,
+        FlatBounded::new(64, 48, 1),
+        &biomes,
+        &WorldgenParams::dev_default(),
+    );
 
     // Two band homes: near but distant (a few tiles apart), on the map.
     let home_a = Coord3::ground(26, 24);
@@ -80,14 +85,23 @@ fn main() {
 
     // Seed the two bands: place A at home A speaking language 1, place B at home B speaking 2.
     let mut located = LocationIndex::new();
-    let band = |w: &mut World, located: &mut LocationIndex, place: u32, lang: LangId, home: Coord3, n: usize| -> Vec<StableId> {
+    let band = |w: &mut World,
+                located: &mut LocationIndex,
+                place: u32,
+                lang: LangId,
+                home: Coord3,
+                n: usize|
+     -> Vec<StableId> {
         (0..n)
             .map(|i| {
                 let m = w.spawn(Fixed::ONE);
                 w.set_place(m, place);
                 w.set_language_of(m, lang);
                 // Place the person on the map beside their band's home.
-                located.place(OccupantId::being(m), Coord3::ground(home.x + (i as i32 % 2), home.y + (i as i32 / 2)));
+                located.place(
+                    OccupantId::being(m),
+                    Coord3::ground(home.x + (i as i32 % 2), home.y + (i as i32 / 2)),
+                );
                 m
             })
             .collect()
@@ -154,8 +168,14 @@ fn main() {
     println!("\nThe same meanings, two emergent tongues (English gist, band A word, band B word):");
     for &c in concepts.iter().take(12) {
         let gloss = nsm_gloss(c).unwrap_or("?");
-        let wa = w.word_for(band_a[0], c).map(|x| sub_a.render(&x)).unwrap_or_else(|| "-".into());
-        let wb = w.word_for(band_b[0], c).map(|x| sub_b.render(&x)).unwrap_or_else(|| "-".into());
+        let wa = w
+            .word_for(band_a[0], c)
+            .map(|x| sub_a.render(&x))
+            .unwrap_or_else(|| "-".into());
+        let wb = w
+            .word_for(band_b[0], c)
+            .map(|x| sub_b.render(&x))
+            .unwrap_or_else(|| "-".into());
         println!("  {gloss:<14} {wa:<10} {wb}");
     }
     println!(
@@ -177,7 +197,11 @@ fn main() {
     println!("  seed                {seed:#018x}");
     println!("  world (map) hash    {:032x}", map.state_hash());
     println!("  clock (ticks)       {}", w.clock());
-    println!("  event-log length    {}  (hash {:032x})", w.events().len(), w.event_log_hash());
+    println!(
+        "  event-log length    {}  (hash {:032x})",
+        w.events().len(),
+        w.event_log_hash()
+    );
     println!("  lexicon digest      {:032x}", digest.finish());
 }
 

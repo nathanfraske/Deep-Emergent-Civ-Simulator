@@ -206,7 +206,9 @@ pub fn step_generation(
                 continue;
             }
             let daughter_pool =
-                parent.pool.found(seed, id.0 as u64, g, p.founder_size, p.recovery_size);
+                parent
+                    .pool
+                    .found(seed, id.0 as u64, g, p.founder_size, p.recovery_size);
             let daughter = crate::biosphere::Species {
                 layer: parent.layer,
                 niche: parent.niche.clone(),
@@ -220,14 +222,18 @@ pub fn step_generation(
             if let Some(child) = bio.species.speciate(*id, daughter) {
                 report.daughters += 1;
                 let cap = {
-                    let s = bio.species.get(child).unwrap().niche.suitability(&region.env);
+                    let s = bio
+                        .species
+                        .get(child)
+                        .unwrap()
+                        .niche
+                        .suitability(&region.env);
                     p.pop_capacity.checked_mul(s).unwrap_or(Fixed::ZERO)
                 };
                 pops.insert(child, Stock::new(cap, cap, p.pop_regen));
                 // Orr-snowball: a deterministic incompatibility roll keyed on the ordered
                 // pair and the generation, so the count accumulates per sweep.
-                let rng =
-                    DrawKey::pair(id.0 as u64, child.0 as u64, g, Phase::SPECIATE).rng(seed);
+                let rng = DrawKey::pair(id.0 as u64, child.0 as u64, g, Phase::SPECIATE).rng(seed);
                 if rng.flip(0) {
                     report.incompatibilities += 1;
                 }
@@ -385,10 +391,16 @@ mod tests {
         let p = EpochParams::dev_default();
         // A perfectly fit species gets the maximum positive coefficient (clamped).
         let hi = selection_coefficients(Fixed::ONE, 3, &p);
-        assert!(hi.iter().all(|&s| s > Fixed::ZERO), "a good fit selects positively");
+        assert!(
+            hi.iter().all(|&s| s > Fixed::ZERO),
+            "a good fit selects positively"
+        );
         // A total misfit gets a negative coefficient.
         let lo = selection_coefficients(Fixed::ZERO, 3, &p);
-        assert!(lo.iter().all(|&s| s < Fixed::ZERO), "a misfit selects against");
+        assert!(
+            lo.iter().all(|&s| s < Fixed::ZERO),
+            "a misfit selects against"
+        );
         // A neutral fit is zero.
         let mid = selection_coefficients(Fixed::from_ratio(1, 2), 3, &p);
         assert!(mid.iter().all(|&s| s == Fixed::ZERO));
@@ -401,14 +413,25 @@ mod tests {
         let gp = GeneratorParams::dev_default();
         let ep = EpochParams::dev_default();
         let run_once = || {
-            let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
+            let mut bio = generate(
+                0xB105,
+                &region(4),
+                7,
+                &gp,
+                &crate::anatomy::BodyPlanRegistry::dev_default(),
+                crate::anatomy::WorldProfile::grounded(),
+            );
             let founders = bio.len();
             let report = run(0xB105, &mut bio, &region(4), &ep);
             (founders, bio.len(), report)
         };
         let (founders_a, total_a, report_a) = run_once();
         let (founders_b, total_b, report_b) = run_once();
-        assert_eq!((founders_a, total_a, report_a), (founders_b, total_b, report_b), "replays");
+        assert_eq!(
+            (founders_a, total_a, report_a),
+            (founders_b, total_b, report_b),
+            "replays"
+        );
         assert!(report_a.daughters > 0, "the epoch radiates daughters");
         assert!(total_a > founders_a, "the lineage grows past the founders");
         assert_eq!(report_a.generations, ep.generations);
@@ -420,15 +443,32 @@ mod tests {
         let ep = EpochParams::dev_default();
         // Seed in a mild region, then radiate in a hostile one (extreme temperature) so many
         // niches fall below the extinction floor.
-        let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
+        let mut bio = generate(
+            0xB105,
+            &region(4),
+            7,
+            &gp,
+            &crate::anatomy::BodyPlanRegistry::dev_default(),
+            crate::anatomy::WorldProfile::grounded(),
+        );
         let report = run(0xB105, &mut bio, &region(10), &ep);
-        assert!(report.extinctions > 0, "a hostile region kills poorly-fit species");
+        assert!(
+            report.extinctions > 0,
+            "a hostile region kills poorly-fit species"
+        );
     }
 
     #[test]
     fn the_species_cap_bounds_the_radiation() {
         let gp = GeneratorParams::dev_default();
-        let mut bio = generate(0xB105, &region(4), 7, &gp, &crate::anatomy::BodyPlanRegistry::dev_default(), crate::anatomy::WorldProfile::grounded());
+        let mut bio = generate(
+            0xB105,
+            &region(4),
+            7,
+            &gp,
+            &crate::anatomy::BodyPlanRegistry::dev_default(),
+            crate::anatomy::WorldProfile::grounded(),
+        );
         let founders = bio.len();
         // The cap bounds the radiation (the daughters), so set it above the founder count and
         // fork often over many generations; the lineage grows toward the cap but never past it.
@@ -437,8 +477,14 @@ mod tests {
         ep.generations = 300;
         ep.speciation_cadence = 5;
         run(0xB105, &mut bio, &region(4), &ep);
-        assert!(bio.len() <= ep.max_species, "the cap bounds the lineage size");
-        assert!(bio.len() > founders, "the radiation grew the lineage toward the cap");
+        assert!(
+            bio.len() <= ep.max_species,
+            "the cap bounds the lineage size"
+        );
+        assert!(
+            bio.len() > founders,
+            "the radiation grew the lineage toward the cap"
+        );
     }
 
     /// A bit-exact fold of a biosphere's evolving state: each species' identity, kind, extinction
@@ -470,10 +516,22 @@ mod tests {
         let reg = region(4);
         let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
         // Two identical fresh biospheres (generate is deterministic from its seed and inputs).
-        let mut bio_batch =
-            generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
-        let bio_step =
-            generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
+        let mut bio_batch = generate(
+            0xB105,
+            &reg,
+            7,
+            &gp,
+            &bpr,
+            crate::anatomy::WorldProfile::grounded(),
+        );
+        let bio_step = generate(
+            0xB105,
+            &reg,
+            7,
+            &gp,
+            &bpr,
+            crate::anatomy::WorldProfile::grounded(),
+        );
 
         let report_batch = run(0xB105, &mut bio_batch, &reg, &ep);
 
@@ -488,7 +546,10 @@ mod tests {
 
         let report_step = rad.report();
         let (bio_step, _) = rad.into_parts();
-        assert_eq!(report_batch, report_step, "the stepped report equals the batch report");
+        assert_eq!(
+            report_batch, report_step,
+            "the stepped report equals the batch report"
+        );
         assert_eq!(
             bio_hash(&bio_batch),
             bio_hash(&bio_step),
@@ -502,7 +563,14 @@ mod tests {
         let ep = EpochParams::dev_default();
         let reg = region(4);
         let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
-        let bio = generate(0xB105, &reg, 7, &gp, &bpr, crate::anatomy::WorldProfile::grounded());
+        let bio = generate(
+            0xB105,
+            &reg,
+            7,
+            &gp,
+            &bpr,
+            crate::anatomy::WorldProfile::grounded(),
+        );
         let mut rad = Radiation::new(0xB105, bio, reg, ep);
         assert_eq!(rad.generation(), 0);
         assert_eq!(rad.generations_planned(), ep.generations);
@@ -510,6 +578,9 @@ mod tests {
         rad.step_once();
         rad.step_once();
         assert_eq!(rad.generation(), 2, "the generation counter tracks steps");
-        assert!(rad.report().alive > 0, "the live report carries a current alive count");
+        assert!(
+            rad.report().alive > 0,
+            "the live report carries a current alive count"
+        );
     }
 }

@@ -72,7 +72,10 @@ fn describe_occupants(living: &LivingWorld, occ: &[OccupantId]) -> String {
 /// see the individual organisms). Centres on the first occupied tile.
 fn snapshot(argv: &[String]) {
     use std::io::Write as _;
-    let path = argv.get(2).cloned().unwrap_or_else(|| "living.ppm".to_string());
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "living.ppm".to_string());
     let seed: u64 = parse(argv.get(3), 0xEA27);
     let mut params = GenesisParams::dev_default();
     params.width = parse(argv.get(4), 96);
@@ -87,7 +90,15 @@ fn snapshot(argv: &[String]) {
     let (cols, rows) = ((w / tile_px) as i32, (h / tile_px) as i32);
     let ccol = (cols / 2) as usize;
     let crow = (rows / 2) as usize;
-    render::draw_outline(&mut buf, w, ccol * tile_px, crow * tile_px, tile_px, tile_px, CURSOR);
+    render::draw_outline(
+        &mut buf,
+        w,
+        ccol * tile_px,
+        crow * tile_px,
+        tile_px,
+        tile_px,
+        CURSOR,
+    );
     // The selector readout for the centre tile, drawn on the map like the live viewer.
     let biome = living
         .map
@@ -95,7 +106,12 @@ fn snapshot(argv: &[String]) {
         .map(|t| biomes.name(t.biome).to_string())
         .unwrap_or_else(|| "off the world".to_string());
     let occ = living.occupants.occupants(center);
-    let detail = format!("tile ({},{})  {biome}  |  {}", center.x, center.y, describe_occupants(&living, &occ));
+    let detail = format!(
+        "tile ({},{})  {biome}  |  {}",
+        center.x,
+        center.y,
+        describe_occupants(&living, &occ)
+    );
     render::draw_label(
         &mut buf,
         w,
@@ -157,7 +173,10 @@ fn populated_center(living: &LivingWorld, w: i32, h: i32) -> Coord3 {
 /// The test-harness render: `--render <path> <mode> <seed> <w> <h>`, mode overview or
 /// superfine, writes a PPM the harness converts and inspects.
 fn render_cmd(argv: &[String]) {
-    let path = argv.get(2).cloned().unwrap_or_else(|| "frame.ppm".to_string());
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "frame.ppm".to_string());
     let mode = argv.get(3).map(String::as_str).unwrap_or("overview");
     let seed: u64 = parse(argv.get(4), 0xEA27);
     let mut params = GenesisParams::dev_default();
@@ -271,7 +290,9 @@ fn world_profile(name: Option<&String>) -> WorldProfile {
 fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
     arg.and_then(|s| {
         if let Some(hex) = s.strip_prefix("0x") {
-            u64::from_str_radix(hex, 16).ok().and_then(|v| v.to_string().parse().ok())
+            u64::from_str_radix(hex, 16)
+                .ok()
+                .and_then(|v| v.to_string().parse().ok())
         } else {
             s.parse().ok()
         }
@@ -430,7 +451,11 @@ fn main() {
             cam.center = target_center;
         } else {
             // Pan by one node in the overview, one tile in the superfine, so panning is steady.
-            let step = if zoom <= depth { tree.node_side(zoom) } else { 1 };
+            let step = if zoom <= depth {
+                tree.node_side(zoom)
+            } else {
+                1
+            };
             let mut dx = 0i32;
             let mut dy = 0i32;
             if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
@@ -493,7 +518,15 @@ fn main() {
             let sf = zoom - depth; // 1..=SUPERFINE_LEVELS
             let tile_px = (6 + 6 * sf) as i32;
             (
-                render::superfine(&living, &biomes, cam.center, tile_px as usize, win_w, win_h, BG),
+                render::superfine(
+                    &living,
+                    &biomes,
+                    cam.center,
+                    tile_px as usize,
+                    win_w,
+                    win_h,
+                    BG,
+                ),
                 tile_px,
                 1,
                 format!("superfine {sf} ({tile_px}px/tile)"),
@@ -551,7 +584,10 @@ fn main() {
                         .map(|t| biomes.name(t.biome).to_string())
                         .unwrap_or_else(|| "off the world".to_string());
                     let occ = living.occupants.occupants(coord);
-                    format!("tile ({cell_x},{cell_y})  {biome}  |  {}", describe_occupants(&living, &occ))
+                    format!(
+                        "tile ({cell_x},{cell_y})  {biome}  |  {}",
+                        describe_occupants(&living, &occ)
+                    )
                 };
                 // Draw the readout on the map, just below the selected cell, so the names of
                 // what the cursor sits on are visible without watching the title bar.

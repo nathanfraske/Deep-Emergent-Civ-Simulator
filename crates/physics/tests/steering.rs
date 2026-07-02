@@ -52,8 +52,14 @@ fn matter_is_identified_by_physics_not_by_label() {
     // The anti-steering-by-identity guarantee: two substances with identical physical vectors but
     // different names have the same content id, so nothing downstream can treat one race's iron
     // differently from another's by name alone. content_id must never fold self.id.
-    let elf = subst("elf_iron", &[("mat.density", 7870), ("mat.yield_strength", 250)]);
-    let dwarf = subst("dwarf_iron", &[("mat.density", 7870), ("mat.yield_strength", 250)]);
+    let elf = subst(
+        "elf_iron",
+        &[("mat.density", 7870), ("mat.yield_strength", 250)],
+    );
+    let dwarf = subst(
+        "dwarf_iron",
+        &[("mat.density", 7870), ("mat.yield_strength", 250)],
+    );
     assert_eq!(
         elf.content_id(),
         dwarf.content_id(),
@@ -61,7 +67,10 @@ fn matter_is_identified_by_physics_not_by_label() {
     );
     // And it stays physics-sensitive: a different vector is a different substance, so the hash is not
     // trivially constant.
-    let lighter = subst("elf_iron", &[("mat.density", 7860), ("mat.yield_strength", 250)]);
+    let lighter = subst(
+        "elf_iron",
+        &[("mat.density", 7860), ("mat.yield_strength", 250)],
+    );
     assert_ne!(
         elf.content_id(),
         lighter.content_id(),

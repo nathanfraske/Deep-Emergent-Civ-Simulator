@@ -902,7 +902,13 @@ pub fn dynamic_pressure(density: Fixed, velocity: Fixed, p_max: Fixed) -> Fixed 
 /// Aerodynamic force (1/2) C rho A v^2 (N), shared by drag (C = drag coefficient) and lift (C = lift
 /// coefficient); the two differ only in the coefficient. The coefficient product is built before the
 /// squared velocity.
-fn aero_force(coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+fn aero_force(
+    coefficient: Fixed,
+    density: Fixed,
+    area: Fixed,
+    velocity: Fixed,
+    f_max: Fixed,
+) -> Fixed {
     if sat_abs(velocity) > V2_MAX {
         return f_max;
     }
@@ -929,20 +935,38 @@ fn aero_force(coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, 
 }
 
 /// Drag force (1/2) Cd rho A v^2 (N).
-pub fn drag_force(drag_coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+pub fn drag_force(
+    drag_coefficient: Fixed,
+    density: Fixed,
+    area: Fixed,
+    velocity: Fixed,
+    f_max: Fixed,
+) -> Fixed {
     aero_force(drag_coefficient, density, area, velocity, f_max)
 }
 
 /// Aerodynamic lift (1/2) Cl rho A v^2 (N), the reduced-order lumped-coefficient lift that floors a
 /// wing, a gliding creature, a sail, and the lift half of a ballistic arc.
-pub fn aerodynamic_lift(lift_coefficient: Fixed, density: Fixed, area: Fixed, velocity: Fixed, f_max: Fixed) -> Fixed {
+pub fn aerodynamic_lift(
+    lift_coefficient: Fixed,
+    density: Fixed,
+    area: Fixed,
+    velocity: Fixed,
+    f_max: Fixed,
+) -> Fixed {
     aero_force(lift_coefficient, density, area, velocity, f_max)
 }
 
 /// Reynolds number Re = rho*|v|*L/mu (dimensionless), a laminar/turbulent regime gate. The transition
 /// Reynolds number is a reserved consumer constant, kept out of the kernel. Zero speed reads zero, an
 /// inviscid fluid reads the cap.
-pub fn reynolds_number(density: Fixed, velocity: Fixed, length: Fixed, viscosity: Fixed, re_max: Fixed) -> Fixed {
+pub fn reynolds_number(
+    density: Fixed,
+    velocity: Fixed,
+    length: Fixed,
+    viscosity: Fixed,
+    re_max: Fixed,
+) -> Fixed {
     let speed = sat_abs(velocity);
     if speed == ZERO {
         return ZERO;
@@ -1010,7 +1034,13 @@ pub fn convective_flux(h: Fixed, area: Fixed, hot: Fixed, cold: Fixed, flux_max:
 /// pascals and divided down before the four radius multiplies, so the underflowing r^4 shrinks an
 /// already-reduced base; an underflow is the correct choked (zero) direction. A frictionless or
 /// zero-length channel reads the cap; zero radius or pressure reads zero.
-pub fn poiseuille_flow(dp: Fixed, radius: Fixed, viscosity: Fixed, length: Fixed, q_max: Fixed) -> Fixed {
+pub fn poiseuille_flow(
+    dp: Fixed,
+    radius: Fixed,
+    viscosity: Fixed,
+    length: Fixed,
+    q_max: Fixed,
+) -> Fixed {
     if radius <= ZERO || dp <= ZERO {
         return ZERO;
     }
@@ -1021,7 +1051,11 @@ pub fn poiseuille_flow(dp: Fixed, radius: Fixed, viscosity: Fixed, length: Fixed
         Some(x) => x,
         None => return q_max,
     };
-    let mut b = match pa.checked_div(viscosity).and_then(|x| x.checked_div(length)).and_then(|x| x.checked_div(Fixed::from_int(8))) {
+    let mut b = match pa
+        .checked_div(viscosity)
+        .and_then(|x| x.checked_div(length))
+        .and_then(|x| x.checked_div(Fixed::from_int(8)))
+    {
         Some(x) => x,
         None => return q_max,
     };
@@ -1056,7 +1090,13 @@ pub fn speed_of_sound(bulk_modulus: Fixed, density: Fixed, c_max: Fixed) -> Fixe
 
 /// Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
 /// density field. The pressure is bridged to pascals. A zero or sub-floor R_s*T reads the dense cap.
-pub fn ideal_gas_density(pressure: Fixed, temperature: Fixed, gas_constant: Fixed, rho_min: Fixed, rho_max: Fixed) -> Fixed {
+pub fn ideal_gas_density(
+    pressure: Fixed,
+    temperature: Fixed,
+    gas_constant: Fixed,
+    rho_min: Fixed,
+    rho_max: Fixed,
+) -> Fixed {
     let pa = match pressure.checked_mul(C_PA) {
         Some(x) => x,
         None => return rho_max,
@@ -1101,7 +1141,13 @@ pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max
 /// Saturation vapour pressure e_s = e_ref + slope*(T - T_ref) (MPa), the affine tangent to the
 /// Clausius-Clapeyron curve over the simulated band (the exact exp/log curve is deferred to
 /// R-GPU-CANON-PIN). Clamped to [0, cap]; valid within about twenty kelvin of the reference.
-pub fn saturation_vapor_pressure(temperature: Fixed, slope: Fixed, t_ref: Fixed, e_ref: Fixed, es_cap: Fixed) -> Fixed {
+pub fn saturation_vapor_pressure(
+    temperature: Fixed,
+    slope: Fixed,
+    t_ref: Fixed,
+    e_ref: Fixed,
+    es_cap: Fixed,
+) -> Fixed {
     let dt = temperature - t_ref;
     let term = match slope.checked_mul(dt) {
         Some(x) => x,
@@ -1119,7 +1165,14 @@ pub fn saturation_vapor_pressure(temperature: Fixed, slope: Fixed, t_ref: Fixed,
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
 /// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
 /// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
-pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_still: Fixed, b_wind: Fixed, e_max: Fixed) -> Fixed {
+pub fn evaporation_rate(
+    e_ambient: Fixed,
+    e_saturation: Fixed,
+    wind: Fixed,
+    a_still: Fixed,
+    b_wind: Fixed,
+    e_max: Fixed,
+) -> Fixed {
     let vpd = e_saturation - e_ambient;
     if vpd <= ZERO {
         return ZERO;
@@ -1141,7 +1194,12 @@ pub fn evaporation_rate(e_ambient: Fixed, e_saturation: Fixed, wind: Fixed, a_st
 /// gate). The caller forms the mass-weighted sums by `Fixed::saturating_sum` (order-independent);
 /// this kernel takes them. A negative delta_h is exothermic. Which reactions occur emerges from the
 /// sign over the substance vectors, never an authored recipe (Hess's law).
-pub fn reaction(products_sum: Fixed, reactants_sum: Fixed, temperature: Fixed, barrier: Fixed) -> (Fixed, bool) {
+pub fn reaction(
+    products_sum: Fixed,
+    reactants_sum: Fixed,
+    temperature: Fixed,
+    barrier: Fixed,
+) -> (Fixed, bool) {
     // Saturating in i128: the sums are order-independent saturating_sums bounded only by i64, so the
     // difference of opposite-signed extremes must not panic or wrap.
     (sat_sub(products_sum, reactants_sum), temperature >= barrier)
@@ -1152,7 +1210,13 @@ pub fn reaction(products_sum: Fixed, reactants_sum: Fixed, temperature: Fixed, b
 /// (non-positive driving) does not attack. Reports the driving margin; the exponential Tafel rate is
 /// deferred. The pairing emerges from the measured potentials, not an authored table (this is the
 /// wave-2 corrosion the R-WOUND corrosion mode and R-FLUID corrosion were flagged against).
-pub fn corrosion(fluid_potential: Fixed, material_potential: Fixed, susceptibility: Fixed, acidity_factor: Fixed, corrosion_max: Fixed) -> Fixed {
+pub fn corrosion(
+    fluid_potential: Fixed,
+    material_potential: Fixed,
+    susceptibility: Fixed,
+    acidity_factor: Fixed,
+    corrosion_max: Fixed,
+) -> Fixed {
     let driving = fluid_potential - material_potential;
     if driving <= ZERO {
         return ZERO;
@@ -1199,7 +1263,14 @@ pub fn dissolution(solute_affinity: Fixed, solvent_aggressiveness: Fixed) -> Fix
 /// T ~ 14000 K (blue-star and plasma), above which a surface routes to the cap (an honest Tier-0
 /// limit; a forge and a solar surface are well within). A cooler surface than its surroundings emits
 /// nothing net here (the absorption side is the caller's).
-pub fn radiant_emission(emissivity: Fixed, area: Fixed, t_hot: Fixed, t_cold: Fixed, sigma: Fixed, flux_max: Fixed) -> Fixed {
+pub fn radiant_emission(
+    emissivity: Fixed,
+    area: Fixed,
+    t_hot: Fixed,
+    t_cold: Fixed,
+    sigma: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
     let fourth = |t: Fixed| {
         sigma
             .checked_mul(t)
@@ -1219,7 +1290,10 @@ pub fn radiant_emission(emissivity: Fixed, area: Fixed, t_hot: Fixed, t_cold: Fi
         return ZERO;
     }
     let net = e_hot - e_cold;
-    match net.checked_mul(emissivity).and_then(|x| x.checked_mul(area)) {
+    match net
+        .checked_mul(emissivity)
+        .and_then(|x| x.checked_mul(area))
+    {
         Some(q) => q.min(flux_max),
         None => flux_max,
     }
@@ -1237,7 +1311,12 @@ pub fn wien_peak(temperature: Fixed, wien_b: Fixed, wavelength_max: Fixed) -> Fi
 /// Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
 /// spatial reach (light or sound). A distant source (the r^2 or 4*pi*r^2 product past the ceiling) is
 /// negligible (zero); a source at zero distance reads the cap.
-pub fn inverse_square_falloff(power: Fixed, distance: Fixed, four_pi: Fixed, irrad_max: Fixed) -> Fixed {
+pub fn inverse_square_falloff(
+    power: Fixed,
+    distance: Fixed,
+    four_pi: Fixed,
+    irrad_max: Fixed,
+) -> Fixed {
     let r2 = match distance.checked_mul(distance) {
         Some(x) => x,
         None => return ZERO,
@@ -1259,13 +1338,23 @@ pub fn inverse_square_falloff(power: Fixed, distance: Fixed, four_pi: Fixed, irr
 /// bounded fraction of the incident so no overflow forms; the absorbed is the residual (R+T+A=1),
 /// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
 /// attenuation.
-pub fn interface_split(incident: Fixed, reflectance: Fixed, transmittance: Fixed) -> (Fixed, Fixed, Fixed) {
+pub fn interface_split(
+    incident: Fixed,
+    reflectance: Fixed,
+    transmittance: Fixed,
+) -> (Fixed, Fixed, Fixed) {
     // The fractions are physical partitions in [0, 1]; clamping keeps a reflected/transmitted term in
     // [0, incident] so the residual subtraction cannot overflow on an out-of-domain negative input.
     let reflectance = reflectance.clamp(ZERO, Fixed::ONE);
     let transmittance = transmittance.clamp(ZERO, Fixed::ONE);
-    let reflected = incident.checked_mul(reflectance).unwrap_or(incident).min(incident);
-    let transmitted = incident.checked_mul(transmittance).unwrap_or(ZERO).min(incident);
+    let reflected = incident
+        .checked_mul(reflectance)
+        .unwrap_or(incident)
+        .min(incident);
+    let transmitted = incident
+        .checked_mul(transmittance)
+        .unwrap_or(ZERO)
+        .min(incident);
     let absorbed = (incident - reflected - transmitted).clamp(ZERO, incident);
     (reflected, absorbed, transmitted)
 }
@@ -1297,7 +1386,12 @@ pub fn refractive_contrast(n1: Fixed, n2: Fixed, contrast_max: Fixed) -> (Fixed,
 /// forward emission law, the term that SETS a surface's temperature from absorbed irradiance. The
 /// fourth root is two nested integer square roots, so the unrepresentable T^4 never forms. A
 /// non-positive absorbed flux reads zero; a non-emitter never equilibrates and reads the cap.
-pub fn radiative_equilibrium(absorbed_irradiance: Fixed, emissivity: Fixed, sigma: Fixed, t_max: Fixed) -> Fixed {
+pub fn radiative_equilibrium(
+    absorbed_irradiance: Fixed,
+    emissivity: Fixed,
+    sigma: Fixed,
+    t_max: Fixed,
+) -> Fixed {
     if absorbed_irradiance <= ZERO {
         return ZERO;
     }
@@ -1329,7 +1423,13 @@ pub fn radiative_equilibrium(absorbed_irradiance: Fixed, emissivity: Fixed, sigm
 /// Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
 /// (like signs repel). Coincident charges route to the cap; a distant pair is negligible. The
 /// Coulomb coefficient is passed on its reserved x1e9 output scale.
-pub fn coulomb_force(q1: Fixed, q2: Fixed, r: Fixed, k_coulomb: Fixed, f_max: Fixed) -> (Fixed, bool) {
+pub fn coulomb_force(
+    q1: Fixed,
+    q2: Fixed,
+    r: Fixed,
+    k_coulomb: Fixed,
+    f_max: Fixed,
+) -> (Fixed, bool) {
     let repulsive = (q1 > ZERO) == (q2 > ZERO);
     if r <= ZERO {
         return (f_max, repulsive);
@@ -1422,7 +1522,13 @@ pub fn resistance(resistivity: Fixed, length: Fixed, area: Fixed, r_max: Fixed) 
 
 /// Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
 /// permeability does not overflow. The nonlinear B-H saturation loop is deferred.
-pub fn solenoid_field(permeability: Fixed, current: Fixed, turn_density: Fixed, mu_0: Fixed, b_max: Fixed) -> Fixed {
+pub fn solenoid_field(
+    permeability: Fixed,
+    current: Fixed,
+    turn_density: Fixed,
+    mu_0: Fixed,
+    b_max: Fixed,
+) -> Fixed {
     let ni = match turn_density.checked_mul(current) {
         Some(x) => x,
         None => return b_max,
@@ -1480,7 +1586,13 @@ pub fn dipole_torque(moment: Fixed, flux_density: Fixed, torque_max: Fixed) -> F
 
 /// Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
 /// threads the prior-tick flux (canonical state) and the fixed tick duration DT.
-pub fn faraday_emf(flux_now: Fixed, flux_prev: Fixed, turns: Fixed, dt: Fixed, v_max: Fixed) -> Fixed {
+pub fn faraday_emf(
+    flux_now: Fixed,
+    flux_prev: Fixed,
+    turns: Fixed,
+    dt: Fixed,
+    v_max: Fixed,
+) -> Fixed {
     if dt <= ZERO {
         return ZERO;
     }
@@ -1498,7 +1610,13 @@ pub fn faraday_emf(flux_now: Fixed, flux_prev: Fixed, turns: Fixed, dt: Fixed, v
 /// Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
 /// M = k*sqrt(L1*L2) formed by the caller. The transformer and choke, and the closing half of the
 /// R-COMMS inductance gap.
-pub fn inductive_emf(inductance: Fixed, current_now: Fixed, current_prev: Fixed, dt: Fixed, v_max: Fixed) -> Fixed {
+pub fn inductive_emf(
+    inductance: Fixed,
+    current_now: Fixed,
+    current_prev: Fixed,
+    dt: Fixed,
+    v_max: Fixed,
+) -> Fixed {
     if dt <= ZERO {
         return ZERO;
     }
@@ -1506,9 +1624,9 @@ pub fn inductive_emf(inductance: Fixed, current_now: Fixed, current_prev: Fixed,
     let rate = di
         .checked_div(dt)
         .unwrap_or(if di < ZERO { Fixed::MIN } else { Fixed::MAX });
-    let prod = rate
-        .checked_mul(inductance)
-        .unwrap_or(if rate < ZERO { Fixed::MIN } else { Fixed::MAX });
+    let prod =
+        rate.checked_mul(inductance)
+            .unwrap_or(if rate < ZERO { Fixed::MIN } else { Fixed::MAX });
     sat_sub(ZERO, prod).clamp(ZERO - v_max, v_max)
 }
 

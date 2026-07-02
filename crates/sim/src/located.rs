@@ -184,7 +184,11 @@ mod tests {
         let a = Coord3::ground(0, 0);
         let d = Coord3::ground(9, 9);
         idx.place(b(1), a);
-        assert_eq!(idx.place(b(1), d), Some(a), "returns the previous coordinate");
+        assert_eq!(
+            idx.place(b(1), d),
+            Some(a),
+            "returns the previous coordinate"
+        );
         assert_eq!(idx.occupants(a), vec![], "left the old tile");
         assert_eq!(idx.occupants(d), vec![b(1)], "arrived at the new tile");
         assert_eq!(idx.coord_of(b(1)), Some(d));
@@ -199,7 +203,11 @@ mod tests {
         assert!(idx.occupants(c).is_empty());
         assert_eq!(idx.coord_of(b(1)), None);
         assert!(idx.is_empty());
-        assert_eq!(idx.remove(b(1)), None, "removing an absent occupant is None");
+        assert_eq!(
+            idx.remove(b(1)),
+            None,
+            "removing an absent occupant is None"
+        );
     }
 
     #[test]
@@ -210,7 +218,11 @@ mod tests {
         let organism = OccupantId::organism(StableId(7));
         idx.place(being, c);
         idx.place(organism, c);
-        assert_eq!(idx.occupants(c).len(), 2, "same raw id, different kind, both present");
+        assert_eq!(
+            idx.occupants(c).len(),
+            2,
+            "same raw id, different kind, both present"
+        );
     }
 
     #[test]
@@ -221,7 +233,11 @@ mod tests {
         idx.place(b(2), Coord3::ground(CHUNK - 1, CHUNK - 1));
         idx.place(b(3), Coord3::ground(CHUNK, 0));
         let c0 = idx.occupants_in_chunk(ChunkCoord { cx: 0, cy: 0 });
-        assert_eq!(c0, vec![b(1), b(2)], "the block gathers its two, canonically");
+        assert_eq!(
+            c0,
+            vec![b(1), b(2)],
+            "the block gathers its two, canonically"
+        );
         let c1 = idx.occupants_in_chunk(ChunkCoord { cx: 1, cy: 0 });
         assert_eq!(c1, vec![b(3)]);
     }

@@ -143,7 +143,9 @@ pub fn random_controller_genome(
     seed: u64,
     id: u64,
 ) -> Genome {
-    let rng = DrawKey::entity(id, 0, Phase::CONTROLLER).slot(SLOT_INIT).rng(seed);
+    let rng = DrawKey::entity(id, 0, Phase::CONTROLLER)
+        .slot(SLOT_INIT)
+        .rng(seed);
     let spread = params.init_spread;
     let alleles = (0..layout.weight_count())
         .map(|k| {
@@ -189,7 +191,8 @@ pub fn mutate(
                     .rng(seed)
                     .unit_fixed(0);
                 // u in [0, ONE) -> [-step, step).
-                let delta = u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
+                let delta =
+                    u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
                 allele.additive += delta;
             }
         }
@@ -264,7 +267,13 @@ pub fn episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
     let homeo = Homeostasis::new(&reg, Fixed::ONE);
-    let mut walker = Walker::new(StableId(1), Coord3::ground(0, 0), scoring_body(), homeo, controller.clone());
+    let mut walker = Walker::new(
+        StableId(1),
+        Coord3::ground(0, 0),
+        scoring_body(),
+        homeo,
+        controller.clone(),
+    );
     let mut field = ResourceField::new();
     // A water region to the east; the being is shown it (the scorer tests foraging, not search).
     for y in -2..=2 {
@@ -278,7 +287,9 @@ pub fn episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
     let mut ws = vec![walker];
     let mut survived = 0u32;
     for t in 0..ticks {
-        locomotion::step(&mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64);
+        locomotion::step(
+            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+        );
         if !ws[0].alive {
             break;
         }
@@ -320,12 +331,20 @@ pub fn full_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> 
             field.add(WATER, Coord3::ground(x, y));
         }
     }
-    let walker = Walker::new(StableId(1), Coord3::ground(0, 0), scoring_body(), homeo, controller.clone());
+    let walker = Walker::new(
+        StableId(1),
+        Coord3::ground(0, 0),
+        scoring_body(),
+        homeo,
+        controller.clone(),
+    );
     let p = LocomotionParams::dev_default();
     let mut ws = vec![walker];
     let mut survived = 0u32;
     for t in 0..ticks {
-        locomotion::step(&mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64);
+        locomotion::step(
+            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+        );
         if !ws[0].alive {
             break;
         }
@@ -391,7 +410,10 @@ pub fn evolve(layout: &ControllerLayout, params: &EvolveParams, seed: u64) -> Ev
         // index (deterministic).
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         let keep = (pop.len() / 2).max(1);
-        let survivors: Vec<Genome> = scored[..keep].iter().map(|&(_, i)| pop[i].clone()).collect();
+        let survivors: Vec<Genome> = scored[..keep]
+            .iter()
+            .map(|&(_, i)| pop[i].clone())
+            .collect();
 
         // Next generation: the survivors (elitism), then a bounded mutant of each until the
         // population is refilled.
@@ -514,8 +536,14 @@ mod tests {
         let blank = Controller::zeros(&l);
         let fit_good = episode_survival(&good, 200, 0xF00D);
         let fit_blank = episode_survival(&blank, 200, 0xF00D);
-        assert!(fit_good > fit_blank, "the forager outlives the blank controller ({fit_good} vs {fit_blank})");
-        assert!(fit_good >= 190, "the competent forager survives almost to the cap ({fit_good})");
+        assert!(
+            fit_good > fit_blank,
+            "the forager outlives the blank controller ({fit_good} vs {fit_blank})"
+        );
+        assert!(
+            fit_good >= 190,
+            "the competent forager survives almost to the cap ({fit_good})"
+        );
     }
 
     #[test]
@@ -545,7 +573,10 @@ mod tests {
             last.to_f64_lossy()
         );
         let best_last = *report.best_fitness.last().unwrap();
-        assert!(best_last >= 190, "an evolved lineage survives almost to the cap ({best_last})");
+        assert!(
+            best_last >= 190,
+            "an evolved lineage survives almost to the cap ({best_last})"
+        );
     }
 
     #[test]
@@ -563,7 +594,10 @@ mod tests {
             .iter()
             .map(|g| {
                 let c = Controller::express(&genes, g, &l);
-                (g.clone(), episode_survival(&c, params.episode_ticks, 0x5EED_1234 ^ 0xE0))
+                (
+                    g.clone(),
+                    episode_survival(&c, params.episode_ticks, 0x5EED_1234 ^ 0xE0),
+                )
             })
             .collect();
         let best = scored.iter().max_by_key(|(_, f)| *f).unwrap();
@@ -578,7 +612,12 @@ mod tests {
         dirs.insert(WATER, (Fixed::ONE, Fixed::ZERO));
         let input = l.build_input(&homeo, &BTreeSet::new(), &dirs);
         let (out, _) = controller.evaluate(&input, &[]);
-        let d = l.decide(&out, &crate::homeostasis::AffordanceRegistry::dev_default().afforded(&scoring_body())).unwrap();
+        let d = l
+            .decide(
+                &out,
+                &crate::homeostasis::AffordanceRegistry::dev_default().afforded(&scoring_body()),
+            )
+            .unwrap();
         // Emergent water-seeking: it moves toward the known water (a positive eastward heading).
         if let Some((hx, _)) = d.heading {
             assert!(
@@ -600,14 +639,22 @@ mod tests {
         let blank = Controller::zeros(&l);
         let sel_strength = Fixed::from_ratio(1, 5);
         let coeff = homeostatic_coefficient(&good, &blank, 200, sel_strength, 0xC0FFEE);
-        assert!(coeff > Fixed::ZERO, "surviving longer is a positive selection coefficient");
+        assert!(
+            coeff > Fixed::ZERO,
+            "surviving longer is a positive selection coefficient"
+        );
         let mut pool = controller_pool(&l, 200, Fixed::from_ratio(1, 2));
         let before = pool.freq(0).unwrap();
         for _ in 0..20 {
             pool.select(&vec![coeff; pool.loci()]);
         }
         let after = pool.freq(0).unwrap();
-        assert!(after > before, "the adaptive controller allele rises in the pool ({} -> {})", before.to_f64_lossy(), after.to_f64_lossy());
+        assert!(
+            after > before,
+            "the adaptive controller allele rises in the pool ({} -> {})",
+            before.to_f64_lossy(),
+            after.to_f64_lossy()
+        );
     }
 
     #[test]
@@ -621,13 +668,23 @@ mod tests {
             .iter()
             .map(|g| {
                 let c = Controller::express(&genes, g, &l);
-                (g.clone(), episode_survival(&c, params.episode_ticks, 0x1111 ^ 0xE0))
+                (
+                    g.clone(),
+                    episode_survival(&c, params.episode_ticks, 0x1111 ^ 0xE0),
+                )
             })
             .collect();
         let grad_a = selection_gradient(&scored, &l, &genes);
         let grad_b = selection_gradient(&scored, &l, &genes);
-        assert_eq!(grad_a, grad_b, "the gradient is a deterministic function of the population");
-        assert_eq!(grad_a.len(), l.weight_count(), "one gradient entry per controller weight");
+        assert_eq!(
+            grad_a, grad_b,
+            "the gradient is a deterministic function of the population"
+        );
+        assert_eq!(
+            grad_a.len(),
+            l.weight_count(),
+            "one gradient entry per controller weight"
+        );
     }
 
     #[test]

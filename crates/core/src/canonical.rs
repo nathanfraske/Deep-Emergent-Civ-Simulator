@@ -222,7 +222,10 @@ mod tests {
         let b = vec![(1u32, "a"), (2, "b"), (3, "c")];
         let sa = canonical_sorted(a, |&(k, _)| k);
         let sb = canonical_sorted(b, |&(k, _)| k);
-        assert_eq!(sa, sb, "the same set materialises in the same canonical order");
+        assert_eq!(
+            sa, sb,
+            "the same set materialises in the same canonical order"
+        );
         assert_eq!(sa, vec![(1, "a"), (2, "b"), (3, "c")]);
     }
 
@@ -238,14 +241,20 @@ mod tests {
 
         let r1 = canonical_reduce(shuffled.clone(), |&(k, _)| k, 0i64, fold);
         let r2 = canonical_reduce(other_order, |&(k, _)| k, 0i64, fold);
-        assert_eq!(r1, r2, "the combine is a function of the set, not the arrival order");
+        assert_eq!(
+            r1, r2,
+            "the combine is a function of the set, not the arrival order"
+        );
 
         // It equals the fold over the key-sorted sequence [2, 5, 7]: ((0*3+2)*3+5)*3+7 = 40.
         assert_eq!(r1, 40);
         // And it differs from a naive fold over the shuffled arrival order [7, 2, 5]: 74, which is
         // exactly the nondeterminism the helper removes.
         let naive = shuffled.into_iter().fold(0i64, fold);
-        assert_ne!(naive, r1, "a naive fold over arrival order would differ (the bug being pinned)");
+        assert_ne!(
+            naive, r1,
+            "a naive fold over arrival order would differ (the bug being pinned)"
+        );
         assert_eq!(naive, 74);
     }
 

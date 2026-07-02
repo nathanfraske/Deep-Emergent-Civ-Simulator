@@ -92,7 +92,9 @@ impl Stock {
         }
         // amount is held in [0, capacity], so the quotient is in [0, ONE] and the divide
         // (guarded against a zero denominator above) cannot overflow.
-        self.amount.checked_div(self.capacity).unwrap_or(Fixed::ZERO)
+        self.amount
+            .checked_div(self.capacity)
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// The logistic regeneration increment for one step, `r * amount * (1 - amount/capacity)`,
@@ -116,7 +118,9 @@ impl Stock {
             Some(v) => v,
             None => return Fixed::ZERO,
         };
-        self.regen_rate.checked_mul(occupied_growth).unwrap_or(Fixed::ZERO)
+        self.regen_rate
+            .checked_mul(occupied_growth)
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// Advance one step: regenerate toward capacity, then apply `draw` (a negative draw is
@@ -127,7 +131,11 @@ impl Stock {
             .amount
             .saturating_add(self.regen_increment())
             .clamp(Fixed::ZERO, self.capacity);
-        let drawn = if draw < Fixed::ZERO { Fixed::ZERO } else { draw };
+        let drawn = if draw < Fixed::ZERO {
+            Fixed::ZERO
+        } else {
+            draw
+        };
         // after_regen and drawn are both in [0, capacity], so the difference cannot overflow.
         self.amount = (after_regen - drawn).clamp(Fixed::ZERO, self.capacity);
     }
@@ -152,7 +160,10 @@ impl Stock {
     /// remainder is overflow that the compartment cannot hold).
     pub fn deposit(&mut self, add: Fixed) -> Fixed {
         let before = self.amount;
-        self.amount = self.amount.saturating_add(add.clamp(Fixed::ZERO, Fixed::MAX)).clamp(Fixed::ZERO, self.capacity);
+        self.amount = self
+            .amount
+            .saturating_add(add.clamp(Fixed::ZERO, Fixed::MAX))
+            .clamp(Fixed::ZERO, self.capacity);
         self.amount - before
     }
 }
@@ -215,7 +226,10 @@ mod tests {
             last = s.amount();
         }
         // Converges to capacity within a small tolerance.
-        assert!(s.capacity() - s.amount() < f(1, 100), "settles at carrying capacity");
+        assert!(
+            s.capacity() - s.amount() < f(1, 100),
+            "settles at carrying capacity"
+        );
     }
 
     #[test]
@@ -249,7 +263,10 @@ mod tests {
             s.step(f(2, 100));
         }
         assert!(!s.is_collapsed(), "a sustainable draw does not collapse");
-        assert!(s.amount() < s.capacity(), "a standing draw holds it below capacity");
+        assert!(
+            s.amount() < s.capacity(),
+            "a standing draw holds it below capacity"
+        );
     }
 
     #[test]
@@ -271,11 +288,18 @@ mod tests {
         let mut prey = Stock::new(Fixed::ONE, Fixed::ONE, f(3, 10));
         let mut pred = Stock::new(f(1, 10), Fixed::ONE, f(1, 10));
         let r = flow(&mut prey, &mut pred, f(3, 10), f(1, 10));
-        assert_eq!(r.moved, f(3, 10), "the requested draw was available and removed");
+        assert_eq!(
+            r.moved,
+            f(3, 10),
+            "the requested draw was available and removed"
+        );
         assert_eq!(r.moved, r.delivered + r.lost, "every unit is accounted for");
         // A tenth efficiency delivers a tenth of what moved.
         assert!(approx(r.delivered, f(3, 100)));
-        assert!(approx(prey.amount(), f(7, 10)), "the prey lost exactly what moved");
+        assert!(
+            approx(prey.amount(), f(7, 10)),
+            "the prey lost exactly what moved"
+        );
     }
 
     #[test]
@@ -289,21 +313,36 @@ mod tests {
 
     #[test]
     fn occupancy_normalises_amount_over_capacity() {
-        assert_eq!(Stock::new(Fixed::ZERO, Fixed::ONE, Fixed::ZERO).occupancy(), Fixed::ZERO);
-        assert_eq!(Stock::new(Fixed::ONE, Fixed::ONE, Fixed::ZERO).occupancy(), Fixed::ONE);
-        assert!(approx(Stock::new(f(1, 2), Fixed::ONE, Fixed::ZERO).occupancy(), f(1, 2)));
+        assert_eq!(
+            Stock::new(Fixed::ZERO, Fixed::ONE, Fixed::ZERO).occupancy(),
+            Fixed::ZERO
+        );
+        assert_eq!(
+            Stock::new(Fixed::ONE, Fixed::ONE, Fixed::ZERO).occupancy(),
+            Fixed::ONE
+        );
+        assert!(approx(
+            Stock::new(f(1, 2), Fixed::ONE, Fixed::ZERO).occupancy(),
+            f(1, 2)
+        ));
         // A wide capacity still normalises into [0, ONE].
         let s = Stock::new(f(30, 1), Fixed::from_int(100), Fixed::ZERO);
         assert!(approx(s.occupancy(), f(3, 10)), "30 of 100 reads as 0.3");
         // A zero capacity reads as empty, not a divide by zero.
-        assert_eq!(Stock::new(Fixed::ZERO, Fixed::ZERO, Fixed::ZERO).occupancy(), Fixed::ZERO);
+        assert_eq!(
+            Stock::new(Fixed::ZERO, Fixed::ZERO, Fixed::ZERO).occupancy(),
+            Fixed::ZERO
+        );
     }
 
     #[test]
     fn deposit_is_capped_at_capacity() {
         let mut s = Stock::new(f(9, 10), Fixed::ONE, Fixed::ZERO);
         let stored = s.deposit(f(5, 10));
-        assert!(approx(stored, f(1, 10)), "only the room to capacity is stored");
+        assert!(
+            approx(stored, f(1, 10)),
+            "only the room to capacity is stored"
+        );
         assert_eq!(s.amount(), Fixed::ONE);
     }
 }

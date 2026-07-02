@@ -132,7 +132,10 @@ fn body(mass: (i64, i64), activity: (i64, i64)) -> BodyPlan {
         encephalization: Fixed::from_ratio(1, 2),
         diet_breadth: Fixed::from_ratio(1, 2),
         weapons: vec![],
-        covering: Part { kind: 0, development: Fixed::from_ratio(1, 2) },
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
         senses: vec![],
         locomotion: vec![1], // has legs, so it can walk (but not swim: no SWIM mode)
         temperament: Temperament {
@@ -176,7 +179,10 @@ fn frame(map: &TileMap, biomes: &BiomeSet, walkers: &[Walker], names: &[char]) {
     for (i, w) in walkers.iter().enumerate() {
         let c = w.coord();
         let ch = names.get(i).copied().unwrap_or('?');
-        at.insert((c.x, c.y), if w.alive { ch } else { ch.to_ascii_lowercase() });
+        at.insert(
+            (c.x, c.y),
+            if w.alive { ch } else { ch.to_ascii_lowercase() },
+        );
     }
     for y in 0..topo.height {
         let mut line = String::with_capacity(topo.width as usize);
@@ -203,9 +209,17 @@ fn main() {
     let seed = 0x5A11_u64;
     let (w, h) = (56, 22);
     let biomes = BiomeSet::dev_default();
-    let map = TileMap::generate(seed, FlatBounded::new(w, h, 1), &biomes, &WorldgenParams::dev_default());
+    let map = TileMap::generate(
+        seed,
+        FlatBounded::new(w, h, 1),
+        &biomes,
+        &WorldgenParams::dev_default(),
+    );
     let field = resources(&map, &biomes);
-    let terrain = MapTerrain { map: &map, biomes: &biomes };
+    let terrain = MapTerrain {
+        map: &map,
+        biomes: &biomes,
+    };
     let reg = water_reg();
     let afford = AffordanceRegistry::dev_default();
     let layout = ControllerLayout::new(&reg, &afford, 0);
@@ -217,10 +231,34 @@ fn main() {
     let names = ['A', 'B', 'C', 'D'];
     let full = || Homeostasis::new(&reg, Fixed::ONE);
     let mut walkers = vec![
-        Walker::new(StableId(1), home, body((3, 4), (3, 4)), full(), forager(&layout)),
-        Walker::new(StableId(2), home, body((1, 4), (1, 2)), full(), forager(&layout)),
-        Walker::new(StableId(3), home, body((9, 10), (9, 10)), full(), forager(&layout)),
-        Walker::new(StableId(4), home, body((1, 2), (2, 5)), full(), Controller::zeros(&layout)),
+        Walker::new(
+            StableId(1),
+            home,
+            body((3, 4), (3, 4)),
+            full(),
+            forager(&layout),
+        ),
+        Walker::new(
+            StableId(2),
+            home,
+            body((1, 4), (1, 2)),
+            full(),
+            forager(&layout),
+        ),
+        Walker::new(
+            StableId(3),
+            home,
+            body((9, 10), (9, 10)),
+            full(),
+            forager(&layout),
+        ),
+        Walker::new(
+            StableId(4),
+            home,
+            body((1, 2), (2, 5)),
+            full(),
+            Controller::zeros(&layout),
+        ),
     ];
 
     println!(
@@ -252,11 +290,26 @@ fn main() {
             println!();
         }
         if tick < total {
-            locomotion::step(&mut walkers, &reg, &layout, &afford, &terrain, &field, &p, seed, tick as u64);
+            locomotion::step(
+                &mut walkers,
+                &reg,
+                &layout,
+                &afford,
+                &terrain,
+                &field,
+                &p,
+                seed,
+                tick as u64,
+            );
         }
     }
 
-    let survivors: Vec<char> = walkers.iter().enumerate().filter(|(_, w)| w.alive).map(|(i, _)| names[i]).collect();
+    let survivors: Vec<char> = walkers
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.alive)
+        .map(|(i, _)| names[i])
+        .collect();
     println!("Survivors: {survivors:?}. The foragers found water and drank; the blank one, wanting nothing, did not.");
     let fingerprint: Vec<(i32, i32)> = walkers.iter().map(|w| (w.coord().x, w.coord().y)).collect();
     println!("Determinism: the band's final tiles are {fingerprint:?}, the same on every run.");

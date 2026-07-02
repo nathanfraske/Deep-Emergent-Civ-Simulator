@@ -1350,7 +1350,10 @@ mod tests {
         // daughter carries the recovery size.
         let d = parent.found(0xF00D, 42, 3, 5, 200);
         assert_eq!(d.loci(), parent.loci());
-        assert_eq!(d.effective_size, 200, "the daughter recovers to the recovery size");
+        assert_eq!(
+            d.effective_size, 200,
+            "the daughter recovers to the recovery size"
+        );
         let moved = (0..8).any(|i| d.freq(i) != parent.freq(i));
         assert!(moved, "founder drift at a small size shifts some frequency");
         // Deterministic: the same fork replays identically.

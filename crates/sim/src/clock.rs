@@ -336,8 +336,14 @@ mod tests {
             "chunked ({sum}) and single-shot ({one}) agree within one tick of float rounding"
         );
         let expected = (rate * total_time) as i64;
-        assert!((sum - expected).abs() <= 1, "chunked total tracks rate*time");
-        assert!((one - expected).abs() <= 1, "single-shot total tracks rate*time");
+        assert!(
+            (sum - expected).abs() <= 1,
+            "chunked total tracks rate*time"
+        );
+        assert!(
+            (one - expected).abs() <= 1,
+            "single-shot total tracks rate*time"
+        );
     }
 
     #[test]
@@ -367,7 +373,10 @@ mod tests {
         // rest is surfaced as LOD debt rather than run or dropped.
         let ran = d.advance(1.0);
         assert_eq!(ran, 1000, "the cap bounds the frame");
-        assert!(d.lod_debt() > 0, "the surplus is recorded as temporal-LOD debt");
+        assert!(
+            d.lod_debt() > 0,
+            "the surplus is recorded as temporal-LOD debt"
+        );
         assert_eq!(d.lod_debt(), 1_000_000_000 - 1000);
     }
 
@@ -383,9 +392,15 @@ mod tests {
     #[test]
     fn rate_is_clamped_to_the_view_bounds() {
         let mut d = PlaybackDriver::new(0.0);
-        assert!(d.rate() >= MIN_RATE, "zero is clamped up to the floor, not left at zero");
+        assert!(
+            d.rate() >= MIN_RATE,
+            "zero is clamped up to the floor, not left at zero"
+        );
         d.set_rate(1.0e30);
-        assert!(d.rate() <= MAX_RATE, "an enormous rate is clamped to the ceiling");
+        assert!(
+            d.rate() <= MAX_RATE,
+            "an enormous rate is clamped to the ceiling"
+        );
         d.scale_rate(0.0); // ignored (non-positive)
         assert!(d.rate() <= MAX_RATE);
     }
@@ -397,7 +412,11 @@ mod tests {
         // and playback speed 1.0 reads one in-world second per real second; the life cadence is one
         // in-world year; a radiation generation reads as ten thousand years.
         assert_eq!(SimClock::dev_default().world_seconds_per_tick, 1.0);
-        assert_eq!(LIFE_CADENCE_TICKS, 365 * 24 * 3600, "one in-world year at a one-second tick");
+        assert_eq!(
+            LIFE_CADENCE_TICKS,
+            365 * 24 * 3600,
+            "one in-world year at a one-second tick"
+        );
         assert_eq!(YEARS_PER_GENERATION, 10_000);
         // At the set base tick, the life cadence is exactly one year of world-time.
         let c = SimClock::dev_default();

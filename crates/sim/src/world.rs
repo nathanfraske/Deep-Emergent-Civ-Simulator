@@ -1762,12 +1762,7 @@ impl World {
                                     if i % workers == w {
                                         for (ord, pm) in turn(s).into_iter().enumerate() {
                                             part.push((
-                                                CommandKey::new(
-                                                    clock,
-                                                    s,
-                                                    CMD_DIALOGUE,
-                                                    ord as u64,
-                                                ),
+                                                CommandKey::new(clock, s, CMD_DIALOGUE, ord as u64),
                                                 pm,
                                             ));
                                         }

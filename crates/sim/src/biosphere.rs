@@ -100,7 +100,11 @@ impl Niche {
     /// quotient is in `[0, 1)` and no product precedes the clamp, and the minimum-fold is
     /// order-independent, matching the floor's `net_nutrition` discipline.
     pub fn suitability(&self, env: &EnvProfile) -> Fixed {
-        let n = self.optimum.len().min(self.breadth.len()).min(env.fields.len());
+        let n = self
+            .optimum
+            .len()
+            .min(self.breadth.len())
+            .min(env.fields.len());
         let mut worst = Fixed::ONE;
         for a in 0..n {
             let d = (env.fields[a] - self.optimum[a]).abs();
@@ -136,7 +140,8 @@ impl Niche {
         for i in 0..n {
             acc += (self.optimum[i] - other.optimum[i]).abs();
         }
-        acc.checked_div(Fixed::from_int(n as i32)).unwrap_or(Fixed::ZERO)
+        acc.checked_div(Fixed::from_int(n as i32))
+            .unwrap_or(Fixed::ZERO)
     }
 }
 
@@ -165,12 +170,18 @@ pub struct Species {
 /// carnivorous plant, still a plant. A consumer (no abiotic source, a heterotroph) is an
 /// animal, labelled by its diet: a herbivore eats only producers, a carnivore eats animals, an
 /// omnivore eats both. Prey roles are resolved recursively in the same set.
-pub fn trophic_label(species: &std::collections::BTreeMap<SpeciesId, Species>, id: SpeciesId) -> &'static str {
+pub fn trophic_label(
+    species: &std::collections::BTreeMap<SpeciesId, Species>,
+    id: SpeciesId,
+) -> &'static str {
     let sp = match species.get(&id) {
         Some(s) => s,
         None => return "unknown",
     };
-    let is_producer = sp.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_)));
+    let is_producer = sp
+        .draws_on
+        .iter()
+        .any(|s| matches!(s, SourceRef::Abiotic(_)));
     let mut eats_species = false;
     let mut eats_animal = false;
     let mut eats_plant = false;
@@ -179,10 +190,18 @@ pub fn trophic_label(species: &std::collections::BTreeMap<SpeciesId, Species>, i
             eats_species = true;
             // A prey drawing on abiotic is a plant; a prey drawing on a species is an animal.
             if let Some(prey) = species.get(dep) {
-                if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_))) {
+                if prey
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)))
+                {
                     eats_plant = true;
                 }
-                if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Species(_))) {
+                if prey
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Species(_)))
+                {
                     eats_animal = true;
                 }
             }
@@ -398,10 +417,16 @@ pub fn generate(
     }
 
     // Confirm closure over the whole accepted set (the least-fixed-point invariant).
-    let all: BTreeMap<SpeciesId, Species> =
-        lin.ids().map(|id| (id, lin.get(id).unwrap().clone())).collect();
+    let all: BTreeMap<SpeciesId, Species> = lin
+        .ids()
+        .map(|id| (id, lin.get(id).unwrap().clone()))
+        .collect();
     let live = grounded(&region.abiotic, &all);
-    debug_assert_eq!(live.len(), all.len(), "the generated web is closed by construction");
+    debug_assert_eq!(
+        live.len(),
+        all.len(),
+        "the generated web is closed by construction"
+    );
 
     Biosphere {
         species: lin,
@@ -537,8 +562,11 @@ mod tests {
         let p = GeneratorParams::dev_default();
         let b = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
         assert!(!b.is_empty(), "the region is seeded");
-        let all: BTreeMap<SpeciesId, Species> =
-            b.species.ids().map(|id| (id, b.species.get(id).unwrap().clone())).collect();
+        let all: BTreeMap<SpeciesId, Species> = b
+            .species
+            .ids()
+            .map(|id| (id, b.species.get(id).unwrap().clone()))
+            .collect();
         let live = grounded(&region().abiotic, &all);
         assert_eq!(live.len(), all.len(), "every generated species is grounded");
         // Producers draw on abiotic, consumers on a lower species.
@@ -569,7 +597,11 @@ mod tests {
         let b = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
         assert_eq!(hash(&a), hash(&b), "same seed and region, same biosphere");
         let c = generate(0x1234, &region(), 7, &p, &reg(), WorldProfile::grounded());
-        assert_ne!(hash(&a), hash(&c), "a different seed, a different biosphere");
+        assert_ne!(
+            hash(&a),
+            hash(&c),
+            "a different seed, a different biosphere"
+        );
     }
 
     #[test]
@@ -609,17 +641,43 @@ mod tests {
         );
         sp.insert(
             SpeciesId(0),
-            Species { layer: 0, niche: Niche { optimum: vec![], breadth: vec![] }, body_plan: bp.clone(), draws_on: vec![SourceRef::Abiotic(0)], pool: pool.clone(), extinct: false },
+            Species {
+                layer: 0,
+                niche: Niche {
+                    optimum: vec![],
+                    breadth: vec![],
+                },
+                body_plan: bp.clone(),
+                draws_on: vec![SourceRef::Abiotic(0)],
+                pool: pool.clone(),
+                extinct: false,
+            },
         );
         sp.insert(
             SpeciesId(1),
-            Species { layer: 1, niche: Niche { optimum: vec![], breadth: vec![] }, body_plan: bp, draws_on: vec![SourceRef::Species(SpeciesId(99))], pool, extinct: false },
+            Species {
+                layer: 1,
+                niche: Niche {
+                    optimum: vec![],
+                    breadth: vec![],
+                },
+                body_plan: bp,
+                draws_on: vec![SourceRef::Species(SpeciesId(99))],
+                pool,
+                extinct: false,
+            },
         );
         let mut abiotic = BTreeSet::new();
         abiotic.insert(0u16);
         let live = grounded(&abiotic, &sp);
-        assert!(live.contains(&SpeciesId(0)), "the producer grounds on abiotic");
-        assert!(!live.contains(&SpeciesId(1)), "the consumer with an absent prey is an orphan");
+        assert!(
+            live.contains(&SpeciesId(0)),
+            "the producer grounds on abiotic"
+        );
+        assert!(
+            !live.contains(&SpeciesId(1)),
+            "the consumer with an absent prey is an orphan"
+        );
 
         // The label is derived, not stored: 0 is a plant, 1 is a heterotroph.
         let mut full: BTreeMap<SpeciesId, Species> = sp.clone();
@@ -630,14 +688,21 @@ mod tests {
             SpeciesId(2),
             Species {
                 layer: 0,
-                niche: Niche { optimum: vec![], breadth: vec![] },
+                niche: Niche {
+                    optimum: vec![],
+                    breadth: vec![],
+                },
                 body_plan: full.get(&SpeciesId(0)).unwrap().body_plan.clone(),
                 draws_on: vec![SourceRef::Abiotic(0), SourceRef::Species(SpeciesId(0))],
                 pool: full.get(&SpeciesId(0)).unwrap().pool.clone(),
                 extinct: false,
             },
         );
-        assert_eq!(trophic_label(&full, SpeciesId(2)), "carnivorous plant", "a plant that eats prey stays a plant");
+        assert_eq!(
+            trophic_label(&full, SpeciesId(2)),
+            "carnivorous plant",
+            "a plant that eats prey stays a plant"
+        );
         // A pure heterotroph that eats the plant is a herbivore (an animal).
         assert_eq!(trophic_label(&full, SpeciesId(1)), "herbivore");
     }

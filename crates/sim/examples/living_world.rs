@@ -70,7 +70,10 @@ fn main() {
     let biomes = BiomeSet::dev_default();
     let tree = QuadTree::build(&world.map);
     println!("== the world (colour overview) ==");
-    print!("{}", whole_map_frame_color(&tree, &biomes, tree.depth().min(5)));
+    print!(
+        "{}",
+        whole_map_frame_color(&tree, &biomes, tree.depth().min(5))
+    );
     println!();
 
     // Zoom to one region: its surviving species and the organisms on its tiles.
@@ -102,10 +105,18 @@ fn main() {
             }
         }
         let occupied: Vec<_> = world.occupants.occupied().take(6).collect();
-        println!("\n  organisms placed on the map (first {} tiles):", occupied.len());
+        println!(
+            "\n  organisms placed on the map (first {} tiles):",
+            occupied.len()
+        );
         for coord in occupied {
             let occ = world.occupants.occupants(coord);
-            println!("    tile ({}, {}): {} organism(s)", coord.x, coord.y, occ.len());
+            println!(
+                "    tile ({}, {}): {} organism(s)",
+                coord.x,
+                coord.y,
+                occ.len()
+            );
         }
     }
 
@@ -126,7 +137,10 @@ fn main() {
         tolerances: vec![Some(Fixed::from_ratio(2, 100))],
         hill: vec![2],
     };
-    for (who, phys) in [("a tolerant eater", &tolerant), ("a sensitive eater", &sensitive)] {
+    for (who, phys) in [
+        ("a tolerant eater", &tolerant),
+        ("a sensitive eater", &sensitive),
+    ] {
         let e = assess(&berry, phys, &caps);
         let v = verdict(&e, Fixed::from_ratio(1, 10), Fixed::from_ratio(1, 2));
         println!(

@@ -34,7 +34,11 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     // 38 mechanical + 15 fluids axes; 19 + 15 laws; 2 + 2 substances.
-    assert_eq!(reg.axis_count(), 53, "the mechanical and fluids axes together");
+    assert_eq!(
+        reg.axis_count(),
+        53,
+        "the mechanical and fluids axes together"
+    );
     assert_eq!(reg.law_count(), 34, "the wave-1 and wave-2 fluid laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
@@ -49,7 +53,10 @@ fn a_standalone_fluids_floor_fails_because_it_reads_the_mechanical_axes() {
     // The fluids floor is not self-contained by design: loading it alone must error on the missing
     // mechanical axes rather than silently skip the dangling reference.
     let r = PhysicsRegistry::load(data_path("fluids_floor.toml"));
-    assert!(r.is_err(), "the fluids floor alone has dangling mech.* references");
+    assert!(
+        r.is_err(),
+        "the fluids floor alone has dangling mech.* references"
+    );
 }
 
 #[test]
@@ -57,10 +64,17 @@ fn the_speed_of_sound_is_physical_for_air_and_water() {
     let c_max = Fixed::from_int(100000);
     // Air: K ~0.142 MPa, rho 1.225 -> ~340 m/s.
     let air = laws::speed_of_sound(f(142, 1000), f(1225, 1000), c_max).to_f64_lossy();
-    assert!((300.0..400.0).contains(&air), "air sound speed ~340, got {air}");
+    assert!(
+        (300.0..400.0).contains(&air),
+        "air sound speed ~340, got {air}"
+    );
     // Water: K 2200 MPa, rho 998 -> ~1480 m/s (the megapascal modulus never materialises in Pa).
-    let water = laws::speed_of_sound(Fixed::from_int(2200), Fixed::from_int(998), c_max).to_f64_lossy();
-    assert!((1400.0..1600.0).contains(&water), "water sound speed ~1480, got {water}");
+    let water =
+        laws::speed_of_sound(Fixed::from_int(2200), Fixed::from_int(998), c_max).to_f64_lossy();
+    assert!(
+        (1400.0..1600.0).contains(&water),
+        "water sound speed ~1480, got {water}"
+    );
 }
 
 #[test]
@@ -76,7 +90,14 @@ fn ideal_gas_density_recovers_air_at_one_atmosphere() {
     .to_f64_lossy();
     assert!((1.1..1.35).contains(&rho), "air density ~1.225, got {rho}");
     // Warmer air is lighter.
-    let hot = laws::ideal_gas_density(f(101325, 1000000), Fixed::from_int(313), Fixed::from_int(287), f(8, 100), Fixed::from_int(23000)).to_f64_lossy();
+    let hot = laws::ideal_gas_density(
+        f(101325, 1000000),
+        Fixed::from_int(313),
+        Fixed::from_int(287),
+        f(8, 100),
+        Fixed::from_int(23000),
+    )
+    .to_f64_lossy();
     assert!(hot < rho, "warmer air is less dense");
 }
 
@@ -85,13 +106,23 @@ fn lift_and_drag_scale_with_the_square_of_speed_and_the_coefficient() {
     let f_max = Fixed::from_int(1_000_000_000);
     let rho = f(1225, 1000);
     let area = Fixed::from_int(2);
-    let slow = laws::aerodynamic_lift(Fixed::ONE, rho, area, Fixed::from_int(10), f_max).to_f64_lossy();
-    let fast = laws::aerodynamic_lift(Fixed::ONE, rho, area, Fixed::from_int(20), f_max).to_f64_lossy();
-    assert!(fast > slow * 3.5, "doubling speed roughly quadruples lift ({slow} -> {fast})");
+    let slow =
+        laws::aerodynamic_lift(Fixed::ONE, rho, area, Fixed::from_int(10), f_max).to_f64_lossy();
+    let fast =
+        laws::aerodynamic_lift(Fixed::ONE, rho, area, Fixed::from_int(20), f_max).to_f64_lossy();
+    assert!(
+        fast > slow * 3.5,
+        "doubling speed roughly quadruples lift ({slow} -> {fast})"
+    );
     // A higher lift coefficient gives more lift at the same speed; zero gives none.
-    let more = laws::aerodynamic_lift(Fixed::from_int(2), rho, area, Fixed::from_int(10), f_max).to_f64_lossy();
+    let more = laws::aerodynamic_lift(Fixed::from_int(2), rho, area, Fixed::from_int(10), f_max)
+        .to_f64_lossy();
     assert!(more > slow, "a higher lift coefficient lifts more");
-    assert_eq!(laws::aerodynamic_lift(Fixed::ZERO, rho, area, Fixed::from_int(10), f_max), Fixed::ZERO, "no lift coefficient, no lift");
+    assert_eq!(
+        laws::aerodynamic_lift(Fixed::ZERO, rho, area, Fixed::from_int(10), f_max),
+        Fixed::ZERO,
+        "no lift coefficient, no lift"
+    );
     // Drag shares the family.
     let drag = laws::drag_force(f(47, 100), rho, area, Fixed::from_int(10), f_max).to_f64_lossy();
     assert!(drag > 0.0, "a blunt body has drag");
@@ -105,18 +136,35 @@ fn thermal_buoyancy_lifts_warm_air_and_sinks_cold() {
     let cold = laws::thermal_buoyancy(Fixed::from_int(283), Fixed::from_int(288), g, a_max);
     assert!(warm > Fixed::ZERO, "a warmer parcel rises");
     assert!(cold < Fixed::ZERO, "a colder parcel sinks");
-    assert_eq!(laws::thermal_buoyancy(Fixed::from_int(288), Fixed::from_int(288), g, a_max), Fixed::ZERO, "equal temperature, no buoyancy");
+    assert_eq!(
+        laws::thermal_buoyancy(Fixed::from_int(288), Fixed::from_int(288), g, a_max),
+        Fixed::ZERO,
+        "equal temperature, no buoyancy"
+    );
 }
 
 #[test]
 fn evaporation_rises_with_the_deficit_and_the_wind_and_stops_at_saturation() {
     let e_max = Fixed::from_int(1000);
     let e_s = f(74, 10000); // saturation ~0.0074 MPa
-    let dry = laws::evaporation_rate(f(20, 10000), e_s, Fixed::ZERO, f(1, 100), f(1, 50), e_max).to_f64_lossy();
-    let windy = laws::evaporation_rate(f(20, 10000), e_s, Fixed::from_int(5), f(1, 100), f(1, 50), e_max).to_f64_lossy();
+    let dry = laws::evaporation_rate(f(20, 10000), e_s, Fixed::ZERO, f(1, 100), f(1, 50), e_max)
+        .to_f64_lossy();
+    let windy = laws::evaporation_rate(
+        f(20, 10000),
+        e_s,
+        Fixed::from_int(5),
+        f(1, 100),
+        f(1, 50),
+        e_max,
+    )
+    .to_f64_lossy();
     assert!(windy > dry, "wind speeds evaporation");
     // Saturated air (ambient at saturation) does not evaporate.
-    assert_eq!(laws::evaporation_rate(e_s, e_s, Fixed::from_int(5), f(1, 100), f(1, 50), e_max), Fixed::ZERO, "no deficit, no evaporation");
+    assert_eq!(
+        laws::evaporation_rate(e_s, e_s, Fixed::from_int(5), f(1, 100), f(1, 50), e_max),
+        Fixed::ZERO,
+        "no deficit, no evaporation"
+    );
 }
 
 #[test]
@@ -138,19 +186,43 @@ fn extreme_velocity_routes_to_the_cap_rather_than_panicking() {
     // on abs (i64::MIN negation). The kernels are total, never panicking on an out-of-domain input.
     let p_max = Fixed::from_int(100000);
     let f_max = Fixed::from_int(1_000_000_000);
-    assert_eq!(laws::dynamic_pressure(Fixed::from_int(1), Fixed::MIN, p_max), p_max);
-    assert_eq!(laws::drag_force(Fixed::ONE, Fixed::ONE, Fixed::ONE, Fixed::MIN, f_max), f_max);
-    assert_eq!(laws::reynolds_number(Fixed::ONE, Fixed::MIN, Fixed::ONE, Fixed::ONE, f_max), f_max);
+    assert_eq!(
+        laws::dynamic_pressure(Fixed::from_int(1), Fixed::MIN, p_max),
+        p_max
+    );
+    assert_eq!(
+        laws::drag_force(Fixed::ONE, Fixed::ONE, Fixed::ONE, Fixed::MIN, f_max),
+        f_max
+    );
+    assert_eq!(
+        laws::reynolds_number(Fixed::ONE, Fixed::MIN, Fixed::ONE, Fixed::ONE, f_max),
+        f_max
+    );
 }
 
 #[test]
 fn reynolds_gates_the_regime_and_the_kernels_replay() {
     let re_max = Fixed::from_int(1_000_000_000);
     // Water pipe: rho 998, v 1, L 0.1, mu 1e-3 -> Re ~ 99800 (turbulent).
-    let re = laws::reynolds_number(Fixed::from_int(998), Fixed::ONE, f(1, 10), f(1, 1000), re_max).to_f64_lossy();
+    let re = laws::reynolds_number(
+        Fixed::from_int(998),
+        Fixed::ONE,
+        f(1, 10),
+        f(1, 1000),
+        re_max,
+    )
+    .to_f64_lossy();
     assert!(re > 2300.0, "a fast water pipe is turbulent, Re {re}");
     // Determinism: every kernel is a pure function of its inputs.
-    let a = laws::speed_of_sound(Fixed::from_int(2200), Fixed::from_int(998), Fixed::from_int(100000));
-    let b = laws::speed_of_sound(Fixed::from_int(2200), Fixed::from_int(998), Fixed::from_int(100000));
+    let a = laws::speed_of_sound(
+        Fixed::from_int(2200),
+        Fixed::from_int(998),
+        Fixed::from_int(100000),
+    );
+    let b = laws::speed_of_sound(
+        Fixed::from_int(2200),
+        Fixed::from_int(998),
+        Fixed::from_int(100000),
+    );
     assert_eq!(a, b, "the same inputs replay bit for bit");
 }

@@ -56,7 +56,11 @@ fn push_ansi_cell(s: &mut String, color: Option<Rgb>, glyph: char) {
     use std::fmt::Write as _;
     match color {
         Some(c) => {
-            let fg = if c.luminance() > 140 { (0, 0, 0) } else { (235, 235, 235) };
+            let fg = if c.luminance() > 140 {
+                (0, 0, 0)
+            } else {
+                (235, 235, 235)
+            };
             // \x1b[48;2;r;g;bm sets the background, \x1b[38;2;r;g;bm the foreground.
             let _ = write!(
                 s,
@@ -269,7 +273,10 @@ mod tests {
         let mut prev = 0usize;
         for z in 0..=t.depth() {
             let lines = whole_map_frame(&t, &b, z).lines().count();
-            assert!(lines >= prev, "the overview rows do not shrink as zoom rises");
+            assert!(
+                lines >= prev,
+                "the overview rows do not shrink as zoom rises"
+            );
             prev = lines;
         }
     }
@@ -285,7 +292,11 @@ mod tests {
         let render = m.render_glyphs(&b);
         let frame_rows: Vec<&str> = frame.lines().collect();
         let render_rows: Vec<&str> = render.lines().collect();
-        assert_eq!(frame_rows.len(), 24, "the deepest overview has a row per tile row");
+        assert_eq!(
+            frame_rows.len(),
+            24,
+            "the deepest overview has a row per tile row"
+        );
         for (fr, rr) in frame_rows.iter().zip(render_rows.iter()) {
             let f: String = fr.chars().take(48).collect();
             assert_eq!(f, *rr, "the deepest overview matches the per-tile render");
@@ -299,7 +310,10 @@ mod tests {
         let frame = cam.frame(&t, &b, 20, 10);
         let rows: Vec<&str> = frame.lines().collect();
         assert_eq!(rows.len(), 10, "row count is the requested height");
-        assert!(rows.iter().all(|r| r.chars().count() == 20), "each row is the requested width");
+        assert!(
+            rows.iter().all(|r| r.chars().count() == 20),
+            "each row is the requested width"
+        );
     }
 
     #[test]
@@ -338,16 +352,26 @@ mod tests {
         // Centre far off the world; the viewport should be all spaces, no panic.
         let cam = Camera::new(Coord3::ground(-1000, -1000), 5);
         let frame = cam.frame(&t, &b, 8, 4);
-        assert!(frame.chars().all(|c| c == ' ' || c == '\n'), "off-world draws as space");
+        assert!(
+            frame.chars().all(|c| c == ' ' || c == '\n'),
+            "off-world draws as space"
+        );
     }
 
     #[test]
     fn the_colour_overview_carries_ansi_and_replays() {
         let (t, _m, b) = tree(0xEA27, 48, 24);
         let frame = whole_map_frame_color(&t, &b, 4);
-        assert!(frame.contains("\x1b[48;2;"), "cells set a truecolor background");
+        assert!(
+            frame.contains("\x1b[48;2;"),
+            "cells set a truecolor background"
+        );
         assert!(frame.contains("\x1b[0m"), "cells reset");
-        assert_eq!(frame, whole_map_frame_color(&t, &b, 4), "a colour view is a pure read");
+        assert_eq!(
+            frame,
+            whole_map_frame_color(&t, &b, 4),
+            "a colour view is a pure read"
+        );
         // The same number of rows as the plain overview.
         assert_eq!(
             frame.lines().count(),
@@ -362,7 +386,11 @@ mod tests {
         let bg = crate::terrain::Rgb::new(8, 8, 12);
         let buf = cam.paint(&t, &b, 320, 200, 4, bg);
         assert_eq!(buf.len(), 320 * 200, "one word per pixel");
-        assert_eq!(buf, cam.paint(&t, &b, 320, 200, 4, bg), "painting is a pure read");
+        assert_eq!(
+            buf,
+            cam.paint(&t, &b, 320, 200, 4, bg),
+            "painting is a pure read"
+        );
     }
 
     #[test]
@@ -372,7 +400,10 @@ mod tests {
         // Centre far off the world: every pixel is the background colour.
         let cam = Camera::new(Coord3::ground(-100000, -100000), 5);
         let buf = cam.paint(&t, &b, 64, 64, 4, bg);
-        assert!(buf.iter().all(|&w| w == bg.pack()), "off-world is all background");
+        assert!(
+            buf.iter().all(|&w| w == bg.pack()),
+            "off-world is all background"
+        );
     }
 
     #[test]
@@ -385,12 +416,22 @@ mod tests {
         // The centre pixel's colour must be the colour of the node under the camera centre.
         let level = cam.level(&t);
         let side = t.node_side(level);
-        let want = node_color(&t, &b, level, cam.center.x.div_euclid(side), cam.center.y.div_euclid(side))
-            .map(crate::terrain::Rgb::pack)
-            .unwrap_or(bg.pack());
+        let want = node_color(
+            &t,
+            &b,
+            level,
+            cam.center.x.div_euclid(side),
+            cam.center.y.div_euclid(side),
+        )
+        .map(crate::terrain::Rgb::pack)
+        .unwrap_or(bg.pack());
         // The centre node sits at viewport centre (cols/2, rows/2), i.e. mid-buffer.
         let cx = (w / cell / 2) * cell;
         let cy = (h / cell / 2) * cell;
-        assert_eq!(buf[cy * w + cx], want, "the centre pixel is the centre node colour");
+        assert_eq!(
+            buf[cy * w + cx],
+            want,
+            "the centre pixel is the centre node colour"
+        );
     }
 }

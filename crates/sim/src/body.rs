@@ -106,13 +106,49 @@ impl TissueRegistry {
         TissueRegistry {
             materials: vec![
                 // hide: low hardness, tough (moderate cut energy), low fracture strength.
-                m(HIDE, "hide", Fixed::from_ratio(2, 1), Fixed::from_ratio(10, 1), Fixed::from_ratio(3, 1), Fixed::from_ratio(4, 1), Fixed::from_ratio(50, 1), Fixed::from_ratio(1, 100)),
+                m(
+                    HIDE,
+                    "hide",
+                    Fixed::from_ratio(2, 1),
+                    Fixed::from_ratio(10, 1),
+                    Fixed::from_ratio(3, 1),
+                    Fixed::from_ratio(4, 1),
+                    Fixed::from_ratio(50, 1),
+                    Fixed::from_ratio(1, 100),
+                ),
                 // flesh: soft, easily cut.
-                m(FLESH, "flesh", Fixed::from_ratio(1, 1), Fixed::from_ratio(3, 1), Fixed::from_ratio(1, 1), Fixed::from_ratio(2, 1), Fixed::from_ratio(10, 1), Fixed::from_ratio(2, 100)),
+                m(
+                    FLESH,
+                    "flesh",
+                    Fixed::from_ratio(1, 1),
+                    Fixed::from_ratio(3, 1),
+                    Fixed::from_ratio(1, 1),
+                    Fixed::from_ratio(2, 1),
+                    Fixed::from_ratio(10, 1),
+                    Fixed::from_ratio(2, 100),
+                ),
                 // bone: hard, strong, brittle (fractures rather than cuts).
-                m(BONE, "bone", Fixed::from_ratio(120, 1), Fixed::from_ratio(150, 1), Fixed::from_ratio(8, 1), Fixed::from_ratio(40, 1), Fixed::from_ratio(18000, 1000), Fixed::from_ratio(1, 100)),
+                m(
+                    BONE,
+                    "bone",
+                    Fixed::from_ratio(120, 1),
+                    Fixed::from_ratio(150, 1),
+                    Fixed::from_ratio(8, 1),
+                    Fixed::from_ratio(40, 1),
+                    Fixed::from_ratio(18000, 1000),
+                    Fixed::from_ratio(1, 100),
+                ),
                 // organ: very soft.
-                m(ORGAN, "organ", Fixed::from_ratio(1, 2), Fixed::from_ratio(2, 1), Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 1), Fixed::from_ratio(5, 1), Fixed::from_ratio(2, 100)),
+                m(
+                    ORGAN,
+                    "organ",
+                    Fixed::from_ratio(1, 2),
+                    Fixed::from_ratio(2, 1),
+                    Fixed::from_ratio(1, 2),
+                    Fixed::from_ratio(1, 1),
+                    Fixed::from_ratio(5, 1),
+                    Fixed::from_ratio(2, 100),
+                ),
             ],
         }
     }
@@ -425,32 +461,60 @@ impl Body {
     /// and a mass share of the body. Deterministic, a pure function of the plan (Principle 1: the
     /// aggregate anatomy expands to this only when the individual is promoted). The tissue thicknesses
     /// and mass shares are reserved-with-basis; the covering's development thickens the outer layer.
-    pub fn from_body_plan(
-        plan: &BodyPlan,
-        fluid: FluidKindId,
-        params: &BodyParams,
-    ) -> Body {
+    pub fn from_body_plan(plan: &BodyPlan, fluid: FluidKindId, params: &BodyParams) -> Body {
         let mass = plan.body_mass.clamp(Fixed::ZERO, Fixed::ONE);
         // Tissue thickness scales with body mass; the covering thickens the outer hide layer.
-        let base = params.base_thickness.mul(mass.saturating_add(Fixed::from_ratio(1, 4)));
-        let hide_t = base.mul(Fixed::from_ratio(1, 4).saturating_add(plan.covering.development.mul(Fixed::from_ratio(1, 2))));
+        let base = params
+            .base_thickness
+            .mul(mass.saturating_add(Fixed::from_ratio(1, 4)));
+        let hide_t = base.mul(
+            Fixed::from_ratio(1, 4)
+                .saturating_add(plan.covering.development.mul(Fixed::from_ratio(1, 2))),
+        );
         let flesh_t = base;
         let bone_t = base.mul(Fixed::from_ratio(1, 2));
 
         let torso_layers = vec![
-            TissueLayer { material: HIDE, thickness: hide_t },
-            TissueLayer { material: FLESH, thickness: flesh_t },
-            TissueLayer { material: ORGAN, thickness: bone_t }, // vital organs at the core
+            TissueLayer {
+                material: HIDE,
+                thickness: hide_t,
+            },
+            TissueLayer {
+                material: FLESH,
+                thickness: flesh_t,
+            },
+            TissueLayer {
+                material: ORGAN,
+                thickness: bone_t,
+            }, // vital organs at the core
         ];
         let limb_layers = vec![
-            TissueLayer { material: HIDE, thickness: hide_t },
-            TissueLayer { material: FLESH, thickness: flesh_t.mul(Fixed::from_ratio(1, 2)) },
-            TissueLayer { material: BONE, thickness: bone_t },
+            TissueLayer {
+                material: HIDE,
+                thickness: hide_t,
+            },
+            TissueLayer {
+                material: FLESH,
+                thickness: flesh_t.mul(Fixed::from_ratio(1, 2)),
+            },
+            TissueLayer {
+                material: BONE,
+                thickness: bone_t,
+            },
         ];
         let head_layers = vec![
-            TissueLayer { material: HIDE, thickness: hide_t },
-            TissueLayer { material: BONE, thickness: bone_t }, // the skull
-            TissueLayer { material: ORGAN, thickness: flesh_t.mul(Fixed::from_ratio(1, 2)) },
+            TissueLayer {
+                material: HIDE,
+                thickness: hide_t,
+            },
+            TissueLayer {
+                material: BONE,
+                thickness: bone_t,
+            }, // the skull
+            TissueLayer {
+                material: ORGAN,
+                thickness: flesh_t.mul(Fixed::from_ratio(1, 2)),
+            },
         ];
 
         let torso_mass = mass.mul(params.torso_mass_fraction);
@@ -458,7 +522,11 @@ impl Body {
         let limb_count = plan.locomotion.iter().filter(|&&m| m != 0).count().max(1);
         let weapon_count = plan.weapons.len();
         let divisor = Fixed::from_int((1 + limb_count + weapon_count) as i32);
-        let each = if divisor > Fixed::ZERO { rest.div(divisor) } else { Fixed::ZERO };
+        let each = if divisor > Fixed::ZERO {
+            rest.div(divisor)
+        } else {
+            Fixed::ZERO
+        };
 
         let mut parts = Vec::new();
         parts.push(BodyPart {
@@ -500,9 +568,10 @@ impl Body {
             parts.push(BodyPart {
                 kind: 20 + i as u16,
                 name: format!("weapon{i}"),
-                tissues: vec![
-                    TissueLayer { material: BONE, thickness: bone_t.mul(w.development.clamp(Fixed::ZERO, Fixed::ONE)) },
-                ],
+                tissues: vec![TissueLayer {
+                    material: BONE,
+                    thickness: bone_t.mul(w.development.clamp(Fixed::ZERO, Fixed::ONE)),
+                }],
                 mass: each.mul(Fixed::from_ratio(1, 4)),
                 vital: false,
                 functions: vec![F_STRIKE],
@@ -514,7 +583,11 @@ impl Body {
         let vessel = Stock::new(Fixed::ONE, Fixed::ONE, Fixed::ZERO);
         Body {
             parts,
-            fluids: vec![FluidPool { kind: fluid, volume: vessel, bleed_rate: Fixed::ZERO }],
+            fluids: vec![FluidPool {
+                kind: fluid,
+                volume: vessel,
+                bleed_rate: Fixed::ZERO,
+            }],
         }
     }
 
@@ -542,7 +615,11 @@ impl Body {
         let mut worst = Fixed::ONE;
         for p in &self.parts {
             if p.vital {
-                let v = if p.destroyed() { Fixed::ZERO } else { p.condition.integrity };
+                let v = if p.destroyed() {
+                    Fixed::ZERO
+                } else {
+                    p.condition.integrity
+                };
                 if v < worst {
                     worst = v;
                 }
@@ -571,11 +648,14 @@ impl Body {
     /// deterministic drain; death from a pool past critical is read by [`Body::is_alive`].
     pub fn bleed(&mut self, fluids: &FluidRegistry) {
         for pool in &mut self.fluids {
-            let clot = fluids.fluid(pool.kind).map(|f| f.clot_rate).unwrap_or(Fixed::ZERO);
+            let clot = fluids
+                .fluid(pool.kind)
+                .map(|f| f.clot_rate)
+                .unwrap_or(Fixed::ZERO);
             if pool.bleed_rate > Fixed::ZERO {
                 let net = pool.bleed_rate;
                 pool.volume.step(net); // draw the bled volume
-                // The wound seals a little each tick.
+                                       // The wound seals a little each tick.
                 pool.bleed_rate = sub_floor(pool.bleed_rate, clot);
             }
         }
@@ -599,7 +679,10 @@ impl Body {
     /// stat read from the body and its materials, not an authored number, so a larger body of a
     /// stronger tissue is stronger and losing a limb weakens it). The raw morphology is the primitive.
     pub fn strength(&self, tissues: &TissueRegistry) -> Fixed {
-        let flesh_strength = tissues.material(FLESH).map(|m| m.fracture_strength).unwrap_or(Fixed::ZERO);
+        let flesh_strength = tissues
+            .material(FLESH)
+            .map(|m| m.fracture_strength)
+            .unwrap_or(Fixed::ZERO);
         let mut muscle = Fixed::ZERO;
         for p in &self.parts {
             if p.destroyed() {
@@ -677,7 +760,8 @@ pub fn apply_insult(
 
     match modes.measure(insult.mode) {
         MeasureKind::Penetration => {
-            let pressure = laws::contact_pressure(insult.force, insult.contact_area, params.pressure_max);
+            let pressure =
+                laws::contact_pressure(insult.force, insult.contact_area, params.pressure_max);
             // How deep the pressure can reach: walk the layers from the surface, summing the
             // thickness of each layer the pressure can bite, and stop at the first layer whose
             // hardness it does not exceed (a bone core stops a weak cut, the wound propagating
@@ -734,7 +818,8 @@ pub fn apply_insult(
                     }
                 }
             }
-            let stress = laws::contact_pressure(insult.force, insult.contact_area, params.pressure_max);
+            let stress =
+                laws::contact_pressure(insult.force, insult.contact_area, params.pressure_max);
             let (stress_margin, energy_margin) = laws::fracture_onset(
                 stress,
                 fs,
@@ -746,7 +831,8 @@ pub fn apply_insult(
             if stress_margin < Fixed::ZERO || energy_margin < Fixed::ZERO {
                 rec.fractured = true;
                 rec.severity = params.fracture_damage;
-                part.condition.integrity = sub_floor(part.condition.integrity, params.fracture_damage);
+                part.condition.integrity =
+                    sub_floor(part.condition.integrity, params.fracture_damage);
                 if part.carries_fluid.is_some() {
                     rec.vessel_breached = true;
                 }
@@ -764,7 +850,10 @@ pub fn apply_insult(
             // Burn severity: the temperature rise against the reserved burn scale, worsened if the
             // thermal stress cracks the tissue.
             let mut sev = if params.burn_scale > Fixed::ZERO {
-                insult.delta_t.div(params.burn_scale).clamp(Fixed::ZERO, Fixed::ONE)
+                insult
+                    .delta_t
+                    .div(params.burn_scale)
+                    .clamp(Fixed::ZERO, Fixed::ONE)
             } else {
                 Fixed::ZERO
             };
@@ -864,9 +953,20 @@ mod tests {
             body_mass: Fixed::from_ratio(mass.0, mass.1),
             encephalization: Fixed::from_ratio(1, 2),
             diet_breadth: Fixed::from_ratio(1, 2),
-            weapons: (0..weapons).map(|i| Part { kind: i as u16, development: Fixed::from_ratio(3, 4) }).collect(),
-            covering: Part { kind: 0, development: Fixed::from_ratio(1, 2) },
-            senses: vec![Part { kind: 0, development: Fixed::from_ratio(1, 2) }],
+            weapons: (0..weapons)
+                .map(|i| Part {
+                    kind: i as u16,
+                    development: Fixed::from_ratio(3, 4),
+                })
+                .collect(),
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            }],
             locomotion: (0..legs).map(|_| 1u16).collect(),
             temperament: Temperament {
                 boldness: Fixed::from_ratio(1, 2),
@@ -886,9 +986,28 @@ mod tests {
     fn a_promoted_body_has_vital_parts_a_vessel_and_starts_intact() {
         let b = body();
         assert!(b.parts.iter().any(|p| p.vital), "it has a vital part");
-        assert!(b.parts.iter().any(|p| p.name == "torso" && p.carries_fluid.is_some()), "the torso carries a vessel");
-        assert_eq!(b.parts.iter().filter(|p| p.name.starts_with("limb")).count(), 4, "four legs");
-        assert_eq!(b.parts.iter().filter(|p| p.name.starts_with("weapon")).count(), 1, "one weapon");
+        assert!(
+            b.parts
+                .iter()
+                .any(|p| p.name == "torso" && p.carries_fluid.is_some()),
+            "the torso carries a vessel"
+        );
+        assert_eq!(
+            b.parts
+                .iter()
+                .filter(|p| p.name.starts_with("limb"))
+                .count(),
+            4,
+            "four legs"
+        );
+        assert_eq!(
+            b.parts
+                .iter()
+                .filter(|p| p.name.starts_with("weapon"))
+                .count(),
+            1,
+            "one weapon"
+        );
         let fr = FluidRegistry::dev_default();
         assert!(b.is_alive(&fr), "a fresh body is alive");
         assert_eq!(b.integrity(&fr), Fixed::ONE, "and at full integrity");
@@ -902,14 +1021,27 @@ mod tests {
         let params = BodyParams::dev_default();
         let small = Body::from_body_plan(&plan((1, 8), 2, 0), BLOOD, &params);
         let big = Body::from_body_plan(&plan((1, 1), 6, 0), BLOOD, &params);
-        assert!(big.reach() > small.reach(), "the bigger, more-limbed body reaches farther");
-        assert!(big.strength(&tissues) > small.strength(&tissues), "and is stronger");
+        assert!(
+            big.reach() > small.reach(),
+            "the bigger, more-limbed body reaches farther"
+        );
+        assert!(
+            big.strength(&tissues) > small.strength(&tissues),
+            "and is stronger"
+        );
         // Amputation weakens the body (derived, not stored).
         let mut b = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
         let before = b.strength(&tissues);
-        let limb = b.parts.iter().position(|p| p.name.starts_with("limb")).unwrap();
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
         b.parts[limb].condition.severed = true;
-        assert!(b.strength(&tissues) < before, "losing a limb lowers derived strength");
+        assert!(
+            b.strength(&tissues) < before,
+            "losing a limb lowers derived strength"
+        );
     }
 
     #[test]
@@ -919,7 +1051,10 @@ mod tests {
         let big = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
         let sd = small.parts[0].depth();
         let bd = big.parts[0].depth();
-        assert!(bd > sd, "a bigger body has a deeper torso ({bd:?} vs {sd:?})");
+        assert!(
+            bd > sd,
+            "a bigger body has a deeper torso ({bd:?} vs {sd:?})"
+        );
     }
 
     #[test]
@@ -928,7 +1063,11 @@ mod tests {
         let modes = DamageModeRegistry::dev_default();
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
-        let limb = b.parts.iter().position(|p| p.name.starts_with("limb")).unwrap();
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
         // A sharp blade: a tiny edge contact area (a high pressure exceeding even the bone) and ample
         // energy cuts clean through.
         let insult = Insult {
@@ -952,7 +1091,11 @@ mod tests {
         let modes = DamageModeRegistry::dev_default();
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
-        let limb = b.parts.iter().position(|p| p.name.starts_with("limb")).unwrap();
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
         // A heavy blunt blow: a broad contact area, high force and energy.
         let insult = Insult {
             mode: BLUNT,
@@ -962,8 +1105,14 @@ mod tests {
             delta_t: Fixed::ZERO,
         };
         let rec = apply_insult(&mut b, limb, &insult, &modes, &tissues, &params);
-        assert!(rec.fractured, "a hard enough blow fractures the part (the floor criterion)");
-        assert!(b.parts[limb].condition.integrity < Fixed::ONE, "and lowers its integrity");
+        assert!(
+            rec.fractured,
+            "a hard enough blow fractures the part (the floor criterion)"
+        );
+        assert!(
+            b.parts[limb].condition.integrity < Fixed::ONE,
+            "and lowers its integrity"
+        );
     }
 
     #[test]
@@ -972,7 +1121,11 @@ mod tests {
         let modes = DamageModeRegistry::dev_default();
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
-        let limb = b.parts.iter().position(|p| p.name.starts_with("limb")).unwrap();
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
         // A feather touch: negligible force spread over a broad area does not exceed the hardness.
         let insult = Insult {
             mode: CUT,
@@ -982,8 +1135,16 @@ mod tests {
             delta_t: Fixed::ZERO,
         };
         let rec = apply_insult(&mut b, limb, &insult, &modes, &tissues, &params);
-        assert_eq!(rec.severity, Fixed::ZERO, "a touch below the tissue hardness does nothing");
-        assert_eq!(b.parts[limb].condition.integrity, Fixed::ONE, "the limb is unharmed");
+        assert_eq!(
+            rec.severity,
+            Fixed::ZERO,
+            "a touch below the tissue hardness does nothing"
+        );
+        assert_eq!(
+            b.parts[limb].condition.integrity,
+            Fixed::ONE,
+            "the limb is unharmed"
+        );
     }
 
     #[test]
@@ -993,7 +1154,10 @@ mod tests {
         let tissues = TissueRegistry::dev_default();
         let fr = FluidRegistry::dev_default();
         // Make the breach open fast so the test is short.
-        let params = BodyParams { breach_bleed: Fixed::from_ratio(1, 2), ..BodyParams::dev_default() };
+        let params = BodyParams {
+            breach_bleed: Fixed::from_ratio(1, 2),
+            ..BodyParams::dev_default()
+        };
         let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
         // A deep pierce that breaches the vessel but does not run clean through the torso.
         let insult = Insult {
@@ -1004,7 +1168,10 @@ mod tests {
             delta_t: Fixed::ZERO,
         };
         let rec = apply_insult(&mut b, torso, &insult, &modes, &tissues, &params);
-        assert!(rec.vessel_breached, "a deep torso wound breaches the vessel");
+        assert!(
+            rec.vessel_breached,
+            "a deep torso wound breaches the vessel"
+        );
         assert!(!rec.severed, "but does not run clean through");
         assert!(b.is_alive(&fr), "not dead yet");
         // Bleed out over time.
@@ -1047,14 +1214,32 @@ mod tests {
         let mut modes = DamageModeRegistry::dev_default();
         // A world adds a curse mode with no built measurement.
         let curse = DamageModeId(99);
-        modes.modes.push(DamageModeDef { id: curse, name: "curse".to_string(), measure: MeasureKind::Exotic });
+        modes.modes.push(DamageModeDef {
+            id: curse,
+            name: "curse".to_string(),
+            measure: MeasureKind::Exotic,
+        });
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
         let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
-        let insult = Insult { mode: curse, force: Fixed::from_int(999), contact_area: Fixed::from_ratio(1, 1000), delivered_energy: Fixed::from_int(999), delta_t: Fixed::ZERO };
+        let insult = Insult {
+            mode: curse,
+            force: Fixed::from_int(999),
+            contact_area: Fixed::from_ratio(1, 1000),
+            delivered_energy: Fixed::from_int(999),
+            delta_t: Fixed::ZERO,
+        };
         let rec = apply_insult(&mut b, torso, &insult, &modes, &tissues, &params);
-        assert_eq!(rec.severity, Fixed::ZERO, "an unbuilt exotic mode fabricates no damage");
-        assert_eq!(b.parts[torso].condition.integrity, Fixed::ONE, "the part is unharmed until the law is built");
+        assert_eq!(
+            rec.severity,
+            Fixed::ZERO,
+            "an unbuilt exotic mode fabricates no damage"
+        );
+        assert_eq!(
+            b.parts[torso].condition.integrity,
+            Fixed::ONE,
+            "the part is unharmed until the law is built"
+        );
     }
 
     #[test]
@@ -1065,11 +1250,24 @@ mod tests {
             let tissues = TissueRegistry::dev_default();
             let params = BodyParams::dev_default();
             let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
-            let insult = Insult { mode: CUT, force: Fixed::from_int(300), contact_area: Fixed::from_ratio(1, 100_000), delivered_energy: Fixed::from_int(2), delta_t: Fixed::ZERO };
+            let insult = Insult {
+                mode: CUT,
+                force: Fixed::from_int(300),
+                contact_area: Fixed::from_ratio(1, 100_000),
+                delivered_energy: Fixed::from_int(2),
+                delta_t: Fixed::ZERO,
+            };
             let rec = apply_insult(&mut b, torso, &insult, &modes, &tissues, &params);
-            (rec.severity.to_bits(), b.parts[torso].condition.integrity.to_bits())
+            (
+                rec.severity.to_bits(),
+                b.parts[torso].condition.integrity.to_bits(),
+            )
         };
-        assert_eq!(run(), run(), "the same insult on the same tissue measures identically");
+        assert_eq!(
+            run(),
+            run(),
+            "the same insult on the same tissue measures identically"
+        );
     }
 
     #[test]
@@ -1081,14 +1279,18 @@ mod tests {
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
         let predator = Body::from_body_plan(&plan((1, 1), 4, 1), BLOOD, &params);
-        let weapon = predator.parts.iter().position(|p| p.name.starts_with("weapon")).unwrap();
+        let weapon = predator
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("weapon"))
+            .unwrap();
         let mut prey = Body::from_body_plan(&plan((1, 2), 4, 0), BLOOD, &params);
         let torso = prey.parts.iter().position(|p| p.name == "torso").unwrap();
         let rec = strike(
             &predator,
             weapon,
-            Fixed::from_int(30),          // a fast blow (m/s)
-            Fixed::from_int(2000),        // the force behind it (N)
+            Fixed::from_int(30),           // a fast blow (m/s)
+            Fixed::from_int(2000),         // the force behind it (N)
             Fixed::from_ratio(1, 100_000), // a sharp point
             PIERCE,
             &mut prey,
@@ -1097,13 +1299,35 @@ mod tests {
             &tissues,
             &params,
         );
-        assert!(rec.severity > Fixed::ZERO, "the strike drew a measurable wound");
-        assert!(prey.parts[torso].condition.integrity < Fixed::ONE, "the prey is hurt");
+        assert!(
+            rec.severity > Fixed::ZERO,
+            "the strike drew a measurable wound"
+        );
+        assert!(
+            prey.parts[torso].condition.integrity < Fixed::ONE,
+            "the prey is hurt"
+        );
 
         // A weaponless body strikes nothing.
         let unarmed = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
-        let rec2 = strike(&unarmed, 0, Fixed::from_int(30), Fixed::from_int(2000), Fixed::from_ratio(1, 100_000), PIERCE, &mut prey, torso, &modes, &tissues, &params);
-        assert_eq!(rec2.severity, Fixed::ZERO, "a body with no weapon part strikes for nothing");
+        let rec2 = strike(
+            &unarmed,
+            0,
+            Fixed::from_int(30),
+            Fixed::from_int(2000),
+            Fixed::from_ratio(1, 100_000),
+            PIERCE,
+            &mut prey,
+            torso,
+            &modes,
+            &tissues,
+            &params,
+        );
+        assert_eq!(
+            rec2.severity,
+            Fixed::ZERO,
+            "a body with no weapon part strikes for nothing"
+        );
     }
 
     #[test]
@@ -1115,8 +1339,17 @@ mod tests {
         let params = BodyParams::dev_default();
         let before = b.integrity(&fr);
         let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
-        let insult = Insult { mode: CUT, force: Fixed::from_int(200), contact_area: Fixed::from_ratio(1, 100_000), delivered_energy: Fixed::from_int(1), delta_t: Fixed::ZERO };
+        let insult = Insult {
+            mode: CUT,
+            force: Fixed::from_int(200),
+            contact_area: Fixed::from_ratio(1, 100_000),
+            delivered_energy: Fixed::from_int(1),
+            delta_t: Fixed::ZERO,
+        };
         apply_insult(&mut b, torso, &insult, &modes, &tissues, &params);
-        assert!(b.integrity(&fr) < before, "a wound to a vital part lowers derived integrity");
+        assert!(
+            b.integrity(&fr) < before,
+            "a wound to a vital part lowers derived integrity"
+        );
     }
 }

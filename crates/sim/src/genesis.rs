@@ -132,7 +132,10 @@ impl LivingWorld {
         };
         // Derive the kingdom-and-diet label cheaply, without cloning the region (fork F11).
         // Kingdom is autotrophy, not diet: a producer is a plant whatever it eats.
-        let is_producer = sp.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_)));
+        let is_producer = sp
+            .draws_on
+            .iter()
+            .any(|s| matches!(s, SourceRef::Abiotic(_)));
         let mut eats_species = false;
         let mut eats_animal = false;
         let mut eats_plant = false;
@@ -140,10 +143,18 @@ impl LivingWorld {
             if let SourceRef::Species(dep) = src {
                 eats_species = true;
                 if let Some(prey) = bio.species.get(*dep) {
-                    if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Abiotic(_))) {
+                    if prey
+                        .draws_on
+                        .iter()
+                        .any(|s| matches!(s, SourceRef::Abiotic(_)))
+                    {
                         eats_plant = true;
                     }
-                    if prey.draws_on.iter().any(|s| matches!(s, SourceRef::Species(_))) {
+                    if prey
+                        .draws_on
+                        .iter()
+                        .any(|s| matches!(s, SourceRef::Species(_)))
+                    {
                         eats_animal = true;
                     }
                 }
@@ -245,8 +256,14 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
             let region = derive_region(&map, x0, y0, side, params.generator.env_axes);
             // A stable per-region id folds the grid coordinate; used to key the region's draws.
             let region_id = ((rx as u64) << 32) | (ry as u64 & 0xffff_ffff);
-            let mut biosphere =
-                generate(seed, &region, region_id, &params.generator, &registry, params.profile);
+            let mut biosphere = generate(
+                seed,
+                &region,
+                region_id,
+                &params.generator,
+                &registry,
+                params.profile,
+            );
             let report = run(seed, &mut biosphere, &region, &params.epoch);
 
             // The dawn: promote a representative surviving organism of each species onto a
@@ -263,7 +280,14 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
                 &map,
             );
 
-            regions.insert((rx, ry), RegionBiosphere { region, biosphere, report });
+            regions.insert(
+                (rx, ry),
+                RegionBiosphere {
+                    region,
+                    biosphere,
+                    report,
+                },
+            );
         }
     }
 
@@ -389,12 +413,18 @@ impl WorldGenesis {
 
     /// The living species across all regions at the generation reached so far.
     pub fn alive(&self) -> u32 {
-        self.regions.iter().map(|sr| sr.radiation.report().alive).sum()
+        self.regions
+            .iter()
+            .map(|sr| sr.radiation.report().alive)
+            .sum()
     }
 
     /// The total species (living and extinct) across all regions so far.
     pub fn species(&self) -> usize {
-        self.regions.iter().map(|sr| sr.radiation.biosphere().len()).sum()
+        self.regions
+            .iter()
+            .map(|sr| sr.radiation.biosphere().len())
+            .sum()
     }
 
     /// The generated map (fixed for the life of the driver).
@@ -562,9 +592,17 @@ mod tests {
         let p = GenesisParams::dev_default();
         let a = genesis(0x11FE, &p);
         let b = genesis(0x11FE, &p);
-        assert_eq!(a.state_hash(), b.state_hash(), "the same seed yields the same living world");
+        assert_eq!(
+            a.state_hash(),
+            b.state_hash(),
+            "the same seed yields the same living world"
+        );
         let c = genesis(0x2222, &p);
-        assert_ne!(a.state_hash(), c.state_hash(), "a different seed, a different world");
+        assert_ne!(
+            a.state_hash(),
+            c.state_hash(),
+            "a different seed, a different world"
+        );
     }
 
     #[test]
@@ -591,7 +629,10 @@ mod tests {
         assert!(founders > 0, "the founders are seeded before any radiation");
         // A snapshot at generation 0 is already a valid living world (the founders on the map).
         let snap0 = wg.snapshot();
-        assert!(!snap0.occupants.is_empty(), "generation 0 places the founders");
+        assert!(
+            !snap0.occupants.is_empty(),
+            "generation 0 places the founders"
+        );
         // Step the whole radiation; progress advances and the ecology grows.
         for _ in 0..p.epoch.generations {
             wg.step_once();
@@ -599,7 +640,10 @@ mod tests {
         assert!(wg.is_complete());
         assert_eq!(wg.generation(), p.epoch.generations);
         let snapf = wg.snapshot();
-        assert!(snapf.species() >= snap0.species(), "the radiation grew the lineage");
+        assert!(
+            snapf.species() >= snap0.species(),
+            "the radiation grew the lineage"
+        );
         assert_eq!(
             snapf.state_hash(),
             genesis(0x11FE, &p).state_hash(),
@@ -614,7 +658,10 @@ mod tests {
         assert!(!w.regions.is_empty(), "the map is partitioned into regions");
         assert!(w.species() > 0, "species were generated");
         assert!(w.alive() > 0, "some species survive to the dawn");
-        assert!(!w.occupants.is_empty(), "the dawn placed organisms on the map");
+        assert!(
+            !w.occupants.is_empty(),
+            "the dawn placed organisms on the map"
+        );
         // The map is still a normal generated map.
         assert_eq!(w.map.topo().width, p.width);
     }
@@ -624,7 +671,10 @@ mod tests {
         let p = GenesisParams::dev_default();
         let w = genesis(0x11FE, &p);
         let daughters: u32 = w.regions.values().map(|r| r.report.daughters).sum();
-        assert!(daughters > 0, "the pre-dawn epoch radiated daughter species");
+        assert!(
+            daughters > 0,
+            "the pre-dawn epoch radiated daughter species"
+        );
     }
 
     #[test]
@@ -633,6 +683,9 @@ mod tests {
         let w = genesis(0x11FE, &p);
         // Some occupied tile has a promoted organism the located join can return.
         let coord = w.occupants.occupied().next().expect("an occupied tile");
-        assert!(!w.occupants.occupants(coord).is_empty(), "a tile returns its occupants");
+        assert!(
+            !w.occupants.occupants(coord).is_empty(),
+            "a tile returns its occupants"
+        );
     }
 }

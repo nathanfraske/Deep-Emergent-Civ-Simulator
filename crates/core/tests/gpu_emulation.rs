@@ -100,8 +100,16 @@ fn emu_mul(a: i64, b: i64) -> i64 {
     let (alo, ahi) = split(a);
     let (blo, bhi) = split(b);
     let neg = is_neg(ahi) ^ is_neg(bhi);
-    let (malo, mahi) = if is_neg(ahi) { neg64(alo, ahi) } else { (alo, ahi) };
-    let (mblo, mbhi) = if is_neg(bhi) { neg64(blo, bhi) } else { (blo, bhi) };
+    let (malo, mahi) = if is_neg(ahi) {
+        neg64(alo, ahi)
+    } else {
+        (alo, ahi)
+    };
+    let (mblo, mbhi) = if is_neg(bhi) {
+        neg64(blo, bhi)
+    } else {
+        (blo, bhi)
+    };
     let prod = umul_64_128(malo, mahi, mblo, mbhi);
     let signed = if neg { neg128(prod) } else { prod };
     join(signed[1], signed[2])
@@ -114,8 +122,16 @@ fn emu_div(a: i64, b: i64) -> i64 {
     let (alo, ahi) = split(a);
     let (blo, bhi) = split(b);
     let neg = is_neg(ahi) ^ is_neg(bhi);
-    let (malo, mahi) = if is_neg(ahi) { neg64(alo, ahi) } else { (alo, ahi) };
-    let (mdlo, mdhi) = if is_neg(bhi) { neg64(blo, bhi) } else { (blo, bhi) };
+    let (malo, mahi) = if is_neg(ahi) {
+        neg64(alo, ahi)
+    } else {
+        (alo, ahi)
+    };
+    let (mdlo, mdhi) = if is_neg(bhi) {
+        neg64(blo, bhi)
+    } else {
+        (blo, bhi)
+    };
     // numerator magnitude = |a| << 32, little-endian 96-bit words.
     let num = [0u32, malo, mahi];
     let (mut r0, mut r1, mut r2) = (0u32, 0u32, 0u32); // 65-bit remainder
@@ -164,10 +180,10 @@ fn corners() -> Vec<i64> {
         i64::MIN,
         i64::MIN + 1,
         i64::MAX - 1,
-        1 << 32,        // 1.0
-        -(1 << 32),     // -1.0
+        1 << 32,    // 1.0
+        -(1 << 32), // -1.0
         (1 << 32) + 1,
-        1 << 31,        // 0.5
+        1 << 31, // 0.5
         -(1 << 31),
         (1i64 << 62),
         -(1i64 << 62),
@@ -268,9 +284,18 @@ fn the_limb_divide_emulation_is_bit_identical_to_the_oracle() {
 #[test]
 fn the_named_multiply_corners_match() {
     // The specific corners the proposal calls out.
-    assert_eq!(emu_mul(i64::MIN, i64::MIN), Fixed::from_bits(i64::MIN).mul(Fixed::from_bits(i64::MIN)).to_bits());
+    assert_eq!(
+        emu_mul(i64::MIN, i64::MIN),
+        Fixed::from_bits(i64::MIN)
+            .mul(Fixed::from_bits(i64::MIN))
+            .to_bits()
+    );
     assert_eq!(emu_mul(i64::MIN, i64::MIN), 0, "mul(MIN, MIN) = 0");
-    assert_eq!(emu_mul(i64::MIN, -1), 1i64 << 31, "mul(MIN, -1 bits) = 2^31");
+    assert_eq!(
+        emu_mul(i64::MIN, -1),
+        1i64 << 31,
+        "mul(MIN, -1 bits) = 2^31"
+    );
     // 1.5 * 2.0 = 3.0 in Q32.32.
     assert_eq!(emu_mul(3 << 31, 2 << 32), 3 << 32, "1.5 * 2.0 = 3.0");
 }

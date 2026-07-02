@@ -36,7 +36,7 @@ fn fixture_field() -> Field {
 // Labelled test calibrations (not canonical values).
 fn fixture_calib() -> FieldCalib {
     FieldCalib {
-        diffusion: k(1, 10),  // 0.1, within the 0.25 stability bound
+        diffusion: k(1, 10), // 0.1, within the 0.25 stability bound
         relaxation: k(1, 100),
         exchange: k(1, 5),
     }
@@ -53,7 +53,10 @@ fn heat_flows_from_the_field_into_a_cold_body() {
         r.step();
     }
     let end = r.body_temp(who).unwrap().to_f64_lossy();
-    assert!(end > start + 1.0, "the body warms toward the hot cell it stands on ({start} -> {end})");
+    assert!(
+        end > start + 1.0,
+        "the body warms toward the hot cell it stands on ({start} -> {end})"
+    );
     // It never overshoots the environment it is exchanging with (Newton cooling is contractive).
     assert!(end < 400.0, "the body cannot exceed the source temperature");
 }
@@ -68,8 +71,14 @@ fn the_field_diffuses_and_relaxes_deterministically() {
     }
     let centre_after = r.field().at(2, 2).to_f64_lossy();
     let near_after = r.field().at(2, 1).to_f64_lossy(); // adjacent to the hot centre
-    assert!(centre_after < centre_before, "the hot centre cools as heat spreads");
-    assert!(near_after > edge_before, "a neighbour of the hot centre warms");
+    assert!(
+        centre_after < centre_before,
+        "the hot centre cools as heat spreads"
+    );
+    assert!(
+        near_after > edge_before,
+        "a neighbour of the hot centre warms"
+    );
 }
 
 #[test]
@@ -88,7 +97,12 @@ fn a_run_reproduces_bit_for_bit() {
     for _ in 0..30 {
         a.step();
         b.step();
-        assert_eq!(a.state_hash(), b.state_hash(), "identical inputs replay identically at tick {}", a.clock());
+        assert_eq!(
+            a.state_hash(),
+            b.state_hash(),
+            "identical inputs replay identically at tick {}",
+            a.clock()
+        );
     }
     assert!(a.clock() == 30);
 }
