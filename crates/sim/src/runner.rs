@@ -47,18 +47,23 @@
 //! physics-in-and-behaviour-out path (Part 8.4, R-BEHAVIOR-EVOLVE). A runner built with
 //! [`Runner::with_embodiment`] owns an [`Embodiment`]: a population of located beings whose movement is
 //! driven by their evolved controllers ([`crate::locomotion`], [`crate::controller`]), not an authored
-//! policy. Each tick, after the field step and the body-thermal exchange, a pure comfort-band map
-//! ([`comfort_fraction`]) turns each being's absolute core temperature into a temperature homeostatic
-//! reserve in `[0, 1]`, per being from its own reserved comfort band, and the being's controller reads
-//! that reserve and issues a movement affordance; the beings' new coordinates re-sync the located index
-//! so the next tick's thermal exchange reads where they moved. This closes the loop from physics to
-//! physiology to behaviour to physics with no authored heading. In this first increment the controller
-//! reads temperature only as a scalar comfort, with no directional thermal percept, so an uncomfortable
-//! being explores (an undirected, seed-keyed heading) and a comfortable one rests, and directed
-//! thermotaxis is an emergent consequence of moving-while-uncomfortable under survival rather than a
-//! wired rule. The comfort band's set point and half-range are reserved per-race physiology (Part 20),
-//! the beings' controllers are expressed and (in the full engine) selected by survival, and the
-//! composite hash folds each being's position, reserves, and controller state after the world fold.
+//! policy. Each tick, after the field step and the body-thermal exchange, two pure reads feed the
+//! being's controller: a comfort-band map ([`comfort_fraction`]) turns its absolute core temperature
+//! into a temperature homeostatic reserve in `[0, 1]` (its physiological state, per being from its own
+//! reserved comfort band), and the raw temperature gradient at its cell ([`Field::gradient_at`], the
+//! unit direction toward warmer surroundings, what a thermoreceptor senses) is its directional
+//! percept. The controller reads both and issues a movement affordance; the beings' new coordinates
+//! re-sync the located index so the next tick's thermal exchange reads where they moved. This closes
+//! the loop from physics to physiology to behaviour to physics with no authored heading: the gradient
+//! is a physical field quantity, not a policy, and how a being combines "am I uncomfortable" (its
+//! reserve) with "which way is warmer" (the gradient) is its evolved controller's, selected by
+//! survival. A being whose controller has evolved to climb the gradient reaches warmth directly; one
+//! that has not explores (an undirected, seed-keyed heading), and directed thermotaxis is the emergent
+//! consequence rather than a wired rule. The comfort band's set point and half-range are reserved
+//! per-race physiology (Part 20); the composite hash folds each being's position, reserves, and
+//! controller state after the world fold. Honest limit: raw gradient plus the even comfort reserve
+//! lets a linear controller learn warmth-seeking in a cold world, but fleeing lethal heat needs either
+//! a recurrent controller or a signed thermal-state percept (a new input channel), a later increment.
 //!
 //! The steering boundary the canonical runner holds (Principle 9): the world phases it drives are the
 //! emergent, data-driven ones (belief, dialogue, gossip, language), and the emergent-behaviour source
@@ -72,7 +77,7 @@
 
 use crate::anatomy::BodyPlan;
 use crate::controller::ControllerLayout;
-use crate::homeostasis::{AffordanceRegistry, HomeostaticRegistry, TEMPERATURE};
+use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::world::World;
@@ -161,6 +166,28 @@ impl Field {
         (self.width, self.height)
     }
 
+    /// The raw temperature gradient at a cell: the central difference over the four clamped neighbours
+    /// (the same zero-flux Neumann boundary [`Field::step`] uses), `(at(x+1,y) - at(x-1,y), at(x,y+1) -
+    /// at(x,y-1))`. Positive components point toward warmer cells. This is pure integer subtraction (no
+    /// `Fixed::mul`, no division, no RNG), the same per-cell stencil class as [`Field::step`] and
+    /// `crates/gpu`'s field kernel, so it is bit-identical on every machine and thread count and ports
+    /// unchanged to a CubeCL `#[cube]` kernel. A cell off the field reads a zero gradient. The caller
+    /// normalises to a unit direction (a cheap per-being step), keeping this kernel add-and-subtract
+    /// only. It is a physical field quantity, not a heading: what a thermoreceptor senses, not a policy.
+    pub fn gradient_at(&self, x: i32, y: i32) -> (Fixed, Fixed) {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return (Fixed::ZERO, Fixed::ZERO);
+        }
+        let xl = if x > 0 { x - 1 } else { x };
+        let xr = if x < self.width - 1 { x + 1 } else { x };
+        let yu = if y > 0 { y - 1 } else { y };
+        let yd = if y < self.height - 1 { y + 1 } else { y };
+        (
+            self.at(xr, y) - self.at(xl, y),
+            self.at(x, yd) - self.at(x, yu),
+        )
+    }
+
     /// One canonical step: the fixed-point diffusion-and-relaxation stencil. Each product is the
     /// pinned `Fixed::mul` (floor), the neighbour sum is exact integer addition, and the clamped
     /// boundary is deterministic, so the step is bit-identical on every machine and thread count and
@@ -229,6 +256,24 @@ pub fn comfort_fraction(body_temp: Fixed, band: &BeingThermal) -> Fixed {
     Fixed::ONE - dev.div(band.half_band).clamp(Fixed::ZERO, Fixed::ONE)
 }
 
+/// Normalise a raw gradient to a unit direction, the same way the known-source percept does (parity
+/// with `crate::locomotion` source_dirs): divide by the magnitude and clamp to `[-1, 1]`. A flat
+/// gradient (zero magnitude) reads as no direction, so the being has no thermal heading to follow and
+/// explores for that axis. This is the cheap per-being step that keeps [`Field::gradient_at`] itself
+/// add-and-subtract only for the GPU path.
+fn unit(dx: Fixed, dy: Fixed) -> (Fixed, Fixed) {
+    let dist = (dx.mul(dx) + dy.mul(dy)).sqrt();
+    if dist > Fixed::ZERO {
+        let lo = Fixed::from_int(-1);
+        (
+            dx.div(dist).clamp(lo, Fixed::ONE),
+            dy.div(dist).clamp(lo, Fixed::ONE),
+        )
+    } else {
+        (Fixed::ZERO, Fixed::ZERO)
+    }
+}
+
 /// A bounded open plane the size of the field: every in-bounds tile is passable at unit cost, and a
 /// tile off the field is impassable, so a being stays on the field its thermal exchange reads. Pure
 /// physics (a passability-and-cost gate), no route and no behaviour; the map-backed terrain with real
@@ -270,9 +315,11 @@ impl Embodiment {
     /// A new, empty embodiment over a temperature-bearing physiology registry, an affordance registry,
     /// the movement parameters, a controller hidden width (zero for a reaction norm), and a locomotion
     /// seed. The controller layout is derived from the two registries, so a caller builds or expresses
-    /// its beings' controllers against [`Embodiment::layout`]. The resource field starts empty: this
-    /// first increment gives the beings no directional thermal percept, so thermotaxis is emergent
-    /// rather than sensed.
+    /// its beings' controllers against [`Embodiment::layout`]. The resource field starts empty because
+    /// temperature is a diffuse field with no discrete source tile to remember; the being's directional
+    /// thermal percept is instead the live temperature gradient the runner reads from the field each
+    /// tick ([`Field::gradient_at`]), so thermotaxis is sensed yet still emergent (the controller must
+    /// evolve to follow the gradient).
     ///
     /// The registry must carry the [`TEMPERATURE`] axis, and that axis must not self-drain (its base
     /// and exertion draws must be zero), because the reserve is set each tick from the body core
@@ -492,17 +539,35 @@ impl Runner {
         self.clock += 1;
     }
 
-    /// The embodiment coupling sub-phase: map each being's field-driven core temperature to its
-    /// temperature reserve through the comfort-band map (physics to physiology), let its evolved
-    /// controller drive one step of locomotion (physiology to behaviour), and re-sync the located index
-    /// to the beings' new coordinates (behaviour to physics). The comfort-band map is pure, and the
-    /// locomotion draws its exploration heading from the being-and-tick-keyed RNG, so the sub-phase
-    /// authors no heading and reproduces bit for bit. Distinct fields of the runner are borrowed
-    /// disjointly, so the field, the body-temperature map, the located index, and the embodiment are
-    /// touched without contention.
+    /// The embodiment coupling sub-phase: sense each being's thermal comfort gradient from the field
+    /// (physics to percept), map its field-driven core temperature to its temperature reserve through
+    /// the comfort-band map (physics to physiology), let its evolved controller drive one step of
+    /// locomotion (physiology and percept to behaviour), and re-sync the located index to the beings'
+    /// new coordinates (behaviour to physics). The comfort gradient and the comfort-band map are pure,
+    /// and the locomotion draws its exploration heading from the being-and-tick-keyed RNG, so the
+    /// sub-phase authors no heading and reproduces bit for bit. Distinct fields of the runner are
+    /// borrowed disjointly, so the field, the body-temperature map, the located index, and the
+    /// embodiment are touched without contention.
     fn step_embodiment(&mut self) {
         let (width, height) = self.field.dims();
         let terrain = BoundedPlane { width, height };
+        // (0) Physics to percept: each being senses the raw temperature gradient at its cell, the unit
+        // direction toward warmer surroundings (what a thermoreceptor senses), as the TEMPERATURE axis's
+        // directional percept. Read from the field (immutable) before the mutable embodiment borrow; a
+        // pure field quantity, drawing no RNG. It is a percept, not a heading: a controller must evolve
+        // to act on it, and how it combines it with its comfort reserve is selection's to wire.
+        let field_dirs: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
+            match self.embodiment.as_ref() {
+                Some(emb) => emb
+                    .walkers
+                    .iter()
+                    .map(|w| {
+                        let (gx, gy) = self.field.gradient_at(w.coord().x, w.coord().y);
+                        (w.id, BTreeMap::from([(TEMPERATURE, unit(gx, gy))]))
+                    })
+                    .collect(),
+                None => return,
+            };
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
@@ -514,9 +579,10 @@ impl Runner {
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
             }
         }
-        // (2) Physiology to behaviour: the evolved controllers drive one locomotion step over the being
-        // slice (move-or-rest, and when moving with no directional percept an undirected explore).
-        locomotion::step(
+        // (2) Physiology and percept to behaviour: the evolved controllers drive one locomotion step
+        // over the being slice, reading the comfort-gradient percept in the TEMPERATURE direction slot.
+        // A controller that has evolved to follow it climbs toward comfort; one that has not explores.
+        locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
             &emb.layout,
@@ -526,6 +592,7 @@ impl Runner {
             &emb.params,
             emb.seed,
             self.clock,
+            &field_dirs,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
