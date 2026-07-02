@@ -210,8 +210,11 @@ pub struct ScenarioResolution {
 }
 
 impl ScenarioResolution {
-    /// The manifest ids this scenario still needs the owner to set before it can run calibrated:
-    /// the per-scenario review queue. Empty means every dial the scenario pushes is set.
+    /// The manifest ids for the `[dials]` this scenario pushes that the owner has not set yet: the
+    /// per-scenario dial review queue. This scopes to the change-and-extremes dials only; a world's
+    /// magic-intensity and race postures ([`MagicPosture`], [`RacePosture`]) are not manifest-backed
+    /// yet and are resolved separately once Part 34 lands, so an empty queue here means the dials are
+    /// set, not that a magical world is fully calibrated.
     pub fn reserved_ids(&self) -> Vec<&str> {
         self.dials
             .iter()
@@ -220,8 +223,11 @@ impl ScenarioResolution {
             .collect()
     }
 
-    /// Whether every dial this scenario pushes has a set magnitude, so the scenario can run under
-    /// [`Profile::Calibrated`](crate::calibration::Profile).
+    /// Whether every `[dials]` entry this scenario pushes has a set magnitude. This covers the
+    /// change-and-extremes dials only, not the magic-intensity or race postures (not manifest-backed
+    /// until Part 34), so it is necessary but not sufficient for a magical world to run under
+    /// [`Profile::Calibrated`](crate::calibration::Profile); a grounded world (Mirror) with no magic
+    /// postures is fully calibrated when this holds.
     pub fn is_fully_set(&self) -> bool {
         self.dials.iter().all(|d| d.entry.is_set())
     }
