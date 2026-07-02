@@ -149,10 +149,19 @@ bits, and let `guard` be the integer headroom bits above the top. The quantity k
 bits already resolve the bottom to `P` significant bits (`floor(log2(lo)) + 32 >= P`).
 Otherwise the scale is derived to hold both ends: `integer_bits = ceil(log2(hi)) + guard`,
 `frac_bits` set so `floor(log2(lo)) + frac_bits >= P`, and `scale_bits = frac_bits` subject to
-`integer_bits + frac_bits <= 63`. When that budget cannot be met (the conductor-to-insulator
-resistivity envelope spans about twenty-four orders and exceeds sixty-three magnitude bits),
-the envelope is windowed to a representable sub-range with the tail clamped or reserved, the
-honest windowing the floor data already documents. Under this rule the bulk of the substrate
+`integer_bits + frac_bits <= 63`. That budget bites in practice, and it does so two ways. Charge
+`[1e-9, 1e5]` fits it exactly (Q17.46, seventeen integer plus forty-six fractional, at `P = 16`
+and `guard = 0`), but capacitance `[1e-12, 1e3]` at `P = 16` needs ten integer plus fifty-six
+fractional bits, sixty-six in all, so the budget forces a reduced significance target
+(capacitance's `P` caps near thirteen, a Q10.53) rather than the full sixteen the charge
+example uses: the low-end significance a wide envelope can carry is itself bounded by the
+budget, quantity by quantity. When even a reduced `P` down to a floor cannot hold both ends
+(the conductor-to-insulator resistivity envelope spans about twenty-four orders and exceeds
+sixty-three magnitude bits outright), the envelope is windowed to a representable sub-range with
+the tail clamped or reserved, the honest windowing the floor data already documents. So the
+budget resolves in three stages: full `P` where it fits (charge), a reduced `P` where the
+envelope is wide but bounded (capacitance), and a windowed envelope where even the reduced `P`
+cannot span it (resistivity, dynamic viscosity). Under this rule the bulk of the substrate
 (the fluids, chemistry, mechanical, and the seven one-scale electromagnetism axes, whose tops
 fit `2^31` and whose bottoms resolve at scale 32) derives `scale_bits = 32` and is unchanged:
 their `Fixed` representation and their `AbsoluteQuantity` representation coincide. Only the
@@ -320,12 +329,14 @@ culture and belief layers) and is the second arc; it is not built here.
 
 - Phase 1 pins the absolute layer only. The emic round-trip loss and the sorted unit store, the
   two defects the flag names by number, are Phase 2 and remain open until that arc lands.
-- The scale-derivation rule assigns a scale from the declared envelope and significance target.
-  A quantity whose true physical range exceeds what sixty-three magnitude bits can hold at the
-  required significance (resistivity's full twenty-four orders, dynamic viscosity's sixteen) is
-  represented over a windowed sub-range with the tail clamped or reserved, the same honest
-  windowing the floor data documents. Per-quantity scales widen the representable window; they
-  do not make it unbounded.
+- The scale-derivation rule assigns a scale from the declared envelope and significance target,
+  and the low-end significance a wide envelope can carry is itself bounded by the sixty-three-bit
+  budget: capacitance `[1e-12, 1e3]` cannot hold the full `P = 16` the charge example uses and
+  caps near thirteen significant bits at its low end. A quantity whose range exceeds what
+  sixty-three magnitude bits can hold even at a reduced significance (resistivity's full
+  twenty-four orders, dynamic viscosity's sixteen) is represented over a windowed sub-range with
+  the tail clamped or reserved, the same honest windowing the floor data documents. Per-quantity
+  scales widen the representable window; they do not make it unbounded.
 - Scale-aware arithmetic is cross-domain, not electromagnetism-only: the blast radius is every
   kernel reading a scale-reserved axis, across six domains. A future domain that introduces a
   new wide-range quantity inherits the mechanism but must have its reader kernels made
@@ -354,7 +365,11 @@ culture and belief layers) and is the second arc; it is not built here.
    mechanics, optics, acoustics, and biology wide-range kernels through the helpers; graduate
    the range-reserved axes to set; pin each scale-reserved axis's `scale_bits`; reconcile
    `k_coulomb`, `MU_0`, `DT`, and the caps; and surface the reserved decisions for owner
-   ratification. Larger scale-reserved sets may split PR-3 by domain.
+   ratification. Larger scale-reserved sets may split PR-3 by domain. One floor-data seam a
+   value audit surfaced closes here: the `opt.source_power` and `acoustic.source_power` range
+   bases name no source and no anchor magnitudes, unlike their sibling axes, so setting those two
+   ranges must add a cited radiometric and acoustic source-power reference rather than restate the
+   axis name.
 
 On the arc's completion, R-UNITS-PIN's absolute half is consolidated into design.md (Part 55,
 a `Decided and reserved` blockquote, a Part 62 record, a Part 63 bibliography group) and the
