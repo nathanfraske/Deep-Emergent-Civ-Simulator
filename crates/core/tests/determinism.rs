@@ -284,3 +284,75 @@ fn command_application_is_thread_count_independent() {
         "spawn ids are minted densely in canonical order at the barrier"
     );
 }
+
+#[test]
+fn canonical_crates_use_only_ordered_containers_except_documented_index_maps() {
+    // R-CANON-WALK: canonical simulation state must live in ordered containers (BTreeMap /
+    // BTreeSet) so iteration order, and thus the state hash and any future parallel fold, is
+    // deterministic. A std HashMap / HashSet iterates in a per-instance random order, which
+    // breaks reproducibility even single-threaded. The clippy `disallowed_types` lint denies
+    // them in the canonical crates at compile time; this is the test-time backstop, so a CI
+    // run without clippy still catches a regression. It enumerates the three proven-safe
+    // opt-outs (single-key lookups or sorted-accessor registries, each carrying a justified
+    // `#[allow(clippy::disallowed_types)]`) and fails if any other canonical module grows one.
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    let allowed: BTreeSet<&str> = [
+        "core/src/event.rs",
+        "core/src/id.rs",
+        "sim/src/calibration.rs",
+    ]
+    .into_iter()
+    .collect();
+
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")); // crates/core
+    let workspace = manifest.parent().unwrap().parent().unwrap(); // repo root
+
+    fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    rs_files(&p, out);
+                } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    let mut offenders: Vec<String> = Vec::new();
+    for crate_name in ["core", "sim", "world"] {
+        let src = workspace.join("crates").join(crate_name).join("src");
+        let mut files = Vec::new();
+        rs_files(&src, &mut files);
+        for f in files {
+            let rel = f
+                .strip_prefix(workspace.join("crates"))
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(&f).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                let t = line.trim_start();
+                if t.starts_with("//") || line.contains("disallowed_types") {
+                    continue;
+                }
+                let uses_hash = (line.contains("HashMap") || line.contains("HashSet"))
+                    && !line.contains("BTreeMap")
+                    && !line.contains("BTreeSet");
+                if uses_hash && !allowed.contains(rel.as_str()) {
+                    offenders.push(format!("{}:{}: {}", rel, i + 1, t));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "R-CANON-WALK: an unordered container appeared in a canonical crate outside the \
+         documented whitelist (use BTreeMap/BTreeSet, or add a justified \
+         #[allow(clippy::disallowed_types)] and extend the whitelist):\n{}",
+        offenders.join("\n")
+    );
+}

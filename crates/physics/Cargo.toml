@@ -16,3 +16,8 @@ civsim-core = { path = "../core" }
 # floating point reaches canonical state through them.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[lints.clippy]
+# R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);
+# this crate holds no hashable simulation state, so the ordered-container lint is off here.
+disallowed_types = "allow"

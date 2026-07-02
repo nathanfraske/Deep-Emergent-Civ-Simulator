@@ -35,6 +35,13 @@
 //! itself: the full tick is bit-identical at every worker count, because the applied
 //! order is a pure function of the produced command set rather than of the thread that
 //! produced it. The sweep runs the same replay at widths 1, 2, 3, and 8.
+//!
+//! For that third property to bite, the command set must be non-empty. The sweep drives
+//! the promoted beings with an observation schedule (`seed_observations`) so they form
+//! beliefs and assert, accept, and refuse them in the converse phase, and a move-count
+//! guard (`MIN_EXPECTED_MOVES`) asserts the run stays well clear of zero. An undriven tick
+//! forms no belief, emits no move, and would let the barrier prove an empty set identical:
+//! a vacuous pass the guard now refuses.
 
 use civsim_core::{Fixed, StableId};
 use civsim_sim::decision::Behaviour;
@@ -42,13 +49,13 @@ use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
 };
-use civsim_sim::evidence::InferenceParams;
+use civsim_sim::evidence::{AttrKindId, InferenceParams, ValueId};
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::lod::TwoTierWorld;
 use civsim_sim::primes::nsm_concept_ids;
 use civsim_sim::runner::{Field, FieldCalib, Runner};
 use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
-use civsim_sim::world::{GossipParams, World};
+use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_world::Coord3;
 
 const WITNESSED: AccessChannelId = AccessChannelId(1);
@@ -123,10 +130,63 @@ fn substrate() -> (ForceFloor, MoveRegistry) {
     (floor, registry)
 }
 
+// The observation schedule that drives the promoted beings to form beliefs, so the
+// converse phase turns those beliefs into dialogue moves and the CommandKey barrier
+// re-orders a non-empty, thread-scrambled command set (R-HARNESS-COVER Phase-0). Without
+// this the sweep ticks on empty input, no belief forms, no move is emitted, and the
+// barrier proves an empty command set identical: a vacuous pass. A fixed function of the
+// being and the tick, so it stays deterministic and camera-free.
+const OBS_SUBJECT: StableId = StableId(900_000);
+const OBS_ATTR: AttrKindId = AttrKindId(0);
+const OBS_HYPS: [ValueId; 3] = [10, 20, 30];
+/// The observation weight, above the fixture commit threshold (3) and runner-up margin (2),
+/// so one observation commits a belief the speaker can then assert.
+const OBS_WEIGHT: i32 = 5;
+/// Re-seed beliefs on this cadence; between re-seeds the converse phase propagates and
+/// converges, so the run is a train of non-empty move bursts rather than one early burst.
+const OBS_REFRESH: u64 = 10;
+
+/// The observations for tick `t`: on each refresh boundary every being observes one value
+/// of a shared question. Neighbouring indices (which land in different bands, and which
+/// within one band step by `bands`) draw different values, so a band holds a disagreement
+/// its promoted speakers assert to and take up from each other; the value each being sees
+/// rotates every refresh, so later ticks keep producing moves. A pure function of the id
+/// and the tick.
+fn seed_observations(ids: &[StableId], t: u64) -> Vec<TickInput> {
+    if !t.is_multiple_of(OBS_REFRESH) {
+        return Vec::new();
+    }
+    let epoch = t / OBS_REFRESH;
+    ids.iter()
+        .enumerate()
+        .map(|(i, &mind)| {
+            let toward = OBS_HYPS[(i as u64 + epoch) as usize % OBS_HYPS.len()];
+            TickInput {
+                mind,
+                ordinal: 0,
+                stim: Stimulus::Observe {
+                    subject: OBS_SUBJECT,
+                    attr: OBS_ATTR,
+                    hyps: OBS_HYPS.to_vec(),
+                    toward,
+                    weight: Fixed::from_int(OBS_WEIGHT),
+                    from: mind,
+                },
+            }
+        })
+        .collect()
+}
+
+/// The floor the driven converse phase must clear so the worker sweep can never silently
+/// go vacuous again. The observed count over the 40-being, 80-tick run is far above this;
+/// the guard only has to be well clear of zero and of a trivial handful (R-HARNESS-COVER).
+const MIN_EXPECTED_MOVES: usize = 200;
+
 /// A dawn world with language, dialogue, and gossip installed, `beings` minds spread
 /// across `bands` co-located groups, everyone promoted to move-by-move dialogue, so a
-/// tick exercises the full phase sequence. Mirrors the `tick_bench` fixture.
-fn dawn_world(beings: usize, bands: usize, seed: u64) -> World {
+/// tick exercises the full phase sequence. Mirrors the `tick_bench` fixture. Returns the
+/// world and the minted being ids, so the caller can drive them with observations.
+fn dawn_world(beings: usize, bands: usize, seed: u64) -> (World, Vec<StableId>) {
     let bands = bands.max(1);
     let mut w = World::new(
         params(),
@@ -166,31 +226,35 @@ fn dawn_world(beings: usize, bands: usize, seed: u64) -> World {
         w.set_place(m, (i % bands) as u32);
         w.promote(m);
     }
-    w
+    (w, ids)
 }
 
-/// Run a dawn world for `ticks` at the given ActionStage worker width and return the
-/// (state hash, event-log hash) after each tick, the canonical fingerprint of the run.
+/// Run a dawn world for `ticks` at the given ActionStage worker width, driving the
+/// promoted beings with the observation schedule so the converse phase produces dialogue
+/// moves. Returns the (state hash, event-log hash) after each tick, the canonical
+/// fingerprint of the run, and the total dialogue-move count (every dialogue move is the
+/// only thing that appends to the event log, so this is exactly `events().len()`), which
+/// the sweep guards against silently falling to zero.
 fn run_trace_workers(
     beings: usize,
     bands: usize,
     seed: u64,
     ticks: u64,
     workers: usize,
-) -> Vec<(u128, u128)> {
-    let mut w = dawn_world(beings, bands, seed);
+) -> (Vec<(u128, u128)>, usize) {
+    let (mut w, ids) = dawn_world(beings, bands, seed);
     w.set_workers(workers);
     let mut trace = Vec::with_capacity(ticks as usize);
-    for _ in 0..ticks {
-        w.tick(&[]);
+    for t in 0..ticks {
+        w.tick(&seed_observations(&ids, t));
         trace.push((w.state_hash(), w.event_log_hash()));
     }
-    trace
+    (trace, w.events().len())
 }
 
-/// Run a dawn world serially (worker width 1).
+/// Run a dawn world serially (worker width 1), returning the hash trace only.
 fn run_trace(beings: usize, bands: usize, seed: u64, ticks: u64) -> Vec<(u128, u128)> {
-    run_trace_workers(beings, bands, seed, ticks, 1)
+    run_trace_workers(beings, bands, seed, ticks, 1).0
 }
 
 #[test]
@@ -222,13 +286,31 @@ fn full_tick_is_bit_identical_across_worker_counts() {
     // barrier re-orders them by CommandKey, and the whole tick's canonical state and
     // event log must be bit-identical at every width. Round-robin turn assignment means
     // the pre-barrier production order scrambles differently at each width, so only the
-    // total-order sort can be holding the canon still.
-    let serial = run_trace_workers(40, 5, 0xC0FFEE, 80, 1);
+    // total-order sort can be holding the canon still. The beings are driven by the
+    // observation schedule, so this command set is a non-empty, thread-scrambled train of
+    // real dialogue moves, not the empty set an undriven tick would produce.
+    let (serial, serial_moves) = run_trace_workers(40, 5, 0xC0FFEE, 80, 1);
+    // The anti-vacuity guard (R-HARNESS-COVER Phase-0): the driven converse phase must
+    // emit a substantial dialogue-move set, or the sweep would prove an empty command set
+    // identical and catch no ordering regression. This fails loud on any regression that
+    // silences the converse phase (a lost observation path, a broken promotion, a dropped
+    // move) before the bit-identity check can go vacuously green.
+    assert!(
+        serial_moves >= MIN_EXPECTED_MOVES,
+        "the converse phase produced only {serial_moves} dialogue moves (expected at least \
+         {MIN_EXPECTED_MOVES}): the worker sweep would prove an empty command set identical \
+         (R-HARNESS-COVER guard)"
+    );
     for workers in [2usize, 3, 8] {
-        let parallel = run_trace_workers(40, 5, 0xC0FFEE, 80, workers);
+        let (parallel, parallel_moves) = run_trace_workers(40, 5, 0xC0FFEE, 80, workers);
         assert_eq!(
             serial, parallel,
             "the tick diverged at {workers} workers: the applied order leaked the thread schedule"
+        );
+        assert_eq!(
+            serial_moves, parallel_moves,
+            "the dialogue-move count is not width-invariant at {workers} workers: the barrier \
+             dropped or duplicated a move under parallelism"
         );
     }
 }
@@ -306,8 +388,8 @@ fn composed_trace(
     seed: u64,
     ticks: u64,
     workers: usize,
-) -> Vec<(u128, u128)> {
-    let mut world = dawn_world(beings, bands, seed);
+) -> (Vec<(u128, u128)>, usize) {
+    let (mut world, ids) = dawn_world(beings, bands, seed);
     world.set_workers(workers);
     let mut runner = Runner::with_world(field_fixture(), field_calib(), world);
     for k in 0..4u64 {
@@ -316,8 +398,11 @@ fn composed_trace(
         runner.place_being(id, coord, Fixed::from_int(37));
     }
     let mut trace = Vec::with_capacity(ticks as usize);
-    for _ in 0..ticks {
-        runner.step();
+    for t in 0..ticks {
+        // The observation schedule feeds the cognition sub-phase of the composite step, so
+        // the composed sweep exercises the same non-empty CommandKey barrier the direct
+        // sweep does, rather than a cognition side that never speaks.
+        runner.step_with_world_inputs(&seed_observations(&ids, t));
         let world = runner.world().expect("the composed runner owns a world");
         // Clock lockstep: the field spine and the cognition world advance together, one per step.
         assert_eq!(
@@ -327,7 +412,12 @@ fn composed_trace(
         );
         trace.push((runner.state_hash(), world.event_log_hash()));
     }
-    trace
+    let moves = runner
+        .world()
+        .expect("the composed runner owns a world")
+        .events()
+        .len();
+    (trace, moves)
 }
 
 #[test]
@@ -336,8 +426,8 @@ fn composed_runner_tick_replay_is_bit_identical() {
     // phases. Two composed runs from one seed must produce the same composite state hash and world
     // event-log hash at every tick: the field spine and the six-phase cognition tick, folded into one
     // canonical fingerprint, reproduce bit for bit.
-    let a = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
-    let b = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
+    let (a, _) = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
+    let (b, _) = composed_trace(40, 5, 0xC0DE_F00D, 100, 1);
     assert_eq!(a.len(), 100);
     assert_eq!(a, b, "the composed tick did not replay bit for bit");
 }
@@ -346,8 +436,8 @@ fn composed_runner_tick_replay_is_bit_identical() {
 fn composed_runner_tick_diverges_on_a_different_seed() {
     // The composite trace is seed-sensitive, so the bit-identity above is a real reproduction of a
     // non-trivial composed run rather than a constant.
-    let a = composed_trace(40, 5, 1, 60, 1);
-    let b = composed_trace(40, 5, 2, 60, 1);
+    let (a, _) = composed_trace(40, 5, 1, 60, 1);
+    let (b, _) = composed_trace(40, 5, 2, 60, 1);
     assert_ne!(
         a, b,
         "distinct seeds should not produce the same composed trace"
@@ -360,12 +450,24 @@ fn composed_runner_tick_is_bit_identical_across_worker_counts() {
     // CommandKey barrier, so the composite must be bit-identical at every World worker width: the
     // field-first-then-cognition order is fixed and the applied command order is a pure function of
     // the produced set, not of the thread that produced it (R-CMD-ORDER, R-HARNESS-COVER).
-    let serial = composed_trace(40, 5, 0xBEEF, 80, 1);
+    let (serial, serial_moves) = composed_trace(40, 5, 0xBEEF, 80, 1);
+    // The same anti-vacuity guard the direct sweep carries: the composed cognition side
+    // must produce a non-empty dialogue-move set, or its barrier proves nothing.
+    assert!(
+        serial_moves >= MIN_EXPECTED_MOVES,
+        "the composed converse phase produced only {serial_moves} dialogue moves (expected at \
+         least {MIN_EXPECTED_MOVES}): the composed sweep would prove an empty command set \
+         identical (R-HARNESS-COVER guard)"
+    );
     for workers in [2usize, 3, 8] {
-        let parallel = composed_trace(40, 5, 0xBEEF, 80, workers);
+        let (parallel, parallel_moves) = composed_trace(40, 5, 0xBEEF, 80, workers);
         assert_eq!(
             serial, parallel,
             "the composed tick diverged at {workers} workers"
+        );
+        assert_eq!(
+            serial_moves, parallel_moves,
+            "the composed dialogue-move count is not width-invariant at {workers} workers"
         );
     }
 }
@@ -378,7 +480,7 @@ fn the_canonical_runner_refuses_an_authored_behaviour_repertoire() {
     // (Part 8.4) and must not ride the canonical-emergent spine, whose behaviour source is the evolved
     // controller. Installing one (even an empty one, which still sets has_behaviour) and composing it
     // onto the canonical runner is a fail-loud steering leak.
-    let mut world = dawn_world(4, 2, 0x5EED);
+    let (mut world, _ids) = dawn_world(4, 2, 0x5EED);
     world.set_behaviour(Behaviour {
         drives: vec![],
         curves: vec![],

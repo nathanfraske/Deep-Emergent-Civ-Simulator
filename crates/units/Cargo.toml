@@ -14,3 +14,8 @@ civsim-core = { path = "../core" }
 # this crate; magnitudes are integer fixed-point, so nothing here can perturb a
 # canonical result.
 serde = { version = "1", features = ["derive"] }
+
+[lints.clippy]
+# R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);
+# this crate holds no hashable simulation state, so the ordered-container lint is off here.
+disallowed_types = "allow"

@@ -63,7 +63,11 @@ pub struct CommandKey {
     pub tick: u64,
     /// The primary entity the command concerns; the first tie-break after the tick.
     pub primary: StableId,
-    /// The command or event kind discriminant; the second tie-break.
+    /// The command or event kind discriminant; the second tie-break. The `u32` kind space is
+    /// engine mechanics, not owner-calibrated world content: the discriminants are fixed
+    /// identifiers the engine assigns to its own command and event varieties (a dialogue move,
+    /// a spawn, a promotion), the same standing as the `R-RNG-COORD` phase-set. It carries no
+    /// reserved value, and a new engine command variety claims the next discriminant.
     pub kind: u32,
     /// The emission ordinal, which must make the key unique per `(tick, primary, kind)`.
     pub ordinal: u64,
@@ -225,7 +229,19 @@ impl<C> CommandBuffer<C> {
     /// walk (design Part 3.5), so the result is a pure function of the buffered set given
     /// unique keys (the emission ordinal is the caller's uniqueness contract).
     pub fn into_ordered(self) -> Vec<(CommandKey, C)> {
-        canonical_sorted(self.pending, |pair: &(CommandKey, C)| pair.0)
+        let ordered = canonical_sorted(self.pending, |pair: &(CommandKey, C)| pair.0);
+        // The emission ordinal is the caller's uniqueness contract: each CommandKey must be
+        // unique per tick, so the total order is well defined. On a duplicate key the sort's
+        // tie-break is not a defined canonical order (it falls back to the push order, which
+        // is worker-count dependent), the exact non-determinism the barrier exists to remove.
+        // Surface the collision rather than silently leak the thread schedule, mirroring
+        // EventQueue::schedule's displaced-payload signal (R-CMD-ORDER).
+        debug_assert!(
+            ordered.windows(2).all(|w| w[0].0 != w[1].0),
+            "CommandBuffer: duplicate CommandKey; the emission ordinal did not make the key \
+             unique per (tick, primary, kind), so the applied order would leak the worker schedule"
+        );
+        ordered
     }
 
     /// Drain the buffer at the barrier, applying each command in total [`CommandKey`]
@@ -451,5 +467,18 @@ mod tests {
             assign(&spawns_b, 100),
             "each spawn key gets the same id regardless of emission order"
         );
+    }
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "duplicate CommandKey")]
+    fn command_buffer_surfaces_a_duplicate_key() {
+        // The emission-ordinal uniqueness contract: two commands sharing a CommandKey have no
+        // defined order, so the barrier surfaces the collision rather than falling back to the
+        // worker-dependent push order (R-CMD-ORDER). Guarded by a debug_assert, so the harness
+        // (run in debug) catches a caller that fails to make its keys unique.
+        let mut buf: CommandBuffer<&str> = CommandBuffer::new();
+        buf.push(key(5, 2, 1, 7), "a");
+        buf.push(key(5, 2, 1, 7), "b"); // same key: a caller defect
+        let _ = buf.into_ordered();
     }
 }

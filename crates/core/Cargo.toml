@@ -16,3 +16,7 @@ rust-version.workspace = true
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+# R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
+disallowed_types = "deny"

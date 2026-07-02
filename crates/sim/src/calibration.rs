@@ -28,6 +28,7 @@
 
 use civsim_core::Fixed;
 use serde::{Deserialize, Serialize};
+#[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -127,6 +128,9 @@ impl std::error::Error for CalibrationError {}
 #[derive(Debug)]
 pub struct CalibrationManifest {
     order: Vec<String>,
+    // The reserved-value manifest is a name-keyed config lookup (get by key), read at
+    // startup and never iterated into a state hash (R-CANON-WALK).
+    #[allow(clippy::disallowed_types)]
     values: HashMap<String, ReservedValue>,
 }
 
@@ -136,6 +140,7 @@ impl CalibrationManifest {
         let file: ManifestFile =
             toml::from_str(s).map_err(|e| CalibrationError::Parse(e.to_string()))?;
         let mut order = Vec::with_capacity(file.reserved.len());
+        #[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
         let mut values = HashMap::with_capacity(file.reserved.len());
         for entry in file.reserved {
             if values.contains_key(&entry.id) {

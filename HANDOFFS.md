@@ -46,6 +46,24 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): the determinism parallelism on-ramp, built and adversarially audited (owner sign-off pending for the flag-flips)
+
+The owner chose to scope the determinism cluster completely, then implement and audit. On `claude/determinism-onramp`. A scope fan-out (7 readers + synthesis) split the cluster into a safe parallel-tick on-ramp and held research dives (R-PROJ-REGISTER has active concurrent work via R-AGING, R-SAVE-SCHEMA and R-UNITS-PIN need owner reserved values and collide with the physics fan-out, R-HARNESS-COVER's LOD-equivalence is blocked on unbuilt R-TEMPORAL-LOD). The owner approved the full on-ramp and the strictest R-CANON-WALK enforcement.
+
+**Built (mechanism only; flag-to-resolved consolidation held for owner sign-off).**
+- **R-HARNESS-COVER Phase-0:** the determinism harness worker sweep was vacuous (it ticked promoted beings on empty input, so the converse phase emitted zero dialogue moves and the `CommandKey` barrier re-ordered an empty set). It now drives observations (`seed_observations`), producing a non-empty thread-scrambled move set (1650 moves direct, 1476 composed), with a `MIN_EXPECTED_MOVES` guard so it cannot silently go vacuous again. `crates/sim/tests/determinism_harness.rs`, plus an additive `Runner::step_with_world_inputs`.
+- **R-CANON-WALK enforcement:** `clippy.toml` denies std `HashMap`/`HashSet` in the canonical crates (core, sim, world); the substrate/tooling crates (physics, units, gpu, viewer) hold no hashable tick state and keep the lint off. The 3 proven-safe sites (event provenance index, id registry, reserved-value manifest) opt out with justified `#[allow]`. Added `EventLog::by_entity_sorted` (a `StableId`-ordered accessor for the one named provenance index) and a test-time source-scan backstop in `crates/core/tests/determinism.rs`.
+- **R-CMD-ORDER guard:** `CommandBuffer::into_ordered` now surfaces a duplicate `CommandKey` (debug_assert) rather than falling back to worker-dependent push order, mirroring `EventQueue`; the u32 kind space is classified as engine mechanics.
+- **R-REDUCE-ORDER two sites:** the typology weighted pick is order-independent by construction (proven). The gossip conflict apply was analysed rather than rewritten.
+
+**The audit (5 adversaries + synthesis) found one real seam.** Three of four items are CLEAN, and the R-CMD-ORDER worker sweep was proven to bite (mutating `into_ordered` to skip the sort fails the sweep). The confirmed finding: the gossip conflict apply is NOT order-independent by construction. When two competing assertions about one `(subject, attr)` carry different candidate sets, the belief frame's `hyps` is fixed first-writer-wins (`agent.rs` `or_insert_with`) and `add_evidence` drops evidence toward a value absent from it (`evidence.rs`), so the committed belief depends on apply order. I confirmed it in code and reproduced the divergence. It is not a live divergence today (the apply runs single-threaded in canonical `CommandKey` order, R-CMD-ORDER), but the reduce_order.rs proof overclaimed order-independence (it pinned a constant candidate set). Corrected: the gossip apply is order-independent only for a shared candidate set, and is otherwise an R-CMD-ORDER ordered-apply site, not an R-REDUCE-ORDER order-independent one; a new test locks the mismatched-candidate order-dependence on record.
+
+**Surfaced for the owner (a decision before the APPLY pass is parallelised, not just the read pass):** canonicalize the per-question candidate set (union or sort the `hyps` across competing assertions, so `add_evidence` stops dropping), or hold the gossip apply to the canonical barrier. This is belief-model semantics, so it is the owner's call, not changed unilaterally.
+
+**Where it stopped.** The on-ramp mechanism is built, audited, and green (clippy 0 workspace-wide, full suite passes) on `claude/determinism-onramp`, 4 commits. The flag-flips (R-CANON-WALK, R-CMD-ORDER, and the reduce sites to resolved, the Part 62 records, the audit counts) are held for owner sign-off per the project custom, as are the held research dives (R-PROJ-REGISTER, R-SAVE-SCHEMA, R-UNITS-PIN) and the gossip-hyps seam decision.
+
+---
+
 ## 2026-07-02 (continued): the wgpu/SPIR-V backend, a third codegen path for the arithmetic (item 1)
 
 The last GPU-lane residual: confirm the transcendentals cross-backend. The CPU backend could not (it panics in cubecl-opt), so a background probe stood up the cubecl-wgpu (Vulkan/SPIR-V) path. On `claude/gpu-wgpu-backend`.
