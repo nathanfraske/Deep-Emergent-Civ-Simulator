@@ -1079,9 +1079,11 @@ source = "Part 25 genome model; record 62.5; the high end per docs/working/TEST_
 
 [[reserved]]
 id = "genome.point_mutation_rate.high"
-basis = "the high-end per-locus point-mutation probability Tempest and Arcanum push toward, above the baseline so standing variation and the molecular clock run fast; its upper bound is where a lineage stops being stable across a generation (Kimura); the baseline is genome.point_mutation_rate"
-status = "reserved"
-value = ""
+basis = "the high-end per-locus point-mutation probability Tempest and Arcanum push toward, above the baseline so standing variation and the molecular clock run fast (Kimura neutral theory supports the faster-clock rationale); the useful upper bound is the mutation-load error threshold (Eigen quasispecies; Muller), not a Kimura result, and whether 0.001 stays sub-threshold depends on the reserved genome.loci_per_channel count; the baseline is genome.point_mutation_rate (panel-reviewed 2026-07-02, citation corrected)"
+status = "set"
+value = "0.001"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-02"
 unit = "probability"
 source = "Part 25.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
@@ -1095,9 +1097,11 @@ source = "Part 25.5, 25.10; the high end per docs/working/TEST_WORLDS.md (Tempes
 
 [[reserved]]
 id = "genome.selection_scaling.high"
-basis = "the hard-selection end Tempest pushes toward (Arcanum keeps the baseline), so pressure bites hard and populations swing; its upper bound is where selection crashes or deterministically fixes a population; the baseline is genome.selection_scaling"
-status = "reserved"
-value = ""
+basis = "the hard-selection end Tempest and Venus push toward (Arcanum keeps the baseline), so pressure bites hard and populations swing; set at 0.5, about 2.5x the baseline breeder's-equation response (change = h^2 * S), understood as a faster allele-frequency response rather than a hard fixation ceiling, since in the discrete recurrence p'=p(1+s)/(1+ps) any positive coefficient fixes eventually and only the speed changes; the baseline is genome.selection_scaling (panel-reviewed 2026-07-02, fixation-ceiling framing corrected)"
+status = "set"
+value = "0.5"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-02"
 unit = "coefficient"
 source = "Part 25.7; the high end per docs/working/TEST_WORLDS.md (Tempest)"
 
@@ -1167,17 +1171,21 @@ source = "Part 25.7; biosphere candidate; the high end per docs/working/TEST_WOR
 
 [[reserved]]
 id = "genome.effective_population_size.low"
-basis = "the small-Ne end Tempest pushes toward, below the baseline so drift is violent and lineages diverge and fix by chance; its lower bound is where the pool is too small to persist; the baseline is genome.effective_population_size (Wright-Fisher; Kimura neutral theory)"
-status = "reserved"
-value = ""
+basis = "the small-Ne end Tempest and Venus push toward, below the baseline so drift is violent and lineages diverge and fix by chance (Wright-Fisher; Kimura neutral theory); set at 30, deliberately below the Ne~50 short-term minimum-viable-population floor (Franklin 1980; Soule 50/500) so small banded pools diverge hard and sometimes go extinct, the boom-and-bust character the stress worlds want; the baseline is genome.effective_population_size (panel-reviewed 2026-07-02, owner kept 30 below MVP by design; regime assignment must key on generated world physics, not a per-world-name lookup)"
+status = "set"
+value = "30"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-02"
 unit = "individuals"
 source = "Part 25.7-25.8; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
 
 [[reserved]]
 id = "genome.speciation_distance.low"
-basis = "the near-speciation end Tempest pushes toward, below the baseline so diverged pools are declared distinct species sooner and radiations and extinctions come quickly; the baseline is genome.speciation_distance (Coyne and Orr)"
-status = "reserved"
-value = ""
+basis = "the near-speciation end Tempest pushes toward, below the baseline so diverged pools are declared distinct species sooner and radiations and extinctions come quickly; set at 0.15, half the baseline, a design ratio consistent with the project's other direction siblings rather than a figure drawn from the literature (Coyne and Orr ground declared-on-divergence speciation, not the specific cutoff); the baseline is genome.speciation_distance (panel-reviewed 2026-07-02, half-baseline framed as a design ratio, owner-ratified)"
+status = "set"
+value = "0.15"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-02"
 unit = "distance"
 source = "Part 25.7; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
 

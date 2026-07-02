@@ -438,16 +438,24 @@ name = "Probe"
                 "{world} resolves every dial it pushes"
             );
         }
-        // Tempest cranks change, so its direction siblings are the stress-world ends, all reserved:
-        // the per-scenario review queue includes the high mutation and the low effective size.
+        // Tempest cranks change, so its direction siblings are the stress-world ends. As the owner
+        // graduates them through the reserved-values worksheet the review queue shrinks, so this
+        // asserts the MECHANISM rather than a fixed membership, and survives calibration: the review
+        // queue surfaces exactly the dials Tempest pushes whose resolved manifest entry is still
+        // unset, and is_fully_set is precisely that queue being empty.
         let tempest = Scenario::load(format!("{dir}tempest.toml")).unwrap();
         let queue = tempest.resolve(&manifest).unwrap();
         let reserved = queue.reserved_ids();
-        assert!(reserved.contains(&"genome.mutation_rates.high"));
-        assert!(reserved.contains(&"genome.effective_population_size.low"));
-        assert!(
-            !queue.is_fully_set(),
-            "Tempest's stress-world ends are reserved for the owner"
+        for &id in &reserved {
+            assert!(
+                !manifest.get(id).unwrap().is_set(),
+                "the review queue must surface only unset dials, but {id} is set"
+            );
+        }
+        assert_eq!(
+            queue.is_fully_set(),
+            reserved.is_empty(),
+            "a scenario is fully set exactly when its review queue is empty"
         );
     }
 
