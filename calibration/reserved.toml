@@ -1056,3 +1056,133 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
+
+# --- Scenario direction siblings (docs/working/TEST_WORLDS.md) ---
+#
+# A test-world scenario pushes each change-and-extremes dial in a direction (real, high, low),
+# and the magnitude behind a pushed direction is a reserved end of its own, distinct from the
+# baseline. These are those ends: the `.high` and `.low` siblings the Tempest and Arcanum stress
+# worlds resolve to (scenarios/*.toml, crates/sim/src/scenario.rs). A `real` dial resolves to its
+# baseline entry above; only the pushed directions need a sibling. Every one stays reserved: the
+# stress-world extremes are the owner's to set, surfaced here rather than fabricated, each basis
+# naming the direction and the useful bound the scenario is meant to find.
+
+[[reserved]]
+id = "genome.mutation_rates.high"
+basis = "the volatile-end point- and structural-mutation rates and step-size distribution the Tempest and Arcanum worlds push toward, so genomes churn and novelty arrives fast; the upper useful bound is where heavy mutation breaks legibility or a determinism replay; the baseline is genome.mutation_rates"
+status = "reserved"
+value = ""
+unit = "per_locus_per_generation"
+source = "Part 25 genome model; record 62.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "genome.point_mutation_rate.high"
+basis = "the high-end per-locus point-mutation probability Tempest and Arcanum push toward, above the baseline so standing variation and the molecular clock run fast; its upper bound is where a lineage stops being stable across a generation (Kimura); the baseline is genome.point_mutation_rate"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 25.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "genome.mutation_step.high"
+basis = "the large-step end Tempest and Arcanum push toward, so a single mutation moves a trait far and novelty is coarse rather than incremental; the baseline is genome.mutation_step"
+status = "reserved"
+value = ""
+unit = "trait_units"
+source = "Part 25.5, 25.10; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "genome.selection_scaling.high"
+basis = "the hard-selection end Tempest pushes toward (Arcanum keeps the baseline), so pressure bites hard and populations swing; its upper bound is where selection crashes or deterministically fixes a population; the baseline is genome.selection_scaling"
+status = "reserved"
+value = ""
+unit = "coefficient"
+source = "Part 25.7; the high end per docs/working/TEST_WORLDS.md (Tempest)"
+
+[[reserved]]
+id = "language.sound_change_rate.high"
+basis = "the fast-drift end Tempest and Arcanum push toward, so phonologies shift and languages splinter fast; the baseline is language.sound_change_rate"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33.4 drift; record 62.12; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "lang.drift_operator_rates.high"
+basis = "the fast lexical-and-grammatical churn end Tempest and Arcanum push toward, so vocabularies and grammars drift and split fast; the baseline is lang.drift_operator_rates"
+status = "reserved"
+value = ""
+unit = "per_generation"
+source = "Part 33 language system; record 62.7; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "language.innovation_rate.high"
+basis = "the high-coinage end Tempest and Arcanum push toward, above the baseline so fresh word forms seed dialect split fast; its upper bound is where a band can no longer converge before the next coinage (naming-game convergence); the baseline is language.innovation_rate"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 33 procedural language; record 62.6; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "axiom.calcification_rate.high"
+basis = "the fast-hardening end Tempest and Arcanum push toward, so beliefs calcify and ideologies harden and schism; the baseline is axiom.calcification_rate"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "axiom.conformity_prestige_strengths.high"
+basis = "the strong-conformity end Tempest and Arcanum push toward, so prestige and conformity drive belief cascades and schism; the baseline is axiom.conformity_prestige_strengths"
+status = "reserved"
+value = ""
+unit = "strength"
+source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "value_metric.conflict_coefficient.high"
+basis = "the high-conflict end Tempest and Arcanum push toward, so value differences ignite into open conflict rather than ordinary friction; the baseline is value_metric.conflict_coefficient"
+status = "reserved"
+value = ""
+unit = "coefficient"
+source = "Part 21 value-distance metric; record 62.3; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "being.life_event_impulse.high"
+basis = "the strong-shock end Tempest and Arcanum push toward, so individual life events ripple hard through the population; the baseline is being.life_event_impulse"
+status = "reserved"
+value = ""
+unit = "axis_units"
+source = "Part 20 being model; record 62.2; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "biosphere.predawn_generations.high"
+basis = "the long pre-dawn Tempest pushes toward (the grounded and Arcanum worlds keep the baseline), so the inherited ecology is already a churned, over-specialized, boom-and-bust web; its upper bound is the compute the aggregate tier can spend; the baseline is biosphere.predawn_generations"
+status = "reserved"
+value = ""
+unit = "generations"
+source = "Part 25.7; biosphere candidate; the high end per docs/working/TEST_WORLDS.md (Tempest)"
+
+[[reserved]]
+id = "genome.effective_population_size.low"
+basis = "the small-Ne end Tempest pushes toward, below the baseline so drift is violent and lineages diverge and fix by chance; its lower bound is where the pool is too small to persist; the baseline is genome.effective_population_size (Wright-Fisher; Kimura neutral theory)"
+status = "reserved"
+value = ""
+unit = "individuals"
+source = "Part 25.7-25.8; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
+
+[[reserved]]
+id = "genome.speciation_distance.low"
+basis = "the near-speciation end Tempest pushes toward, below the baseline so diverged pools are declared distinct species sooner and radiations and extinctions come quickly; the baseline is genome.speciation_distance (Coyne and Orr)"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 25.7; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
+
+[[reserved]]
+id = "genome.speciation_incompatibilities.low"
+basis = "the few-incompatibilities end Tempest pushes toward, below the baseline count so a single complementary allele pair raises a reproductive firewall and speciation is fast; the baseline is genome.speciation_incompatibilities (Dobzhansky-Muller)"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25.7; the low end per docs/working/TEST_WORLDS.md (Tempest)"
