@@ -46,6 +46,24 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): the GPU-vs-CPU offload map scoped (docs/working/GPU_CPU_OFFLOAD_MAP.md)
+
+The owner asked to scope what all can and should be offloaded to the GPU versus kept on the parallelised CPU. A five-agent subsystem survey (environment/fields, cognition/language, embodiment/life, physics laws, determinism/aggregation) classified every engine compute workload against a consistent GPU-fit framework grounded in the code, and a synthesis produced the map. On `claude/gpu-offload-scope`. Also merged this session: PR #66, the canonical GPU perceive notice-roll spike (bit-identical on the 5090).
+
+**The decision framework (five properties, read in order):** domain size and independence (large grid W*H or population N); flattenability (SoA grid or dense column vs pointer-chasing BTreeMap-of-Vec); control-flow uniformity (SIMT vs branchy dispatch); arithmetic intensity vs transfer; order-independence of the reduction/apply (associative i128 sum, monotone-min, integer count vs serial-by-contract). GPU = all five; HYBRID = a flat draw-keyed gather (device) plus a ragged order-sensitive apply (host), the perceive shape; CPU-PARALLEL = independent but branchy/trivial per item; CPU-SERIAL = order-dependent by contract, a graph, or a low-N control plane.
+
+**What goes where (headline).** GPU: the temperature field step, worldgen noise + fused biome classify, the evolved controller forward pass, homeostasis + body-thermal (fused into a resident being-kernel), pool-tier aggregate mortality, Wright-Fisher drift, the eikonal solve (when built). HYBRID: perceive (built), the thermal-gradient sample, individual mortality, locomotion, several physics flux/optics laws. CPU-parallel: decide, converse, gossip (its gather is pointer-chasing, so it is NOT perceive-shaped), language drift. CPU-serial: belief update, theory-of-mind, the naming game, the CommandBuffer barrier, the state-hash walk, the scheduler (all order-dependent by contract).
+
+**Prioritised roadmap (value x feasibility).** Already landed: the diffusion kernel and the perceive spike. Then: (1) finish the temperature field kernel; (2) worldgen noise + fused biome (the cleanest standalone win, zero input transfer, one-shot, no residency fight); (3) the fused resident being-kernel (highest architectural value, unlocks the field offload); (4) pool-tier aggregate mortality (largest parallel domain); (5) Wright-Fisher drift; (6) individual mortality; (7) perceive gather to production (SoA extract + stream-compaction). The residency / SoA-extraction / stream-compaction triad (design Part 5.6) recurs at exactly those load-bearing points.
+
+**ACTIONABLE FINDING to reconcile.** The built GPU diffusion kernel (`crates/gpu/src/field.rs`) matches `crates/core` `diffusion_bench` (toroidal, diffusion-only), NOT the runner's `Field::step` (`crates/sim/src/runner.rs`, which is clamped-Neumann boundary + a `relaxation*(baseline-cur)` term). So the field offload needs a NEW kernel variant with the clamped boundary, the second coefficient, and a resident baseline buffer, under its own Stage-0 gate. The proven diffusion kernel stays valid for its own bench; it is not yet the runner field.
+
+**Two workloads need a new primitive before any bit-identity gate:** Archard wear (`laws.rs`) and the wide-i128 EM forms (`coulomb_force`) evaluate a full-width raw i128 product / truncating i128-by-i64 divide that the pinned fixed-shift `q32_mul`/`q32_div` do not cover.
+
+**Where it stopped.** Scope doc landed on `claude/gpu-offload-scope`; the perceive spike on main (#66). Cross-cutting gates hold: every GPU verdict is contingent on residency AND scale (the dev map 48x24 and dev populations sit below every launch threshold), and each offload is routed by a profile, not on assertion. Next natural build (owner-gated): the worldgen-noise offload (step 2, no residency fight) or finishing the temperature field kernel (step 1).
+
+---
+
 ## 2026-07-02 (continued): canonical GPU perceive spike, the memory-bound gather runs on the GPU bit-for-bit
 
 The owner asked whether the memory-bound perceive could run on the GPU, where the memory bandwidth is an order of magnitude higher. The answer is yes, and it is the convergence of this session's two GPU-enabling threads: the pinned Q32.32 arithmetic (R-GPU-CANON-PIN) and the draw-keyed counter RNG (R-RNG-COORD). On `claude/gpu-perceive-spike`.
