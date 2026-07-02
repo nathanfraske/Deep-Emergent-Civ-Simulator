@@ -16,11 +16,22 @@ serial tick, not the parallel command scheduler," with the parallel form left fo
 R-REDUCE-ORDER. Two pieces the original red-team flagged are already hardened: every canonical id
 newtype now derives `Ord` (the audit bullet's claim that `PoolId` and `EventId` lack it is stale),
 and the parallel-sum seam (C-05) is closed, `Fixed::sum_bits` folding in `i128` so a sum is
-identical for any partition even when a prefix would overflow. What is open is smaller and
-cleaner than the stale backlog implies: there is no single sanctioned canonical-iteration helper
-(iteration order is held per container by the `BTreeMap` habit plus the one Registry accessor), no
-general `canonical_reduce` primitive for a non-associative combine over an unordered source, and no
-scheduler at all.
+identical for any partition even when a prefix would overflow.
+
+Since this pass was first drafted, the parallelism on-ramp has been built and adversarially audited,
+so the substrate this design assumed it would create is now largely in place. The sanctioned
+canonical-iteration helpers exist (`canonical_sorted` and `canonical_reduce` in `crates/core/src/canonical.rs`).
+R-CANON-WALK is now enforced rather than a habit: a `clippy.toml` denies `std::collections::HashMap`/`HashSet`
+in the canonical crates (core, sim, world), the three proven-safe sites carry a justified `#[allow]`,
+the `EventLog` gained a `by_entity_sorted` ordered accessor, and a source-scan test in
+`crates/core/tests/determinism.rs` fails if any canonical module grows an unordered container.
+R-CMD-ORDER's mechanism is built and its barrier now surfaces a duplicate `CommandKey` rather than
+leaking the worker schedule, and the determinism harness worker sweep is a real adversary again (it
+drives a non-empty, thread-scrambled command set through the barrier). R-REDUCE-ORDER's two live
+combines are both order-independent: the typology pick by construction, and the gossip conflict apply
+after closing the order-dependence seam the audit found (a belief's candidate set is now the sorted
+union of every asserted hypothesis, `InferenceFrame::merge_hyps`, rather than first-writer-wins).
+What is now open is exactly one thing: there is no scheduler at all. The keystone is the last piece.
 
 ## The four items resolve as one
 
@@ -82,6 +93,34 @@ threaded barrier rather than pre-minted in a parallel stage; and `EventId` a det
 of canonical content. Until the command stage exists, the serial tick applies its stimuli in the
 canonical (mind id, ordinal) order it already uses, which is the same key restricted to one kind.
 
+### The scheduler core: the buildable shape
+
+Now that the substrate is built, the keystone reduces to one new module (`crates/core/src/schedule.rs`),
+with no new dependency and no calibration. The concrete shapes:
+
+- A `ResourceId(u32)`: a named canonical data resource (a per-being store, the event log, an RNG
+  stream, a field). Resources are a data-defined registry, so a new one is an id, not a code change
+  (Principle 11).
+- A `SystemId(u32)`: a stable canonical id per system (a tick phase, or a finer unit of work),
+  assigned from a sorted declaration like the phase registry, never from registration order, so the
+  schedule cannot depend on load order.
+- An `Access { reads: BTreeSet<ResourceId>, writes: BTreeSet<ResourceId> }` per system. Two systems
+  conflict when one writes a resource the other reads or writes.
+- The derivation `schedule(&BTreeMap<SystemId, Access>) -> Vec<Vec<SystemId>>`: the layered assignment
+  already specified (walk systems in `SystemId` order; place each in the earliest batch with no
+  conflict against a member and after every lower-id system it conflicts with). A pure function of the
+  sorted declarations, so it is deterministic and observer-independent (Principles 3, 10).
+- A serial executor `run_serial(&schedule, &mut world)` that flattens the batches in order and runs
+  each system, so the schedule is exercised and proven against the current serial tick before any
+  parallelism. A Rayon executor is the same signature with a `par_iter` inside each batch, and is not
+  built in this pass.
+
+The proof obligations are determinism-harness checks: the derived schedule is a pure function of the
+declarations (permuting declaration order yields the identical layering); the flattened serial order
+reproduces the current tick's canonical state hash bit for bit (the scheduler changes how the tick is
+expressed, not what it computes); and no conflict ever places two writers of one resource in the same
+batch. The existing worker-count sweep then extends to the batch executor when Rayon is switched on.
+
 ## The owner's question: hecs now, Rayon now, or hold off?
 
 Hold off on both for this pass, and build the scheduler and the hardening as the deterministic
@@ -115,15 +154,16 @@ stays a switch to throw when profiling demands it; both are unblocked, not requi
 
 ## What to build now, and what waits
 
-Buildable now, low-risk, and the substrate the rest needs: the `canonical` primitives, a
-`canonical_sorted` (the sanctioned canonical-iteration helper, R-CANON-WALK) and a `canonical_reduce`
-(the sort-then-fold primitive, R-REDUCE-ORDER), in `civsim-core`, fully tested, since the id-ordering
-and the sum seam they build on are already done. These harden determinism today and are storage- and
-parallelism-agnostic. The scheduler core (the declared-access to layered-schedule module) is the
-keystone and is built after this pass is signed off, still over the serial tick, with the phase
-methods expressed as declared-access systems so the schedule is exercised without yet parallelising.
-R-CMD-ORDER's command key is specified now and wired when the command stage lands. Adopting hecs and
-switching on Rayon are separate later decisions this substrate unblocks.
+The substrate that used to be the "build now" list is now built and merged: the `canonical_sorted`
+and `canonical_reduce` primitives, the R-CANON-WALK enforcement (clippy deny plus the source-scan
+backstop and the ordered `EventLog` accessor), the R-CMD-ORDER duplicate-key guard, and the two
+order-independent reduce sites. So the immediate next build, on this pass's sign-off, is the scheduler
+core itself: the one `schedule.rs` module above (`ResourceId`, `SystemId`, `Access`, the layered
+`schedule`, and the serial executor), still over the serial tick, with the phase methods expressed as
+declared-access systems so the schedule is exercised and proven against the current tick without yet
+parallelising. R-CMD-ORDER's command key is specified and its barrier built; it is wired to the
+scheduler's write batches when the parallel command stage lands. Adopting hecs and switching on Rayon
+stay separate later decisions this substrate unblocks.
 
 ## Reserved values and honest limits
 
