@@ -4,6 +4,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): R-REPRO genome-derived mate-choice fitness built (the red-team's proxy gap closed), on `claude/find-unblocked-work-dwdpsj`
+
+The owner said to take the R-REPRO follow-on. The load-bearing one, named by both the red-team and the module, was to replace the authored fitness-of-distance proxy with fitness read off the real offspring genotype, so the emergence claim rests on the engine's own genetics rather than a reduced-form proxy.
+
+**Built (`crates/sim/src/mate_choice.rs`, additive).** The genome-derived offspring fitness: `offspring_heterozygosity` (the fraction of an offspring's loci that are heterozygous, the overdominance/heterosis axis, the same predicate `GeneSet::express` uses for the dominance deviation) and `hybrid_viability` (the offspring's `hybrid_outcome` against a Dobzhansky-Muller table mapped to a fitness scalar, the incompatibility axis), plus `most_viable_mate` (the viability-aware choice that reads prospective hybrid viability by forming each candidate offspring through `GeneticScheme::reproduce`, the cue a distance-only preference lacks). Two new tests over the real reproduce/hybrid_outcome physics: a heterophilic chooser's offspring is more heterozygous than a homophilic one's, measured on the formed genome, not authored as f(distance) (so the heterosis axis is grounded in the engine's segregation); and a distance (homophilic) preference forms an inviable offspring with an incompatible NEAR mate while `most_viable_mate` picks the compatible far mate and forms a viable offspring, so the incompatibility axis needs the prospective-hybrid-viability cue the distance feature cannot carry. Twelve mate_choice tests (+2), workspace green, fmt/clippy/rustdoc `-D warnings` clean, prose customs clean.
+
+**What this closes.** The red-team's major finding (the distance-monotone proxy cannot demonstrate emergence through the engine's real, non-monotone offspring-genotype physics) is now answered: the genome-derived fitness reads the real offspring genotype, and the two axes the literature names are each covered. The module doc and the proposal are updated to say so.
+
+**Where it stopped.** R-REPRO stays OPEN (a research proof, deepened, not a resolve). The remaining follow-ons, all named: unify the genome-derived fitness with the sign-agnostic proof under one selection loop; reuse `evolve_with` once its input registry carries a candidate-percept family (it is coupled to the homeostatic-axis and affordance registries today); add the value and axiom-distance features; and the `World::birth` choosing call site; gestation stays blocked on R-AGING. Counts unchanged.
+
+---
+
 ## 2026-07-02 (continued): R-REPRO mate-choice direction researched, recommended emergent, and the load-bearing proof built, on `claude/find-unblocked-work-dwdpsj`
 
 The owner asked whether the mate-preference DIRECTION (homophily / heterophily / random) can be emergent rather than an authored per-race lever, wanting a cited recommendation, with the lever acceptable only if emergence is prohibitively compute-intensive. Researched, recommended, and the load-bearing claim built and proven.
