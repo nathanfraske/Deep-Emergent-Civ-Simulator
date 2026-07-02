@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02: anatomy-derived homeostatic reserves built (composition-derived organs), on `claude/anatomy-reserves`, draft PR #28
+
+The owner-directed emergent-physiology item (roadmap Tier B, backlog task #21) had been red-teamed and reframed in the prior session: reserve capacity must derive from a being's organs rather than its body mass, and an organ's function must be DERIVED from its tissue composition against the biology floor, never an authored `OrganCategory` tag (a Principle 8 template). The owner signed off "Derived from tissue composition". This session built it.
+
+**The organ substrate (`crates/sim/src/anatomy.rs`).** `TissueComposition` (a value on each biology-floor material axis, `bio.energy_density` and `bio.water_fraction`), `TissueComponent` (the floor-axis vocabulary a reserve reads, extensible as the floor grows: the respiratory-surface component arrives with R-MEDIUM), and `OrganKindDef` (an organ kind as data: id, name, fantasy gate, composition, with NO function tag). Added an `organs: Vec<OrganKindDef>` registry to `BodyPlanRegistry` with a labelled dev-fixture set (fat-body, glycogen-store, water-store, generalist-viscera, and a magic-gated mana-sac), `organ_composition`, a `BodyPlan.organs: Vec<Part>` field (development is the organ's capacity-bearing size), and `pick_organs`, the organ draw keyed off `base + 100` with no coupling to body mass, covering, or trophic layer (the anti-steering invariant that lets an armored giant roll few organs).
+
+**The derivation (`crates/sim/src/homeostasis.rs`).** `HomeostaticAxisDef` gains `backing_component: Option<TissueComponent>`. The canonical `Homeostasis::new(reg, plan, organs)` sets each backed axis's capacity to the development-weighted sum over the being's organs of their composition on that component; a derived non-backed axis (integrity, temperature) keeps unit capacity. The old mass-scaling constructor is retained only as the labelled `Homeostasis::from_mass` development fallback, and every existing fixture and test caller was migrated to it, so behaviour is preserved bit for bit. No production caller sources a reserve from mass.
+
+**Proof.** New tests in both files: capacity derives from composition; an energy-dense organ backs energy not water; a huge, mostly-armored giant with one tiny organ holds a SMALLER reserve than a small, organ-rich body (the owner's armored-giant case); no organs means no metabolic reserve and non-viability; capacity sums over organs and scales with development; a derived axis holds unit capacity regardless of organs; determinism; and the organ draw is registry-gated, fantasy-gated, and deterministic. Full workspace tests, clippy `-D warnings`, `cargo fmt --check`, and rustdoc `-D warnings` all green; prose customs verified on the diff.
+
+**Where it stopped, and what is next.** Two commits on `claude/anatomy-reserves` (feat + roadmap docs), pushed, DRAFT PR #28 opened to main; the CI prose check passed and the build/test job was in progress at hand-off (verified locally). Per the owner's close review of this architectural change it is NOT auto-merged; it awaits his look. The roadmap records the first half of the owner-directed item DONE. Next, still on the same owner-directed item: scope R-MEDIUM (the gas-exchange and respirable-medium floor law) as a proposal (backlog task #22), then build the generalized medium substrate with aquatic life as one instance (task #20), which is where the deferred bidirectional-thermotaxis gate rides in.
+
+---
+
 ## 2026-07-02: the GPU stood up with CubeCL (`crates/gpu`), R-GPU-CANON-PIN signed off, consolidated, and rebased onto the moved main
 
 The owner asked to stand up the GPU with CubeCL now that it is available and the RTX 5090 is a working part of the compute, and then to consolidate cleanly and PR and merge. On `claude/physics-substrate-fanout`.
