@@ -153,7 +153,7 @@ const OBS_REFRESH: u64 = 10;
 /// rotates every refresh, so later ticks keep producing moves. A pure function of the id
 /// and the tick.
 fn seed_observations(ids: &[StableId], t: u64) -> Vec<TickInput> {
-    if t % OBS_REFRESH != 0 {
+    if !t.is_multiple_of(OBS_REFRESH) {
         return Vec::new();
     }
     let epoch = t / OBS_REFRESH;
