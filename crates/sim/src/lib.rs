@@ -60,6 +60,7 @@ pub mod clock;
 pub mod conservation;
 pub mod controller;
 pub mod decision;
+pub mod demography;
 pub mod dialogue;
 pub mod edibility;
 pub mod epoch;
@@ -104,6 +105,7 @@ pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_P
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
 pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use demography::AgeHistogram;
 pub use dialogue::{
     conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
     ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
