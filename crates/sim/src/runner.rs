@@ -76,6 +76,7 @@
 //! deliberative tier is properly built on the evolved substrate.
 
 use crate::anatomy::BodyPlan;
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::ControllerLayout;
 use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
@@ -101,6 +102,21 @@ pub struct FieldCalib {
     /// convective coefficient and the body surface-to-thermal-mass ratio (`law.convective_flux`),
     /// expressed as the discrete Newton-cooling rate.
     pub exchange: Fixed,
+}
+
+impl FieldCalib {
+    /// The field calibrations read from the calibration manifest, fail-loud if any is still reserved
+    /// (Principle 11, the reserved-value discipline): `field.diffusion`, `field.relaxation`, and
+    /// `field.body_exchange`. This is the sanctioned way to obtain a [`FieldCalib`] on a canonical run;
+    /// there is deliberately no default, so an unset value refuses to run rather than fabricating a
+    /// number. A test may instead name each as a labelled fixture.
+    pub fn from_manifest(manifest: &CalibrationManifest) -> Result<FieldCalib, CalibrationError> {
+        Ok(FieldCalib {
+            diffusion: manifest.require_fixed("field.diffusion")?,
+            relaxation: manifest.require_fixed("field.relaxation")?,
+            exchange: manifest.require_fixed("field.body_exchange")?,
+        })
+    }
 }
 
 /// A canonical scalar temperature field over the flat bounded map, Q32.32 on the `therm.temperature`
@@ -636,5 +652,79 @@ impl Runner {
             }
         }
         h.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calibration::CalibrationManifest;
+
+    /// A manifest with the three field calibrations set to labelled fixture values.
+    const SET: &str = r#"
+[[reserved]]
+id = "field.diffusion"
+basis = "fixture"
+status = "set"
+value = "0.125"
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.relaxation"
+basis = "fixture"
+status = "set"
+value = "0.0625"
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.body_exchange"
+basis = "fixture"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "test"
+"#;
+
+    #[test]
+    fn field_calib_reads_the_three_values_from_a_set_manifest() {
+        let m = CalibrationManifest::from_toml_str(SET).unwrap();
+        let c = FieldCalib::from_manifest(&m).unwrap();
+        assert_eq!(c.diffusion, Fixed::from_ratio(1, 8));
+        assert_eq!(c.relaxation, Fixed::from_ratio(1, 16));
+        assert_eq!(c.exchange, Fixed::from_ratio(1, 4));
+    }
+
+    #[test]
+    fn field_calib_fails_loud_when_a_value_is_reserved() {
+        // The shipped manifest holds these reserved (empty), so the loader must refuse rather than
+        // fabricate a number (Principle 11). A reserved diffusion entry reproduces that.
+        let reserved = r#"
+[[reserved]]
+id = "field.diffusion"
+basis = "fixture"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.relaxation"
+basis = "fixture"
+status = "set"
+value = "0.0625"
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.body_exchange"
+basis = "fixture"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "test"
+"#;
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert_eq!(
+            FieldCalib::from_manifest(&m).unwrap_err(),
+            CalibrationError::Reserved("field.diffusion".to_string()),
+        );
     }
 }
