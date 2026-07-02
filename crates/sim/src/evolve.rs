@@ -54,7 +54,7 @@
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
 use civsim_world::Coord3;
 
-use crate::anatomy::{BodyPlan, Part, Temperament, TissueComponent};
+use crate::anatomy::{BodyPlan, Part, Temperament};
 use crate::controller::{Controller, ControllerLayout};
 use crate::genome::{
     Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
@@ -212,7 +212,7 @@ fn scoring_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
-            backing_component: Some(TissueComponent::WaterFraction),
+            backing_component: Some("bio.water_fraction".to_string()),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 60),
             exertion_drain: Fixed::from_ratio(1, 200),
@@ -372,7 +372,7 @@ fn dawn_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
-            backing_component: Some(TissueComponent::WaterFraction),
+            backing_component: Some("bio.water_fraction".to_string()),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 150),
             exertion_drain: Fixed::from_ratio(1, 300),

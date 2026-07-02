@@ -37,40 +37,37 @@ pub struct KindDef {
     pub fantasy: bool,
 }
 
-/// An organ's tissue composition: its value on each biology-floor material axis, in `[0, ONE]`. This
-/// is the same "composition over the biology floor" shape the body's fluids already use ([`crate::body`]
-/// `FluidDef`). The organ's physiological function is NOT tagged: which reserve it backs is DERIVED
-/// from this composition against the floor (an energy-dense tissue is an energy store, a water-rich one
-/// a water store), so nobody authors "fat-body is metabolic"; the mechanism reads the composition. The
-/// components are the authored physics-floor material axes (Principle 9), the vocabulary the floor
-/// grows; extend the struct as the floor gains axes (a respiratory-surface component arrives with
-/// R-MEDIUM). A labelled development-fixture composition here, grounded in the cited floor axes.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// An organ's tissue composition: its value on each biology-floor material axis, keyed by the floor
+/// axis id (`bio.energy_density`, `bio.water_fraction`, `bio.protein_fraction`, and the rest the floor
+/// declares in `crates/physics/data/biology_floor.toml`). This is the same string-keyed, sorted-walk
+/// composition-over-the-floor shape the physics substrate's `Substance::vector` uses (`crates/physics`),
+/// so the component vocabulary is the floor's DATA and grows with it at zero code cost (Principle 11):
+/// a reserve backed by protein or a toxin-load tissue is a data edit, not an enum change. The organ's
+/// physiological function is NOT tagged: which reserve it backs is DERIVED from this composition against
+/// the floor (an energy-dense tissue is an energy store, a water-rich one a water store), so nobody
+/// authors "fat-body is metabolic"; the mechanism reads the composition. A respiratory-surface axis
+/// (R-MEDIUM) enters here as another floor axis id, again with no code change. Labelled development-
+/// fixture compositions here, grounded in the cited floor axes, not owner canon.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct TissueComposition {
-    /// Stored-energy density, from `bio.energy_density` (biology floor). A fat body sits high here.
-    pub energy_density: Fixed,
-    /// Water content, from `bio.water_fraction` (biology floor). A water-storage tissue sits high here.
-    pub water_fraction: Fixed,
+    /// The value on each biology-floor axis, keyed by axis id and sorted for a deterministic walk (the
+    /// `Substance::vector` convention). An axis the organ bears none of is simply absent.
+    pub components: std::collections::BTreeMap<String, Fixed>,
 }
 
 impl TissueComposition {
-    /// The value of one composition component (which reserve reads which is set by the axis).
-    pub fn component(&self, c: TissueComponent) -> Fixed {
-        match c {
-            TissueComponent::EnergyDensity => self.energy_density,
-            TissueComponent::WaterFraction => self.water_fraction,
+    /// The organ's value on one composition component, named by its biology-floor axis id. An absent
+    /// axis reads as zero (the organ bears none of that tissue), the substrate's absence convention.
+    pub fn component(&self, axis: &str) -> Fixed {
+        self.components.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Build a composition from (biology-floor axis id, value) pairs.
+    pub fn from_pairs(pairs: &[(&str, Fixed)]) -> TissueComposition {
+        TissueComposition {
+            components: pairs.iter().map(|&(a, v)| (a.to_string(), v)).collect(),
         }
     }
-}
-
-/// A composition component: which biology-floor material axis an organ-backed reserve reads to derive
-/// its capacity. Mirrors the physics-floor axes (authored physics), so it is a fixed vocabulary that
-/// grows with the floor, not authored behaviour. A reserve names the component it is backed by; the
-/// organ's contribution is its composition on that component (function derived, not tagged).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum TissueComponent {
-    EnergyDensity,
-    WaterFraction,
 }
 
 /// One organ kind as data: an id, a legibility name, a fantasy gate, and its tissue composition. The
@@ -111,23 +108,23 @@ fn defs(entries: &[(&str, bool)]) -> Vec<KindDef> {
         .collect()
 }
 
-/// Build organ kinds from (name, fantasy, energy_density, water_fraction) tuples. The compositions are
-/// LABELLED DEVELOPMENT FIXTURE values grounded in the cited biology-floor axes, not owner canon.
-fn organ_defs(entries: &[(&str, bool, Fixed, Fixed)]) -> Vec<OrganKindDef> {
+/// One development-fixture organ entry: (name, fantasy gate, composition as (biology-floor axis id,
+/// value) pairs).
+type OrganFixture<'a> = (&'a str, bool, &'a [(&'a str, Fixed)]);
+
+/// Build organ kinds from (name, fantasy, composition-pairs) tuples, each pair a (biology-floor axis
+/// id, value). The compositions are LABELLED DEVELOPMENT FIXTURE values grounded in the cited floor
+/// axes, not owner canon.
+fn organ_defs(entries: &[OrganFixture]) -> Vec<OrganKindDef> {
     entries
         .iter()
         .enumerate()
-        .map(
-            |(i, &(name, fantasy, energy_density, water_fraction))| OrganKindDef {
-                id: i as u16,
-                name: name.to_string(),
-                fantasy,
-                composition: TissueComposition {
-                    energy_density,
-                    water_fraction,
-                },
-            },
-        )
+        .map(|(i, &(name, fantasy, comp))| OrganKindDef {
+            id: i as u16,
+            name: name.to_string(),
+            fantasy,
+            composition: TissueComposition::from_pairs(comp),
+        })
         .collect()
 }
 
@@ -194,30 +191,52 @@ impl BodyPlanRegistry {
                 ("blink", true),
             ]),
             organs: organ_defs(&[
-                // (name, fantasy, energy_density, water_fraction). Function is derived from the
+                // (name, fantasy, &[(biology-floor axis id, value)]). Function is derived from the
                 // composition: an energy-dense tissue backs the energy reserve, a water-rich one the
-                // hydration reserve, both to the extent of their composition. Nothing here is tagged.
-                ("fat-body", false, Fixed::ONE, Fixed::from_ratio(1, 10)),
+                // hydration reserve, both to the extent of their composition. Nothing here is tagged,
+                // and the axis ids are the floor's own (`bio.*`), so a new reserve type keys off an
+                // existing or new floor axis with no code change.
+                (
+                    "fat-body",
+                    false,
+                    &[
+                        ("bio.energy_density", Fixed::ONE),
+                        ("bio.water_fraction", Fixed::from_ratio(1, 10)),
+                    ][..],
+                ),
                 (
                     "glycogen-store",
                     false,
-                    Fixed::from_ratio(3, 4),
-                    Fixed::from_ratio(1, 4),
+                    &[
+                        ("bio.energy_density", Fixed::from_ratio(3, 4)),
+                        ("bio.water_fraction", Fixed::from_ratio(1, 4)),
+                    ][..],
                 ),
-                ("water-store", false, Fixed::ZERO, Fixed::ONE),
+                (
+                    "water-store",
+                    false,
+                    &[
+                        ("bio.energy_density", Fixed::ZERO),
+                        ("bio.water_fraction", Fixed::ONE),
+                    ][..],
+                ),
                 (
                     "generalist-viscera",
                     false,
-                    Fixed::from_ratio(1, 2),
-                    Fixed::from_ratio(1, 2),
+                    &[
+                        ("bio.energy_density", Fixed::from_ratio(1, 2)),
+                        ("bio.water_fraction", Fixed::from_ratio(1, 2)),
+                    ][..],
                 ),
                 // Magical (Part 34): a mana-storing tissue, a fixture stand-in until an arcane floor
                 // grounds its composition.
                 (
                     "mana-sac",
                     true,
-                    Fixed::from_ratio(1, 2),
-                    Fixed::from_ratio(1, 4),
+                    &[
+                        ("bio.energy_density", Fixed::from_ratio(1, 2)),
+                        ("bio.water_fraction", Fixed::from_ratio(1, 4)),
+                    ][..],
                 ),
             ]),
         }
@@ -303,11 +322,11 @@ pub struct BodyPlan {
 
 impl BodyPlanRegistry {
     /// The tissue composition of an organ kind, by registry id, if known.
-    pub fn organ_composition(&self, kind: u16) -> Option<TissueComposition> {
+    pub fn organ_composition(&self, kind: u16) -> Option<&TissueComposition> {
         self.organs
             .iter()
             .find(|o| o.id == kind)
-            .map(|o| o.composition)
+            .map(|o| &o.composition)
     }
 }
 
@@ -572,12 +591,19 @@ mod tests {
         // The fat-body fixture (id 0) is energy-dense (ONE) and nearly dry (1/10). Its function is not
         // tagged anywhere; the mechanism reads this composition to derive which reserve it backs.
         let fat = reg.organ_composition(0).expect("fat-body is registered");
-        assert_eq!(fat.energy_density, Fixed::ONE);
-        assert_eq!(fat.water_fraction, Fixed::from_ratio(1, 10));
         assert_eq!(
-            fat.component(TissueComponent::EnergyDensity),
+            fat.component("bio.energy_density"),
             Fixed::ONE,
-            "the component accessor reads the same value the reserve derivation will"
+            "the composition reads its energy-density off the floor axis id"
+        );
+        assert_eq!(
+            fat.component("bio.water_fraction"),
+            Fixed::from_ratio(1, 10)
+        );
+        assert_eq!(
+            fat.component("bio.protein_fraction"),
+            Fixed::ZERO,
+            "an axis the organ bears none of reads as zero (the substrate absence convention)"
         );
         assert!(
             reg.organ_composition(9999).is_none(),

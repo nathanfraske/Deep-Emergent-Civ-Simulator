@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament, TissueComponent};
+use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
 use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, WATER,
@@ -83,7 +83,7 @@ fn water_reg() -> HomeostaticRegistry {
         axes: vec![HomeostaticAxisDef {
             id: WATER,
             name: "water".to_string(),
-            backing_component: Some(TissueComponent::WaterFraction),
+            backing_component: Some("bio.water_fraction".to_string()),
             capacity_per_mass: Fixed::ONE,
             base_drain: Fixed::from_ratio(1, 120),
             exertion_drain: Fixed::from_ratio(1, 300),

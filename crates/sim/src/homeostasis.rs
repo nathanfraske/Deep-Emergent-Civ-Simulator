@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry, TissueComponent};
+use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::stocks::Stock;
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
@@ -64,13 +64,16 @@ pub struct HomeostaticAxisDef {
     pub id: HomeostaticAxisId,
     /// A legibility handle, never read by the mechanism.
     pub name: String,
-    /// The tissue-composition component that backs this reserve, or `None` for a derived non-draining
-    /// axis (integrity, temperature) whose capacity is a fixed unit and whose level is sourced each tick
-    /// from elsewhere. On the canonical anatomy-derived path ([`Homeostasis::new`]) the reserve's
-    /// capacity is the development-weighted sum over the being's organs of their composition on this
-    /// component: a being carries this reserve because it bears energy-dense (or water-rich) tissue, its
-    /// function DERIVED from composition, never a tag on an organ kind.
-    pub backing_component: Option<TissueComponent>,
+    /// The biology-floor axis id whose tissue this reserve is backed by (`bio.energy_density`,
+    /// `bio.water_fraction`, and the rest the floor declares), or `None` for a derived non-draining axis
+    /// (integrity, temperature) whose capacity is a fixed unit and whose level is sourced each tick from
+    /// elsewhere. On the canonical anatomy-derived path ([`Homeostasis::new`]) the reserve's capacity is
+    /// the development-weighted sum over the being's organs of their composition on this floor axis: a
+    /// being carries this reserve because it bears energy-dense (or water-rich) tissue, its function
+    /// DERIVED from composition, never a tag on an organ kind. The id is data (a floor axis, the
+    /// `Substance::vector` key convention), so a reserve backed by protein or a respiratory-surface axis
+    /// (R-MEDIUM) is a data edit, not a code change (Principle 11).
+    pub backing_component: Option<String>,
     /// The reserve capacity as a multiple of body mass, used ONLY by the labelled development fallback
     /// [`Homeostasis::from_mass`], never by the canonical anatomy-derived path. RESERVED. Basis: the
     /// reserve size relative to body mass from the Part 20 physiology; retained so tests and fixtures
@@ -106,7 +109,7 @@ impl HomeostaticRegistry {
                 HomeostaticAxisDef {
                     id: ENERGY,
                     name: "energy".to_string(),
-                    backing_component: Some(TissueComponent::EnergyDensity),
+                    backing_component: Some("bio.energy_density".to_string()),
                     capacity_per_mass: Fixed::ONE,
                     base_drain: Fixed::from_ratio(1, 400),
                     exertion_drain: Fixed::from_ratio(1, 100),
@@ -115,7 +118,7 @@ impl HomeostaticRegistry {
                 HomeostaticAxisDef {
                     id: WATER,
                     name: "water".to_string(),
-                    backing_component: Some(TissueComponent::WaterFraction),
+                    backing_component: Some("bio.water_fraction".to_string()),
                     capacity_per_mass: Fixed::from_ratio(6, 10),
                     base_drain: Fixed::from_ratio(1, 300),
                     exertion_drain: Fixed::from_ratio(1, 400),
@@ -195,15 +198,15 @@ pub struct Homeostasis {
 
 impl Homeostasis {
     /// A being at full reserves, capacities derived from its ANATOMY (the canonical path). For each
-    /// axis backed by a tissue-composition component, the reserve capacity is the development-weighted
-    /// sum over the being's organs of that organ's composition on the component: `Σ organ.development *
-    /// organs.organ_composition(organ.kind).component(c)`. So a reserve exists to the extent the body
-    /// bears tissue that stores it, function DERIVED from composition against the biology floor, never
-    /// a tag (Principle 8). A huge, mostly-armored creature that rolled few or small organs holds small
-    /// metabolic reserves; a body with no organ contributing to an axis has zero capacity there and
-    /// fails that axis at once (the armored-giant case the owner raised). A non-backed axis (integrity,
-    /// temperature; `backing_component == None`) is a unit-capacity derived reserve whose level is
-    /// sourced each tick from elsewhere, not stored in tissue.
+    /// axis backed by a biology-floor composition axis, the reserve capacity is the development-weighted
+    /// sum over the being's organs of that organ's composition on the axis: `Σ organ.development *
+    /// organs.organ_composition(organ.kind).component(axis_id)`. So a reserve exists to the extent the
+    /// body bears tissue that stores it, function DERIVED from composition against the biology floor,
+    /// never a tag (Principle 8). A huge, mostly-armored creature that rolled few or small organs holds
+    /// small metabolic reserves; a body with no organ contributing to an axis has zero capacity there
+    /// and fails that axis at once (the armored-giant case the owner raised). A non-backed axis
+    /// (integrity, temperature; `backing_component == None`) is a unit-capacity derived reserve whose
+    /// level is sourced each tick from elsewhere, not stored in tissue.
     pub fn new(
         reg: &HomeostaticRegistry,
         plan: &BodyPlan,
@@ -211,13 +214,13 @@ impl Homeostasis {
     ) -> Homeostasis {
         let mut reserves = BTreeMap::new();
         for axis in &reg.axes {
-            let cap = match axis.backing_component {
-                Some(c) => {
+            let cap = match &axis.backing_component {
+                Some(axis_id) => {
                     let mut sum = Fixed::ZERO;
                     for organ in &plan.organs {
                         let share = organs
                             .organ_composition(organ.kind)
-                            .map(|comp| comp.component(c))
+                            .map(|comp| comp.component(axis_id))
                             .unwrap_or(Fixed::ZERO);
                         let backed = organ.development.checked_mul(share).unwrap_or(Fixed::ZERO);
                         sum = sum.saturating_add(backed);
@@ -823,5 +826,40 @@ mod tests {
             (h.capacity(ENERGY).to_bits(), h.capacity(WATER).to_bits())
         };
         assert_eq!(run(), run(), "the same anatomy derives the same reserves");
+    }
+
+    #[test]
+    fn a_reserve_can_key_off_any_floor_axis_as_pure_data() {
+        // The hardening proof (Principle 11): a reserve backed by a biology-floor axis the default
+        // fixtures never use (`bio.protein_fraction`) works with DATA ALONE. No enum variant, no match
+        // arm, no struct field is touched: the composition and the backing are keyed off floor axis
+        // ids, the `Substance::vector` convention, so the reserve vocabulary grows with the floor's
+        // data, never a code change. A future respiratory-surface axis (R-MEDIUM) enters the same way.
+        use crate::anatomy::{OrganKindDef, TissueComposition};
+        let mut organs = BodyPlanRegistry::dev_default();
+        organs.organs = vec![OrganKindDef {
+            id: 0,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[("bio.protein_fraction", Fixed::ONE)]),
+        }];
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: HomeostaticAxisId(9),
+                name: "protein".to_string(),
+                backing_component: Some("bio.protein_fraction".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let plan = organ_body((1, 2), vec![organ(0, (1, 1))]);
+        let h = Homeostasis::new(&reg, &plan, &organs);
+        assert_eq!(
+            h.capacity(HomeostaticAxisId(9)),
+            Fixed::ONE,
+            "a protein-backed reserve derives from a protein-rich organ, keyed off the floor axis id"
+        );
     }
 }

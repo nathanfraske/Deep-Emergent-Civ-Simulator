@@ -539,7 +539,7 @@ fn walk_dir<T: Terrain>(w: &mut Walker, hx: Fixed, hy: Fixed, speed: Fixed, terr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, Part, Temperament, TissueComponent};
+    use crate::anatomy::{BodyPlan, Part, Temperament};
     use crate::controller::ControllerLayout;
     use crate::homeostasis::{
         AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
@@ -574,7 +574,7 @@ mod tests {
             axes: vec![HomeostaticAxisDef {
                 id: WATER,
                 name: "water".to_string(),
-                backing_component: Some(TissueComponent::WaterFraction),
+                backing_component: Some("bio.water_fraction".to_string()),
                 capacity_per_mass: Fixed::ONE,
                 base_drain: Fixed::from_ratio(1, 300),
                 exertion_drain: Fixed::from_ratio(1, 400),
