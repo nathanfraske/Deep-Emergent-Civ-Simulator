@@ -357,6 +357,24 @@ impl Homeostasis {
     }
 }
 
+/// Whether a body plan's anatomy can sustain life at birth: built at full reserves from its organs
+/// ([`Homeostasis::new`]), no backed axis starts at or below its death floor. A body with no organ
+/// contributing to a backed reserve (the extreme of the armored-giant case: a creature that stores no
+/// energy at all) is birth-nonviable and this returns false.
+///
+/// This is a QUERY over physics, not a generator gate. The owner's decision on the birth-nonviable
+/// case is to LEAN ON THE EXISTING CLOSURE CULL rather than add a seed-time reject: in the running
+/// sim a birth-nonviable organism dies at once (its reserve is already through the floor), so its
+/// aggregate pool draws no sustaining return and collapses under the Part 15 stock dynamics
+/// ([`crate::stocks::Stock`]), the same over-harvest cull that removes an under-supplied pool. Nothing
+/// here rejects a species at seed time. The cull it leans on reads only the food web and supply, never
+/// morphology, and birth-viability is a pure function of the organ set, independent of body mass,
+/// covering, or weaponry, so leaning on the cull removes only the physically-impossible and steers no
+/// morphological outcome (proven in `crates/sim/tests/biosphere_steering.rs`, Principle 9).
+pub fn birth_viable(reg: &HomeostaticRegistry, plan: &BodyPlan, organs: &BodyPlanRegistry) -> bool {
+    Homeostasis::new(reg, plan, organs).is_alive(reg)
+}
+
 /// An affordance id, minted through the registry (extensible, never a closed enum of behaviours).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct AffordanceId(pub u16);
