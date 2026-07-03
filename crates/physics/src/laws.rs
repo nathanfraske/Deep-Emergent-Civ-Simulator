@@ -2297,6 +2297,41 @@ mod tests {
     }
 
     #[test]
+    fn sensible_rise_is_the_energy_over_heat_capacity_and_bounds_the_extremes() {
+        // m = 2 kg, c = 1000 J/(kg*K), Q = 1000 J: dT = Q/(m*c) = 1000/2000 = 0.5 K.
+        let dt = sensible_rise(
+            Fixed::from_int(2),
+            Fixed::from_int(1000),
+            Fixed::from_int(1000),
+            cap(1_000_000),
+        );
+        assert_eq!(dt, Fixed::from_ratio(1, 2), "dT = {dt:?} should be 0.5 K");
+        // A massless body has no heat capacity, so any energy swings it the full reserved rise.
+        assert_eq!(
+            sensible_rise(
+                ZERO,
+                Fixed::from_int(1000),
+                Fixed::from_int(1000),
+                cap(1_000_000)
+            ),
+            cap(1_000_000),
+            "the massless limit is the maximum swing"
+        );
+        // An overflowing heat capacity is an enormous thermal mass: the rise reads zero, not the
+        // cap (the wave-1 F1 fix the kernel comment records).
+        assert_eq!(
+            sensible_rise(
+                Fixed::from_int(2_000_000_000),
+                Fixed::from_int(2),
+                Fixed::from_int(1000),
+                cap(1_000_000),
+            ),
+            ZERO,
+            "an overflowing capacity is a vast mass, a near-zero rise"
+        );
+    }
+
+    #[test]
     fn poiseuille_flow_keeps_a_representable_flow_off_the_cap() {
         // Air, dp = 1 MPa, r = 0.01 m, mu = 1.78e-5 Pa*s, L = 1 m: Q = pi*dp_Pa*r^4/(8*mu*L) ~ 220
         // m^3/s. The divide-first form overflowed dp/mu and returned the cap.

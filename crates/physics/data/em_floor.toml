@@ -4,8 +4,10 @@
 # (crates/physics/src/laws.rs). Loads onto the mechanical, fluids, and chem/optics floors (it reads
 # mech.arm_length, mech.contact_area, mech.velocity, and the volt-promoted chem.standard_potential).
 # Electricity forces the fifth base dimension (electric current, the SI ampere); every axis is a
-# five-base monomial "length,mass,time,temperature,current". Every range is reserved-with-basis
-# pending the owner's set; nothing here is an owner-set value.
+# five-base monomial "length,mass,time,temperature,current". The fourteen axis ranges are owner-set
+# (ratified 2026-07-03), each basis and citation in its axis real field; every law constant remains
+# reserved-with-basis. Each axis's per-quantity fixed-point scale derives from its declared decimal
+# envelope (R-UNITS-PIN), so a sub-epsilon low end (the picofarad capacitance) keeps its magnitude.
 
 # --- Electricity axes ---
 
@@ -14,70 +16,77 @@ id = "elec.charge"
 measures = "electric charge q, the Coulomb-force and capacitor source"
 unit = "C"
 dimension = "charge"
-scale = "C (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "C"
 tier = 2
-range_reserved = "proposed window [1e-9, 1e5] C; the microcoulomb low end underflows the Q32.32 floor at unit separation, reserving a per-quantity charge scale reconciled against the Coulomb coefficient. Basis: CRC; Griffiths Ch 2; NIST CODATA"
-real = "Griffiths, Introduction to Electrodynamics Ch 2; NIST CODATA"
+range_lo = "0.000000001"
+range_hi = "100000"
+real = "Griffiths, Introduction to Electrodynamics Ch 2; NIST CODATA; window [1e-9, 1e5] C owner-ratified 2026-07-03, the microcoulomb low end deriving a fine per-quantity scale reconciled against the Coulomb coefficient (R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.current"
 measures = "electric current I, the fifth-base quantity (the ampere)"
 unit = "A"
 dimension = "current"
-scale = "A (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "A"
 tier = 2
-range_reserved = "proposed window [1e-6, 1e5] A (nerve microamp to industrial kiloamp). Basis: CRC; Horowitz and Hill, The Art of Electronics"
-real = "Griffiths Ch 7; Horowitz and Hill"
+range_lo = "0.000001"
+range_hi = "100000"
+real = "Griffiths Ch 7; Horowitz and Hill; window [1e-6, 1e5] A owner-ratified 2026-07-03 (nerve microamp to industrial kiloamp, R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.potential"
 measures = "electric potential difference V (the volt)"
 unit = "V"
 dimension = "voltage"
-scale = "V (one scale, unified with elec.emf and the promoted chem.standard_potential)"
+scale = "V"
 tier = 2
-range_reserved = "proposed signed window [-1e8, 1e8] V (a single scale spans signal millivolts to lightning hundred-megavolts). Basis: CRC; Griffiths Ch 2"
-real = "Griffiths Ch 2"
+range_lo = "-100000000"
+range_hi = "100000000"
+real = "Griffiths Ch 2; signed window [-1e8, 1e8] V owner-ratified 2026-07-03 (one scale unified with elec.emf and the promoted chem.standard_potential, signal millivolts to lightning hundred-megavolts, R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.emf"
 measures = "source electromotive force (the volt), the driving side of a circuit"
 unit = "V"
 dimension = "voltage"
-scale = "V (one scale, unified with elec.potential)"
+scale = "V"
 tier = 2
-range_reserved = "proposed signed window [-1e8, 1e8] V, the same one-scale volt as elec.potential. Kept role-distinct from elec.potential on the wave-2 fluid.driving_pressure precedent (S-ELEC-EMF, the owner may collapse). Basis: Griffiths Ch 7"
-real = "Griffiths Ch 7"
+range_lo = "-100000000"
+range_hi = "100000000"
+real = "Griffiths Ch 7; signed window [-1e8, 1e8] V owner-ratified 2026-07-03, the same one-scale volt as elec.potential, kept role-distinct on the wave-2 fluid.driving_pressure precedent (S-ELEC-EMF, the owner may collapse; R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.resistance"
 measures = "resistance R of a circuit element, the Ohm lever; the element interface value law.resistance derives from resistivity and geometry"
 unit = "Ohm"
 dimension = "2,1,-3,0,-2"
-scale = "Ohm (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "Ohm"
 tier = 2
-range_reserved = "proposed window [1e-3, 1e9] Ohm (milliohm contacts to gigaohm insulation, ~12 orders). Basis: CRC; component and wire datasheets"
-real = "Griffiths Ch 7; CRC"
+range_lo = "0.001"
+range_hi = "1000000000"
+real = "Griffiths Ch 7; CRC; window [1e-3, 1e9] Ohm owner-ratified 2026-07-03 (milliohm contacts to gigaohm insulation, ~12 orders reconciled to a per-quantity scale, R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.resistivity"
 measures = "bulk electrical resistivity rho of a material (the geometry-independent conductor/insulator datum)"
 unit = "Ohm*m"
 dimension = "3,1,-3,0,-2"
-scale = "Ohm*m (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "Ohm*m"
 tier = 2
-range_reserved = "proposed window [1e-8, 1e3] Ohm*m, regime-windowed at the Tier because the full conductor-to-insulator envelope spans ~24 orders (copper ~1.7e-8, glass ~1e12); extreme insulators clamp or reserve a scale. Conductivity is not a second axis (the derived reciprocal, S-ELEC-RECIP). Basis: CRC resistivity tables; Kittel"
-real = "CRC; Kittel, Introduction to Solid State Physics"
+range_lo = "0.00000001"
+range_hi = "1000"
+real = "CRC; Kittel, Introduction to Solid State Physics; window [1e-8, 1e3] Ohm*m owner-ratified 2026-07-03, regime-limited because the full conductor-to-insulator envelope spans ~24 orders (copper ~1.7e-8, glass ~1e12) and extreme insulators clamp; conductivity is the derived reciprocal rather than a second axis (S-ELEC-RECIP, R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.capacitance"
 measures = "capacitance C, charge stored per volt"
 unit = "F"
 dimension = "-2,-1,4,0,2"
-scale = "F (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "F"
 tier = 2
-range_reserved = "proposed window [1e-12, 1e3] F (picofarad to supercapacitor kilofarad). Basis: CRC; Horowitz and Hill"
-real = "Griffiths Ch 2; Horowitz and Hill"
+range_lo = "0.000000000001"
+range_hi = "1000"
+real = "Griffiths Ch 2; Horowitz and Hill; window [1e-12, 1e3] F owner-ratified 2026-07-03 (picofarad to supercapacitor kilofarad; the picofarad low end underflows the Q32.32 range, so capacitance derives a fine per-quantity scale from the declared decimal envelope, R-UNITS-PIN)"
 
 [[axis]]
 id = "elec.electric_field"
@@ -86,8 +95,9 @@ unit = "V/m"
 dimension = "1,1,-3,0,-1"
 scale = "V/m"
 tier = 2
-range_reserved = "proposed window [1e2, 1e9] V/m (ambient fields to dielectric breakdown ~3e6 in air, higher in solids). Basis: CRC; Griffiths Ch 2"
-real = "Griffiths Ch 2; CRC dielectric-strength tables"
+range_lo = "100"
+range_hi = "1000000000"
+real = "Griffiths Ch 2; CRC dielectric-strength tables; window [1e2, 1e9] V/m owner-ratified 2026-07-03 (ambient fields to dielectric breakdown ~3e6 in air, higher in solids, R-UNITS-PIN)"
 
 # --- Magnetism axes ---
 
@@ -98,8 +108,9 @@ unit = "T"
 dimension = "0,1,-2,0,-1"
 scale = "T"
 tier = 2
-range_reserved = "proposed window [1e-5, 50] T fits one scale (earth ~5e-5, MRI ~1.5 to 3, strong lab ~45); magnetar fields reserve or clamp. Basis: CRC magnetic-property tables; NIST"
-real = "Griffiths Ch 5; Purcell and Morin, Electricity and Magnetism; CRC"
+range_lo = "0.00001"
+range_hi = "50"
+real = "Griffiths Ch 5; Purcell and Morin, Electricity and Magnetism; CRC; window [1e-5, 50] T owner-ratified 2026-07-03 (earth ~5e-5, MRI ~1.5 to 3, strong lab ~45; magnetar fields clamp, R-UNITS-PIN)"
 
 [[axis]]
 id = "mag.flux"
@@ -108,8 +119,9 @@ unit = "Wb"
 dimension = "2,1,-2,0,-1"
 scale = "Wb"
 tier = 2
-range_reserved = "proposed window [1e-6, 1e3] Wb one scale (small-coil microweber to large-machine kiloweber). Basis: Griffiths Ch 7; Fink and Beaty, Standard Handbook for Electrical Engineers"
-real = "Griffiths Ch 7; Fink and Beaty"
+range_lo = "0.000001"
+range_hi = "1000"
+real = "Griffiths Ch 7; Fink and Beaty, Standard Handbook for Electrical Engineers; window [1e-6, 1e3] Wb owner-ratified 2026-07-03 (small-coil microweber to large-machine kiloweber, R-UNITS-PIN)"
 
 [[axis]]
 id = "mag.permeability"
@@ -118,28 +130,31 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 2
-range_reserved = "proposed [1, 250000] (vacuum 1, iron ~5000, mu-metal ~2e5). Basis: CRC and ferromagnetic-material permeability tables; Jiles, Magnetism and Magnetic Materials"
-real = "Kittel; CRC; Jiles"
+range_lo = "1"
+range_hi = "250000"
+real = "Kittel; CRC; Jiles, Magnetism and Magnetic Materials; window [1, 250000] owner-ratified 2026-07-03 (vacuum 1, iron ~5000, mu-metal ~2e5, R-UNITS-PIN)"
 
 [[axis]]
 id = "mag.magnetic_moment"
 measures = "magnetic dipole moment m of a magnet or current loop"
 unit = "A*m^2"
 dimension = "2,0,0,0,1"
-scale = "A*m^2 (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "A*m^2"
 tier = 2
-range_reserved = "proposed window [1e-4, 1e3] A*m^2 one scale (compass needle ~0.1, strong magnet to ~1e2); the Bohr magneton ~9e-24 is quantum and deferred. Basis: CRC permanent-magnet data"
-real = "Griffiths Ch 6; CRC; magnet datasheets"
+range_lo = "0.0001"
+range_hi = "1000"
+real = "Griffiths Ch 6; CRC; magnet datasheets; window [1e-4, 1e3] A*m^2 owner-ratified 2026-07-03 (compass needle ~0.1, strong magnet to ~1e2; the Bohr magneton ~9e-24 is quantum and deferred, R-UNITS-PIN)"
 
 [[axis]]
 id = "mag.inductance"
 measures = "inductance L (self, and mutual via the coupling coefficient), flux linkage per current"
 unit = "H"
 dimension = "2,1,-2,0,-2"
-scale = "H (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "H"
 tier = 2
-range_reserved = "proposed window [1e-6, 1e2] H one scale (~8 orders; radio microhenry to filter and transformer henries). Basis: CRC; inductor and transformer datasheets; Horowitz and Hill"
-real = "Griffiths Ch 7; Fink and Beaty; Horowitz and Hill"
+range_lo = "0.000001"
+range_hi = "100"
+real = "Griffiths Ch 7; Fink and Beaty; Horowitz and Hill; window [1e-6, 1e2] H owner-ratified 2026-07-03 (~8 orders, radio microhenry to filter and transformer henries on a per-quantity scale, R-UNITS-PIN)"
 
 [[axis]]
 id = "mag.coupling_coefficient"
@@ -148,8 +163,9 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 2
-range_reserved = "proposed [0, 1] (loose air-cored coupling near 0, a tight iron-cored transformer near 1). Basis: transformer-design texts; Fink and Beaty"
-real = "Fink and Beaty; Horowitz and Hill"
+range_lo = "0"
+range_hi = "1"
+real = "Fink and Beaty; Horowitz and Hill; window [0, 1] owner-ratified 2026-07-03 (loose air-cored coupling near 0, a tight iron-cored transformer near 1, R-UNITS-PIN)"
 
 # --- Electricity laws (metadata; kernels in laws.rs) ---
 

@@ -137,11 +137,11 @@ id = "opt.source_power"
 measures = "radiant or luminous source power (the inverse-square reach lever)"
 unit = "W"
 dimension = "2,1,-3,0"
-scale = "W (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "W"
 tier = 0
 range_lo = "0.000001"
 range_hi = "1000000"
-real = "radiometric source-power ranges; the sub-microwatt low end reserves a per-quantity scale"
+real = "Boyd, Radiometry and the Detection of Optical Radiation; IES Lighting Handbook; CRC. Anchor magnitudes over [1e-6, 1e6] W: a bioluminescent organism ~1e-6 W, a candle ~1 W radiant, a 100 W lamp, an industrial searchlight ~1e6 W. The sub-microwatt to megawatt span derives a fine per-quantity scale from the declared decimal envelope (R-UNITS-PIN)"
 
 [[axis]]
 id = "opt.spectral_band"

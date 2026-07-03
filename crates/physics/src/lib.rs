@@ -39,6 +39,8 @@
 
 pub mod graph;
 pub mod laws;
+pub mod quantities;
+pub mod scaled;
 
 use civsim_core::{Fixed, StateHasher};
 use serde::{Deserialize, Serialize};
@@ -284,10 +286,35 @@ pub struct QuantityAxis {
     pub scale_unit: String,
     /// The fixed-point range, set or reserved.
     pub range: AxisRange,
+    /// The raw declared decimal bounds `(lo, hi)` of a set range, retained verbatim from the data.
+    /// A bound below the Q32.32 epsilon (a picofarad capacitance, say) underflows the stored `Fixed`
+    /// `range` to zero, losing the magnitude the per-quantity scale derivation (R-UNITS-PIN) reads;
+    /// the declared decimal keeps it. The `Fixed` `range` remains the clamp representation, this is
+    /// the derivation source of truth. `None` for a reserved range.
+    pub range_decimal: Option<(String, String)>,
+    /// A per-class scale breakdown, empty for a single-scale axis. When the physics of an axis
+    /// reserves its scale per class (a per-toxin-class tolerance whose pg/kg-to-g/kg envelope exceeds
+    /// one Q32.32 scale, R-UNITS-PIN), the class is the quantity granularity: each entry is a distinct
+    /// quantity with its own envelope, and the catalogue registers one `QuantityDef` per entry. The
+    /// membership is data that grows with the world (Principle 11), so a new class is a new entry
+    /// rather than a code change.
+    pub per_class: Vec<PerClassRange>,
     /// The tier (0 the grounded floor).
     pub tier: u8,
     /// Whether the axis is real-with-source or fantasy-reserved.
     pub provenance: Provenance,
+}
+
+/// One class's envelope in a per-class-scale axis: the class id and its declared decimal bounds. The
+/// catalogue registers one quantity per entry so each class carries its own per-quantity scale
+/// (R-UNITS-PIN, the `bio.consumer.reference_tolerance` case), keyed off the same declared decimal
+/// envelope the single-scale axes use so a sub-epsilon per-class bound keeps its magnitude.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerClassRange {
+    /// The class id (a toxin class, say) this per-class quantity is keyed to.
+    pub class: String,
+    /// The declared decimal bounds `(lo, hi)` of this class's envelope.
+    pub bounds: (String, String),
 }
 
 /// When a port reads its axis value. A `Current` port reads this tick's value; a `Prior`
@@ -801,6 +828,20 @@ impl PhysicsRegistry {
                     h.write_fixed(*hi);
                 }
             }
+            // The declared decimal bounds distinguish two set ranges whose sub-epsilon low ends
+            // both underflow the stored Fixed to zero (a picofarad versus a femtofarad), which the
+            // Fixed lo/hi above cannot.
+            if let Some((lo, hi)) = &axis.range_decimal {
+                h.write_bytes(lo.as_bytes());
+                h.write_bytes(hi.as_bytes());
+            }
+            // The per-class scale breakdown is part of the axis's content: two axes differing only in
+            // a class's envelope are distinct.
+            for pc in &axis.per_class {
+                h.write_bytes(pc.class.as_bytes());
+                h.write_bytes(pc.bounds.0.as_bytes());
+                h.write_bytes(pc.bounds.1.as_bytes());
+            }
             h.write_u32(axis.tier as u32);
             write_provenance(&mut h, &axis.provenance);
         }
@@ -984,19 +1025,44 @@ struct AxisDef {
     /// The basis if fantasy-reserved.
     #[serde(default)]
     fantasy: String,
+    /// A per-class scale breakdown (R-UNITS-PIN): one entry per class, each with its own envelope,
+    /// so the catalogue registers one quantity per class. Empty for a single-scale axis.
+    #[serde(default)]
+    per_class: Vec<PerClassDef>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct PerClassDef {
+    class: String,
+    #[serde(default)]
+    range_lo: String,
+    #[serde(default)]
+    range_hi: String,
 }
 
 impl AxisDef {
     fn into_axis(self) -> Result<QuantityAxis, PhysicsError> {
+        // `@` is the reserved separator the catalogue joins a per-class quantity name with
+        // (`<axis>@<class>`), so an axis id carrying it could alias a per-class quantity and collide.
+        if self.id.contains('@') {
+            return Err(PhysicsError::BadValue {
+                id: self.id.clone(),
+                detail: "an axis id may not contain '@', the per-class quantity separator"
+                    .to_string(),
+            });
+        }
         let dimension =
             parse_dimension(&self.dimension).map_err(|detail| PhysicsError::BadDimension {
                 id: self.id.clone(),
                 detail,
             })?;
-        let range = if !self.range_reserved.trim().is_empty() {
-            AxisRange::Reserved {
-                basis: self.range_reserved.trim().to_string(),
-            }
+        let (range, range_decimal) = if !self.range_reserved.trim().is_empty() {
+            (
+                AxisRange::Reserved {
+                    basis: self.range_reserved.trim().to_string(),
+                },
+                None,
+            )
         } else if !self.range_lo.trim().is_empty() && !self.range_hi.trim().is_empty() {
             let lo = Fixed::from_decimal_str(&self.range_lo).map_err(|detail| {
                 PhysicsError::BadValue {
@@ -1010,11 +1076,43 @@ impl AxisDef {
                     detail,
                 }
             })?;
-            AxisRange::Set { lo, hi }
+            (
+                AxisRange::Set { lo, hi },
+                Some((
+                    self.range_lo.trim().to_string(),
+                    self.range_hi.trim().to_string(),
+                )),
+            )
         } else {
             return Err(PhysicsError::BadRange(self.id.clone()));
         };
         let provenance = provenance_from(&self.real, &self.fantasy, &self.id)?;
+        let mut per_class: Vec<PerClassRange> = Vec::with_capacity(self.per_class.len());
+        for p in self.per_class {
+            // A class id must be non-empty and free of the `@` separator, else its
+            // `<axis>@<class>` quantity name would be malformed or could alias another.
+            if p.class.trim().is_empty() || p.class.contains('@') {
+                return Err(PhysicsError::BadValue {
+                    id: self.id.clone(),
+                    detail: format!(
+                        "a per-class class id must be non-empty and free of '@', got '{}'",
+                        p.class
+                    ),
+                });
+            }
+            // A duplicate class id would collide two `<axis>@<class>` quantity names, which the
+            // catalogue's register panics on; reject it at load with a clean error instead.
+            if per_class.iter().any(|e| e.class == p.class) {
+                return Err(PhysicsError::BadValue {
+                    id: self.id.clone(),
+                    detail: format!("duplicate per-class class '{}'", p.class),
+                });
+            }
+            per_class.push(PerClassRange {
+                class: p.class,
+                bounds: (p.range_lo.trim().to_string(), p.range_hi.trim().to_string()),
+            });
+        }
         Ok(QuantityAxis {
             id: self.id,
             measures: self.measures,
@@ -1022,6 +1120,8 @@ impl AxisDef {
             dimension,
             scale_unit: self.scale,
             range,
+            range_decimal,
+            per_class,
             tier: self.tier,
             provenance,
         })

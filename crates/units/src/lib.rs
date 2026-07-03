@@ -327,38 +327,8 @@ impl AbsoluteQuantity {
         if from_def.dimension != to_def.dimension {
             return None;
         }
-        let s1 = from_def.scale_bits as i32;
-        let s2 = to_def.scale_bits as i32;
-        let bits = if s2 >= s1 {
-            // Up-scale by a left shift. A non-zero value shifted by 63 or more already
-            // exceeds the i64 range, so report it out of range rather than overflowing
-            // the i128 intermediate; a shift under 63 of an i64 value stays well inside
-            // i128. This honours the checked contract instead of panicking or wrapping.
-            let shift = (s2 - s1) as u32;
-            if self.bits == 0 {
-                0
-            } else if shift >= 63 {
-                return None;
-            } else {
-                (self.bits as i128) << shift
-            }
-        } else {
-            // Down-scale by a rounded division. Bound the shift so the divisor stays a
-            // positive power of two (1 << 127 would be i128::MIN); past that the result
-            // rounds to zero anyway, so report None rather than feed a bad denominator.
-            let shift = (s1 - s2) as u32;
-            if shift >= 127 {
-                return None;
-            }
-            idiv_round_half_even(self.bits as i128, 1i128 << shift)
-        };
-        if bits < i64::MIN as i128 || bits > i64::MAX as i128 {
-            return None;
-        }
-        Some(AbsoluteQuantity {
-            quantity: to,
-            bits: bits as i64,
-        })
+        rescale_bits(self.bits, from_def.scale_bits, to_def.scale_bits)
+            .map(|bits| AbsoluteQuantity { quantity: to, bits })
     }
 }
 
@@ -377,6 +347,128 @@ fn idiv_round_half_even(num: i128, den: i128) -> i128 {
         q
     } else {
         q + 1
+    }
+}
+
+/// Rescale a raw fixed-point magnitude from one scale (fractional-bit count) to another: up-scale by
+/// a checked left shift, down-scale by a round-half-to-even division, in 128-bit space, returning
+/// `None` on an out-of-`i64` result. This is the one raw-bit primitive the whole quantity system
+/// rescales through: it is the bridge from a `Fixed` value (its scale is its `FRAC_BITS`) to an
+/// [`AbsoluteQuantity`] at a quantity's scale and back, and the engine of [`AbsoluteQuantity::checked_convert`].
+/// A `scale_bits == to == from` rescale is the identity, so a quantity stored at the canonical
+/// thirty-two fractional bits bridges to and from `Fixed` with no change.
+pub fn rescale_bits(bits: i64, from_scale_bits: u32, to_scale_bits: u32) -> Option<i64> {
+    let s1 = from_scale_bits as i32;
+    let s2 = to_scale_bits as i32;
+    let out: i128 = if s2 >= s1 {
+        // Up-scale by a left shift. A non-zero value shifted by 63 or more already exceeds the i64
+        // range, so report it out of range rather than overflow the i128 intermediate.
+        let shift = (s2 - s1) as u32;
+        if bits == 0 {
+            0
+        } else if shift >= 63 {
+            return None;
+        } else {
+            (bits as i128) << shift
+        }
+    } else {
+        // Down-scale by a rounded division; bound the shift so the divisor stays a positive power of
+        // two, past which the result rounds to zero anyway.
+        let shift = (s1 - s2) as u32;
+        if shift >= 127 {
+            return None;
+        }
+        idiv_round_half_even(bits as i128, 1i128 << shift)
+    };
+    if out < i64::MIN as i128 || out > i64::MAX as i128 {
+        None
+    } else {
+        Some(out as i64)
+    }
+}
+
+/// The scale a quantity's envelope derives to, and whether the envelope had to be windowed (its
+/// low-end significance reduced below the target) to fit the sixty-three magnitude bits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DerivedScale {
+    /// The fractional-bit count the quantity is stored at.
+    pub scale_bits: u32,
+    /// True when the sixty-three-bit budget could not hold the full significance target, so the
+    /// low end carries fewer significant bits than requested (the capacitance and resistivity case).
+    pub windowed: bool,
+}
+
+/// Derive a quantity's fixed-point scale from its declared envelope. The mechanism is fixed; the
+/// envelope and the targets are the owner's reserved numbers (R-UNITS-PIN), provided by the caller:
+/// `hi_log2` is the floor-base-2 logarithm of the envelope's largest bound magnitude, `lo_log2` the
+/// floor-base-2 logarithm of its smallest non-zero bound magnitude (both negative for a value below
+/// one, and computed from the physical decimal envelope by the caller, since a bound like `1e-12`
+/// underflows the canonical fixed-point epsilon and cannot round-trip through a `Fixed`); `sig_target`
+/// is the significant bits the low end must retain; `guard` is the integer headroom above the top;
+/// and `canonical_scale` is the default scale a fitting quantity keeps (thirty-two for the physics
+/// Q32.32 substrate). The rule (design.md Part 55, the units proposal): the scale defaults to
+/// `canonical_scale` when the top fits its integer field and `canonical_scale` fractional bits
+/// already resolve the bottom to `sig_target` significant bits; otherwise a wide envelope derives a
+/// scale that holds the top and gives the bottom as much significance as the sixty-three-bit budget
+/// allows, reducing the significance target (`windowed`) when even that will not fit. The crate
+/// authors no scale; it computes one from the owner's envelope and targets.
+pub fn derive_scale_bits(
+    hi_log2: i32,
+    lo_log2: i32,
+    sig_target: u32,
+    guard: u32,
+    canonical_scale: u32,
+) -> DerivedScale {
+    const MAG_BITS: u32 = 63; // one sign bit, sixty-three magnitude bits in i64
+    let default_int_bits = MAG_BITS.saturating_sub(canonical_scale); // 31 for the canonical Q32.32
+
+    // Integer bits to hold the top's integer part (none when the top is below one), plus the guard.
+    // Saturating throughout so a non-physical extreme argument returns a bounded result rather than
+    // panicking or wrapping; real envelope log2 bounds and a small guard never approach these limits.
+    let integer_bits = (hi_log2.saturating_add(1).max(0) as u32).saturating_add(guard);
+    // Significant bits of the bottom at scale f are about lo_log2 + f, so f >= sig_target - lo_log2.
+    // Computed in i64 so the u32-minus-i32 cannot overflow.
+    let frac_needed = (sig_target as i64 - lo_log2 as i64).clamp(0, MAG_BITS as i64) as u32;
+
+    if integer_bits <= default_int_bits && frac_needed <= canonical_scale {
+        return DerivedScale {
+            scale_bits: canonical_scale,
+            windowed: false,
+        };
+    }
+
+    let budget = MAG_BITS.saturating_sub(integer_bits);
+    let scale_bits = frac_needed.min(budget).min(62);
+    // Windowed when the low end carries fewer significant bits than requested, which is exactly when
+    // the final scale falls below what the significance target needed (whether the 63-bit budget or
+    // the 62-bit cap is what bound it), or the top alone overruns the magnitude bits.
+    let windowed = integer_bits > MAG_BITS || frac_needed > scale_bits;
+    DerivedScale {
+        scale_bits,
+        windowed,
+    }
+}
+
+impl AbsoluteQuantity {
+    /// Bridge a `Fixed` value (whose scale is `fixed_frac_bits`) to this quantity's scale, or `None`
+    /// on an out-of-range result. For a quantity stored at `fixed_frac_bits` this is the identity, so
+    /// the canonical Q32.32 quantities cross with no change.
+    pub fn from_fixed_bits(
+        quantity: u32,
+        fixed_bits: i64,
+        fixed_frac_bits: u32,
+        reg: &QuantityRegistry,
+    ) -> Option<AbsoluteQuantity> {
+        let def = reg.get(quantity)?;
+        rescale_bits(fixed_bits, fixed_frac_bits, def.scale_bits)
+            .map(|bits| AbsoluteQuantity { quantity, bits })
+    }
+
+    /// Bridge this quantity's magnitude back to a `Fixed` value's raw bits at `fixed_frac_bits`, or
+    /// `None` on an out-of-range result.
+    pub fn to_fixed_bits(self, fixed_frac_bits: u32, reg: &QuantityRegistry) -> Option<i64> {
+        let def = reg.get(self.quantity)?;
+        rescale_bits(self.bits, def.scale_bits, fixed_frac_bits)
     }
 }
 
@@ -491,5 +583,112 @@ mod tests {
         assert_eq!(back.id_of("force"), q.id_of("force"));
         assert_eq!(back.id_of("distance"), q.id_of("distance"));
         assert_eq!(back.len(), q.len());
+    }
+
+    #[test]
+    fn derive_scale_bits_defaults_to_the_canonical_and_derives_for_wide_envelopes() {
+        // A quantity whose envelope fits Q32.32 keeps scale 32 (modulus [1, 1.2e6], P=16, guard=1).
+        assert_eq!(
+            derive_scale_bits(20, 0, 16, 1, 32),
+            DerivedScale {
+                scale_bits: 32,
+                windowed: false
+            }
+        );
+        // A symmetric signed envelope keeps 32: no tiny low bound (potential [-1e8, 1e8]).
+        assert_eq!(derive_scale_bits(26, 26, 16, 1, 32).scale_bits, 32);
+        // Charge [1e-9, 1e5] does not fit: the low end forces Q17.46, the design-of-record's worked
+        // case, without windowing.
+        assert_eq!(
+            derive_scale_bits(16, -30, 16, 0, 32),
+            DerivedScale {
+                scale_bits: 46,
+                windowed: false
+            }
+        );
+        // Capacitance [1e-12, 1e3] exceeds the 63-bit budget at P=16, so it windows to Q10.53 (the
+        // low end carries about thirteen significant bits, fewer than the sixteen requested).
+        assert_eq!(
+            derive_scale_bits(9, -40, 16, 0, 32),
+            DerivedScale {
+                scale_bits: 53,
+                windowed: true
+            }
+        );
+        // A truly over-wide envelope stays bounded and is flagged windowed.
+        let wide = derive_scale_bits(40, -27, 16, 0, 32);
+        assert!(wide.windowed && wide.scale_bits <= 62);
+        // Windowed is flagged even when the 62-bit fractional cap (not the budget) is what drops the
+        // low end below the target: here scale caps at 62 but the target wanted 63 fractional bits.
+        let capped = derive_scale_bits(-1, -47, 16, 0, 32);
+        assert_eq!(
+            capped,
+            DerivedScale {
+                scale_bits: 62,
+                windowed: true
+            }
+        );
+        // Non-physical extreme arguments return a bounded result rather than panicking or wrapping.
+        let ex = derive_scale_bits(i32::MAX, i32::MIN, u32::MAX, u32::MAX, 32);
+        assert!(ex.scale_bits <= 62);
+    }
+
+    #[test]
+    fn rescale_bits_bridges_fixed_scales_and_is_identity_at_the_same_scale() {
+        let five = 5i64 << 32; // 5.0 as Q32.32 raw
+        assert_eq!(
+            rescale_bits(five, 32, 32),
+            Some(five),
+            "same scale is identity"
+        );
+        assert_eq!(
+            rescale_bits(five, 32, 46),
+            Some(5i64 << 46),
+            "up-scale is a left shift"
+        );
+        assert_eq!(
+            rescale_bits(5i64 << 46, 46, 32),
+            Some(five),
+            "down-scale round-trips a representable value"
+        );
+        // A shift past the i64 range is reported, not wrapped.
+        assert_eq!(rescale_bits(1, 0, 63), None);
+    }
+
+    #[test]
+    fn the_fixed_bridge_is_a_no_op_for_a_canonical_quantity() {
+        let mut q = QuantityRegistry::new();
+        let q32 = q.register(QuantityDef {
+            name: "at32".to_string(),
+            dimension: Dimension::dimensionless(),
+            scale_bits: 32,
+            overflow: OverflowPolicy::Saturate,
+        });
+        let q46 = q.register(QuantityDef {
+            name: "at46".to_string(),
+            dimension: Dimension::dimensionless(),
+            scale_bits: 46,
+            overflow: OverflowPolicy::Saturate,
+        });
+        let five = 5i64 << 32;
+        // A canonical Q32.32 quantity bridges to and from Fixed unchanged.
+        let a = AbsoluteQuantity::from_fixed_bits(q32, five, 32, &q).unwrap();
+        assert_eq!(a.bits, five);
+        assert_eq!(a.to_fixed_bits(32, &q), Some(five));
+        // A finer-scaled quantity holds a value the Fixed scale underflows: charge ~1e-9 at scale 46
+        // is ~70369 raw, but through the Q32.32 bridge it degrades to ~4 raw (why the finer scale
+        // exists), and re-deriving from that coarse value loses the low bits.
+        let charge_raw_46 = 70369i64; // round(1e-9 * 2^46)
+        let c = AbsoluteQuantity::new(q46, charge_raw_46);
+        let through_fixed = c.to_fixed_bits(32, &q).unwrap();
+        assert_eq!(
+            through_fixed, 4,
+            "1e-9 underflows the Q32.32 grid to ~4 raw"
+        );
+        let back = AbsoluteQuantity::from_fixed_bits(q46, through_fixed, 32, &q).unwrap();
+        assert!(
+            back.bits < charge_raw_46,
+            "round-tripping through Q32.32 loses charge's low end"
+        );
     }
 }
