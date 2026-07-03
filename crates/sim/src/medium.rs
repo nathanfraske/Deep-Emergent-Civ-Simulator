@@ -126,32 +126,50 @@ pub struct MediumField {
     height: i32,
     respirable: Vec<Fixed>,
     density: Vec<Fixed>,
+    temperature: Vec<Fixed>,
 }
 
 impl MediumField {
-    /// A field from explicit per-cell respirable content and density (row-major, `width * height` each).
+    /// A field from explicit per-cell respirable content, density, and temperature (row-major,
+    /// `width * height` each). The temperature is the medium's, the state a being's core temperature
+    /// exchanges toward (a lava cell is lethally hot, a void cell cold), read by [`in_medium_temperature`].
     pub fn new(
         width: i32,
         height: i32,
         respirable: Vec<Fixed>,
         density: Vec<Fixed>,
+        temperature: Vec<Fixed>,
     ) -> MediumField {
         assert!(width > 0 && height > 0, "a field has positive extent");
         let n = (width as usize) * (height as usize);
         assert_eq!(respirable.len(), n, "respirable is width*height long");
         assert_eq!(density.len(), n, "density is width*height long");
+        assert_eq!(temperature.len(), n, "temperature is width*height long");
         MediumField {
             width,
             height,
             respirable,
             density,
+            temperature,
         }
     }
 
     /// A uniform medium filling the whole field (one medium everywhere).
-    pub fn uniform(width: i32, height: i32, respirable: Fixed, density: Fixed) -> MediumField {
+    pub fn uniform(
+        width: i32,
+        height: i32,
+        respirable: Fixed,
+        density: Fixed,
+        temperature: Fixed,
+    ) -> MediumField {
         let n = (width as usize) * (height as usize);
-        MediumField::new(width, height, vec![respirable; n], vec![density; n])
+        MediumField::new(
+            width,
+            height,
+            vec![respirable; n],
+            vec![density; n],
+            vec![temperature; n],
+        )
     }
 
     fn idx(&self, x: i32, y: i32) -> Option<usize> {
@@ -175,6 +193,20 @@ impl MediumField {
         self.idx(x, y)
             .map(|i| self.density[i])
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The temperature of the medium at a cell. Off the field there is no medium; this reads zero, which
+    /// a caller distinguishes from a real zero-temperature medium by also checking [`Self::contains`]
+    /// (the absence convention, as with the other reads).
+    pub fn temperature_at(&self, x: i32, y: i32) -> Fixed {
+        self.idx(x, y)
+            .map(|i| self.temperature[i])
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Whether a cell is on the field (holds a medium at all).
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        self.idx(x, y).is_some()
     }
 }
 
@@ -263,6 +295,44 @@ pub fn buoyancy_at(
 ) -> Fixed {
     let medium_density = field.density_at(pos.x, pos.y);
     buoyancy(body_density(plan, organs), medium_density, gravity)
+}
+
+/// One tick of in-medium thermal exchange: a being's core temperature relaxes toward the temperature of
+/// the medium it sits in, `new = prev + rate * (medium_temp - prev)`, the discrete form of Newton's law
+/// of cooling. Physics in: a body in a hot medium (lava) heats toward it and one in a cold medium cools,
+/// at the reserved exchange rate, so a lethal-hot or lethal-cold medium drives the body out of its
+/// comfort band ([`crate::runner::comfort_fraction`]) and kills it, with no authored rule. The exchange
+/// is a scalar relaxation toward the medium temperature: it carries no spatial direction and treats a
+/// hot and a cold medium as mirror images, so it steers no heading (Principle 9).
+pub fn in_medium_temperature(
+    prev_body_temp: Fixed,
+    medium_temp: Fixed,
+    exchange_rate: Fixed,
+) -> Fixed {
+    let rate = exchange_rate.clamp(Fixed::ZERO, Fixed::ONE);
+    // Temperatures are held in the floor's bounded range, so the signed gap is representable.
+    let gap = medium_temp - prev_body_temp;
+    let step = rate.checked_mul(gap).unwrap_or(Fixed::ZERO);
+    prev_body_temp.saturating_add(step)
+}
+
+/// The located form: a being at `pos` exchanges heat with the medium of its cell. Off the field there is
+/// no medium to exchange with, so the body temperature holds (unlike an on-field cell, whose real medium
+/// temperature it relaxes toward).
+pub fn in_medium_temperature_at(
+    prev_body_temp: Fixed,
+    field: &MediumField,
+    pos: Coord3,
+    exchange_rate: Fixed,
+) -> Fixed {
+    if !field.contains(pos.x, pos.y) {
+        return prev_body_temp;
+    }
+    in_medium_temperature(
+        prev_body_temp,
+        field.temperature_at(pos.x, pos.y),
+        exchange_rate,
+    )
 }
 
 #[cfg(test)]
@@ -439,6 +509,7 @@ mod tests {
             1,
             vec![Fixed::ONE, Fixed::from_ratio(1, 5)], // rich then poor respirable content
             vec![Fixed::from_int(998), Fixed::from_ratio(1225, 1000)], // water then air density
+            vec![Fixed::from_int(290), Fixed::from_int(290)], // both temperate
         )
     }
 
@@ -493,6 +564,7 @@ mod tests {
             1,
             vec![Fixed::ONE, Fixed::from_ratio(9, 10)],
             vec![Fixed::from_int(998), Fixed::from_ratio(1225, 1000)],
+            vec![Fixed::from_int(290), Fixed::from_int(290)],
         );
         assert!(
             survive_at(&plan, &organs, &field, Coord3::ground(0, 0), 500),
@@ -639,6 +711,11 @@ mod tests {
                 Fixed::from_int(3000),         // lava: denser than the body, it floats
                 Fixed::from_ratio(1225, 1000), // air: far lighter, it falls
             ],
+            vec![
+                Fixed::from_int(290),
+                Fixed::from_int(1500),
+                Fixed::from_int(290),
+            ], // temperature irrelevant to buoyancy
         );
         assert!(
             buoyancy_at(&plan, &organs, &field, Coord3::ground(0, 0), g()) < Fixed::ZERO,
@@ -665,6 +742,122 @@ mod tests {
             )
             .to_bits()
         };
+        assert_eq!(run(), run(), "the same body and medium replay bit for bit");
+    }
+
+    // In-medium thermal exchange (increment 2d, part A): a being's core temperature relaxes toward the
+    // temperature of the medium it sits in, so lethal-hot and lethal-cold media are real. All physics,
+    // no steering: the exchange carries no heading and treats hot and cold as mirror images.
+
+    use crate::runner::{comfort_fraction, BeingThermal};
+
+    /// A reserved thermal band fixture: a viable body-temperature band around a set point (the same
+    /// shape the thermal coupling uses). Not owner canon.
+    fn band() -> BeingThermal {
+        BeingThermal {
+            setpoint: Fixed::from_int(37),
+            half_band: Fixed::from_int(8),
+            initial_temp: Fixed::from_int(37),
+        }
+    }
+
+    #[test]
+    fn a_body_heats_toward_a_hot_medium_and_cools_toward_a_cold_one() {
+        let rate = Fixed::from_ratio(1, 10);
+        let start = Fixed::from_int(37);
+        assert!(
+            in_medium_temperature(start, Fixed::from_int(1200), rate) > start,
+            "a hot medium heats the body toward it"
+        );
+        assert!(
+            in_medium_temperature(start, Fixed::from_int(-50), rate) < start,
+            "a cold medium cools the body toward it"
+        );
+        assert_eq!(
+            in_medium_temperature(start, start, rate),
+            start,
+            "a medium at the body temperature drives no exchange (equilibrium)"
+        );
+    }
+
+    #[test]
+    fn a_hot_and_a_cold_medium_are_mirror_image_treatments() {
+        // The anti-steer: an equal temperature gap above and below the body drives an equal and
+        // opposite exchange, so the mechanism favours neither hot nor cold and bakes in no direction.
+        let rate = Fixed::from_ratio(1, 5);
+        let start = Fixed::from_int(37);
+        let d = Fixed::from_int(200);
+        let up = in_medium_temperature(start, start + d, rate) - start;
+        let down = in_medium_temperature(start, start - d, rate) - start;
+        assert_eq!(
+            up,
+            Fixed::ZERO - down,
+            "hot and cold media are symmetric: no authored preference"
+        );
+    }
+
+    #[test]
+    fn a_lethal_hot_medium_kills_and_a_temperate_one_does_not() {
+        // Physics in, death out: a body held in a lava medium heats out of its comfort band and dies
+        // (comfort falls to zero), while a body in a temperate medium holds and lives. No authored rule
+        // says lava is lethal; the thermal exchange plus the comfort band make it so.
+        let rate = Fixed::from_ratio(1, 10);
+        let band = band();
+
+        let lava = Fixed::from_int(1200);
+        let hot_body = in_medium_temperature(band.initial_temp, lava, rate);
+        assert_eq!(
+            comfort_fraction(hot_body, &band),
+            Fixed::ZERO,
+            "a lava medium drives the body past its band: lethal"
+        );
+
+        let temperate = band.setpoint;
+        let held_body = in_medium_temperature(band.initial_temp, temperate, rate);
+        assert!(
+            comfort_fraction(held_body, &band) > Fixed::ZERO,
+            "a temperate medium holds the body in its band: survivable"
+        );
+
+        // A lethal-cold medium is lethal too, the symmetric case.
+        let void = Fixed::from_int(-200);
+        let cold_body = in_medium_temperature(band.initial_temp, void, rate);
+        assert_eq!(
+            comfort_fraction(cold_body, &band),
+            Fixed::ZERO,
+            "a lethal-cold medium is lethal too, symmetrically"
+        );
+    }
+
+    #[test]
+    fn located_thermal_exchange_reads_the_cell_and_holds_off_the_field() {
+        // A one-cell lava field. On the cell the body heats toward the lava; off the field there is no
+        // medium and the body temperature holds.
+        let rate = Fixed::from_ratio(1, 10);
+        let start = Fixed::from_int(37);
+        let field = MediumField::uniform(
+            1,
+            1,
+            Fixed::ZERO,
+            Fixed::from_int(3000),
+            Fixed::from_int(1200),
+        );
+        assert!(
+            in_medium_temperature_at(start, &field, Coord3::ground(0, 0), rate) > start,
+            "on the lava cell the body heats"
+        );
+        assert_eq!(
+            in_medium_temperature_at(start, &field, Coord3::ground(9, 9), rate),
+            start,
+            "off the field there is no medium, the body temperature holds"
+        );
+    }
+
+    #[test]
+    fn in_medium_thermal_exchange_is_deterministic() {
+        let rate = Fixed::from_ratio(3, 10);
+        let run =
+            || in_medium_temperature(Fixed::from_int(37), Fixed::from_int(900), rate).to_bits();
         assert_eq!(run(), run(), "the same body and medium replay bit for bit");
     }
 }

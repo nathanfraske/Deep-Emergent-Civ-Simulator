@@ -209,7 +209,7 @@ fn the_thermotaxis_controller_authors_no_heading() {
     let here: BTreeSet<HomeostaticAxisId> = BTreeSet::new();
     let mut dirs = BTreeMap::new();
     dirs.insert(TEMPERATURE, (Fixed::ONE, Fixed::ZERO)); // a direction is on offer...
-    let input = l.build_input(&homeo, &here, &dirs);
+    let input = l.build_input(&homeo, &here, &dirs, &BTreeMap::new());
     let (out, _) = c.evaluate(&input, &[]);
     let afforded = AffordanceRegistry::dev_default().afforded(&mobile_body());
     let d = l

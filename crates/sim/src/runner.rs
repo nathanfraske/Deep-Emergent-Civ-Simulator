@@ -47,23 +47,30 @@
 //! physics-in-and-behaviour-out path (Part 8.4, R-BEHAVIOR-EVOLVE). A runner built with
 //! [`Runner::with_embodiment`] owns an [`Embodiment`]: a population of located beings whose movement is
 //! driven by their evolved controllers ([`crate::locomotion`], [`crate::controller`]), not an authored
-//! policy. Each tick, after the field step and the body-thermal exchange, two pure reads feed the
+//! policy. Each tick, after the field step and the body-thermal exchange, three pure reads feed the
 //! being's controller: a comfort-band map ([`comfort_fraction`]) turns its absolute core temperature
 //! into a temperature homeostatic reserve in `[0, 1]` (its physiological state, per being from its own
-//! reserved comfort band), and the raw temperature gradient at its cell ([`Field::gradient_at`], the
-//! unit direction toward warmer surroundings, what a thermoreceptor senses) is its directional
-//! percept. The controller reads both and issues a movement affordance; the beings' new coordinates
-//! re-sync the located index so the next tick's thermal exchange reads where they moved. This closes
-//! the loop from physics to physiology to behaviour to physics with no authored heading: the gradient
-//! is a physical field quantity, not a policy, and how a being combines "am I uncomfortable" (its
-//! reserve) with "which way is warmer" (the gradient) is its evolved controller's, selected by
-//! survival. A being whose controller has evolved to climb the gradient reaches warmth directly; one
-//! that has not explores (an undirected, seed-keyed heading), and directed thermotaxis is the emergent
-//! consequence rather than a wired rule. The comfort band's set point and half-range are reserved
-//! per-race physiology (Part 20); the composite hash folds each being's position, reserves, and
-//! controller state after the world fold. Honest limit: raw gradient plus the even comfort reserve
-//! lets a linear controller learn warmth-seeking in a cold world, but fleeing lethal heat needs either
-//! a recurrent controller or a signed thermal-state percept (a new input channel), a later increment.
+//! reserved comfort band); the raw temperature gradient at its cell ([`Field::gradient_at`], the unit
+//! direction toward warmer surroundings, what a thermoreceptor senses) is its directional percept; and
+//! the signed deviation of its core temperature from its set point ([`signed_deviation`], too hot
+//! positive, too cold negative) is its interoceptive thermoreceptor, the bit the even comfort reserve
+//! cannot carry. The controller reads all three and issues a movement affordance; the beings' new
+//! coordinates re-sync the located index so the next tick's thermal exchange reads where they moved.
+//! This closes the loop from physics to physiology to behaviour to physics with no authored heading:
+//! the gradient and the signed deviation are physical quantities, not a policy, and how a being
+//! combines "am I too hot or too cold" (its signed thermoreceptor) with "which way is warmer" (the
+//! gradient) is its evolved controller's, selected by survival. A being whose controller has evolved
+//! to climb the gradient reaches warmth directly; one that has not explores (an undirected, seed-keyed
+//! heading), and directed thermotaxis is the emergent consequence rather than a wired rule. The
+//! comfort band's set point and half-range are reserved per-race physiology (Part 20); the composite
+//! hash folds each being's position, reserves, and controller state after the world fold. The signed
+//! thermoreceptor is what lets a controller flee lethal heat as well as seek warmth: the two demand
+//! opposite gradient-following signs, which the even reserve cannot gate but the signed percept can,
+//! and combining the signed bit with the gradient to flee is a product a recurrent controller
+//! represents. That selection wires it, hot-fleeing emerging without an authored heading, is proven in
+//! the [`evolve`](mod@crate::evolve) module. Honest limit: the signed percept lifts the linear-warmth-seeking ceiling, but
+//! the bidirectional gating needs the recurrent controller, so a reaction norm still cannot solve a
+//! world with both lethal-hot and lethal-cold regions.
 //!
 //! The steering boundary the canonical runner holds (Principle 9): the world phases it drives are the
 //! emergent, data-driven ones (belief, dialogue, gossip, language), and the emergent-behaviour source
@@ -291,6 +298,28 @@ pub fn comfort_fraction(body_temp: Fixed, band: &BeingThermal) -> Fixed {
         };
     }
     Fixed::ONE - dev.div(band.half_band).clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The signed thermoreceptor: an absolute core temperature and a viable band to a signed deviation in
+/// `[-1, 1]`, positive when the body is above its set point (too hot), negative when below (too cold),
+/// zero at the set point. This is the odd (sign-preserving) counterpart of the even [`comfort_fraction`]:
+/// where comfort collapses hot and cold to one magnitude, this carries the bit that distinguishes them,
+/// the raw interoceptive percept a being needs to tell overheating from freezing. It is scaled by the
+/// half-range and clamped, so it saturates to `+1`/`-1` at the lethal edges, and it is exactly odd in
+/// the deviation (a body the same distance above or below the set point reads equal and opposite),
+/// so it authors no direction and favours neither hot nor cold (Principle 9). A pure fixed-point
+/// function: no RNG, no camera. A degenerate zero half-range reads as the pure sign of the deviation.
+pub fn signed_deviation(body_temp: Fixed, band: &BeingThermal) -> Fixed {
+    let dev = body_temp - band.setpoint;
+    if band.half_band <= Fixed::ZERO {
+        return match dev.to_bits().cmp(&0) {
+            std::cmp::Ordering::Greater => Fixed::ONE,
+            std::cmp::Ordering::Less => Fixed::from_int(-1),
+            std::cmp::Ordering::Equal => Fixed::ZERO,
+        };
+    }
+    dev.div(band.half_band)
+        .clamp(Fixed::from_int(-1), Fixed::ONE)
 }
 
 /// Normalise a raw gradient to a unit direction, the same way the known-source percept does (parity
@@ -679,6 +708,28 @@ impl Runner {
                     .collect(),
                 None => return,
             };
+        // (0b) Physics to percept, the signed thermoreceptor: each being senses the signed deviation of
+        // its core temperature from its own comfort set point (too hot positive, too cold negative), a
+        // raw interoceptive scalar in [-1, 1], fed into the TEMPERATURE axis's signed input slot. This is
+        // the bit the even comfort reserve cannot carry; it is a percept, not a heading (it says the body
+        // is too hot, not which way to flee), so a controller must combine it with the gradient percept
+        // to act, and selection wires that. Read before the mutable embodiment borrow, drawing no RNG.
+        let field_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> =
+            match self.embodiment.as_ref() {
+                Some(emb) => emb
+                    .walkers
+                    .iter()
+                    .filter_map(|w| {
+                        let bt = *self.body_temp.get(&w.id)?;
+                        let band = emb.thermal.get(&w.id)?;
+                        Some((
+                            w.id,
+                            BTreeMap::from([(TEMPERATURE, signed_deviation(bt, band))]),
+                        ))
+                    })
+                    .collect(),
+                None => return,
+            };
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
@@ -691,8 +742,10 @@ impl Runner {
             }
         }
         // (2) Physiology and percept to behaviour: the evolved controllers drive one locomotion step
-        // over the being slice, reading the comfort-gradient percept in the TEMPERATURE direction slot.
-        // A controller that has evolved to follow it climbs toward comfort; one that has not explores.
+        // over the being slice, reading the temperature gradient in the TEMPERATURE direction slot and
+        // the signed thermoreceptor in its signed slot. A controller that has evolved to gate its
+        // gradient-following on the signed bit climbs toward comfort from either side; one that has not
+        // explores or, wired for one side only, walks into danger on the other.
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -704,6 +757,7 @@ impl Runner {
             emb.seed,
             self.clock,
             &field_dirs,
+            &field_signed,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
@@ -820,6 +874,88 @@ source = "test"
         assert_eq!(
             FieldCalib::from_manifest(&m).unwrap_err(),
             CalibrationError::Reserved("field.diffusion".to_string()),
+        );
+    }
+
+    /// A labelled thermal band fixture (not owner canon): a set point and half-range.
+    fn band() -> BeingThermal {
+        BeingThermal {
+            setpoint: Fixed::from_int(37),
+            half_band: Fixed::from_int(8),
+            initial_temp: Fixed::from_int(37),
+        }
+    }
+
+    #[test]
+    fn signed_deviation_reads_hot_positive_and_cold_negative() {
+        let b = band();
+        assert!(
+            signed_deviation(b.setpoint + Fixed::from_int(4), &b) > Fixed::ZERO,
+            "above the set point reads too hot (positive)"
+        );
+        assert!(
+            signed_deviation(b.setpoint - Fixed::from_int(4), &b) < Fixed::ZERO,
+            "below the set point reads too cold (negative)"
+        );
+        assert_eq!(
+            signed_deviation(b.setpoint, &b),
+            Fixed::ZERO,
+            "at the set point there is no deviation"
+        );
+    }
+
+    #[test]
+    fn signed_deviation_is_odd_in_the_deviation() {
+        // The anti-steer: the raw thermoreceptor is exactly odd about the set point, so a body the same
+        // distance above and below reads equal and opposite. It favours neither hot nor cold and bakes
+        // in no direction (Principle 9), the signed counterpart of comfort_fraction being even.
+        let b = band();
+        for d in [1i32, 3, 7, 40] {
+            let up = signed_deviation(b.setpoint + Fixed::from_int(d), &b);
+            let down = signed_deviation(b.setpoint - Fixed::from_int(d), &b);
+            assert_eq!(
+                up,
+                Fixed::ZERO - down,
+                "hot and cold are mirror images at d={d}"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_deviation_saturates_at_the_band_edges() {
+        // At and beyond a full half-range the percept saturates to +/-1, so a lethal-hot medium reads a
+        // fully-positive thermoreceptor and a lethal-cold one a fully-negative, the clean bit a
+        // controller needs to tell the two dangers apart.
+        let b = band();
+        assert_eq!(
+            signed_deviation(b.setpoint + Fixed::from_int(100), &b),
+            Fixed::ONE,
+            "far above the band saturates to +1"
+        );
+        assert_eq!(
+            signed_deviation(b.setpoint - Fixed::from_int(100), &b),
+            Fixed::from_int(-1),
+            "far below the band saturates to -1"
+        );
+    }
+
+    #[test]
+    fn signed_deviation_and_comfort_are_the_odd_and_even_halves() {
+        // The two thermoreceptive reads are complementary: comfort is even (magnitude of discomfort),
+        // signed deviation is odd (which side). Together they carry both "how far out of band" and "which
+        // way", which the even reserve alone cannot, without either one authoring a heading.
+        let b = band();
+        let hot = b.setpoint + Fixed::from_int(5);
+        let cold = b.setpoint - Fixed::from_int(5);
+        assert_eq!(
+            comfort_fraction(hot, &b),
+            comfort_fraction(cold, &b),
+            "comfort collapses hot and cold to one magnitude"
+        );
+        assert_ne!(
+            signed_deviation(hot, &b),
+            signed_deviation(cold, &b),
+            "but the signed thermoreceptor distinguishes them"
         );
     }
 }

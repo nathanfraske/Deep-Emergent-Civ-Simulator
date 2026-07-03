@@ -87,7 +87,7 @@ fn main() {
             .map(|k| Fixed::from_ratio((k as i64 % 7) - 3, 5))
             .collect();
         let controller = Controller::from_weights(n_in, n_out, h, weights);
-        let input = layout.build_input(&homeo_state, &here, &dirs);
+        let input = layout.build_input(&homeo_state, &here, &dirs, &BTreeMap::new());
         let hidden0 = controller.fresh_hidden();
 
         // --- Per-tick evaluation cost. Bound the total work so wide nets do not run long. ---
@@ -196,7 +196,7 @@ fn time_eval(
         .map(|k| Fixed::from_ratio((k as i64 % 7) - 3, 5))
         .collect();
     let controller = Controller::from_weights(layout.n_in(), layout.n_out(), h, weights);
-    let input = layout.build_input(homeo_state, here, dirs);
+    let input = layout.build_input(homeo_state, here, dirs, &BTreeMap::new());
     let mut hidden = controller.fresh_hidden();
     let reps: usize = (200_000_000usize / wc.max(1)).clamp(50_000, 5_000_000);
     let mut cs = 0i64;

@@ -369,18 +369,22 @@ pub fn step<T: Terrain>(
         seed,
         tick,
         &BTreeMap::new(),
+        &BTreeMap::new(),
     )
 }
 
-/// As [`step`], but with an additional per-being map of field-derived percept directions, keyed by
-/// stable id then by homeostatic axis. This is a directional percept a being senses from a physical
-/// field rather than from a remembered point source: the temperature comfort gradient the runner
-/// supplies for the TEMPERATURE axis (the unit direction of increasing comfort at the being's cell),
-/// and later a moisture or wind field, merged into that axis's direction slot of the controller input
-/// alongside the known-source percept. It is a percept, not a heading: the controller must evolve to
-/// follow it (Principle 9), and it draws no randomness, so determinism and camera-freedom hold. A
-/// field direction for an axis overrides the known-source direction for that axis, since the field
-/// percept is the live signal for a diffuse quantity that has no discrete source tile.
+/// As [`step`], but with two additional per-being percept maps, each keyed by stable id then by
+/// homeostatic axis. The first, `field_dirs`, is a directional percept a being senses from a physical
+/// field rather than from a remembered point source: the temperature gradient the runner supplies for
+/// the TEMPERATURE axis (the unit direction toward warmer surroundings at the being's cell), and later
+/// a moisture or wind field, merged into that axis's direction slot alongside the known-source percept.
+/// The second, `field_signed`, is the scalar signed setpoint-deviation percept for an axis (the raw
+/// thermoreceptor: whether the body is too hot or too cold), fed into that axis's signed input slot.
+/// Both are percepts, not headings: the controller must evolve to combine them (Principle 9), and
+/// neither draws randomness, so determinism and camera-freedom hold. A field direction for an axis
+/// overrides the known-source direction for that axis, since the field percept is the live signal for
+/// a diffuse quantity that has no discrete source tile; the signed percept has no known-source
+/// counterpart and is simply supplied.
 #[allow(clippy::too_many_arguments)]
 pub fn step_with_field_dirs<T: Terrain>(
     walkers: &mut [Walker],
@@ -393,6 +397,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     seed: u64,
     tick: u64,
     field_dirs: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>>,
+    field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -414,7 +419,11 @@ pub fn step_with_field_dirs<T: Terrain>(
                 dirs.insert(axis, d);
             }
         }
-        let input = layout.build_input(&w.homeostasis, &here_axes, &dirs);
+        // The signed setpoint-deviation percept for this being (the raw thermoreceptor), empty when
+        // none is supplied so the signed input reads zero, as it did before this percept existed.
+        let empty_signed = BTreeMap::new();
+        let signed = field_signed.get(&w.id).unwrap_or(&empty_signed);
+        let input = layout.build_input(&w.homeostasis, &here_axes, &dirs, signed);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
         let afforded = afford.afforded(&w.body);
