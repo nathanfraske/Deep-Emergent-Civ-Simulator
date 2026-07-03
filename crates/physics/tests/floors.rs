@@ -21,7 +21,7 @@
 //! physics proof (the mace-versus-morningstar strike, edibility as a relation) lives in
 //! the law harness in `laws.rs`; this is the data half of the proof.
 
-use civsim_physics::{PhysicsError, PhysicsRegistry};
+use civsim_physics::PhysicsRegistry;
 
 fn data_path(file: &str) -> String {
     format!("{}/data/{}", env!("CARGO_MANIFEST_DIR"), file)
@@ -124,18 +124,18 @@ fn the_pressure_class_axes_share_the_pinned_megapascal_scale() {
 }
 
 #[test]
-fn ranges_are_set_with_only_the_scale_pending_axes_reserved() {
+fn ranges_are_set_with_only_the_per_class_tolerance_reserved() {
     use civsim_core::Fixed;
-    // The owner's confirmed values are set; only the two axes whose per-quantity scale is
-    // unsettled (R-UNITS-PIN) stay reserved: the geometry second moment of area and the
-    // per-class consumer reference tolerance.
+    // Every mechanical axis range is now set (the geometry second moment of area ratified
+    // 2026-07-03 on its per-quantity scale, R-UNITS-PIN); the biology floor keeps only the
+    // per-toxin-class consumer reference tolerance reserved, its scale being per class.
     let mech = mechanical();
-    assert_eq!(
-        mech.reserved_axis_ids(),
-        vec!["mech.second_moment_of_area"],
-        "only the scale-pending geometry axis stays reserved"
+    assert!(
+        mech.reserved_axis_ids().is_empty(),
+        "every mechanical axis range is set, got reserved {:?}",
+        mech.reserved_axis_ids()
     );
-    // A set range now reads back the cited bound exactly.
+    // A set range reads back the cited bound exactly.
     let (lo, hi) = mech
         .axis("mat.density")
         .unwrap()
@@ -146,23 +146,27 @@ fn ranges_are_set_with_only_the_scale_pending_axes_reserved() {
     // atmospheric buoyancy and wind are expressible; the high bound is unchanged.
     assert_eq!(lo, Fixed::from_ratio(8, 100));
     assert_eq!(hi, Fixed::from_int(23000));
-    // The scale-pending axis still fails loud when read.
-    let smoa = mech.axis("mech.second_moment_of_area").unwrap();
+    // The second moment of area now reads back its ratified window; its 1e-12 low bound underflows
+    // the stored Fixed to zero (the picofarad analog), the true magnitude living in the declared
+    // decimal envelope the per-quantity scale derives from.
+    let (smoa_lo, smoa_hi) = mech
+        .axis("mech.second_moment_of_area")
+        .unwrap()
+        .range
+        .require("mech.second_moment_of_area")
+        .unwrap();
     assert_eq!(
-        smoa.range
-            .require("mech.second_moment_of_area")
-            .unwrap_err(),
-        PhysicsError::ReservedRange("mech.second_moment_of_area".to_string())
+        smoa_lo,
+        Fixed::ZERO,
+        "the 1e-12 low bound underflows to zero"
     );
+    assert_eq!(smoa_hi, Fixed::ONE, "the 1 m^4 high bound");
 
     let bio = biology();
     assert_eq!(
         bio.reserved_axis_ids(),
-        vec![
-            "bio.consumer.reference_tolerance",
-            "bio.respiratory_surface"
-        ],
-        "the per-class-scale tolerance and the respiratory-surface axis (its m^2 per-quantity scale is R-UNITS-PIN) stay reserved"
+        vec!["bio.consumer.reference_tolerance"],
+        "only the per-toxin-class reference tolerance stays reserved, its scale being per class (R-UNITS-PIN)"
     );
 }
 

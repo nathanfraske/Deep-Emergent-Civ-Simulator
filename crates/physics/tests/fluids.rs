@@ -63,10 +63,10 @@ fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
         .unwrap();
     assert_eq!(lo, Fixed::from_ratio(1, 100000), "0.00001 Pa*s (air)");
     assert_eq!(hi, Fixed::from_int(100), "100 Pa*s (lava end)");
-    assert_eq!(
-        reg.reserved_axis_ids(),
-        vec!["mech.second_moment_of_area"],
-        "the fluids ranges are graduated; only the scale-pending geometry axis stays reserved"
+    assert!(
+        reg.reserved_axis_ids().is_empty(),
+        "the fluids and geometry ranges are all graduated, got reserved {:?}",
+        reg.reserved_axis_ids()
     );
 }
 
