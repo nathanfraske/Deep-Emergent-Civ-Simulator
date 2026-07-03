@@ -936,13 +936,14 @@ source = "Part 20; crates/sim/src/homeostasis.rs"
 # --- R-BEHAVIOR-EVOLVE Stages 2 to 4: the evolved behaviour controller (Part 8; record 62.19;
 # docs/emergent_behavior_design.md) ---
 
-[[reserved]]
-id = "physiology.intake_yield"
-basis = "DERIVE, worksheet §13a: the net nutrition and water content per bite the edibility floor measures (laws::edibility, net_nutrition) over the located matter, not an authored fraction; the design already flags this interim (R-PHYS-BIO). Wire ingest to the floor measure."
-status = "reserved"
-value = ""
-unit = "fraction_of_capacity_per_tick"
-source = "Part 41 (R-PHYS-BIO), Part 8; crates/sim/src/locomotion.rs"
+# physiology.intake_yield RETIRED (derives through edibility::assess / laws::satisfaction over the tile
+# Composition; worksheet §13a DERIVE): the fraction of a reserve restored per bite is no longer an
+# authored constant. The ingest arm (crates/sim/src/locomotion.rs) reads the tile's per-class supply
+# from its ResourceField Composition and puts it through the resolved edibility floor's satisfaction
+# measure against the being's own Physiology (per-class requirement and assimilation), so the deposit
+# DERIVES from the composition and the physiology, exactly the R-PHYS-BIO wiring this item flagged as
+# interim. Removed rather than left as a fail-loud sentinel for a value the engine no longer authors,
+# the same treatment as physiology.reserve_capacity_per_mass above.
 
 [[reserved]]
 id = "behavior.controller_hidden_width"

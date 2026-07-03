@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, StableId};
 use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
 use civsim_sim::controller::{Controller, ControllerLayout};
+use civsim_sim::edibility::{Composition, Physiology};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, WATER,
 };
@@ -92,6 +93,19 @@ fn water_reg() -> HomeostaticRegistry {
     }
 }
 
+/// A labelled dev-fixture water composition: shoreline matter carrying a quarter-water supply on the
+/// water backing class (`bio.water_fraction`). Against the unit-requirement, unit-assimilation
+/// physiology the beings carry, this deposits a quarter of capacity per bite, the amount the retired
+/// `intake_yield` fixture did.
+fn water_matter() -> Composition {
+    Composition {
+        nutrients: [("bio.water_fraction".to_string(), Fixed::from_ratio(1, 4))]
+            .into_iter()
+            .collect(),
+        toxins: BTreeMap::new(),
+    }
+}
+
 /// Where water is on the map: the shorelines. Drawn from the world content, not a rule in locomotion.
 fn resources(map: &TileMap, biomes: &BiomeSet) -> ResourceField {
     let mut field = ResourceField::new();
@@ -101,7 +115,7 @@ fn resources(map: &TileMap, biomes: &BiomeSet) -> ResourceField {
             let c = Coord3::ground(x, y);
             if let Some(t) = map.tile(c) {
                 if biomes.name(t.biome) == "coast" {
-                    field.add(WATER, c);
+                    field.set(c, water_matter());
                 }
             }
         }
@@ -232,12 +246,14 @@ fn main() {
     let home = start_tile(&map, &biomes);
     let names = ['A', 'B', 'C', 'D'];
     let full = || Homeostasis::from_mass(&reg, Fixed::ONE);
+    let phys = || Physiology::dev_for_registry(&reg);
     let mut walkers = vec![
         Walker::new(
             StableId(1),
             home,
             body((3, 4), (3, 4)),
             full(),
+            phys(),
             forager(&layout),
         ),
         Walker::new(
@@ -245,6 +261,7 @@ fn main() {
             home,
             body((1, 4), (1, 2)),
             full(),
+            phys(),
             forager(&layout),
         ),
         Walker::new(
@@ -252,6 +269,7 @@ fn main() {
             home,
             body((9, 10), (9, 10)),
             full(),
+            phys(),
             forager(&layout),
         ),
         Walker::new(
@@ -259,6 +277,7 @@ fn main() {
             home,
             body((1, 2), (2, 5)),
             full(),
+            phys(),
             Controller::zeros(&layout),
         ),
     ];

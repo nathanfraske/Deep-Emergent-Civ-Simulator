@@ -56,6 +56,7 @@ use civsim_world::Coord3;
 
 use crate::anatomy::{BodyPlan, Part, Temperament};
 use crate::controller::{Controller, ControllerLayout};
+use crate::edibility::{Composition, Physiology};
 use crate::genome::{
     Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
     GenePool, GeneSet, Genome, Haplotype, SchemeId,
@@ -221,6 +222,19 @@ fn scoring_reg() -> HomeostaticRegistry {
     }
 }
 
+/// A labelled scoring-fixture water tile: matter carrying a quarter-water supply on the water backing
+/// class. Against the unit-requirement, unit-assimilation scoring physiology
+/// ([`Physiology::dev_for_registry`]) this deposits a quarter of capacity per bite, the same amount
+/// the retired `intake_yield` fixture did, so the scorer's foraging gradient is unchanged.
+fn water_matter() -> Composition {
+    Composition {
+        nutrients: [("bio.water_fraction".to_string(), Fixed::from_ratio(1, 4))]
+            .into_iter()
+            .collect(),
+        toxins: std::collections::BTreeMap::new(),
+    }
+}
+
 /// An open, flat plane: the scoring environment where survival turns on the controller's foraging,
 /// not on terrain.
 struct OpenPlane;
@@ -325,11 +339,12 @@ fn episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i3
         Coord3::ground(0, 0),
         scoring_body(),
         homeo,
+        Physiology::dev_for_registry(&reg),
         controller.clone(),
     );
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 3, 7, 2) {
-        field.add(WATER, c);
+        field.set(c, water_matter());
         walker.learn(WATER, c);
     }
     let p = LocomotionParams::dev_default();
@@ -396,13 +411,14 @@ fn full_episode_survival_dir(
     let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 6, 9, 1) {
-        field.add(WATER, c);
+        field.set(c, water_matter());
     }
     let walker = Walker::new(
         StableId(1),
         Coord3::ground(0, 0),
         scoring_body(),
         homeo,
+        Physiology::dev_for_registry(&reg),
         controller.clone(),
     );
     let p = LocomotionParams::dev_default();
@@ -521,6 +537,7 @@ fn thermal_run(
             start,
             scoring_body(),
             Homeostasis::from_mass(&reg, Fixed::ONE),
+            Physiology::dev_for_registry(&reg),
             controller.clone(),
         ),
         BeingThermal {

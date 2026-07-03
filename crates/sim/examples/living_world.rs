@@ -29,6 +29,8 @@
 //! cargo run -p civsim-sim --example living_world -- 0xBEEF
 //! ```
 
+use std::collections::BTreeMap;
+
 use civsim_core::Fixed;
 use civsim_sim::biosphere::SourceRef;
 use civsim_sim::edibility::{assess, verdict, Composition, FloorCaps, Physiology};
@@ -123,20 +125,33 @@ fn main() {
     // The relational edibility: one organism, two consumers.
     println!("\n== edibility is a relation (the same berry) ==");
     let caps = FloorCaps::dev_default();
+    // Labelled dev-fixture compositions and physiologies, keyed by biology-floor class id.
+    let cls = |pairs: &[(&str, Fixed)]| -> BTreeMap<String, Fixed> {
+        pairs.iter().map(|&(k, v)| (k.to_string(), v)).collect()
+    };
     let berry = Composition {
-        nutrients: vec![Fixed::from_ratio(6, 10), Fixed::from_ratio(4, 10)],
-        toxins: vec![Fixed::from_ratio(6, 10)],
+        nutrients: cls(&[
+            ("bio.energy_density", Fixed::from_ratio(6, 10)),
+            ("bio.water_fraction", Fixed::from_ratio(4, 10)),
+        ]),
+        toxins: cls(&[("bio.alkaloid_load", Fixed::from_ratio(6, 10))]),
     };
-    let tolerant = Physiology {
-        requirements: vec![Fixed::from_ratio(3, 10), Fixed::from_ratio(3, 10)],
-        tolerances: vec![Some(Fixed::from_ratio(9, 10))],
-        hill: vec![2],
+    let phys = |tol: Fixed| Physiology {
+        requirements: cls(&[
+            ("bio.energy_density", Fixed::from_ratio(3, 10)),
+            ("bio.water_fraction", Fixed::from_ratio(3, 10)),
+        ]),
+        assimilation: cls(&[
+            ("bio.energy_density", Fixed::ONE),
+            ("bio.water_fraction", Fixed::ONE),
+        ]),
+        tolerances: cls(&[("bio.alkaloid_load", tol)]),
+        hill: [("bio.alkaloid_load".to_string(), 2u8)]
+            .into_iter()
+            .collect(),
     };
-    let sensitive = Physiology {
-        requirements: vec![Fixed::from_ratio(3, 10), Fixed::from_ratio(3, 10)],
-        tolerances: vec![Some(Fixed::from_ratio(2, 100))],
-        hill: vec![2],
-    };
+    let tolerant = phys(Fixed::from_ratio(9, 10));
+    let sensitive = phys(Fixed::from_ratio(2, 100));
     for (who, phys) in [
         ("a tolerant eater", &tolerant),
         ("a sensitive eater", &sensitive),

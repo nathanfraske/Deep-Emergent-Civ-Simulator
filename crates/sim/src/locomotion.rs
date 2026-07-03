@@ -51,17 +51,23 @@
 //! rather than routing around an obstacle (the pathfinding of Part 13). The reaction-norm controller
 //! cannot gate a response on internal state through a product (it moves toward a known source
 //! whenever away from it, whatever the reserve, and ingests underfoot when the reserve is low); the
-//! recurrent controller lifts that ceiling (both are [`crate::controller`]). The intake yield here is
-//! a reserved fraction standing in for the resolved edibility floor's measure (R-PHYS-BIO); wiring
-//! the floor's net-nutrition and water-content per bite is the named follow-on.
+//! recurrent controller lifts that ceiling (both are [`crate::controller`]). Intake is measured, not
+//! authored: a being ingests the matter underfoot by reading the tile's [`Composition`] on each
+//! homeostatic axis's backing class through the resolved edibility floor's satisfaction measure
+//! (R-PHYS-BIO, [`crate::edibility`], `civsim_physics::laws::satisfaction`) against its own
+//! [`Physiology`], so the deposit derives from the tile's composition and the being's physiology
+//! rather than a reserved fraction. Toxin classes are read but not yet applied to a reserve here (no
+//! harm sink at the mass-only Walker tier); the harm coupling is the named follow-on.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
+use civsim_physics::laws;
 use civsim_world::Coord3;
 
 use crate::anatomy::BodyPlan;
 use crate::controller::{Controller, ControllerLayout};
+use crate::edibility::{Composition, Physiology};
 use crate::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, INGEST, MOVE,
 };
@@ -92,11 +98,6 @@ pub struct LocomotionParams {
     /// a direction rather than jittering in place. RESERVED. Basis: the persistence of a real
     /// search path before it turns.
     pub explore_persistence: u64,
-    /// The fraction of a reserve's capacity restored by one tick of ingesting a source of it.
-    /// RESERVED. Basis: the net-nutrition and water-content per bite the resolved edibility floor
-    /// measures (R-PHYS-BIO, `crate::edibility`); this fraction is the interim stand-in until the
-    /// floor's measure is wired to the located matter.
-    pub intake_yield: Fixed,
 }
 
 impl LocomotionParams {
@@ -108,7 +109,6 @@ impl LocomotionParams {
             activity_floor: Fixed::from_ratio(1, 4),
             sense_range: 4,
             explore_persistence: 6,
-            intake_yield: Fixed::from_ratio(1, 4),
         }
     }
 }
@@ -125,15 +125,18 @@ pub trait Terrain {
     fn cost(&self, coord: Coord3) -> Fixed;
 }
 
-/// Where the sources of each homeostatic axis really sit on the map, the world's ground truth: an
-/// axis maps to the set of tiles that bear matter restoring it (water tiles bear water, forage tiles
-/// bear energy). The world builds this from its content and the edibility floor; a being does not
-/// get to read it, it can only perceive the tiles near it (see [`step`]). The module never hardcodes
-/// which axis a tile restores, so a source-of-an-axis exists only where that pairing is placed
-/// (Principle 11).
+/// The matter that really sits on each tile, the world's ground truth: a per-tile [`Composition`]
+/// (its supply over the nutrient classes, its dose over the toxin classes), keyed by the biology-
+/// floor class ids. Whether a tile is a source of a given homeostatic axis is DERIVED, never stored:
+/// it is a source of an axis exactly when its composition carries a nonzero supply on that axis's
+/// backing class (`water tiles bear bio.water_fraction`, forage tiles bear `bio.energy_density`),
+/// read against a [`HomeostaticRegistry`]. The module never hardcodes which axis a tile restores;
+/// the pairing emerges from the composition and the registry's backing classes (Principles 9 and
+/// 11). The world builds this from its content and the edibility floor; a being does not get to read
+/// it, it can only perceive the tiles near it (see [`step`]).
 #[derive(Clone, Debug, Default)]
 pub struct ResourceField {
-    tiles: BTreeMap<HomeostaticAxisId, BTreeSet<Coord3>>,
+    matter: BTreeMap<Coord3, Composition>,
 }
 
 impl ResourceField {
@@ -142,28 +145,70 @@ impl ResourceField {
         ResourceField::default()
     }
 
-    /// Record that `coord` bears a source of `axis`.
-    pub fn add(&mut self, axis: HomeostaticAxisId, coord: Coord3) {
-        self.tiles.entry(axis).or_default().insert(coord);
+    /// Record the matter composition on a tile (overwriting any prior).
+    pub fn set(&mut self, coord: Coord3, comp: Composition) {
+        self.matter.insert(coord, comp);
     }
 
-    /// Whether a coordinate bears a source of an axis.
-    pub fn source(&self, axis: HomeostaticAxisId, coord: Coord3) -> bool {
-        self.tiles.get(&axis).is_some_and(|s| s.contains(&coord))
+    /// The matter composition on a tile, if any.
+    pub fn composition(&self, coord: Coord3) -> Option<&Composition> {
+        self.matter.get(&coord)
     }
 
-    /// The axes this field carries sources for, in canonical id order.
-    pub fn axes(&self) -> impl Iterator<Item = HomeostaticAxisId> + '_ {
-        self.tiles.keys().copied()
+    /// Whether a coordinate bears a source of an axis: does its composition carry a NONZERO supply on
+    /// the axis's backing class. A present zero is absence (the substrate convention), so it is not a
+    /// source. Reads only the axis's backing-class string and the tile composition, never a race,
+    /// species, or kind identifier (Principle 9).
+    pub fn source(
+        &self,
+        axis: HomeostaticAxisId,
+        coord: Coord3,
+        homeo: &HomeostaticRegistry,
+    ) -> bool {
+        let Some(class) = homeo
+            .axis(axis)
+            .and_then(|a| a.backing_component.as_deref())
+        else {
+            return false;
+        };
+        self.matter
+            .get(&coord)
+            .is_some_and(|c| c.nutrient(class) > Fixed::ZERO)
     }
 
-    /// The axes whose source is on a given tile, in canonical id order (what a being can ingest
-    /// where it stands).
-    pub fn axes_here(&self, coord: Coord3) -> Vec<HomeostaticAxisId> {
-        self.tiles
+    /// The registered axes this field carries a source for anywhere, in the registry's canonical
+    /// order: a backed axis some tile's composition carries a nonzero supply of.
+    pub fn axes(&self, homeo: &HomeostaticRegistry) -> Vec<HomeostaticAxisId> {
+        homeo
+            .axes
             .iter()
-            .filter(|(_, s)| s.contains(&coord))
-            .map(|(&a, _)| a)
+            .filter(|def| {
+                def.backing_component.as_deref().is_some_and(|class| {
+                    self.matter
+                        .values()
+                        .any(|c| c.nutrient(class) > Fixed::ZERO)
+                })
+            })
+            .map(|def| def.id)
+            .collect()
+    }
+
+    /// The registered axes whose source is on a given tile, in the registry's canonical order (what a
+    /// being can ingest where it stands): a backed axis the tile's composition carries a nonzero
+    /// supply of.
+    pub fn axes_here(&self, coord: Coord3, homeo: &HomeostaticRegistry) -> Vec<HomeostaticAxisId> {
+        let Some(comp) = self.matter.get(&coord) else {
+            return Vec::new();
+        };
+        homeo
+            .axes
+            .iter()
+            .filter(|def| {
+                def.backing_component
+                    .as_deref()
+                    .is_some_and(|class| comp.nutrient(class) > Fixed::ZERO)
+            })
+            .map(|def| def.id)
             .collect()
     }
 }
@@ -185,6 +230,10 @@ pub struct Walker {
     pub body: BodyPlan,
     /// The homeostatic reserves: the being's needs as physical states of its body.
     pub homeostasis: Homeostasis,
+    /// The consumer physiology the ingest measure reads: its per-class requirement and assimilation
+    /// over the biology-floor classes, per-instance like the body and reserves. What a bite of the
+    /// matter underfoot is worth to this being is measured against this, never authored.
+    pub physiology: Physiology,
     /// The expressed behaviour controller, the being's evolved policy.
     pub controller: Controller,
     /// The controller's carried hidden state (empty for a reaction norm).
@@ -204,6 +253,7 @@ impl Walker {
         tile: Coord3,
         body: BodyPlan,
         homeostasis: Homeostasis,
+        physiology: Physiology,
         controller: Controller,
     ) -> Walker {
         let hidden = controller.fresh_hidden();
@@ -213,6 +263,7 @@ impl Walker {
             y: Fixed::from_int(tile.y) + HALF,
             body,
             homeostasis,
+            physiology,
             controller,
             hidden,
             known: BTreeMap::new(),
@@ -298,14 +349,14 @@ pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionPara
 /// Perceive the world within the being's sensory range: for each axis the field carries, any source
 /// tile within `sense_range` tiles of where the being stands is learned. This is the being seeing
 /// what is near it; it learns nothing about tiles beyond its senses.
-fn perceive(w: &mut Walker, resources: &ResourceField, range: i64) {
+fn perceive(w: &mut Walker, resources: &ResourceField, homeo: &HomeostaticRegistry, range: i64) {
     let here = w.coord();
-    let axes: Vec<HomeostaticAxisId> = resources.axes().collect();
+    let axes = resources.axes(homeo);
     for axis in axes {
         for dy in -range..=range {
             for dx in -range..=range {
                 let c = Coord3::ground(here.x + dx as i32, here.y + dy as i32);
-                if resources.source(axis, c) {
+                if resources.source(axis, c, homeo) {
                     w.learn(axis, c);
                 }
             }
@@ -406,10 +457,10 @@ pub fn step_with_field_dirs<T: Terrain>(
             continue;
         }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
-        perceive(w, resources, p.sense_range);
+        perceive(w, resources, homeo, p.sense_range);
         let here = w.coord();
         let here_axes: BTreeSet<HomeostaticAxisId> =
-            resources.axes_here(here).into_iter().collect();
+            resources.axes_here(here, homeo).into_iter().collect();
         let mut dirs = source_dirs(w);
         // Merge the field-derived percept for this being: a directional signal it senses from a
         // physical field (the temperature comfort gradient), overriding the known-source direction for
@@ -452,12 +503,37 @@ pub fn step_with_field_dirs<T: Terrain>(
                         }
                     }
                     INGEST => {
-                        // Take in what the current tile offers on each axis it is a source of; the
-                        // yield is the reserved fraction of the reserve's capacity.
-                        for axis in resources.axes_here(here) {
-                            let cap = w.homeostasis.capacity(axis);
-                            let amount = p.intake_yield.mul(cap);
-                            w.homeostasis.ingest(axis, amount);
+                        // Take in the matter underfoot, its worth MEASURED not authored: for each
+                        // homeostatic axis backed by a biology-floor class, read the tile's supply of
+                        // that class and put it through the resolved edibility floor's satisfaction
+                        // measure (`laws::satisfaction`) against this being's own physiology (its
+                        // per-class assimilation and requirement), then deposit that fraction of the
+                        // reserve's capacity. The deposit reads only `homeo.axes`, the backing-class
+                        // strings, the tile composition, and the being's own physiology: no race,
+                        // species, or kind identifier enters (Principle 9), so the same tile restores
+                        // two differently-built beings by different amounts, purely from their bodies.
+                        if let Some(comp) = resources.composition(here) {
+                            for axis in &homeo.axes {
+                                let Some(class) = axis.backing_component.as_deref() else {
+                                    continue;
+                                };
+                                let supply = comp.nutrient(class);
+                                if supply <= Fixed::ZERO {
+                                    continue; // the tile is no source of this axis
+                                }
+                                let frac = laws::satisfaction(
+                                    supply,
+                                    w.physiology.assimilation(class),
+                                    w.physiology.requirement(class),
+                                );
+                                let cap = w.homeostasis.capacity(axis.id);
+                                let amount = frac.checked_mul(cap).unwrap_or(cap);
+                                w.homeostasis.ingest(axis.id, amount);
+                            }
+                            // Toxin classes in the composition are read but NOT applied to a reserve
+                            // here: there is no harm sink at the mass-only Walker tier. Wiring
+                            // `laws::net_harm` to a condition or integrity reserve is the named
+                            // follow-on (R-WOUND, the promoted Part 35 body tier).
                         }
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle
@@ -596,6 +672,28 @@ mod tests {
         ControllerLayout::new(reg, &AffordanceRegistry::dev_default(), 0)
     }
 
+    /// The biology-floor class the water axis is backed by, in the fixtures.
+    const WATER_CLASS: &str = "bio.water_fraction";
+
+    /// A labelled dev-fixture water composition: a tile whose matter carries the given supply on the
+    /// water backing class and nothing else. A `water_fraction` of `1/4` reproduces the retired
+    /// `intake_yield` fixture (a unit-requirement, unit-assimilation consumer then deposits a quarter
+    /// of capacity per bite), so the movement fixtures that do not turn on composition are unchanged.
+    fn water_matter(water_fraction: Fixed) -> Composition {
+        Composition {
+            nutrients: [(WATER_CLASS.to_string(), water_fraction)]
+                .into_iter()
+                .collect(),
+            toxins: BTreeMap::new(),
+        }
+    }
+
+    /// The standard fixture water tile: a quarter-water composition (the retired-`intake_yield`
+    /// equivalent), used where a test only needs a water source and not a specific richness.
+    fn water_tile() -> Composition {
+        water_matter(Fixed::from_ratio(1, 4))
+    }
+
     /// A taxis controller for a single target axis whose input block starts at `base`: it moves
     /// toward the known source when away from it and ingests the matter underfoot when the reserve is
     /// low. Output layout: [move_act, move_dx, move_dy, ingest_act].
@@ -674,8 +772,9 @@ mod tests {
         for _ in 0..120 {
             homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty
         }
+        let phys = Physiology::dev_for_registry(&reg);
         (
-            Walker::new(StableId(id), tile, body, homeo, c),
+            Walker::new(StableId(id), tile, body, homeo, phys, c),
             reg,
             l,
             afford,
@@ -688,7 +787,7 @@ mod tests {
         wk.learn(WATER, Coord3::ground(2, 0));
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(2, 0));
+        field.set(Coord3::ground(2, 0), water_tile());
         let p = LocomotionParams::dev_default();
         let start = ws[0].coord();
         for t in 0..40 {
@@ -707,7 +806,7 @@ mod tests {
         wk.learn(WATER, Coord3::ground(6, 0));
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(6, 0));
+        field.set(Coord3::ground(6, 0), water_tile());
         let p = LocomotionParams::dev_default();
         let start = ws[0].coord();
         for t in 0..60 {
@@ -722,20 +821,22 @@ mod tests {
 
     #[test]
     fn a_being_walks_to_water_it_knows_of_and_drinks() {
-        let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
-        wk.learn(WATER, Coord3::ground(9, 0)); // it has seen this water before
-        let thirst_before = wk.homeostasis.level(WATER);
-        let mut ws = vec![wk];
-        let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(9, 0));
-        let p = LocomotionParams::dev_default();
-        let mut reached = false;
-        for t in 0..80 {
-            step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
-            if ws[0].coord() == Coord3::ground(9, 0) {
-                reached = true;
-                // give it a few ticks to drink
-                for t2 in t + 1..t + 6 {
+        // Walk to a known water tile and drink; and the reserve GAIN from one bite scales with the
+        // tile's water composition, because the deposited fraction is the edibility floor's
+        // satisfaction over the tile's supply, not an authored constant (R-PHYS-BIO,
+        // laws::satisfaction). A richer tile (higher bio.water_fraction) restores more per bite.
+        let drink_from = |water_fraction: Fixed| -> (bool, Fixed, Fixed) {
+            let (mut wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
+            wk.learn(WATER, Coord3::ground(9, 0)); // it has seen this water before
+            let mut ws = vec![wk];
+            let mut field = ResourceField::new();
+            field.set(Coord3::ground(9, 0), water_matter(water_fraction)); // labelled dev fixture
+            let p = LocomotionParams::dev_default();
+            for t in 0..80 {
+                step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
+                if ws[0].coord() == Coord3::ground(9, 0) {
+                    // Just arrived, not yet drunk: record the level, take one drink tick, record again.
+                    let before_drink = ws[0].homeostasis.level(WATER);
                     step(
                         &mut ws,
                         &reg,
@@ -745,16 +846,30 @@ mod tests {
                         &field,
                         &p,
                         SEED,
-                        t2,
+                        100 + t,
                     );
+                    let after_drink = ws[0].homeostasis.level(WATER);
+                    return (true, before_drink, after_drink);
                 }
-                break;
             }
-        }
-        assert!(reached, "the being walked to the water it knew of");
+            (false, Fixed::ZERO, Fixed::ZERO)
+        };
+        let (reached_poor, before_poor, after_poor) = drink_from(Fixed::from_ratio(1, 10));
+        let (reached_rich, before_rich, after_rich) = drink_from(Fixed::from_ratio(4, 10));
         assert!(
-            ws[0].homeostasis.level(WATER) > thirst_before,
-            "and drank, restoring its water"
+            reached_poor && reached_rich,
+            "the being walked to the water it knew of"
+        );
+        assert!(after_poor > before_poor, "and drank, restoring its water");
+        // The walk is identical (composition does not affect movement), so the pre-drink levels match
+        // and any difference in the post-drink level is the composition-scaled bite.
+        assert_eq!(
+            before_poor, before_rich,
+            "the walk to the tile is unchanged"
+        );
+        assert!(
+            after_rich > after_poor,
+            "a richer water tile restores more per bite: the gain scales with the tile's composition"
         );
     }
 
@@ -765,7 +880,7 @@ mod tests {
         let (wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(40, 0));
+        field.set(Coord3::ground(40, 0), water_tile());
         let p = LocomotionParams::dev_default();
         assert!(
             !ws[0].known.contains_key(&WATER),
@@ -794,8 +909,8 @@ mod tests {
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
         for x in 6..=10 {
-            field.add(WATER, Coord3::ground(x, 3));
-            field.add(WATER, Coord3::ground(x, 4));
+            field.set(Coord3::ground(x, 3), water_tile());
+            field.set(Coord3::ground(x, 4), water_tile());
         }
         let p = LocomotionParams::dev_default();
         let mut learned = false;
@@ -823,8 +938,8 @@ mod tests {
         let (wk, reg, l, afford) = water_walker(1, Coord3::ground(0, 0), mobile_body());
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(2, 0)); // within sense range of the origin
-        field.add(WATER, Coord3::ground(40, 0)); // far outside it
+        field.set(Coord3::ground(2, 0), water_tile()); // within sense range of the origin
+        field.set(Coord3::ground(40, 0), water_tile()); // far outside it
         let p = LocomotionParams::dev_default();
         step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, 0);
         let known = ws[0].known.get(&WATER).cloned().unwrap_or_default();
@@ -844,7 +959,7 @@ mod tests {
         wk.learn(WATER, Coord3::ground(9, 0));
         let mut ws = vec![wk];
         let mut field = ResourceField::new();
-        field.add(WATER, Coord3::ground(9, 0));
+        field.set(Coord3::ground(9, 0), water_tile());
         let p = LocomotionParams::dev_default();
         for t in 0..80 {
             step(&mut ws, &reg, &l, &afford, &Walled, &field, &p, SEED, t);
@@ -857,6 +972,10 @@ mod tests {
 
     #[test]
     fn locomotion_replays_bit_identically() {
+        // One being (id 2) sits on a water Composition tile and drinks each tick; the other (id 1)
+        // knows of no water and explores. The run therefore exercises both exploration and ingestion
+        // from a Composition tile, and the fingerprint carries the water reserves too, so the replay
+        // proves the measured intake is deterministic as well as the movement.
         let run = || {
             let reg = water_reg();
             let afford = AffordanceRegistry::dev_default();
@@ -864,31 +983,48 @@ mod tests {
             let c = taxis_controller(&l, 0);
             let mut field = ResourceField::new();
             for x in 6..=10 {
-                field.add(WATER, Coord3::ground(x, 3));
+                field.set(Coord3::ground(x, 3), water_tile());
             }
-            let mk = |id: u64, tile: Coord3| {
+            let mk = |id: u64, tile: Coord3, knows_water: bool| {
                 let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
                 for _ in 0..80 {
                     h.metabolize(&reg, Fixed::ZERO);
                 }
-                Walker::new(StableId(id), tile, mobile_body(), h, c.clone())
+                let phys = Physiology::dev_for_registry(&reg);
+                let mut w = Walker::new(StableId(id), tile, mobile_body(), h, phys, c.clone());
+                if knows_water {
+                    w.learn(WATER, Coord3::ground(8, 3));
+                }
+                w
             };
-            let mut ws = vec![mk(2, Coord3::ground(0, 0)), mk(1, Coord3::ground(1, 6))];
+            let mut ws = vec![
+                mk(2, Coord3::ground(8, 3), true), // starts on water, drinks in place
+                mk(1, Coord3::ground(1, 6), false), // knows nothing, explores
+            ];
             let p = LocomotionParams::dev_default();
             for t in 0..80 {
                 step(&mut ws, &reg, &l, &afford, &OpenGround, &field, &p, SEED, t);
             }
+            // After the id-order sort ws[0] is id 1 (the explorer), ws[1] is id 2 (the drinker).
             (
                 ws[0].x.to_bits(),
                 ws[0].y.to_bits(),
                 ws[1].x.to_bits(),
                 ws[1].y.to_bits(),
+                ws[0].homeostasis.amount(WATER).to_bits(),
+                ws[1].homeostasis.amount(WATER).to_bits(),
+                ws[1].homeostasis.level(WATER),
             )
         };
+        let first = run();
         assert_eq!(
+            first,
             run(),
-            run(),
-            "the same setup, including exploration, replays bit for bit"
+            "the same setup, including exploration and ingestion, replays bit for bit"
+        );
+        assert!(
+            first.6 > Fixed::from_ratio(3, 4),
+            "the being on the water tile drank: its reserve stayed above three-quarters, which 80 ticks of pure drain from a pre-drained start could not"
         );
     }
 
@@ -901,11 +1037,13 @@ mod tests {
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = taxis_controller(&l, 4); // water block starts at input 4 in the two-axis layout
         let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let phys = Physiology::dev_for_registry(&reg);
         let mut ws = vec![Walker::new(
             StableId(1),
             Coord3::ground(0, 0),
             mobile_body(),
             homeo,
+            phys,
             c,
         )];
         let field = ResourceField::new(); // barren
@@ -957,11 +1095,13 @@ mod tests {
         let l = ControllerLayout::new(&reg, &afford, 0);
         let c = Controller::zeros(&l);
         let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let phys = Physiology::dev_for_registry(&reg);
         let mut ws = vec![Walker::new(
             StableId(1),
             Coord3::ground(0, 0),
             mobile_body(),
             homeo,
+            phys,
             c,
         )];
         let field = ResourceField::new();
@@ -979,5 +1119,140 @@ mod tests {
             "the dev registry carries both energy and water axes"
         );
         let _ = (ENERGY, WATER);
+    }
+
+    #[test]
+    fn a_tile_is_a_source_only_where_its_composition_carries_the_backing_component() {
+        // Source-of-an-axis is DERIVED, never stored: a tile is a water source exactly when its
+        // composition carries a nonzero supply on the water axis's backing class, read against the
+        // registry. Nothing tags a tile "water"; the pairing emerges from the composition and the
+        // registry's backing classes (Principles 9 and 11).
+        let reg = water_reg();
+        let mut field = ResourceField::new();
+        let wet = Coord3::ground(1, 1);
+        let dry = Coord3::ground(2, 2);
+        field.set(wet, water_matter(Fixed::from_ratio(1, 2)));
+        // A tile whose composition carries only a class no registered axis is backed by is no source.
+        field.set(
+            dry,
+            Composition {
+                nutrients: [("bio.energy_density".to_string(), Fixed::ONE)]
+                    .into_iter()
+                    .collect(),
+                toxins: BTreeMap::new(),
+            },
+        );
+        assert!(
+            field.source(WATER, wet, &reg),
+            "the wet tile carries the water backing class, so it is a water source"
+        );
+        assert!(
+            !field.source(WATER, dry, &reg),
+            "the energy-only tile carries no water, so it is not a water source"
+        );
+        assert!(
+            !field.source(WATER, Coord3::ground(9, 9), &reg),
+            "an empty tile is no source"
+        );
+        assert_eq!(
+            field.axes_here(wet, &reg),
+            vec![WATER],
+            "the wet tile affords the water axis"
+        );
+        assert!(
+            field.axes_here(dry, &reg).is_empty(),
+            "the energy-only tile affords no registered (water) axis"
+        );
+        assert_eq!(
+            field.axes(&reg),
+            vec![WATER],
+            "the field carries a water source somewhere"
+        );
+    }
+
+    #[test]
+    fn a_present_zero_backing_component_is_not_a_source() {
+        // Presence is a NONZERO supply; a present zero is absence (the substrate convention), so a
+        // tile carrying bio.water_fraction = 0 is not a water source.
+        let reg = water_reg();
+        let mut field = ResourceField::new();
+        let c = Coord3::ground(0, 0);
+        field.set(c, water_matter(Fixed::ZERO));
+        assert!(
+            !field.source(WATER, c, &reg),
+            "a present-zero water supply is not a source"
+        );
+        assert!(field.axes_here(c, &reg).is_empty());
+        assert!(field.axes(&reg).is_empty());
+    }
+
+    #[test]
+    fn two_physiologies_ingest_differently_from_one_identical_tile() {
+        // THE NON-STEERING TEST. Two beings with distinct physiology stand on ONE identical water
+        // tile, both thirsty. They end the tick with different water reserves purely from their own
+        // physiology (their per-class requirement over the tile's supply through laws::satisfaction),
+        // never from any race, species, or kind identifier: the ingest arm reads only homeo.axes, the
+        // backing-class strings, the tile composition, and each being's own physiology (Principle 9).
+        let reg = water_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let l = layout_for(&reg);
+        let c = taxis_controller(&l, 0);
+        let tile = Coord3::ground(0, 0);
+        // A modest supply so the requirement difference shows and neither reserve saturates in a tick.
+        let mut field = ResourceField::new();
+        field.set(tile, water_matter(Fixed::from_ratio(1, 4)));
+
+        // Two consumers differing ONLY in their water requirement: an efficient one (low requirement,
+        // high satisfaction) and a demanding one (high requirement, low satisfaction). Assimilation is
+        // the labelled unit dev fixture in both.
+        let mk = |req: Fixed| {
+            let mut homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..200 {
+                homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty enough to drink, not die
+            }
+            let phys = Physiology {
+                requirements: [(WATER_CLASS.to_string(), req)].into_iter().collect(),
+                assimilation: [(WATER_CLASS.to_string(), Fixed::ONE)]
+                    .into_iter()
+                    .collect(),
+                tolerances: BTreeMap::new(),
+                hill: BTreeMap::new(),
+            };
+            let mut wk = Walker::new(StableId(1), tile, mobile_body(), homeo, phys, c.clone());
+            wk.learn(WATER, tile);
+            vec![wk]
+        };
+        let mut efficient = mk(Fixed::from_ratio(1, 2)); // 0.25 supply / 0.5 req -> satisfaction 0.5
+        let mut demanding = mk(Fixed::ONE); //             0.25 supply / 1.0 req -> satisfaction 0.25
+        let p = LocomotionParams::dev_default();
+        step(
+            &mut efficient,
+            &reg,
+            &l,
+            &afford,
+            &OpenGround,
+            &field,
+            &p,
+            SEED,
+            0,
+        );
+        step(
+            &mut demanding,
+            &reg,
+            &l,
+            &afford,
+            &OpenGround,
+            &field,
+            &p,
+            SEED,
+            0,
+        );
+
+        let e = efficient[0].homeostasis.level(WATER);
+        let d = demanding[0].homeostasis.level(WATER);
+        assert!(
+            e > d,
+            "the efficient consumer (lower requirement) restores more from the identical tile than the demanding one, purely from its own physiology: {e:?} vs {d:?}"
+        );
     }
 }
