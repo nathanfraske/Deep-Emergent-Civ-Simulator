@@ -45,13 +45,36 @@ fn the_mechanical_floor_loads_with_its_axes_laws_and_substances() {
     assert_eq!(reg.axis_count(), 38, "the mechanical-and-materials axes");
     assert_eq!(
         reg.law_count(),
-        20,
-        "the wave-1 interaction laws (law.impact split into kinetic_energy and impulse)"
+        21,
+        "the wave-1 interaction laws (law.impact split into kinetic_energy and impulse; law.sensible_rise surfaces the sensible_energy inverse)"
     );
     assert_eq!(
         reg.substance_count(),
         2,
         "the iron and oak example materials"
+    );
+}
+
+#[test]
+fn the_sensible_energy_inverse_is_reachable_as_its_own_law() {
+    // The sensible_rise kernel (dT from a delivered energy) had no law entry, so the data-driven
+    // graph could not reach it though its forward sibling law.sensible_heat could. It is now a
+    // first-class law binding the kernel, and the loader accepts its contract on load.
+    let reg = mechanical();
+    let rise = reg
+        .law("law.sensible_rise")
+        .expect("the inverse law is present");
+    assert_eq!(rise.kernel, "sensible_rise");
+    // A leaf read over registry input axes (mass and specific heat), the delivered energy
+    // caller-composed, so it derives at the base tier like its forward sibling.
+    assert_eq!(
+        reg.derived_tier("law.sensible_rise"),
+        reg.derived_tier("law.sensible_heat")
+    );
+    // Its forward sibling is still present and distinct.
+    assert_eq!(
+        reg.law("law.sensible_heat").unwrap().kernel,
+        "sensible_energy"
     );
 }
 

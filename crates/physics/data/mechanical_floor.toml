@@ -655,9 +655,21 @@ ports = [
   { role = "mass", axis = "mech.mass" },
   { role = "specific_heat", axis = "therm.specific_heat" },
 ]
-output_measure = "the energy for a temperature change, or the rise from a delivered energy"
+output_measure = "the energy for a temperature change, Q = m*c*dT (the delivered-energy inverse is law.sensible_rise)"
 dimension = "energy"
 interval_bound = "[0, E_MAX]"
+tier = 0
+
+[[law]]
+id = "law.sensible_rise"
+kernel = "sensible_rise"
+ports = [
+  { role = "mass", axis = "mech.mass" },
+  { role = "specific_heat", axis = "therm.specific_heat" },
+]
+output_measure = "the temperature rise from a delivered energy, dT = Q/(m*c) (the inverse of law.sensible_heat)"
+dimension = "temperature"
+interval_bound = "[0, RISE_MAX]"
 tier = 0
 
 [[law]]

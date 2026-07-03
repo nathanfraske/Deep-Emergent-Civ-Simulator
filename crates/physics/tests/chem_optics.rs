@@ -39,7 +39,7 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
         69,
         "the mechanical, fluids, and chem/optics axes"
     );
-    assert_eq!(reg.law_count(), 47, "the wave-1 and wave-2 laws");
+    assert_eq!(reg.law_count(), 48, "the wave-1 and wave-2 laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     assert!(reg.law("law.radiative_equilibrium").is_some());
     assert!(reg.axis("chem.formation_enthalpy").is_some());

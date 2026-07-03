@@ -39,7 +39,7 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
         55,
         "the mechanical and fluids axes together"
     );
-    assert_eq!(reg.law_count(), 36, "the wave-1 and wave-2 fluid laws");
+    assert_eq!(reg.law_count(), 37, "the wave-1 and wave-2 fluid laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
     // water carry values only on existing axes and participate only in existing laws.
