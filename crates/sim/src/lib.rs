@@ -90,6 +90,7 @@ pub mod locomotion;
 pub mod lod;
 pub mod mate_choice;
 pub mod medium;
+pub mod personality;
 pub mod physiology;
 pub mod primes;
 pub mod race;
@@ -150,7 +151,8 @@ pub use dialogue::{
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
 pub use evidence::{
-    aggregate_diffusion_rate, good_weight, AttrKindId, EvidenceRef, InferenceFrame, InferenceParams,
+    aggregate_diffusion_rate, derive_aggregate_diffusion_rate, good_weight, AttrKindId,
+    EvidenceRef, InferenceFrame, InferenceParams,
 };
 pub use evolve::{
     controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
@@ -190,6 +192,10 @@ pub use language::{
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use mate_choice::{choose, genetic_distance, realised_fitness, MatePreference};
+pub use personality::{
+    age_personality, plasticity_at, PersonalityProfile, PersonalityRegistry, TraitAxisId, TraitDef,
+    TraitInstance,
+};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};

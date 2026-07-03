@@ -125,11 +125,11 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.aggregate_diffusion_rate"
-basis = "DERIVE, worksheet §13a: a mean-field of the individual-tier gossip parameters and contact density, calibrated to the tier-consistency invariant, not an authored Earth-village diffusion rate."
+basis = "DERIVES (2026-07-03) through evidence::aggregate_diffusion_rate over derive_aggregate_diffusion_rate (crates/sim/src/evidence.rs): the aggregate belief-diffusion rate is the mean field of the individual-tier gossip loop, told_weight * trust_baseline * contact_density (Bass 1969; the SI-epidemic social-diffusion mean field). The content-blind base rate reads gossip.told_weight and gossip.trust_baseline (already set) at unit contact density; the per-belief contact density enters downstream as the distance coupling PrevailingBelief::advance_diffusion applies, so rate*distance is the full mean-field product. A tier-consistency test (crates/sim/src/evidence.rs) validates that the aggregate logistic run at the derived rate reproduces the mean of a stochastic individual-tier gossip ensemble within a sampling tolerance. No independent Earth-village diffusion rate is authored and no reserved input remains: the rate keys off the gossip parameters (Principle 11), and two worlds diverge only through those, never a race id (Principle 9). This entry stays as the surfaced pointer to the derivation."
 status = "reserved"
 value = ""
 unit = "per_tick"
-source = "Part 9 evidence engine; record 62.6; audit section 1f"
+source = "Part 9 evidence engine; record 62.6; audit section 1f; crates/sim/src/evidence.rs"
 
 # evidence.knowledge_to_strength RETIRED (belief facet-strength substrate built, 2026-07-03):
 # the mapping from a pool knowledge level to a promoted mind belief strength was a second,
@@ -152,19 +152,19 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "being.plasticity_by_age"
-basis = "DERIVE the timing per race, worksheet §13b: the inflection derives from each race's maturity_years and lifespan_years (per-race TraitDef data); the high-youth-to-low-plateau shape (rising rank-order stability) is the human maturity principle (Roberts and DelVecchio) and is the steer as the only worked example. Reserve only the residual steepness per race."
+basis = "DERIVES (2026-07-03) through the personality substrate (crates/sim/src/personality.rs), read at World::life_cadence: plasticity(age) = TraitDef.plasticity_curve.eval(Race::maturation_fraction(age)), so the slowdown timing derives from each race's own maturity_years through the one maturation-fraction path (no per-race branch, Principle 9). The high-youth-to-low-plateau shape (rising rank-order stability, Roberts and DelVecchio) is one race's data row, the only worked example, never the mechanism. The residual curve shape is per-race TraitDef data on the PersonalityRegistry (a data-defined substrate sibling to the value and axiom substrates), not a manifest scalar, so no manifest value remains to set; this entry stays as the surfaced pointer to the per-race data."
 status = "reserved"
 value = ""
 unit = "curve"
-source = "Part 20 being model; record 62.2; audit section 1a"
+source = "Part 20 being model; record 62.2; audit section 1a; crates/sim/src/personality.rs"
 
 [[reserved]]
 id = "being.maturity_targets"
-basis = "DERIVE per race, worksheet §13b: the maturity-target directions are per-race TraitDef data, not a fixed set; rising conscientiousness and falling novelty-seeking is the human Big-Five aging literature and is the steer as the only worked example."
+basis = "DERIVES (2026-07-03) through the personality substrate (crates/sim/src/personality.rs): the maturity-target direction each trait drifts toward is per-race TraitDef.maturity_target data, not a fixed set of axes, read by the one age_personality kernel (a trait whose target sits above the neutral birth rises, one below falls, no race branch, Principle 9). Rising conscientiousness and falling novelty-seeking (the human Big-Five aging literature) is one race's two data rows, the only worked example. The targets are per-race data on the PersonalityRegistry, not a manifest scalar, so no manifest value remains to set; this entry stays as the surfaced pointer to the per-race data."
 status = "reserved"
 value = ""
 unit = "axis_units"
-source = "Part 20 being model; record 62.2; audit section 1a"
+source = "Part 20 being model; record 62.2; audit section 1a; crates/sim/src/personality.rs"
 
 [[reserved]]
 id = "being.life_event_impulse"
@@ -1128,35 +1128,34 @@ set_date = "2026-07-01"
 unit = "hidden_units"
 source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
-[[reserved]]
-id = "behavior.controller_init_spread"
-basis = "the half-range of a founder lineage's initial random controller weights; the weight scale at which the activation's clamp is neither always saturated nor always near zero, so behavioural variation is expressible from the start (a representational bound)"
-status = "set"
-value = "2.0"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "weight"
-source = "Part 8; crates/sim/src/evolve.rs"
+# behavior.controller_init_spread, controller_mutation_rate, and controller_mutation_step RETIRED
+# (controller-scaling derivation built, 2026-07-03; worksheet §13a): the three controller scalings no
+# longer stand as free numbers. They DERIVE through EvolveParams::from_layout (crates/sim/src/evolve.rs)
+# from the controller's own geometry: init_spread = 1/sqrt(n_in) (Xavier/He fan-in scaling, Glorot and
+# Bengio 2010, He et al. 2015), with NO reserved scalar; mutation_rate = target_mutations/weight_count
+# (the mutations-per-genome convention, so a larger controller mutates each locus less often at fixed
+# expected mutations); and mutation_step = mutation_step_fraction * clamp_width (a fraction of the
+# controller activation's [-1, 1] dynamic range). The layout is a pure function of the world's
+# registries and carries no race id (Principle 9). The two residual owner fractions are the new
+# behavior.controller_target_mutations and behavior.controller_mutation_step_fraction below; the three
+# old scalars are removed rather than left as fail-loud sentinels for values the engine no longer reads,
+# the same treatment as being.heritable_fraction.
 
 [[reserved]]
-id = "behavior.controller_mutation_rate"
-basis = "the per-controller-weight probability of a bounded mutation on inheritance; the mutation scale the pre-dawn epoch uses for the other genome channels (epoch EpochParams), adjusted for the larger controller parameter space"
-status = "set"
-value = "0.166667"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "probability_per_weight"
-source = "Part 8, Part 25; crates/sim/src/evolve.rs"
+id = "behavior.controller_target_mutations"
+basis = "the expected number of controller-weight mutations per inherited genome, the numerator EvolveParams::from_layout divides by the layout's weight_count to get the per-locus mutation probability (crates/sim/src/evolve.rs). Basis: the mutations-per-genome-per-generation the pre-dawn epoch targets for the controller channel, a small count (around one to a few) so a controller inherits mostly intact yet explores, held constant across controller sizes so the per-locus rate falls as the controller grows rather than a fixed per-locus probability that would flood a large controller with mutations. A tuneable lever: raise for faster behavioural search, lower for smoother inheritance"
+status = "reserved"
+value = ""
+unit = "mutations_per_genome"
+source = "Part 8, Part 25; crates/sim/src/evolve.rs from_layout; worksheet §13a"
 
 [[reserved]]
-id = "behavior.controller_mutation_step"
-basis = "the bounded magnitude of a controller-weight mutation; small enough that a small weight change is a small behaviour change (smooth evolution) yet large enough to explore the weight space, a stress-test tunable"
-status = "set"
-value = "0.4"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "weight"
-source = "Part 8; crates/sim/src/evolve.rs"
+id = "behavior.controller_mutation_step_fraction"
+basis = "the controller-weight mutation step as a fraction of the activation clamp's [-1, 1] width (two), the multiplier EvolveParams::from_layout applies to the clamp width to get the absolute step (crates/sim/src/evolve.rs). Basis: the fraction of a weight's full dynamic range a single mutation perturbs, small enough that a small weight change is a small behaviour change (smooth evolution) yet large enough to explore the weight space; expressed as a fraction of the clamp width rather than an absolute weight so it stays scale-correct as the activation range is fixed. A stress-test tuneable lever"
+status = "reserved"
+value = ""
+unit = "fraction_of_clamp_width"
+source = "Part 8; crates/sim/src/evolve.rs from_layout; worksheet §13a"
 
 [[reserved]]
 id = "behavior.selection_pop_size"
@@ -1266,11 +1265,19 @@ source = "Part 35, Part 8; crates/sim/src/body.rs"
 
 [[reserved]]
 id = "field.diffusion"
-basis = "the medium's thermal diffusivity over the cell size and the base tick, kept below the four-neighbour stencil's explicit 0.25 stability bound; a conduction rate, not a taste value"
+basis = "DERIVES (2026-07-03) through runner::derive_field_diffusion over laws::thermal_diffusivity (crates/sim/src/runner.rs, crates/physics/src/laws.rs): the field's diffusion coefficient is the SELECTED medium's thermal diffusivity alpha = k/(rho*c) times the base tick over the squared cell size (alpha*dt/dx^2), clamped to the four-neighbour stencil's 1/4 von Neumann stability bound (a numerics law constant, not owner content). The medium is the lever and the diffusivity is physics (owner ruling): a world of air and a world of water get different coefficients from k/(rho*c) alone, never a free taste scalar and never a race branch (Principle 9). The three thermal axes (conductivity, density, specific_heat) are per-medium map data on medium.{air,water,dense_toxic} below; the cell size is field.cell_size below; the timestep is time.base_tick_seconds. This scalar is retained only as the labelled fixture fallback and the world-dialing .high sibling's baseline; a canonical run derives the coefficient from the medium, and this stays a fail-loud sentinel. HONEST LIMIT: at a one-second base tick and a map-scale cell the physical coefficient is far below the stencil bound and even below Q32.32 resolution, so the derivation reproduces heat that barely conducts per tick (physically correct); a coarser field sub-step or a scale-appropriate cell_size is where a visible diffusion rate comes from"
 status = "reserved"
 value = ""
 unit = "ratio_per_tick"
-source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
+source = "canonical runner field layer (crates/sim/src/runner.rs); crates/physics/src/laws.rs thermal_diffusivity; design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
+
+[[reserved]]
+id = "field.cell_size"
+basis = "the edge length of one field cell in world-metres, the dx the derived thermal-diffusion coefficient (field.diffusion) divides by as alpha*dt/dx^2 (crates/sim/src/runner.rs derive_field_diffusion). Primarily a determinism-and-scale bound rather than a taste value: it sets the spatial resolution the temperature stencil runs at and, with the base tick, whether the derived coefficient is both representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. Basis: the world's chosen map resolution (metres per tile), set so the derived coefficient stays representable and sub-bound for the densest medium the world selects; a smaller cell raises the coefficient toward the stability rail, a larger one shrinks it toward zero. Reserved rather than derived because the map-cell size is a world-scale choice, not a physical constant"
+status = "reserved"
+value = ""
+unit = "metres_per_cell"
+source = "canonical runner field layer (crates/sim/src/runner.rs) derive_field_diffusion; design Part 5.4/5.5"
 
 [[reserved]]
 id = "field.diffusion.high"
@@ -1420,27 +1427,27 @@ source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
 id = "medium.air"
-basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved; reserved for the owner"
+basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved. THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.026 (W/m/K, dry air near 300 K, the fluids/thermal floor) and specific_heat about 1005 (J/kg/K, air at constant pressure); with the density above these give a thermal diffusivity near 2.2e-5 m^2/s, real-with-source from Incropera and DeWitt, not fabricated. Reserved for the owner"
 status = "reserved"
 value = ""
 unit = "medium_profile"
-source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 
 [[reserved]]
 id = "medium.water"
-basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice); reserved"
+basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. Reserved"
 status = "reserved"
 value = ""
 unit = "medium_profile"
-source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 
 [[reserved]]
 id = "medium.dense_toxic"
-basis = "the crushing hot toxic atmosphere (Venus), a require_map profile; recommended density about 65 (dense enough that buoyancy lifts a light body to the cooler cloud decks), respirable_content about 0.1 (thin in anything respirable, the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, a proposed harm-axis extension mapping to the wound and edibility harm channel), in_medium_exchange_rate about 0.20 (the dense hot medium couples fast, it cooks); reserved"
+basis = "the crushing hot toxic atmosphere (Venus), a require_map profile; recommended density about 65 (dense enough that buoyancy lifts a light body to the cooler cloud decks), respirable_content about 0.1 (thin in anything respirable, the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, a proposed harm-axis extension mapping to the wound and edibility harm channel), in_medium_exchange_rate about 0.20 (the dense hot medium couples fast, it cooks). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.034 (W/m/K, hot dense carbon-dioxide near 700 K) and specific_heat about 850 (J/kg/K, CO2 at constant pressure); with the density above these set the world's own diffusivity from k/(rho*c), grounded in the fluids/thermal floor rather than fabricated, so Venus's field conducts on its own physics. Reserved"
 status = "reserved"
 value = ""
 unit = "medium_profile"
-source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 
 [[reserved]]
 id = "genome.mutation_rates.high"

@@ -371,7 +371,10 @@ pub struct BeliefParams {
     /// symmetric, counter-seeded deviation added around the curve output so promoted minds vary.
     pub dispersion: Fixed,
     /// The aggregate diffusion rate (`evidence.aggregate_diffusion_rate`): how fast a prevailing
-    /// belief's level climbs toward saturation per step, before the per-belief distance coupling.
+    /// belief's level climbs toward saturation per step, before the per-belief distance coupling. It
+    /// DERIVES from the individual-tier gossip parameters (`gossip.told_weight`,
+    /// `gossip.trust_baseline`) rather than being an independent authored scalar, so the aggregate
+    /// tier is a mean-field of the gossip loop.
     pub diffusion_rate: Fixed,
 }
 
@@ -379,8 +382,8 @@ impl BeliefParams {
     /// Read the belief calibrations from the manifest. Returns the fail-loud `Reserved` error
     /// while any of the curve, the dispersion, or the diffusion rate is still reserved, so a
     /// build cannot run belief lifting or diffusion on unset numbers. The diffusion rate is read
-    /// through [`evidence::aggregate_diffusion_rate`] so the `evidence`-namespaced value is
-    /// obtained in one place.
+    /// through [`evidence::aggregate_diffusion_rate`], which DERIVES it from the gossip parameters,
+    /// so the `evidence`-namespaced value is obtained in one place and keyed to one source of truth.
     pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
         Ok(BeliefParams {
             level_to_strength: m.require_curve("tier.belief_level_to_strength")?,
@@ -596,15 +599,23 @@ status = "set"
 value = "0.1"
 source = "Part 54"
 [[reserved]]
-id = "evidence.aggregate_diffusion_rate"
-basis = "rate"
+id = "gossip.told_weight"
+basis = "the log-odds weight a told assertion carries"
 status = "set"
-value = "0.25"
-source = "Part 9"
+value = "0.5"
+source = "Part 9.5"
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "the trust a fresh listener extends"
+status = "set"
+value = "0.5"
+source = "Part 9.5"
 "#;
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         let p = BeliefParams::from_manifest(&m).unwrap();
         assert_eq!(p.dispersion, Fixed::from_ratio(1, 10));
+        // The aggregate diffusion rate DERIVES from the gossip parameters at unit contact density:
+        // told_weight * trust_baseline = 0.5 * 0.5 = 0.25, not an independent authored scalar.
         assert_eq!(p.diffusion_rate, Fixed::from_ratio(1, 4));
         assert_eq!(p.level_to_strength.eval(Fixed::ONE), Fixed::ONE);
     }

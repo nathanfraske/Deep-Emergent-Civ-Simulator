@@ -60,6 +60,7 @@ use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
 use crate::mate_choice::{choose, MatePreference};
+use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, TraitInstance};
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
@@ -408,6 +409,18 @@ pub struct World {
     /// lineage's race id is folded there, so a divergent race assignment still shows up); the
     /// observable divergence is the drift the derived cadence produces over time.
     races: BTreeMap<RaceId, Race>,
+    /// The per-race personality profiles (design Part 20, R-BEING-REP): the age-personality
+    /// substrate's `being.plasticity_by_age` (the maturation-timed plasticity curves) and
+    /// `being.maturity_targets` (where each trait matures to), per race. Empty until
+    /// [`World::set_personality_registry`] installs one, and the life-cadence personality beat is
+    /// then inert, so a world that declares no personality drift runs exactly as before.
+    personality: PersonalityRegistry,
+    /// Per-being live personality: the current trait values the life-cadence personality beat drifts
+    /// toward each race's maturity targets. Seeded birth-neutral when a being of a race that carries
+    /// a profile is created; a being whose race declares no profile carries no instance. Like the
+    /// `ages` it rides on, it is a reconstructible deterministic function of the age cadence and is
+    /// not folded into [`World::state_hash`].
+    traits: BTreeMap<StableId, TraitInstance>,
     /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
     /// with no entry reads every channel, so perception is gated only where a sensorium is set.
     sensorium: BTreeMap<StableId, Sensorium>,
@@ -512,6 +525,8 @@ impl World {
             ages: BTreeMap::new(),
             race_of: BTreeMap::new(),
             races: BTreeMap::new(),
+            personality: PersonalityRegistry::new(),
+            traits: BTreeMap::new(),
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
@@ -842,6 +857,38 @@ impl World {
         self.races = races;
     }
 
+    /// Install the per-race personality registry (design Part 20, R-BEING-REP): the age-personality
+    /// substrate's plasticity curves and maturity targets, per race. Until set, the life-cadence
+    /// personality beat is inert and no being carries a trait instance, so a world that declares no
+    /// personality drift is unchanged. Beings seeded at the dawn or born after this is installed,
+    /// whose race carries a profile, get a birth-neutral instance; [`World::install_personality`]
+    /// seeds one directly for a test or an expressed starting personality.
+    pub fn set_personality_registry(&mut self, registry: PersonalityRegistry) {
+        self.personality = registry;
+    }
+
+    /// Install a being's live personality directly (a test seed, or an expressed starting
+    /// personality). The life-cadence personality beat then drifts it toward its race's maturity
+    /// targets at the being's own age-scaled plasticity.
+    pub fn install_personality(&mut self, id: StableId, instance: TraitInstance) {
+        self.traits.insert(id, instance);
+    }
+
+    /// A being's current value on a personality trait axis, or `None` if the being carries no
+    /// personality instance (its race declares no profile, or it was never seeded).
+    pub fn trait_value(&self, id: StableId, axis: TraitAxisId) -> Option<Fixed> {
+        self.traits.get(&id).map(|inst| inst.value(axis))
+    }
+
+    /// Seed a being's birth-neutral personality if its race carries a profile (design Part 20). A
+    /// no-op when no profile is registered for the race, so the seeding path stays inert until a
+    /// world installs personality data.
+    fn seed_personality(&mut self, id: StableId, race: RaceId) {
+        if let Some(profile) = self.personality.profile(race) {
+            self.traits.insert(id, profile.birth_instance());
+        }
+    }
+
     /// Register a language lineage (its own articulation system, change log, and parent).
     pub fn add_language(&mut self, lang: Language) {
         self.languages.insert(lang.id(), lang);
@@ -982,6 +1029,8 @@ impl World {
                 self.place_of.insert(id, band.place);
                 self.ages.insert(id, 0);
                 self.race_of.insert(id, band.race);
+                // Seed a birth-neutral personality if the race carries a profile (inert otherwise).
+                self.seed_personality(id, band.race);
                 // Stamp the founder's gene-fed sex into the census (read off its sex-determination
                 // locus, no RNG). A founding cohort thus carries a sex ratio that emerged from its
                 // pool's sex-determination allele frequencies rather than being drawn.
@@ -1414,6 +1463,8 @@ impl World {
         self.intrinsic.insert(child, beliefs);
         self.ages.insert(child, 0);
         self.race_of.insert(child, race.id);
+        // Seed a birth-neutral personality if the race carries a profile (inert otherwise).
+        self.seed_personality(child, race.id);
         // Inherit the mate preference as a quantitative trait: the midparent of the two parents'
         // weights plus a bounded mutation drawn under Phase::MATE_CHOICE keyed on the child,
         // scaled by the same `mutation_spread` the belief inheritance uses (so no new value is
@@ -1680,8 +1731,37 @@ impl World {
             return;
         }
         self.age_step();
+        self.drift_personalities();
         if let Some(hazard) = self.mortality_hazard.clone() {
             self.apply_mortality(&hazard);
+        }
+    }
+
+    /// The personality beat of the life cadence (design Part 20, R-BEING-REP): every tracked being
+    /// whose race carries a personality profile drifts its traits one step toward that race's
+    /// maturity targets at its own age-scaled plasticity, through the shared
+    /// [`crate::personality::age_personality`] kernel. Beings are walked in canonical id order (the
+    /// `BTreeMap` order), and the drift is a pure fixed-point function of each being's new age and its
+    /// per-race data, with no RNG and no race branch (Principles 3, 9), so the beat replays bit for
+    /// bit. It runs after aging (so a being drifts at its new age) and before mortality, matching the
+    /// established life-cadence order. Inert when no personality registry is installed or no being
+    /// carries an instance, so the world never drifts on a fabricated profile.
+    fn drift_personalities(&mut self) {
+        if self.personality.is_empty() || self.traits.is_empty() {
+            return;
+        }
+        for (id, inst) in self.traits.iter_mut() {
+            let Some(race_id) = self.race_of.get(id).copied() else {
+                continue;
+            };
+            let Some(profile) = self.personality.profile(race_id) else {
+                continue;
+            };
+            let Some(race) = self.races.get(&race_id) else {
+                continue;
+            };
+            let age = self.ages.get(id).copied().unwrap_or(0);
+            age_personality(inst, profile, race, age);
         }
     }
 
@@ -1701,6 +1781,7 @@ impl World {
         self.ages.remove(&id);
         self.race_of.remove(&id);
         self.sensorium.remove(&id);
+        self.traits.remove(&id);
         self.drive_levels.remove(&id);
         self.last_action.remove(&id);
         self.lexicons.remove(&id);

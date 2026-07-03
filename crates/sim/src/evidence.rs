@@ -230,14 +230,44 @@ fn clamp_i128(v: i128, bound: i128) -> i128 {
     v.clamp(-bound, bound)
 }
 
-/// The aggregate-tier belief diffusion rate (`evidence.aggregate_diffusion_rate`): how fast a
-/// prevailing belief's knowledge level climbs toward saturation per step, before the per-belief
-/// distance coupling the belief substrate applies. Read from the manifest and failing loud while
-/// still reserved (Principle 11), so aggregate diffusion cannot run on a fabricated rate. Read
-/// here, in the `evidence`-namespaced module the value belongs to, and consumed by the belief
-/// substrate ([`crate::belief::BeliefParams`]).
+/// The mean-field aggregate belief-diffusion rate: the per-step transmission strength a prevailing
+/// belief gains, `told_weight * trust_baseline * contact_density` (Bass 1969; the SI-epidemic and
+/// social-diffusion mean field). The individual tier's gossip loop adds `told_weight * trust` in
+/// log-odds per contact (crates/sim/src/world.rs `apply_assertion`); averaging that over a population
+/// with `contact_density` contacts per step gives this aggregate hazard, so the aggregate tier is a
+/// consequence of the individual tier's parameters rather than an independent authored rate (design
+/// Part 9, Part 54; worksheet §13a). Clamped to `[0, 1]` because it is a diffusion rate the saturating
+/// aggregate step multiplies against headroom. Nothing here reads a race id: two worlds diverge only
+/// through their gossip parameters and contact density (Principle 9).
+pub fn derive_aggregate_diffusion_rate(
+    told_weight: Fixed,
+    trust_baseline: Fixed,
+    contact_density: Fixed,
+) -> Fixed {
+    told_weight
+        .mul(trust_baseline)
+        .mul(contact_density)
+        .clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The aggregate-tier belief diffusion rate (`evidence.aggregate_diffusion_rate`), DERIVED from the
+/// individual-tier gossip parameters rather than authored: the content-blind base rate is
+/// [`derive_aggregate_diffusion_rate`] of `gossip.told_weight` and `gossip.trust_baseline` at unit
+/// contact density, because the per-belief contact density enters downstream as the `distance`
+/// coupling [`crate::belief::PrevailingBelief::advance_diffusion`] applies (so `rate * distance` is the
+/// full mean-field `told_weight * trust_baseline * contact_density`). The two gossip parameters are
+/// read fail-loud, so the rate cannot run on an unset value (Principle 11), and no independent
+/// `evidence.aggregate_diffusion_rate` scalar is authored: it is the same quantity the gossip loop
+/// already carries, kept to one source of truth. Read here, in the `evidence`-namespaced module the
+/// value belongs to, and consumed by the belief substrate ([`crate::belief::BeliefParams`]).
 pub fn aggregate_diffusion_rate(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
-    m.require_fixed("evidence.aggregate_diffusion_rate")
+    let told_weight = m.require_fixed("gossip.told_weight")?;
+    let trust_baseline = m.require_fixed("gossip.trust_baseline")?;
+    Ok(derive_aggregate_diffusion_rate(
+        told_weight,
+        trust_baseline,
+        Fixed::ONE,
+    ))
 }
 
 /// I.J. Good's weight of evidence, `W = ln(P(E|H) / P(E|not H)) = ln P(E|H) - ln P(E|not H)`
@@ -273,6 +303,108 @@ pub fn good_weight(p_given_true: Fixed, p_given_false: Fixed, clamp: Fixed) -> F
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_aggregate_rate_is_the_gossip_product_and_two_worlds_diverge() {
+        // The mean-field form: told_weight * trust_baseline * contact_density, clamped to a rate.
+        let told = Fixed::from_int(2);
+        let a = derive_aggregate_diffusion_rate(
+            told,
+            Fixed::from_ratio(2, 5),
+            Fixed::from_ratio(3, 10),
+        );
+        // 2 * 0.4 * 0.3 = 0.24, up to the floor rounding of two fixed-point multiplies.
+        assert!(
+            (a.to_bits() - Fixed::from_ratio(24, 100).to_bits()).abs() < 4,
+            "the product is 0.24 ({a:?})"
+        );
+        // A second world with a lower trust diffuses slower, purely from its gossip parameter.
+        let b = derive_aggregate_diffusion_rate(
+            told,
+            Fixed::from_ratio(1, 5),
+            Fixed::from_ratio(3, 10),
+        );
+        assert!(
+            b < a,
+            "lower trust gives a slower aggregate diffusion ({b:?} < {a:?})"
+        );
+        // The product is clamped to a rate in [0, 1] (a strong per-contact strength cannot push the
+        // saturating step past its headroom).
+        let clamped = derive_aggregate_diffusion_rate(Fixed::from_int(5), Fixed::ONE, Fixed::ONE);
+        assert_eq!(clamped, Fixed::ONE, "the rate is clamped to one");
+    }
+
+    #[test]
+    fn the_derived_aggregate_rate_is_the_mean_field_of_the_individual_gossip_loop() {
+        // Tier-consistency: the aggregate logistic run at the DERIVED rate reproduces the mean of the
+        // individual-tier gossip loop within a sampling tolerance (design Part 54, the two-tier
+        // conservation spirit). The individual tier is an explicit stochastic ensemble; the aggregate
+        // tier is the deterministic mean field of it.
+        use crate::belief::{BeliefKey, PrevailingBelief};
+        use civsim_core::{DrawKey, Phase};
+
+        // Gossip parameters (labelled fixtures). told_weight * trust = 0.8 is the per-contact
+        // transmission strength; contact_density = 0.3 is the per-step contact probability.
+        let told_weight = Fixed::from_int(2);
+        let trust = Fixed::from_ratio(2, 5);
+        let contact_density = Fixed::from_ratio(3, 10);
+        let strength = told_weight.mul(trust).clamp(Fixed::ZERO, Fixed::ONE);
+        let rate = derive_aggregate_diffusion_rate(told_weight, trust, contact_density);
+
+        const N: u64 = 4000;
+        let seed = 0x00C0FFEE;
+        let mut convinced = vec![false; N as usize];
+
+        // Aggregate tier: one prevailing belief over the same N members, seeded unconvinced.
+        let key = BeliefKey {
+            subject: StableId(1),
+            attr: AttrKindId(0),
+            value: 0,
+        };
+        let mut agg = PrevailingBelief::seeded(key, Fixed::ZERO, N as u32);
+
+        let tolerance = Fixed::from_ratio(4, 100).to_bits(); // four percent at N=4000
+        for t in 0..12u64 {
+            // Individual tier: each unconvinced member makes a gossip contact with probability
+            // contact_density, and a contact transmits the belief with probability `strength`; a
+            // member that receives a transmission is convinced. Two independent counter-keyed draws.
+            for (m, c) in convinced.iter_mut().enumerate() {
+                if *c {
+                    continue;
+                }
+                let contact = DrawKey::entity(m as u64, t, Phase::GOSSIP)
+                    .slot(0)
+                    .rng(seed)
+                    .unit_fixed(0);
+                if contact < contact_density {
+                    let transmit = DrawKey::entity(m as u64, t, Phase::GOSSIP)
+                        .slot(1)
+                        .rng(seed)
+                        .unit_fixed(1);
+                    if transmit < strength {
+                        *c = true;
+                    }
+                }
+            }
+            // Aggregate tier: one logistic diffusion step at the derived rate (unit distance).
+            agg.advance_diffusion(rate, Fixed::ONE);
+
+            let count = convinced.iter().filter(|c| **c).count();
+            let frac = Fixed::from_ratio(count as i64, N as i64);
+            let level = agg.knowledge_level();
+            let diff = (frac.to_bits() - level.to_bits()).abs();
+            assert!(
+                diff < tolerance,
+                "step {t}: individual mean {frac:?} tracks the aggregate mean field {level:?} (diff {diff} bits)"
+            );
+        }
+        // Both tiers spread the belief (a nonzero fraction adopted), so the agreement is not
+        // the trivial both-at-zero case.
+        assert!(
+            agg.knowledge_level() > Fixed::from_ratio(1, 2),
+            "the belief spread through most of the population"
+        );
+    }
 
     fn params() -> InferenceParams {
         // Fixture calibration, not the owner's reserved values: this tests the

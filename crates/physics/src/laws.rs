@@ -743,6 +743,35 @@ pub fn sensible_rise(mass: Fixed, specific_heat: Fixed, energy: Fixed, rise_max:
     }
 }
 
+/// The thermal diffusivity of a medium, `alpha = k / (rho * c)` (m^2/s): the conductivity `k` over
+/// the volumetric heat capacity, the density `rho` times the specific heat `c` (Incropera and DeWitt,
+/// Fundamentals of Heat and Mass Transfer). It is the material property that sets how fast a
+/// temperature field conducts toward uniform, the physics the discrete field stencil's diffusion
+/// coefficient is derived from: a medium is the lever (which substance fills the world), and its
+/// diffusivity is this physics, not a free scalar. The same reassociation as `sensible_rise` (which
+/// is `Q / (m*c)`): the volumetric heat capacity is formed first, so an overflow there reads as an
+/// enormous heat capacity and a near-zero diffusivity, a zero heat capacity saturates to the cap, and
+/// a divide overflow saturates to the cap. Deterministic: pinned `checked_mul` and `checked_div`, no
+/// float. Nothing here reads a medium label; only its three thermal axes.
+pub fn thermal_diffusivity(
+    conductivity: Fixed,
+    density: Fixed,
+    specific_heat: Fixed,
+    alpha_max: Fixed,
+) -> Fixed {
+    let capacity = match density.checked_mul(specific_heat) {
+        Some(c) => c,
+        None => return ZERO,
+    };
+    if capacity == ZERO {
+        return alpha_max;
+    }
+    match conductivity.checked_div(capacity) {
+        Some(a) => a.clamp(ZERO, alpha_max),
+        None => alpha_max,
+    }
+}
+
 /// The combined sensible-plus-latent energy of a phase transition, combined by an
 /// order-independent saturating sum then capped, so two saturated terms cannot sum past
 /// the declared interval (the wave-1 F7 fix).
@@ -2289,6 +2318,41 @@ mod tests {
     }
 
     // --- Thermal ---
+
+    #[test]
+    fn thermal_diffusivity_is_k_over_rho_c_and_separates_two_media() {
+        // Real air against real water (Incropera and DeWitt): both diffusivities are positive, small,
+        // and representable, and air diffuses heat far faster than water, purely from k/(rho*c). The
+        // medium is the lever; the diffusivity is not a free scalar.
+        let alpha_max = cap(1);
+        // Air: k=0.0262 W/m/K, rho=1.2 kg/m^3, c=1005 J/kg/K -> alpha ~ 2.17e-5 m^2/s.
+        let air = thermal_diffusivity(
+            Fixed::from_ratio(262, 10_000),
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            alpha_max,
+        );
+        // Water: k=0.606, rho=1000, c=4186 -> alpha ~ 1.45e-7 m^2/s.
+        let water = thermal_diffusivity(
+            Fixed::from_ratio(606, 1000),
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            alpha_max,
+        );
+        assert!(
+            air > ZERO && water > ZERO,
+            "both diffusivities are positive"
+        );
+        assert!(
+            air > water,
+            "air conducts heat faster than water from k/(rho*c) ({air:?} > {water:?})"
+        );
+        // A massless (zero heat capacity) medium saturates to the cap; nothing wraps negative.
+        assert_eq!(
+            thermal_diffusivity(Fixed::from_int(1), ZERO, Fixed::from_int(1), alpha_max),
+            alpha_max
+        );
+    }
 
     #[test]
     fn conduction_saturates_on_a_zero_path_and_is_finite_otherwise() {

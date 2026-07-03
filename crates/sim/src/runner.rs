@@ -91,6 +91,7 @@ use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::world::{TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -145,6 +146,85 @@ impl FieldCalib {
             exchange: manifest.require_fixed("field.body_exchange")?,
         })
     }
+
+    /// The field calibrations with the diffusion coefficient DERIVED from the world's selected medium
+    /// (design Part 5.4/5.5; the owner's ruling that the medium is the lever and the diffusivity is
+    /// physics). The medium's three thermal axes (`conductivity`, `density`, `specific_heat`) are read
+    /// from its `require_map` profile (`medium.{name}`), the cell size from the reserved
+    /// `field.cell_size`, and the timestep from `time.base_tick_seconds`; the diffusion coefficient is
+    /// then [`derive_field_diffusion`] of those, so the field's conduction rate is not a free scalar
+    /// but a consequence of which substance fills the world. The relaxation and body-exchange
+    /// calibrations are read as before. Fail-loud throughout: while the medium profile or the cell
+    /// size is reserved this refuses to run, so no fabricated diffusivity reaches canonical state
+    /// (Principle 11). The medium selection is the caller's (the scenario resolves `medium.{name}`);
+    /// this reads no medium label, only the thermal axes, so a world of air and a world of water
+    /// diverge from their physics, never a branch (Principle 9).
+    pub fn from_manifest_with_medium(
+        manifest: &CalibrationManifest,
+        medium_id: &str,
+    ) -> Result<FieldCalib, CalibrationError> {
+        let profile = manifest.require_map(medium_id)?;
+        let axis = |name: &str| -> Result<Fixed, CalibrationError> {
+            profile
+                .get(name)
+                .copied()
+                .ok_or_else(|| CalibrationError::BadValue {
+                    id: medium_id.to_string(),
+                    detail: format!("medium profile is missing the '{name}' thermal axis"),
+                })
+        };
+        let conductivity = axis("conductivity")?;
+        let density = axis("density")?;
+        let specific_heat = axis("specific_heat")?;
+        let cell_size = manifest.require_fixed("field.cell_size")?;
+        let dt = manifest.require_fixed("time.base_tick_seconds")?;
+        Ok(FieldCalib {
+            diffusion: derive_field_diffusion(conductivity, density, specific_heat, cell_size, dt),
+            relaxation: manifest.require_fixed("field.relaxation")?,
+            exchange: manifest.require_fixed("field.body_exchange")?,
+        })
+    }
+}
+
+/// The explicit two-dimensional four-neighbour diffusion stencil's stability bound, `1/4`: an
+/// explicit forward-Euler diffusion step is stable only for `alpha * dt / dx^2 <= 1/4` on this
+/// stencil (the von Neumann stability limit; Press et al., Numerical Recipes). This is a numerics law
+/// constant, not world content: it is the mathematics of the discretization, so it is fixed in code
+/// rather than reserved (Principle 11 governs world content, not the stencil's own stability limit).
+const STENCIL_STABILITY_BOUND: Fixed = Fixed::from_bits(1 << (Fixed::FRAC_BITS - 2));
+
+/// The representability cap on a derived thermal diffusivity (m^2/s) passed to
+/// [`laws::thermal_diffusivity`]. No real medium's diffusivity approaches one square metre per second
+/// (silver, among the highest, is about 1.7e-4), so a cap of one is a pure overflow guard that never
+/// binds on a real substance; it exists so a degenerate zero-heat-capacity medium saturates rather
+/// than dividing unbounded.
+const DIFFUSIVITY_MAX: Fixed = Fixed::ONE;
+
+/// Derive the field's dimensionless diffusion coefficient from a medium's thermal properties (design
+/// Part 5.4/5.5): the medium's thermal diffusivity `alpha = k / (rho * c)` (through
+/// [`laws::thermal_diffusivity`]) times the timestep over the squared cell size, `alpha * dt / dx^2`,
+/// the explicit-stencil coefficient, clamped to the four-neighbour stencil's stability bound
+/// ([`STENCIL_STABILITY_BOUND`]). A canonical cell size keeps the physical coefficient well below the
+/// bound (heat does not conduct across a map cell in one base tick), so the clamp is a stability rail
+/// rather than the operating point; it guarantees the derived value can never destabilize the stencil
+/// regardless of the medium selected. Pure fixed-point and deterministic: the physics divide, one
+/// multiply, one divide, and a clamp, no float and no RNG. A zero cell size (a degenerate scale)
+/// reads a zero coefficient rather than dividing by zero. Reads no medium label, only its three
+/// thermal axes, so two media diverge from their physics alone (Principle 9).
+pub fn derive_field_diffusion(
+    conductivity: Fixed,
+    density: Fixed,
+    specific_heat: Fixed,
+    cell_size: Fixed,
+    dt: Fixed,
+) -> Fixed {
+    let alpha = laws::thermal_diffusivity(conductivity, density, specific_heat, DIFFUSIVITY_MAX);
+    let cell_area = cell_size.mul(cell_size);
+    if cell_area == Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    let coefficient = alpha.mul(dt).div(cell_area);
+    coefficient.clamp(Fixed::ZERO, STENCIL_STABILITY_BOUND)
 }
 
 /// A canonical scalar temperature field over the flat bounded map, Q32.32 on the `therm.temperature`
@@ -868,6 +948,142 @@ source = "test"
             relaxation: Fixed::ZERO,
             exchange: Fixed::from_ratio(1, 4),
         }
+    }
+
+    /// Real air and water thermal profiles (Incropera and DeWitt), the medium `require_map` axes the
+    /// derivation reads. Labelled fixtures, not owner canon: a canonical run reads the reserved
+    /// `medium.{name}` profile, which is fail-loud until the owner sets it.
+    const AIR_K: Fixed = Fixed::from_bits((262 << Fixed::FRAC_BITS) / 10_000); // 0.0262 W/m/K
+    const WATER_K: Fixed = Fixed::from_bits((606 << Fixed::FRAC_BITS) / 1_000); // 0.606 W/m/K
+
+    #[test]
+    fn field_diffusion_derives_from_the_medium_and_two_media_diverge_under_the_bound() {
+        // A fixture cell size and the one-second base tick chosen so both media land representable and
+        // sub-bound: at these scales air's derived coefficient is near the stability rail and water's
+        // is far below it, purely from k/(rho*c). The medium SELECTION is the lever.
+        let cell = Fixed::from_ratio(1, 100); // one-centimetre fixture cell
+        let dt = Fixed::ONE; // time.base_tick_seconds = 1
+        let air = derive_field_diffusion(
+            AIR_K,
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            cell,
+            dt,
+        );
+        let water = derive_field_diffusion(
+            WATER_K,
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            cell,
+            dt,
+        );
+        assert!(air > Fixed::ZERO, "air conducts");
+        assert!(water > Fixed::ZERO, "water conducts");
+        assert_ne!(
+            air, water,
+            "the two media give different diffusion coefficients"
+        );
+        assert!(
+            air > water,
+            "air conducts heat faster than water from k/(rho*c) ({air:?} > {water:?})"
+        );
+        assert!(
+            air < STENCIL_STABILITY_BOUND && water < STENCIL_STABILITY_BOUND,
+            "both derived coefficients stay under the four-neighbour stencil's 0.25 stability bound"
+        );
+    }
+
+    #[test]
+    fn a_pathological_medium_is_clamped_to_the_stencil_bound_not_beyond() {
+        // A high-conductivity, tiny-heat-capacity, tiny-cell fixture drives the raw coefficient past
+        // the stability bound; the derivation clamps it to the bound rather than destabilizing the
+        // stencil, so no medium selection can break the field step.
+        let clamped = derive_field_diffusion(
+            Fixed::from_int(500),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(1, 1000),
+            Fixed::ONE,
+        );
+        assert_eq!(
+            clamped, STENCIL_STABILITY_BOUND,
+            "an unstable raw coefficient is clamped to the stability bound"
+        );
+    }
+
+    #[test]
+    fn the_field_step_reads_the_derived_medium_diffusion() {
+        // A hot cell in the middle of a cool row; one step with the medium-derived diffusion spreads
+        // heat to the neighbours, and the denser-conducting air spreads more than water in one step,
+        // so the field's evolution follows the selected medium.
+        let hot_row = || vec![Fixed::ZERO, Fixed::from_int(100), Fixed::ZERO];
+        let cell = Fixed::from_ratio(1, 100);
+        let dt = Fixed::ONE;
+        let air_diff = derive_field_diffusion(
+            AIR_K,
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            cell,
+            dt,
+        );
+        let water_diff = derive_field_diffusion(
+            WATER_K,
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            cell,
+            dt,
+        );
+        let field_after = |diff: Fixed| {
+            let mut f = Field::new(3, 1, hot_row());
+            f.step(&FieldCalib {
+                diffusion: diff,
+                relaxation: Fixed::ZERO,
+                exchange: Fixed::ZERO,
+            });
+            (f.at(0, 0), f.at(1, 0))
+        };
+        let (air_edge, air_centre) = field_after(air_diff);
+        let (water_edge, _water_centre) = field_after(water_diff);
+        assert!(
+            air_edge > Fixed::ZERO,
+            "the medium-derived diffusion conducted heat into the neighbour"
+        );
+        assert!(
+            air_centre < Fixed::from_int(100),
+            "and drew it out of the hot cell"
+        );
+        assert!(
+            air_edge > water_edge,
+            "air's faster medium diffusion spreads more heat in one step than water's ({air_edge:?} > {water_edge:?})"
+        );
+    }
+
+    #[test]
+    fn from_manifest_with_medium_fails_loud_while_the_profile_is_reserved_and_derives_once_set() {
+        // A manifest whose medium profile is still reserved: the derivation refuses to run rather than
+        // fabricating a diffusivity (Principle 11).
+        let reserved = format!(
+            "{SET}\n[[reserved]]\nid = \"medium.air\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"medium_profile\"\nsource = \"t\"\n[[reserved]]\nid = \"field.cell_size\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.01\"\nunit = \"m\"\nsource = \"t\"\n[[reserved]]\nid = \"time.base_tick_seconds\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"s\"\nsource = \"t\"\n"
+        );
+        let m = CalibrationManifest::from_toml_str(&reserved).unwrap();
+        assert!(
+            FieldCalib::from_manifest_with_medium(&m, "medium.air").is_err(),
+            "a reserved medium profile fails loud"
+        );
+
+        // Once the owner sets the profile (with the conductivity and specific-heat axes), the field
+        // calibration derives its diffusion from it.
+        let set = reserved.replace(
+            "id = \"medium.air\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"",
+            "id = \"medium.air\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"conductivity=0.0262,density=1.2,specific_heat=1005\"",
+        );
+        let m2 = CalibrationManifest::from_toml_str(&set).unwrap();
+        let calib = FieldCalib::from_manifest_with_medium(&m2, "medium.air").unwrap();
+        assert!(
+            calib.diffusion > Fixed::ZERO && calib.diffusion < STENCIL_STABILITY_BOUND,
+            "the derived diffusion is positive and sub-bound ({:?})",
+            calib.diffusion
+        );
     }
 
     #[test]
