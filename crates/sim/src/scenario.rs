@@ -417,17 +417,27 @@ name = "Probe"
 
     #[test]
     fn every_canonical_scenario_resolves_against_the_real_manifest() {
-        // The bulk lever's completeness guarantee: every dial each of the four worlds pushes maps
-        // to a real manifest entry (a base id or a direction sibling), so pulling a scenario lever
-        // surfaces a defined reserved value for every dial rather than a dangling reference. This
-        // keeps scenarios/*.toml and calibration/reserved.toml in step.
+        // The bulk lever's completeness guarantee: every dial each world pushes maps to a real
+        // manifest entry (a base id or a direction sibling), so pulling a scenario lever surfaces a
+        // defined reserved value for every dial rather than a dangling reference. This keeps
+        // scenarios/*.toml and calibration/reserved.toml in step. Covers the four canonical worlds
+        // and the three new variants (Venus, Europa, Crucible); Europa's placid low dials resolve to
+        // the reserved .low genome and drift siblings surfaced for it.
         let manifest = CalibrationManifest::load(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../calibration/reserved.toml"
         ))
         .unwrap();
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
-        for world in ["mirror", "tempest", "arcanum", "confluence"] {
+        for world in [
+            "mirror",
+            "tempest",
+            "arcanum",
+            "confluence",
+            "venus",
+            "europa",
+            "crucible",
+        ] {
             let scenario = Scenario::load(format!("{dir}{world}.toml")).unwrap();
             let r = scenario
                 .resolve(&manifest)
@@ -490,5 +500,61 @@ name = "Probe"
             "Confluence mixes magical and not"
         );
         assert_eq!(confluence.scenario.grounding, "real");
+    }
+
+    #[test]
+    fn the_three_new_scenario_files_load_and_read_as_expected() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+
+        // Venus: super-hot toxic world, a thin thread of magic, harsh selection on small pools.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert!(venus.magic.laws, "Venus installs a thin MagicLaws");
+        assert!(venus.races.magical_mix, "Venus mixes magical and not");
+        assert_eq!(
+            venus.dial("genome.selection_scaling"),
+            Some(Direction::High),
+            "a lethal world selects hard"
+        );
+        assert_eq!(
+            venus.dial("genome.effective_population_size"),
+            Some(Direction::Low),
+            "small cloud-deck pools drift"
+        );
+
+        // Europa: placid ocean world, no magic, low drift, long pre-dawn.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert!(!europa.magic.laws, "Europa has no magic");
+        assert_eq!(
+            europa.dial("genome.mutation_rates"),
+            Some(Direction::Low),
+            "a buffered ocean drifts slowly"
+        );
+        assert_eq!(
+            europa.dial("biosphere.predawn_generations"),
+            Some(Direction::High),
+            "a vent ecology needs deep time to radiate"
+        );
+
+        // Crucible: war as the emergent equilibrium of scarcity and divergence.
+        let crucible = Scenario::load(format!("{dir}crucible.toml")).unwrap();
+        assert!(crucible.magic.laws, "Crucible carries a scarce war-magic");
+        assert_eq!(crucible.races.count, "many", "many peoples, few zones");
+        assert_eq!(
+            crucible.dial("value_metric.conflict_coefficient"),
+            Some(Direction::High),
+            "scarce contested range earns a high conflict coefficient"
+        );
+        assert_eq!(
+            crucible.dial("genome.speciation_distance"),
+            Some(Direction::Low),
+            "fast radiation into many distinct peoples"
+        );
+        // The mutation clock stays real: the extremity is social and environmental, not a churned
+        // genome, which is what distinguishes Crucible from Tempest.
+        assert_eq!(
+            crucible.dial("genome.mutation_rates"),
+            Some(Direction::Real),
+            "Crucible does not crank the mutation clock"
+        );
     }
 }

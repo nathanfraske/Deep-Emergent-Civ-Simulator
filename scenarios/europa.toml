@@ -1,0 +1,44 @@
+# Europa: a global liquid-water ocean beneath an ice crust, lightless in the deep,
+# warmed and fed at the seafloor by hydrothermal and tidal vents. Life is fully aquatic
+# and chemosynthetic: energy from vent chemistry, not the sun. The world the medium
+# substrate (R-MEDIUM) exists for: respiration from dissolved gas, buoyancy from body
+# density, in-medium thermal exchange in a cold dense medium, amphibious bands at the
+# vents and the ice. The ocean's huge thermal mass buffers change, so the world is
+# placid and slow-drifting. No magic (grounded, like Mirror but oceanic). See
+# docs/working/RESERVED_VALUES_WORKSHEET.md. The environment is proposed for §3 promotion.
+
+[scenario]
+id = "europa"
+name = "Europa"
+summary = "A global liquid-water ocean beneath an ice crust, lightless in the deep, warmed and fed at the seafloor by hydrothermal and tidal vents. Life is fully aquatic and chemosynthetic. The thermally-buffered ocean damps change, so the world is placid and slow-drifting. No magic."
+grounding = "real"
+
+[races]
+count = "several"
+diversity = "high"
+
+[magic]
+laws = false
+affinity_fraction = "none"
+
+[dials]
+# A thermally-buffered, resource-stable ocean damps change, so the genetic and linguistic
+# drift dials sit low and conflict is low. The pre-dawn is long, because a chemosynthetic
+# vent ecology needs deep time to radiate into the dark, patchy niches life inherits. The
+# low genome and drift siblings are reserved (surfaced, not fabricated); the world resolves
+# but does not run under the Calibrated profile until the owner sets them.
+"genome.mutation_rates" = "low"               # a buffered, stable world drifts slowly
+"genome.point_mutation_rate" = "low"
+"genome.mutation_step" = "low"
+"genome.selection_scaling" = "real"
+"genome.effective_population_size" = "real"
+"genome.speciation_distance" = "real"
+"genome.speciation_incompatibilities" = "real"
+"language.sound_change_rate" = "low"          # placid phonologies
+"lang.drift_operator_rates" = "low"
+"language.innovation_rate" = "low"            # stable lexicons
+"axiom.calcification_rate" = "real"
+"axiom.conformity_prestige_strengths" = "real"
+"value_metric.conflict_coefficient" = "low"   # resource-stable, low friction
+"being.life_event_impulse" = "real"
+"biosphere.predawn_generations" = "high"      # deep time for a chemosynthetic vent ecology to radiate

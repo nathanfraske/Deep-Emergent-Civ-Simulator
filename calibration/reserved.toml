@@ -1122,6 +1122,14 @@ unit = "per_genome_per_generation"
 source = "Part 25 genome model; record 62.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
+id = "genome.mutation_rates.low"
+basis = "the placid structural-mutation end Europa pulls, below the baseline so rearrangements are rarer still and schemes barely drift, the thermally-buffered slow-change world; the baseline is genome.mutation_rates"
+status = "reserved"
+value = ""
+unit = "per_genome_per_generation"
+source = "Part 25.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
+
+[[reserved]]
 id = "genome.point_mutation_rate.high"
 basis = "the high-end per-locus point-mutation probability Tempest and Arcanum push toward, above the baseline so standing variation and the molecular clock run fast (Kimura neutral theory supports the faster-clock rationale); the useful upper bound is the mutation-load error threshold (Eigen quasispecies; Muller), not a Kimura result, and whether 0.001 stays sub-threshold depends on the reserved genome.loci_per_channel count; the baseline is genome.point_mutation_rate (panel-reviewed 2026-07-02, citation corrected)"
 status = "set"
@@ -1132,6 +1140,14 @@ unit = "probability"
 source = "Part 25.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
+id = "genome.point_mutation_rate.low"
+basis = "the placid point-mutation end Europa pulls, below the baseline so the molecular clock and standing variation run slow in a buffered, stable world; the baseline is genome.point_mutation_rate"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "Part 25.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
+
+[[reserved]]
 id = "genome.mutation_step.high"
 basis = "the large-step end Tempest and Arcanum push toward, so a single mutation moves a trait far and novelty is coarse rather than incremental; the baseline is genome.mutation_step"
 status = "set"
@@ -1140,6 +1156,14 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "trait_units"
 source = "Part 25.5, 25.10; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "genome.mutation_step.low"
+basis = "the small-step end Europa pulls, below the baseline so an additive mutation perturbs a trait less, slow fine drift; the baseline is genome.mutation_step"
+status = "reserved"
+value = ""
+unit = "trait_units"
+source = "Part 25.10; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
 
 [[reserved]]
 id = "genome.selection_scaling.high"
@@ -1178,6 +1202,14 @@ status = "reserved"
 value = ""
 unit = "per_generation"
 source = "Part 33 language system; record 62.7; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "lang.drift_operator_rates.low"
+basis = "the slow lexical-and-grammatical churn end Europa pulls, below the baseline so vocabularies and grammars drift slowly in a placid world; a transparent multiplier over the non-sound-change operator set, still reserved pending its structured-value format; the baseline is lang.drift_operator_rates"
+status = "reserved"
+value = ""
+unit = "per_generation"
+source = "Part 33 language system; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
 
 [[reserved]]
 id = "language.innovation_rate.high"

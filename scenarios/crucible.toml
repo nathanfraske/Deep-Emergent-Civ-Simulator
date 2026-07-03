@@ -1,0 +1,54 @@
+# Crucible: a world where war is the emergent equilibrium, not an authored fact. The
+# habitable ground is a scatter of fertile basins ("greenwells") in a vast lethal waste
+# of ash, salt, and killing heat; every well is a prize, the waste between them a killing
+# ground crossed only by raiders and the desperate. Many peoples are pressed into few
+# zones with nowhere to expand but into each other, so niche overlap is extreme and the
+# habitable band is always contested. Isolation in the basins breeds many divergent,
+# mutually-unintelligible, hardened peoples; a scarce and dangerous war-magic is one more
+# contested edge. Nothing here authors "everyone fights": the constant war falls out of
+# scarcity, isolation, and divergence, the conflict_pressure map (value.rs) reading a
+# world whose generated physics carries scarce, contested range. In the spirit of Dune
+# and Warhammer without being either. See docs/working/RESERVED_VALUES_WORKSHEET.md §9.
+
+[scenario]
+id = "crucible"
+name = "Crucible"
+summary = "A world where war is the emergent equilibrium: a scatter of fertile basins in a vast lethal waste, many divergent peoples pressed into few contested zones with nowhere to expand but into each other. Scarcity, isolation, and hardened in-group creeds make perpetual conflict the outcome, sharpened by a scarce and dangerous war-magic. War falls out of the physics, it is not handed to the world."
+grounding = "real"
+
+[races]
+count = "many"                  # many peoples pressed into few habitable zones
+diversity = "high"              # isolation in the basins breeds divergence
+
+[magic]
+laws = true
+potency = "low_to_moderate"     # a scarce, dangerous war edge, not an ambient utility
+cost = "real"
+limit_looseness = "low"
+affinity_fraction = "few"
+affinity_weight = "moderate"
+
+[dials]
+# War is not a dial. What the dials crank are its emergent drivers: harsh selection on
+# small basin-bound pools, fast divergence into many mutually-unintelligible peoples,
+# hardened in-group creeds, and a high conflict coefficient the scarce contested range
+# earns (the coefficient is the caller-supplied lever conflict_pressure reads, its regime
+# keyed on the generated scarcity physics, not on this world's name). The genetic mutation
+# clock and the pre-dawn depth stay real: the extremity is social and environmental, not a
+# churned genome. This distinguishes Crucible from Tempest (which cranks every change dial,
+# including mutation) and from Venus (environmental lethality rather than contest).
+"genome.mutation_rates" = "real"
+"genome.point_mutation_rate" = "real"
+"genome.mutation_step" = "real"
+"genome.selection_scaling" = "high"           # a lethal, contested world selects hard
+"genome.effective_population_size" = "low"    # small basin-bound pools drift and diverge
+"genome.speciation_distance" = "low"          # fast radiation into many distinct peoples
+"genome.speciation_incompatibilities" = "real"
+"language.sound_change_rate" = "high"         # isolated basins diverge into mutual unintelligibility
+"lang.drift_operator_rates" = "high"
+"language.innovation_rate" = "high"
+"axiom.calcification_rate" = "high"           # constant war hardens creeds and warrior codes
+"axiom.conformity_prestige_strengths" = "high" # war demands in-group cohesion and the prestige of arms
+"value_metric.conflict_coefficient" = "high"  # scarce contested range, extreme niche overlap
+"being.life_event_impulse" = "high"           # violence and loss ripple hard through individuals
+"biosphere.predawn_generations" = "real"
