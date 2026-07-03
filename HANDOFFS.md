@@ -4,6 +4,26 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-02 (continued): R-MEDIUM COMPLETE, increment 2d (in-medium thermal exchange + the signed thermoreceptor and emergent bidirectional thermotaxis), on `claude/medium-thermal-exchange`
+
+The owner's directive was "2D first, just make sure there are no unintentional steers," then "finish R-MEDIUM completely." Increment 2d had two parts; both are now built, gated, and pushed (part A already merged as PR #51; part B on the same branch pending push).
+
+**Part A (merged, PR #51): in-medium thermal exchange.** `MediumField` carries a per-cell temperature; `medium::in_medium_temperature`/`in_medium_temperature_at` relaxes a being's core temperature toward its cell's medium, `new = prev + rate*(medium_temp - prev)` (Newton's cooling over `Fixed`, checked, cap-on-overflow). Physics in, death out: a lava-hot medium heats the body past its comfort band and kills it, a lethal-cold medium the mirror, a temperate medium holds. Anti-steer proven: scalar relaxation, no heading, hot and cold an equal-and-opposite step (`up == -down`). 19 medium tests.
+
+**Part B (this branch): the signed thermoreceptor and bidirectional thermotaxis, the invasive controller change that completes R-MEDIUM.** The controller gains a fifth per-axis input, the signed setpoint-deviation percept (`controller.rs` `INPUTS_PER_AXIS` 4 to 5, the GENERAL substrate: every homeostatic axis exposes both its even comfort level and its signed deviation, so nothing authors "temperature is special"; a one-sided axis reads a harmless zero). The runner supplies it for TEMPERATURE from the new odd `runner::signed_deviation` (too hot positive, too cold negative, saturating at the band edges, exactly odd about the set point, the signed counterpart of the even `comfort_fraction`), threaded through `locomotion::step_with_field_dirs` alongside the gradient percept. It is a RAW percept, not a heading: it says the body is too hot, never which way to flee, so the controller must combine it with the gradient itself (the owner's guardrail against folding it into a "which way to safety" direction).
+
+The proof (`crates/sim/src/evolve.rs`): a bidirectional scorer scores survival in BOTH a lethal-cold bowl and a lethal-hot bowl (mirror images across the set point, proven cell-for-cell). NECESSITY, seed-robust: no single gradient polarity survives both (the warmth-seeker climbs to the warm rim in the cold bowl but walks into the lethal-hot centre, 200 vs 14 ticks; the heat-fleer is the mirror), because telling hot from cold is the bit the even reserve cannot carry. EMERGENCE: from random controllers, homeostatic-survival selection with the signed percept and a recurrent controller (hidden state, since the gating is a product of two percepts a reaction norm cannot form) produces a being that seeks warmth when cold and flees heat when hot, surviving both bowls to the cap (bi 200 at seed 0x1234, dev budget), with no heading or hot-versus-cold rule authored. LOAD-BEARING by ablation: zeroing only the signed input in the same evolved controller drops it from 200 to 131.
+
+**Steering audit (the owner's standing concern).** Every added piece is symmetric and headingless: `signed_deviation` is exactly odd about the set point; the hot and cold bowls are mirror images; the start sets are balanced; the signed percept is a scalar interoceptive read, never a direction. The controller, not the mechanism, learns the gating. Honest limit recorded: the bidirectional gating needs the recurrent controller (a reaction norm cannot form the product), so a reaction norm still cannot solve a both-dangers world.
+
+**Blast radius handled.** `INPUTS_PER_AXIS` 4 to 5 shifted every controller layout's width; all hand-built fixtures and index assertions updated (controller.rs, embodiment.rs integrity slot 8 to 10, thermal_coupling.rs, the example). Two seed-tuned water-evolution tests were re-pinned from 0x1111 to 0x1004 (found by a fail-fast seed scan; the seed is a fixture, the anti-steering guarantee is separate and seed-independent, per those tests' own design).
+
+**Gate-green.** Full sim suite 381 lib + all integration green; clippy, rustdoc, fmt `-D warnings` clean; default `cargo build` clean; prose customs clean on added lines. R-MEDIUM is a build-track item (not a counted `docs/audit.md` backlog R-item), so no audit-count or Part 62/63 consolidation; the CONSENSUS_ROADMAP DONE bullet is the record. R-MEDIUM (full aquatic-and-thermal physiology: medium, respiration, buoyancy, in-medium thermal exchange, amphibious bands, and heat-fleeing) is COMPLETE, all emergent on physics kernels with no authored steering.
+
+**Where it stopped.** Part B built and gated on `claude/medium-thermal-exchange`, pending push and the PR #51 update. NEXT (the owner's standing second ask): populate all reserved calibration values needing the owner's call as one large batch, using the scenario/lever system (`scenario.rs`) for multiple worlds, surfaced reserved-with-basis for ratification.
+
+---
+
 ## 2026-07-02 (continued): R-AGING life cadence wired into World::tick, the world now lives on the clock, on `claude/find-unblocked-work-dwdpsj`
 
 The owner picked the R-AGING keystone from a cited three-way fork (over finishing the R-REPRO choose-site viability axis or the pool-tier split rule). The gap: the per-entity aging and mortality methods existed but nothing drove them on the clock, so `World::tick` advanced cognition only. This closes that root blocker.
@@ -43,6 +63,108 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 **Scope stated plainly.** This evolves the one distance weight, so it demonstrates the heterosis and inbreeding axis distance carries; the incompatibility axis (non-monotone in distance) is handled by the viability-aware `most_viable_mate`, and evolving a feature-weighted preference over both axes on the shared `evolve_with` substrate (once its input registry carries a candidate-percept family) plus the `World::birth` call site are the remaining follow-ons.
 
 **Gate-green.** 15 mate_choice tests (+3), the full sim and core suites green, `Phase::MATE_CHOICE` added with no collision; fmt, clippy and rustdoc `-D warnings` clean (the eight-arg loop carries an `#[allow(clippy::too_many_arguments)]`, the `reproduce` precedent), prose customs clean. Module doc, proposal, HANDOFFS, TODOS updated. R-REPRO stays open; the emergence claim is now complete short of the feature-weighted `evolve_with` integration and `World::birth`. Counts unchanged.
+
+---
+
+## 2026-07-02 (continued): offload-map steps 1 and 2 built, three GPU kernels bit-identical on the 5090
+
+Following the offload map, the owner picked step 2 (worldgen noise + fused biome) and step 1 (the runner field kernel). All three are built and gated bit-identical on the 5090, on `claude/gpu-field-step`.
+
+**Step 1: the runner field kernel (`crates/gpu/src/field.rs`).** The survey found the built `diffuse_kernel` matched `diffusion_bench` (toroidal, diffusion-only), not the runner's `Field::step`. `field_step_kernel` / `gpu_field_step` closes that: the clamped-Neumann (zero-flux, edge=self) five-point stencil plus the relaxation term, `g = c + diffusion*lap + relaxation*(baseline - c)`, with the baseline uploaded once and resident across iterations (only the field ping-pongs). Bit-identical to the CPU `Field::step` over 37x23 after 50 iters (`tests/field_step_gate.rs`).
+
+**Step 2: worldgen noise + fused biome (`crates/gpu/src/worldgen.rs`).** The cleanest standalone GPU offload: coordinate-keyed, zero input transfer, one-shot. `gpu_worldgen_noise` ports `noise::fractal` (the DrawKey lattice fold on the shared `splitmix64`, Q32.32 smoothstep/lerp, octaves with halving amplitude/period, normalised by the pinned `q32_div`), bit-identical over 48x24 x 3 fields. `gpu_worldgen` fuses `BiomeSet::classify` (first-match [lo,hi)-band scan) onto the same pass, bit-identical over 48x24. `splitmix64` was lifted from `perceive.rs` to `prim.rs` so both share one copy (perceive gate re-run green).
+
+**DSL gotchas banked (in the transcendental/worldgen module docs + the gpu-canon-pin memory).** Three real ones caught this session: (1) an accumulator carried across an `#[unroll]` loop whose body calls a `#[cube]` fn is silently dropped (the octaves are manually unrolled straight-line instead, as `transcendental::exp` already does); (2) a runtime or `const` loop bound yields zero iterations, so bounds must be literals; (3) array indices must be cast `as usize` inline. A branchless `#[unroll]` latch whose body calls no `#[cube]` fn does carry its accumulator (the biome scan), matching CORDIC.
+
+**Green.** fmt, clippy `-D warnings`, rustdoc `-D warnings`, and the full ten-file GPU suite (all gates: stage0, cross-backend, field, field-step, perceive, worldgen noise + biome, transcendentals) pass on the 5090.
+
+**Where it stopped, and next.** Steps 1 and 2 complete on `claude/gpu-field-step`. The offload map's remaining priorities: step 3 (the fused resident being-kernel: controller + homeostasis + body-thermal, the enabling infrastructure that unlocks the field offload), then step 4 (pool-tier aggregate mortality), step 5 (Wright-Fisher drift), and perceive to production. Every GPU verdict stays gated on residency AND scale, routed by a profile (the dev map 48x24 sits below the launch threshold; these are scale arguments). The worldgen noise, being one-shot with no per-tick transfer, is the one that pays at any map worth generating.
+
+---
+
+## 2026-07-02 (continued): the GPU-vs-CPU offload map scoped (docs/working/GPU_CPU_OFFLOAD_MAP.md)
+
+The owner asked to scope what all can and should be offloaded to the GPU versus kept on the parallelised CPU. A five-agent subsystem survey (environment/fields, cognition/language, embodiment/life, physics laws, determinism/aggregation) classified every engine compute workload against a consistent GPU-fit framework grounded in the code, and a synthesis produced the map. On `claude/gpu-offload-scope`. Also merged this session: PR #66, the canonical GPU perceive notice-roll spike (bit-identical on the 5090).
+
+**The decision framework (five properties, read in order):** domain size and independence (large grid W*H or population N); flattenability (SoA grid or dense column vs pointer-chasing BTreeMap-of-Vec); control-flow uniformity (SIMT vs branchy dispatch); arithmetic intensity vs transfer; order-independence of the reduction/apply (associative i128 sum, monotone-min, integer count vs serial-by-contract). GPU = all five; HYBRID = a flat draw-keyed gather (device) plus a ragged order-sensitive apply (host), the perceive shape; CPU-PARALLEL = independent but branchy/trivial per item; CPU-SERIAL = order-dependent by contract, a graph, or a low-N control plane.
+
+**What goes where (headline).** GPU: the temperature field step, worldgen noise + fused biome classify, the evolved controller forward pass, homeostasis + body-thermal (fused into a resident being-kernel), pool-tier aggregate mortality, Wright-Fisher drift, the eikonal solve (when built). HYBRID: perceive (built), the thermal-gradient sample, individual mortality, locomotion, several physics flux/optics laws. CPU-parallel: decide, converse, gossip (its gather is pointer-chasing, so it is NOT perceive-shaped), language drift. CPU-serial: belief update, theory-of-mind, the naming game, the CommandBuffer barrier, the state-hash walk, the scheduler (all order-dependent by contract).
+
+**Prioritised roadmap (value x feasibility).** Already landed: the diffusion kernel and the perceive spike. Then: (1) finish the temperature field kernel; (2) worldgen noise + fused biome (the cleanest standalone win, zero input transfer, one-shot, no residency fight); (3) the fused resident being-kernel (highest architectural value, unlocks the field offload); (4) pool-tier aggregate mortality (largest parallel domain); (5) Wright-Fisher drift; (6) individual mortality; (7) perceive gather to production (SoA extract + stream-compaction). The residency / SoA-extraction / stream-compaction triad (design Part 5.6) recurs at exactly those load-bearing points.
+
+**ACTIONABLE FINDING to reconcile.** The built GPU diffusion kernel (`crates/gpu/src/field.rs`) matches `crates/core` `diffusion_bench` (toroidal, diffusion-only), NOT the runner's `Field::step` (`crates/sim/src/runner.rs`, which is clamped-Neumann boundary + a `relaxation*(baseline-cur)` term). So the field offload needs a NEW kernel variant with the clamped boundary, the second coefficient, and a resident baseline buffer, under its own Stage-0 gate. The proven diffusion kernel stays valid for its own bench; it is not yet the runner field.
+
+**Two workloads need a new primitive before any bit-identity gate:** Archard wear (`laws.rs`) and the wide-i128 EM forms (`coulomb_force`) evaluate a full-width raw i128 product / truncating i128-by-i64 divide that the pinned fixed-shift `q32_mul`/`q32_div` do not cover.
+
+**Where it stopped.** Scope doc landed on `claude/gpu-offload-scope`; the perceive spike on main (#66). Cross-cutting gates hold: every GPU verdict is contingent on residency AND scale (the dev map 48x24 and dev populations sit below every launch threshold), and each offload is routed by a profile, not on assertion. Next natural build (owner-gated): the worldgen-noise offload (step 2, no residency fight) or finishing the temperature field kernel (step 1).
+
+---
+
+## 2026-07-02 (continued): canonical GPU perceive spike, the memory-bound gather runs on the GPU bit-for-bit
+
+The owner asked whether the memory-bound perceive could run on the GPU, where the memory bandwidth is an order of magnitude higher. The answer is yes, and it is the convergence of this session's two GPU-enabling threads: the pinned Q32.32 arithmetic (R-GPU-CANON-PIN) and the draw-keyed counter RNG (R-RNG-COORD). On `claude/gpu-perceive-spike`.
+
+**Built (the de-risking spike).** `crates/gpu/src/perceive.rs`: the perceive notice roll ported to a `#[cube]` kernel, `gpu_notice`. It reproduces the CPU `perceive` decision bit-for-bit: the same `splitmix64` counter RNG on native u64, the same `DrawKey::pair` coordinate fold (`[ABSENT, being, trace, clock, PERCEPTION, slot]` with rotate_left((i%63)+1)), the same `unit_fixed(0) = at(0) >> 32`, and the chance `clamp(q32_mul(salience, acuity), 0, 1)`. Gated bit-identical over 7200 (being, trace) pairs on the 5090 with a real hit fraction (`tests/perceive_gate.rs`). Bit-identity is what makes it a CANONICAL offload (an authoritative replacement), not a quantized approximation.
+
+**DSL findings banked** (in the gpu-canon-pin-status memory): native u64 multiply DOES work in the cube DSL on CUDA, and u64 add/mul wrap (matching `wrapping_add`/`wrapping_mul`); there is NO `rotate_left` intrinsic (write it by hand, `#[allow(clippy::manual_rotate)]`); scalar kernel args are passed by value to `launch` (no `ScalarArg` wrapper, since a scalar `T: LaunchArg` with `RuntimeArg = T`). One bug caught and fixed: the SplitMix64 golden-gamma constant was mis-transcribed (borderline hit mismatches until corrected to `0x9E3779B97F4A7C15`); using hex literals directly avoids the conversion error.
+
+**Why this matters.** perceive is the near-ideal GPU workload for this engine: massively parallel (being x trace), memory-bound (the CPU bottleneck the 265K timing exposed), draw-keyed (each thread computes its own roll, no shared stream), and fixed-point (the exact GPU-proven arithmetic). So the whole GPU canon-pin plus draw-keyed-RNG effort exists precisely so a canonical workload like perceive CAN run on the GPU bit-for-bit.
+
+**Where it stopped, and the scoped follow-on.** The spike is green (fmt, clippy, rustdoc, the full ten-gate GPU suite) on `claude/gpu-perceive-spike`. The full offload is scoped, not built: a struct-of-arrays extraction of the being/trace fields from the BTreeMaps, a resident cross-tick GPU buffer (design Part 5.6, the CPU-to-GPU seam), a stream compaction of the sparse hits, and wiring into `World::perceive` behind the same width-invariant proof. The gate for it is a profile showing the extraction plus transfer is worth the bandwidth win, which needs a realistic (spread, not all-co-located) population.
+
+---
+
+## 2026-07-02 (continued): dynamic (heterogeneous-core-aware) load balancing for parallel perceive, stood up on the 265K
+
+The owner asked whether the parallel scheme can efficiently use hybrid CPUs (Intel P and E cores, AMD X3D CCDs with and without V-cache), and noted this system has a Core Ultra 7 265K, so it could be stood up for real. On `claude/perceive-dynamic-balance`.
+
+**The enabler.** Determinism decouples correctness from scheduling: the per-being rolls are draw-keyed and the merge is canonical, so the result is bit-identical whatever cores run the work. Heterogeneous scheduling is a pure throughput tuning that cannot break a run or a test, a rare freedom.
+
+**Built.** `World::perceive`'s gather went from static contiguous chunks (bounded by the slowest core) to DYNAMIC load balancing: workers pull the next trace index from a shared atomic counter, so a faster core does more traces and none idles at the barrier. The pooled output is re-canonicalised by a cheap work-unit (trace index) sort, not a per-hit sort, so the balanced gather stays a pure function of state. Bit-identical across 2/3/8/16 workers still holds.
+
+**The honest finding on the 265K (8 P + 12 E).** A per-hit sort merge cost more than it saved (sorting ~2M hits single-threaded Amdahl-capped the phase, workers=1 436ms -> workers=16 386ms, only 1.13x); switching to the work-unit-granularity merge fixed that (387 -> 218ms, about 1.8x). But it plateaus near eight workers because perceive is MEMORY-BOUND (each worker walks the shared minds BTreeMap, so a few cores saturate memory bandwidth). Heterogeneous scheduling buys throughput on compute-bound work; a memory-bound phase is capped by bandwidth whatever the core mix, and its lever is data layout, not more cores. The compute-bound phases (converse dialogue reasoning, gossip deception judgement) are where per-core throughput and a P-core preference will show. An ignored `perceive_timing_across_workers` bench records this on the machine.
+
+**Design.** Folded a "Heterogeneous cores and dynamic scheduling" section into `docs/deterministic_scheduler_design.md`: the determinism-decouples-scheduling freedom, dynamic balancing plus canonical merge, the memory-bound-vs-compute-bound distinction with the 265K numbers, and the opt-in later refinements (a rayon work-stealing pool; hwloc topology-aware pinning to keep a cache-sensitive phase on the V-cache CCD, with the honest snag that no clean API reports which CCD has V-cache), all gated behind a profile that shows the parallel tick is the limit, which it is not yet.
+
+**Where it stopped.** On `claude/perceive-dynamic-balance`, green. Next: apply the same intra-phase pattern to the compute-bound phases (converse is already structured for it; gossip, decide, drift, mortality follow), where the heterogeneous-core win appears.
+
+---
+
+## 2026-07-02 (continued): parallel perceive, the first real intra-phase per-being parallelism
+
+Following the World::tick scope, the honest finding was that PHASE-level scheduling of the cognition tick buys no parallelism: perceive, converse, gossip, and life_cadence all write the minds/belief hub, so they serialise, and the only independent phases (decide, naming game, drift) are the cheap ones. The owner chose the real throughput lever: INTRA-phase, per-being parallelism, over the population N. On `claude/parallel-perceive`.
+
+**Built.** `World::perceive` (`crates/sim/src/world.rs`) now parallelises its gather pass across `self.workers` threads, mirroring the converse phase's ActionStage pattern. The per-being notice roll is draw-keyed by `(being, trace, clock, PERCEPTION)`, so the hit set is a pure function of state; the inner mind loop is extracted into `gather_trace(&self, ...)` (a pure read of `&World`, which is Sync), the sorted traces are split into contiguous chunks gathered on `std::thread::scope` workers, and the chunks concatenate in order, reproducing the serial hit sequence exactly. The apply pass stays single-threaded in canonical order. Proven bit-identical to the serial gather at 2/3/8/16 workers (`perceive_is_bit_identical_across_worker_counts`, 24 co-located beings, 16 distinct traces), and the full-tick worker sweep still holds.
+
+**Why this is the pattern.** converse already proved the two-pass shape (pure read across workers, then a canonical-order apply); perceive is the second phase to take it, and gossip, decide, drift, and mortality are the remaining candidates (all already gather-then-apply with draw-keyed per-being rolls). converse_language stays serial by design (its intra-tick read-then-write on lexicons is the band-consensus mechanism).
+
+**Where it stopped.** Parallel perceive is green (fmt, workspace clippy, full sim suite) on `claude/parallel-perceive`. Next candidates for the same intra-phase pattern: gossip, decide, drift, mortality. A phase-level World::tick scheduler declaration (determinism documentation, no speedup) stays an optional minor exercise. Collision note: #58 (R-UNITS-PIN) is docs-only, orthogonal to world.rs; R-AGING edits the tick tail, separable from the perceive body edited here.
+
+---
+
+## 2026-07-02 (continued): the deterministic scheduler's first real tick integration (the runner)
+
+The owner said go ahead. With `World::tick` hot from concurrent R-AGING work, the runner (`crates/sim/src/runner.rs`, low-collision, stable) was the clean surface for the scheduler's first REAL integration. On `claude/scheduler-runner-integration`.
+
+**Built.** The runner tick's phases are now declared as deterministic-scheduler systems over named resources (the field, the body-temperature map, the located index, the cognition world): `Runner::tick_systems` returns the `BTreeMap<SystemId, Access>`, the body-thermal exchange is extracted into `phase_body_exchange`, `run_phase` dispatches a phase by id, and `Runner::step_scheduled` builds the schedule and runs it through `run_serial`. Proven bit-identical to the hand-pinned `step` over 40 composed ticks (`the_runner_tick_runs_through_the_scheduler_bit_identically`). The composed-runner determinism suite still passes, so the phase extraction is behaviour-preserving.
+
+**The payoff the schedule demonstrates.** The cognition world shares no resource with the field phases, so the scheduler places the world tick in the first batch alongside the field step (a parallelisable pair) while the field-reading body exchange serialises after, yet the result is bit-identical: the reordered phases do not conflict, and the counter RNG is draw-keyed rather than sequential (R-RNG-COORD), so a reorder cannot change a draw. The scheduler discovered the field/cognition parallelism from the declarations alone.
+
+**Where it stopped.** The runner integration is green (fmt, workspace clippy, the full sim suite) on `claude/scheduler-runner-integration`. The next, hotter surface is expressing `World::tick`'s cognition phases as declared-access systems (the real per-being parallelism win), best taken when the concurrent tick work settles. Then the Rayon executor when a profile shows the serial tick is the limit. The on-ramp flag-flips and the held research dives stay owner-gated.
+
+---
+
+## 2026-07-02 (continued): visual projection scoped, physics-derived terrain colour built (first slice)
+
+The owner asked how to visually show the deep world (physics, anatomy, materials), and whether procgen PNG pixel art is the way. Answered and delivered a first slice on `claude/visual-projection`.
+
+**The thesis.** Do not author appearance, derive it: appearance is a projection of the canonical data the sim already computes, never a hand-drawn template (Principle 8). The chem-optics floor already carries the optical axes (reflectance, albedo, emissivity, absorption) that the light physics uses, materials are Substance vectors, anatomy is a per-part body graph, and temperature/wetness/wounds are live state, so a material's colour is a read of its optical vector, a hot thing glows from its thermal state, and a creature's shape is its part graph. The renderer is a non-canonical consumer (Principle 10), so it is free to use floats and the GPU; the bit-identity discipline does not apply to pixels. Procgen pixel art is the right richer view, a projection, not an art asset.
+
+**First slice built.** `physics_terrain_color` in `crates/viewer/src/render.rs` derives terrain colour from a tile's own elevation, moisture, and temperature fields (each in [0,1], what worldgen computed), so terrain looks like its physics (water blue deepening with depth, wet temperate land green, dry ground tan, cold heights snow, hot arid ochre, peaks lightening to rock) rather than an authored biome swatch. Wired into `superfine` with a light biome accent for identity. Proven by `physics_terrain_colour_reflects_the_fields`; viewer tests, fmt, and clippy green.
+
+**Scoped for sign-off.** `docs/working/VISUAL_PROJECTION_SCOPED_PROPOSAL.md`: a data-driven `VisualProjection` registry (material palette from the optical axes, anatomy silhouette from the part graph, state overlays), a two-tier glyph-then-procgen-sprite view, a content-hash sprite atlas the GPU can rasterize, the reserved palette values surfaced with basis (aesthetic calls the owner sets), and the honest limits (procgen ugliness, physics is not a pleasing palette by default, arbitrary morphology is the real work). Build order: terrain slice (done), the registry proper, the anatomy silhouette, the sprite atlas.
+
+**Where it stopped.** The terrain slice and the proposal are on `claude/visual-projection`, pending merge. The registry and the anatomy silhouette are the next builds on the owner's sign-off. Note: another agent is on R-UNITS-PIN concurrently; this touches only the viewer and reads the physics axes, so collision is low.
 
 ---
 

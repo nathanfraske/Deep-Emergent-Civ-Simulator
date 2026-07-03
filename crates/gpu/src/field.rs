@@ -169,3 +169,101 @@ pub fn gpu_diffuse_tiled(
     let bytes = client.read_one_unchecked(f_h);
     i64::from_bytes(&bytes).to_vec()
 }
+
+/// One canonical diffusion-and-relaxation step over a clamped-Neumann (zero-flux) grid, matching
+/// `civsim_sim`'s `Field::step` (`crates/sim/src/runner.rs`): `g = c + diffusion*lap + relaxation*(baseline
+/// - c)`, where `lap = up + dn + lf + rt - 4*c` and an edge neighbour clamps to the cell itself rather
+/// than wrapping. This is the runner's field, distinct from [`diffuse_kernel`] above, which is toroidal
+/// and diffusion-only (the `diffusion_bench` shape). Field and baseline values are `i64` Q32.32 bits;
+/// the two coefficient multiplies are the pinned `q32_mul` and the `4*c` is the exact shift.
+#[cube(launch)]
+fn field_step_kernel(
+    f: &Array<i64>,
+    baseline: &Array<i64>,
+    g: &mut Array<i64>,
+    width: u32,
+    height: u32,
+    diffusion: i64,
+    relaxation: i64,
+) {
+    let x = ABSOLUTE_POS_X;
+    let y = ABSOLUTE_POS_Y;
+    if x < width && y < height {
+        // Clamped-Neumann: an edge neighbour is the cell itself (zero flux), not a wrap-around.
+        let xl = select(x == 0u32, x, x - 1u32);
+        let xr = select(x == width - 1u32, x, x + 1u32);
+        let yu = select(y == 0u32, y, y - 1u32);
+        let yd = select(y == height - 1u32, y, y + 1u32);
+
+        let idx = (y * width + x) as usize;
+        let c = f[idx];
+        let up = f[(yu * width + x) as usize];
+        let dn = f[(yd * width + x) as usize];
+        let lf = f[(y * width + xl) as usize];
+        let rt = f[(y * width + xr) as usize];
+
+        let lap = up + dn + lf + rt - (c << 2u32); // 4*c is an exact shift on the bit pattern
+        let relax = baseline[idx] - c;
+        g[idx] = c + q32_mul(diffusion, lap) + q32_mul(relaxation, relax);
+    }
+}
+
+/// Run `iters` canonical diffusion-and-relaxation steps on the GPU over a `width` x `height`
+/// clamped-Neumann field, matching `Field::step`. `initial` and `baseline` are row-major `i64` Q32.32
+/// bit patterns (each `width * height` long); `diffusion` and `relaxation` are the two coefficients
+/// (Q32.32 bits). The baseline stays resident on the device across every iteration (only the field
+/// ping-pongs), which is the residency the offload map calls for. Returns the final field, bit-identical
+/// to the CPU `Field::step` on CUDA.
+#[allow(clippy::too_many_arguments)]
+pub fn gpu_field_step(
+    client: &CudaClient,
+    initial: &[i64],
+    baseline: &[i64],
+    width: u32,
+    height: u32,
+    iters: u32,
+    diffusion: i64,
+    relaxation: i64,
+) -> Vec<i64> {
+    let n = (width as usize) * (height as usize);
+    assert_eq!(
+        initial.len(),
+        n,
+        "gpu_field_step: initial field must cover width*height cells"
+    );
+    assert_eq!(
+        baseline.len(),
+        n,
+        "gpu_field_step: baseline must cover width*height cells"
+    );
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut f_h = client.create_from_slice(i64::as_bytes(initial));
+    let mut g_h = client.empty(n * core::mem::size_of::<i64>());
+    // The baseline is a constant forcing, uploaded once and held resident across the iteration loop.
+    let base_h = client.create_from_slice(i64::as_bytes(baseline));
+
+    let tile = 16u32;
+    let bx = width.div_ceil(tile);
+    let by = height.div_ceil(tile);
+    for _ in 0..iters {
+        unsafe {
+            field_step_kernel::launch::<CudaRuntime>(
+                client,
+                CubeCount::Static(bx, by, 1),
+                CubeDim::new_3d(tile, tile, 1),
+                ArrayArg::from_raw_parts(f_h.clone(), n),
+                ArrayArg::from_raw_parts(base_h.clone(), n),
+                ArrayArg::from_raw_parts(g_h.clone(), n),
+                width,
+                height,
+                diffusion,
+                relaxation,
+            );
+        }
+        core::mem::swap(&mut f_h, &mut g_h);
+    }
+    let bytes = client.read_one_unchecked(f_h);
+    i64::from_bytes(&bytes).to_vec()
+}

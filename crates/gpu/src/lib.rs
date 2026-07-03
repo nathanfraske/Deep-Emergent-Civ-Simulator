@@ -57,14 +57,18 @@
 //! working device only when called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
 pub mod field;
+pub mod perceive;
 mod prim;
 pub mod stage0;
 pub mod transcendental;
+pub mod worldgen;
 
-pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_fixed_mul};
+pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul};
+pub use perceive::gpu_notice;
 pub use stage0::{
     cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client, CpuClient, CudaClient, WgpuClient,
 };
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,
 };
+pub use worldgen::{gpu_worldgen, gpu_worldgen_noise};

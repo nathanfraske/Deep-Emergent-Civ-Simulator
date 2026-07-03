@@ -2224,46 +2224,66 @@ impl World {
     /// the perception phase, so the result is bit-identical on replay and independent of
     /// thread count. A two-pass shape (decide, then apply) keeps the walk a pure read.
     fn perceive(&mut self) {
-        let hits: Vec<PerceptionHit> = {
-            let mut traces: Vec<&Trace> = self.traces.iter().collect();
-            traces.sort_by_key(|t| t.id);
+        // Gather pass: every located being rolls, per public trace it can sense, whether it notices
+        // it. The rolls are draw-keyed per (being, trace, clock), so the hit set is a pure function of
+        // the state and the gather parallelises across `workers` threads (the ActionStage pattern the
+        // converse phase proves). The sorted traces are split into contiguous chunks, each worker
+        // gathers its chunk's hits, and the chunks are concatenated in order, which reproduces the
+        // serial hit sequence exactly, so the phase is bit-identical at every worker count.
+        let mut traces: Vec<&Trace> = self.traces.iter().collect();
+        traces.sort_by_key(|t| t.id);
+        let workers = self.workers.max(1);
+        let n = traces.len();
+        let hits: Vec<PerceptionHit> = if workers == 1 || n <= 1 {
             let mut out = Vec::new();
-            for t in traces {
-                for (mind_id, mind) in &self.minds {
-                    if self.place_of.get(mind_id) != Some(&t.place) {
-                        continue;
-                    }
-                    // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives
-                    // the trace only on a channel it reads, and its channel acuity scales the
-                    // roll; a being with no sensorium reads every channel at full acuity, so the
-                    // place-based perception of every existing world is unchanged.
-                    let channel_acuity = match self.sensorium.get(mind_id) {
-                        Some(s) => match s.reads(t.channel) {
-                            Some(a) => a,
-                            None => continue,
-                        },
-                        None => Fixed::ONE,
-                    };
-                    let acuity = mind.acuity.mul(channel_acuity);
-                    let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
-                    let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
-                        .rng(self.seed)
-                        .unit_fixed(0);
-                    if roll < chance {
-                        out.push(PerceptionHit {
-                            mind: *mind_id,
-                            subject: t.subject,
-                            attr: t.attr,
-                            hyps: t.hyps.clone(),
-                            value: t.value,
-                            weight: t.weight,
-                            from: t.from,
-                        });
-                    }
-                }
+            for t in &traces {
+                self.gather_trace(t, &mut out);
             }
             out
+        } else {
+            // Dynamic load balancing, heterogeneous-core aware: each worker pulls the next trace
+            // index from a shared counter, so a faster core (an Intel P-core, or an AMD V-cache CCD)
+            // gathers more traces than a slower one, and no thread idles at the barrier on an equal
+            // static slice. The gather writes nothing (a pure read of the frozen `&World`, which is
+            // Sync). Each worker tags its output with the trace index; the merge sorts by that index
+            // (a `traces`-length key, not a per-hit one, so it is cheap) and flattens, which
+            // reproduces the serial trace-then-being order exactly. So the result is a pure function
+            // of state whatever core gathered which trace: that is what lets the schedule adapt to a
+            // hybrid CPU without touching correctness, and without a per-hit sort that would Amdahl-
+            // cap the phase.
+            let this: &World = &*self;
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let mut indexed: Vec<(usize, Vec<PerceptionHit>)> = std::thread::scope(|sc| {
+                let handles: Vec<_> = (0..workers)
+                    .map(|_| {
+                        sc.spawn(|| {
+                            let mut local: Vec<(usize, Vec<PerceptionHit>)> = Vec::new();
+                            loop {
+                                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                if i >= n {
+                                    break;
+                                }
+                                let mut out = Vec::new();
+                                this.gather_trace(traces[i], &mut out);
+                                if !out.is_empty() {
+                                    local.push((i, out));
+                                }
+                            }
+                            local
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().expect("a perceive worker panicked"))
+                    .collect()
+            });
+            indexed.sort_by_key(|(i, _)| *i);
+            indexed.into_iter().flat_map(|(_, v)| v).collect()
         };
+        // Apply pass (single-threaded): each noticed being integrates the evidence into its beliefs,
+        // in the canonical trace-then-being order the gather reproduced. `consider` is
+        // order-independent, so this apply is bit-identical whatever the worker count.
         for hit in hits {
             if let Some(mind) = self.minds.get_mut(&hit.mind) {
                 mind.consider(
@@ -2274,6 +2294,46 @@ impl World {
                     hit.weight,
                     hit.from,
                 );
+            }
+        }
+    }
+
+    /// Gather the perception hits for one trace across all located, sensing beings: the inner pass of
+    /// [`perceive`], a pure read of `&self` (the minds, places, sensoria, clock, and seed), so it runs
+    /// on a worker thread with no contention. Each being's notice roll is draw-keyed by
+    /// `(being, trace, clock, PERCEPTION)`, so the hit set is a pure function of the state, independent
+    /// of the worker that computed it.
+    fn gather_trace(&self, t: &Trace, out: &mut Vec<PerceptionHit>) {
+        for (mind_id, mind) in &self.minds {
+            if self.place_of.get(mind_id) != Some(&t.place) {
+                continue;
+            }
+            // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives the trace
+            // only on a channel it reads, and its channel acuity scales the roll; a being with no
+            // sensorium reads every channel at full acuity, so the place-based perception of every
+            // existing world is unchanged.
+            let channel_acuity = match self.sensorium.get(mind_id) {
+                Some(s) => match s.reads(t.channel) {
+                    Some(a) => a,
+                    None => continue,
+                },
+                None => Fixed::ONE,
+            };
+            let acuity = mind.acuity.mul(channel_acuity);
+            let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
+            let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
+                .rng(self.seed)
+                .unit_fixed(0);
+            if roll < chance {
+                out.push(PerceptionHit {
+                    mind: *mind_id,
+                    subject: t.subject,
+                    attr: t.attr,
+                    hyps: t.hyps.clone(),
+                    value: t.value,
+                    weight: t.weight,
+                    from: t.from,
+                });
             }
         }
     }
@@ -2518,6 +2578,71 @@ source = "Part 9"
             salience,
             weight: Fixed::from_int(5),
             from: StableId(500),
+        }
+    }
+
+    #[test]
+    fn perceive_is_bit_identical_across_worker_counts() {
+        // The intra-phase parallelism (the throughput lever, not the phase-level scheduler): perceive
+        // gathers per-(being, trace) notice rolls across worker threads, then applies in canonical
+        // order. With many co-located sensing beings and many distinct traces at salience below one
+        // (so the roll bites and only some beings notice), the parallel gather must reproduce the
+        // serial result exactly at every worker count, because the rolls are draw-keyed and the trace
+        // chunks concatenate in canonical order.
+        let build = |workers: usize| -> u128 {
+            let mut w = world().with_seed(0x9E5C_0A11);
+            w.set_workers(workers);
+            let place = 1u32;
+            for _ in 0..24 {
+                let m = w.spawn(Fixed::ONE);
+                w.set_place(m, place);
+            }
+            for k in 0..16u64 {
+                let value = if k % 2 == 0 { 10 } else { 20 };
+                let mut t = trace(place, value, Fixed::from_ratio(1, 2));
+                t.id = StableId(1000 + k);
+                t.from = StableId(1000 + k);
+                w.emit_trace(t);
+            }
+            w.perceive();
+            w.state_hash()
+        };
+        let serial = build(1);
+        for workers in [2usize, 3, 8, 16] {
+            assert_eq!(
+                build(workers),
+                serial,
+                "parallel perceive at {workers} workers diverged from the serial gather"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore] // a manual throughput check on the actual machine, not a CI gate
+    fn perceive_timing_across_workers() {
+        use std::time::Instant;
+        let make = || {
+            let mut w = world().with_seed(0xB16_B00C);
+            let place = 1u32;
+            for _ in 0..2000 {
+                let m = w.spawn(Fixed::ONE);
+                w.set_place(m, place);
+            }
+            for k in 0..2000u64 {
+                let value = if k % 2 == 0 { 10 } else { 20 };
+                let mut t = trace(place, value, Fixed::from_ratio(1, 2));
+                t.id = StableId(100_000 + k);
+                t.from = StableId(100_000 + k);
+                w.emit_trace(t);
+            }
+            w
+        };
+        for workers in [1usize, 2, 4, 8, 16, 20] {
+            let mut w = make();
+            w.set_workers(workers);
+            let t0 = Instant::now();
+            w.perceive();
+            eprintln!("perceive workers={:2}: {:?}", workers, t0.elapsed());
         }
     }
 

@@ -103,7 +103,12 @@ pub fn satisfaction(supply: Fixed, assimilation: Fixed, requirement: Option<Fixe
         Some(r) if r == ZERO => return ONE,
         Some(r) => r,
     };
-    let num = supply.checked_mul(assimilation).unwrap_or(ZERO);
+    let num = match supply.checked_mul(assimilation) {
+        // Both factors are non-negative fractions, so an overflowing product is abundant supply:
+        // route to full satisfaction, the same extreme the divide-overflow below reaches, not to zero.
+        Some(x) => x,
+        None => return ONE,
+    };
     match num.checked_div(req) {
         Some(s) => s.clamp(ZERO, ONE),
         None => ONE,
@@ -213,7 +218,9 @@ pub fn edibility(
 pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixed {
     let den = match contact_area.checked_mul(C_PA) {
         Some(d) => d,
-        None => return p_max,
+        // A contact area so large it overflows spreads the force to a negligible pressure: route to
+        // zero, not the maximum-pressure cap (which is the zero-area extreme just below).
+        None => return ZERO,
     };
     if den == ZERO {
         return p_max;
@@ -279,7 +286,7 @@ pub fn bend_stress(
             None => stress_max,
         }
     };
-    (sigma, yield_strength - sigma)
+    (sigma, sat_sub(yield_strength, sigma))
 }
 
 /// Axial stress (MPa) and the collapse margin: force over cross-section.
@@ -301,7 +308,7 @@ pub fn axial_stress(
             None => stress_max,
         }
     };
-    (sigma, yield_strength - sigma)
+    (sigma, sat_sub(yield_strength, sigma))
 }
 
 /// The dual fracture criterion: a stress margin against the fracture strength and an
@@ -414,7 +421,9 @@ pub fn lever(
         advantage_max
     } else {
         match effort_arm.checked_div(load_arm) {
-            Some(m) => m,
+            // Cap the arm ratio at advantage_max on the success path too, matching the zero-load and
+            // overflow branches, so a representable but very high ratio still honours the bound.
+            Some(m) => m.min(advantage_max),
             None => advantage_max,
         }
     };
@@ -467,7 +476,7 @@ pub fn friction(
         Some(f) => f,
         None => force_max,
     };
-    let slip_margin = f_s_max - tangential;
+    let slip_margin = sat_sub(f_s_max, tangential);
     let kinetic_force = match kinetic_coefficient.checked_mul(normal) {
         Some(f) => f,
         None => force_max,
@@ -482,7 +491,7 @@ pub fn friction(
     let efficiency = if input_power == ZERO {
         ZERO
     } else {
-        let net = (input_power - power_loss).max(ZERO);
+        let net = sat_sub(input_power, power_loss).max(ZERO);
         match net.checked_div(input_power) {
             Some(e) => e.clamp(ZERO, ONE),
             None => ONE,
@@ -556,7 +565,14 @@ pub fn euler_buckle(
         Some(x) => x,
         None => return force_max,
     };
-    match pi_squared().checked_mul(ei) {
+    // `modulus` is on the megapascal scale (stored = Pa / 1e6); the buckling load is a newton
+    // force, so promote the product to pascals with the C_PA bridge, applied last (after the
+    // reducing r divide) so a representable load is not capped early.
+    let base = match pi_squared().checked_mul(ei) {
+        Some(x) => x,
+        None => return force_max,
+    };
+    match base.checked_mul(C_PA) {
         Some(p) => p.min(force_max),
         None => force_max,
     }
@@ -632,7 +648,10 @@ pub fn wear(
         Some(x) => x,
         None => return wear_max,
     };
-    let v = n3 / h;
+    // `hardness` is on the megapascal scale (stored = Pa / 1e6); the wear volume is SI cubic
+    // metres, so divide by the pascal hardness (h promoted by the 1e6 C_PA bridge), not the raw
+    // megapascal value, or the volume comes out 1e6 too large.
+    let v = n3 / (h * 1_000_000);
     if v >= wmb {
         wear_max
     } else {
@@ -678,6 +697,13 @@ pub fn sensible_energy(
     delta_t: Fixed,
     energy_max: Fixed,
 ) -> Fixed {
+    // The law reports a non-negative sensible energy over [0, E_MAX] (a cooling contributes no
+    // positive sensible heat), so a non-positive gradient reads zero. This also keeps the overflow
+    // branch below sign-correct: it is reached only for a positive gradient, so the positive cap is
+    // the right extreme rather than a sign-blind one.
+    if delta_t <= ZERO {
+        return ZERO;
+    }
     let capacity = match mass.checked_mul(specific_heat) {
         Some(c) => c,
         None => return energy_max,
@@ -716,9 +742,16 @@ pub fn phase_change_energy(
     latent_heat: Fixed,
     energy_max: Fixed,
 ) -> Fixed {
-    let delta_t = transition_temperature - start_temperature;
-    let sensible =
+    let delta_t = sat_sub(transition_temperature, start_temperature);
+    // `sensible_energy` is in joules (specific_heat is J/(kg*K)), while the latent term is in
+    // kilojoules (latent_heat is kJ/kg); bridge the sensible term to kilojoules with C_KJ before
+    // the sum so the two addends share one scale.
+    let sensible_j =
         sensible_energy(mass, specific_heat, delta_t, energy_max).clamp(ZERO, energy_max);
+    let sensible = match sensible_j.checked_div(C_KJ) {
+        Some(x) => x,
+        None => ZERO,
+    };
     let latent = match mass.checked_mul(latent_heat) {
         Some(e) => e.min(energy_max),
         None => energy_max,
@@ -819,7 +852,15 @@ pub fn thermal_stress(
         Some(x) => x,
         None => return (stress_max, true),
     };
-    let sigma = match modulus.checked_mul(strain_effective) {
+    // `modulus` is megapascals (stored = Pa / 1e6) and `expansion_coefficient` is ppm/K (stored =
+    // strain-per-K x 1e6); their product cancels the two prefixes to leave pascals, so descale by
+    // C_PA to the megapascal that `fracture_strength` and `stress_max` are on, or a mild heating
+    // reads 1e6 too high and fractures spuriously.
+    let sigma_pa = match modulus.checked_mul(strain_effective) {
+        Some(x) => x,
+        None => return (stress_max, true),
+    };
+    let sigma = match sigma_pa.checked_div(C_PA) {
         Some(x) => x.clamp(-stress_max, stress_max),
         None => return (stress_max, true),
     };
@@ -992,11 +1033,15 @@ pub fn reynolds_number(
         Some(x) => x,
         None => return re_max,
     };
-    let re = match rv.checked_div(viscosity) {
+    // Multiply the characteristic length in before dividing by the (possibly tiny) viscosity:
+    // dividing first sends `rho*v/mu` past the ceiling for a small channel even when the true
+    // Re (with a sub-metre length) is representable. If `rho*v*L` overflows, the Reynolds number
+    // is genuinely out of range and the cap is the right extreme.
+    let rvl = match rv.checked_mul(length) {
         Some(x) => x,
         None => return re_max,
     };
-    match re.checked_mul(length) {
+    match rvl.checked_div(viscosity) {
         Some(x) => x.min(re_max),
         None => re_max,
     }
@@ -1081,9 +1126,9 @@ pub fn membrane_gas_flux(
 }
 
 /// Hagen-Poiseuille laminar flow Q = pi*dP*r^4/(8*mu*L) (m^3/s). The driving pressure is bridged to
-/// pascals and divided down before the four radius multiplies, so the underflowing r^4 shrinks an
-/// already-reduced base; an underflow is the correct choked (zero) direction. A frictionless or
-/// zero-length channel reads the cap; zero radius or pressure reads zero.
+/// pascals, then the radius multiplies and the viscosity, length, and 8 divides are interleaved so
+/// no intermediate overflows a representable flow or underflows a capillary to zero. A frictionless
+/// or zero-length channel reads the cap; zero radius or pressure reads zero.
 pub fn poiseuille_flow(
     dp: Fixed,
     radius: Fixed,
@@ -1101,22 +1146,22 @@ pub fn poiseuille_flow(
         Some(x) => x,
         None => return q_max,
     };
-    let mut b = match pa
-        .checked_div(viscosity)
+    // Interleave the four radius multiplies with the viscosity, length, and 8 divides so the
+    // running value tracks the (bounded) true flow. Dividing by the tiny viscosity up front sends
+    // `dp/mu` past the ceiling for a representable flow, and applying r^4 up front underflows a
+    // capillary to zero; alternating grow and shrink keeps every intermediate near the result.
+    // A genuinely out-of-range flow (a large radius) still overflows to the cap.
+    let q = pa
+        .checked_mul(radius)
+        .and_then(|x| x.checked_div(viscosity))
+        .and_then(|x| x.checked_mul(radius))
         .and_then(|x| x.checked_div(length))
+        .and_then(|x| x.checked_mul(radius))
         .and_then(|x| x.checked_div(Fixed::from_int(8)))
-    {
-        Some(x) => x,
-        None => return q_max,
-    };
-    for _ in 0..4 {
-        b = match b.checked_mul(radius) {
-            Some(x) => x,
-            None => return ZERO,
-        };
-    }
-    match b.checked_mul(Fixed::PI) {
-        Some(q) => q.min(q_max),
+        .and_then(|x| x.checked_mul(radius))
+        .and_then(|x| x.checked_mul(Fixed::PI));
+    match q {
+        Some(x) => x.min(q_max),
         None => q_max,
     }
 }
@@ -1153,7 +1198,9 @@ pub fn ideal_gas_density(
     };
     let rt = match gas_constant.checked_mul(temperature) {
         Some(x) => x,
-        None => return rho_max,
+        // rho = P/(R*T): an overflowing R*T denominator drives the density toward zero, so route to
+        // the minimum, not the maximum. A vanishing R*T (below) is the dense extreme.
+        None => return rho_min,
     };
     if rt <= ZERO {
         return rho_max;
@@ -1170,12 +1217,14 @@ pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max
     if t_ambient <= ZERO {
         return ZERO;
     }
+    let lo = sat_sub(ZERO, a_max);
     let dt = sat_sub(t_parcel, t_ambient);
     let ratio = match dt.checked_div(t_ambient) {
         Some(x) => x,
-        None => return ZERO,
+        // A huge |dt|/T is a large signed acceleration: route by the sign of dt, matching the
+        // multiply-overflow branch below, rather than to zero (which reads as no buoyancy).
+        None => return if dt < ZERO { lo } else { a_max },
     };
-    let lo = ZERO - a_max;
     match ratio.checked_mul(gravity) {
         Some(a) => a.clamp(lo, a_max),
         None => {
@@ -1229,7 +1278,9 @@ pub fn evaporation_rate(
     }
     let wind_fn = match b_wind.checked_mul(sat_abs(wind)) {
         Some(x) => a_still.saturating_add(x),
-        None => a_still,
+        // An overflowing wind term is an unbounded transfer coefficient over a positive deficit, so
+        // the evaporation saturates at the cap, not back down to the still-air baseline.
+        None => return e_max,
     };
     match wind_fn.checked_mul(vpd) {
         Some(e) => e.min(e_max),
@@ -1275,7 +1326,11 @@ pub fn corrosion(
         Some(x) => x,
         None => return corrosion_max,
     };
-    match r1.checked_mul(acidity_factor) {
+    // `acidity_factor` is the pH (0 most acidic, 14 most basic); acid attack rises as pH falls, so
+    // the aggressiveness is the distance below the pH ceiling. The 14 is the definitional pH scale
+    // maximum (the chem.acidity axis range), a scale bound, not a fabricated realism value.
+    let aggressiveness = sat_sub(Fixed::from_int(14), acidity_factor).max(ZERO);
+    match r1.checked_mul(aggressiveness) {
         Some(x) => x.min(corrosion_max),
         None => corrosion_max,
     }
@@ -1396,7 +1451,10 @@ pub fn interface_split(
     // The fractions are physical partitions in [0, 1]; clamping keeps a reflected/transmitted term in
     // [0, incident] so the residual subtraction cannot overflow on an out-of-domain negative input.
     let reflectance = reflectance.clamp(ZERO, Fixed::ONE);
-    let transmittance = transmittance.clamp(ZERO, Fixed::ONE);
+    // Reflectance and transmittance share one unit budget (R + T <= 1), so clamp transmittance to the
+    // fraction reflectance leaves. Otherwise a physically-impossible R + T > 1 pair would return a
+    // triple summing to more than the incident flux, creating energy from nothing.
+    let transmittance = transmittance.clamp(ZERO, sat_sub(Fixed::ONE, reflectance));
     let reflected = incident
         .checked_mul(reflectance)
         .unwrap_or(incident)
@@ -1405,7 +1463,7 @@ pub fn interface_split(
         .checked_mul(transmittance)
         .unwrap_or(ZERO)
         .min(incident);
-    let absorbed = (incident - reflected - transmitted).clamp(ZERO, incident);
+    let absorbed = sat_sub(sat_sub(incident, reflected), transmitted).clamp(ZERO, incident);
     (reflected, absorbed, transmitted)
 }
 
@@ -1445,11 +1503,14 @@ pub fn radiative_equilibrium(
     if absorbed_irradiance <= ZERO {
         return ZERO;
     }
-    let es = match emissivity.checked_mul(sigma) {
+    // The denominator root is sqrt(emissivity*sigma), formed as sqrt(emissivity)*sqrt(sigma) rather
+    // than sqrt of the product: sigma is only about eight fixed-point bits, so emissivity*sigma
+    // underflows to zero for a low emissivity and would spuriously return the cap, while each factor
+    // roots cleanly first.
+    let den_sqrt = match emissivity.sqrt().checked_mul(sigma.sqrt()) {
         Some(x) => x,
         None => return t_max,
     };
-    let den_sqrt = es.sqrt();
     if den_sqrt == ZERO {
         return t_max;
     }
@@ -1514,9 +1575,11 @@ pub fn coulomb_force(
     }
 }
 
-/// Ohm's law V = I*R (V).
+/// Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
+/// magnitude, so the current's sign carries no meaning here), which also keeps the overflow cap
+/// sign-correct.
 pub fn ohm_voltage(current: Fixed, resistance: Fixed, v_max: Fixed) -> Fixed {
-    match current.checked_mul(resistance) {
+    match sat_abs(current).checked_mul(resistance) {
         Some(v) => v.min(v_max),
         None => v_max,
     }
@@ -1593,7 +1656,10 @@ pub fn solenoid_field(
     mu_0: Fixed,
     b_max: Fixed,
 ) -> Fixed {
-    let ni = match turn_density.checked_mul(current) {
+    // The flux-density axis is a non-negative magnitude, and the other factors are non-negative, so
+    // take the current's magnitude: the field strength does not carry the current's sign here, and
+    // the overflow cap stays sign-correct.
+    let ni = match turn_density.checked_mul(sat_abs(current)) {
         Some(x) => x,
         None => return b_max,
     };
@@ -1608,9 +1674,13 @@ pub fn solenoid_field(
 }
 
 /// Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+/// Flux is a non-negative magnitude over [0, PHI_MAX], consistent with `solenoid_field`'s magnitude
+/// flux density and the floor's interval bound; the Lenz-law sign `faraday_emf` recovers comes from
+/// the signed tick-to-tick difference of two non-negative flux samples, not from the flux itself. A
+/// non-negative product bounds cleanly and an overflow is a large flux, so it routes to the cap.
 pub fn flux_linkage(flux_density: Fixed, area: Fixed, phi_max: Fixed) -> Fixed {
     match flux_density.checked_mul(area) {
-        Some(p) => p.min(phi_max),
+        Some(p) => p.clamp(ZERO, phi_max),
         None => phi_max,
     }
 }
@@ -2061,20 +2131,22 @@ mod tests {
 
     #[test]
     fn wear_reassociates_the_scale_before_the_product() {
-        // In-range axes (force 1e8, slide 10, coefficient 1000 stored x1e6, hardness 1) whose
-        // K_scaled*F*s would overflow the ceiling must yield the true ~1e6 wear, not the false cap.
+        // In-range axes (force 1e8, slide 10, coefficient 1000 stored x1e6 so K=1e-3, hardness 1 MPa)
+        // whose K_scaled*F*s would overflow a Fixed must yield the true wear from the i128 chain, with
+        // the SI cubic-metre volume promoting the megapascal hardness to pascals:
+        // V = K*F*s/H_Pa = 1e-3*1e8*10/(1*1e6) = 1.0 m^3, not the false cap.
         let wear_max = cap(2_000_000_000);
         let w = wear(
             F_INT(1000),        // wear_coefficient_scaled (K x 1e6)
             F_INT(1_000_000),   // coefficient_scale
             F_INT(100_000_000), // force 1e8
             F_INT(10),          // slide distance
-            F_INT(1),           // hardness
+            F_INT(1),           // hardness (MPa)
             wear_max,
         );
         assert!(
-            w > F_INT(900_000) && w < wear_max,
-            "wear = {w:?} should be the true ~1e6, not the cap"
+            w > Fixed::from_ratio(99, 100) && w < Fixed::from_ratio(101, 100),
+            "wear = {w:?} should be the true ~1.0 m^3, not the cap"
         );
     }
 
@@ -2132,22 +2204,260 @@ mod tests {
 
     #[test]
     fn wear_wide_form_keeps_full_precision_for_a_sub_unit_coefficient() {
-        // At the mild-lubricated low end of the coefficient axis (K_scaled = 0.001 stored x1e6, so
-        // true K = 1e-9), the wide i128 evaluation must reconstruct the true wear rather than lose
-        // the low bits: K*F*s/H = 1e-9 * 1e8 * 10 / 1 = 1.0. Materialising K = K_scaled/scale as a
-        // Fixed would floor it and read back ~0.93; the scale-divides-the-product form reads 1.0.
+        // At the mild-lubricated low end (K_scaled = 0.001 stored x1e6, so true K = 1e-9), the wide
+        // i128 evaluation must reconstruct the true wear without losing the low bits, with the SI
+        // volume promoting the megapascal hardness to pascals: V = K*F*s/H_Pa =
+        // 1e-9 * 1e8 * 10 / (1*1e6) = 1e-6 m^3 (a Fixed-reduced coefficient would floor to zero).
         let wear_max = cap(2_000_000_000);
         let w = wear(
             Fixed::from_ratio(1, 1_000), // wear_coefficient_scaled = 0.001 (true K = 1e-9)
             F_INT(1_000_000),            // coefficient_scale
             F_INT(100_000_000),          // force 1e8
             F_INT(10),                   // slide distance
-            F_INT(1),                    // hardness
+            F_INT(1),                    // hardness (MPa)
             wear_max,
         );
         assert!(
-            w > Fixed::from_ratio(999, 1000) && w < Fixed::from_ratio(1001, 1000),
-            "wear = {w:?} should be the true ~1.0, not the ~0.93 a Fixed-reduced coefficient gives"
+            w > Fixed::from_ratio(9, 10_000_000) && w < Fixed::from_ratio(11, 10_000_000),
+            "wear = {w:?} should be the true ~1e-6 m^3"
+        );
+    }
+
+    // --- Scale, precision, and reduce-before-grow corrections (blind-audit fixes) ---
+
+    #[test]
+    fn euler_buckle_promotes_the_megapascal_modulus_to_a_newton_load() {
+        // Iron E = 200000 MPa, I = 1e-6 m^4, K = 1, L = 1: P_cr = pi^2 * E_Pa * I / (KL)^2 =
+        // pi^2 * 2e11 * 1e-6 ~ 1.97e6 N. Without the C_PA promotion it read ~1.97 N.
+        let p = euler_buckle(
+            Fixed::from_int(200_000),
+            Fixed::from_ratio(1, 1_000_000),
+            Fixed::ONE,
+            Fixed::ONE,
+            cap(2_000_000_000),
+        );
+        assert!(
+            p > Fixed::from_int(1_900_000) && p < Fixed::from_int(2_050_000),
+            "buckling load = {p:?} should be ~1.97e6 N, not ~1.97 N"
+        );
+    }
+
+    #[test]
+    fn thermal_stress_descales_to_megapascals_and_does_not_fracture_on_mild_heating() {
+        // Iron E = 200000 MPa, alpha = 12 ppm/K, dT = 1 K, constraint = 1, fracture 500 MPa:
+        // sigma = E_Pa * alpha * dT = 2.4e6 Pa = 2.4 MPa, well under fracture. The unbridged kernel
+        // left sigma at 2.4e6 (pascals) and fractured spuriously.
+        let (sigma, fractured) = thermal_stress(
+            Fixed::from_int(200_000),
+            Fixed::from_int(12),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_int(500),
+            cap(2_000_000_000),
+        );
+        assert!(
+            sigma < Fixed::from_int(10),
+            "mild sigma = {sigma:?} should be ~2.4 MPa"
+        );
+        assert!(
+            !fractured,
+            "a 1 K constrained heating of iron must not fracture"
+        );
+        // A large gradient still fractures: dT = 300 K gives ~720 MPa > 500.
+        let (_s, hot) = thermal_stress(
+            Fixed::from_int(200_000),
+            Fixed::from_int(12),
+            Fixed::from_int(300),
+            Fixed::ONE,
+            Fixed::from_int(500),
+            cap(2_000_000_000),
+        );
+        assert!(
+            hot,
+            "a 300 K constrained heating exceeds the fracture strength"
+        );
+    }
+
+    #[test]
+    fn phase_change_energy_bridges_the_sensible_joules_to_kilojoules() {
+        // Water, m = 1 kg, c = 4186 J/(kg*K), dT = 10 K, latent = 334 kJ/kg: sensible = 41860 J =
+        // 41.86 kJ, plus 334 kJ latent = ~375.86 kJ. The unbridged sum was 41860 + 334.
+        let e = phase_change_energy(
+            Fixed::ONE,
+            Fixed::from_int(4186),
+            Fixed::from_int(273),
+            Fixed::from_int(263),
+            Fixed::from_int(334),
+            cap(2_000_000_000),
+        );
+        assert!(
+            e > Fixed::from_int(375) && e < Fixed::from_int(377),
+            "phase-change energy = {e:?} should be ~375.86 kJ"
+        );
+    }
+
+    #[test]
+    fn poiseuille_flow_keeps_a_representable_flow_off_the_cap() {
+        // Air, dp = 1 MPa, r = 0.01 m, mu = 1.78e-5 Pa*s, L = 1 m: Q = pi*dp_Pa*r^4/(8*mu*L) ~ 220
+        // m^3/s. The divide-first form overflowed dp/mu and returned the cap.
+        let q = poiseuille_flow(
+            Fixed::ONE,
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(178, 10_000_000),
+            Fixed::ONE,
+            cap(2_000_000_000),
+        );
+        assert!(
+            q > Fixed::from_int(150) && q < Fixed::from_int(300),
+            "laminar flow = {q:?} should be ~220 m^3/s, not the cap"
+        );
+    }
+
+    #[test]
+    fn reynolds_number_multiplies_length_before_the_viscosity_divide() {
+        // rho = 998, v = 1000, L = 1e-3, mu = 1e-4: Re = rho*v*L/mu = 9.98e6, representable. The
+        // divide-first form overflowed rho*v/mu and returned the cap.
+        let re = reynolds_number(
+            Fixed::from_int(998),
+            Fixed::from_int(1000),
+            Fixed::from_ratio(1, 1000),
+            Fixed::from_ratio(1, 10_000),
+            cap(2_000_000_000),
+        );
+        assert!(
+            re > Fixed::from_int(9_000_000) && re < Fixed::from_int(11_000_000),
+            "Reynolds = {re:?} should be ~9.98e6, not the cap"
+        );
+    }
+
+    #[test]
+    fn radiative_equilibrium_roots_the_factors_so_low_emissivity_does_not_underflow() {
+        let sigma = Fixed::from_ratio(567, 10_000_000_000); // 5.67e-8
+                                                            // emissivity 0.004, absorbed 1000: T = (1000/(0.004*sigma))^(1/4) ~ 1450 K. Forming
+                                                            // emissivity*sigma underflowed to zero and returned the cap.
+        let t = radiative_equilibrium(
+            Fixed::from_int(1000),
+            Fixed::from_ratio(4, 1000),
+            sigma,
+            Fixed::from_int(100_000),
+        );
+        assert!(
+            t > Fixed::from_int(1200) && t < Fixed::from_int(1700),
+            "equilibrium temperature = {t:?} should be ~1450 K, not the cap"
+        );
+    }
+
+    #[test]
+    fn lever_caps_the_mechanical_advantage_on_the_success_path() {
+        // effort 100, load 1e-6 gives a raw ratio 1e8; the advantage_max = 50 cap must bind.
+        let l = lever(
+            Fixed::from_int(100),
+            Fixed::from_int(100),
+            Fixed::from_ratio(1, 1_000_000),
+            cap(2_000_000_000),
+            Fixed::from_int(50),
+            cap(2_000_000_000),
+        );
+        assert_eq!(l.mechanical_advantage, Fixed::from_int(50));
+    }
+
+    #[test]
+    fn interface_split_conserves_flux_when_reflectance_plus_transmittance_exceed_one() {
+        // R = T = 0.7 is physically impossible (R + T <= 1); the triple must still sum to the
+        // incident flux, not 1.4x it.
+        let (r, a, t) = interface_split(
+            Fixed::from_int(100),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_ratio(7, 10),
+        );
+        assert_eq!(
+            r + a + t,
+            Fixed::from_int(100),
+            "R + A + T must equal the incident flux"
+        );
+        assert!(
+            r > Fixed::from_int(69) && r < Fixed::from_int(71),
+            "reflected ~70"
+        );
+        assert!(
+            t > Fixed::from_int(29) && t < Fixed::from_int(31),
+            "transmitted ~30"
+        );
+        assert_eq!(
+            a, ZERO,
+            "the residual is fully consumed, no negative absorbed"
+        );
+    }
+
+    // --- Overflow-direction and sign corrections (blind-audit latent-class sweep) ---
+
+    #[test]
+    fn overflowing_and_degenerate_branches_route_to_the_correct_physical_extreme() {
+        // satisfaction: an overflowing supply*assimilation is abundance, so full satisfaction.
+        assert_eq!(
+            satisfaction(Fixed::MAX, Fixed::MAX, Some(Fixed::ONE)),
+            ONE,
+            "an overflowing supply product is fully satisfied, not starving"
+        );
+        // contact_pressure: an overflowing contact area spreads the force to zero pressure.
+        assert_eq!(
+            contact_pressure(Fixed::ONE, Fixed::MAX, cap(2_000_000_000)),
+            ZERO,
+            "a vast contact area gives negligible pressure, not the max"
+        );
+        // sensible_energy: a cooling (negative gradient) is zero over the [0, E_MAX] law.
+        assert_eq!(
+            sensible_energy(
+                Fixed::ONE,
+                Fixed::from_int(4186),
+                Fixed::from_int(-10),
+                cap(2_000_000_000)
+            ),
+            ZERO,
+            "a negative temperature gradient contributes no positive sensible heat"
+        );
+        // ideal_gas_density: an overflowing R*T denominator drives density to its minimum.
+        assert_eq!(
+            ideal_gas_density(
+                Fixed::ONE,
+                Fixed::from_int(100_000),
+                Fixed::from_int(30_000),
+                Fixed::from_int(1),
+                cap(2_000_000_000),
+            ),
+            Fixed::from_int(1),
+            "a huge R*T gives a vanishing density (rho_min), not rho_max"
+        );
+    }
+
+    #[test]
+    fn em_magnitude_kernels_bound_non_negative() {
+        // ohm_voltage is a magnitude: a negative current gives a positive voltage.
+        assert_eq!(
+            ohm_voltage(Fixed::from_int(-5), Fixed::from_int(10), cap(2_000_000_000)),
+            Fixed::from_int(50),
+            "V = |I|*R is non-negative"
+        );
+        // flux_linkage is a non-negative magnitude over [0, phi_max] (consistent with the magnitude
+        // flux density and the floor bound): a product over the cap clamps to phi_max, and an
+        // out-of-domain negative clamps to the zero floor rather than staying unbounded.
+        assert_eq!(
+            flux_linkage(
+                Fixed::from_int(100),
+                Fixed::from_int(10),
+                Fixed::from_int(500)
+            ),
+            Fixed::from_int(500),
+            "a large flux clamps to phi_max"
+        );
+        assert_eq!(
+            flux_linkage(
+                Fixed::from_int(-100),
+                Fixed::from_int(10),
+                Fixed::from_int(500)
+            ),
+            ZERO,
+            "an out-of-domain negative flux clamps to the zero floor"
         );
     }
 
