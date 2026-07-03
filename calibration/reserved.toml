@@ -625,22 +625,32 @@ unit = "weight"
 source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
 
 # --- R-DEEPTECH-COMPOSE: recursive technology composition (Part 41, record 62.10) ---
+# The Part 41 composition evaluator is BUILT (2026-07-03, crates/compose, civsim-compose): a memoised,
+# interval-valued, fixed-point fold OUTSIDE crates/physics (Principle 9, the emergent side of the
+# authored-physics boundary made a crate boundary). Three of the compose values below now route through
+# the evaluator rather than floating free: compose.viability_threshold DERIVES to the physics collapse
+# boundary, and compose.interface_penalty_curve and compose.emergent_proxy_weights are reserved-with-
+# basis THROUGH the evaluator (their structure derives; specific magnitudes stay the owner's). The four
+# combinator fold kernels, the interface-axis and whole-system-proxy memberships (open data registries
+# with labelled dev seeds), and the memoised fold are fixed Rust against the dev seed; the kernel path
+# takes only Fixed and never a material or race id. compose.transmission_stability already derives from
+# the transmission substrate (below, unchanged).
 
 [[reserved]]
 id = "compose.max_depth"
-basis = "the per-tick budget and the depth at which marginal proxy gain falls below noise; a determinism-and-performance bound, not a realism one"
+basis = "the per-tick budget and the depth at which marginal proxy gain falls below noise; a determinism-and-performance bound, not a realism one; consumed by the evaluator's bottom-up recursion (crates/compose/src/eval.rs)"
 status = "reserved"
 value = ""
 unit = "levels"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs"
 
 [[reserved]]
 id = "compose.viability_threshold"
-basis = "the failure boundary the material and physics data already define, such as pressure exceeding yield"
+basis = "DERIVES (2026-07-03) through the compose evaluator (crates/compose/src/eval.rs, crates/compose/src/promote.rs): viability is a DIMENSIONLESS safety fraction (one minus utilization), so the collapse boundary is a safety of ZERO, the point at which a structural utilization reaches the material's OWN yield or fracture capacity (the failure boundary the material and physics data already define). The promotion gate compares the viability lower bound to that derived zero, so the free number retires; what remains reserved-with-basis is only an owner SAFETY FACTOR above zero, whose basis is the design margin over the physics boundary the culture wants (a positive fraction), fail-loud until set, defaulting to the pure physics boundary of zero"
 status = "reserved"
 value = ""
-unit = "physics_units"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+unit = "safety_fraction"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs; crates/compose/src/promote.rs"
 
 [[reserved]]
 id = "compose.transmission_stability"
@@ -652,27 +662,27 @@ source = "Part 41 composition mechanism; record 62.10; audit section 1l; transmi
 
 [[reserved]]
 id = "compose.reuse_compression_threshold"
-basis = "the description-length-decrease criterion, with the integer reuse count its cheap surrogate, calibrated so promoted-library growth fits the aggregate-tier memory budget"
+basis = "the description-length-decrease criterion, with the integer reuse count its cheap surrogate, calibrated so promoted-library growth fits the aggregate-tier memory budget; consumed by the third promotion gate (crates/compose/src/promote.rs reuse_count >= reuse_threshold)"
 status = "reserved"
 value = ""
 unit = "count"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/promote.rs"
 
 [[reserved]]
 id = "compose.interface_penalty_curve"
-basis = "the interface-mismatch penalty curve and adaptable range; the loss physics of the relevant interface axis and where an adapter becomes physically impossible"
+basis = "reserved-with-basis THROUGH the evaluator (2026-07-03, crates/compose/src/eval.rs PenaltyCurve): the ADAPTABLE RANGE (the mismatch span the curve grades over) derives from the interface axis's own physics range width, the point past which an adapter becomes physically impossible; the curve FLOORS beyond it (clamped at the last point) rather than diverging, so a large mismatch is a bounded cost an emergent adapter can pay, never a hard rejection. What is reserved is the penalty DEPTH per knee (the y-values), whose basis is the loss physics of the relevant interface axis; a data-defined piecewise-linear Curve (the decision::Curve shape), not a closed set of named shapes"
 status = "reserved"
 value = ""
 unit = "curve"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs"
 
 [[reserved]]
 id = "compose.emergent_proxy_weights"
-basis = "the physics substrate units and criticality for each aggregate quantity, not aesthetic tuning"
+basis = "reserved-with-basis THROUGH the evaluator (2026-07-03, crates/compose/src/proxy.rs ProxyWeights): the whole-system-proxy MEMBERSHIP is an open data registry (labelled dev seed, owner-set), and each active proxy's CRITICALITY WEIGHT is one value here, the scale by which its violation (a negative whole-system margin) charges viability. The basis is the physics substrate units and criticality for each aggregate quantity, not aesthetic tuning; a proxy with no weight FAILS LOUD at substrate construction (Memo::new), so a reserved weight is never silently defaulted to zero. This registry is where the evaluator's reach is bounded"
 status = "reserved"
 value = ""
 unit = "weight"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/proxy.rs"
 
 # --- Knowledge-transmission substrate: the drift and loss rates compose.transmission_stability
 # derives from (Parts 20, 23, 25, 41; crates/sim/src/transmission.rs). The transmit and loss

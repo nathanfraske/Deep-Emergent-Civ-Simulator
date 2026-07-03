@@ -320,6 +320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "civsim-compose"
+version = "0.1.0"
+dependencies = [
+ "civsim-core",
+ "civsim-physics",
+]
+
+[[package]]
 name = "civsim-core"
 version = "0.1.0"
 
@@ -346,6 +354,7 @@ dependencies = [
 name = "civsim-sim"
 version = "0.1.0"
 dependencies = [
+ "civsim-compose",
  "civsim-core",
  "civsim-physics",
  "civsim-world",
