@@ -337,6 +337,7 @@ name = "civsim-physics"
 version = "0.1.0"
 dependencies = [
  "civsim-core",
+ "civsim-units",
  "serde",
  "toml 0.8.23",
 ]
