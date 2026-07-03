@@ -423,9 +423,12 @@ pub fn derive_scale_bits(
     let default_int_bits = MAG_BITS.saturating_sub(canonical_scale); // 31 for the canonical Q32.32
 
     // Integer bits to hold the top's integer part (none when the top is below one), plus the guard.
-    let integer_bits = (hi_log2 + 1).max(0) as u32 + guard;
+    // Saturating throughout so a non-physical extreme argument returns a bounded result rather than
+    // panicking or wrapping; real envelope log2 bounds and a small guard never approach these limits.
+    let integer_bits = (hi_log2.saturating_add(1).max(0) as u32).saturating_add(guard);
     // Significant bits of the bottom at scale f are about lo_log2 + f, so f >= sig_target - lo_log2.
-    let frac_needed = (sig_target as i32 - lo_log2).max(0) as u32;
+    // Computed in i64 so the u32-minus-i32 cannot overflow.
+    let frac_needed = (sig_target as i64 - lo_log2 as i64).clamp(0, MAG_BITS as i64) as u32;
 
     if integer_bits <= default_int_bits && frac_needed <= canonical_scale {
         return DerivedScale {
@@ -436,7 +439,10 @@ pub fn derive_scale_bits(
 
     let budget = MAG_BITS.saturating_sub(integer_bits);
     let scale_bits = frac_needed.min(budget).min(62);
-    let windowed = integer_bits > MAG_BITS || frac_needed > budget;
+    // Windowed when the low end carries fewer significant bits than requested, which is exactly when
+    // the final scale falls below what the significance target needed (whether the 63-bit budget or
+    // the 62-bit cap is what bound it), or the top alone overruns the magnitude bits.
+    let windowed = integer_bits > MAG_BITS || frac_needed > scale_bits;
     DerivedScale {
         scale_bits,
         windowed,
@@ -612,6 +618,19 @@ mod tests {
         // A truly over-wide envelope stays bounded and is flagged windowed.
         let wide = derive_scale_bits(40, -27, 16, 0, 32);
         assert!(wide.windowed && wide.scale_bits <= 62);
+        // Windowed is flagged even when the 62-bit fractional cap (not the budget) is what drops the
+        // low end below the target: here scale caps at 62 but the target wanted 63 fractional bits.
+        let capped = derive_scale_bits(-1, -47, 16, 0, 32);
+        assert_eq!(
+            capped,
+            DerivedScale {
+                scale_bits: 62,
+                windowed: true
+            }
+        );
+        // Non-physical extreme arguments return a bounded result rather than panicking or wrapping.
+        let ex = derive_scale_bits(i32::MAX, i32::MIN, u32::MAX, u32::MAX, 32);
+        assert!(ex.scale_bits <= 62);
     }
 
     #[test]
