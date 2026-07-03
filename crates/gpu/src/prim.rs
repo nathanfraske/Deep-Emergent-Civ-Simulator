@@ -117,16 +117,17 @@ pub(crate) fn q32_mul(a: i64, b: i64) -> i64 {
     (i64::cast_from(hi) << 32u32) | i64::cast_from(lo)
 }
 
-/// Saturating Q32.32 multiply on `i64` operands: the Fixed product when it fits `i64`, else the signed
-/// extreme (`i64::MIN` when the operands' signs differ, `i64::MAX` when they agree), matching the
-/// controller's `sat_mul` (`Fixed::checked_mul` or saturate). Same sign-magnitude limb product as
-/// [`q32_mul`], but it also keeps the top word `w3` (bits [96, 128) of the product magnitude, which
-/// `q32_mul` discards) so an overflow of the [32, 96) result is detectable: the Q32.32 magnitude is the
-/// 96-bit value `(w3 : w2 : w1)`, and it fits the signed range iff `w3 == 0` and the sign bit of the
-/// result is not forced by `w2`. No `i128`; the product is the same u32-limb accumulation the Stage 0
-/// multiply proves.
+/// The shared checked Q32.32 limb multiply behind [`sat_mul`] and [`checked_mul_zero`]: it returns a
+/// 3-element array `[fit, overflow, use_neg]`. `fit` is the wrapped [32, 96) result (the correct value
+/// when the product fits `i64`); `overflow` is 1 when the true Q32.32 product does not fit `i64`; and
+/// `use_neg` is 1 when the result is negative. Same sign-magnitude limb product as [`q32_mul`], but it
+/// also keeps the top word `w3` (bits [96, 128) of the product magnitude, which `q32_mul` discards) so
+/// an overflow of the [32, 96) result window is detectable: the Q32.32 magnitude is the 96-bit value
+/// `(w3 : w2 : w1)`, and it fits iff `w3 == 0` and the sign bit is not forced by `w2`. No `i128`.
+/// Consolidating the overflow decision here is a correctness guard: the negative-side boundary is subtle
+/// (a blind audit caught a missing `w0 == 0` conjunct in it once), and both callers share this logic.
 #[cube]
-pub(crate) fn sat_mul(a: i64, b: i64) -> i64 {
+fn mul_checked(a: i64, b: i64) -> Array<i64> {
     let alo = u32::cast_from(a);
     let ahi = u32::cast_from(a >> 32u32);
     let blo = u32::cast_from(b);
@@ -213,10 +214,46 @@ pub(crate) fn sat_mul(a: i64, b: i64) -> i64 {
     let over_neg = (w3 != 0u32) || (hibit == 1u32 && !at_min);
     let overflow = select(use_neg, over_neg, over_pos);
 
+    let mut r = Array::<i64>::new(3usize);
+    r[0usize] = fit;
+    r[1usize] = select(overflow, 1i64, 0i64);
+    r[2usize] = select(use_neg, 1i64, 0i64);
+    r
+}
+
+/// Saturating Q32.32 multiply: the Fixed product when it fits `i64`, else the signed extreme (`i64::MIN`
+/// on differing signs, `i64::MAX` on agreeing signs), matching the controller's `sat_mul`.
+#[cube]
+pub(crate) fn sat_mul(a: i64, b: i64) -> i64 {
+    let r = mul_checked(a, b);
     let i64_max = 9223372036854775807i64;
     let i64_min = -9223372036854775807i64 - 1i64; // i64::MIN, split so the literal does not overflow
-    let sat = select(use_neg, i64_min, i64_max);
-    select(overflow, sat, fit)
+    let sat = select(r[2usize] == 1i64, i64_min, i64_max);
+    select(r[1usize] == 1i64, sat, r[0usize])
+}
+
+/// Checked Q32.32 multiply returning ZERO on overflow rather than saturating, matching the physiology
+/// path's `Fixed::checked_mul(...).unwrap_or(Fixed::ZERO)` (the homeostasis drain and the logistic
+/// regen). Shares [`mul_checked`]'s overflow decision with [`sat_mul`], so the two cannot drift.
+#[cube]
+pub(crate) fn checked_mul_zero(a: i64, b: i64) -> i64 {
+    let r = mul_checked(a, b);
+    select(r[1usize] == 1i64, 0i64, r[0usize])
+}
+
+/// Saturating i64 add: `a + b`, saturating to the signed extreme on overflow rather than wrapping,
+/// matching `Fixed::saturating_add`. Overflow occurs only when the operands share a sign and the wrapped
+/// result's sign flips; the saturation direction is that shared sign.
+#[cube]
+pub(crate) fn sat_add(a: i64, b: i64) -> i64 {
+    let s = a + b; // wrapping i64 add
+    let same_sign = (a ^ b) >= 0i64;
+    let flipped = (a ^ s) < 0i64;
+    let overflow = same_sign && flipped;
+    let i64_max = 9223372036854775807i64;
+    let i64_min = -9223372036854775807i64 - 1i64;
+    let sat = select(a < 0i64, i64_min, i64_max);
+    select(overflow, sat, s)
 }
 
 /// The pinned Q32.32 divide on `i64` operands (sign-magnitude 96-step restoring long division,

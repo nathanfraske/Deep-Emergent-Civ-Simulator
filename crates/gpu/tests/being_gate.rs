@@ -17,7 +17,7 @@
 //! is the exact same update written against `civsim_core::Fixed`. Self-skips unless `CIVSIM_GPU` is set.
 
 use civsim_core::Fixed;
-use civsim_gpu::{cuda_client, gpu_activate, gpu_body_thermal, gpu_sat_mul};
+use civsim_gpu::{cuda_client, gpu_activate, gpu_body_thermal, gpu_metabolize, gpu_sat_mul};
 
 fn gpu_enabled() -> bool {
     std::env::var("CIVSIM_GPU").is_ok()
@@ -288,5 +288,150 @@ fn activate_is_bit_identical_to_the_controller_activate() {
     assert_eq!(
         mism, 0,
         "GPU activate must equal the CPU activate over all {n_acts} activations (hi={hi_clamp} lo={lo_clamp} pass={pass})"
+    );
+}
+
+/// The CPU oracle for `Stock::regen_increment`: the logistic per-step regen.
+fn cpu_regen(amount: Fixed, capacity: Fixed, regen_rate: Fixed) -> Fixed {
+    let z = Fixed::ZERO;
+    if capacity <= z || amount <= z {
+        return z;
+    }
+    let ratio = match amount.checked_div(capacity) {
+        Some(r) => r,
+        None => return z,
+    };
+    let gap = Fixed::ONE - ratio;
+    let og = match amount.checked_mul(gap) {
+        Some(v) => v,
+        None => return z,
+    };
+    regen_rate.checked_mul(og).unwrap_or(z)
+}
+
+/// The CPU oracle for one being-and-axis drain: `Homeostasis::metabolize` then `Stock::step`.
+#[allow(clippy::too_many_arguments)]
+fn cpu_metabolize(
+    base_drain: i64,
+    exertion_drain: i64,
+    exertion: i64,
+    amount: i64,
+    capacity: i64,
+    regen_rate: i64,
+) -> i64 {
+    let z = Fixed::ZERO;
+    let one = Fixed::ONE;
+    let ex = Fixed::from_bits(exertion).clamp(z, one);
+    let coupling = Fixed::from_bits(exertion_drain)
+        .checked_mul(ex)
+        .unwrap_or(z);
+    let frac = Fixed::from_bits(base_drain).saturating_add(coupling);
+    let cap = Fixed::from_bits(capacity);
+    let draw = frac.checked_mul(cap).unwrap_or(z);
+    let amt = Fixed::from_bits(amount);
+    let regen = cpu_regen(amt, cap, Fixed::from_bits(regen_rate));
+    let after_regen = amt.saturating_add(regen).clamp(z, cap);
+    let drawn = if draw < z { z } else { draw };
+    (after_regen - drawn).clamp(z, cap).to_bits()
+}
+
+#[test]
+fn metabolize_is_bit_identical_to_the_drain_and_step() {
+    if !gpu_enabled() {
+        eprintln!("civsim-gpu: skipping metabolize gate (set CIVSIM_GPU=1 to run)");
+        return;
+    }
+    let client = cuda_client();
+    let n_axes = 3usize;
+    let n_beings = 2500usize;
+    let mut s = 0x5A17_0BAD_C0DE_1234u64;
+    let mut nxt = || {
+        s = s.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = s;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let base_drain: Vec<i64> = (0..n_axes)
+        .map(|a| Fixed::from_ratio(1 + a as i64, 300).to_bits())
+        .collect();
+    let exertion_drain: Vec<i64> = (0..n_axes)
+        .map(|a| Fixed::from_ratio(1 + a as i64, 150).to_bits())
+        .collect();
+    // Exertion spans below 0 and above 1 to exercise the clamp on both ends.
+    let exertion: Vec<i64> = (0..n_beings)
+        .map(|b| Fixed::from_ratio((b as i64 % 7) - 2, 3).to_bits())
+        .collect();
+    let (mut amount, mut capacity, mut regen_rate) = (Vec::new(), Vec::new(), Vec::new());
+    for b in 0..n_beings {
+        for a in 0..n_axes {
+            let r = nxt();
+            // Capacity: sometimes 0 (dead reserve), occasionally large (stress the checked products),
+            // else a small-to-moderate value.
+            let cap = if (b + a) % 11 == 0 {
+                Fixed::ZERO
+            } else if (b + a) % 17 == 0 {
+                Fixed::from_int(1 << 26)
+            } else {
+                Fixed::from_int(1 + (r % 4000) as i32)
+            };
+            // Amount: a fraction of capacity in [0, cap], including 0 and full.
+            let frac_k = (r >> 10) % 11;
+            let amt = cap.mul(Fixed::from_ratio(frac_k as i64, 10));
+            let rate = Fixed::from_ratio(1 + ((r >> 20) % 30) as i64, 500);
+            amount.push(amt.to_bits());
+            capacity.push(cap.to_bits());
+            regen_rate.push(rate.to_bits());
+        }
+    }
+
+    let got = gpu_metabolize(
+        &client,
+        &base_drain,
+        &exertion_drain,
+        &exertion,
+        &amount,
+        &capacity,
+        &regen_rate,
+        n_axes as u32,
+    );
+    let n = amount.len();
+    assert_eq!(got.len(), n);
+    let (mut mism, mut regened, mut drained, mut zero_cap) = (0u64, 0u64, 0u64, 0u64);
+    for i in 0..n {
+        let being = i / n_axes;
+        let axis = i % n_axes;
+        let want = cpu_metabolize(
+            base_drain[axis],
+            exertion_drain[axis],
+            exertion[being],
+            amount[i],
+            capacity[i],
+            regen_rate[i],
+        );
+        if capacity[i] == 0 {
+            zero_cap += 1;
+        } else if want > amount[i] {
+            regened += 1;
+        } else if want < amount[i] {
+            drained += 1;
+        }
+        if got[i] != want {
+            mism += 1;
+            if mism <= 8 {
+                eprintln!(
+                    "metabolize mismatch i={i} got={:#018x} want={:#018x}",
+                    got[i], want
+                );
+            }
+        }
+    }
+    assert!(
+        regened > 0 && drained > 0 && zero_cap > 0,
+        "sweep must hit regen, drain, and zero-capacity (regen={regened} drain={drained} zerocap={zero_cap})"
+    );
+    assert_eq!(
+        mism, 0,
+        "GPU metabolize must equal the CPU drain+step over all {n} reserves (regen={regened} drain={drained} zerocap={zero_cap})"
     );
 }
