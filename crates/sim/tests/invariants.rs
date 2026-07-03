@@ -21,7 +21,7 @@
 use civsim_core::{Fixed, StableId};
 use civsim_sim::conservation::ConservationRegistry;
 use civsim_sim::lod::TwoTierWorld;
-use civsim_sim::{AgeHistogram, Curve};
+use civsim_sim::{AgeHistogram, AttrKindId, BeliefKey, BeliefParams, Curve, FacetStrength};
 
 /// The total age-tracked population across both tiers: the members held in pool age
 /// distributions plus the promoted individuals carrying an age. The conserved projection the
@@ -121,6 +121,7 @@ fn a_deliberate_leak_is_caught() {
         id,
         wealth: Fixed::from_int(1),
         age: None,
+        beliefs: Vec::new(),
     });
     w.reg.set_location(
         id,
@@ -204,4 +205,96 @@ fn age_population_is_conserved_across_the_tier_boundary() {
             "count tracks the distribution after mortality"
         );
     }
+}
+
+/// A fixture belief calibration (an identity level-to-strength curve, a small dispersion, a
+/// diffusion rate), never an owner value: it exercises the mechanism while the manifest path
+/// stays fail-loud until the owner sets the real numbers.
+fn belief_fixture() -> BeliefParams {
+    BeliefParams {
+        level_to_strength: Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]),
+        dispersion: Fixed::from_ratio(1, 10),
+        diffusion_rate: Fixed::from_ratio(1, 4),
+    }
+}
+
+#[test]
+fn belief_mass_is_conserved_across_the_tier_boundary() {
+    // R-PROJ-REGISTER, the belief half of the Part 54 keystone: aggregate belief mass is a
+    // conserved projection across the lift (promotion) and the restriction (demotion), balancing
+    // bit for bit after every crossing, exactly as population and wealth do. Registering it is all
+    // it takes to cover it, with nothing special-cased.
+    let mut reg = ConservationRegistry::new();
+    reg.register("aggregate_belief_mass", |w: &TwoTierWorld| w.belief_mass());
+
+    let params = belief_fixture();
+    let mut w = TwoTierWorld::new();
+    let p = w.add_pool(8, Fixed::from_int(80));
+    // Seed two prevailing beliefs at distinct levels, each held by all eight members.
+    let subject = StableId(100);
+    let k1 = BeliefKey {
+        subject,
+        attr: AttrKindId(0),
+        value: 1,
+    };
+    let k2 = BeliefKey {
+        subject,
+        attr: AttrKindId(0),
+        value: 2,
+    };
+    w.pools[0].beliefs.seed(k1, Fixed::from_ratio(3, 5), 8);
+    w.pools[0].beliefs.seed(k2, Fixed::from_ratio(1, 4), 8);
+
+    let baseline = reg.snapshot(&w);
+    assert!(reg.check_against(&baseline, &w).is_ok());
+
+    // Lift a cohort of four, one crossing at a time; belief mass balances after each.
+    let mut promoted = Vec::new();
+    for i in 0..4u64 {
+        let id = w.promote_lifting(p, Fixed::from_int(1), &params, 0, 0xB111 + i);
+        promoted.push(id);
+        reg.check_against(&baseline, &w)
+            .expect("a lift conserves total belief mass");
+    }
+
+    // Restrict them back into the same pool; belief mass balances after each demotion.
+    for id in promoted {
+        w.demote(id, p);
+        reg.check_against(&baseline, &w)
+            .expect("a restriction conserves total belief mass");
+    }
+    // After the full round trip the counts return and the mass is exact.
+    assert_eq!(w.pools[0].beliefs.get(&k1).unwrap().count, 8);
+    assert_eq!(w.pools[0].beliefs.get(&k2).unwrap().count, 8);
+    assert!(reg.check_against(&baseline, &w).is_ok());
+}
+
+#[test]
+fn a_deliberate_belief_mass_leak_is_caught() {
+    // The belief projection has teeth: a hand-made imbalance (belief mass invented in a pool with
+    // no promoted counterpart) must fail the check.
+    let mut reg = ConservationRegistry::new();
+    reg.register("aggregate_belief_mass", |w: &TwoTierWorld| w.belief_mass());
+
+    let mut w = TwoTierWorld::new();
+    let _p = w.add_pool(4, Fixed::ZERO);
+    let key = BeliefKey {
+        subject: StableId(1),
+        attr: AttrKindId(0),
+        value: 3,
+    };
+    w.pools[0].beliefs.seed(key, Fixed::from_ratio(1, 2), 4);
+    let baseline = reg.snapshot(&w);
+
+    // Fold a facet strength into the pool's belief out of nowhere (bypassing the conserving lift),
+    // inflating the mass with no counterpart on the promoted tier.
+    w.pools[0]
+        .beliefs
+        .get_mut(&key)
+        .unwrap()
+        .fold_one(FacetStrength::new(Fixed::from_ratio(9, 10)));
+    let err = reg
+        .check_against(&baseline, &w)
+        .expect_err("invented belief mass must be caught");
+    assert_eq!(err.projection, "aggregate_belief_mass");
 }

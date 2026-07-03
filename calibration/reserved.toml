@@ -123,13 +123,14 @@ value = ""
 unit = "per_tick"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
-[[reserved]]
-id = "evidence.knowledge_to_strength"
-basis = "the mapping from a pool knowledge level to a promoted mind belief strength"
-status = "reserved"
-value = ""
-unit = "curve"
-source = "Part 9 evidence engine; record 62.6; audit section 1f"
+# evidence.knowledge_to_strength RETIRED (belief facet-strength substrate built, 2026-07-03):
+# the mapping from a pool knowledge level to a promoted mind belief strength was a second,
+# independent curve doing the same job as tier.belief_level_to_strength. It now DERIVES through
+# belief::instantiate_strength (crates/sim/src/belief.rs), the single monotone level-to-strength
+# curve plus per-mind dispersion the two-tier lift operator reads. The single source of truth is
+# tier.belief_level_to_strength (the curve) and tier.belief_dispersion (the dispersion half-width)
+# below; this duplicate is removed rather than left a fail-loud sentinel for a value the engine no
+# longer authors separately.
 
 # --- R-BEING-REP: personality representation (Part 20, record 62.2) ---
 
@@ -693,10 +694,18 @@ source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
 [[reserved]]
 id = "tier.belief_level_to_strength"
-basis = "the belief level-to-strength curve and per-mind dispersion so the population mean reconstructs the pool knowledge level within fixed-point tolerance"
+basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength."
 status = "reserved"
 value = ""
 unit = "curve"
+source = "Part 54 tier consistency; record 62.9; audit section 1j"
+
+[[reserved]]
+id = "tier.belief_dispersion"
+basis = "the per-mind belief dispersion half-width read by belief::instantiate_strength (crates/sim/src/belief.rs): the promoted facet strength is clamp01(level_to_strength(level) + (unit_draw*2-1)*dispersion), a symmetric mean-zero deviation keyed on the being, the belief, and the tick (Phase::BELIEF_LIFT), so promoted minds vary around the pool level. Split out of the former tier.belief_level_to_strength curve-plus-dispersion bundle. Set the half-width against the same target as the curve: small enough that the population mean strength still reconstructs the pool knowledge level within fixed-point tolerance, large enough that individual variation reads as plausible. A zero half-width promotes every mind to exactly the curve output."
+status = "reserved"
+value = ""
+unit = "ratio"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
 [[reserved]]

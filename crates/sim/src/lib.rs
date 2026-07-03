@@ -61,6 +61,7 @@ pub mod agent;
 pub mod anatomy;
 pub mod axiom;
 pub mod base_rates;
+pub mod belief;
 pub mod biosphere;
 pub mod body;
 pub mod breeding;
@@ -115,6 +116,9 @@ pub use axiom::{
     EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
 };
 pub use base_rates::{RaceBaseRateRegistry, RaceBaseRates};
+pub use belief::{
+    instantiate_strength, BeliefKey, BeliefParams, BeliefPool, FacetStrength, PrevailingBelief,
+};
 pub use body::{
     apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
     DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
@@ -140,7 +144,9 @@ pub use dialogue::{
     ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
-pub use evidence::{good_weight, AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use evidence::{
+    aggregate_diffusion_rate, good_weight, AttrKindId, EvidenceRef, InferenceFrame, InferenceParams,
+};
 pub use evolve::{
     controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
     selection_gradient, EvolveParams, EvolveReport,

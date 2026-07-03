@@ -230,6 +230,16 @@ fn clamp_i128(v: i128, bound: i128) -> i128 {
     v.clamp(-bound, bound)
 }
 
+/// The aggregate-tier belief diffusion rate (`evidence.aggregate_diffusion_rate`): how fast a
+/// prevailing belief's knowledge level climbs toward saturation per step, before the per-belief
+/// distance coupling the belief substrate applies. Read from the manifest and failing loud while
+/// still reserved (Principle 11), so aggregate diffusion cannot run on a fabricated rate. Read
+/// here, in the `evidence`-namespaced module the value belongs to, and consumed by the belief
+/// substrate ([`crate::belief::BeliefParams`]).
+pub fn aggregate_diffusion_rate(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
+    m.require_fixed("evidence.aggregate_diffusion_rate")
+}
+
 /// I.J. Good's weight of evidence, `W = ln(P(E|H) / P(E|not H)) = ln P(E|H) - ln P(E|not H)`
 /// (Good 1950; Jaynes 2003), the log-likelihood ratio a single observation contributes to the
 /// additive log-odds total the inference engine sums. It is general over any two probabilities:

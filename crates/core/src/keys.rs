@@ -133,6 +133,13 @@ impl Phase {
     /// holder erodes in lockstep and the erosion replays bit for bit. Its expectation is the
     /// reserved loss rate and it is always non-negative, so proficiency only erodes.
     pub const KNOW_LOSS: Phase = Phase(0x18);
+    /// A belief-lifting per-mind dispersion draw (the belief facet-strength substrate, Part 54):
+    /// the small symmetric mean-zero deviation added around the level-to-strength curve when an
+    /// aggregate pool's prevailing belief is instantiated into a promoting mind's facet strength,
+    /// keyed on the being, the belief's content hash, and the tick, so a mind promoted holding
+    /// several beliefs perturbs each independently and the lift replays bit for bit. The dispersion
+    /// magnitude is a reserved calibration; the draw keys on no belief's identity (Principle 9).
+    pub const BELIEF_LIFT: Phase = Phase(0x19);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -261,6 +268,18 @@ mod tests {
         assert_eq!(Phase::KNOW_LOSS, Phase(0x18));
         assert_ne!(Phase::TRANSMIT, Phase::GOSSIP);
         assert_ne!(Phase::KNOW_LOSS, Phase::DRIFT);
+        // The belief-lift dispersion phase (0x19) is the next free value after KNOW_LOSS (0x18)
+        // and must not alias the transmission phases it neighbours nor the perception phase, on
+        // counter zero, so a belief-lift dispersion, a transmission copy, a forgetting roll, and a
+        // perception roll never collide.
+        let belief_lift = DrawKey::entity(42, 9, Phase::BELIEF_LIFT).rng(seed).at(0);
+        assert_eq!(Phase::BELIEF_LIFT, Phase(0x19));
+        assert_ne!(belief_lift, transmit);
+        assert_ne!(belief_lift, know_loss);
+        assert_ne!(belief_lift, perception);
+        assert_ne!(belief_lift, development);
+        assert_ne!(Phase::BELIEF_LIFT, Phase::TRANSMIT);
+        assert_ne!(Phase::BELIEF_LIFT, Phase::KNOW_LOSS);
     }
 
     #[test]
