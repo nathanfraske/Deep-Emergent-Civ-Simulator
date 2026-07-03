@@ -272,17 +272,21 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.calcification_rate"
-basis = "the calcification rate, its cap, and the brittleness under repeated challenge"
-status = "reserved"
-value = ""
+basis = "the per-tick rate at which a held belief calcifies toward its cap (axiom.calcification_cap); the cap and the brittleness are separate entries, so this scalar is the dial the worlds push"
+status = "set"
+value = "0.001"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "per_tick"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.conformity_prestige_strengths"
-basis = "the conformity and prestige strengths, and the fission and deviation thresholds"
-status = "reserved"
-value = ""
+basis = "the conformity and prestige interaction strengths in the opinion kernel, a data map read by require_map (each a per-interaction convergence-strength magnitude, within the range bounded-confidence models use for that parameter; the cascade threshold is governed separately by the confidence bound); the fission and deviation thresholds are separate entries (axiom.fission_threshold, axiom.deviation_threshold)"
+status = "set"
+value = "conformity=0.1,prestige=0.1"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "strength"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
 
@@ -314,9 +318,11 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.drift_operator_rates"
-basis = "the drift operator rates other than sound change, which is its own dial (language.sound_change_rate): lexical replacement, grammaticalisation, splitting, borrowing; a per-operator set, still reserved pending its structured-value format"
-status = "reserved"
-value = ""
+basis = "the per-generation rates of the drift operators other than sound change (its own dial, language.sound_change_rate): lexical replacement (0.01, Swadesh-core replacement scaled toward whole-lexicon turnover), grammaticalisation (0.005), splitting (0.002), borrowing (0.01); a data map, read by require_map, whose membership grows with the world"
+status = "set"
+value = "borrowing=0.01,grammaticalisation=0.005,lexical_replacement=0.01,splitting=0.002"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; record 62.7; audit section 1g"
 
@@ -1213,17 +1219,21 @@ source = "Part 33 language system; record 62.7; the low end per docs/working/RES
 
 [[reserved]]
 id = "lang.drift_operator_rates.high"
-basis = "the fast lexical-and-grammatical churn end Tempest and Arcanum push toward, above the baseline so vocabularies and grammars drift and split fast; a transparent multiplier over the non-sound-change operator set; the baseline is lang.drift_operator_rates"
-status = "reserved"
-value = ""
+basis = "the fast churn end Tempest, Arcanum, and Crucible push toward, 5x each base operator so vocabularies and grammars drift and split fast; the baseline is lang.drift_operator_rates"
+status = "set"
+value = "borrowing=0.05,grammaticalisation=0.025,lexical_replacement=0.05,splitting=0.01"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; record 62.7; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
 id = "lang.drift_operator_rates.low"
-basis = "the slow lexical-and-grammatical churn end Europa pulls, below the baseline so vocabularies and grammars drift slowly in a placid world; a transparent multiplier over the non-sound-change operator set, still reserved pending its structured-value format; the baseline is lang.drift_operator_rates"
-status = "reserved"
-value = ""
+basis = "the slow churn end Europa pulls, 0.25x each base operator so a placid world drifts slowly; the baseline is lang.drift_operator_rates"
+status = "set"
+value = "borrowing=0.0025,grammaticalisation=0.00125,lexical_replacement=0.0025,splitting=0.0005"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
 
@@ -1249,19 +1259,57 @@ source = "Part 33 procedural language; record 62.6; the low end per docs/working
 
 [[reserved]]
 id = "axiom.calcification_rate.high"
-basis = "the fast-hardening end Tempest and Arcanum push toward, so beliefs calcify and ideologies harden and schism; the baseline is axiom.calcification_rate"
-status = "reserved"
-value = ""
+basis = "the fast-hardening rate Tempest, Arcanum, and Venus push toward, 4x the baseline so beliefs calcify and ideologies harden and schism; the baseline is axiom.calcification_rate"
+status = "set"
+value = "0.004"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "per_tick"
 source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
-id = "axiom.conformity_prestige_strengths.high"
-basis = "the strong-conformity end Tempest and Arcanum push toward, so prestige and conformity drive belief cascades and schism; the baseline is axiom.conformity_prestige_strengths"
+id = "axiom.calcification_cap"
+basis = "the ceiling a calcifying belief approaches (the maximum entrenchment), set at 0.95 so a hardened belief is near-immovable but never perfectly closed; the rate toward it is axiom.calcification_rate"
+status = "set"
+value = "0.95"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
+unit = "fraction"
+source = "Part 28 axiom model; record 62.4"
+
+[[reserved]]
+id = "axiom.calcification_brittleness"
+basis = "how much a near-miss challenge to a calcified belief raises its brittleness (its propensity to shatter rather than bend under a later strong challenge); reserved, the design gives the direction (rising with near-miss challenges) but no magnitude"
 status = "reserved"
 value = ""
+unit = "rate"
+source = "Part 28 axiom model; record 62.4"
+
+[[reserved]]
+id = "axiom.conformity_prestige_strengths.high"
+basis = "the strong-conformity end Tempest, Arcanum, and Venus push toward, 2x each baseline strength so prestige and conformity drive belief cascades and schism; the baseline is axiom.conformity_prestige_strengths"
+status = "set"
+value = "conformity=0.2,prestige=0.2"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
 unit = "strength"
 source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
+
+[[reserved]]
+id = "axiom.fission_threshold"
+basis = "the member-variance at which a group splits into sects (the spread on a central axiom growing too wide); reserved, keyed on the variance of the group's member stances, no magnitude fabricated"
+status = "reserved"
+value = ""
+unit = "variance"
+source = "Part 28 axiom model; record 62.4"
+
+[[reserved]]
+id = "axiom.deviation_threshold"
+basis = "the band around the group mean beyond which a member is flagged as deviating (the Dwarf Fortress cyan highlight, generalized); reserved, keyed on the same stance-variance scale as the fission threshold"
+status = "reserved"
+value = ""
+unit = "distance"
+source = "Part 28 axiom model; record 62.4"
 
 [[reserved]]
 id = "value_metric.conflict_coefficient.high"

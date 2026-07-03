@@ -480,3 +480,19 @@ You approved a war world in the spirit of Dune or Warhammer without being either
 The scenario file is `scenarios/crucible.toml`, and the resolution and load tests now cover it alongside Venus and Europa. Crucible's scarce-fertile-ground physics is a resource-distribution property beyond the §3 thermal-and-medium levers; it is carried today through the dials and a harsh (not lethal-everywhere) field, with a resource-patchiness lever a natural later addition.
 
 Manifest counts after the scenario-file pass: 135 entries, 68 set, 67 reserved (the four reserved `.low` genome and drift siblings Europa's placid dials resolve to were added, surfaced not fabricated).
+
+---
+
+## §10. The structured-value format, and the compound held entries graduated (2026-07-03)
+
+The compound entries §7 held (a set of operator rates, a bundle of named strengths) needed a value shape a single manifest string could carry and a consumer could parse. That format now exists: `CalibrationManifest::require_map` (`crates/sim/src/calibration.rs`) reads a `"key1=v1,key2=v2"` string into a deterministically-ordered `BTreeMap<String, Fixed>`, each value taking the same exact decimal-to-fixed path as `require_fixed`, the membership growing with the data rather than being fixed in code (Principle 11). It fails loud on a reserved, malformed, empty, or duplicate-keyed entry. Tested against both a fixture and the real manifest.
+
+On that format the fully-specified compounds graduated, and the compounds with an unspecified component were split so the specified parts graduate and the unspecified stay reserved, surfaced rather than fabricated:
+
+- **`lang.drift_operator_rates`** and its `.high` and `.low` siblings graduated as maps of the four non-sound-change operators (lexical replacement 0.01, grammaticalisation 0.005, splitting 0.002, borrowing 0.01; the stress siblings 5x and 0.25x each). Sound change stays its own dial.
+- **`axiom.calcification_rate`** split into the rate (0.001, the dial the worlds push) with its `.high` (0.004), plus a new set `axiom.calcification_cap` (0.95). The brittleness (rising with near-miss challenges, a direction the design gives without a magnitude) is a new reserved entry `axiom.calcification_brittleness`.
+- **`axiom.conformity_prestige_strengths`** and its `.high` graduated as maps of the two strengths (conformity 0.1, prestige 0.1; the `.high` 2x each). The fission and deviation thresholds, keyed on group stance-variance with no magnitude given, are new reserved entries `axiom.fission_threshold` and `axiom.deviation_threshold`.
+
+Still held for a component value the design does not fix: the per-axis physiology drains (`physiology.base_metabolic_drain`, `physiology.exertion_drain_coupling`), whose energy-axis rate is given (~1/300 and ~1/400 of capacity per tick) but whose water and other axes are only described as "slower" and "weakly," so they wait on the per-axis magnitudes; and `body.burn_scale`, which is derived from the tissue thermal-damage (protein-denaturation) threshold in the physics floor rather than being an owner-picked scalar, so it graduates from the floor data, not here.
+
+Manifest counts after the compound pass: 141 entries, 76 set, 65 reserved.

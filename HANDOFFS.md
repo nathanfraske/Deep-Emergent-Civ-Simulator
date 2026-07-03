@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-03 (continued): the structured-value format and the compound held entries graduated, on `claude/reserved-values-worksheet`
+
+The compound entries the earlier passes held (a set of drift operator rates, a bundle of belief strengths) needed a value shape a single manifest string could carry and a consumer could parse. Built it and graduated what the owner had specified.
+
+**The format: `CalibrationManifest::require_map` (`crates/sim/src/calibration.rs`).** Reads a `"key=value,..."` string into a deterministically-ordered `BTreeMap<String, Fixed>`, each value on the same exact decimal-to-fixed path as `require_fixed`, the membership data-driven and growing with the world (Principle 11), failing loud on a reserved, malformed, empty, or duplicate-keyed entry. Two tests: a fixture exercising sorted-order parse and the fail-loud paths, and one loading the real manifest to confirm the graduated compound entries parse as maps.
+
+**Graduated on the format.** `lang.drift_operator_rates` and its `.high`/`.low` siblings as maps of the four non-sound-change operators (lexical replacement 0.01, grammaticalisation 0.005, splitting 0.002, borrowing 0.01; siblings 5x and 0.25x). `axiom.calcification_rate` split into the rate (0.001, the dial) with its `.high` (0.004) plus a new set `axiom.calcification_cap` (0.95). `axiom.conformity_prestige_strengths` and its `.high` as maps of the two strengths (0.1, 0.1; the high 2x). New reserved entries surfaced (not fabricated) for the components the design gives a direction but no magnitude: `axiom.calcification_brittleness`, `axiom.fission_threshold`, `axiom.deviation_threshold`. Still held for a missing component value: the per-axis physiology drains (energy given, water and others only "slower"/"weakly") and `body.burn_scale` (derived from the tissue thermal-damage floor, not an owner scalar). Worksheet §10 records it.
+
+**Gate-green.** Full sim lib 388 tests green (calibration 10, +2; scenario 8), fmt and clippy clean, manifest prose clean (0 em dashes). Manifest now 141 entries, 76 set, 65 reserved.
+
+**Where it stopped.** Committed on `claude/reserved-values-worksheet` (PR #59), pending push. NEXT: the per-axis physiology drains need the water and other-axis magnitudes; `body.burn_scale` graduates from the physics floor; the §3 environmental-lever promotion (thermal band and medium to dials) is the remaining big piece to make Venus and Europa fully first-class.
+
+---
+
 ## 2026-07-03 (continued): the dawn floor blind-audited and resolved (record 62.24), Crucible and the scenario files, on `claude/reserved-values-worksheet`
 
 Two things closed after the three design-changes: the war world plus the scenario files, and a blind audit of the dawn stopping condition that the owner asked for, which overturned the earlier reconciliation.

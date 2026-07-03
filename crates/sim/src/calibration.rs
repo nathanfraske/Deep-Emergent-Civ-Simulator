@@ -28,6 +28,7 @@
 
 use civsim_core::Fixed;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 #[allow(clippy::disallowed_types)] // R-CANON-WALK opt-out, justified below
 use std::collections::HashMap;
 use std::fmt;
@@ -220,6 +221,49 @@ impl CalibrationManifest {
         })
     }
 
+    /// A required map value, for a reserved value whose shape is a variable-membership
+    /// set (the per-operator drift rates, a per-axis drain vector, a named-component
+    /// bundle). Parsed from a `"key1=v1,key2=v2"` string into a deterministically-ordered
+    /// map of fixed-point values, each value taking the same exact decimal-to-fixed path
+    /// as [`require_fixed`] so the map is bit-identical across machines, and the membership
+    /// grows with the data rather than being fixed in code (Principle 11). Fails loud if
+    /// reserved, malformed, empty, or carrying a duplicate key.
+    pub fn require_map(&self, id: &str) -> Result<BTreeMap<String, Fixed>, CalibrationError> {
+        let raw = self.require_str(id)?;
+        let mut map = BTreeMap::new();
+        for pair in raw.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                continue;
+            }
+            let (key, val) = pair
+                .split_once('=')
+                .ok_or_else(|| CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("map entry '{pair}' is not key=value"),
+                })?;
+            let key = key.trim().to_string();
+            let value =
+                parse_decimal_fixed(val.trim()).map_err(|detail| CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("value for '{key}': {detail}"),
+                })?;
+            if map.insert(key.clone(), value).is_some() {
+                return Err(CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("duplicate map key '{key}'"),
+                });
+            }
+        }
+        if map.is_empty() {
+            return Err(CalibrationError::BadValue {
+                id: id.to_string(),
+                detail: "empty map".to_string(),
+            });
+        }
+        Ok(map)
+    }
+
     /// Enforce the calibrated profile: every id in `enabled` must exist and be set.
     /// Returns the list of unsatisfied (unknown or reserved) ids as an error.
     pub fn ensure_all_set(&self, enabled: &[&str]) -> Result<(), CalibrationError> {
@@ -333,12 +377,22 @@ unit = "count"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-29"
 source = "Part 54 tier consistency; record 62.9"
+
+[[reserved]]
+id = "sample.map"
+basis = "a structured-value set, exercising require_map"
+status = "set"
+value = "alpha=0.5,gamma=0.25,beta=0.125"
+unit = "set"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
+source = "test fixture"
 "#;
 
     #[test]
     fn parses_and_indexes() {
         let m = CalibrationManifest::from_toml_str(SAMPLE).unwrap();
-        assert_eq!(m.len(), 3);
+        assert_eq!(m.len(), 4);
         assert!(m.is_reserved("compose.max_depth"));
         assert!(m.is_set("evidence.decay_rate"));
     }
@@ -370,6 +424,68 @@ source = "Part 54 tier consistency; record 62.9"
             Fixed::from_ratio(1, 4)
         );
         assert_eq!(m.require_i64("tier.promote_threshold").unwrap(), 8);
+    }
+
+    #[test]
+    fn the_real_manifest_compound_entries_parse_as_maps() {
+        let m = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+        // The four non-sound-change drift operators are a graduated data map.
+        let drift = m.require_map("lang.drift_operator_rates").unwrap();
+        assert_eq!(drift.len(), 4);
+        assert!(drift.contains_key("lexical_replacement") && drift.contains_key("borrowing"));
+        // Its stress siblings scale the whole set and still parse as maps.
+        assert_eq!(
+            m.require_map("lang.drift_operator_rates.high")
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            m.require_map("lang.drift_operator_rates.low")
+                .unwrap()
+                .len(),
+            4
+        );
+        // The two conformity strengths are a map; the fission and deviation thresholds
+        // are separate entries, still reserved, so a scalar read of them fails loud.
+        let conf = m
+            .require_map("axiom.conformity_prestige_strengths")
+            .unwrap();
+        assert_eq!(conf.len(), 2);
+        assert_eq!(conf["conformity"], conf["prestige"]);
+        assert!(m.require_fixed("axiom.calcification_brittleness").is_err());
+        assert!(m.require_fixed("axiom.fission_threshold").is_err());
+    }
+
+    #[test]
+    fn a_map_value_parses_exactly_in_sorted_order_and_fails_loud() {
+        let m = CalibrationManifest::from_toml_str(SAMPLE).unwrap();
+        let map = m.require_map("sample.map").unwrap();
+        assert_eq!(map.len(), 3);
+        assert_eq!(map["alpha"], Fixed::from_ratio(1, 2));
+        assert_eq!(map["beta"], Fixed::from_ratio(1, 8));
+        assert_eq!(map["gamma"], Fixed::from_ratio(1, 4));
+        // BTreeMap sorts keys regardless of source order, so the walk is deterministic.
+        let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+        assert_eq!(keys, ["alpha", "beta", "gamma"]);
+        // A reserved map fails loud like any reserved read.
+        assert!(matches!(
+            m.require_map("compose.max_depth").unwrap_err(),
+            CalibrationError::Reserved(_)
+        ));
+        // A malformed entry (no key=value) is a BadValue, never a silent guess.
+        let bad = CalibrationManifest::from_toml_str(
+            "[[reserved]]\nid = \"x\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"novalue\"\nunit = \"set\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            bad.require_map("x").unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
     }
 
     #[test]
