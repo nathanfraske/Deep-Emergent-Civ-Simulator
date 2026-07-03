@@ -13,19 +13,167 @@
 // limitations under the License.
 
 //! The resident being-kernel (offload-map step 3): per-being physiology run over a device-resident
-//! being buffer, co-resident with the field so the field never reads back per tick. This is the first
-//! slice, the body-thermal exchange (design Part 5.4 / the runner's `phase_body_exchange`): each located
-//! being exchanges heat with its cell by discrete Newton cooling toward the cell temperature. It is the
-//! resident-being-over-resident-field pattern the offload map's step 3 is built around: the being reads
-//! the field at its own cell index and updates its body temperature in place. Bit-identical to the CPU
-//! `phase_body_exchange` on CUDA (the update is the pinned Q32.32 multiply and exact integer add/sub).
-//! The controller forward pass and the homeostasis drain (both saturating, `i128`-accumulated) are the
-//! remaining being-kernel computations to fuse onto this pass.
+//! being buffer, co-resident with the field so the field never reads back per tick, the
+//! resident-being-over-resident-field pattern step 3 is built around. Each kernel is bit-identical to
+//! its CPU oracle on CUDA. Four pieces are here:
+//! - [`gpu_body_thermal`]: the body-thermal exchange (the runner's `phase_body_exchange`), discrete
+//!   Newton cooling of each being toward the field temperature at its own cell (the pinned `q32_mul`).
+//! - [`gpu_metabolize`]: the homeostasis drain (`Homeostasis::metabolize` then `Stock::step`), a
+//!   logistic regeneration toward capacity then a drain, held in `[0, capacity]`.
+//! - [`gpu_activate`]: the controller's activation (`activate`), `clamp(sum sat_mul(w, x), -1, 1)`, the
+//!   saturating sum carried in a two-limb signed 128-bit accumulator.
+//! - [`gpu_sat_mul`]: the saturating Q32.32 multiply the controller and drain both use, exposed for
+//!   its own gate.
+//!
+//! The remaining being-kernel work is the reaction-norm matvec (looping `activate` over the outputs of
+//! a per-being weight matrix) and fusing all four over one resident being buffer.
 
-use crate::prim::{q32_mul, sat_mul};
+use crate::prim::{checked_mul_zero, q32_div, q32_mul, sat_add, sat_mul};
 use crate::stage0::CudaClient;
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
+
+/// Clamp `v` into `[0, cap]` (a Fixed clamp with `cap >= 0`): `0` if `v < 0`, `cap` if `v > cap`, else
+/// `v`. The reserve and the exertion both stay in such a band.
+#[cube]
+fn clamp_cap(v: i64, cap: i64) -> i64 {
+    let lo = select(v < 0i64, 0i64, v);
+    select(lo > cap, cap, lo)
+}
+
+/// The logistic per-step regeneration increment for one reserve, matching `Stock::regen_increment`:
+/// zero if the capacity or the amount is non-positive; else `ratio = amount / capacity`,
+/// `gap = 1 - ratio`, and the increment is `regen_rate * (amount * gap)`, each product checked (zero on
+/// overflow), which keeps the intermediate `amount * gap <= amount` representable before the rate scales
+/// it. The divide uses the pinned `q32_div`; a safe divisor stands in when the guard zeroes the result.
+#[cube]
+fn regen_increment(amount: i64, capacity: i64, regen_rate: i64) -> i64 {
+    let one = 4294967296i64; // ONE
+    let guard = (capacity <= 0i64) || (amount <= 0i64);
+    let denom = select(capacity == 0i64, one, capacity); // never divide by zero when guarded off
+    let ratio = q32_div(amount, denom);
+    let gap = one - ratio;
+    let occupied = checked_mul_zero(amount, gap);
+    let inc = checked_mul_zero(regen_rate, occupied);
+    select(guard, 0i64, inc)
+}
+
+/// One being-and-axis homeostasis drain, matching `Homeostasis::metabolize` followed by `Stock::step`:
+/// the reserve regenerates logistically toward capacity, then a drain of `(base + exertion_coupling) *
+/// capacity` is applied, all held in `[0, capacity]`. `idx` runs over `(being, axis)` pairs row-major
+/// with `n_axes` axes per being, so `axis = idx % n_axes` and `being = idx / n_axes`. Per-axis inputs
+/// (`base_drain`, `exertion_drain`) are indexed by axis, `exertion` by being, and the per-reserve state
+/// (`amount`, `capacity`, `regen_rate`) by `idx`.
+#[cube(launch)]
+#[allow(clippy::too_many_arguments)]
+fn metabolize_kernel(
+    base_drain: &Array<i64>,
+    exertion_drain: &Array<i64>,
+    exertion: &Array<i64>,
+    amount: &Array<i64>,
+    capacity: &Array<i64>,
+    regen_rate: &Array<i64>,
+    n_axes: u32,
+    out: &mut Array<i64>,
+) {
+    let idx = ABSOLUTE_POS;
+    if idx < out.len() {
+        let na = n_axes as usize;
+        let axis = idx % na;
+        let being = idx / na;
+        let one = 4294967296i64;
+        // metabolize: the drain fraction of capacity, then the draw.
+        let ex = clamp_cap(exertion[being], one); // clamp(exertion, 0, 1)
+        let coupling = checked_mul_zero(exertion_drain[axis], ex);
+        let frac = sat_add(base_drain[axis], coupling);
+        let cap = capacity[idx];
+        let draw = checked_mul_zero(frac, cap);
+        // stock.step: regenerate, then apply the (non-negative) draw, staying in [0, cap].
+        let amt = amount[idx];
+        let regen = regen_increment(amt, cap, regen_rate[idx]);
+        let after_regen = clamp_cap(sat_add(amt, regen), cap);
+        let drawn = select(draw < 0i64, 0i64, draw);
+        out[idx] = clamp_cap(after_regen - drawn, cap);
+    }
+}
+
+/// Run the homeostasis drain on the GPU for a located being population, bit-identical to
+/// `Homeostasis::metabolize` + `Stock::step` on CUDA. Per-axis `base_drain`/`exertion_drain` (length
+/// `n_axes`), per-being `exertion`, and per-`(being, axis)` `amount`/`capacity`/`regen_rate` (length
+/// `n_beings * n_axes`, row-major by being then axis). Returns the updated reserve amounts.
+#[allow(clippy::too_many_arguments)]
+pub fn gpu_metabolize(
+    client: &CudaClient,
+    base_drain: &[i64],
+    exertion_drain: &[i64],
+    exertion: &[i64],
+    amount: &[i64],
+    capacity: &[i64],
+    regen_rate: &[i64],
+    n_axes: u32,
+) -> Vec<i64> {
+    let n = amount.len();
+    assert!(n_axes >= 1, "gpu_metabolize: need at least one axis");
+    let na = n_axes as usize;
+    assert_eq!(
+        base_drain.len(),
+        na,
+        "gpu_metabolize: base_drain is per axis"
+    );
+    assert_eq!(
+        exertion_drain.len(),
+        na,
+        "gpu_metabolize: exertion_drain is per axis"
+    );
+    assert_eq!(
+        capacity.len(),
+        n,
+        "gpu_metabolize: capacity is per (being, axis)"
+    );
+    assert_eq!(
+        regen_rate.len(),
+        n,
+        "gpu_metabolize: regen_rate is per (being, axis)"
+    );
+    assert_eq!(
+        n % na,
+        0,
+        "gpu_metabolize: amount length must be a multiple of n_axes"
+    );
+    assert_eq!(
+        exertion.len(),
+        n / na,
+        "gpu_metabolize: exertion is per being"
+    );
+    if n == 0 {
+        return Vec::new();
+    }
+    let bd = client.create_from_slice(i64::as_bytes(base_drain));
+    let ed = client.create_from_slice(i64::as_bytes(exertion_drain));
+    let ex = client.create_from_slice(i64::as_bytes(exertion));
+    let am = client.create_from_slice(i64::as_bytes(amount));
+    let ca = client.create_from_slice(i64::as_bytes(capacity));
+    let rr = client.create_from_slice(i64::as_bytes(regen_rate));
+    let out_h = client.empty(core::mem::size_of_val(amount));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        metabolize_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(bd.clone(), na),
+            ArrayArg::from_raw_parts(ed.clone(), na),
+            ArrayArg::from_raw_parts(ex.clone(), n / na),
+            ArrayArg::from_raw_parts(am.clone(), n),
+            ArrayArg::from_raw_parts(ca.clone(), n),
+            ArrayArg::from_raw_parts(rr.clone(), n),
+            n_axes,
+            ArrayArg::from_raw_parts(out_h.clone(), n),
+        );
+    }
+    i64::from_bytes(&client.read_one_unchecked(out_h)).to_vec()
+}
 
 /// The maximum term count one `activate` sums (a literal unroll bound; the launcher clamps `n_terms`).
 /// The controller's largest activation is `n_in + hidden` terms; 32 covers the dev layout with headroom.
