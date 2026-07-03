@@ -383,16 +383,38 @@ envelope from them (the very input `derive_scale_bits` was documented to expect)
 derives a fine per-quantity scale that resolves the picofarad while every bound above the epsilon
 derives unchanged. (Whether a given wide axis's scale is flagged windowed, carrying fewer than the
 target's significant bits, depends on the reserved significance target, so the axis citations name
-the per-quantity scale without predicting that contingent flag.) The remaining wide-range domains (fluids, mechanics, optics, acoustics, biology),
-`opt.source_power` and `acoustic.source_power` with their cited-source seam, and the constant
-reconciliation (`k_coulomb`, `MU_0`, `DT`, the caps) are the next increments, still splitting PR-3
-by domain.
+the per-quantity scale without predicting that contingent flag.) The electromagnetism ranges landed
+as PR #77.
+
+The scale-aware arithmetic primitive landed as PR #81: `Scaled`, a raw-bit i128 carrier that tracks
+the fractional-bit exponent through each multiply and divide under the canonical rounding, the tool a
+wide-range kernel routes through. The per-class scale mechanism landed as PR #82: where an axis
+reserves its scale per class (`bio.consumer.reference_tolerance`), the class is the quantity
+granularity and the catalogue registers one quantity per class. The two remaining reserved floor-axis
+windows (`mech.second_moment_of_area` [1e-12, 1] m^4, `bio.respiratory_surface` [0, 200] m^2) were set
+as PR #83, and the `opt.source_power` and `acoustic.source_power` cited-source seam is closed (their
+ranges were already owner-set; the fix added the radiometric and acoustic references and anchor
+magnitudes their bases lacked, and dropped the now-derivable scale note).
+
+State of the absolute layer: the data and the four mechanisms (the derivation rule, the catalogue,
+the scale-aware primitive, and the per-class scales) are complete, and every physics axis range is
+owner-set except the per-toxin-class tolerance. What is left divides into two groups, neither
+buildable now without a dependency. Latent until the runtime law-graph evaluator
+that feeds per-quantity-scaled values to the kernels exists (a downstream sim concern, not this
+crate): routing the production kernels through `Scaled`, the `k_coulomb`/`MU_0` constant
+reconciliation that rides that routing (retiring the ad-hoc times-ten-to-the-nine Coulomb scale), and
+storing a wide axis's clamp range on its per-quantity scale rather than the underflow-lossy `Fixed`.
+Doing these now is churn on merged code for capability nothing exercises, and the interface is better
+designed against the real caller than a hypothetical, so they wait for that consumer; the primitive's
+own test already proves the routing pattern. Owner-pending: the per-toxin-class tolerance values (a
+toxicology call per class), the induction tick duration `DT`, and the electromagnetism output caps
+(derivable from the set ranges under the wave-1 cap policy, surfaced for ratification).
 
 On the arc's completion, R-UNITS-PIN's absolute half is consolidated into design.md (Part 55,
 a `Decided and reserved` blockquote, a Part 62 record, a Part 63 bibliography group) and the
 audit log (a Section 1 block, the Section 3 bullet rewritten toward resolved with the emic half
-noted as the remaining Phase 2 work, and the counts moved), per the resolution workflow. Phase
-2 (the emic layer) is the second arc.
+noted as the remaining Phase 2 work, and the counts moved), per the resolution workflow, on the
+owner's sign-off of the resolution. Phase 2 (the emic layer) is the second arc.
 
 ## Cross-references to reconcile on consolidation
 
