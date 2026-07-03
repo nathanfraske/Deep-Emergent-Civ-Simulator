@@ -109,6 +109,9 @@ fn a_race(id: u32) -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Environment variance zero: a homogeneous developmental environment, so this fixture
+        // reproduces the pre-V_E dawn (labelled test value, not owner data).
+        Fixed::ZERO,
         // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
         80,
         18,
@@ -265,6 +268,7 @@ fn race_by_memory_weight(id: u32, memory_weight: Fixed) -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        Fixed::ZERO,
         80,
         18,
     )

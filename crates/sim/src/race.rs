@@ -58,8 +58,20 @@ pub struct Race {
     pub intrinsic: IntrinsicBeliefs,
     /// The non-genetic offset added when a member's cognition is expressed from its genes (the
     /// nurture baseline). At the dawn this is the race's environmental cognition floor; richer
-    /// per-context environment is a follow-on.
+    /// per-context environment is a follow-on. This is the cohort-shared centre; the per-member
+    /// spread around it is `environment_variance`.
     pub environment: Fixed,
+    /// The half-width of the per-being developmental-environment deviation (the V_E spread, design
+    /// Part 25.6): the environmental-variance half of narrow-sense heritability. At expression each
+    /// member draws a mean-zero symmetric offset in `[-environment_variance, +environment_variance)`
+    /// (see [`crate::world`]'s development draw under [`civsim_core::Phase::DEVELOPMENT`]) and adds it
+    /// to `environment`, so two members of one cohort express different minds from one genome-and-
+    /// environment rule and V_E is positive rather than identically zero. The offset is symmetric,
+    /// so it authors variance without shifting the cohort mean (Principle 9). A per-race owner datum,
+    /// reserved (`genome.environment_variance`): the interim [`Fixed::ZERO`] reproduces the current
+    /// homogeneous world bit for bit. The mechanism is fixed Rust; this half-width is data
+    /// (Principle 11).
+    pub environment_variance: Fixed,
     /// The race's natural lifespan in life-cadence steps (design Part 20, R-AGING), an owner-set
     /// per-race datum (design.md:1593). It normalizes a being's raw age into the life fraction a
     /// life-hazard curve is evaluated at (see [`Race::life_fraction`]), so a long-lived and a
@@ -84,6 +96,7 @@ impl Race {
         scheme: GeneticScheme,
         intrinsic: IntrinsicBeliefs,
         environment: Fixed,
+        environment_variance: Fixed,
         lifespan_years: u32,
         maturity_years: u32,
     ) -> Self {
@@ -94,6 +107,7 @@ impl Race {
             scheme,
             intrinsic,
             environment,
+            environment_variance,
             lifespan_years,
             maturity_years,
         }

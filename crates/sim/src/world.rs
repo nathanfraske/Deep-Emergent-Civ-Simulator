@@ -123,6 +123,28 @@ fn assertion_move(
     }
 }
 
+/// The per-being developmental-environment offset (design Part 25.6): a mean-zero symmetric
+/// deviation in `[-spread, +spread)` drawn once per being under [`Phase::DEVELOPMENT`], keyed on
+/// the being's `id` and the `tick` (the dawn passes tick 0, a birth passes the generation). This
+/// is the environmental-variance (V_E) source that makes [`crate::genome::GeneSet::express`] vary
+/// between members of one cohort: today every member rides one shared `race.environment`, so V_E
+/// is identically zero; adding this per-being offset to that baseline authors variance without a
+/// direction, because the map `(2 * unit - 1)` is symmetric about zero and its expectation over a
+/// uniform `unit_fixed` draw in `[0, ONE)` is exactly zero, so it shifts no cohort mean
+/// (Principle 9). `spread` is the race's reserved `environment_variance`, the half-width of the
+/// deviation; at [`Fixed::ZERO`] the offset is exactly zero and the expressed mind is bit-identical
+/// to the pre-offset dawn (the interim that reproduces the homogeneous world). Deterministic:
+/// `unit_fixed` lies in `[0, ONE)` and the symmetric map is a pure function of the seed, the being,
+/// and the tick, so it replays bit for bit; it is non-heritable, applied at expression and never
+/// folded back into a pool's allele frequencies on demotion. Mirrors the mate-preference draw the
+/// dawn and birth already use for symmetric per-being variation.
+fn env_offset(seed: u64, id: StableId, tick: u64, spread: Fixed) -> Fixed {
+    let unit = DrawKey::entity(id.0, tick, Phase::DEVELOPMENT)
+        .rng(seed)
+        .unit_fixed(0);
+    (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
+}
+
 /// The reserved calibrations the gossip loop needs. Read from the manifest; until set,
 /// reading them fails loud rather than running on a fabricated default.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -756,7 +778,15 @@ impl World {
             for _ in 0..band.members {
                 let id = self.reg.mint();
                 let genome = race.pool.promote(self.seed, id.0, race.ploidy());
-                let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
+                // Express the member's mind on the race's environment baseline plus its own
+                // mean-zero developmental offset (the V_E spread, design Part 25.6), keyed on the
+                // member's id at the dawn tick 0. At the reserved interim `environment_variance` of
+                // zero the offset is exactly zero, so this reproduces the pre-offset dawn bit for
+                // bit; a positive spread makes members of one band express different minds from one
+                // genome-and-environment rule, without shifting the band mean.
+                let env =
+                    race.environment + env_offset(self.seed, id, 0, race.environment_variance);
+                let mind = Mind::from_genome(id, &race.genes, &genome, env);
                 // The dawn member's evidence ring is sized from its own expressed memory through
                 // the shared ring-capacity law, not copied from the race template's literal cap,
                 // so a mindful founder carries a larger ring than a forgetful one of the same
@@ -1146,7 +1176,15 @@ impl World {
             self.seed,
             generation,
         );
-        let mind = Mind::from_genome(child, &race.genes, &child_genome, race.environment);
+        // Express the child's mind on the race's environment baseline plus its own mean-zero
+        // developmental offset (design Part 25.6), keyed on the child's id and this generation.
+        // Two siblings recombined identically from one pair of parents at one generation share a
+        // genome but draw distinct offsets from their distinct ids, so V_E makes their expressed
+        // minds differ; at the reserved interim `environment_variance` of zero the offset vanishes
+        // and this reproduces the pre-offset birth.
+        let env =
+            race.environment + env_offset(self.seed, child, generation, race.environment_variance);
+        let mind = Mind::from_genome(child, &race.genes, &child_genome, env);
         let beliefs = self.inherited_beliefs(
             child,
             parent_a,

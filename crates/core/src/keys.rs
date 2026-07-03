@@ -112,6 +112,14 @@ impl Phase {
     /// under genome-derived offspring fitness, keyed on the lineage and the generation so a
     /// run replays bit for bit (design Part 25, the R-BEHAVIOR-EVOLVE selection precedent).
     pub const MATE_CHOICE: Phase = Phase(0x15);
+    /// The per-being developmental-environment offset draw (design Part 25.6): a mean-zero
+    /// symmetric deviation that makes a member's expressed cognition vary from its cohort, the
+    /// environmental-variance (V_E) half of narrow-sense heritability. Keyed on the being's id
+    /// (the tick coordinate carries the dawn's tick 0 or a birth's generation), so a member's
+    /// developmental deviation is a reproducible function of the seed and the being rather than a
+    /// single environment shared across the whole cohort. Non-heritable: it is applied at
+    /// expression and never folded back into a pool's allele frequencies.
+    pub const DEVELOPMENT: Phase = Phase(0x16);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -216,6 +224,12 @@ mod tests {
         assert_ne!(perception, gossip);
         assert_ne!(gossip, language);
         assert_ne!(perception, language);
+        // The developmental-environment phase (0x16) must not alias the mate-choice phase
+        // (0x15) it neighbours, nor the perception phase, on counter zero.
+        let development = DrawKey::entity(42, 9, Phase::DEVELOPMENT).rng(seed).at(0);
+        let mate_choice = DrawKey::entity(42, 9, Phase::MATE_CHOICE).rng(seed).at(0);
+        assert_ne!(development, mate_choice);
+        assert_ne!(development, perception);
     }
 
     #[test]

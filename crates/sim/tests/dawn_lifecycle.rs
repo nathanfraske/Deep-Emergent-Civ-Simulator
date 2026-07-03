@@ -98,6 +98,8 @@ fn a_race() -> Race {
         scheme,
         beliefs(Fixed::ZERO),
         Fixed::from_int(2),
+        // Homogeneous developmental environment (V_E zero): reproduces the pre-V_E dawn.
+        Fixed::ZERO,
         // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
         80,
         18,

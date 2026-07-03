@@ -207,6 +207,14 @@ unit = "fraction"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
 [[reserved]]
+id = "genome.environment_variance"
+basis = "the half-width of the per-being mean-zero developmental-environment deviation added at expression (design Part 25.6), the environmental-variance (V_E) source that makes express() vary within a cohort so narrow-sense heritability is below one; a per-race / world-dialing datum set to the environmental heterogeneity of the race's developmental range, explicitly NOT a human twin-study anchor; the interim zero reproduces the current homogeneous world (every member on one shared environment); the eventual derivation is the intra-region env-field variance once beings are spatially distributed within a band's region, so the spread reads off the world rather than a fabricated constant"
+status = "reserved"
+value = ""
+unit = "cognition_offset"
+source = "Part 25.6 developmental environment; audit section 1d; crates/sim/src/race.rs environment_variance"
+
+[[reserved]]
 id = "genome.loci_per_channel"
 basis = "the loci-per-channel counts"
 status = "set"

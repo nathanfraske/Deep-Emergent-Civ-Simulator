@@ -103,6 +103,8 @@ fn race_with(id: RaceId, lifespan_years: u32, maturity_years: u32) -> Race {
         scheme,
         beliefs(),
         Fixed::from_int(2),
+        // Homogeneous developmental environment (V_E zero) for the life-stage fixture.
+        Fixed::ZERO,
         lifespan_years,
         maturity_years,
     )

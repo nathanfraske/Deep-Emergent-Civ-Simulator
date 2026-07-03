@@ -110,6 +110,8 @@ fn a_race() -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Homogeneous developmental environment (V_E zero): reproduces the pre-V_E birth.
+        Fixed::ZERO,
         // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
         80,
         18,
@@ -232,6 +234,8 @@ fn diverse_race() -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Homogeneous developmental environment (V_E zero): reproduces the pre-V_E birth.
+        Fixed::ZERO,
         // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
         80,
         18,
@@ -480,6 +484,7 @@ fn memory_dominance_race() -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        Fixed::ZERO,
         80,
         18,
     )
