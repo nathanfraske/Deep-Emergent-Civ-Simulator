@@ -41,6 +41,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use civsim_world::OrbitalElements;
+
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
@@ -473,6 +475,14 @@ impl World {
         self.life_cadence_ticks = ticks.max(1);
     }
 
+    /// The life-cadence period in ticks the world currently beats aging and mortality on
+    /// (design Part 20). On the canonical path this is the value derived from the world's orbit
+    /// by [`World::from_manifest_with_orbital`]; with the direct constructor it is the labelled
+    /// dev fallback [`LIFE_CADENCE_TICKS`] until [`World::set_life_cadence`] overrides it.
+    pub fn life_cadence_ticks(&self) -> u64 {
+        self.life_cadence_ticks
+    }
+
     /// Install the age-hazard curve the mortality beat rolls against (design Part 20). Until this
     /// is set the mortality half of the life cadence is a no-op, so the world never runs on a
     /// fabricated hazard shape: the owner supplies the curve, its shape reserved with its basis
@@ -518,6 +528,29 @@ impl World {
         let mut world = World::new(belief_params, meta_params, weights);
         world.channels = channels.clone();
         world.gossip = Some(gossip);
+        Ok(world)
+    }
+
+    /// A world whose calibrations are loaded from the manifest and whose life-cadence beat is
+    /// derived from the world's orbit (design Parts 14.6, 20, 54). This is [`World::from_manifest`]
+    /// plus the celestial derivation: the life-cadence period becomes
+    /// [`crate::clock::ticks_from_seconds`] of the orbital year over the base tick, so aging and
+    /// mortality beat on the world's own year rather than the hardcoded [`LIFE_CADENCE_TICKS`] dev
+    /// fallback. The orbital elements are supplied by the caller (a labelled fixture in tests,
+    /// [`crate::clock::orbital_from_manifest`] once the owner sets the two per-world scalars), never
+    /// fabricated here; the base tick is read live from the manifest as a canonical [`Fixed`]. Fails
+    /// loud if the base tick is reserved or the derived cadence is degenerate, so a world never runs
+    /// on a fabricated or zero cadence.
+    pub fn from_manifest_with_orbital(
+        manifest: &CalibrationManifest,
+        channels: &AccessChannelRegistry,
+        profile: Profile,
+        orbital: OrbitalElements,
+    ) -> Result<Self, CalibrationError> {
+        let mut world = World::from_manifest(manifest, channels, profile)?;
+        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        world.set_life_cadence(cadence);
         Ok(world)
     }
 
@@ -2619,6 +2652,55 @@ source = "Part 9"
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         let chans = AccessChannelRegistry::default();
         assert!(World::from_manifest(&m, &chans, Profile::Calibrated).is_err());
+    }
+
+    #[test]
+    fn the_life_cadence_derives_from_the_orbit_via_from_manifest_with_orbital() {
+        // The non-steering property at the world level: two worlds built from the same dev
+        // manifest and channels, differing only in their orbit, get different life_cadence_ticks,
+        // because the cadence derives from the orbital year over the base tick rather than a
+        // hardcoded per-world number. Earth's orbit reproduces today's interim; a faster world
+        // beats aging on a shorter year, all from one derivation.
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/profiles/dev-fixtures.toml"
+        ))
+        .expect("dev fixtures load");
+        let chans = AccessChannelRegistry::from_toml_str(
+            r#"
+[[channels]]
+id = 1
+name = "witnessed"
+[[channels]]
+id = 2
+name = "told"
+[[channels]]
+id = 3
+name = "said"
+"#,
+        )
+        .unwrap();
+        let earth = World::from_manifest_with_orbital(
+            &manifest,
+            &chans,
+            Profile::Development,
+            OrbitalElements::dev_earth(),
+        )
+        .expect("earth world builds");
+        assert_eq!(earth.life_cadence_ticks(), 31_536_000);
+        let fast_orbit = OrbitalElements {
+            orbital_period_seconds: Fixed::from_int(86_400),
+            rotation_period_seconds: Fixed::from_int(3_600),
+        };
+        let fast =
+            World::from_manifest_with_orbital(&manifest, &chans, Profile::Development, fast_orbit)
+                .expect("fast world builds");
+        assert_eq!(fast.life_cadence_ticks(), 86_400);
+        assert_ne!(
+            earth.life_cadence_ticks(),
+            fast.life_cadence_ticks(),
+            "two orbits, two cadences from one formula"
+        );
     }
 
     fn trace(place: PlaceId, value: ValueId, salience: Fixed) -> Trace {

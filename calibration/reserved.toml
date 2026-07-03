@@ -898,6 +898,28 @@ set_date = "2026-07-01"
 unit = "years_per_generation"
 source = "Part 25, Part 32; docs/time_and_playback.md"
 
+# --- R-CELESTIAL: a world's orbit (Parts 14.6, 32, 20). The two orbital scalars are the
+# physical inputs the canonical time cadences derive from: the life-cadence beat is
+# ticks_from_seconds(world.orbital_period_seconds, time.base_tick_seconds). Owner-set per world,
+# fail-loud while reserved; Earth's values are one option among many, carried only as the labelled
+# dev fixture OrbitalElements::dev_earth (crates/world/src/celestial.rs), never a silent default. ---
+
+[[reserved]]
+id = "world.orbital_period_seconds"
+basis = "the length of the world's year in world-seconds (one full orbit), the physical input the life-cadence beat derives from through ticks_from_seconds over time.base_tick_seconds (crates/sim/src/clock.rs); owner-set per world rather than an Earth default: Earth's 31536000 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default. The Q32.32 range caps a representable year near 2.1e9 world-seconds."
+status = "reserved"
+value = ""
+unit = "seconds_per_orbit"
+source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/sim/src/clock.rs ticks_from_seconds"
+
+[[reserved]]
+id = "world.rotation_period_seconds"
+basis = "the length of the world's day in world-seconds (one full rotation), the physical input a day-night calendar and diurnal cadences derive from; owner-set per world rather than an Earth default: Earth's 86400 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default."
+status = "reserved"
+value = ""
+unit = "seconds_per_rotation"
+source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
+
 # --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
 
 # physiology.reserve_capacity_per_mass RETIRED (worksheet §17, derive audit): the reserve

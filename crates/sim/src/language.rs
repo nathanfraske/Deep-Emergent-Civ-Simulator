@@ -440,6 +440,17 @@ pub struct DriftParams {
     /// The per-generation probability that a lineage innovates one regular form change.
     pub sound_change_rate: Fixed,
     /// How many ticks make one generation (the drift cadence).
+    ///
+    /// DEFERRED derivation (the R-CELESTIAL / R-AGING seam): a generation is a race's maturity in
+    /// world-time, so `generation_ticks` should derive as `race.maturity_years` (in orbits) times
+    /// the orbital year in ticks (`clock::ticks_from_seconds(orbital.orbital_period_seconds,
+    /// base_tick)`). Both halves now exist: the orbital half is the celestial substrate
+    /// (`civsim_world::OrbitalElements` plus `clock::ticks_from_seconds`), and the maturity half is
+    /// the per-race `Race::maturity_years` datum. The wiring is not forced here because `DriftParams`
+    /// carries no `Race` or `OrbitalElements` to derive from; threading them through would change
+    /// this reader's signature and every call site, so it is left as a manifest value
+    /// (`language.generation_ticks`, still the flagged Earth interim) until the drift path carries a
+    /// race and an orbit.
     pub generation_ticks: u64,
 }
 

@@ -170,3 +170,13 @@ status = "set"
 value = "4"
 unit = "ticks"
 source = "dev fixture for Part 33.4 drift"
+
+# --- celestial and time (Parts 14.6, 20, 32) ---
+
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "FIXTURE placeholder, not the owner's value; one world-second per tick so a development world can derive its life cadence from an orbit through ticks_from_seconds"
+status = "set"
+value = "1"
+unit = "seconds_per_tick"
+source = "dev fixture for Part 14.6; crates/sim/src/clock.rs"

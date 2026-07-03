@@ -40,6 +40,11 @@
 //! fast-forward through busy, canonically-active time remains the open problem the design keeps
 //! in the research tier; this module makes the boundary visible instead of pretending it away.
 
+use civsim_core::Fixed;
+use civsim_world::OrbitalElements;
+
+use crate::calibration::{CalibrationError, CalibrationManifest};
+
 /// A steppable simulation: something the observer can advance one canonical tick at a time. A
 /// step is one base tick (for the dawn) or one generation (for the pre-dawn radiation); the
 /// contract is that a step is always a whole canonical unit, never a fraction, so replay is
@@ -54,14 +59,85 @@ pub trait Steppable {
     fn now(&self) -> u64;
 }
 
-/// The life-cadence period in base ticks: how often aging and the mortality roll beat, the unit
-/// the age-hazard curve is scaled to (design Part 20, R-AGING). Owner-set (2026-07-01,
-/// `time.life_cadence_ticks`) to one in-world year, which at the one-second base tick is
-/// 31_536_000 ticks. Note: revisit one in-world month (2_592_000 ticks) if it fits the compute
-/// budget, for smoother visible aging. The aging step is written to run once per this cadence and
-/// is not yet wired into the tick (`crate::world::World::age_step`); this constant is the value it
-/// waits on.
+/// A labelled DEVELOPMENT and TEST fallback for the life-cadence period in base ticks: how often
+/// aging and the mortality roll beat, the unit the age-hazard curve is scaled to (design Part 20,
+/// R-AGING). This is Earth's year at the one-second base tick (365 days of 86,400 seconds), one
+/// option among many, NOT the canonical per-world value: on the canonical path the life cadence
+/// derives from the world's own orbit, [`ticks_from_seconds`] over the orbital year and the base
+/// tick (see [`crate::world::World::from_manifest_with_orbital`]), so a fast world and a slow
+/// world beat aging on their own years. This constant is what [`crate::world::World::new`] falls
+/// back to when no manifest and orbit are supplied, so tests and tools have a concrete cadence
+/// before the owner sets the two per-world orbital scalars.
 pub const LIFE_CADENCE_TICKS: u64 = 31_536_000;
+
+/// Derive a whole-tick cadence from a span of world-time, the canonical bridge from seconds to
+/// ticks (design Part 14.6, Parts 20 and 54). It divides a span in world-seconds by the base-tick
+/// duration and floors to whole ticks, entirely in fixed-point so no float enters the result
+/// (Principle 3). This is the derivation the life-cadence beat runs through, so a world's year in
+/// ticks is a function of its orbit and its base tick rather than a hardcoded constant. It fails
+/// loud rather than panicking, wrapping, or returning a zero cadence: the base tick and the span
+/// must both be positive, the quotient must stay in fixed-point range, and the floored result
+/// must be at least one tick (a span shorter than one base tick would beat every tick).
+pub fn ticks_from_seconds(
+    seconds: Fixed,
+    base_tick_seconds: Fixed,
+) -> Result<u64, CalibrationError> {
+    if base_tick_seconds <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "time.base_tick_seconds".to_string(),
+            detail: "the base-tick duration must be positive to derive a tick cadence".to_string(),
+        });
+    }
+    if seconds <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "time.derived_cadence".to_string(),
+            detail: "the world-time span must be positive to derive a tick cadence".to_string(),
+        });
+    }
+    let quotient =
+        seconds
+            .checked_div(base_tick_seconds)
+            .ok_or_else(|| CalibrationError::BadValue {
+                id: "time.derived_cadence".to_string(),
+                detail: "the tick cadence overflows fixed-point range for this span and base tick"
+                    .to_string(),
+            })?;
+    // The quotient is strictly positive here (both inputs are positive), so the arithmetic
+    // shift right by the fractional bits is an exact floor toward zero and the cast to u64
+    // cannot wrap into a huge value.
+    let ticks = (quotient.to_bits() >> Fixed::FRAC_BITS) as u64;
+    if ticks == 0 {
+        return Err(CalibrationError::BadValue {
+            id: "time.derived_cadence".to_string(),
+            detail: "the span is shorter than one base tick, which would beat every tick"
+                .to_string(),
+        });
+    }
+    Ok(ticks)
+}
+
+/// The base-tick duration as a fixed-point value, read live from the manifest
+/// (`time.base_tick_seconds`). This is the canonical [`Fixed`] source the tick-cadence
+/// derivation ([`ticks_from_seconds`]) uses, distinct from the non-canonical f64
+/// [`SimClock::world_seconds_per_tick`], which stays a view-side display value and must never
+/// carry the canonical division. Fails loud while the value is reserved.
+pub fn base_tick_seconds_fixed(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
+    m.require_fixed("time.base_tick_seconds")
+}
+
+/// Read a world's orbital elements from the two reserved owner scalars
+/// (`world.orbital_period_seconds`, `world.rotation_period_seconds`), failing loud while either
+/// is reserved (never fabricating a value). The two periods are owner-set per world: Earth's
+/// values are one option among many (see [`OrbitalElements::dev_earth`]), never a silent default,
+/// so a reserved manifest correctly refuses to hand back a fabricated orbit rather than defaulting
+/// to Earth. (A free function rather than an inherent `OrbitalElements::from_manifest` because the
+/// type lives in `civsim-world`, which cannot depend on the manifest in `civsim-sim`.)
+pub fn orbital_from_manifest(m: &CalibrationManifest) -> Result<OrbitalElements, CalibrationError> {
+    Ok(OrbitalElements {
+        orbital_period_seconds: m.require_fixed("world.orbital_period_seconds")?,
+        rotation_period_seconds: m.require_fixed("world.rotation_period_seconds")?,
+    })
+}
 
 /// In-world years one pre-dawn radiation generation represents, for the deep-time readout only,
 /// never canonical state. Owner-set (2026-07-01, `time.years_per_generation`) to 10_000 years, a
@@ -406,21 +482,127 @@ mod tests {
     }
 
     #[test]
-    fn the_owner_set_time_values_are_what_was_confirmed() {
-        // The owner set these on 2026-07-01 (calibration/reserved.toml); this test is the
-        // confirmation. Base tick is one in-world second, so a year of ticks is a year of seconds
-        // and playback speed 1.0 reads one in-world second per real second; the life cadence is one
-        // in-world year; a radiation generation reads as ten thousand years.
-        assert_eq!(SimClock::dev_default().world_seconds_per_tick, 1.0);
+    fn the_life_cadence_derives_from_the_orbit_and_base_tick() {
+        // The life cadence is a derivation, not a hardcoded constant: a world's year in
+        // world-seconds divided by the base-tick duration, floored to whole ticks. For the
+        // labelled Earth fixture at the owner-set one-second base tick this reproduces today's
+        // interim of 31,536,000 ticks (one Earth year of seconds), the same value the dev fallback
+        // LIFE_CADENCE_TICKS carries, so the derivation and the fallback agree on Earth. The point
+        // is that the value now comes out of the orbit rather than being written down.
+        let earth = OrbitalElements::dev_earth();
+        let base_tick = Fixed::from_int(1); // time.base_tick_seconds, one world-second per tick
+        let cadence = ticks_from_seconds(earth.orbital_period_seconds, base_tick).unwrap();
         assert_eq!(
-            LIFE_CADENCE_TICKS,
-            365 * 24 * 3600,
-            "one in-world year at a one-second tick"
+            cadence, 31_536_000,
+            "Earth's year of seconds at a one-second tick"
         );
+        assert_eq!(
+            cadence, LIFE_CADENCE_TICKS,
+            "the derivation reproduces the dev fallback on Earth"
+        );
+        // The other owner-set time confirmations still hold.
+        assert_eq!(SimClock::dev_default().world_seconds_per_tick, 1.0);
         assert_eq!(YEARS_PER_GENERATION, 10_000);
-        // At the set base tick, the life cadence is exactly one year of world-time.
-        let c = SimClock::dev_default();
-        assert_eq!(c.world_seconds(LIFE_CADENCE_TICKS), 365.0 * 24.0 * 3600.0);
+    }
+
+    #[test]
+    fn a_fast_world_and_a_slow_world_derive_different_cadences() {
+        // The non-steering property at the derivation level: one formula, two orbits, two
+        // cadences. A fast world (a short year) and a slow, long-year world get different life
+        // cadences from the same function, and neither is the hardcoded Earth constant, so the
+        // cadence is a property of the world's orbit rather than an authored per-world number. The
+        // life cadence a real world runs on (`World::from_manifest_with_orbital`) is exactly this
+        // derivation, so what holds here holds for `World::life_cadence_ticks`.
+        let base_tick = Fixed::from_int(1);
+        // A fast world: a year of one Earth day (86,400 world-seconds).
+        let fast = ticks_from_seconds(Fixed::from_int(86_400), base_tick).unwrap();
+        // A slow, long-year world (a Venus-scale slow spin at world scale): about four Earth years,
+        // well inside the Q32.32 range, so its cadence is much longer than Earth's.
+        let slow = ticks_from_seconds(Fixed::from_int(126_144_000), base_tick).unwrap();
+        assert_ne!(fast, slow, "different orbits derive different cadences");
+        assert_eq!(fast, 86_400);
+        assert_eq!(slow, 126_144_000);
+        assert_ne!(fast, 31_536_000, "the fast world is not the Earth constant");
+        assert_ne!(slow, 31_536_000, "the slow world is not the Earth constant");
+    }
+
+    #[test]
+    fn deriving_a_cadence_fails_loud_on_bad_inputs() {
+        // The derivation never panics, wraps, or returns a zero cadence. A non-positive base tick
+        // or a non-positive orbital span is a fail-loud CalibrationError, and a span shorter than
+        // one base tick (which would beat every tick) is refused rather than floored to zero.
+        assert!(ticks_from_seconds(Fixed::from_int(31_536_000), Fixed::ZERO).is_err());
+        assert!(ticks_from_seconds(Fixed::from_int(31_536_000), Fixed::from_int(-1)).is_err());
+        assert!(ticks_from_seconds(Fixed::ZERO, Fixed::from_int(1)).is_err());
+        assert!(ticks_from_seconds(Fixed::from_int(-5), Fixed::from_int(1)).is_err());
+        // Half a second of world-time at a one-second base tick floors to zero ticks: refused.
+        assert!(ticks_from_seconds(Fixed::from_ratio(1, 2), Fixed::from_int(1)).is_err());
+        // A span of exactly one base tick is the smallest admissible cadence, one tick.
+        assert_eq!(
+            ticks_from_seconds(Fixed::from_int(1), Fixed::from_int(1)).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn orbital_and_base_tick_read_live_and_fail_loud_while_reserved() {
+        // The two orbital scalars are owner-set per world; a reserved manifest hands back a
+        // fail-loud error, never a fabricated Earth orbit. A set manifest reads both back exactly,
+        // and the base-tick reader supplies the canonical Fixed the cadence math divides by (never
+        // the non-canonical f64 world_seconds_per_tick).
+        let reserved = r#"
+[[reserved]]
+id = "world.orbital_period_seconds"
+basis = "b"
+status = "reserved"
+source = "s"
+[[reserved]]
+id = "world.rotation_period_seconds"
+basis = "b"
+status = "reserved"
+source = "s"
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "b"
+status = "set"
+value = "1"
+source = "s"
+"#;
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert!(matches!(
+            orbital_from_manifest(&m).unwrap_err(),
+            CalibrationError::Reserved(_)
+        ));
+        assert_eq!(base_tick_seconds_fixed(&m).unwrap(), Fixed::from_int(1));
+
+        let set = r#"
+[[reserved]]
+id = "world.orbital_period_seconds"
+basis = "b"
+status = "set"
+value = "86400"
+source = "s"
+[[reserved]]
+id = "world.rotation_period_seconds"
+basis = "b"
+status = "set"
+value = "3600"
+source = "s"
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "b"
+status = "set"
+value = "1"
+source = "s"
+"#;
+        let m = CalibrationManifest::from_toml_str(set).unwrap();
+        let orbital = orbital_from_manifest(&m).unwrap();
+        assert_eq!(orbital.orbital_period_seconds, Fixed::from_int(86_400));
+        assert_eq!(orbital.rotation_period_seconds, Fixed::from_int(3_600));
+        // The whole pipeline: manifest to orbit to cadence, all fixed-point and fail-loud.
+        let base_tick = base_tick_seconds_fixed(&m).unwrap();
+        let cadence = ticks_from_seconds(orbital.orbital_period_seconds, base_tick).unwrap();
+        assert_eq!(cadence, 86_400);
     }
 
     #[test]

@@ -32,7 +32,9 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId, StateHasher};
-use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
+use civsim_world::{
+    BiomeSet, Coord3, FlatBounded, OrbitalElements, TileMap, TopologySpace, WorldgenParams,
+};
 
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
@@ -53,10 +55,15 @@ pub struct GenesisParams {
     pub epoch: EpochParams,
     /// The world profile that gates content (whether magic is present), from the test worlds.
     pub profile: WorldProfile,
+    /// The world's orbital elements: its year and day lengths in world-seconds (design Part 14.6,
+    /// Part 32). Owner-set per world; a labelled Earth fixture in development. The canonical time
+    /// cadences derive from these, and they fold into [`LivingWorld::state_hash`].
+    pub orbital: OrbitalElements,
 }
 
 impl GenesisParams {
-    /// A labelled DEVELOPMENT FIXTURE, not owner values (a grounded, no-magic world).
+    /// A labelled DEVELOPMENT FIXTURE, not owner values (a grounded, no-magic world on an Earth
+    /// orbit).
     pub fn dev_default() -> GenesisParams {
         GenesisParams {
             width: 48,
@@ -65,6 +72,7 @@ impl GenesisParams {
             generator: GeneratorParams::dev_default(),
             epoch: EpochParams::dev_default(),
             profile: WorldProfile::grounded(),
+            orbital: OrbitalElements::dev_earth(),
         }
     }
 }
@@ -100,6 +108,10 @@ pub struct LivingWorld {
     pub occupants: LocationIndex,
     pub occupant_info: BTreeMap<OccupantId, OccupantInfo>,
     pub registry: BodyPlanRegistry,
+    /// The world's orbital elements: its year and day lengths in world-seconds (design Part 14.6).
+    /// Carried from [`GenesisParams`] and folded into [`LivingWorld::state_hash`], so the orbit is
+    /// canonical state: two worlds with the same seed but different orbits are different worlds.
+    pub orbital: OrbitalElements,
 }
 
 impl LivingWorld {
@@ -207,6 +219,12 @@ impl LivingWorld {
         let map_hash = self.map.state_hash();
         h.write_u64((map_hash >> 64) as u64);
         h.write_u64(map_hash as u64);
+        // The world's orbit folds in at a pinned position: right after the map hash and before the
+        // regions, orbital period then rotation period, order fixed. A change to the year or day
+        // length changes the world hash deterministically (Principle 3), so the orbit is canonical
+        // state rather than a display value.
+        h.write_fixed(self.orbital.orbital_period_seconds);
+        h.write_fixed(self.orbital.rotation_period_seconds);
         for ((rx, ry), rb) in &self.regions {
             h.write_u32(*rx as u32);
             h.write_u32(*ry as u32);
@@ -297,6 +315,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
         occupants,
         occupant_info,
         registry,
+        orbital: params.orbital,
     }
 }
 
@@ -467,6 +486,7 @@ impl WorldGenesis {
             occupants,
             occupant_info,
             registry: self.registry.clone(),
+            orbital: self.params.orbital,
         }
     }
 
@@ -602,6 +622,37 @@ mod tests {
             a.state_hash(),
             c.state_hash(),
             "a different seed, a different world"
+        );
+    }
+
+    #[test]
+    fn the_orbit_folds_into_the_world_hash() {
+        // The orbit is canonical state (design Part 14.6, Principle 3): the same seed and orbit
+        // hash identically, and the same seed under a different orbit hashes differently, so a
+        // world's year and day length are part of what makes it that world.
+        let mut p = GenesisParams::dev_default();
+        let earth = genesis(0x11FE, &p);
+        assert_eq!(
+            earth.state_hash(),
+            genesis(0x11FE, &p).state_hash(),
+            "same seed and orbit, same hash"
+        );
+        // A different orbit, everything else held: a different world.
+        p.orbital = OrbitalElements {
+            orbital_period_seconds: Fixed::from_int(86_400),
+            rotation_period_seconds: Fixed::from_int(3_600),
+        };
+        let fast = genesis(0x11FE, &p);
+        assert_ne!(
+            earth.state_hash(),
+            fast.state_hash(),
+            "a different orbit is a different world"
+        );
+        // And the different-orbit world is itself reproducible.
+        assert_eq!(
+            fast.state_hash(),
+            genesis(0x11FE, &p).state_hash(),
+            "the different-orbit world replays bit-identically"
         );
     }
 

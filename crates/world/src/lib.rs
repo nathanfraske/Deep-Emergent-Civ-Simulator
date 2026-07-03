@@ -36,9 +36,13 @@
 //!   one tree over the tile map summarising each region by its dominant biome.
 //! - [`view`]: the camera and the multi-zoom glyph view (design Parts 14, 11, 54), a pure
 //!   read of the quadtree that draws the world at any zoom without writing canon.
+//! - [`celestial`]: a world's orbital elements (design Parts 14.6, 32), the year and day
+//!   lengths in fixed-point world-seconds that the canonical time cadences derive from, so a
+//!   world's calendar is a property of its orbit rather than a hardcoded Earth year.
 //!
 //! The multi-scale GPU view (Part 14) is a later swap of the same [`view`] reads.
 
+pub mod celestial;
 pub mod lod;
 pub mod noise;
 pub mod terrain;
@@ -46,6 +50,7 @@ pub mod topology;
 pub mod view;
 pub mod worldgen;
 
+pub use celestial::OrbitalElements;
 pub use lod::{ChunkCoord, NodeSummary, QuadTree, CHUNK};
 pub use terrain::{BiomeDef, BiomeId, BiomeSet, Rgb};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
