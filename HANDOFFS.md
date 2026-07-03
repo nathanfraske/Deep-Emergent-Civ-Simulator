@@ -4,6 +4,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-03 (continued): the derive-from-fundamentals program, seven substrates built to the first wall, on `claude/reserved-values-consolidation`
+
+Recovered a dead session, applied the reserved-value derive-vs-fundamentals audit to the manifest, then built the prerequisite substrates that unblock the steer-derivations, stopping at the first owner wall. All on `claude/reserved-values-consolidation` (based on the worksheet branch, then merged up to main so R-UNITS-PIN and the GPU work are in the basis). 804 tests pass, fmt/clippy/verify.sh clean.
+
+**The audit and its application.** Two adversarial design workflows plus the recovered 5-auditor blind Steering Audit swept the whole manifest. The steer-removals the owner wanted (heritability, phoneme priors, typology, the evidence curves) are almost all blocked on unbuilt substrate; the buildable-today set was small. The audit routing was applied to `calibration/reserved.toml` (worksheet §13 through §17): 8 HIGH steers reverted set to reserved (fail-loud derive sentinels), 5 kept set with flagged basis, 12 de-anchored in basis. Committed (d1a9f1d).
+
+**The seven substrates (autonomous run, prereq-scope build order), each with a non-steering test and reproduce-today or fail-loud, committed and pushed:** (1) maturation-datum (per-race lifespan/maturity + `race_of` map + race-normalized mortality; f20d558); (2) edibility-composition (axis-id-keyed Composition, ingest derived from `laws::satisfaction`, retire intake_yield; FIXED the net_nutrition=1.0 bug; 5000286); (3) celestial-orbital (life_cadence_ticks derives from a per-world orbital period, Earth demoted to a dev fixture; 37649d6); (4) memory-datum (RingCapacityLaw derives the evidence ring from Mind.memory, `require_curve`, fixed the birth ring-copy bug; 91a31e9); (5) env-variance (per-being V_E, Phase::DEVELOPMENT, proven V_P > V_A so h2 < 1; aa8e468); (6) technique-transmission (Knowledge over an opaque DesignId, derives compose.transmission_stability; 93e0352); (7) trace-kind-registry (good_weight + trace/base-rate registries free implication_weights/trace_decay/absence_windows; 4494afe).
+
+**Where it stopped: the first wall, step 8 (breeding-value-tier).** It needs the owner's 25.10 integer-Gaussian measure-identity (inverse-CDF table vs sum-of-uniforms + precision, stamped into world identity), the per-locus vs per-channel GenePool representation, and the heritability graduation. Cannot be built autonomously. Steps 9 through 15 are the remaining walls (channel-attenuation, metabolic-kernel, sex-census, belief-facet-strength, parse-cost-law, institution-adico, composition-evaluator), each with its exact owner decision in the prereq-scope order and the morning summary. NEXT: owner rules the walls; resume building each as it clears; then the blind audit of the whole and the value review.
+
+---
+
 ## 2026-07-03 (continued): the medium lever, the last §3 piece, on `claude/reserved-values-worksheet`
 
 The owner said to do the medium next and then work through all the dials. Built the medium lever, completing §3 as plumbing.
