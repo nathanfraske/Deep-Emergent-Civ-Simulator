@@ -371,6 +371,23 @@ culture and belief layers) and is the second arc; it is not built here.
    ranges must add a cited radiometric and acoustic source-power reference rather than restate the
    axis name.
 
+**Landed increments (the actual sequence, which refined the plan above).** PR-1 (#71) built the
+scale-derivation rule and the `Fixed` bridge. PR-2 (#73) built the canonical quantity catalogue
+over the floor axis set. The electromagnetism increment (this PR) sets the fourteen owner-ratified
+electromagnetism ranges (2026-07-03) and adds the piece the plan did not foresee: a decimal-envelope
+derivation path. The catalogue's first cut read each axis's log2 bounds from the stored `Fixed`
+range, but a bound below the Q32.32 epsilon (the picofarad low end of `elec.capacitance`, ~1e-12)
+underflows that `Fixed` to zero, so the derivation would size the canonical scale and silently lose
+the bottom. The axis now retains its declared decimal bounds, and the derivation reads the log2
+envelope from them (the very input `derive_scale_bits` was documented to expect), so capacitance
+derives a fine per-quantity scale that resolves the picofarad while every bound above the epsilon
+derives unchanged. (Whether a given wide axis's scale is flagged windowed, carrying fewer than the
+target's significant bits, depends on the reserved significance target, so the axis citations name
+the per-quantity scale without predicting that contingent flag.) The remaining wide-range domains (fluids, mechanics, optics, acoustics, biology),
+`opt.source_power` and `acoustic.source_power` with their cited-source seam, and the constant
+reconciliation (`k_coulomb`, `MU_0`, `DT`, the caps) are the next increments, still splitting PR-3
+by domain.
+
 On the arc's completion, R-UNITS-PIN's absolute half is consolidated into design.md (Part 55,
 a `Decided and reserved` blockquote, a Part 62 record, a Part 63 bibliography group) and the
 audit log (a Section 1 block, the Section 3 bullet rewritten toward resolved with the emic half

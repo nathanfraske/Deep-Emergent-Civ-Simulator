@@ -76,20 +76,95 @@ fn log2_floor(v: Fixed) -> Option<i32> {
     }
 }
 
+/// The fractional width the decimal-envelope log2 computes in: an i128 fixed-point wide enough that
+/// a bound far below the Q32.32 epsilon (a picofarad, ~1e-12 ~ 2^-40) keeps its magnitude instead of
+/// underflowing to zero, with headroom for the largest physical bound (~1e9 ~ 2^30) inside i128.
+const WIDE_FRAC: u32 = 80;
+
+/// Parse a decimal string to an i128 fixed-point value with `WIDE_FRAC` fractional bits, the same
+/// integer arithmetic as `Fixed::from_decimal_str` but wide enough that a sub-Q32.32-epsilon
+/// magnitude survives. `None` on a malformed string or an envelope so wide it would overflow i128
+/// (far outside any physical range), in which case the caller falls back to the Fixed-rounded bound.
+fn decimal_to_wide(s: &str) -> Option<i128> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (neg, body) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s.strip_prefix('+').unwrap_or(s)),
+    };
+    let (int_str, frac_str) = body.split_once('.').unwrap_or((body, ""));
+    if frac_str.len() > 30 {
+        return None;
+    }
+    let int_val: i128 = if int_str.is_empty() {
+        0
+    } else {
+        int_str.parse().ok()?
+    };
+    // The shift by WIDE_FRAC must not overflow i128: a magnitude needing more than 127 - WIDE_FRAC
+    // bits is rejected (the caller then reads the Fixed-rounded bound).
+    if int_val != 0 && int_val.unsigned_abs().leading_zeros() <= WIDE_FRAC {
+        return None;
+    }
+    let mut bits: i128 = int_val << WIDE_FRAC;
+    if !frac_str.is_empty() {
+        let digits: i128 = frac_str.parse().ok()?;
+        if digits != 0 && digits.unsigned_abs().leading_zeros() <= WIDE_FRAC {
+            return None;
+        }
+        let mut den: i128 = 1;
+        for _ in 0..frac_str.len() {
+            den = den.checked_mul(10)?;
+        }
+        bits += (digits << WIDE_FRAC) / den;
+    }
+    if neg {
+        bits = -bits;
+    }
+    Some(bits)
+}
+
+/// `floor(log2(|value|))` of a decimal string, exact and free of floating point, or `None` for a
+/// zero or unparseable value. Computed from the wide fixed-point bits, so a bound like `1e-12` that
+/// underflows the Q32.32 range reads its true magnitude (`-40`) rather than the zero the stored
+/// `Fixed` would give.
+fn decimal_log2_floor(s: &str) -> Option<i32> {
+    let raw = decimal_to_wide(s)?.unsigned_abs();
+    if raw == 0 {
+        None
+    } else {
+        Some(127 - raw.leading_zeros() as i32 - WIDE_FRAC as i32)
+    }
+}
+
 /// The scale an axis derives from its set envelope, or `None` when the range is still reserved
 /// (unset), so a reserved axis is left out of the catalogue until the owner sets it. `sig_target`
 /// (the significant bits the low end must retain) and `guard` (integer headroom above the top) are
-/// the owner's reserved numbers.
+/// the owner's reserved numbers. The envelope's log2 bounds are read from the declared decimal bounds
+/// (retained on the axis), since a bound below the Q32.32 epsilon underflows the stored `Fixed` range
+/// to zero; each bound falls back to the Fixed-rounded value only if the decimal is absent or too wide
+/// to parse.
 pub fn axis_scale(axis: &QuantityAxis, sig_target: u32, guard: u32) -> Option<DerivedScale> {
-    let (lo, hi) = match &axis.range {
+    let (lo_fx, hi_fx) = match &axis.range {
         AxisRange::Set { lo, hi } => (*lo, *hi),
         AxisRange::Reserved { .. } => return None,
     };
+    let (lo_dec, hi_dec) = match &axis.range_decimal {
+        Some((lo, hi)) => (Some(lo.as_str()), Some(hi.as_str())),
+        None => (None, None),
+    };
+    // Prefer the declared decimal magnitude per bound; fall back to the Fixed-rounded bound only when
+    // the decimal is absent or beyond the wide parser (never for a physical envelope).
+    let lo_log = lo_dec
+        .and_then(decimal_log2_floor)
+        .or_else(|| log2_floor(lo_fx));
+    let hi_log = hi_dec
+        .and_then(decimal_log2_floor)
+        .or_else(|| log2_floor(hi_fx));
     // The largest bound magnitude drives the top; the smallest non-zero one drives the bottom.
-    let present: Vec<i32> = [log2_floor(lo), log2_floor(hi)]
-        .into_iter()
-        .flatten()
-        .collect();
+    let present: Vec<i32> = [lo_log, hi_log].into_iter().flatten().collect();
     let (hi_log2, lo_log2) = match (present.iter().max(), present.iter().min()) {
         (Some(h), Some(l)) => (*h, *l),
         // A degenerate [0, 0] envelope is a point at the origin: it needs no scale beyond the
@@ -139,6 +214,71 @@ mod tests {
         reg.extend(data_path("fluids_floor.toml")).unwrap();
         reg.extend(data_path("chem_optics_floor.toml")).unwrap();
         reg
+    }
+
+    fn all_floors() -> PhysicsRegistry {
+        let mut reg = floors();
+        reg.extend(data_path("em_floor.toml")).unwrap();
+        reg
+    }
+
+    /// The fourteen electromagnetism axes, now owner-set (2026-07-03), that this arc brings into the
+    /// catalogue. Kept here so the coverage test fails loud if a future axis is added or renamed.
+    const EM_AXES: [&str; 14] = [
+        "elec.charge",
+        "elec.current",
+        "elec.potential",
+        "elec.emf",
+        "elec.resistance",
+        "elec.resistivity",
+        "elec.capacitance",
+        "elec.electric_field",
+        "mag.flux_density",
+        "mag.flux",
+        "mag.permeability",
+        "mag.magnetic_moment",
+        "mag.inductance",
+        "mag.coupling_coefficient",
+    ];
+
+    #[test]
+    fn every_owner_set_em_axis_derives_a_scale_that_resolves_its_low_end() {
+        // The R-UNITS-PIN gate: each ratified electromagnetism range must derive a scale whose ULP
+        // (2^-scale_bits) sits at or below the declared low end, so no axis silently loses its bottom
+        // to the Q32.32 underflow the decimal-envelope path exists to prevent.
+        let reg = all_floors();
+        let cat = build_catalogue(&reg, 16, 1);
+        for id in EM_AXES {
+            let axis = reg.axis(id).unwrap_or_else(|| panic!("{id} present"));
+            assert!(axis.range.is_set(), "{id} range is owner-set");
+            let derived = axis_scale(axis, 16, 1).unwrap_or_else(|| panic!("{id} derives a scale"));
+            if let Some((lo, _)) = &axis.range_decimal {
+                if let Some(lo_log2) = decimal_log2_floor(lo) {
+                    assert!(
+                        derived.scale_bits as i32 + lo_log2 >= 0,
+                        "{id}: scale_bits {} cannot resolve a low end at 2^{}",
+                        derived.scale_bits,
+                        lo_log2
+                    );
+                }
+            }
+            // Each set EM axis joins the built catalogue.
+            assert!(cat.id_of(id).is_some(), "{id} is in the catalogue");
+        }
+        // Capacitance is the one whose picofarad low end underflows the Fixed range, so it must use
+        // the decimal path and derive a windowed scale rather than the (wrong) canonical one.
+        let cap = reg.axis("elec.capacitance").unwrap();
+        assert!(
+            axis_scale(cap, 16, 1).unwrap().windowed,
+            "capacitance derives a windowed scale from its declared decimal envelope"
+        );
+        // Permeability [1, 250000] fits the canonical scale at a modest target.
+        let perm = reg.axis("mag.permeability").unwrap();
+        assert_eq!(
+            axis_scale(perm, 16, 1).unwrap().scale_bits,
+            CANONICAL_SCALE,
+            "a fitting EM ratio keeps the canonical scale"
+        );
     }
 
     #[test]
@@ -221,5 +361,76 @@ mod tests {
                 "a modest target keeps the canonical scale"
             );
         }
+    }
+
+    #[test]
+    fn decimal_log2_floor_reads_sub_epsilon_bounds_the_fixed_range_loses() {
+        // 1e-12 underflows the Q32.32 range to zero as a Fixed (2^-32 ~ 2.3e-10 is the floor), but
+        // the decimal reads its true magnitude, floor(log2(1e-12)) = -40.
+        assert_eq!(decimal_log2_floor("0.000000000001"), Some(-40));
+        // Bounds at or above the epsilon agree with the plain floor-log2.
+        assert_eq!(decimal_log2_floor("1000"), Some(9));
+        assert_eq!(decimal_log2_floor("1"), Some(0));
+        assert_eq!(decimal_log2_floor("0.00000001"), Some(-27)); // 1e-8
+                                                                 // A signed bound reads its magnitude; a zero or empty bound reads nothing.
+        assert_eq!(decimal_log2_floor("-100000000"), Some(26)); // 1e8
+        assert_eq!(decimal_log2_floor("0"), None);
+        assert_eq!(decimal_log2_floor(""), None);
+    }
+
+    #[test]
+    fn a_sub_epsilon_low_bound_derives_a_windowed_scale_that_holds_it() {
+        // A capacitance-like envelope whose low end (1e-12) underflows the Fixed range to zero: the
+        // stored Fixed bound is lost, but the declared decimal is retained and the derivation sizes a
+        // scale fine enough to resolve the picofarad, windowed because the ~52-order envelope exceeds
+        // one canonical scale. This is the sub-epsilon path the EM capacitance axis needs.
+        let toml = r#"
+[[axis]]
+id = "test.capacitance"
+measures = "charge stored per volt"
+unit = "F"
+dimension = "dimensionless"
+scale = "F"
+tier = 2
+range_lo = "0.000000000001"
+range_hi = "1000"
+real = "test envelope"
+"#;
+        let reg = PhysicsRegistry::from_toml_str(toml).unwrap();
+        let axis = reg.axis("test.capacitance").unwrap();
+        // The stored Fixed low bound underflowed to zero, but the declared decimal survived.
+        assert_eq!(
+            axis.range_decimal.as_ref().map(|(lo, _)| lo.as_str()),
+            Some("0.000000000001"),
+            "the declared decimal envelope is retained"
+        );
+        assert!(
+            matches!(axis.range, AxisRange::Set { lo, .. } if lo == Fixed::ZERO),
+            "the sub-epsilon low bound underflowed the stored Fixed to zero"
+        );
+        let derived = axis_scale(axis, 16, 1).unwrap();
+        assert!(
+            derived.windowed,
+            "the wide envelope forces a windowed scale"
+        );
+        assert!(
+            derived.scale_bits >= 40,
+            "scale_bits = {} must resolve 2^-40 ~ 1e-12",
+            derived.scale_bits
+        );
+    }
+
+    #[test]
+    fn a_fitting_axis_derives_the_same_scale_through_the_decimal_path() {
+        // The decimal-envelope path is behaviour-preserving for a bound at or above the epsilon:
+        // chem.acidity [0, 14] keeps the canonical scale exactly as before, the only change being
+        // where the sub-epsilon low end (which acidity does not have) would now read correctly.
+        let reg = floors();
+        let acidity = reg.axis("chem.acidity").expect("acidity is set");
+        assert_eq!(
+            axis_scale(acidity, 16, 1).unwrap().scale_bits,
+            CANONICAL_SCALE,
+            "a fitting axis still keeps the canonical Q32.32 scale under the decimal path"
+        );
     }
 }
