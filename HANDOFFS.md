@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-03 (continued): the three semantic design-changes, on `claude/reserved-values-worksheet`
+
+After the batch graduation the owner said to take the three design-changes next (they unblock the most held values). All three are now made, doc and manifest, verified.
+
+**Change 1: `genome.mutation_rates` re-semanticized to the structural-rearrangement rate.** The design (33.9, Part 25) already distinguished the per-locus point mutation from the per-genome structural mutation (duplicate, delete, or rearrange a locus or linkage group). The manifest had already split out `genome.point_mutation_rate` and `genome.mutation_step`, so `genome.mutation_rates` is the leftover structural rate. Re-semanticized (unit `per_genome_per_generation`, basis names the structural mechanism) and graduated: 0.001 per genome per generation, `.high` 0.02. The scenario dial name is unchanged, so the lever wiring (`scenario.rs` maps the dial name, does not read the value) is untouched. Two more values set.
+
+**Change 2: `lang.drift_operator_rates` de-double-counted.** Sound change is its own dial (`language.sound_change_rate`), so the operator set now covers only lexical replacement, grammaticalisation, splitting, borrowing. Reconciled across the 33.9 blockquote, the audit reserved list (docs/audit.md), and the manifest basis. Stays reserved: a four-operator set needs its structured-value format.
+
+**Change 3: the dawn of language stops on NSM-prime completion.** The dawn coordination now runs until the founding cohort coordinates form-meaning pairings for the NSM semantic primes (the primitive axes of 33.1, the grounding floor, about sixty-five primes), rather than after a fixed round count. The round cap becomes a determinism safety bound scaled to the coordinating-unit size, so a cohort too small to reach the full prime set within the cap yields a thinner starter (the reconciliation that keeps the R-LANG-MODALITY "small cohort, thin language" property true, flagged for the owner's review). Reconciled across 33.9 prose and blockquote, 33.10, the 33.3 and 33.4 modality references, the R-LANG and R-LANG-MODALITY records (62.6, 62.13), and the manifest `lang.dawn_round_cap` basis. The cap's value stays reserved (a safety ceiling); the anchor set is now the NSM prime inventory, no longer a reserved knob.
+
+**Gate-green.** Design verification suite clean (parts 64 gapless, fences balanced 208, records 23 sequential, 0 em dashes, 0 banned adverbs across design.md and audit.md); worksheet and manifest prose clean; calibration (8) and scenario (7) tests green. Manifest now 131 entries, 68 set, 63 reserved. Worksheet §8 records the changes.
+
+**Where it stopped.** Committed on `claude/reserved-values-worksheet` (PR #59), pending push. NEXT: the structured-value format for the four-operator drift set and the other compound held entries; the §3 environmental-lever promotion; the Crucible war world; and the scenario files. One reconciliation to confirm with the owner: the dawn safety cap now scales with cohort size so the "small cohort, thin language" property survives the NSM-completion stopping condition.
+
+---
+
 ## 2026-07-03: Whole-batch calibration audit and graduation (Batches 2-11), two stale drafts merged, on `claude/reserved-values-worksheet`
 
 Two threads closed this session: cleaning up the open draft PRs, and running the reserved-values batch through its audit gate and graduating what cleared.

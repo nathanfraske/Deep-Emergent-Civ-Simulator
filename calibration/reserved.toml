@@ -228,10 +228,12 @@ source = "Part 25 genome model; record 62.5; audit section 1d"
 
 [[reserved]]
 id = "genome.mutation_rates"
-basis = "the point- and structural-mutation rates and the mutation step-size distribution"
-status = "reserved"
-value = ""
-unit = "per_locus_per_generation"
+basis = "the structural-mutation rate: the per-genome per-generation probability a scheme duplicates, deletes, or rearranges a locus or linkage group (the rare deep-time substrate by which schemes themselves drift, design 33/Part 25), distinct from the per-locus point flip (genome.point_mutation_rate) and the additive step size (genome.mutation_step); set an order below the point-flip rate so a rearrangement is rare novelty, not every birth"
+status = "set"
+value = "0.001"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
+unit = "per_genome_per_generation"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
 # Ne, the speciation distance, and the incompatibility-count threshold are surfaced in
@@ -312,7 +314,7 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.drift_operator_rates"
-basis = "the drift operator rates: sound change, lexical replacement, grammaticalisation, splitting, borrowing"
+basis = "the drift operator rates other than sound change, which is its own dial (language.sound_change_rate): lexical replacement, grammaticalisation, splitting, borrowing; a per-operator set, still reserved pending its structured-value format"
 status = "reserved"
 value = ""
 unit = "per_generation"
@@ -344,7 +346,7 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.dawn_round_cap"
-basis = "the dawn dynamic round cap and anchor-set size; performance budget against emergence richness"
+basis = "a determinism safety upper bound on the dawn coordination, modality-blind and scaled to the coordinating-unit size; the dawn now runs until the founding cohort coordinates form-meaning pairings for its NSM semantic primes (the primitive axes, the grounding floor of 33.1, about 65 primes), the cap guaranteeing termination rather than being the stopping condition, so a cohort too small to converge on the full prime set within the cap yields a thinner starter; the anchor set is the NSM prime inventory, and the cap is set above the rounds a founding cohort needs to coordinate those primes"
 status = "reserved"
 value = ""
 unit = "rounds"
@@ -1111,10 +1113,12 @@ source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 3
 
 [[reserved]]
 id = "genome.mutation_rates.high"
-basis = "the volatile-end point- and structural-mutation rates and step-size distribution the Tempest and Arcanum worlds push toward, so genomes churn and novelty arrives fast; the upper useful bound is where heavy mutation breaks legibility or a determinism replay; the baseline is genome.mutation_rates"
-status = "reserved"
-value = ""
-unit = "per_locus_per_generation"
+basis = "the volatile structural-mutation end Tempest and Arcanum push toward, above the baseline so genomes churn and schemes drift fast; its upper bound is where legibility or a determinism replay breaks; the baseline is genome.mutation_rates"
+status = "set"
+value = "0.02"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
+unit = "per_genome_per_generation"
 source = "Part 25 genome model; record 62.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
@@ -1169,7 +1173,7 @@ source = "Part 33 language system; record 62.7; the low end per docs/working/RES
 
 [[reserved]]
 id = "lang.drift_operator_rates.high"
-basis = "the fast lexical-and-grammatical churn end Tempest and Arcanum push toward, so vocabularies and grammars drift and split fast; the baseline is lang.drift_operator_rates"
+basis = "the fast lexical-and-grammatical churn end Tempest and Arcanum push toward, above the baseline so vocabularies and grammars drift and split fast; a transparent multiplier over the non-sound-change operator set; the baseline is lang.drift_operator_rates"
 status = "reserved"
 value = ""
 unit = "per_generation"
