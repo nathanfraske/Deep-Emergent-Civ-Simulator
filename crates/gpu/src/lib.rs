@@ -56,6 +56,7 @@
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
 //! working device only when called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
+pub mod being;
 pub mod field;
 pub mod perceive;
 mod prim;
@@ -63,6 +64,7 @@ pub mod stage0;
 pub mod transcendental;
 pub mod worldgen;
 
+pub use being::gpu_body_thermal;
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul};
 pub use perceive::gpu_notice;
 pub use stage0::{

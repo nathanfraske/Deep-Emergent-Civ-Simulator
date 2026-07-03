@@ -66,6 +66,20 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): offload-map step 3 first slice (being-kernel body-thermal) + a fully-blind self-audit
+
+Continuing the offload map, the being-kernel (step 3) is begun with its cleanest slice, and the new fully-blind audit method (AGENTIC_ADDENDUM section 7) was run against it as a self-check. On `claude/gpu-being-thermal`.
+
+**Built (`crates/gpu/src/being.rs`).** `gpu_body_thermal`: the per-being body-thermal exchange, discrete Newton cooling toward the being's cell temperature, matching the runner's `phase_body_exchange`: `new = bt + q32_mul(exchange, env - bt)`, where `env` is the resident field temperature at the being's cell index. This is the resident-being-over-resident-field pattern step 3 is built around: the being gathers from the field at its own cell and updates in place. Bit-identical to `phase_body_exchange` over 500 beings on the 5090 (`tests/being_gate.rs`). q32_mul-based, no new primitive. The controller forward pass and the homeostasis drain (both SATURATING and i128-accumulated: `sat_mul` detects i64 overflow, `saturating_sum` clamps an i128 sum) are the harder remaining being-kernel computations, needing a saturating primitive and 128-bit accumulation on the device.
+
+**The blind self-audit (a faithful run of the method, including its own limit).** Assembled a packet (Section A substrate contract, B code-only, C spec) in the scratchpad and ran a blind pilot plus a three-auditor panel (Sonnet, varied lenses, each reading only the packet, no repo access). The panel CONVERGED on a "critical" totality finding: the host wrapper's block count, shown in the packet as `ceil(n / threads)`, is a no-op if `n / threads` truncates, which would silently skip the tail beings (n=1 gives 0 blocks). VERIFIED against source per Prime Directive 1: the real code is `(n as u32).div_ceil(threads)`, Rust's std ceiling division (`1.div_ceil(256) == 1`), so the finding is a FALSE POSITIVE, a packet-fidelity artifact, not a code defect (the gate at n=500, not a multiple of 256, already covers every being). This is the method's own documented limit #1 in action: an imprecise Section B (pseudocode `ceil(...)` instead of the verbatim `div_ceil`) laundered a phantom premise the blind panel then reasoned soundly from. LESSON banked: Section B must carry the verbatim launch code, never pseudocode. The audit still earned its keep: the kernel body audited correct by all (matching the gate), and two observations about the unchecked `cell[i]` raw load became an actionable hardening, a host-side precondition assert that every cell index is within the field (matching the CPU, where an off-grid being never reaches the index).
+
+**Green.** fmt, clippy `-D warnings`, rustdoc `-D warnings`, the being gate, and the full GPU suite pass on the 5090.
+
+**Where it stopped, and next.** Step 3's body-thermal slice is on `claude/gpu-being-thermal`. The remaining being-kernel pieces are the controller forward pass and the homeostasis drain, both of which need the saturating-with-i128 arithmetic (a real new primitive: a saturating q32 multiply with overflow detection, and a 128-bit accumulator emulated in two i64 limbs). Those, fused with the body-thermal over one resident being buffer, complete step 3 and unlock the field offload (the field never reads back per tick). Then step 4 (pool-tier aggregate mortality), step 5 (Wright-Fisher drift).
+
+---
+
 ## 2026-07-02 (continued): offload-map steps 1 and 2 built, three GPU kernels bit-identical on the 5090
 
 Following the offload map, the owner picked step 2 (worldgen noise + fused biome) and step 1 (the runner field kernel). All three are built and gated bit-identical on the 5090, on `claude/gpu-field-step`.
