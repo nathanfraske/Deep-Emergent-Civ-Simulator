@@ -21,20 +21,10 @@
 //! offload (an authoritative replacement), not a quantized approximation. This is exactly the
 //! massively-parallel, memory-bound, draw-keyed, fixed-point workload the GPU wins hardest on.
 
-use crate::prim::q32_mul;
+use crate::prim::{q32_mul, splitmix64};
 use crate::stage0::CudaClient;
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
-
-/// The oracle's `splitmix64` (crates/core/src/rng.rs), on native `u64`. CUDA `u64` add and multiply
-/// wrap, matching the oracle's `wrapping_add`/`wrapping_mul`.
-#[cube]
-fn splitmix64(x: u64) -> u64 {
-    let mut z = x + 0x9E3779B97F4A7C15u64; // the SplitMix64 golden gamma
-    z = (z ^ (z >> 30u32)) * 0xBF58476D1CE4E5B9u64;
-    z = (z ^ (z >> 27u32)) * 0x94D049BB133111EBu64;
-    z ^ (z >> 31u32)
-}
 
 /// The perceive notice decision for one (being, trace) pair, bit-identical to the oracle: fold the
 /// draw key `[ABSENT, being, trace, clock, PERCEPTION, slot]` (`Rng::for_coords`), draw the unit roll
