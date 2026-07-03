@@ -63,8 +63,8 @@ use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use crate::value::RaceId;
 use civsim_core::{
-    CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId,
-    StateHasher,
+    gaussian_unit, CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, GaussApprox,
+    Phase, Registry, StableId, StateHasher,
 };
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
@@ -1098,15 +1098,18 @@ impl World {
                 });
                 axiom::confidence_weighted_mean(pairs).unwrap_or(pax.innate_seed)
             };
-            let unit = DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
-                .rng(self.seed)
-                .unit_fixed(0);
+            let deviate = gaussian_unit(
+                &DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
+                    .rng(self.seed),
+                0,
+                GaussApprox::SumOfUniforms { k: 12 },
+            );
             let seed = axiom::inherit_seed(
                 pax.innate_seed,
                 local_mean,
                 heritability,
                 mutation_spread,
-                unit,
+                deviate,
             );
             child_axioms.push(Axiom {
                 axis: pax.axis,

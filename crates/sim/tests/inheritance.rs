@@ -150,13 +150,17 @@ fn mutation_stays_within_its_bound() {
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(99);
     let (parent, band) = parent_and_band(&mut w);
     let spread = Fixed::from_ratio(1, 10);
-    // Blend at h=0.5 is 0.5; the mutated seed stays within [0.4, 0.6].
+    // Blend at h=0.5 is 0.5. The mutation is now a mean-zero Gaussian of standard deviation
+    // `spread`, so it is bounded by the stamped sum-of-uniforms tail (+/- 6 standard deviations,
+    // the honest limit of the k=12 approximation) rather than the former uniform +/- spread.
+    let bound = Fixed::from_int(6).mul(spread);
+    let blend = Fixed::from_ratio(1, 2);
     for gen in 0..8u64 {
         let child = w
             .inherit_child(
                 parent,
                 &band,
-                Fixed::from_ratio(1, 2),
+                blend,
                 spread,
                 gen,
                 Fixed::ONE,
@@ -165,8 +169,8 @@ fn mutation_stays_within_its_bound() {
             .unwrap();
         let s = child_seed(&w, child);
         assert!(
-            s >= Fixed::from_ratio(4, 10) && s <= Fixed::from_ratio(6, 10),
-            "the mutation is bounded: {s:?}"
+            (s - blend).abs() <= bound,
+            "the mutation is bounded by the Gaussian tail: {s:?}"
         );
     }
 }

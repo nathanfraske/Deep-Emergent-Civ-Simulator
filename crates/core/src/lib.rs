@@ -39,6 +39,9 @@
 //!   open per the unresolved R-EVENT backlog item: the kind is a data-defined
 //!   identifier, not a closed Rust enum.
 //! - [`StateHasher`]: the deterministic fixed-order state hash (design Part 3.5).
+//! - [`GaussApprox`] and [`gaussian_unit`]: the stamped integer-Gaussian approximation
+//!   (design 25.10), a mean-zero deviate over the counter-keyed RNG for the quantitative
+//!   breeding-value spine and the continuous mutation steps, with no float.
 //! - The typed canonical-state boundary in [`canonical`].
 
 pub mod arena;
@@ -47,6 +50,7 @@ pub mod canonical;
 pub mod command;
 pub mod event;
 pub mod fixed;
+pub mod gauss;
 pub mod hash;
 pub mod id;
 pub mod keys;
@@ -61,6 +65,7 @@ pub use canonical::{
 pub use command::{content_id, CommandBuffer, CommandKey, EventQueue};
 pub use event::{Event, EventId, EventKindId, EventLog};
 pub use fixed::{Fixed, FRAC_BITS};
+pub use gauss::{gaussian, gaussian_unit, GaussApprox};
 pub use hash::StateHasher;
 pub use id::{EntityHandle, EntityLocation, PoolId, Registry, StableId, StableRef};
 pub use keys::{DrawKey, Phase, ABSENT};

@@ -690,26 +690,27 @@ pub fn confidence_weighted_variance(
 }
 
 /// Inherit one axiom's innate seed for a child (design Part 28): the heritable-plus-encultured
-/// blend `h * parental_seed + (1 - h) * local_mean`, plus a bounded mutation in
-/// `[-mutation_spread, +mutation_spread]` derived from `unit_draw`, a counter-RNG sample in
-/// `[0, 1)` the caller keys on the child and the axis. The heritable term is the parent's own
-/// innate seed, the Friedkin-Johnsen prejudice the enculturation rule anchors to, so a child
-/// resembles both its parent and its local culture and varies by the mutation, closing the
-/// loop between inheritance and enculturation. A pure function of its inputs (the RNG draw is
-/// supplied), so it is bit-identical; the result is clamped to the bipolar range. The mutation
-/// is a bounded uniform draw; the integer-Gaussian shape of design 25.10 is the deferred
-/// refinement, the same reserved method the genome's continuous mutation waits on.
+/// blend `h * parental_seed + (1 - h) * local_mean`, plus a mean-zero Gaussian mutation of
+/// standard deviation `mutation_spread`, formed from `unit_deviate`, a zero-mean unit-variance
+/// Gaussian sample the caller draws through the stamped integer-Gaussian approximation
+/// (`civsim_core::gaussian_unit`) and keys on the child and the axis. The heritable term is the
+/// parent's own innate seed, the Friedkin-Johnsen prejudice the enculturation rule anchors to, so
+/// a child resembles both its parent and its local culture and varies by the mutation, closing the
+/// loop between inheritance and enculturation. A pure function of its inputs (the deviate is
+/// supplied), so it is bit-identical; the result is clamped to the bipolar range. The mutation is
+/// now the same integer-Gaussian primitive the genome's continuous mutation uses (design 25.10),
+/// replacing the former bounded-uniform draw.
 pub fn inherit_seed(
     parental_seed: Fixed,
     local_mean: Fixed,
     heritability: Fixed,
     mutation_spread: Fixed,
-    unit_draw: Fixed,
+    unit_deviate: Fixed,
 ) -> Fixed {
     let h = heritability.clamp(Fixed::ZERO, Fixed::ONE);
     let blend = h.mul(parental_seed) + (Fixed::ONE - h).mul(local_mean);
-    // Map the unit draw in [0, 1) to a symmetric bounded mutation in [-spread, +spread].
-    let mutation = (unit_draw.mul(Fixed::from_int(2)) - Fixed::ONE).mul(mutation_spread);
+    // Scale the unit-variance Gaussian deviate to a mean-zero mutation of the given spread.
+    let mutation = unit_deviate.mul(mutation_spread);
     (blend + mutation).clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
 }
 
@@ -1115,38 +1116,26 @@ mod tests {
     fn inherit_seed_blends_parent_and_culture_with_a_bounded_mutation() {
         let parent = Fixed::ZERO;
         let culture = Fixed::ONE;
-        // No mutation (unit draw 0.5 maps to zero): h=0.5 blends to 0.5.
+        // No mutation (a zero Gaussian deviate maps to zero): h=0.5 blends to 0.5.
         let mid = inherit_seed(
             parent,
             culture,
             Fixed::from_ratio(1, 2),
             Fixed::from_ratio(1, 10),
-            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
         );
         assert_eq!(mid, Fixed::from_ratio(1, 2));
-        // h=1 is pure parent, h=0 pure culture (zero-mutation draw).
+        // h=1 is pure parent, h=0 pure culture (zero-mutation deviate).
         assert_eq!(
-            inherit_seed(
-                parent,
-                culture,
-                Fixed::ONE,
-                Fixed::ZERO,
-                Fixed::from_ratio(1, 2)
-            ),
+            inherit_seed(parent, culture, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
             parent
         );
         assert_eq!(
-            inherit_seed(
-                parent,
-                culture,
-                Fixed::ZERO,
-                Fixed::ZERO,
-                Fixed::from_ratio(1, 2)
-            ),
+            inherit_seed(parent, culture, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO),
             culture
         );
-        // The unit draw at its extremes pushes the seed by at most the spread (within
-        // fixed-point rounding of the 0.1 spread): draw 1 -> +spread, draw 0 -> -spread.
+        // A unit-variance Gaussian deviate scales the mutation by the spread: deviate +1 -> +spread,
+        // deviate -1 -> -spread (within fixed-point rounding of the 0.1 spread).
         let tol = Fixed::from_bits(4);
         let spread = Fixed::from_ratio(1, 10);
         let h = Fixed::from_ratio(1, 2); // heritability; with parent 0 and culture 1 the blend is 0.5
@@ -1156,7 +1145,7 @@ mod tests {
             (hi - (expected + spread)).abs() <= tol,
             "blend 0.5 plus the full +spread: {hi:?}"
         );
-        let lo = inherit_seed(parent, culture, h, spread, Fixed::ZERO);
+        let lo = inherit_seed(parent, culture, h, spread, Fixed::from_int(-1));
         assert!(
             (lo - (expected - spread)).abs() <= tol,
             "blend 0.5 minus the full spread: {lo:?}"

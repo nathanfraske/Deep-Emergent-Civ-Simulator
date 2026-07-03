@@ -588,6 +588,8 @@ mod tests {
                 recombination: vec![Fixed::ZERO; loci.saturating_sub(1)],
             }],
             mutation_rate: mutation,
+            additive_mutation_step: Fixed::ZERO,
+            gauss: civsim_core::GaussApprox::default(),
         }
     }
 

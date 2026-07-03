@@ -133,13 +133,13 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 # --- R-BEING-REP: personality representation (Part 20, record 62.2) ---
 
-[[reserved]]
-id = "being.heritable_fraction"
-basis = "DERIVE, worksheet §13a: narrow-sense heritability is an emergent population statistic, h2 = V_A/(V_A+V_E) read from the express() variance decomposition, not an owner-set input; a flat value is the human twin-study midpoint this entry's own basis forbids. Wire to the genome variance readout."
-status = "reserved"
-value = ""
-unit = "fraction"
-source = "Part 20 being model; record 62.2; audit section 1a"
+# being.heritable_fraction RETIRED (breeding-value tier built, 2026-07-03): narrow-sense
+# heritability is no longer an authored constant. It DERIVES through
+# GenePool::narrow_sense_heritability (crates/sim/src/genome.rs) as V_A/(V_A+V_E), where V_A =
+# additive_variance() = sum 2*p*(1-p)*alpha^2 over the pool's per-locus effects alpha_i (per-race
+# genome data, dev fixtures, NOT a manifest scalar) and V_E = genome.environment_variance (the
+# per-being developmental offset of Part 25.6). Removed rather than left as a fail-loud sentinel for
+# a value the engine no longer authors, the same treatment as physiology.reserve_capacity_per_mass.
 
 [[reserved]]
 id = "being.plasticity_by_age"
@@ -213,13 +213,37 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 # --- R-GENOME: genetics and deep-time evolution (Part 25, record 62.5) ---
 
+# genome.narrow_sense_heritability RETIRED (breeding-value tier built, 2026-07-03): the same
+# quantity as being.heritable_fraction, now a derived read rather than an authored constant. It
+# DERIVES through GenePool::narrow_sense_heritability (crates/sim/src/genome.rs) as V_A/(V_A+V_E),
+# with V_A = additive_variance() = sum 2*p*(1-p)*alpha^2 over the pool's per-locus effects alpha_i
+# (per-race genome data, dev fixtures) and V_E = genome.environment_variance. The V_A==V_E case
+# gives exactly one half, the human twin-study midpoint, as an emergent consequence of the effect
+# vector and the developmental variance rather than an input. Removed, not left as a sentinel.
+
+# genome.gauss_approx: the stamped integer-Gaussian approximation the whole quantitative genome
+# draws through (design 25.10). A world-identity measure value: the choice is folded into every
+# quantitative lineage and into GenePool::hash_into, so changing it re-rolls the world. SET to the
+# sum-of-uniforms method at k=12, whose unit-variance scale sqrt(12/k) is exactly one and whose
+# deviate tail is bounded to +/- 6 (a documented honest limit). The alternative is an inverse-CDF
+# table at a chosen precision, reserved and not built.
 [[reserved]]
-id = "genome.narrow_sense_heritability"
-basis = "DERIVE, worksheet §13a: the same quantity as being.heritable_fraction, an emergent V_A/(V_A+V_E) readout from express(), not an authored constant; 0.5 is the human twin-study figure. Wire to the genome variance decomposition."
+id = "genome.gauss_approx"
+basis = "the integer-Gaussian approximation method and precision (design 25.10), a stamped world-identity value re-rolling every quantitative lineage if changed; sum-of-uniforms k=12 gives unit scale sqrt(12/k)=1 and a +/-6 tail bound; the inverse-CDF-table alternative is reserved"
+status = "set"
+value = "SumOfUniforms{k=12}"
+set_by = "Nathan M. Fraske"
+set_date = "2026-07-03"
+unit = "gauss_approx"
+source = "Part 25.10; crates/core/src/gauss.rs GaussApprox"
+
+[[reserved]]
+id = "genome.additive_mutation_step"
+basis = "the per-gene standard deviation of the mean-zero Gaussian additive step a point mutation applies to an allele's quantitative value (design 25.5, 25.10), the value GeneticScheme.additive_mutation_step reads and the sole lever that grows the additive genetic variance; drawn through genome.gauss_approx so it is integer and float-free; set to the standing per-locus additive standard deviation the mutation-selection-drift balance targets, an order below the effect scale so a lineage's quantitative spine is stable across a generation (Lynch and Walsh mutational-variance targets); a zero step freezes the spine; this is the fail-loud Gaussian-std form of the earlier interim genome.mutation_step placeholder"
 status = "reserved"
 value = ""
-unit = "fraction"
-source = "Part 25 genome model; record 62.5; audit section 1d"
+unit = "trait_units"
+source = "Part 25.5, 25.10; crates/sim/src/genome.rs GeneticScheme::gamete"
 
 [[reserved]]
 id = "genome.environment_variance"

@@ -226,7 +226,7 @@ impl CalibrationManifest {
     /// set (the per-operator drift rates, a per-axis drain vector, a named-component
     /// bundle). Parsed from a `"key1=v1,key2=v2"` string into a deterministically-ordered
     /// map of fixed-point values, each value taking the same exact decimal-to-fixed path
-    /// as [`require_fixed`] so the map is bit-identical across machines, and the membership
+    /// as [`Self::require_fixed`] so the map is bit-identical across machines, and the membership
     /// grows with the data rather than being fixed in code (Principle 11). Fails loud if
     /// reserved, malformed, empty, or carrying a duplicate key.
     pub fn require_map(&self, id: &str) -> Result<BTreeMap<String, Fixed>, CalibrationError> {
@@ -268,7 +268,7 @@ impl CalibrationManifest {
     /// A required response-curve value, for a reserved value whose shape is a set of `(x, y)`
     /// points (the memory-to-ring-slots map, an entrenchment-threshold curve). Parsed from an
     /// `"x1=y1,x2=y2"` string into a [`Curve`], each coordinate taking the same exact
-    /// decimal-to-fixed path as [`require_fixed`] so the curve is bit-identical across machines,
+    /// decimal-to-fixed path as [`Self::require_fixed`] so the curve is bit-identical across machines,
     /// and the membership (the number and placement of points) grows with the data rather than
     /// being fixed in code (Principle 11). The points need not be pre-sorted; [`Curve::new`]
     /// orders them. Fails loud if reserved, malformed, or empty.

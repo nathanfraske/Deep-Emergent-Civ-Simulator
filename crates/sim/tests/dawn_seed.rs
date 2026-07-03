@@ -47,8 +47,11 @@ fn dev_ring_law() -> RingCapacityLaw {
 
 /// A race carrying two cognition genes (acuity, memory), a two-locus biallelic pool, and an
 /// innate disposition (one value axis, one axiom, an evidence-weighted epistemic stance). The
-/// environment baseline is 2; pool-promoted genomes carry zero additive, and the genes are
-/// additive, so a member's expressed acuity equals that baseline.
+/// environment baseline is 2; the pool has a flat additive spine (every per-locus effect zero, the
+/// GenePool::new default), so pool-promoted genomes carry zero additive and, the genes being
+/// additive, a member's expressed acuity equals that baseline. A pool given a non-zero effect
+/// vector through GenePool::with_additive would instead promote a Gaussian additive spread; that
+/// breeding-value path is exercised in tests/breeding_value.rs.
 fn a_race(id: u32) -> Race {
     let genes = GeneSet {
         genes: vec![
@@ -101,6 +104,8 @@ fn a_race(id: u32) -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         RaceId(id),
@@ -260,6 +265,8 @@ fn race_by_memory_weight(id: u32, memory_weight: Fixed) -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         RaceId(id),

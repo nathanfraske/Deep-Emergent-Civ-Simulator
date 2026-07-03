@@ -90,6 +90,8 @@ fn a_race() -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         RaceId(0),

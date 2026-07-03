@@ -95,6 +95,8 @@ fn race_with(id: RaceId, lifespan_years: u32, maturity_years: u32) -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         id,

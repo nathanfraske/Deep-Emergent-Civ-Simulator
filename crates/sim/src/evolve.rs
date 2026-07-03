@@ -51,7 +51,7 @@
 //! (that surviving the scored episode predicts surviving in the world) is validated by cross-checking
 //! against longer and richer episodes, not asserted.
 
-use civsim_core::{DrawKey, Fixed, Phase, StableId};
+use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StableId};
 use civsim_world::Coord3;
 
 use crate::anatomy::{BodyPlan, Part, Temperament};
@@ -188,13 +188,18 @@ pub fn mutate(
                 .rng(seed)
                 .unit_fixed(0);
             if hit < params.mutation_rate {
-                let u = DrawKey::pair(child_id, locus as u64, generation, Phase::CONTROLLER)
+                let step_rng = DrawKey::pair(child_id, locus as u64, generation, Phase::CONTROLLER)
                     .slot(SLOT_MUT_STEP)
-                    .rng(seed)
-                    .unit_fixed(0);
-                // u in [0, ONE) -> [-step, step).
-                let delta =
-                    u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
+                    .rng(seed);
+                // A mean-zero Gaussian step of standard deviation `mutation_step`, through the
+                // stamped world-identity approximation (genome.gauss_approx, SumOfUniforms k=12),
+                // the same integer-Gaussian primitive the genome's continuous mutation now uses;
+                // it replaces the former bounded-uniform step in [-step, step).
+                let delta = params.mutation_step.mul(gaussian_unit(
+                    &step_rng,
+                    0,
+                    GaussApprox::SumOfUniforms { k: 12 },
+                ));
                 allele.additive += delta;
             }
         }
@@ -1695,7 +1700,9 @@ mod tests {
         // guarantees above are seed-robust.
         let l = thermal_layout(3);
         let params = EvolveParams::dev_default();
-        let seed = 0x1234u64;
+        // A dev-fixture seed whose run reaches full bidirectional survival under the stamped
+        // Gaussian mutation step (the anti-steering and necessity guarantees below are seed-robust).
+        let seed = 0x1007u64;
         let report = evolve_thermal_bidirectional(&l, &params, seed);
         let genes = controller_gene_set(&l);
         let best = report

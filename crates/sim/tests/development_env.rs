@@ -118,6 +118,8 @@ fn race(id: u32, acuity_d: Fixed, env_var: Fixed) -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         RaceId(id),

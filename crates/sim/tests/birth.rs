@@ -81,6 +81,8 @@ fn a_race() -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     let intrinsic = IntrinsicBeliefs {
         values: ValueProfile::with([(ValueAxisId(0), 2)]),
@@ -215,6 +217,8 @@ fn diverse_race() -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     let intrinsic = IntrinsicBeliefs {
         values: ValueProfile::with([(ValueAxisId(0), 2)]),
@@ -455,6 +459,8 @@ fn memory_dominance_race() -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     let intrinsic = IntrinsicBeliefs {
         values: ValueProfile::with([(ValueAxisId(0), 2)]),

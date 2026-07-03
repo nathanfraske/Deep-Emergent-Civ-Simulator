@@ -44,15 +44,24 @@
 //! [`IncompatibilityTable`], so a discrete genetic firewall can isolate two pools that are
 //! still close in frequency (25.7).
 //!
-//! What remains deferred, and why: the bounded epistasis lookup (25.4); the quantitative
-//! breeding-value tier (the breeder's-equation channel means alongside the discrete
-//! allele frequencies); the continuous additive mutation step and the infinitesimal
-//! segregation noise, which need the reserved integer-Gaussian approximation of 25.10;
-//! multi-allele loci (the pool is biallelic for now); and the large-Ne Wright-Fisher
-//! approximation, the genetic-distance measure (a fixation index versus a Nei distance),
-//! and the speciation and selection calibrations, which are owner-reserved choices.
+//! The quantitative breeding-value tier is now built on the owner's stamped decisions (25.10):
+//! the [`GenePool`] carries a per-locus average allele-substitution effect alpha_i alongside its
+//! frequencies, so a promoted individual carries a continuous additive spine whose cohort variance
+//! reconstructs the pool's additive genetic variance ([`GenePool::additive_variance`]);
+//! narrow-sense heritability graduates from an authored constant to the derived read `V_A / (V_A +
+//! V_E)` ([`GenePool::narrow_sense_heritability`]); and the continuous additive mutation step
+//! perturbs the spine through the stamped integer-Gaussian approximation (`SumOfUniforms { k: 12 }`,
+//! [`civsim_core::GaussApprox`]), the sole lever that grows additive variance. The effect vector is
+//! per-race genome data (dev fixtures), never a manifest scalar; the stamp is a world-identity
+//! value folded into [`GenePool::hash_into`].
+//!
+//! What remains deferred, and why: the bounded epistasis lookup (25.4); the infinitesimal
+//! segregation noise on gamete formation; multi-allele loci (the pool is biallelic for now); and
+//! the large-Ne Wright-Fisher approximation, the genetic-distance measure (a fixation index versus
+//! a Nei distance), and the speciation and selection calibrations, which are owner-reserved
+//! choices.
 
-use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StateHasher};
 
 /// A data-defined gene identifier (Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -410,13 +419,26 @@ pub struct GeneticScheme {
     /// The per-locus point-mutation probability (a reserved owner value, supplied as data).
     /// A draw below this flips the locus's discrete allele state.
     pub mutation_rate: Fixed,
+    /// The per-gene continuous additive-mutation step-size standard deviation (a reserved owner
+    /// value, `genome.additive_mutation_step`, supplied as data). When a point mutation fires it
+    /// also perturbs the allele's quantitative additive value by a mean-zero Gaussian step of this
+    /// standard deviation (design 25.5, 25.10), the sole lever that grows the additive spine's
+    /// variance. A zero step freezes the spine, reproducing the discrete-only mutation.
+    pub additive_mutation_step: Fixed,
+    /// The stamped integer-Gaussian approximation the additive step draws through
+    /// (`genome.gauss_approx`, a world-identity value; design 25.10). Only consulted when the
+    /// additive step is non-zero, so a scheme with a frozen spine keeps the loud-fail sentinel
+    /// harmlessly.
+    pub gauss: GaussApprox,
 }
 
-// Draw-site slots within the REPRODUCE phase, so the strand, crossover, and mutation rolls
-// of one reproduction cannot collide on counter zero (the R-RNG-COORD slot rule).
+// Draw-site slots within the REPRODUCE phase, so the strand, crossover, and the two mutation
+// rolls (the discrete state flip and the continuous additive step) of one reproduction cannot
+// collide on counter zero (the R-RNG-COORD slot rule).
 const SLOT_STRAND: u32 = 0;
 const SLOT_CROSSOVER: u32 = 1;
 const SLOT_MUTATE: u32 = 2;
+const SLOT_MUTATE_STEP: u32 = 3;
 
 impl GeneticScheme {
     /// Form one gamete from a parent: a haplotype indexed by the gene set's order, each
@@ -495,11 +517,21 @@ impl GeneticScheme {
                 .rng(seed)
                 .unit_fixed(0);
             if roll < self.mutation_rate {
-                // A point mutation flips the discrete allele state to a fresh variant. The
-                // continuous additive-step mutation is deferred (it needs the reserved
-                // integer-Gaussian approximation of 25.10), so the quantitative spine does
-                // not yet mutate here.
+                // A point mutation flips the discrete allele state to a fresh variant.
                 allele.state = AlleleState(allele.state.0.wrapping_add(1));
+                // It also perturbs the continuous quantitative spine by a mean-zero Gaussian
+                // additive step of the reserved per-gene step-size standard deviation (25.5,
+                // 25.10), drawn on its own slot so it never disturbs the state-flip roll. This is
+                // the sole lever that grows the additive variance; a zero step std freezes the
+                // spine, and then the stamped approximation is not consulted at all.
+                if self.additive_mutation_step != Fixed::ZERO {
+                    let step_rng = DrawKey::pair(parent_id, l as u64, generation, Phase::REPRODUCE)
+                        .slot(SLOT_MUTATE_STEP)
+                        .rng(seed);
+                    allele.additive += self
+                        .additive_mutation_step
+                        .mul(gaussian_unit(&step_rng, 0, self.gauss));
+                }
             }
             alleles.push(allele);
         }
@@ -579,16 +611,50 @@ pub struct GenePool {
     /// Per locus, the frequency of allele state 1 in `[0,1]`; state 0's frequency is the
     /// complement.
     freqs: Vec<Fixed>,
+    /// Per locus, the average allele-substitution effect alpha_i: the per-race genome datum that
+    /// makes the pool a quantitative breeding-value tier and not a bare frequency tier. It doubles
+    /// as the pool's per-locus additive mean, the target [`GenePool::promote`] centres a promoted
+    /// individual's additive spine on and [`GenePool::demote`] folds a demoted one back into. A
+    /// flat pool (all zero) has no additive spine and promotes with zero additive, reproducing the
+    /// prior behaviour. Parallel to `freqs`; per-race data (dev fixtures), never a manifest scalar.
+    effects: Vec<Fixed>,
+    /// The stamped integer-Gaussian approximation the additive spine draws through
+    /// (`genome.gauss_approx`, a world-identity value; design 25.10). Consulted by `promote` only
+    /// at loci with a non-zero effect, so a flat pool keeps the loud-fail sentinel harmlessly.
+    gauss: GaussApprox,
 }
 
+// Draw-site slot within the PROMOTE phase for the additive breeding-value deviation, distinct
+// from the default slot 0 the discrete state draw uses, so the two never collide (R-RNG-COORD).
+const SLOT_ADDITIVE: u32 = 1;
+
 impl GenePool {
-    /// A pool over the given per-locus state-1 frequencies.
+    /// A pool over the given per-locus state-1 frequencies, with a flat additive spine (every
+    /// effect zero) and the unset Gaussian sentinel. A pool built this way promotes with zero
+    /// additive, exactly as before the breeding-value tier landed; give it a spine with
+    /// [`GenePool::with_additive`].
     pub fn new(scheme: SchemeId, effective_size: u32, freqs: Vec<Fixed>) -> Self {
+        let effects = vec![Fixed::ZERO; freqs.len()];
         GenePool {
             scheme,
             effective_size,
             freqs,
+            effects,
+            gauss: GaussApprox::default(),
         }
+    }
+
+    /// Attach the quantitative breeding-value spine: the per-locus average allele-substitution
+    /// effects alpha_i (per-race genome data) and the stamped Gaussian approximation the spine
+    /// draws through. The effects vector is truncated or zero-padded to the locus count so it stays
+    /// parallel to `freqs`. This is the constructor the dawn and the pre-dawn epoch use once a race
+    /// carries its effect vector; a flat pool leaves it at the default.
+    pub fn with_additive(mut self, effects: Vec<Fixed>, gauss: GaussApprox) -> Self {
+        let mut effects = effects;
+        effects.resize(self.freqs.len(), Fixed::ZERO);
+        self.effects = effects;
+        self.gauss = gauss;
+        self
     }
 
     /// The number of loci tracked.
@@ -599,6 +665,71 @@ impl GenePool {
     /// The state-1 frequency at a locus, or `None` if out of range.
     pub fn freq(&self, locus: usize) -> Option<Fixed> {
         self.freqs.get(locus).copied()
+    }
+
+    /// The average allele-substitution effect alpha_i at a locus, the pool's per-locus additive
+    /// mean, or `None` if out of range.
+    pub fn effect(&self, locus: usize) -> Option<Fixed> {
+        self.effects.get(locus).copied()
+    }
+
+    /// The stamped integer-Gaussian approximation the additive spine draws through.
+    pub fn gauss_approx(&self) -> GaussApprox {
+        self.gauss
+    }
+
+    /// Fold the pool's canonical state into a hash in a fixed byte order (design Part 3.5), so the
+    /// breeding-value tier is visible in the world's reproducible identity: the scheme, the
+    /// effective size, the per-locus frequencies, the per-locus effects (the locked-representation
+    /// additive spine), and the stamped Gaussian approximation. The order is the contract; the
+    /// caller feeds pools in a fixed canonical order.
+    pub fn hash_into(&self, hasher: &mut StateHasher) {
+        hasher.write_u32(self.scheme.0);
+        hasher.write_u32(self.effective_size);
+        hasher.write_u32(self.freqs.len() as u32);
+        for &p in &self.freqs {
+            hasher.write_fixed(p);
+        }
+        hasher.write_u32(self.effects.len() as u32);
+        for &alpha in &self.effects {
+            hasher.write_fixed(alpha);
+        }
+        self.gauss.hash_into(hasher);
+    }
+
+    /// The additive genetic variance V_A the pool implies: the canonically-ordered sum over loci
+    /// of `2 * p_i * (1 - p_i) * alpha_i^2`, the standing additive variance of a set of biallelic
+    /// loci under Hardy-Weinberg and linkage equilibrium (Falconer and Mackay; Lynch and Walsh).
+    /// The accumulation is order-independent in 128-bit space (like [`Fixed::sum_bits`]), so the
+    /// value is the same for any partition of the loci across threads. A flat pool returns zero.
+    pub fn additive_variance(&self) -> Fixed {
+        let terms = self
+            .freqs
+            .iter()
+            .zip(self.effects.iter())
+            .map(|(&p, &alpha)| {
+                // 2 * p * (1 - p) * alpha^2, all non-negative.
+                let two_pq = Fixed::from_int(2).mul(p).mul(Fixed::ONE - p);
+                two_pq.mul(alpha).mul(alpha)
+            });
+        Fixed::saturating_sum(terms)
+    }
+
+    /// Narrow-sense heritability, the derived read `V_A / (V_A + V_E)` (design 25.6, 25.10): the
+    /// fraction of phenotypic variance that is additive-genetic and so transmitted to offspring
+    /// (Falconer's offspring-on-midparent regression). `env_var` is the environmental variance V_E
+    /// the developmental-environment offset supplies (`crate::race::Race::environment_variance`).
+    /// This graduates the former authored `genome.narrow_sense_heritability` constant into a
+    /// population statistic read from the pool's own effects and frequencies (Principle 11). A pool
+    /// with no additive and no environmental variance returns zero (there is no heritable spread to
+    /// speak of), rather than dividing by zero.
+    pub fn narrow_sense_heritability(&self, env_var: Fixed) -> Fixed {
+        let va = self.additive_variance();
+        let denom = va + env_var;
+        if denom == Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        va.div(denom)
     }
 
     /// One generation of Wright-Fisher drift: each locus's frequency is resampled as the
@@ -676,7 +807,11 @@ impl GenePool {
                 })
                 .collect()
         };
+        // The daughter inherits the parent's breeding-value spine: the same per-locus effects and
+        // the same stamped approximation travel with the founders, so a forked pool stays a
+        // quantitative tier and keeps the world identity.
         GenePool::new(self.scheme, recovery_size, freqs)
+            .with_additive(self.effects.clone(), self.gauss)
     }
 
     /// A fixed-point genetic distance to another pool: the mean over shared loci of the
@@ -703,28 +838,62 @@ impl GenePool {
         self.distance(other) >= threshold
     }
 
-    /// Promote an explicit genome from the pool by sampling, per locus, `ploidy` allele
-    /// states from the frequencies (Hardy-Weinberg: each allele drawn independently), keyed
-    /// on the new being's id so the individual is reproducible and statistically consistent
-    /// with the pool (design 25.8). The additive value is left at zero here (the
-    /// quantitative breeding-value tier is a follow-on); the discrete state is what the
-    /// pool tracks.
+    /// Promote an explicit genome from the pool (design 25.8): per locus, sample `ploidy` discrete
+    /// allele states from the frequencies (Hardy-Weinberg, each allele independent) for the
+    /// Mendelian layer, and assign the continuous quantitative additive spine so a promoted cohort
+    /// reconstructs the pool's additive genetic variance. Keyed on the new being's id so the
+    /// individual is reproducible and statistically consistent with the pool.
+    ///
+    /// The additive spine, per locus, is the pool's per-locus additive mean (the effect alpha_i)
+    /// plus a mean-zero within-locus deviation scaled to the locus additive standard deviation
+    /// `sqrt(2 p (1 - p)) * |alpha|` (one square root per locus, never in a sub-draw loop), drawn
+    /// through the stamped Gaussian approximation on a slot distinct from the state draw. The
+    /// whole-locus deviation is split evenly across the ploidy alleles, so `express()` sums to it.
+    /// Across promoted individuals the additive spine's variance reconstructs
+    /// [`GenePool::additive_variance`] (the tier-consistency invariant), while its mean matches the
+    /// pool, so a promote-then-demote round trip is unbiased. A zero-effect locus carries no
+    /// additive and draws nothing, so a flat pool with an unset stamp promotes exactly as before.
     pub fn promote(&self, seed: u64, individual_id: u64, ploidy: usize) -> Genome {
+        let ploidy_fx = Fixed::from_int(ploidy.max(1) as i32);
+        // The per-allele additive share at each locus (identical across the haplotypes of one
+        // locus): the mean effect alpha plus the split within-locus Gaussian deviation.
+        let per_allele_additive: Vec<Fixed> = self
+            .freqs
+            .iter()
+            .enumerate()
+            .map(|(locus, &p)| {
+                let alpha = self.effects.get(locus).copied().unwrap_or(Fixed::ZERO);
+                if alpha == Fixed::ZERO {
+                    return Fixed::ZERO;
+                }
+                let g = gaussian_unit(
+                    &DrawKey::pair(individual_id, locus as u64, 0, Phase::PROMOTE)
+                        .slot(SLOT_ADDITIVE)
+                        .rng(seed),
+                    0,
+                    self.gauss,
+                );
+                // Locus additive standard deviation sqrt(2 p (1 - p)) * |alpha|.
+                let two_pq = Fixed::from_int(2).mul(p).mul(Fixed::ONE - p);
+                let sigma = two_pq.sqrt().mul(alpha.abs());
+                alpha + sigma.mul(g).div(ploidy_fx)
+            })
+            .collect();
         let mut haps = Vec::with_capacity(ploidy);
         for h in 0..ploidy {
-            let rng = DrawKey::pair(individual_id, h as u64, 0, Phase::PROMOTE).rng(seed);
+            let state_rng = DrawKey::pair(individual_id, h as u64, 0, Phase::PROMOTE).rng(seed);
             let alleles = self
                 .freqs
                 .iter()
                 .enumerate()
                 .map(|(locus, &p)| {
-                    let s = if rng.unit_fixed(locus as u64) < p {
+                    let s = if state_rng.unit_fixed(locus as u64) < p {
                         1u16
                     } else {
                         0
                     };
                     Allele {
-                        additive: Fixed::ZERO,
+                        additive: per_allele_additive[locus],
                         state: AlleleState(s),
                         origin: individual_id as u32,
                     }
@@ -738,30 +907,43 @@ impl GenePool {
         }
     }
 
-    /// Fold a demoted individual's genotype back into the pool's frequencies (design 25.8):
-    /// each locus's frequency moves toward the individual's state-1 fraction, weighted by
-    /// the pool's size, with fixed rounding. Linkage disequilibrium and family structure
-    /// are lost, the documented cost of demotion.
+    /// Fold a demoted individual's genotype back into the pool (design 25.8): each locus's
+    /// frequency moves toward the individual's state-1 fraction, and the pool's per-locus additive
+    /// mean (the effect alpha_i) moves toward the individual's per-locus additive sum, both by the
+    /// same `2Ne`-weighted running-mean update, canonically ordered, with fixed rounding. Because
+    /// [`GenePool::promote`] centres a promoted individual's per-locus additive sum on the pool
+    /// mean, the additive fold is unbiased: a promote-then-demote round trip leaves the additive
+    /// mean unchanged in expectation. Linkage disequilibrium and family structure are lost, the
+    /// documented cost of demotion.
     pub fn demote(&mut self, genome: &Genome) {
         let two_ne = (self.effective_size.saturating_mul(2)).min(i32::MAX as u32) as i32;
-        for (locus, p) in self.freqs.iter_mut().enumerate() {
-            let total: i32 = genome
-                .haps
-                .iter()
-                .filter_map(|h| h.alleles.get(locus))
-                .count() as i32;
+        let two_ne_fx = Fixed::from_int(two_ne);
+        for locus in 0..self.freqs.len() {
+            let mut total: i32 = 0;
+            let mut ones: i32 = 0;
+            let mut additive_sum = Fixed::ZERO;
+            for hap in &genome.haps {
+                if let Some(a) = hap.alleles.get(locus) {
+                    total += 1;
+                    if a.state == AlleleState(1) {
+                        ones += 1;
+                    }
+                    additive_sum += a.additive;
+                }
+            }
             if total == 0 {
                 continue;
             }
-            let ones: i32 = genome
-                .haps
-                .iter()
-                .filter_map(|h| h.alleles.get(locus))
-                .filter(|a| a.state == AlleleState(1))
-                .count() as i32;
-            let numerator = p.mul(Fixed::from_int(two_ne)) + Fixed::from_int(ones);
             let denom = Fixed::from_int(two_ne + total);
-            *p = numerator.div(denom).clamp(Fixed::ZERO, Fixed::ONE);
+            // Frequency fold (unchanged semantics): toward the individual's state-1 fraction.
+            let p = self.freqs[locus];
+            let numerator = p.mul(two_ne_fx) + Fixed::from_int(ones);
+            self.freqs[locus] = numerator.div(denom).clamp(Fixed::ZERO, Fixed::ONE);
+            // Additive-mean fold: toward the individual's per-locus additive sum. The individual
+            // contributes `total` allele copies whose sum has expectation `total * alpha`, so the
+            // `2Ne`-weighted mean leaves alpha unchanged in expectation.
+            let alpha = self.effects[locus];
+            self.effects[locus] = (alpha.mul(two_ne_fx) + additive_sum).div(denom);
         }
     }
 
@@ -1188,6 +1370,8 @@ mod tests {
                 recombination: vec![Fixed::from_int(recomb); n.saturating_sub(1)],
             }],
             mutation_rate: mutation,
+            additive_mutation_step: Fixed::ZERO,
+            gauss: GaussApprox::default(),
         }
     }
 
