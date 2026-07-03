@@ -4,6 +4,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-03 (continued): the environmental levers promoted (field and thermal band), on `claude/reserved-values-worksheet`
+
+The owner said to take the §3 environmental-lever promotion so Venus and Europa run their environment through the lever system. Did the two parts that map to the existing direction-token mechanism; scoped the medium as a separate increment.
+
+**The `[environment]` block (`crates/sim/src/scenario.rs`).** `Scenario` gains an `environment: BTreeMap<String, Direction>` field parsed from a new `[environment]` block, with an `environment_dial` accessor. `Scenario::resolve` now resolves the change dials and the environmental levers by the same mechanism (`self.dials.iter().chain(self.environment.iter())`), both carried into the same review queue, so a world's environment is levered and calibration-gated exactly like its change engine and a dangling environment reference fails loud the same way.
+
+**Manifest (all reserved, surfaced not set).** §3 was not part of the ratified change-dial batches, so the promotion adds the plumbing and the magnitudes stay the owner's, the recommended value in each basis. Added `field.diffusion.high`, `field.relaxation.low`, `field.body_exchange.high`, and the per-race thermal band `physiology.thermal_setpoint` (base, `.high`, `.low`) and `physiology.thermal_half_band` (base, `.high`, `.low`).
+
+**Scenario files.** `venus.toml` and `europa.toml` gained `[environment]` blocks (Venus: dense diffusive field, fast body coupling, heat-shifted widened band; Europa: near-static under-ice field, fast immersion coupling, cold narrow band). The four canonical worlds carry none, so temperate is the unlevered baseline. The resolution test extends to the environment, and a dedicated test confirms both worlds resolve their environment against the real manifest and surface the environment magnitudes in the review queue.
+
+**Gate-green.** Scenario tests 9 (+1), fmt and clippy clean, scenario-comment and manifest prose clean (0 em dashes). Manifest now 150 entries, 76 set, 74 reserved. Worksheet §11 records it.
+
+**Where it stopped.** Committed on `claude/reserved-values-worksheet` (PR #59), pending push. NEXT (the remaining §3 piece): the medium (§3c), which is a physics `Substance` selected categorically (air, water, dense-toxic) from the floors rather than a `real`/`high`/`low` dial, plus the proposed `medium.toxicity` harm-axis extension, so it is a separate larger increment; and setting the environment magnitudes when the owner takes the §3 batch.
+
+---
+
 ## 2026-07-03 (continued): the structured-value format and the compound held entries graduated, on `claude/reserved-values-worksheet`
 
 The compound entries the earlier passes held (a set of drift operator rates, a bundle of belief strengths) needed a value shape a single manifest string could carry and a consumer could parse. Built it and graduated what the owner had specified.

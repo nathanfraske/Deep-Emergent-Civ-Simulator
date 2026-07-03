@@ -496,3 +496,17 @@ On that format the fully-specified compounds graduated, and the compounds with a
 Still held for a component value the design does not fix: the per-axis physiology drains (`physiology.base_metabolic_drain`, `physiology.exertion_drain_coupling`), whose energy-axis rate is given (~1/300 and ~1/400 of capacity per tick) but whose water and other axes are only described as "slower" and "weakly," so they wait on the per-axis magnitudes; and `body.burn_scale`, which is derived from the tissue thermal-damage (protein-denaturation) threshold in the physics floor rather than being an owner-picked scalar, so it graduates from the floor data, not here.
 
 Manifest counts after the compound pass: 141 entries, 76 set, 65 reserved.
+
+---
+
+## §11. The environmental levers promoted (2026-07-03): the field and the thermal band
+
+§3a (the temperature field) and §3b (the per-race thermal band) are now first-class levers, resolved through the same direction-token mechanism as the change dials. A scenario carries a new `[environment]` block (`crates/sim/src/scenario.rs`, `Scenario::environment`) whose entries push `field.*` and `physiology.thermal_*` levers by the same `real`/`high`/`low` tokens, resolved by `Scenario::resolve` alongside the change dials and carried into the same review queue, so a world's environment is levered and calibration-gated exactly like its change engine, and a dangling environment reference fails loud the same way.
+
+The manifest gained the sibling and thermal-band entries, all **reserved** (surfaced with the recommended value in the basis, not set: §3 was not part of the ratified change-dial batches, so the promotion adds the plumbing and the magnitudes stay yours to set): `field.diffusion.high` (~0.22, dense-medium diffusion below the 0.25 stencil bound), `field.relaxation.low` (~0.005, near-static under ice), `field.body_exchange.high` (~0.20, fast body-to-medium coupling), and the per-race thermal band `physiology.thermal_setpoint` (~310 K base, `.high` ~340 K thermophile, `.low` ~275 K psychrophile) and `physiology.thermal_half_band` (~8 K base, `.high` ~15 K widened, `.low` ~6 K narrow).
+
+`venus.toml` and `europa.toml` carry `[environment]` blocks: Venus levers a dense diffusive field, fast body coupling, and a heat-shifted widened band; Europa levers a diffusive but near-static (under-ice) field, fast immersion coupling, and a cold narrow band. The four canonical worlds carry no `[environment]` block, so temperate is the unlevered baseline. The resolution test extends to cover the environment, and a dedicated test confirms both worlds resolve their environment against the real manifest and surface the environment magnitudes in the review queue.
+
+Remaining in §3: the medium (§3c, gill respiration, buoyancy, the toxicity harm axis). Unlike the field and thermal band, a world's medium is a physics `Substance` selected categorically (air, water, dense-toxic atmosphere) from the floors (`crates/physics/data/*.toml`), not a `real`/`high`/`low` dial, and `medium.toxicity` is a proposed floor extension. That is a separate, larger increment (a categorical medium selection plus the harm-axis extension), the next step to make Venus's toxic-poor respiration and Europa's gill breathing first-class.
+
+Manifest counts after the environment-lever pass: 150 entries, 76 set, 74 reserved.

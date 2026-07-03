@@ -1108,12 +1108,28 @@ unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
 
 [[reserved]]
+id = "field.diffusion.high"
+basis = "the dense-medium diffusion end Venus and Europa pull, thermal diffusivity per cell and tick toward the 0.25 four-neighbour stencil stability bound (a dense convective atmosphere or water conducts heat toward uniform); recommended about 0.22, below the stability bound; reserved for the owner; the baseline is field.diffusion"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
+
+[[reserved]]
 id = "field.relaxation"
 basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick"
 status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
+
+[[reserved]]
+id = "field.relaxation.low"
+basis = "the near-static end Europa pulls, the rate a cell relaxes to its solar-and-biome baseline, near zero under lightless ice with almost no forcing; recommended about 0.005; reserved; the baseline is field.relaxation"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 
 [[reserved]]
 id = "field.body_exchange"
@@ -1132,6 +1148,62 @@ source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 3
 # baseline entry above; only the pushed directions need a sibling. Every one stays reserved: the
 # stress-world extremes are the owner's to set, surfaced here rather than fabricated, each basis
 # naming the direction and the useful bound the scenario is meant to find.
+
+[[reserved]]
+id = "field.body_exchange.high"
+basis = "the fast body-to-medium coupling end Venus and Europa pull (the dense hot atmosphere cooks a body, water immersion couples it fast; Newton cooling, law.convective_flux); recommended about 0.20; reserved; the baseline is field.body_exchange"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_setpoint"
+basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_setpoint.high"
+basis = "the heat-shifted set point a thermophile race carries (Venus); recommended about 340 K, the thermophile adaptation; the baseline is physiology.thermal_setpoint"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_setpoint.low"
+basis = "the cold set point a psychrophile race carries (Europa); recommended about 275 K, just above the ocean freezing point; the baseline is physiology.thermal_setpoint"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_half_band"
+basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; recommended about 8 K for a temperate race; reserved"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_half_band.high"
+basis = "the widened survivable band a heat-adapted race carries (Venus); recommended about 15 K, shifted and widened toward the heat though the runaway surface still lies outside it; the baseline is physiology.thermal_half_band"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
+
+[[reserved]]
+id = "physiology.thermal_half_band.low"
+basis = "the narrow band a cold-stable specialist carries (Europa); recommended about 6 K in a stable cold ocean; the baseline is physiology.thermal_half_band"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
 id = "genome.mutation_rates.high"

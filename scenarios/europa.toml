@@ -42,3 +42,14 @@ affinity_fraction = "none"
 "value_metric.conflict_coefficient" = "low"   # resource-stable, low friction
 "being.life_event_impulse" = "real"
 "biosphere.predawn_generations" = "high"      # deep time for a chemosynthetic vent ecology to radiate
+
+[environment]
+# What makes Europa a cold, buffered ocean: water conducts heat toward uniform, relaxation is
+# near zero under lightless ice (almost no solar forcing), immersion couples the body fast to
+# the cold medium, and the race is a narrow-banded cold-stable specialist. The magnitudes
+# behind these tokens are reserved for the owner (§3).
+"field.diffusion" = "high"                     # water conducts, near the stability bound
+"field.relaxation" = "low"                     # near-static under ice, almost no forcing
+"field.body_exchange" = "high"                 # immersion couples the body fast to the medium
+"physiology.thermal_setpoint" = "low"          # a cold psychrophile core, just above freezing
+"physiology.thermal_half_band" = "low"         # a narrow band in a stable cold ocean

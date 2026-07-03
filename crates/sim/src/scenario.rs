@@ -119,6 +119,12 @@ pub struct Scenario {
     /// The direction each change-and-extremes dial is pushed, by reserved dial id.
     #[serde(default)]
     pub dials: BTreeMap<String, Direction>,
+    /// The direction each environmental lever is pushed, by reserved id: the temperature
+    /// field (`field.*`) and the per-race thermal band (`physiology.thermal_*`) that make a
+    /// world hot, cold, or temperate. Resolved by the same mechanism as `dials`; kept in its
+    /// own block so a world's environment reads apart from its change-engine dials.
+    #[serde(default)]
+    pub environment: BTreeMap<String, Direction>,
 }
 
 impl Scenario {
@@ -138,6 +144,11 @@ impl Scenario {
         self.dials.get(id).copied()
     }
 
+    /// The direction this scenario pushes an environmental lever, or `None` if unset.
+    pub fn environment_dial(&self, id: &str) -> Option<Direction> {
+        self.environment.get(id).copied()
+    }
+
     /// Resolve this scenario against a base calibration manifest: the bulk lever. Pull one
     /// scenario and its whole dial set resolves at once, each dial to the manifest entry behind
     /// its direction ([`dial_manifest_id`]). Every resolved id must exist in the manifest, so a
@@ -150,8 +161,12 @@ impl Scenario {
         &self,
         manifest: &CalibrationManifest,
     ) -> Result<ScenarioResolution, CalibrationError> {
-        let mut dials = Vec::with_capacity(self.dials.len());
-        for (dial, direction) in &self.dials {
+        let mut dials = Vec::with_capacity(self.dials.len() + self.environment.len());
+        // The change-and-extremes dials and the environmental levers resolve by the same
+        // mechanism (direction to manifest id); both are carried in the resolution's review
+        // queue, so a world's environment is levered and calibration-gated exactly like its
+        // change dials, and a dangling environment reference fails loud the same way.
+        for (dial, direction) in self.dials.iter().chain(self.environment.iter()) {
             let manifest_id = dial_manifest_id(dial, *direction);
             let entry = manifest
                 .get(&manifest_id)
@@ -444,8 +459,8 @@ name = "Probe"
                 .unwrap_or_else(|e| panic!("{world} has a dangling dial: {e}"));
             assert_eq!(
                 r.dials.len(),
-                scenario.dials.len(),
-                "{world} resolves every dial it pushes"
+                scenario.dials.len() + scenario.environment.len(),
+                "{world} resolves every dial and environment lever it pushes"
             );
         }
         // Tempest cranks change, so its direction siblings are the stress-world ends. As the owner
@@ -500,6 +515,63 @@ name = "Probe"
             "Confluence mixes magical and not"
         );
         assert_eq!(confluence.scenario.grounding, "real");
+    }
+
+    #[test]
+    fn the_environment_block_levers_the_field_and_thermal_band() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+
+        // Venus is levered hot: a dense diffusive field, fast body coupling, and a
+        // heat-shifted, widened thermal band.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert_eq!(
+            venus.environment_dial("field.body_exchange"),
+            Some(Direction::High),
+            "the dense hot medium couples the body fast"
+        );
+        assert_eq!(
+            venus.environment_dial("physiology.thermal_setpoint"),
+            Some(Direction::High),
+            "a heat-shifted thermophile core"
+        );
+
+        // Europa is levered cold and buffered: near-static relaxation under ice, a cold
+        // narrow-banded specialist.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert_eq!(
+            europa.environment_dial("field.relaxation"),
+            Some(Direction::Low),
+            "near-static under lightless ice"
+        );
+        assert_eq!(
+            europa.environment_dial("physiology.thermal_half_band"),
+            Some(Direction::Low),
+            "a narrow band in a stable cold ocean"
+        );
+
+        // Both environments resolve against the real manifest: every environment lever maps
+        // to a defined (reserved) entry, so the two worlds are levered and calibration-gated,
+        // and the resolution surfaces the environment magnitudes in its review queue.
+        let r = europa.resolve(&manifest).unwrap();
+        assert_eq!(r.dials.len(), europa.dials.len() + europa.environment.len());
+        let reserved = r.reserved_ids();
+        assert!(
+            reserved.contains(&"physiology.thermal_setpoint.low"),
+            "Europa's cold set point is surfaced as a reserved environment magnitude"
+        );
+
+        // The four canonical worlds carry no environment block: temperate is the unlevered
+        // baseline, so their resolution is unchanged.
+        let mirror = Scenario::load(format!("{dir}mirror.toml")).unwrap();
+        assert!(
+            mirror.environment.is_empty(),
+            "Mirror is the temperate baseline"
+        );
     }
 
     #[test]

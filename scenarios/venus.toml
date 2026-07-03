@@ -45,3 +45,14 @@ affinity_weight = "moderate"
 "value_metric.conflict_coefficient" = "high"  # scarce habitable band, contested
 "being.life_event_impulse" = "high"
 "biosphere.predawn_generations" = "real"
+
+[environment]
+# What makes Venus lethally hot: a dense convective atmosphere smears heat toward uniform,
+# the medium couples the body fast (it cooks), and the race adapts by shifting and widening
+# its survivable band upward, though the runaway surface still lies outside it. Field
+# relaxation stays at its baseline (the thick slow atmosphere buffers day and night into one
+# hot baseline). The magnitudes behind these tokens are reserved for the owner (§3).
+"field.diffusion" = "high"                     # dense convective atmosphere smears heat
+"field.body_exchange" = "high"                 # the dense hot medium cooks the body fast
+"physiology.thermal_setpoint" = "high"         # a heat-shifted thermophile core
+"physiology.thermal_half_band" = "high"        # a widened survivable band, still short of the surface
