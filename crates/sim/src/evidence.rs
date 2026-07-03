@@ -109,7 +109,12 @@ impl InferenceFrame {
         attr: AttrKindId,
         hyps: impl IntoIterator<Item = ValueId>,
     ) -> Self {
-        let hyps: Vec<ValueId> = hyps.into_iter().collect();
+        let mut hyps: Vec<ValueId> = hyps.into_iter().collect();
+        // Canonical candidate set: sorted and deduplicated, so the frame's hypothesis order is a
+        // pure function of the value ids (R-CANON-WALK), the state hash walks a canonical order,
+        // and merge_hyps can union new hypotheses in by binary search.
+        hyps.sort_unstable();
+        hyps.dedup();
         let totals = vec![0i128; hyps.len()];
         InferenceFrame {
             subject,
@@ -117,6 +122,21 @@ impl InferenceFrame {
             hyps,
             totals,
             support: Vec::new(),
+        }
+    }
+
+    /// Union additional candidate hypotheses into the frame, keeping the candidate set sorted and
+    /// its parallel `totals` aligned, each new hypothesis entering at a zero total. A belief's
+    /// hypothesis space is the union of every candidate set asserted about the question, so the
+    /// committed belief is a pure function of the evidence set rather than of which informant
+    /// spoke first: the hypothesis space emerges from what the world asserts, and the gossip apply
+    /// is order-independent (R-REDUCE-ORDER) instead of first-writer-wins.
+    pub fn merge_hyps(&mut self, hyps: impl IntoIterator<Item = ValueId>) {
+        for v in hyps {
+            if let Err(idx) = self.hyps.binary_search(&v) {
+                self.hyps.insert(idx, v);
+                self.totals.insert(idx, 0i128);
+            }
         }
     }
 

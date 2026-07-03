@@ -1,9 +1,11 @@
 # The chemistry and optics floors (wave 2 of the physics substrate, R-PHYS-W2; design Part 41,
 # record 62.21). Extends the registry with the chem.* and opt.* axes and the closed-form kernels over
 # them (in crates/physics/src/laws.rs). Loads onto the mechanical and fluids floors (it reads
-# mech.contact_area, mech.arm_length, and the fluids therm.temperature). Every range is
-# reserved-with-basis; nothing is an owner-set value. Ranges stay in the Q32.32 window; a quantity
-# whose true envelope underflows carries a reserved per-quantity scale (R-UNITS-PIN).
+# mech.contact_area, mech.arm_length, and the fluids therm.temperature). The axis ranges below are
+# SET to the owner's confirmed values (2026-07-02), ratified from the cited physical bound in each
+# axis's real field; every value a tunable lever revisable on the owner's signoff. Ranges stay in the
+# Q32.32 window; opt.source_power keeps a per-quantity scale reserved (R-UNITS-PIN) for its full
+# envelope, the set range being the representable working subset.
 
 # --- Chemistry axes ---
 
@@ -14,7 +16,8 @@ unit = "kJ/kg"
 dimension = "2,0,-2,0"
 scale = "kJ/kg"
 tier = 0
-range_reserved = "proposed bounds [-50000, 50000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "-50000"
+range_hi = "50000"
 real = "CRC thermochemical tables; Atkins, Physical Chemistry (fuel and oxide enthalpies, tens of MJ/kg)"
 
 [[axis]]
@@ -24,7 +27,8 @@ unit = "V"
 dimension = "voltage"
 scale = "V (the volt, wave-3 promotion, dimension-and-scale only, no numeric re-fit; unified with elec.potential and elec.emf)"
 tier = 0
-range_reserved = "proposed bounds [-5, 5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "-5"
+range_hi = "5"
 real = "CRC standard electrode-potential (electromotive) series"
 
 [[axis]]
@@ -34,7 +38,8 @@ unit = "pH"
 dimension = "dimensionless"
 scale = "pH"
 tier = 0
-range_reserved = "proposed bounds [0, 14], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "14"
 real = "definitional pH scale (CRC)"
 
 [[axis]]
@@ -44,7 +49,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "relative corrosion-rate ordering (Fontana, Corrosion Engineering); a per-material reserved datum"
 
 [[axis]]
@@ -54,7 +60,8 @@ unit = "kJ/kg"
 dimension = "2,0,-2,0"
 scale = "kJ/kg"
 tier = 0
-range_reserved = "proposed bounds [0, 50000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "50000"
 real = "Atkins (activation energies); its quantitative Arrhenius use is deferred to R-GPU-CANON-PIN"
 
 [[axis]]
@@ -64,7 +71,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "relative solubility ordering (CRC solubility tables); a per-pair reserved datum"
 
 # --- Optics axes ---
@@ -76,7 +84,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "CRC emissivity tables (Incropera Table A.11)"
 
 [[axis]]
@@ -86,7 +95,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "CRC optical-constants and albedo tables"
 
 [[axis]]
@@ -96,7 +106,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "CRC optical-constants tables"
 
 [[axis]]
@@ -106,7 +117,8 @@ unit = "1/m"
 dimension = "-1,0,0,0"
 scale = "1/m"
 tier = 0
-range_reserved = "proposed bounds [0, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1000000"
 real = "Beer-Lambert absorption coefficients (Hecht); the exp transform deferred to R-GPU-CANON-PIN"
 
 [[axis]]
@@ -116,7 +128,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio"
 tier = 0
-range_reserved = "proposed bounds [1, 5], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "1"
+range_hi = "5"
 real = "CRC refractive-index tables (vacuum 1, water 1.33, diamond 2.42)"
 
 [[axis]]
@@ -126,7 +139,8 @@ unit = "W"
 dimension = "2,1,-3,0"
 scale = "W (per-quantity scale reserved, R-UNITS-PIN)"
 tier = 0
-range_reserved = "proposed bounds [0.000001, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0.000001"
+range_hi = "1000000"
 real = "radiometric source-power ranges; the sub-microwatt low end reserves a per-quantity scale"
 
 [[axis]]
@@ -136,7 +150,8 @@ unit = "ratio"
 dimension = "dimensionless"
 scale = "ratio (per band)"
 tier = 0
-range_reserved = "proposed bounds [0, 1], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1"
 real = "CIE tristimulus partition and reflectance spectra (Wyszecki and Stiles; Hecht Ch 4); the band edges and per-race receptor sensitivities are reserved data"
 
 [[axis]]
@@ -146,7 +161,8 @@ unit = "1/m"
 dimension = "-1,0,0,0"
 scale = "1/m"
 tier = 0
-range_reserved = "proposed bounds [0, 1000000], reserved-with-basis pending the owner's set (the wave-2 floor is not yet owner-calibrated; basis in the real citation below)"
+range_lo = "0"
+range_hi = "1000000"
 real = "atmospheric scattering coefficients; the Rayleigh lambda^-4 spectral shape is reserved data, deferred as a computed transcendental"
 
 # --- Chemistry and optics laws (metadata; kernels in laws.rs) ---
@@ -210,8 +226,8 @@ ports = [
   { role = "t_hot", axis = "therm.temperature" },
   { role = "t_cold", axis = "therm.temperature" },
 ]
-output_measure = "radiant heat exchange (Stefan-Boltzmann)"
-dimension = "energy"
+output_measure = "radiant heat exchange (Stefan-Boltzmann), a radiant power (explicit-rate convention)"
+dimension = "2,1,-3,0"
 interval_bound = "[0, FLUX_MAX]"
 tier = 0
 

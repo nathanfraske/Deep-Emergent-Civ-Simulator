@@ -19,3 +19,8 @@ civsim-sim = { path = "../sim" }
 # `Camera::paint` produces. It is an observer-side rendering dependency only; no
 # determinism-critical crate (core, physics, sim) depends on it.
 minifb = "0.27"
+
+[lints.clippy]
+# R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);
+# this crate holds no hashable simulation state, so the ordered-container lint is off here.
+disallowed_types = "allow"

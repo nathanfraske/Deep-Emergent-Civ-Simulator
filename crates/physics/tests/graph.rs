@@ -419,3 +419,95 @@ fn the_migrated_floor_still_hashes_deterministically() {
     // The descriptor fields fold into the content hash; the same data still hashes identically.
     assert_eq!(full_registry().content_id(), full_registry().content_id());
 }
+
+#[test]
+fn the_flux_laws_declare_their_explicit_rate_dimension() {
+    // Convention A (explicit rate): a flux-forming law declares the rate it computes. poiseuille is
+    // now a verified Monomial (volume/time); the composed-difference fluxes declare power or a mass
+    // flux and stay Asserted for their composed input; thermal_buoyancy declares acceleration,
+    // verified SameAs its gravity port. Loading the floors already enforced each check; these lock
+    // the declared dimensions so a regression to the old accumulated form fails.
+    let reg = full_registry();
+    let dim = |id: &str| {
+        let d = reg
+            .law(id)
+            .unwrap_or_else(|| panic!("{id} is defined"))
+            .output_dimension;
+        (d.length, d.mass, d.time, d.temperature, d.current)
+    };
+    assert_eq!(dim("law.poiseuille_flow"), (3, 0, -1, 0, 0), "volume/time");
+    assert_eq!(dim("law.convective_flux"), (2, 1, -3, 0, 0), "power");
+    assert_eq!(
+        dim("law.radiant_emission"),
+        (2, 1, -3, 0, 0),
+        "radiant power"
+    );
+    assert_eq!(
+        dim("law.evaporation_rate"),
+        (-2, 1, -1, 0, 0),
+        "mass flux per area"
+    );
+    assert_eq!(dim("law.membrane_gas_flux"), (0, 1, -1, 0, 0), "mass flux");
+    assert_eq!(
+        dim("law.thermal_buoyancy"),
+        (1, 0, -2, 0, 0),
+        "acceleration"
+    );
+}
+
+#[test]
+fn poiseuille_now_fails_loud_on_a_wrong_output_dimension() {
+    // The explicit-rate correction made poiseuille a Monomial, so its output is now enforced: the
+    // old volume declaration (no time exponent) is rejected as unreachable from dp*r^4/(mu*L).
+    let toml = r#"
+[[axis]]
+id = "fluid.driving_pressure"
+dimension = "pressure"
+scale = "Pa"
+range_lo = "0"
+range_hi = "1000"
+real = "SI pascal"
+
+[[axis]]
+id = "fluid.channel_radius"
+dimension = "length"
+scale = "m"
+range_lo = "0"
+range_hi = "1000"
+real = "geometry"
+
+[[axis]]
+id = "fluid.dynamic_viscosity"
+dimension = "-1,1,-1,0"
+scale = "Pa*s"
+range_lo = "0"
+range_hi = "1000"
+real = "CRC viscosity tables"
+
+[[axis]]
+id = "mech.arm_length"
+dimension = "length"
+scale = "m"
+range_lo = "0"
+range_hi = "1000"
+real = "geometry"
+
+[[law]]
+id = "law.poiseuille_flow"
+kernel = "poiseuille_flow"
+ports = [
+  { role = "dp", axis = "fluid.driving_pressure" },
+  { role = "radius", axis = "fluid.channel_radius" },
+  { role = "viscosity", axis = "fluid.dynamic_viscosity" },
+  { role = "length", axis = "mech.arm_length" },
+]
+output_measure = "flow"
+dimension = "volume"
+interval_bound = "[0, Q_MAX]"
+"#;
+    let err = PhysicsRegistry::from_toml_str(toml).unwrap_err();
+    assert!(
+        matches!(err, PhysicsError::DimensionUnreachable { .. }),
+        "the old volume declaration is now rejected, got {err:?}"
+    );
+}

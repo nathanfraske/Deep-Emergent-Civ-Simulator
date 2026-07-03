@@ -158,8 +158,10 @@ impl Mind {
 
     /// Take in first-order evidence about the world: a signed weight toward one value of
     /// a subject's attribute, scaled by this mind's acuity. The candidate hypotheses are
-    /// supplied so the question can be entertained on first sight; once a question exists
-    /// its hypothesis frame stands and the `hyps` argument is ignored. This is the
+    /// supplied so the question can be entertained on first sight; a later assertion that
+    /// raises new candidates unions them into the frame (its hypothesis space is the union of
+    /// every candidate set asserted about the question), so the committed belief is a pure
+    /// function of the evidence set and not of which informant spoke first. This is the
     /// witness-and-told path of the gossip loop (design 9.5) reduced to its core.
     pub fn consider(
         &mut self,
@@ -171,10 +173,12 @@ impl Mind {
         from: StableId,
     ) {
         let acuity = self.acuity;
+        let hyps: Vec<ValueId> = hyps.into_iter().collect();
         let frame = self
             .beliefs
             .entry((subject, attr))
-            .or_insert_with(|| InferenceFrame::new(subject, attr, hyps));
+            .or_insert_with(|| InferenceFrame::new(subject, attr, hyps.iter().copied()));
+        frame.merge_hyps(hyps.iter().copied());
         frame.add_evidence(toward, weight, acuity, from);
     }
 
@@ -202,10 +206,12 @@ impl Mind {
         obs: AccessObs,
     ) -> Result<(), ProjectionRejected> {
         let acuity = self.acuity;
+        let hyps: Vec<ValueId> = hyps.into_iter().collect();
         let nf = self
             .models
             .entry((target, attr))
-            .or_insert_with(|| NestedFrame::new(target, 1, attr, hyps));
+            .or_insert_with(|| NestedFrame::new(target, 1, attr, hyps.iter().copied()));
+        nf.merge_hyps(hyps.iter().copied());
         nf.observe_access(weights, obs.channel, obs.toward, acuity, obs.from)
     }
 

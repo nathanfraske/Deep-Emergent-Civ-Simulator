@@ -24,6 +24,13 @@
 //! belt-and-braces, and it is what a later phase relies on when perception and the
 //! decision loop produce stimuli in parallel.
 //!
+//! After the cognition phases, the tick beats a coarse life cadence (design Part 20,
+//! R-AGING): on a tick that lands on the life-cadence period every tracked being ages one
+//! step and, if an age-hazard curve is installed, faces the mortality roll, so a world left
+//! running turns its generations over on the clock rather than only when a caller reaches in.
+//! The period defaults to the owner-set [`crate::clock::LIFE_CADENCE_TICKS`] and the hazard is
+//! owner-supplied, so nothing here fabricates when a being ages or how likely it is to die.
+//!
 //! This is deliberately the serial tick, not the parallel command scheduler: that
 //! scheduler's determinism (the total command order and the non-associative combines)
 //! is still open design (R-CMD-ORDER, R-REDUCE-ORDER), so the parallel form is left for
@@ -38,6 +45,7 @@ use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
+use crate::clock::LIFE_CADENCE_TICKS;
 use crate::decision::{ActionId, Behaviour, Curve, DriveId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
@@ -382,6 +390,17 @@ pub struct World {
     /// [`CommandKey`] before application (R-CMD-ORDER; the determinism harness asserts
     /// bit-identity across a worker sweep). 1 means serial.
     workers: usize,
+    /// The life-cadence period in ticks: how often [`World::tick`] beats aging and the mortality
+    /// roll (design Part 20, R-AGING). The owner-set default is [`LIFE_CADENCE_TICKS`] (one
+    /// in-world year); [`World::set_life_cadence`] overrides it per world (a calibration override,
+    /// like the base-tick duration, so a test or a faster-aging world can shrink it). This is
+    /// canonical: it sets when aging and mortality happen, so it is part of the world's timeline.
+    life_cadence_ticks: u64,
+    /// The installed age-hazard curve the mortality beat rolls against (design Part 20). `None`
+    /// until [`World::set_mortality_hazard`] installs one, and the mortality half of the life
+    /// cadence is then a no-op, so the hazard shape is never fabricated: aging (a bare increment)
+    /// runs on the cadence regardless, but a being dies only against an owner-supplied curve.
+    mortality_hazard: Option<Curve>,
 }
 
 impl World {
@@ -424,6 +443,8 @@ impl World {
             meta_params,
             weights,
             workers: 1,
+            life_cadence_ticks: LIFE_CADENCE_TICKS,
+            mortality_hazard: None,
         }
     }
 
@@ -433,6 +454,24 @@ impl World {
     /// before any of them applies (R-CMD-ORDER). Clamped to at least 1.
     pub fn set_workers(&mut self, workers: usize) {
         self.workers = workers.max(1);
+    }
+
+    /// Override the life-cadence period in ticks (design Part 20, R-AGING). The default is the
+    /// owner-set [`LIFE_CADENCE_TICKS`] (one in-world year); this per-world override lets a test
+    /// or a faster-aging world beat aging and mortality on a shorter period. Unlike the worker
+    /// count this is canonical: it changes when aging and mortality happen, so two worlds with
+    /// different cadences have different (each still deterministic) timelines. Clamped to at least
+    /// 1, so the beat never divides by a zero period.
+    pub fn set_life_cadence(&mut self, ticks: u64) {
+        self.life_cadence_ticks = ticks.max(1);
+    }
+
+    /// Install the age-hazard curve the mortality beat rolls against (design Part 20). Until this
+    /// is set the mortality half of the life cadence is a no-op, so the world never runs on a
+    /// fabricated hazard shape: the owner supplies the curve, its shape reserved with its basis
+    /// (the failure boundary of senescence the age data implies). Aging still beats without it.
+    pub fn set_mortality_hazard(&mut self, hazard: Curve) {
+        self.mortality_hazard = Some(hazard);
     }
 
     /// Set the master seed that keys every stochastic draw (perception rolls and, in
@@ -1212,6 +1251,26 @@ impl World {
         dead
     }
 
+    /// The life-cadence beat, run once per [`World::tick`] but firing only on the cadence period
+    /// (design Part 20, R-AGING). On a tick whose clock is a whole multiple of
+    /// [`World::set_life_cadence`]'s period, every tracked being ages one step and then, if an
+    /// age-hazard curve is installed, faces the mortality roll; on every other tick it is a no-op,
+    /// so a run shorter than one cadence never ages. Aging precedes mortality, matching the
+    /// established order the generational-turnover test uses, so a being faces the hazard at its
+    /// new age. The order is pinned and both halves are deterministic (id-ordered, counter-keyed),
+    /// so the beat replays bit for bit and is independent of the field-worker width in the composed
+    /// runner. Without an installed hazard only aging beats: the world never runs on a fabricated
+    /// hazard shape.
+    fn life_cadence(&mut self) {
+        if self.clock == 0 || !self.clock.is_multiple_of(self.life_cadence_ticks) {
+            return;
+        }
+        self.age_step();
+        if let Some(hazard) = self.mortality_hazard.clone() {
+            self.apply_mortality(&hazard);
+        }
+    }
+
     /// Remove a being from the world, pruning every per-being map it appears in (the death and
     /// out-migration primitive of design Part 20). Minds, placement, genome, intrinsic beliefs,
     /// affect, age, sensorium, drives, the last action, lexicon, language assignment, the
@@ -1328,7 +1387,10 @@ impl World {
     /// Advance one tick: the clock steps, then the batch of stimuli is applied to the
     /// minds in canonical order (by target id, then ordinal), so the resulting state is
     /// independent of the order the batch was assembled in. A stimulus for an unknown
-    /// mind is ignored.
+    /// mind is ignored. The cognition phases run first, then the coarse life-cadence beat
+    /// (`life_cadence`) ages the tracked beings and rolls mortality, but only on a tick that
+    /// falls on the cadence period, so a short run sees only cognition (design Part 20,
+    /// R-AGING).
     pub fn tick(&mut self, inputs: &[TickInput]) {
         self.clock += 1;
         let mut ordered: Vec<&TickInput> = inputs.iter().collect();
@@ -1373,15 +1435,18 @@ impl World {
         self.gossip();
         self.converse_language();
         self.drift_languages();
+        self.life_cadence();
     }
 
     /// A profiling aid, not part of the simulation: advance one tick with no stimuli and return the
-    /// wall-clock nanoseconds spent in each of the six phases (perceive, decide, converse, gossip,
-    /// converse_language, drift_languages), so a benchmark can see where a tick's time goes. It
-    /// produces exactly the state `tick(&[])` would, since it runs the same phases in the same order
-    /// with an empty input batch; the `Instant` it reads is non-canonical and never enters state, so
-    /// the resulting hash is unchanged (Principle 3). This exists to answer "profile before
-    /// optimizing" (Part 13), and it is compiled into the library only as a measurement tool.
+    /// wall-clock nanoseconds spent in each of the six cognition phases (perceive, decide, converse,
+    /// gossip, converse_language, drift_languages), so a benchmark can see where a tick's time goes.
+    /// It produces exactly the state `tick(&[])` would, since it runs the same phases in the same
+    /// order with an empty input batch, including the coarse life-cadence beat (run after the six,
+    /// untimed because it fires only on the cadence period); the `Instant` it reads is non-canonical
+    /// and never enters state, so the resulting hash is unchanged (Principle 3). This exists to
+    /// answer "profile before optimizing" (Part 13), and it is compiled into the library only as a
+    /// measurement tool.
     pub fn tick_timed(&mut self) -> [u128; 6] {
         use std::time::Instant;
         self.clock += 1;
@@ -1404,6 +1469,9 @@ impl World {
         let s = Instant::now();
         self.drift_languages();
         ns[5] = s.elapsed().as_nanos();
+        // The coarse life beat runs after the six cognition phases so tick_timed produces the same
+        // state tick would; it is not one of the profiled six (it fires only on the cadence period).
+        self.life_cadence();
         ns
     }
 
@@ -2156,46 +2224,66 @@ impl World {
     /// the perception phase, so the result is bit-identical on replay and independent of
     /// thread count. A two-pass shape (decide, then apply) keeps the walk a pure read.
     fn perceive(&mut self) {
-        let hits: Vec<PerceptionHit> = {
-            let mut traces: Vec<&Trace> = self.traces.iter().collect();
-            traces.sort_by_key(|t| t.id);
+        // Gather pass: every located being rolls, per public trace it can sense, whether it notices
+        // it. The rolls are draw-keyed per (being, trace, clock), so the hit set is a pure function of
+        // the state and the gather parallelises across `workers` threads (the ActionStage pattern the
+        // converse phase proves). The sorted traces are split into contiguous chunks, each worker
+        // gathers its chunk's hits, and the chunks are concatenated in order, which reproduces the
+        // serial hit sequence exactly, so the phase is bit-identical at every worker count.
+        let mut traces: Vec<&Trace> = self.traces.iter().collect();
+        traces.sort_by_key(|t| t.id);
+        let workers = self.workers.max(1);
+        let n = traces.len();
+        let hits: Vec<PerceptionHit> = if workers == 1 || n <= 1 {
             let mut out = Vec::new();
-            for t in traces {
-                for (mind_id, mind) in &self.minds {
-                    if self.place_of.get(mind_id) != Some(&t.place) {
-                        continue;
-                    }
-                    // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives
-                    // the trace only on a channel it reads, and its channel acuity scales the
-                    // roll; a being with no sensorium reads every channel at full acuity, so the
-                    // place-based perception of every existing world is unchanged.
-                    let channel_acuity = match self.sensorium.get(mind_id) {
-                        Some(s) => match s.reads(t.channel) {
-                            Some(a) => a,
-                            None => continue,
-                        },
-                        None => Fixed::ONE,
-                    };
-                    let acuity = mind.acuity.mul(channel_acuity);
-                    let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
-                    let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
-                        .rng(self.seed)
-                        .unit_fixed(0);
-                    if roll < chance {
-                        out.push(PerceptionHit {
-                            mind: *mind_id,
-                            subject: t.subject,
-                            attr: t.attr,
-                            hyps: t.hyps.clone(),
-                            value: t.value,
-                            weight: t.weight,
-                            from: t.from,
-                        });
-                    }
-                }
+            for t in &traces {
+                self.gather_trace(t, &mut out);
             }
             out
+        } else {
+            // Dynamic load balancing, heterogeneous-core aware: each worker pulls the next trace
+            // index from a shared counter, so a faster core (an Intel P-core, or an AMD V-cache CCD)
+            // gathers more traces than a slower one, and no thread idles at the barrier on an equal
+            // static slice. The gather writes nothing (a pure read of the frozen `&World`, which is
+            // Sync). Each worker tags its output with the trace index; the merge sorts by that index
+            // (a `traces`-length key, not a per-hit one, so it is cheap) and flattens, which
+            // reproduces the serial trace-then-being order exactly. So the result is a pure function
+            // of state whatever core gathered which trace: that is what lets the schedule adapt to a
+            // hybrid CPU without touching correctness, and without a per-hit sort that would Amdahl-
+            // cap the phase.
+            let this: &World = &*self;
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let mut indexed: Vec<(usize, Vec<PerceptionHit>)> = std::thread::scope(|sc| {
+                let handles: Vec<_> = (0..workers)
+                    .map(|_| {
+                        sc.spawn(|| {
+                            let mut local: Vec<(usize, Vec<PerceptionHit>)> = Vec::new();
+                            loop {
+                                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                if i >= n {
+                                    break;
+                                }
+                                let mut out = Vec::new();
+                                this.gather_trace(traces[i], &mut out);
+                                if !out.is_empty() {
+                                    local.push((i, out));
+                                }
+                            }
+                            local
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().expect("a perceive worker panicked"))
+                    .collect()
+            });
+            indexed.sort_by_key(|(i, _)| *i);
+            indexed.into_iter().flat_map(|(_, v)| v).collect()
         };
+        // Apply pass (single-threaded): each noticed being integrates the evidence into its beliefs,
+        // in the canonical trace-then-being order the gather reproduced. `consider` is
+        // order-independent, so this apply is bit-identical whatever the worker count.
         for hit in hits {
             if let Some(mind) = self.minds.get_mut(&hit.mind) {
                 mind.consider(
@@ -2206,6 +2294,46 @@ impl World {
                     hit.weight,
                     hit.from,
                 );
+            }
+        }
+    }
+
+    /// Gather the perception hits for one trace across all located, sensing beings: the inner pass of
+    /// [`perceive`], a pure read of `&self` (the minds, places, sensoria, clock, and seed), so it runs
+    /// on a worker thread with no contention. Each being's notice roll is draw-keyed by
+    /// `(being, trace, clock, PERCEPTION)`, so the hit set is a pure function of the state, independent
+    /// of the worker that computed it.
+    fn gather_trace(&self, t: &Trace, out: &mut Vec<PerceptionHit>) {
+        for (mind_id, mind) in &self.minds {
+            if self.place_of.get(mind_id) != Some(&t.place) {
+                continue;
+            }
+            // Channel gate (R-SENSORIUM): a being with an installed sensorium perceives the trace
+            // only on a channel it reads, and its channel acuity scales the roll; a being with no
+            // sensorium reads every channel at full acuity, so the place-based perception of every
+            // existing world is unchanged.
+            let channel_acuity = match self.sensorium.get(mind_id) {
+                Some(s) => match s.reads(t.channel) {
+                    Some(a) => a,
+                    None => continue,
+                },
+                None => Fixed::ONE,
+            };
+            let acuity = mind.acuity.mul(channel_acuity);
+            let chance = t.salience.mul(acuity).clamp(Fixed::ZERO, Fixed::ONE);
+            let roll = DrawKey::pair(mind_id.0, t.id.0, self.clock, Phase::PERCEPTION)
+                .rng(self.seed)
+                .unit_fixed(0);
+            if roll < chance {
+                out.push(PerceptionHit {
+                    mind: *mind_id,
+                    subject: t.subject,
+                    attr: t.attr,
+                    hyps: t.hyps.clone(),
+                    value: t.value,
+                    weight: t.weight,
+                    from: t.from,
+                });
             }
         }
     }
@@ -2450,6 +2578,71 @@ source = "Part 9"
             salience,
             weight: Fixed::from_int(5),
             from: StableId(500),
+        }
+    }
+
+    #[test]
+    fn perceive_is_bit_identical_across_worker_counts() {
+        // The intra-phase parallelism (the throughput lever, not the phase-level scheduler): perceive
+        // gathers per-(being, trace) notice rolls across worker threads, then applies in canonical
+        // order. With many co-located sensing beings and many distinct traces at salience below one
+        // (so the roll bites and only some beings notice), the parallel gather must reproduce the
+        // serial result exactly at every worker count, because the rolls are draw-keyed and the trace
+        // chunks concatenate in canonical order.
+        let build = |workers: usize| -> u128 {
+            let mut w = world().with_seed(0x9E5C_0A11);
+            w.set_workers(workers);
+            let place = 1u32;
+            for _ in 0..24 {
+                let m = w.spawn(Fixed::ONE);
+                w.set_place(m, place);
+            }
+            for k in 0..16u64 {
+                let value = if k % 2 == 0 { 10 } else { 20 };
+                let mut t = trace(place, value, Fixed::from_ratio(1, 2));
+                t.id = StableId(1000 + k);
+                t.from = StableId(1000 + k);
+                w.emit_trace(t);
+            }
+            w.perceive();
+            w.state_hash()
+        };
+        let serial = build(1);
+        for workers in [2usize, 3, 8, 16] {
+            assert_eq!(
+                build(workers),
+                serial,
+                "parallel perceive at {workers} workers diverged from the serial gather"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore] // a manual throughput check on the actual machine, not a CI gate
+    fn perceive_timing_across_workers() {
+        use std::time::Instant;
+        let make = || {
+            let mut w = world().with_seed(0xB16_B00C);
+            let place = 1u32;
+            for _ in 0..2000 {
+                let m = w.spawn(Fixed::ONE);
+                w.set_place(m, place);
+            }
+            for k in 0..2000u64 {
+                let value = if k % 2 == 0 { 10 } else { 20 };
+                let mut t = trace(place, value, Fixed::from_ratio(1, 2));
+                t.id = StableId(100_000 + k);
+                t.from = StableId(100_000 + k);
+                w.emit_trace(t);
+            }
+            w
+        };
+        for workers in [1usize, 2, 4, 8, 16, 20] {
+            let mut w = make();
+            w.set_workers(workers);
+            let t0 = Instant::now();
+            w.perceive();
+            eprintln!("perceive workers={:2}: {:?}", workers, t0.elapsed());
         }
     }
 
@@ -3402,5 +3595,101 @@ name = "said"
             w.apply_mortality(&rising_hazard())
         };
         assert_eq!(build(), build(), "the same beings die on replay");
+    }
+
+    #[test]
+    fn the_life_cadence_beats_aging_only_on_its_period() {
+        // With the cadence set to four ticks and no hazard installed, aging beats only on ticks 4
+        // and 8, never in between, and nobody dies (mortality is a no-op without a curve).
+        let mut w = world();
+        w.set_life_cadence(4);
+        let a = w.spawn(Fixed::ONE);
+        w.set_age(a, 10);
+        for _ in 0..3 {
+            w.tick(&[]);
+        }
+        assert_eq!(w.age_of(a), Some(10), "no beat before the cadence period");
+        w.tick(&[]); // clock == 4, the first beat
+        assert_eq!(w.age_of(a), Some(11), "aged one step on the cadence tick");
+        for _ in 0..3 {
+            w.tick(&[]);
+        }
+        assert_eq!(w.age_of(a), Some(11), "no beat between cadence periods");
+        w.tick(&[]); // clock == 8, the second beat
+        assert_eq!(w.age_of(a), Some(12), "aged again on the next cadence tick");
+        assert_eq!(w.population(), 1, "no hazard installed, so nobody died");
+    }
+
+    #[test]
+    fn the_default_cadence_does_not_beat_in_a_short_run() {
+        // Left at the owner-set default (one in-world year of ticks), a short run never ages, so
+        // the wiring does not disturb the cognition-only tests that predate it.
+        let mut w = world();
+        let a = w.spawn(Fixed::ONE);
+        w.set_age(a, 7);
+        for _ in 0..100 {
+            w.tick(&[]);
+        }
+        assert_eq!(
+            w.age_of(a),
+            Some(7),
+            "the default cadence is far longer than the run"
+        );
+    }
+
+    #[test]
+    fn the_tick_ages_and_culls_on_the_cadence_and_replays() {
+        // With the cadence set to one tick and a hazard installed, the tick ages every being and
+        // rolls mortality each tick. The hazard is flat-zero below age fifty and rising above it,
+        // so over an eight-tick run the three youngest (ages 0, 20, 40, none reaching fifty) are
+        // guaranteed to survive and the eldest (age 100, certain death) is guaranteed to die,
+        // making the cull deterministic regardless of the seed. Because ages are not folded into
+        // the tick hash, the replay is proven directly on the surviving ages.
+        let safe_zone_hazard = || {
+            Curve::new([
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::from_int(50), Fixed::ZERO),
+                (Fixed::from_int(100), Fixed::ONE),
+            ])
+        };
+        let build = || {
+            let mut w = world().with_seed(0x11FE);
+            w.set_life_cadence(1);
+            w.set_mortality_hazard(safe_zone_hazard());
+            let ids: Vec<StableId> = (0..6).map(|_| w.spawn(Fixed::ONE)).collect();
+            for (k, &id) in ids.iter().enumerate() {
+                w.set_age(id, 20 * k as u32); // 0, 20, 40, 60, 80, 100
+            }
+            for _ in 0..8 {
+                w.tick(&[]);
+            }
+            // The survivors as (founder index, age), so the replay compares stable coordinates.
+            let survivors: Vec<(usize, u32)> = ids
+                .iter()
+                .enumerate()
+                .filter_map(|(k, &id)| w.age_of(id).map(|age| (k, age)))
+                .collect();
+            (w.population(), survivors)
+        };
+        let (pop, survivors) = build();
+        assert!(
+            pop < 6,
+            "the eldest died: the population was culled on the cadence"
+        );
+        assert!(pop >= 3, "the three in the flat-zero zone survived");
+        // Every survivor aged by exactly the eight cadence beats it lived through, and the three
+        // guaranteed survivors are the youngest founders.
+        for &(k, age) in &survivors {
+            assert_eq!(
+                age,
+                20 * k as u32 + 8,
+                "a survivor aged one step per cadence beat"
+            );
+        }
+        assert_eq!(
+            (pop, survivors),
+            build(),
+            "the aged-and-culled world replays bit for bit"
+        );
     }
 }

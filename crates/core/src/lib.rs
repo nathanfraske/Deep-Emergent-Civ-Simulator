@@ -51,6 +51,7 @@ pub mod hash;
 pub mod id;
 pub mod keys;
 pub mod rng;
+pub mod schedule;
 
 pub use arena::{Arena, Slab, SlabHandle};
 pub use cacheline::CacheLine;
@@ -64,3 +65,4 @@ pub use hash::StateHasher;
 pub use id::{EntityHandle, EntityLocation, PoolId, Registry, StableId, StableRef};
 pub use keys::{DrawKey, Phase, ABSENT};
 pub use rng::{splitmix64, Rng};
+pub use schedule::{flatten, run_serial, schedule, Access, ResourceId, SystemId};
