@@ -82,10 +82,12 @@ now reads zero over its [0, E_MAX] law, which also keeps its overflow branch sig
 `ideal_gas_density` (an overflowing R*T now reads the minimum density, not the maximum),
 `thermal_buoyancy` (the division overflow now routes by the gradient sign like its sibling branch),
 `evaporation_rate` (an overflowing wind term now saturates at the cap, not the still-air baseline),
-`ohm_voltage` and `solenoid_field` (now magnitudes over their non-negative axes, so the overflow cap
-is sign-correct), and `flux_linkage` (now bounded to the signed interval with a sign-routed
-overflow, since the flux is differentiated for the Lenz sign). The bare subtractions in
-`bend_stress`, `axial_stress`, and `friction` are now saturating. Each carries a regression test.
+and `ohm_voltage`, `solenoid_field`, and `flux_linkage` (now non-negative magnitudes over their
+declared `[0, MAX]` axes, so the overflow cap is sign-correct; the Lenz-law sign `faraday_emf`
+recovers comes from the signed tick-to-tick difference of two non-negative flux samples, not from a
+signed flux, so `solenoid_field` and `flux_linkage` agree on the magnitude reading). The bare
+subtractions in `bend_stress`, `axial_stress`, and `friction` are now saturating. Each carries a
+regression test.
 
 ## Specification and wiring seams (not kernel arithmetic)
 

@@ -1674,20 +1674,14 @@ pub fn solenoid_field(
 }
 
 /// Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
-/// Flux is signed (the differentiation recovers the Lenz-law sign), so it is bounded to the signed
-/// interval and an overflow routes by the flux-density sign (the area is a non-negative magnitude),
-/// not blindly to the positive cap.
+/// Flux is a non-negative magnitude over [0, PHI_MAX], consistent with `solenoid_field`'s magnitude
+/// flux density and the floor's interval bound; the Lenz-law sign `faraday_emf` recovers comes from
+/// the signed tick-to-tick difference of two non-negative flux samples, not from the flux itself. A
+/// non-negative product bounds cleanly and an overflow is a large flux, so it routes to the cap.
 pub fn flux_linkage(flux_density: Fixed, area: Fixed, phi_max: Fixed) -> Fixed {
-    let lo = sat_sub(ZERO, phi_max);
     match flux_density.checked_mul(area) {
-        Some(p) => p.clamp(lo, phi_max),
-        None => {
-            if flux_density < ZERO {
-                lo
-            } else {
-                phi_max
-            }
-        }
+        Some(p) => p.clamp(ZERO, phi_max),
+        None => phi_max,
     }
 }
 
@@ -2437,23 +2431,33 @@ mod tests {
     }
 
     #[test]
-    fn signed_em_kernels_carry_sign_correctly() {
+    fn em_magnitude_kernels_bound_non_negative() {
         // ohm_voltage is a magnitude: a negative current gives a positive voltage.
         assert_eq!(
             ohm_voltage(Fixed::from_int(-5), Fixed::from_int(10), cap(2_000_000_000)),
             Fixed::from_int(50),
             "V = |I|*R is non-negative"
         );
-        // flux_linkage is signed and bounded to [-phi_max, phi_max]: a large negative flux clamps to
-        // the negative bound rather than staying unbounded or flipping to the positive cap.
+        // flux_linkage is a non-negative magnitude over [0, phi_max] (consistent with the magnitude
+        // flux density and the floor bound): a product over the cap clamps to phi_max, and an
+        // out-of-domain negative clamps to the zero floor rather than staying unbounded.
+        assert_eq!(
+            flux_linkage(
+                Fixed::from_int(100),
+                Fixed::from_int(10),
+                Fixed::from_int(500)
+            ),
+            Fixed::from_int(500),
+            "a large flux clamps to phi_max"
+        );
         assert_eq!(
             flux_linkage(
                 Fixed::from_int(-100),
                 Fixed::from_int(10),
                 Fixed::from_int(500)
             ),
-            Fixed::from_int(-500),
-            "a large negative flux clamps to -phi_max"
+            ZERO,
+            "an out-of-domain negative flux clamps to the zero floor"
         );
     }
 
