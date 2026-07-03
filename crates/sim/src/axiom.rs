@@ -549,6 +549,19 @@ pub fn entrenchment_threshold(curve: &Curve, rank: i32) -> Fixed {
     curve.eval(Fixed::from_int(rank))
 }
 
+/// The evidence-ring capacity derived from a being's own memory datum (design Part 25.6 and
+/// Part 9): the ring holds as many recent evidences as the being's expressed memory capacity
+/// (`Mind.memory`) allows, held to at least one and to a reserved replay `ceiling`
+/// (`axiom.evidence_ring_capacity`, a hard state-hash and replay bound rather than a flat
+/// capacity). So a race whose genes invest in memory tracks more evidence and a forgetful race
+/// less, derived from that race's own body with no shared human span authored (the flat-eight
+/// Miller steer the derive audit removed, worksheet §13b). Pure integer arithmetic over the
+/// expressed memory, so it is bit-identical and order-independent (Principle 3).
+pub fn ring_capacity_from_memory(memory: Fixed, ceiling: usize) -> usize {
+    let raw = memory.to_int().max(1) as usize;
+    raw.min(ceiling.max(1))
+}
+
 /// The confidence-weighted mean stance of a group on one axiom axis (the group aggregate of
 /// design Part 28): `sum(stance * confidence) / sum(confidence)` over the members holding the
 /// axis. The accumulation is in 128-bit integer space and the division is a single final
@@ -683,6 +696,30 @@ mod tests {
             innate_seed: stance,
             evidence: ring(cap),
         }
+    }
+
+    #[test]
+    fn the_evidence_ring_capacity_derives_from_memory_and_diverges_by_race() {
+        // The reserved value is now a hard replay ceiling, not a flat capacity.
+        let ceiling = 32;
+        // Two races whose genes express Mind.memory to different magnitudes get different
+        // ring capacities from the same mechanism, with no shared human span authored.
+        let mindful = ring_capacity_from_memory(Fixed::from_int(10), ceiling);
+        let forgetful = ring_capacity_from_memory(Fixed::from_int(4), ceiling);
+        assert_eq!(mindful, 10);
+        assert_eq!(forgetful, 4);
+        assert!(
+            mindful > forgetful,
+            "the race that invests in memory tracks more evidence"
+        );
+        // The ceiling is a hard replay bound: a vast memory cannot exceed it.
+        assert_eq!(
+            ring_capacity_from_memory(Fixed::from_int(1000), ceiling),
+            ceiling
+        );
+        // A neutral or empty memory still holds at least one evidence.
+        assert_eq!(ring_capacity_from_memory(Fixed::ONE, ceiling), 1);
+        assert_eq!(ring_capacity_from_memory(Fixed::ZERO, ceiling), 1);
     }
 
     #[test]

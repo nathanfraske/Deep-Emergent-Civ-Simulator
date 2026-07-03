@@ -244,11 +244,11 @@ source = "Part 25 genome model; record 62.5; audit section 1d"
 
 [[reserved]]
 id = "axiom.evidence_ring_capacity"
-basis = "DERIVE per race, worksheet §13a: map the race's Part 20 memory datum to a ring capacity; a flat 8 structurally echoes Miller's 7 plus or minus 2. Reserve only a hard replay ceiling separately as a budget."
+basis = "DERIVE per race (worksheet §13b, function built): the ring capacity is derived from the being's own Mind.memory datum through axiom::ring_capacity_from_memory, clamped to at least one and to this reserved value as a hard replay CEILING, not a flat capacity. A flat 8 echoed Miller's 7 plus or minus 2; the memory-derived form removes that steer, so a race that invests in memory tracks more evidence. Reserved: the ceiling only (a state-hash and replay bound), pending the wiring of the founder ring to the expressed memory."
 status = "reserved"
 value = ""
 unit = "count"
-source = "Part 28 axiom model; record 62.4; audit section 1c"
+source = "Part 28 axiom model; record 62.4; audit section 1c; derived in axiom::ring_capacity_from_memory"
 
 [[reserved]]
 id = "axiom.entrenchment_curve"
@@ -900,13 +900,12 @@ source = "Part 25, Part 32; docs/time_and_playback.md"
 
 # --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
 
-[[reserved]]
-id = "physiology.reserve_capacity_per_mass"
-basis = "the reserve capacity of a homeostatic axis (energy, water) as a multiple of body mass, so a bigger body carries a larger reserve and more endurance; per axis, from the Part 20 physiology (an energy store and a water store scale differently with mass)"
-status = "reserved"
-value = ""
-unit = "capacity_per_body_mass"
-source = "Part 15, Part 20; crates/sim/src/homeostasis.rs; docs/emergent_behavior_design.md"
+# physiology.reserve_capacity_per_mass RETIRED (worksheet §17, derive audit): the reserve
+# capacity is already derived on the canonical path, Homeostasis::new summing organ.development
+# * organ_composition(axis) over a being's organs against the biology floor (homeostasis.rs).
+# The per-mass ratio backed only the labelled test-only from_mass fallback, never the production
+# constructor, so it is not a reserved calibration. Removed rather than left as a fail-loud
+# sentinel for a value the engine does not author.
 
 [[reserved]]
 id = "physiology.base_metabolic_drain"
