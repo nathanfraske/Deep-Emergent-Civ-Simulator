@@ -63,7 +63,9 @@ use crate::mate_choice::{choose, MatePreference};
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use crate::value::RaceId;
+use crate::value::{
+    EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
+};
 use civsim_core::{
     gaussian_unit, CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, GaussApprox,
     Phase, Registry, StableId, StateHasher,
@@ -668,9 +670,6 @@ impl World {
             "evidence.log_odds_clamp",
             "evidence.commit_threshold",
             "evidence.runner_up_margin",
-            "tom.meta_log_odds_clamp",
-            "tom.meta_commit_threshold",
-            "tom.meta_runner_up_margin",
             "gossip.told_weight",
             "gossip.trust_baseline",
             "gossip.trust_penalty",
@@ -678,8 +677,11 @@ impl World {
         required.extend_from_slice(extra_required);
         manifest.gate(profile, &required)?;
         let belief_params = InferenceParams::from_manifest(manifest)?;
-        let meta_params = tom::meta_params_from_manifest(manifest)?;
-        let weights = AccessWeights::from_manifest(channels, manifest)?;
+        // The meta-frame params and the witnessed/told/said assertion ladder DERIVE from the
+        // first-order evidence params (record 62.11); only the independent access levers
+        // (reachable, absence, denied) are read from the manifest.
+        let meta_params = tom::meta_params_from_evidence(&belief_params);
+        let weights = AccessWeights::from_evidence_and_manifest(channels, &meta_params, manifest)?;
         let gossip = GossipParams::from_manifest(manifest)?;
         let mut world = World::new(belief_params, meta_params, weights);
         world.channels = channels.clone();
@@ -1161,6 +1163,34 @@ impl World {
             last = Some(stance);
         }
         clusters
+    }
+
+    /// The band-mean memory capacity of a founding band: the arithmetic mean of every member's
+    /// [`Mind::memory`], folded in canonical [`StableId`] order (design Part 33.4, the
+    /// R-LANG-DET salience decay). This is the representative memory a
+    /// [`crate::language::SalienceDecayLaw`] reads to set the band's concept-salience decay
+    /// rate, so the rate a founding culture's lexicon leaks at is a consequence of who founds it
+    /// rather than an authored constant. The members are visited in sorted id order, and the sum
+    /// accumulates in 128-bit space before a single divide, so the mean is bit-identical
+    /// regardless of the order the members are supplied or the thread count (Principle 3).
+    /// Returns `None` if no member of the band has a mind (nothing to average), so the caller
+    /// never divides by zero or invents a mean. The fold reads only per-being memory, never a
+    /// race id, so two bands of different composition give different rates from one rule.
+    pub fn band_mean_memory(&self, members: &[StableId]) -> Option<Fixed> {
+        let mut ids: Vec<StableId> = members.to_vec();
+        ids.sort();
+        let mut numerator: i128 = 0;
+        let mut count: i128 = 0;
+        for id in ids {
+            if let Some(mind) = self.minds.get(&id) {
+                numerator += mind.memory.to_bits() as i128;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return None;
+        }
+        Some(Fixed::from_bits((numerator / count) as i64))
     }
 
     /// Produce a child by inheriting intrinsic beliefs from a parent and the local band (design
@@ -2834,9 +2864,71 @@ impl World {
     }
 }
 
+/// Grow the shared etic comparison substrate bottom-up from the emic value axes that recur
+/// across races (design Part 21, the R-VALUE-METRIC `value_metric.etic_substrate_axes`
+/// calibration). Cross-race value comparison passes through a shared [`EticSubstrate`], but
+/// its membership is not an authored human set: an etic axis is minted for each emic
+/// [`ValueAxisId`] whose race-count reaches `recurrence_min`, in ascending emic-id order, so
+/// the substrate carries exactly the axes that recur and an idiosyncratic axis held
+/// by one race stays private (a blind spot in cross-race comparison). Each race then projects
+/// identically onto the shared axes it carries: an emic axis that made the substrate maps onto
+/// its minted etic axis with unit weight ([`project_to_etic`] reads these), and a private axis
+/// has no projection and is absent. The mechanism is fixed Rust and iterates races and axes
+/// generically in canonical id order, never branching on a specific race id (Principle 9); the
+/// membership is a consequence of the per-race value profiles (Principle 11). Returns the
+/// substrate and the per-race projections; a `recurrence_min` above the race count yields an
+/// empty substrate and empty projections. Deterministic by construction: the counts and the
+/// mint walk sorted maps.
+///
+/// [`project_to_etic`]: crate::value::project_to_etic
+pub fn build_etic_substrate(
+    races: &BTreeMap<RaceId, ValueProfile>,
+    recurrence_min: usize,
+) -> (EticSubstrate, BTreeMap<RaceId, RaceProjection>) {
+    // Count, per emic axis, how many races carry a stance on it. A BTreeMap walks axes in
+    // ascending id order, so the recurrence pass is canonical.
+    let mut recurrence: BTreeMap<ValueAxisId, usize> = BTreeMap::new();
+    for profile in races.values() {
+        for (axis, _stance) in profile.axes() {
+            *recurrence.entry(axis).or_insert(0) += 1;
+        }
+    }
+    // Mint one fresh etic axis per recurring emic axis, in ascending emic-id order, and record
+    // the emic-to-etic map the identity projections read.
+    let mut shared: BTreeMap<ValueAxisId, EticAxisId> = BTreeMap::new();
+    let mut axes: Vec<EticAxisId> = Vec::new();
+    for (&axis, &count) in &recurrence {
+        if count >= recurrence_min {
+            let etic = EticAxisId(axes.len() as u32);
+            shared.insert(axis, etic);
+            axes.push(etic);
+        }
+    }
+    let substrate = EticSubstrate { axes };
+    // Each race projects identically onto the shared axes it carries; a private axis contributes
+    // no projection entry and stays absent.
+    let mut projections: BTreeMap<RaceId, RaceProjection> = BTreeMap::new();
+    for (&race, profile) in races {
+        let mut per_axis: BTreeMap<ValueAxisId, EmicProjection> = BTreeMap::new();
+        for (axis, _stance) in profile.axes() {
+            if let Some(&etic) = shared.get(&axis) {
+                per_axis.insert(
+                    axis,
+                    EmicProjection {
+                        onto: vec![(etic, Fixed::ONE)],
+                    },
+                );
+            }
+        }
+        projections.insert(race, RaceProjection { per_axis });
+    }
+    (substrate, projections)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::SalienceDecayLaw;
 
     fn params() -> InferenceParams {
         InferenceParams {
@@ -4234,5 +4326,114 @@ name = "said"
             build(),
             "the aged-and-culled world replays bit for bit"
         );
+    }
+
+    #[test]
+    fn band_memory_sets_the_salience_decay_rate_per_composition() {
+        let mut w = world();
+        // A forgetful band and a sharp band. Each member's founding memory phenotype is set
+        // directly; the band mean is the representative memory the law reads.
+        let dull = [w.spawn(Fixed::ONE), w.spawn(Fixed::ONE)];
+        for id in dull {
+            w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(1, 5);
+        }
+        let keen = [w.spawn(Fixed::ONE), w.spawn(Fixed::ONE)];
+        for id in keen {
+            w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(4, 5);
+        }
+        let dull_mem = w.band_mean_memory(&dull).unwrap();
+        let keen_mem = w.band_mean_memory(&keen).unwrap();
+        assert_eq!(dull_mem, Fixed::from_ratio(1, 5));
+        assert_eq!(keen_mem, Fixed::from_ratio(4, 5));
+        // The fold is canonical: a reversed member slice gives the same mean.
+        let rev: Vec<StableId> = dull.iter().rev().copied().collect();
+        assert_eq!(w.band_mean_memory(&rev), Some(dull_mem));
+        // A decreasing curve turns the two representative memories into two different rates,
+        // with no race branch anywhere in the path.
+        let law = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_ratio(1, 20)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let dull_rate = law.rate_for(dull_mem);
+        let keen_rate = law.rate_for(keen_mem);
+        assert!(
+            dull_rate > keen_rate,
+            "the forgetful band decays concept salience faster"
+        );
+        // A flat curve collapses both bands to one rate: the memory channel is switched off.
+        let flat = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 4)),
+                (Fixed::ONE, Fixed::from_ratio(1, 4)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        assert_eq!(flat.rate_for(dull_mem), flat.rate_for(keen_mem));
+        // An empty band has no representative memory, never a fabricated one.
+        assert_eq!(w.band_mean_memory(&[]), None);
+    }
+
+    #[test]
+    fn etic_substrate_grows_from_recurring_emic_axes() {
+        // Three races over emic value axes. Axis 1 recurs in races 0 and 1; axis 3 recurs in
+        // races 0 and 2; axes 5, 7, 9 are each private to one race.
+        let mut races: BTreeMap<RaceId, ValueProfile> = BTreeMap::new();
+        races.insert(
+            RaceId(0),
+            ValueProfile::with([
+                (ValueAxisId(1), 1),
+                (ValueAxisId(3), 1),
+                (ValueAxisId(5), 1),
+            ]),
+        );
+        races.insert(
+            RaceId(1),
+            ValueProfile::with([(ValueAxisId(1), 1), (ValueAxisId(7), 1)]),
+        );
+        races.insert(
+            RaceId(2),
+            ValueProfile::with([(ValueAxisId(3), 1), (ValueAxisId(9), 1)]),
+        );
+        let (substrate, projections) = build_etic_substrate(&races, 2);
+        // Exactly the two shared axes, minted as fresh etic ids 0 and 1 in ascending emic order.
+        assert_eq!(substrate.axes, vec![EticAxisId(0), EticAxisId(1)]);
+        // Race 0 carries both shared axes: identity projections onto etic 0 (from emic 1) and
+        // etic 1 (from emic 3); its private axis 5 is absent.
+        let p0 = &projections[&RaceId(0)];
+        assert_eq!(p0.per_axis.len(), 2);
+        assert_eq!(
+            p0.per_axis[&ValueAxisId(1)].onto,
+            vec![(EticAxisId(0), Fixed::ONE)]
+        );
+        assert_eq!(
+            p0.per_axis[&ValueAxisId(3)].onto,
+            vec![(EticAxisId(1), Fixed::ONE)]
+        );
+        assert!(
+            !p0.per_axis.contains_key(&ValueAxisId(5)),
+            "the private axis is absent from the projection"
+        );
+        // Races 1 and 2 each carry only one shared axis; their private axes are absent.
+        let p1 = &projections[&RaceId(1)];
+        assert_eq!(p1.per_axis.len(), 1);
+        assert_eq!(
+            p1.per_axis[&ValueAxisId(1)].onto,
+            vec![(EticAxisId(0), Fixed::ONE)]
+        );
+        let p2 = &projections[&RaceId(2)];
+        assert_eq!(p2.per_axis.len(), 1);
+        assert_eq!(
+            p2.per_axis[&ValueAxisId(3)].onto,
+            vec![(EticAxisId(1), Fixed::ONE)]
+        );
+        // Raising the recurrence minimum past the race count empties the substrate.
+        let (empty, projs) = build_etic_substrate(&races, 4);
+        assert!(empty.axes.is_empty());
+        for p in projs.values() {
+            assert!(p.per_axis.is_empty(), "no axis recurs four times");
+        }
     }
 }

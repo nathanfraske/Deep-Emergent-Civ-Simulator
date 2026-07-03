@@ -1106,17 +1106,45 @@ impl IncompatibilityTable {
     /// Dobzhansky-Muller signature: each pool is internally consistent, but a cross would
     /// unite the two alleles in one hybrid. The count is what [`GenePool::reproductively_
     /// isolated`] compares against the reserved incompatibility threshold.
+    ///
+    /// The activation test is the joint Hardy-Weinberg cross probability, not a marginal-AND of two
+    /// presence cutoffs: a pair is active when the product of the two pools' allele frequencies (the
+    /// probability under linkage equilibrium that a hybrid draws `state_a` from one parent and
+    /// `state_b` from the other) reaches `presence`. So the threshold now gates the joint chance a
+    /// cross actually unites the pair rather than each allele being common on its own, and two pools
+    /// that each merely carry one deleterious allele are isolated only to the extent a hybrid is
+    /// likely to inherit both. A pure, deterministic fixed-point function of the frequencies.
     pub fn active_between(&self, a: &GenePool, b: &GenePool, presence: Fixed) -> usize {
         self.pairs
             .iter()
             .filter(|pair| {
-                let forward = a.carries(pair.locus_a as usize, pair.state_a, presence)
-                    && b.carries(pair.locus_b as usize, pair.state_b, presence);
-                let mirror = b.carries(pair.locus_a as usize, pair.state_a, presence)
-                    && a.carries(pair.locus_b as usize, pair.state_b, presence);
-                forward || mirror
+                // The joint Hardy-Weinberg cross probability of a partition: the chance a hybrid
+                // draws state_a from the first pool and state_b from the second, the product of the
+                // two allele frequencies under linkage equilibrium.
+                let cross = |first: &GenePool, second: &GenePool| {
+                    let pa = state_freq(first, pair.locus_a, pair.state_a);
+                    let pb = state_freq(second, pair.locus_b, pair.state_b);
+                    pa.mul(pb)
+                };
+                // Active when either partition (forward or its mirror) clears the presence gate.
+                cross(a, b) >= presence || cross(b, a) >= presence
             })
             .count()
+    }
+}
+
+/// The Hardy-Weinberg frequency of an allele state at a locus in a pool: the state-1 frequency for
+/// state 1, its complement for state 0, and zero for any other state (multi-allele pools are
+/// deferred, 25.10) or an out-of-range locus. The frequency the joint cross-probability product in
+/// [`IncompatibilityTable::active_between`] multiplies.
+fn state_freq(pool: &GenePool, locus: u32, state: AlleleState) -> Fixed {
+    match pool.freq(locus as usize) {
+        None => Fixed::ZERO,
+        Some(p) => match state.0 {
+            1 => p,
+            0 => Fixed::ONE - p,
+            _ => Fixed::ZERO,
+        },
     }
 }
 
@@ -1708,6 +1736,49 @@ mod tests {
         assert!(
             !a.reproductively_isolated(&b, far, &IncompatibilityTable::new(), 1, presence),
             "with no incompatibilities and short distance the pools are not isolated"
+        );
+    }
+
+    #[test]
+    fn a_dm_pair_counts_by_the_joint_cross_probability_not_the_marginals() {
+        // The joint Hardy-Weinberg replacement for the marginal-AND: two pools that each merely
+        // carry the deleterious allele at an intermediate frequency are active only to the extent a
+        // hybrid is likely to inherit both, the product of the two frequencies gated by presence.
+        let table = dm_table(); // locus 0 state 1 crossed with locus 1 state 1
+        let presence = Fixed::from_ratio(1, 2);
+        // Each pool carries its allele at 0.6. The marginal-AND would count this active (0.6 and
+        // 0.6 both clear 0.5), but the joint cross probability is 0.36 < 0.5, so it is dormant.
+        let a = GenePool::new(SchemeId(1), 10, vec![Fixed::from_ratio(3, 5), Fixed::ZERO]);
+        let b = GenePool::new(SchemeId(1), 10, vec![Fixed::ZERO, Fixed::from_ratio(3, 5)]);
+        assert_eq!(
+            table.active_between(&a, &b, presence),
+            0,
+            "a joint cross probability of 0.36 is below the 0.5 presence gate"
+        );
+        // Raise both to 0.8: the product 0.64 clears the gate, so the pair is active.
+        let a2 = GenePool::new(SchemeId(1), 10, vec![Fixed::from_ratio(4, 5), Fixed::ZERO]);
+        let b2 = GenePool::new(SchemeId(1), 10, vec![Fixed::ZERO, Fixed::from_ratio(4, 5)]);
+        assert_eq!(
+            table.active_between(&a2, &b2, presence),
+            1,
+            "0.64 clears the gate"
+        );
+        // A fully-fixed partition (the classic DM signature) is a product of 1.0, always active.
+        let fa = GenePool::new(SchemeId(1), 10, vec![Fixed::ONE, Fixed::ZERO]);
+        let fb = GenePool::new(SchemeId(1), 10, vec![Fixed::ZERO, Fixed::ONE]);
+        assert_eq!(table.active_between(&fa, &fb, presence), 1);
+        // The mirror partition fires too: b carries locus 0, a carries locus 1.
+        let ma = GenePool::new(SchemeId(1), 10, vec![Fixed::ZERO, Fixed::from_ratio(4, 5)]);
+        let mb = GenePool::new(SchemeId(1), 10, vec![Fixed::from_ratio(4, 5), Fixed::ZERO]);
+        assert_eq!(
+            table.active_between(&ma, &mb, presence),
+            1,
+            "the mirror partition clears the gate"
+        );
+        // Determinism: the joint-product count replays bit for bit.
+        assert_eq!(
+            table.active_between(&a2, &b2, presence),
+            table.active_between(&a2, &b2, presence)
         );
     }
 

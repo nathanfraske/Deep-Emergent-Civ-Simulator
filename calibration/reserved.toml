@@ -198,7 +198,7 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.enculturation_pull_rate"
-basis = "DERIVE, worksheet §13a: the pull strength keys off each race's belief_plasticity, mirroring axiom.enculturate's per-mind stubbornness; a flat cross-race rate would regress against the sibling mechanism already built."
+basis = "DERIVES (2026-07-03) through axiom::enculturation_pull_rate (crates/sim/src/axiom.rs), the Friedkin-Johnsen complement 1 - EpistemicStance::effective_stubbornness(base): the per-axiom, per-mind pull toward the group mean is one minus the effective stubbornness the enculturate kernel already applies, so a flat cross-race pull rate is no longer authored. The pull keys off each mind's temperament and the per-axiom stubbornness base (data), never a race id (Principle 9), pinning at zero for a fully stubborn anchor and one for none. No reserved input remains; the stubbornness base and temperament are already per-race data."
 status = "reserved"
 value = ""
 unit = "per_tick"
@@ -206,7 +206,7 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.incommensurability_floor"
-basis = "DERIVE per race-pair, worksheet §13a: the measured etic projection loss for that pair (project_to_etic drop), not a flat floor added to every pairing; the owner leans toward no fixed floor."
+basis = "DERIVES (2026-07-03) through value::cross_race_distance via value::project_to_etic_with_loss (crates/sim/src/value.rs): the cross-race incommensurability is measured PER RACE-PAIR as the etic projection loss (the sum of squared stances of every untranslatable emic axis each side drops), folded into the sum-of-squares under one final sqrt, not a flat floor added to every pairing. A full projection adds nothing and one extra untranslatable axis of stance s raises the distance by exactly the magnitude of s. The flat-floor parameter is removed from cross_race_distance entirely (the owner's lean toward no fixed floor), so no constant is authored; no reserved input remains."
 status = "reserved"
 value = ""
 unit = "distance"
@@ -214,10 +214,18 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.etic_substrate_axes"
-basis = "DERIVE bottom-up, worksheet §13b: grow the shared comparison axes from those that recur across the world's per-race emic data, not a hardcoded human moral-psychology set (record 62.3: no single human structure can be hardcoded as universal). FLAG: design.md:1799 feeds this substrate into conflict_pressure and theory-of-mind friend-or-foe, in tension with 'never a behavioural input'; resolve before it graduates."
+basis = "DERIVES (2026-07-03) through world::build_etic_substrate (crates/sim/src/world.rs): the shared comparison substrate grows BOTTOM-UP, one etic axis minted per emic value axis whose race-count reaches the reserved value_metric.etic_recurrence_min, in ascending emic-id order, with each race projecting identically onto the shared axes it carries and an idiosyncratic axis held by one race staying private (a blind spot). No hardcoded human moral-psychology set (record 62.3: no single human structure can be hardcoded as universal); the membership is a consequence of the per-race emic data (Principle 11), never a race branch (Principle 9). The one reserved input is value_metric.etic_recurrence_min below. FLAG: design.md:1799 feeds this substrate into conflict_pressure and theory-of-mind friend-or-foe, in tension with 'never a behavioural input'; resolve before it graduates."
 status = "reserved"
 value = ""
 unit = "set"
+source = "Part 21 value-distance metric; record 62.3; audit section 1b"
+
+[[reserved]]
+id = "value_metric.etic_recurrence_min"
+basis = "the minimum number of races that must carry an emic value axis for world::build_etic_substrate to mint it into the shared etic comparison substrate. Basis: the recurrence at which an axis counts as cross-culturally shared rather than idiosyncratic, a small integer above one so a value held by a single race stays private (a blind spot) while one that recurs across cultures becomes comparable; set against the number of seeded races and how much overlap the world's cultures should share. A larger minimum shrinks the shared frame (more values stay untranslatable, raising cross-race incommensurability); the degenerate one admits every axis any race holds."
+status = "reserved"
+value = ""
+unit = "count"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 # --- R-GENOME: genetics and deep-time evolution (Part 25, record 62.5) ---
@@ -471,7 +479,7 @@ source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PRO
 
 [[reserved]]
 id = "lang.typology_distance_weights"
-basis = "the per-parameter weights of the 33.5 grammatical distance component over the typology profile; basis the contribution each typological dimension makes to measured mutual intelligibility, consistent with the three-component weighting where lexical distance dominates"
+basis = "DERIVES (2026-07-03) through typology::information_weights (crates/sim/src/typology.rs): each parameter's distance weight is the order-2 diversity of its prior integer language counts, the Hill number N^2 / sum(c_i^2) (inverse Simpson, the effective number of values the parameter takes across the grounding sample), so a parameter whose languages spread evenly over many values carries more information and weighs more while a near-uniform one weighs near one. The per-parameter weights DERIVE from the prior counts (data, Principle 11), so no authored per-dimension table remains and two worlds with different priors weigh their parameters differently from the same rule. A drop-in for the weights argument of typology_distance. No reserved input remains (the priors are already data)."
 status = "reserved"
 value = ""
 unit = "weight"
@@ -481,7 +489,15 @@ source = "Part 33.5 grammatical distance; docs/working/LANG_TYPOLOGY_SCOPED_PROP
 
 [[reserved]]
 id = "langdet.salience_decay_rate"
-basis = "the concept-salience leaky-accumulator decay rate; basis the usage-recency half-life, with a hard lower bound so the usage term cannot underflow to zero (decay_bits >= ceil(2^32 / usage_max_bits)), and the concept-merge threshold required to sit above the salience scale's resolution floor"
+basis = "the DECREASING response curve mapping a band's representative memory capacity (world::band_mean_memory) to its concept-salience leaky-accumulator decay rate, read by language::SalienceDecayLaw::rate_for (crates/sim/src/language.rs) and floored by the reserved langdet.salience_decay_floor below. Basis: the usage-recency half-life as a function of memory, a higher-memory band leaking salience more slowly so the same usage history keeps a concept alive longer in a sharp-memoried culture than a forgetful one (per-race, from the founding band's own memory phenotype, no shared human span). Parsed by require_curve as memory=rate points; a flat curve is the memory-independent single-rate special case. The rate is no longer one authored constant: the curve is data (Principle 11) and the mechanism keys on the memory scalar, never a race id (Principle 9)."
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.salience_decay_floor"
+basis = "the hard lower bound the derived salience-decay rate is floored to (language::SalienceDecayLaw::rate_for), so the leaky accumulator can never decay by zero and freeze the lexicon. Basis: the salience scale's resolution floor, decay_bits >= ceil(2^32 / usage_max_bits), the smallest positive leak the fixed-point usage scale can represent; set from the salience quantisation once usage_max is fixed."
 status = "reserved"
 value = ""
 unit = "rate"
@@ -531,7 +547,7 @@ source = "Part 33.3; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "langmod.capability_gates"
-basis = "the per-channel capability-query floors and feature-to-capability curves gating produce and perceive; basis the reserved anatomy interface (Parts 35, 25), the floor set equal to the wound model's function-loss threshold for consistency, the curve knee at the perceptual grading bands"
+basis = "DERIVES (2026-07-03) through langmod::capability_gate / capability_halves over body::function_integrity (crates/sim/src/langmod.rs, crates/sim/src/body.rs): a channel's usable capability is the Liebig minimum of its produce half (the body's mean-of-bearers function integrity, kneed at the wound function-loss threshold) and its perceive half (the sensorium's per-channel acuity), so two races diverge only through their body integrity and sensorium acuity data run through one kernel, never a race branch (Principle 9). No authored per-channel capability table remains. The one reserved input is body.function_loss_threshold (the knee point), set equal to the wound model's function-loss threshold for consistency (record 62.13)."
 status = "reserved"
 value = ""
 unit = "threshold"
@@ -785,40 +801,21 @@ source = "Part 54 tier consistency; record 62.9; audit section 1j"
 # The access-channel set is data (the registry in crates/sim/src/tom.rs); these are the
 # weights and meta thresholds the nested update reads. The hard constraint from the
 # blockquote: the witnessed weight must be set strictly above the told and said weights,
-# and no meta-observation weight above the same observation taken first-hand. The
-# remaining reserved values in the Part 37 blockquote (lie-discount, common-ground
-# prior, projection-fallback, depth bound, level-of-detail policy, conserved projection,
-# meta-facet decay, trust update) are added here as their consumers are built.
-
-[[reserved]]
-id = "tom.access_weight.witnessed"
-basis = "the weight-of-evidence that a target witnessed a trace; must be set strictly above told and said so a witnessed access out-ranks a contrary assertion and lies are seen through; weight of evidence in nats (Good 1950; Jaynes 2003); >= the meta commit threshold so one clear witnessing attributes a belief"
-status = "set"
-value = "5"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
-
-[[reserved]]
-id = "tom.access_weight.told"
-basis = "the weight that a target was told a value, trust- and hop-scaled; below witnessed; set to the meta commit threshold so one clear telling attributes a belief"
-status = "set"
-value = "4"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
-
-[[reserved]]
-id = "tom.access_weight.said"
-basis = "the weight of a target's own utterance, the channel deception attacks, lie-discounted; below witnessed and below the meta commit threshold, so a bare assertion alone does not fix a model of another's belief"
-status = "set"
-value = "3"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
+# and no meta-observation weight above the same observation taken first-hand.
+#
+# tom.access_weight.witnessed/told/said and tom.meta_commit_threshold/meta_runner_up_margin/
+# meta_log_odds_clamp RETIRED (2026-07-03, derive audit): the six values are no longer authored.
+# The meta-frame params DERIVE through tom::meta_params_from_evidence (crates/sim/src/tom.rs) as
+# the first-order evidence.* params themselves (the same log-odds accumulator, keyed off them, no
+# free second-order magnitude); the witnessed/told/said assertion ladder DERIVES through
+# AccessWeights::from_evidence_and_manifest by the fixed offsets the bases name (witnessed =
+# commit + margin, told = commit, said = commit - margin), so witnessed out-ranks told by exactly
+# the runner-up margin the commit test uses and a lie is seen through by construction, with no
+# hand-tuned gap between three reserved weights. Removed rather than left as sentinels. reachable,
+# absence, and denied stay INDEPENDENT reserved levers below (they gate a different relation, not
+# the assertion ladder). The remaining Part 37 reserved values (lie-discount, common-ground prior,
+# projection-fallback, depth bound, level-of-detail policy, conserved projection, meta-facet decay,
+# trust update) are added as their consumers are built.
 
 [[reserved]]
 id = "tom.access_weight.reachable"
@@ -850,35 +847,9 @@ set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
 
-[[reserved]]
-id = "tom.meta_commit_threshold"
-basis = "the total a modelled belief must reach to commit; the balance of over-attributing a belief the target does not hold against leaving it unknown, plausibly wider than the first-order threshold because second-order evidence is noisier; in nats, 4 is about 98% confidence"
-status = "set"
-value = "4"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
-
-[[reserved]]
-id = "tom.meta_runner_up_margin"
-basis = "the lead over the runner-up a modelled belief must hold; set so the false-belief and deception battery commits rather than merely failing to match projection"
-status = "set"
-value = "2"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
-
-[[reserved]]
-id = "tom.meta_log_odds_clamp"
-basis = "the maximum admissible certainty about another mind, no higher than the first-order clamp, since one cannot know another's mind better than one's own world; in nats, 6 (below the first-order 7)"
-status = "set"
-value = "6"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "log_odds"
-source = "Part 37 theory of mind; record 62.11; audit section 1m"
+# tom.meta_commit_threshold, tom.meta_runner_up_margin, and tom.meta_log_odds_clamp RETIRED here:
+# they DERIVE from the first-order evidence.* params through tom::meta_params_from_evidence (see the
+# R-TOM-UPDATE header block above). Removed rather than left as sentinels.
 
 # --- gossip and trust (Part 9.5, Part 37) ---
 # The told-weight and trust dynamics of transmission. Added as the gossip loop reached
@@ -1031,13 +1002,11 @@ source = "Part 25.7"
 
 [[reserved]]
 id = "genome.allele_presence_threshold"
-basis = "the allele-state frequency at or above which a pool counts as carrying that state for the cross-pool incompatibility test; set near fixation so a pair is active only when each pool reliably contributes its partner allele to a hybrid, lower if a polymorphic pool should still trip the firewall (the presence input to the active-incompatibility count)"
-status = "set"
-value = "0.9"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
-unit = "frequency"
-source = "Part 25.7"
+basis = "RE-BASED (2026-07-03, HW product): the minimum JOINT cross probability at which a Dobzhansky-Muller pair counts as active, gating the Hardy-Weinberg product of the two pools' allele frequencies (p_a times p_b, the linkage-equilibrium chance a hybrid inherits both deleterious alleles) rather than a marginal presence cutoff on each pool (IncompatibilityTable::active_between, crates/sim/src/genome.rs). The marginal-AND cutoff is retired: two pools that each merely carry the allele are isolated only to the extent a hybrid is likely to inherit both. Basis: the hybrid cross-probability at which the incompatibility reliably expresses, so a near-fixed partition (product near one) always fires while an intermediate-frequency pair fires only when the joint chance is high; a lower value lets a polymorphic pair trip the firewall. Re-set for the joint-probability meaning: the former 0.9 was a marginal cutoff, a different scale."
+status = "reserved"
+value = ""
+unit = "joint_probability"
+source = "Part 25.7; crates/sim/src/genome.rs"
 
 [[reserved]]
 id = "time.base_tick_seconds"
@@ -1235,6 +1204,14 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "fraction_of_integrity"
 source = "Part 35; crates/sim/src/body.rs"
+
+[[reserved]]
+id = "body.function_loss_threshold"
+basis = "the fraction of a part's structural integrity at or below which it can no longer perform its function: the knee body::function_integrity applies, and the floor langmod::capability_gate reads for the produce half of the language capability gate (record 62.13). Basis: the wound model's function-loss boundary, so a wound worn past it costs the function rather than merely weakening it; the language capability-gate floor is set equal to it for consistency. One boundary shared by the wound model (Part 35) and the language gate (Part 33.3)."
+status = "reserved"
+value = ""
+unit = "fraction_of_integrity"
+source = "Part 35, Part 33.3; record 62.13; crates/sim/src/body.rs; crates/sim/src/langmod.rs"
 
 [[reserved]]
 id = "body.burn_scale"

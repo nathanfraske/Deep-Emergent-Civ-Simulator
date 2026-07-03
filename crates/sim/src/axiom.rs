@@ -51,9 +51,9 @@
 //!   and disconfirming tags, as the paper specifies); a recency-weighted-pressure hybrid is
 //!   reserved for the stress-test batch.
 //!
-//! Built on top of this brick: enculturation ([`confidence_weighted_mean`] and
-//! [`enculturate`], the Friedkin-Johnsen anchored average, wired over a band by
-//! [`crate::world::World::enculturate_band`]); bounded-confidence schism
+//! Built on top of this brick: enculturation ([`confidence_weighted_mean`], [`enculturate`],
+//! and its [`enculturation_pull_rate`] complement, the Friedkin-Johnsen anchored average, wired
+//! over a band by [`crate::world::World::enculturate_band`]); bounded-confidence schism
 //! ([`bounded_confidence_mean`] and [`confidence_weighted_variance`], wired by
 //! [`crate::world::World::enculturate_band_bounded`], [`crate::world::World::is_fissioning`],
 //! and [`crate::world::World::stance_clusters`]), which fractures a spread band into sects;
@@ -648,6 +648,20 @@ pub fn enculturate(group_mean: Fixed, innate_seed: Fixed, theta: Fixed) -> Fixed
         .clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
 }
 
+/// The Friedkin-Johnsen enculturation pull rate for an axiom (design Part 28): how far a member
+/// moves toward its group mean in one enculturation step, the complement of its effective
+/// stubbornness anchor, `1 - theta` with `theta =
+/// EpistemicStance::effective_stubbornness(base)`. This is the `(1 - theta)` coefficient
+/// [`enculturate`] already applies per mind; naming it lets the group-drift path and the later
+/// language-drift path read one rate rather than each recomputing the complement. Because
+/// [`EpistemicStance::effective_stubbornness`] is clamped to `[0, 1]`, so is the pull: it pins
+/// at zero for a fully stubborn anchor (theta one, a mind that does not move) and at one for no
+/// anchor (theta zero, a mind that moves fully to the mean). A pure function of the stance's
+/// temperament and the per-axiom stubbornness base, never a race identifier (Principle 9).
+pub fn enculturation_pull_rate(stance: &EpistemicStance, base: Fixed) -> Fixed {
+    Fixed::ONE - stance.effective_stubbornness(base)
+}
+
 /// The bounded-confidence mean a member is exposed to (design Part 28, the Deffuant and
 /// Hegselmann-Krause models): the confidence-weighted mean over only the neighbours whose
 /// stance lies within the confidence band `epsilon` of the member's own stance, in the
@@ -1075,6 +1089,56 @@ mod tests {
         assert_eq!(
             enculturate(mean, seed, Fixed::from_ratio(1, 2)),
             Fixed::from_ratio(1, 2)
+        );
+    }
+
+    #[test]
+    fn enculturation_pull_rate_is_the_fj_complement_with_pinned_endpoints() {
+        // A placid mind (no epistemic lift) and a rigid one (dogmatic and freezing) exercise
+        // both ends of the temperament term.
+        let placid = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+        );
+        let rigid = EpistemicStance::new(
+            [(TRADITION, Fixed::ONE)],
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::ONE,
+            Fixed::ZERO,
+        );
+        // The pull is exactly one minus the effective stubbornness across a base sweep, for
+        // either temperament: the same (1 - theta) coefficient enculturate applies.
+        for &(num, den) in &[(0, 1), (1, 10), (1, 4), (1, 2), (3, 4), (1, 1)] {
+            let base = Fixed::from_ratio(num, den);
+            for stance in [&placid, &rigid] {
+                assert_eq!(
+                    enculturation_pull_rate(stance, base),
+                    Fixed::ONE - stance.effective_stubbornness(base),
+                    "pull is the FJ complement"
+                );
+            }
+        }
+        // Endpoints pin at one and zero. A placid mind at base zero has theta zero, so pull one
+        // (a full move to the mean); base one pins theta at one whatever the temperament, so
+        // pull zero (no move).
+        assert_eq!(
+            enculturation_pull_rate(&placid, Fixed::ZERO),
+            Fixed::ONE,
+            "no anchor pulls fully to the mean"
+        );
+        assert_eq!(
+            enculturation_pull_rate(&rigid, Fixed::ONE),
+            Fixed::ZERO,
+            "a fully stubborn anchor does not move"
+        );
+        assert_eq!(
+            enculturation_pull_rate(&placid, Fixed::ONE),
+            Fixed::ZERO,
+            "base one pins the pull at zero for any temperament"
         );
     }
 

@@ -39,6 +39,7 @@
 use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::decision::Curve;
 use crate::typology::TypologyProfile;
 use civsim_core::{Fixed, Rng};
 
@@ -485,6 +486,41 @@ impl DriftParams {
     }
 }
 
+/// The law mapping a representative memory capacity to the rate at which a concept's salience
+/// decays in the leaky-accumulator model (design Part 33.4, the R-LANG-DET salience-decay
+/// calibration `langdet.salience_decay_rate`). A concept's salience is a usage-recency
+/// accumulator: each use lifts it and it leaks down each generation at this rate, so a rarely
+/// used concept fades from the lexicon and a well-used one persists. The rate is not one fixed
+/// constant: a mind that remembers well lets salience leak more slowly, so the same usage
+/// history keeps a concept alive longer in a high-memory being than in a forgetful one. The
+/// shape is a decreasing data [`Curve`] read at the representative memory, floored by the
+/// reserved underflow bound so the leak can never round to zero (a zero rate would freeze the
+/// lexicon). The mechanism is fixed Rust; the curve and the floor are data (Principle 11),
+/// mirroring how the axiom kernel reads its entrenchment threshold from a reserved curve
+/// ([`crate::axiom::entrenchment_threshold`]). The mechanism keys on the supplied memory
+/// scalar, never on a race id, so it differentiates per being and per race from one rule.
+#[derive(Clone, Debug)]
+pub struct SalienceDecayLaw {
+    /// The decreasing rate curve: a representative memory capacity in, a salience-decay rate
+    /// out. Owner data; a flat curve yields the same rate for every memory.
+    pub curve: Curve,
+    /// The hard lower bound the rate is floored to: the reserved underflow bound, so the
+    /// leaky accumulator cannot decay by zero and freeze. Set from the salience scale's
+    /// resolution floor (`decay >= ceil(2^32 / usage_max_bits)`).
+    pub floor: Fixed,
+}
+
+impl SalienceDecayLaw {
+    /// The salience-decay rate for a representative memory capacity: the curve read at that
+    /// memory, floored by the underflow bound. Because the curve is decreasing, a
+    /// higher-memory band decays its concept salience more slowly; the floor guarantees a
+    /// positive leak whatever the curve returns. A pure, deterministic function of its
+    /// inputs, so it replays bit for bit and carries no race branch.
+    pub fn rate_for(&self, memory: Fixed) -> Fixed {
+        self.curve.eval(memory).max(self.floor)
+    }
+}
+
 impl FormSystem {
     /// The contrastive values present per dimension in the inventory, in id order: the
     /// substrate a form change can act on, read from this lineage's own producible set.
@@ -776,6 +812,56 @@ mod tests {
         assert_eq!(ra.len(), 1, "rate one coins one change");
         assert_eq!(a.change_log().len(), 1, "the change is logged");
         assert_eq!(a.change_log()[0].innovation_index, 0);
+    }
+
+    #[test]
+    fn salience_decay_rate_falls_with_memory_and_is_floored() {
+        // A decreasing curve: memory 0 -> rate 0.5, memory 1 -> rate 0.1. A better-remembering
+        // representative decays its concept salience more slowly.
+        let law = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_ratio(1, 10)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let forgetful = law.rate_for(Fixed::ZERO);
+        let sharp = law.rate_for(Fixed::ONE);
+        assert_eq!(forgetful, Fixed::from_ratio(1, 2));
+        assert_eq!(sharp, Fixed::from_ratio(1, 10));
+        assert!(
+            forgetful > sharp,
+            "a higher-memory representative decays salience more slowly"
+        );
+        // The floor holds: a curve reading below the underflow bound is lifted to it, so the
+        // leak is never zero.
+        let sinking = SalienceDecayLaw {
+            curve: Curve::new([(Fixed::ZERO, Fixed::ZERO)]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        assert_eq!(
+            sinking.rate_for(Fixed::from_int(9)),
+            Fixed::from_ratio(1, 100)
+        );
+    }
+
+    #[test]
+    fn a_flat_salience_curve_gives_one_rate_for_every_memory() {
+        // A flat curve reads the same rate at any memory: the memory channel is switched off,
+        // the degenerate single-rate case, with no race branch anywhere.
+        let flat = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(3, 10)),
+                (Fixed::ONE, Fixed::from_ratio(3, 10)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let r0 = flat.rate_for(Fixed::ZERO);
+        let r1 = flat.rate_for(Fixed::from_ratio(1, 2));
+        let r2 = flat.rate_for(Fixed::from_int(4));
+        assert_eq!(r0, Fixed::from_ratio(3, 10));
+        assert_eq!(r0, r1);
+        assert_eq!(r1, r2);
     }
 
     #[test]

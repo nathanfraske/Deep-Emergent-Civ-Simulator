@@ -144,9 +144,46 @@ impl AccessWeights {
         Ok(AccessWeights { weights })
     }
 
+    /// The access weights with the witnessed/told/said assertion ladder DERIVED from the meta
+    /// commit threshold and runner-up margin, and every other channel read from the manifest as an
+    /// independent reserved lever (Part 37, record 62.11). The three assertion channels are keyed
+    /// off the meta params by the fixed offsets their bases name: a witnessed access weighs the
+    /// commit threshold plus one margin, a told access exactly the commit threshold, and a said
+    /// access the commit threshold less one margin. The offsets encode the deception constraint
+    /// structurally: witnessed out-ranks told (and told out-ranks said) by exactly the runner-up
+    /// margin the commit test uses, so a witnessed access always clears a contrary assertion by the
+    /// commit margin and a lie is seen through by construction, with no hand-tuned gap between three
+    /// reserved weights. Any channel not on the ladder (reachable, absence, denied, or any a world
+    /// adds) stays an independent reserved lever, read `tom.access_weight.<name>` and fail-loud
+    /// while reserved. The channel set is data (the registry), so the ladder is keyed off the
+    /// registry's own channel names, never a closed enum; the walk is registry order, so it is
+    /// deterministic. This retires the `tom.access_weight.witnessed`, `.told`, and `.said` reserved
+    /// entries to derive tombstones (`calibration/reserved.toml`).
+    pub fn from_evidence_and_manifest(
+        reg: &AccessChannelRegistry,
+        meta: &InferenceParams,
+        m: &CalibrationManifest,
+    ) -> Result<Self, CalibrationError> {
+        let mut weights = Vec::with_capacity(reg.channels.len());
+        for ch in &reg.channels {
+            let w = match ch.name.as_str() {
+                "witnessed" => meta.commit_threshold + meta.margin,
+                "told" => meta.commit_threshold,
+                "said" => meta.commit_threshold - meta.margin,
+                _ => {
+                    let key = format!("tom.access_weight.{}", ch.name);
+                    m.require_fixed(&key)?
+                }
+            };
+            weights.push((ch.id, w));
+        }
+        Ok(AccessWeights { weights })
+    }
+
     /// Build a weight table directly. The sanctioned production path is
-    /// [`AccessWeights::from_manifest`]; this exists for tests and tools, which supply
-    /// clearly-labelled fixtures rather than the owner's reserved numbers.
+    /// [`AccessWeights::from_evidence_and_manifest`] (the assertion ladder derived, the rest
+    /// reserved); this exists for tests and tools, which supply clearly-labelled fixtures rather
+    /// than the owner's reserved numbers.
     pub fn from_pairs(it: impl IntoIterator<Item = (AccessChannelId, Fixed)>) -> Self {
         AccessWeights {
             weights: it.into_iter().collect(),
@@ -159,17 +196,21 @@ impl AccessWeights {
     }
 }
 
-/// Read the meta-frame inference parameters (the TOM-COMMIT, TOM-CLAMP calibrations)
-/// from the manifest. Distinct from the first-order `evidence.*` values, because
-/// second-order evidence is noisier and the design reserves a possibly wider margin.
-pub fn meta_params_from_manifest(
-    m: &CalibrationManifest,
-) -> Result<InferenceParams, CalibrationError> {
-    Ok(InferenceParams {
-        clamp: m.require_fixed("tom.meta_log_odds_clamp")?,
-        commit_threshold: m.require_fixed("tom.meta_commit_threshold")?,
-        margin: m.require_fixed("tom.meta_runner_up_margin")?,
-    })
+/// The meta-frame inference parameters DERIVED from the first-order evidence params (Part 37, the
+/// resolved R-TOM-UPDATE work, record 62.11). Second-order belief runs the same log-odds
+/// accumulator, so the meta clamp, commit threshold, and runner-up margin are the first-order
+/// `evidence.*` values themselves, keyed off them rather than reserved as three free second-order
+/// numbers: no meta magnitude hides where the first-order engine already fixes one, and one cannot
+/// read another mind on a scale the world was not read on. A pure function; deterministic,
+/// float-free, and free of any race branch. This retires the former `tom.meta_log_odds_clamp`,
+/// `tom.meta_commit_threshold`, and `tom.meta_runner_up_margin` reserved entries to derive
+/// tombstones (`calibration/reserved.toml`).
+pub fn meta_params_from_evidence(evidence: &InferenceParams) -> InferenceParams {
+    InferenceParams {
+        clamp: evidence.clamp,
+        commit_threshold: evidence.commit_threshold,
+        margin: evidence.margin,
+    }
 }
 
 /// Returned when a nested frame is offered evidence it must not accept: the modeller's
@@ -597,6 +638,107 @@ source = "Part 37"
         assert_eq!(
             err,
             CalibrationError::Reserved("tom.access_weight.witnessed".to_string())
+        );
+    }
+
+    #[test]
+    fn the_assertion_ladder_derives_from_the_meta_params_and_keeps_the_deception_constraint() {
+        const REACHABLE: AccessChannelId = AccessChannelId(4);
+        const DENIED: AccessChannelId = AccessChannelId(5);
+
+        // The meta params are the first-order evidence params, keyed off them (no free
+        // second-order magnitude): a fixture with commit 3 and margin 1.
+        let evidence = InferenceParams {
+            clamp: Fixed::from_int(7),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let meta = meta_params_from_evidence(&evidence);
+        assert_eq!(meta.commit_threshold, evidence.commit_threshold);
+        assert_eq!(meta.margin, evidence.margin);
+        assert_eq!(meta.clamp, evidence.clamp);
+
+        // A registry with the three-rung assertion ladder plus two independent levers.
+        let reg = AccessChannelRegistry {
+            channels: vec![
+                AccessChannelDef {
+                    id: WITNESSED,
+                    name: "witnessed".to_string(),
+                },
+                AccessChannelDef {
+                    id: TOLD,
+                    name: "told".to_string(),
+                },
+                AccessChannelDef {
+                    id: SAID,
+                    name: "said".to_string(),
+                },
+                AccessChannelDef {
+                    id: REACHABLE,
+                    name: "reachable".to_string(),
+                },
+                AccessChannelDef {
+                    id: DENIED,
+                    name: "denied".to_string(),
+                },
+            ],
+        };
+        // The independent levers are set in a fixture manifest; the ladder needs no manifest entry.
+        let toml = r#"
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "b"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "test"
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "b"
+status = "set"
+value = "4"
+unit = "log_odds"
+source = "test"
+"#;
+        let m = CalibrationManifest::from_toml_str(toml).unwrap();
+        let w = AccessWeights::from_evidence_and_manifest(&reg, &meta, &m).unwrap();
+        // The ladder: witnessed = commit + margin, told = commit, said = commit - margin.
+        assert_eq!(w.get(WITNESSED), Some(Fixed::from_int(4)));
+        assert_eq!(w.get(TOLD), Some(Fixed::from_int(3)));
+        assert_eq!(w.get(SAID), Some(Fixed::from_int(2)));
+        // The independent levers are the reserved manifest values, untouched by the derivation.
+        assert_eq!(w.get(REACHABLE), Some(Fixed::from_int(2)));
+        assert_eq!(w.get(DENIED), Some(Fixed::from_int(4)));
+        // The deception constraint holds by construction: witnessed strictly out-ranks told and
+        // said, and beats told by exactly the runner-up margin the commit test uses.
+        assert!(w.get(WITNESSED) > w.get(TOLD) && w.get(TOLD) > w.get(SAID));
+        assert_eq!(
+            w.get(WITNESSED).unwrap() - w.get(TOLD).unwrap(),
+            meta.margin,
+            "witnessed clears a contrary told assertion by exactly the commit margin"
+        );
+
+        // An independent lever left reserved fails loud, never a fabricated weight.
+        let reserved = r#"
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "b"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "test"
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "b"
+status = "set"
+value = "4"
+unit = "log_odds"
+source = "test"
+"#;
+        let mr = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert_eq!(
+            AccessWeights::from_evidence_and_manifest(&reg, &meta, &mr).unwrap_err(),
+            CalibrationError::Reserved("tom.access_weight.reachable".to_string())
         );
     }
 }

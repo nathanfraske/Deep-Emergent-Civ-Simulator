@@ -714,6 +714,52 @@ pub struct ValueMetric {
     pub index_of: BTreeMap<TypologyValueId, usize>,
 }
 
+/// The information weights over the typology parameters, a drop-in for the `weights` argument of
+/// [`typology_distance`] (design Part 33.5). Each parameter's weight is the order-2 diversity of
+/// its prior integer language counts, the Hill number of order two `N^2 / sum(c_i^2)` (the inverse
+/// Simpson concentration, the effective number of distinct values the parameter takes across the
+/// grounding sample). A parameter whose languages spread evenly over many values carries more
+/// information about which language is which and so weighs more in the grammatical distance; a
+/// parameter dominated by one value carries little and weighs near one. The weights DERIVE from the
+/// prior counts (data, Principle 11), so `lang.typology_distance_weights` is no longer an authored
+/// per-parameter table: two worlds with different priors weigh their parameters differently from
+/// the same rule, and no human weighting is baked in.
+///
+/// Deterministic and integer-exact: `N` and `sum(c_i^2)` accumulate in `u128` (the counts are
+/// bounded by [`MAX_PRIOR_COUNT`] and there are at most [`MAX_VALUES_PER_PARAM`] of them, so neither
+/// overflows), and the weight is `(N^2 << 32) / sum(c_i^2)` read back as `Fixed` bits, so the map is
+/// bit-identical across machines. A parameter whose prior is missing, or whose counts total zero,
+/// contributes no weight (it is omitted from the map, exactly as [`typology_distance`] treats an
+/// absent weight), so the mechanism never divides by zero or fabricates a weight for a parameter it
+/// has no evidence on. The registry gives the canonical parameter walk; the output is a `BTreeMap`,
+/// so its order is parameter-id order regardless.
+pub fn information_weights(
+    registry: &TypologyRegistry,
+    prior: &TypologyPrior,
+) -> BTreeMap<TypologyParamId, Fixed> {
+    let mut weights = BTreeMap::new();
+    for param in registry.params() {
+        let Some(counts) = prior.counts(param.id) else {
+            continue;
+        };
+        let mut n: u128 = 0;
+        let mut sum_sq: u128 = 0;
+        for &(_value, c) in counts {
+            let c = c as u128;
+            n += c;
+            sum_sq += c * c;
+        }
+        if sum_sq == 0 {
+            // No evidence on this parameter (every count zero): no weight, never a fabricated one.
+            continue;
+        }
+        // Order-2 diversity N^2 / sum(c_i^2), read as Q32.32 bits: (N^2 << 32) / sum_sq.
+        let bits = ((n * n) << 32) / sum_sq;
+        weights.insert(param.id, Fixed::from_bits(bits as i64));
+    }
+    weights
+}
+
 /// The 33.5 grammatical component over two profiles: for each parameter both profiles
 /// carry and the reserved weights name, a categorical unit distance (zero when equal,
 /// one when not), or the parameter's [`ValueMetric`] where one is supplied, scaled by the
@@ -1911,6 +1957,111 @@ source = "test"
         assert!(
             TypologyParams::from_manifest(&m).is_err(),
             "a reserved temperature fails loud, never a fabricated default"
+        );
+    }
+
+    #[test]
+    fn information_weights_are_the_order_two_diversity_of_the_prior_counts() {
+        // A three-parameter toy registry with hand-set prior counts, so the derived weight is a
+        // checkable order-2 diversity N^2 / sum(c_i^2), never an authored table.
+        let two_value = |id: u32, prio: u32| TypologyParamDef {
+            id: TypologyParamId(id),
+            gloss: "p".into(),
+            values: vec![
+                TypologyValueDef {
+                    id: TypologyValueId(0),
+                    gloss: "v0".into(),
+                },
+                TypologyValueDef {
+                    id: TypologyValueId(1),
+                    gloss: "v1".into(),
+                },
+            ],
+            sample_priority: prio,
+            source: "test fixture".into(),
+        };
+        let mut reg = TypologyRegistry::new();
+        reg.add_param(two_value(0, 0));
+        reg.add_param(two_value(1, 1));
+        // A single-value parameter for the diversity-one case.
+        reg.add_param(TypologyParamDef {
+            id: TypologyParamId(2),
+            gloss: "p2".into(),
+            values: vec![TypologyValueDef {
+                id: TypologyValueId(0),
+                gloss: "only".into(),
+            }],
+            sample_priority: 2,
+            source: "test fixture".into(),
+        });
+
+        let mut prior = TypologyPrior::new();
+        // Param 0: an even split 3/3. N=6, sum_sq=18, diversity = 36/18 = 2 exactly.
+        prior.set(
+            TypologyParamId(0),
+            vec![(TypologyValueId(0), 3), (TypologyValueId(1), 3)],
+            "fixture",
+        );
+        // Param 1: a lopsided split 9/1. N=10, sum_sq=82, diversity = 100/82.
+        prior.set(
+            TypologyParamId(1),
+            vec![(TypologyValueId(0), 9), (TypologyValueId(1), 1)],
+            "fixture",
+        );
+        // Param 2: a single value with count 5. N=5, sum_sq=25, diversity = 1 exactly.
+        prior.set(TypologyParamId(2), vec![(TypologyValueId(0), 5)], "fixture");
+
+        let weights = information_weights(&reg, &prior);
+        assert_eq!(weights.len(), 3);
+        assert_eq!(
+            weights[&TypologyParamId(0)],
+            Fixed::from_int(2),
+            "an even two-value split has diversity two"
+        );
+        assert_eq!(
+            weights[&TypologyParamId(2)],
+            Fixed::ONE,
+            "a one-value parameter has diversity one"
+        );
+        // The lopsided parameter is more concentrated, so it carries less information and weighs
+        // less than the even one but still above one, bit-exact 100/82 in Q32.32.
+        let lop = weights[&TypologyParamId(1)];
+        assert!(
+            lop > Fixed::ONE && lop < Fixed::from_int(2),
+            "a lopsided split weighs between one and the even-split diversity ({lop:?})"
+        );
+        assert_eq!(lop, Fixed::from_bits(((100u128 << 32) / 82) as i64));
+
+        // Determinism: the derivation replays bit for bit.
+        assert_eq!(information_weights(&reg, &prior), weights);
+
+        // A parameter with no prior row is omitted, exactly as an absent weight, so it drops out
+        // of the distance rather than fabricating a weight.
+        let mut partial = TypologyPrior::new();
+        partial.set(
+            TypologyParamId(0),
+            vec![(TypologyValueId(0), 3), (TypologyValueId(1), 3)],
+            "fixture",
+        );
+        let partial_w = information_weights(&reg, &partial);
+        assert_eq!(partial_w.len(), 1);
+        assert!(!partial_w.contains_key(&TypologyParamId(1)));
+
+        // Drop-in: the derived weights plug straight into typology_distance and score a
+        // one-value difference at exactly that parameter's diversity weight.
+        let a = TypologyProfile::new(vec![
+            (TypologyParamId(0), TypologyValueId(0)),
+            (TypologyParamId(1), TypologyValueId(0)),
+        ]);
+        let b = TypologyProfile::new(vec![
+            (TypologyParamId(0), TypologyValueId(1)),
+            (TypologyParamId(1), TypologyValueId(0)),
+        ]);
+        let metrics = BTreeMap::new();
+        assert_eq!(
+            typology_distance(&a, &b, &weights, &metrics),
+            Fixed::from_int(2),
+            "the derived weights are a drop-in for the distance's weights arg"
         );
     }
 }

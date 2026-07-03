@@ -34,9 +34,11 @@
 //!   what the structural distance reduces to when axes are independent, computed with the
 //!   deterministic [`Fixed::sqrt`];
 //! - the cross-race plumbing: a shared [`EticSubstrate`], per-race [`EmicProjection`]s onto
-//!   it, and a [`cross_race_distance`] that projects both profiles and adds the reserved
-//!   incommensurability floor, treating an untranslatable value as a theory-of-mind blind
-//!   spot.
+//!   it, and a [`cross_race_distance`] that projects both profiles and folds the measured
+//!   projection loss (the squared stance of every untranslatable emic axis, from the reusable
+//!   [`project_to_etic_with_loss`]) into the sum-of-squares before its single root, so the
+//!   per-pair distance rises by that pair's own incommensurability rather than a flat floor,
+//!   treating an untranslatable value as a theory-of-mind blind spot.
 //!
 //! The one part deliberately left as a flagged seam (the owner's call): the exact weighted
 //! distance for a structured (graph or relationship) space. Record 62.3 pins the ground
@@ -50,9 +52,12 @@
 //! relationship matrix; the latter is the family that reduces to Euclidean for the identity.
 //!
 //! The numeric calibrations (the default compatibility and opposition weights, the
-//! distance-to-pressure coefficient, the cross-race incommensurability floor, and which axes
-//! populate the etic substrate) are reserved owner values (the `value_metric.*` entries of
-//! the calibration manifest), supplied as data, never invented here.
+//! distance-to-pressure coefficient, and which axes populate the etic substrate) are reserved
+//! owner values (the `value_metric.*` entries of the calibration manifest), supplied as data,
+//! never invented here. The cross-race incommensurability is no longer a reserved flat floor:
+//! it is measured per race-pair as the etic projection loss ([`cross_race_distance`] through
+//! [`project_to_etic_with_loss`]), so `value_metric.incommensurability_floor` is retired as a
+//! constant in favour of that derived quantity.
 
 use std::collections::BTreeMap;
 
@@ -371,25 +376,57 @@ impl EticProfile {
 
 /// Project an emic value profile onto the etic substrate through a race's projections. Each
 /// emic stance is spread onto the substrate axes its projection names, weighted; an emic
-/// axis with no projection contributes nothing (the untranslatable, blind-spot case). A pure
-/// deterministic function: the accumulation walks the profile and each projection in
-/// canonical order.
+/// axis with no projection (or an empty one) contributes nothing (the untranslatable,
+/// blind-spot case). A pure deterministic function: the accumulation walks the profile and
+/// each projection in canonical order. This is [`project_to_etic_with_loss`] with the measured
+/// projection loss discarded.
 pub fn project_to_etic(profile: &ValueProfile, race: &RaceProjection) -> EticProfile {
+    project_to_etic_with_loss(profile, race).0
+}
+
+/// Project an emic value profile onto the etic substrate and, alongside the projection, measure
+/// its projection loss: the sum of squared stances of every emic axis the projection drops (an
+/// untranslatable axis with no etic image, whether it has no projection entry or an empty one).
+/// The etic profile is exactly what [`project_to_etic`] yields; the second value is the measured
+/// incommensurability of this one profile under this one race's projections, zero when every
+/// carried axis translates and the squared magnitude of each untranslatable stance otherwise.
+/// A caller folds this loss into its sum-of-squares before a single root, so a cross-race
+/// distance rises by exactly the untranslated magnitude rather than a flat constant. This
+/// measurement is the reusable primitive the cross-race value distance and the later
+/// language-distance incommensurability ceiling both read. A pure deterministic function of the
+/// profile and the race projection: it reads only whether each carried axis has an etic image,
+/// never a race identifier.
+pub fn project_to_etic_with_loss(
+    profile: &ValueProfile,
+    race: &RaceProjection,
+) -> (EticProfile, Fixed) {
     let mut axes: BTreeMap<EticAxisId, Fixed> = BTreeMap::new();
+    let mut loss = Fixed::ZERO;
     for (axis, stance) in profile.axes() {
-        let Some(projection) = race.per_axis.get(&axis) else {
-            continue;
-        };
         let s = Fixed::from_int(stance as i32);
-        for &(etic, weight) in &projection.onto {
+        let onto = race
+            .per_axis
+            .get(&axis)
+            .map(|p| p.onto.as_slice())
+            .unwrap_or(&[]);
+        if onto.is_empty() {
+            // Untranslatable: the axis drops out of the etic frame, and its squared stance is
+            // the projection loss it contributes (the theory-of-mind blind spot, measured).
+            loss += s.mul(s);
+            continue;
+        }
+        for &(etic, weight) in onto {
             *axes.entry(etic).or_insert(Fixed::ZERO) += s.mul(weight);
         }
     }
-    EticProfile { axes }
+    (EticProfile { axes }, loss)
 }
 
-/// Euclidean distance over the etic substrate axes both projected profiles carry.
-fn etic_euclidean(a: &EticProfile, b: &EticProfile) -> Fixed {
+/// The sum of squared differences over the etic substrate axes both projected profiles carry
+/// (the Euclidean sum before the root). Kept apart from the root so the cross-race distance can
+/// fold each side's measured projection loss into the same sum-of-squares under one final
+/// [`Fixed::sqrt`].
+fn etic_sq_distance(a: &EticProfile, b: &EticProfile) -> Fixed {
     let mut acc = Fixed::ZERO;
     for (axis, av) in a.axes() {
         if let Some(bv) = b.get(axis) {
@@ -397,29 +434,33 @@ fn etic_euclidean(a: &EticProfile, b: &EticProfile) -> Fixed {
             acc += d.mul(d);
         }
     }
-    acc.sqrt()
+    acc
 }
 
 /// The cross-race distance between two value profiles (design Part 21): project both onto the
-/// shared etic substrate, take the structural distance there, and add the reserved
-/// incommensurability floor (even an aligned alien unsettles). Pinned when the etic substrate
-/// is independent (Euclidean over the shared substrate axes plus the floor); for a structured
-/// etic substrate the closed form is the same flagged seam, so this returns `None`. The
-/// `incommensurability_floor` is the reserved `value_metric.incommensurability_floor`,
-/// supplied by the caller from the calibration manifest, never invented here.
+/// shared etic substrate and read the distance there, with each profile's untranslatable emic
+/// axes folded in as measured projection loss (even an aligned alien unsettles, by exactly the
+/// magnitude neither race can carry into the shared frame). Pinned when the etic substrate is
+/// independent: the Euclidean sum-of-squares over the shared substrate axes plus each side's
+/// squared projection loss, under one final [`Fixed::sqrt`]. For a structured etic substrate the
+/// closed form is the same flagged seam, so this returns `None`. The incommensurability is
+/// measured per race-pair from [`project_to_etic_with_loss`], not a flat reserved floor: full
+/// projections add nothing, and one extra untranslatable axis of stance `s` raises the distance
+/// by exactly `|s|`. A pure function, symmetric under swapping the two sides; it never branches
+/// on a race identifier.
 pub fn cross_race_distance(
     a: &ValueProfile,
     ra: &RaceProjection,
     b: &ValueProfile,
     rb: &RaceProjection,
     etic_metric: &GroundMetric,
-    incommensurability_floor: Fixed,
 ) -> Option<Fixed> {
     match etic_metric.kind {
         StructureKind::Independent => {
-            let ea = project_to_etic(a, ra);
-            let eb = project_to_etic(b, rb);
-            Some(etic_euclidean(&ea, &eb) + incommensurability_floor)
+            let (ea, loss_a) = project_to_etic_with_loss(a, ra);
+            let (eb, loss_b) = project_to_etic_with_loss(b, rb);
+            let sum_of_squares = etic_sq_distance(&ea, &eb) + loss_a + loss_b;
+            Some(sum_of_squares.sqrt())
         }
         StructureKind::Graph | StructureKind::Relationship => None,
     }
@@ -565,39 +606,118 @@ mod tests {
         assert_eq!(value_distance(&a, &b, &rel), None);
     }
 
+    /// A race projection mapping the given emic axis onto one shared etic axis with unit weight.
+    fn onto_shared(a: ValueAxisId, etic: EticAxisId) -> RaceProjection {
+        RaceProjection {
+            per_axis: [(
+                a,
+                EmicProjection {
+                    onto: vec![(etic, Fixed::ONE)],
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
+    }
+
     #[test]
-    fn cross_race_distance_projects_and_adds_the_floor() {
-        // Two races, two emic axes each, projecting onto one shared etic axis.
+    fn cross_race_distance_adds_no_floor_when_every_axis_translates() {
+        // Two races, one shared etic axis, both profiles translating fully: the distance is the
+        // plain etic distance with nothing added. The flat incommensurability floor is retired.
         let etic = EticAxisId(100);
-        let race_a = RaceProjection {
-            per_axis: [(
-                axis(0),
-                EmicProjection {
-                    onto: vec![(etic, Fixed::ONE)],
-                },
-            )]
-            .into_iter()
-            .collect(),
-        };
-        let race_b = RaceProjection {
-            per_axis: [(
-                axis(0),
-                EmicProjection {
-                    onto: vec![(etic, Fixed::ONE)],
-                },
-            )]
-            .into_iter()
-            .collect(),
-        };
+        let race = onto_shared(axis(0), etic);
         let a = ValueProfile::with([(axis(0), 5)]);
         let b = ValueProfile::with([(axis(0), 2)]);
         let etic_metric = GroundMetric::compile(&ValueStructure::Independent { k: 1 });
-        let floor = Fixed::from_int(1);
-        // Projected magnitudes 5 and 2: distance 3, plus the floor 1, is 4.
+        // Projected magnitudes 5 and 2: distance 3, no projection loss, so exactly 3.
         assert_eq!(
-            cross_race_distance(&a, &race_a, &b, &race_b, &etic_metric, floor),
-            Some(Fixed::from_int(4))
+            cross_race_distance(&a, &race, &b, &race, &etic_metric),
+            Some(Fixed::from_int(3))
         );
+    }
+
+    #[test]
+    fn one_untranslatable_axis_raises_the_distance_by_exactly_its_magnitude() {
+        // Both profiles identical in the etic frame (distance zero). One extra untranslatable
+        // emic axis of stance s on one side raises the pair distance to exactly |s|, the measured
+        // projection loss under one root, not a flat constant.
+        let etic = EticAxisId(100);
+        let ra = onto_shared(axis(0), etic); // axis 1 has no projection: untranslatable
+        let rb = onto_shared(axis(0), etic);
+        let etic_metric = GroundMetric::compile(&ValueStructure::Independent { k: 1 });
+        let base = ValueProfile::with([(axis(0), 4)]);
+        // Baseline: identical translatable stance, distance zero (nothing added).
+        assert_eq!(
+            cross_race_distance(&base, &ra, &base, &rb, &etic_metric),
+            Some(Fixed::ZERO)
+        );
+        // Add one untranslatable axis of stance 3: the distance is exactly |3|.
+        let a_pos = ValueProfile::with([(axis(0), 4), (axis(1), 3)]);
+        assert_eq!(
+            cross_race_distance(&a_pos, &ra, &base, &rb, &etic_metric),
+            Some(Fixed::from_int(3))
+        );
+        // The rise depends only on the magnitude: stance -3 gives the same distance, |-3| = 3.
+        let a_neg = ValueProfile::with([(axis(0), 4), (axis(1), -3)]);
+        assert_eq!(
+            cross_race_distance(&a_neg, &ra, &base, &rb, &etic_metric),
+            Some(Fixed::from_int(3))
+        );
+    }
+
+    #[test]
+    fn cross_race_distance_is_symmetric_under_swap() {
+        // Distance(a, b) equals Distance(b, a), including the projection-loss term: the etic
+        // sum-of-squares is symmetric and loss_a + loss_b is order-free.
+        let etic = EticAxisId(100);
+        let ra = onto_shared(axis(0), etic); // axis 1 untranslatable for race a
+        let rb = onto_shared(axis(0), etic);
+        // a carries an untranslatable axis under ra; b a different translatable stance under rb.
+        let a = ValueProfile::with([(axis(0), 5), (axis(1), 2)]);
+        let b = ValueProfile::with([(axis(0), 1)]);
+        let etic_metric = GroundMetric::compile(&ValueStructure::Independent { k: 1 });
+        let forward = cross_race_distance(&a, &ra, &b, &rb, &etic_metric);
+        let backward = cross_race_distance(&b, &rb, &a, &ra, &etic_metric);
+        assert!(forward.is_some());
+        assert_eq!(forward, backward, "the pair distance is symmetric");
+    }
+
+    #[test]
+    fn project_to_etic_with_loss_measures_the_untranslatable_magnitude() {
+        // The reusable projection-loss measurement (shared with the language-distance
+        // incommensurability ceiling): the etic image matches project_to_etic, and the loss is
+        // the sum of squared stances of every dropped axis.
+        let etic = EticAxisId(100);
+        let race = onto_shared(axis(0), etic);
+        // Axis 0 translates (stance 4 -> etic 4); axes 1 and 2 are untranslatable.
+        let profile = ValueProfile::with([(axis(0), 4), (axis(1), 3), (axis(2), -2)]);
+        let (image, loss) = project_to_etic_with_loss(&profile, &race);
+        assert_eq!(
+            image,
+            project_to_etic(&profile, &race),
+            "the etic image is exactly project_to_etic's"
+        );
+        assert_eq!(image.get(etic), Some(Fixed::from_int(4)));
+        // Loss is 3^2 + (-2)^2 = 13.
+        assert_eq!(loss, Fixed::from_int(13));
+        // A fully translatable profile has zero loss.
+        let full = ValueProfile::with([(axis(0), 7)]);
+        let (_, none_lost) = project_to_etic_with_loss(&full, &race);
+        assert_eq!(none_lost, Fixed::ZERO);
+        // An explicitly empty projection is untranslatable too, and contributes to the loss.
+        let empty = RaceProjection {
+            per_axis: [(axis(0), EmicProjection { onto: vec![] })]
+                .into_iter()
+                .collect(),
+        };
+        let (empty_image, empty_loss) =
+            project_to_etic_with_loss(&ValueProfile::with([(axis(0), 5)]), &empty);
+        assert_eq!(
+            empty_image.axes().count(),
+            0,
+            "an empty projection carries nothing into the etic frame"
+        );
+        assert_eq!(empty_loss, Fixed::from_int(25));
     }
 
     #[test]

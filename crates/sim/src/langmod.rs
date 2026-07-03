@@ -33,12 +33,22 @@
 //! functions of the inputs, walked in a canonical order. The saturation caps and the mode count are
 //! caller-supplied engine mechanics, not owner realism values; the channel physics constants (the
 //! absorption reference, the sound speed, the resonator lengths) are physics-substrate data.
+//!
+//! This module also carries the per-being language capability gate (Part 33.3, record 62.13, the
+//! resolved R-LANG-MODALITY work): a communication channel is usable to a being only to the extent
+//! it can both produce and perceive on it, the Liebig limiting half of the two. The production half
+//! is [`Body::function_integrity`] of the articulating function, kneed at the wound function-loss
+//! threshold; the perception half is the being's [`Sensorium`] acuity for the reception channel. No
+//! race identity enters: two races diverge only through their body integrity and sensorium acuity
+//! data, run through one kernel (Principle 9), and the gate is a pure float-free function of the
+//! body, the sensorium, and the reserved threshold (Principle 3).
 
 use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
 
+use crate::body::{Body, FunctionId};
 use crate::sensorium::{SenseChannelId, Sensorium};
 
 /// Caller-supplied caps and the structural mode count for a perceptual-geometry read-out. These are
@@ -239,6 +249,80 @@ fn abs_diff(a: Fixed, b: Fixed) -> Fixed {
     } else {
         sat_sub(b, a)
     }
+}
+
+/// The two Liebig halves of a being's capability on one communication channel, each in `[0, ONE]`.
+/// Both are kept (rather than only their minimum) so the sibling acquisition split can subtract the
+/// production half from the perception half without recomputing either. [`CapabilityGate::gate`] is
+/// the usable channel capability, the limiting half.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CapabilityGate {
+    /// The reception half: the sensorium's acuity for the channel, zero if it cannot read it.
+    pub perception: Fixed,
+    /// The production half: [`Body::function_integrity`] of the articulating function.
+    pub production: Fixed,
+}
+
+impl CapabilityGate {
+    /// The usable channel capability: the Liebig minimum of the two halves. A voice with no ear, or
+    /// an ear with no voice, gates the channel shut.
+    pub fn gate(self) -> Fixed {
+        if self.perception < self.production {
+            self.perception
+        } else {
+            self.production
+        }
+    }
+}
+
+/// Both halves of a being's capability on a channel: the production side from the body's function
+/// integrity (kneed at `function_loss_threshold`), the perception side from the sensorium's acuity
+/// for the reception `channel`. A pure, deterministic function of the two data inputs and the
+/// reserved threshold; no race identity, no float.
+///
+/// The `function_loss_threshold` is RESERVED (`body.function_loss_threshold` in the calibration
+/// manifest), the knee point [`Body::function_integrity`] applies. Basis: the wound model's
+/// function-loss threshold, set equal to it so the language capability-gate floor and the wound
+/// model agree (record 62.13, "the floor set equal to the wound model's function-loss threshold for
+/// consistency").
+pub fn capability_halves(
+    body: &Body,
+    produce_function: FunctionId,
+    sensorium: &Sensorium,
+    channel: SenseChannelId,
+    function_loss_threshold: Fixed,
+) -> CapabilityGate {
+    let production = body.function_integrity(produce_function, function_loss_threshold);
+    // The being reads the channel with this acuity, or not at all (a channel it cannot perceive
+    // gates the capability to zero regardless of production).
+    let perception = sensorium.reads(channel).unwrap_or(Fixed::ZERO);
+    CapabilityGate {
+        perception,
+        production,
+    }
+}
+
+/// The usable capability of a being on one communication channel: the Liebig minimum of its
+/// perception of the channel and its production on it (design Part 33.3). The perception half is the
+/// sensorium's acuity for `channel`; the production half is the body's integrity on
+/// `produce_function`, kneed at the reserved wound function-loss threshold. Returns `[0, ONE]`. Use
+/// [`capability_halves`] when both halves are needed (the acquisition split). Deterministic,
+/// float-free, and free of any race branch.
+pub fn capability_gate(
+    body: &Body,
+    produce_function: FunctionId,
+    sensorium: &Sensorium,
+    channel: SenseChannelId,
+    function_loss_threshold: Fixed,
+) -> Fixed {
+    capability_halves(
+        body,
+        produce_function,
+        sensorium,
+        channel,
+        function_loss_threshold,
+    )
+    .gate()
 }
 
 #[cfg(test)]
@@ -489,5 +573,157 @@ mod tests {
                 "a longer path confuses more, pair {pair:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_gate_tests {
+    use super::*;
+    use crate::anatomy::{BodyPlan, Part, Temperament};
+    use crate::body::{BodyParams, BLOOD, F_LOCOMOTION, F_VITAL_CORE};
+
+    // FIXTURE values, never read from the manifest.
+    const VOICE: SenseChannelId = SenseChannelId(1); // the reception channel a voice fills (hearing)
+    const SCENT: SenseChannelId = SenseChannelId(2);
+    const LOSS_THRESHOLD: Fixed = Fixed::from_bits(1 << 31); // 0.5, a FIXTURE function-loss knee
+
+    fn plan(mass: (i64, i64), legs: usize) -> BodyPlan {
+        BodyPlan {
+            body_mass: Fixed::from_ratio(mass.0, mass.1),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            }],
+            locomotion: (0..legs).map(|_| 1u16).collect(),
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        }
+    }
+
+    fn body() -> Body {
+        Body::from_body_plan(&plan((3, 4), 4), BLOOD, &BodyParams::dev_default())
+    }
+
+    #[test]
+    fn two_races_with_identical_integrity_and_acuity_gate_bit_identically() {
+        // No RaceId enters the kernel: two races that happen to share body integrity and sensorium
+        // acuity run through the one function and land on the same bits (Principle 9, Principle 3).
+        let race_a = body();
+        let race_b = body();
+        let sens = Sensorium::with([(VOICE, Fixed::from_ratio(3, 4))]);
+        let ga = capability_gate(&race_a, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        let gb = capability_gate(&race_b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            ga.to_bits(),
+            gb.to_bits(),
+            "identical data gates to identical bits"
+        );
+        // And it is the Liebig minimum of the two halves.
+        let halves = capability_halves(&race_a, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            ga,
+            halves.perception.min(halves.production),
+            "the gate is the limiting half"
+        );
+        assert_eq!(
+            ga,
+            Fixed::from_ratio(3, 4),
+            "here perception limits: an intact voice, a keen-but-imperfect ear"
+        );
+    }
+
+    #[test]
+    fn a_wound_below_the_threshold_drops_production_to_the_floor() {
+        let mut b = body();
+        let sens = Sensorium::with([(VOICE, Fixed::ONE)]);
+        // Intact: production is full, so the gate is open (perception is full here too).
+        let before = capability_gate(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(before, Fixed::ONE, "an intact being gates fully open");
+        // Wound the articulating part below the loss threshold: production floors, and the Liebig
+        // minimum drags the whole gate to zero even though perception is untouched.
+        let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
+        b.parts[torso].condition.integrity = Fixed::from_ratio(1, 4); // below the 0.5 threshold
+        let halves = capability_halves(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            halves.production,
+            Fixed::ZERO,
+            "a wound past the function-loss threshold floors production"
+        );
+        assert_eq!(
+            halves.perception,
+            Fixed::ONE,
+            "perception is unaffected by the production-side wound"
+        );
+        assert_eq!(
+            capability_gate(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD),
+            Fixed::ZERO,
+            "the limiting production half gates the channel shut"
+        );
+    }
+
+    #[test]
+    fn an_unread_channel_gates_to_zero() {
+        let b = body();
+        // The being reads scent well but does not read the voice channel at all.
+        let sens = Sensorium::with([(SCENT, Fixed::ONE)]);
+        let halves = capability_halves(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert!(
+            halves.production > Fixed::ZERO,
+            "production on the channel is available"
+        );
+        assert_eq!(
+            halves.perception,
+            Fixed::ZERO,
+            "but the channel is unread: perception is zero"
+        );
+        assert_eq!(
+            capability_gate(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD),
+            Fixed::ZERO,
+            "a channel the being cannot perceive gates shut regardless of production"
+        );
+    }
+
+    #[test]
+    fn a_manual_channel_degrades_gracefully_as_limbs_are_lost() {
+        // A signed channel produced through the locomotion limbs: losing one of four weakens the
+        // channel (the mean of bearers) without erasing it, and perception can still be the limiter.
+        let mut b = body();
+        let sens = Sensorium::with([(VOICE, Fixed::ONE)]);
+        let intact = capability_gate(&b, F_LOCOMOTION, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(intact, Fixed::ONE, "four intact limbs sign at full");
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
+        b.parts[limb].condition.severed = true;
+        let degraded = capability_gate(&b, F_LOCOMOTION, &sens, VOICE, LOSS_THRESHOLD);
+        assert!(
+            degraded > Fixed::ZERO && degraded < Fixed::ONE,
+            "losing one limb weakens the manual channel without silencing it ({degraded:?})"
+        );
+    }
+
+    #[test]
+    fn the_gate_replays_bit_identically() {
+        let run = || {
+            let b = body();
+            let sens = Sensorium::with([(VOICE, Fixed::from_ratio(5, 8))]);
+            capability_gate(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD).to_bits()
+        };
+        assert_eq!(run(), run(), "the same inputs gate to the same bits");
     }
 }

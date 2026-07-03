@@ -112,9 +112,9 @@ pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
 pub use agent::{AccessObs, Mind, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
-    entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId,
-    AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
-    EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
+    enculturation_pull_rate, entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef,
+    AxiomAxisId, AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance,
+    EvidenceRing, EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
 };
 pub use base_rates::{RaceBaseRateRegistry, RaceBaseRates};
 pub use belief::{
@@ -173,10 +173,11 @@ pub use institution::{
     FunctionVec, Institution, Norm, NormType, Predicate, RecognitionTemplate, Role, RoleId,
     TemplateId, TemplateLibrary, STRUCTURAL_FEATURES,
 };
+pub use langmod::{capability_gate, capability_halves, CapabilityGate};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
     FormSegment, FormSystem, LanguageParams, Lexicon, Linearization, ProductionModalityDef,
-    ProductionModalityId, Word,
+    ProductionModalityId, SalienceDecayLaw, Word,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
@@ -200,14 +201,15 @@ pub use transmission::{
     TransmissionParams,
 };
 pub use typology::{
-    grammar_parse_cost, sample_profile, tilted_weights, typology_distance,
+    grammar_parse_cost, information_weights, sample_profile, tilted_weights, typology_distance,
     validate as validate_typology, wals_seed, HarmonyBias, HarmonyModel, TiltParams, TypologyError,
     TypologyParamDef, TypologyParamId, TypologyParams, TypologyPrior, TypologyProfile,
     TypologyRegistry, TypologyValueDef, TypologyValueId, ValueMetric,
 };
 pub use value::{
-    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
-    EmicProjection, EticAxisId, EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId,
-    RaceProjection, StructureKind, ValueAxisId, ValueProfile, ValueStructure,
+    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic,
+    project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId, EticProfile,
+    EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind, ValueAxisId,
+    ValueProfile, ValueStructure,
 };
-pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
+pub use world::{build_etic_substrate, GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
