@@ -24,8 +24,8 @@ use civsim_core::{Fixed, StableId};
 use civsim_sim::{
     AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, Curve, DominanceMode,
     EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
-    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, SchemeId, SourceModeId,
-    ValueAxisId, ValueProfile, World,
+    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, RingCapacityLaw, SchemeId,
+    SourceModeId, ValueAxisId, ValueProfile, World,
 };
 
 const AXIS: AxiomAxisId = AxiomAxisId(0);
@@ -35,6 +35,18 @@ fn params() -> InferenceParams {
         clamp: Fixed::from_int(50),
         commit_threshold: Fixed::from_int(3),
         margin: Fixed::from_int(1),
+    }
+}
+
+/// A labelled test ring-capacity law (not owner data): a linear memory-to-slots curve and a
+/// ceiling, used to size a being's evidence ring from its expressed memory.
+fn dev_ring_law() -> RingCapacityLaw {
+    RingCapacityLaw {
+        curve: Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(8), Fixed::from_int(16)),
+        ]),
+        hard_cap: 32,
     }
 }
 
@@ -154,7 +166,7 @@ fn race_of_is_seeded_at_dawn_and_at_birth_and_pruned_on_death() {
     assert_eq!(w.race_of(bare), None, "a bare-spawned being has no race");
 
     // The dawn seeds each founder's race identity.
-    let founders = w.seed_dawn_populations(&races, &bands);
+    let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
     for &id in &founders {
         assert_eq!(
             w.race_of(id),
@@ -174,6 +186,7 @@ fn race_of_is_seeded_at_dawn_and_at_birth_and_pruned_on_death() {
             Fixed::from_ratio(1, 2),
             Fixed::from_ratio(1, 50),
             0,
+            &dev_ring_law(),
         )
         .expect("a child was born");
     assert_eq!(
@@ -243,7 +256,7 @@ fn two_races_diverge_by_data_not_by_branch() {
         },
     ];
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0x5EED);
-    let seeded = w.seed_dawn_populations(&races, &bands);
+    let seeded = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
     let short_being = seeded[0];
     let long_being = seeded[1];
     w.set_age(short_being, 50);

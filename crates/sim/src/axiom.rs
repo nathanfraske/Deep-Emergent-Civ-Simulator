@@ -71,6 +71,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use civsim_core::{EventId, Fixed};
 
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::decision::Curve;
 use crate::value::ValueProfile;
 
@@ -549,17 +550,58 @@ pub fn entrenchment_threshold(curve: &Curve, rank: i32) -> Fixed {
     curve.eval(Fixed::from_int(rank))
 }
 
-/// The evidence-ring capacity derived from a being's own memory datum (design Part 25.6 and
-/// Part 9): the ring holds as many recent evidences as the being's expressed memory capacity
-/// (`Mind.memory`) allows, held to at least one and to a reserved replay `ceiling`
-/// (`axiom.evidence_ring_capacity`, a hard state-hash and replay bound rather than a flat
-/// capacity). So a race whose genes invest in memory tracks more evidence and a forgetful race
+/// The law mapping a being's expressed memory to its evidence-ring capacity (design Part 25.6
+/// and Part 9): a reserved response curve, read by the same [`Curve`] mechanism the
+/// entrenchment gate uses, plus a hard replay-and-state-hash ceiling. The ring holds as many
+/// recent evidences as the being's own memory phenotype (`Mind.memory`) earns through the
+/// curve, so a race whose genes invest in memory tracks more evidence and a forgetful race
 /// less, derived from that race's own body with no shared human span authored (the flat-eight
-/// Miller steer the derive audit removed, worksheet §13b). Pure integer arithmetic over the
-/// expressed memory, so it is bit-identical and order-independent (Principle 3).
-pub fn ring_capacity_from_memory(memory: Fixed, ceiling: usize) -> usize {
-    let raw = memory.to_int().max(1) as usize;
-    raw.min(ceiling.max(1))
+/// Miller steer the derive audit removed, worksheet §13b). The mechanism is fixed Rust; the
+/// curve and the ceiling are data (Principle 11), the owner's reserved values. A two-point
+/// curve reproduces the linear special case the earlier `to_int`-clamped form gave.
+#[derive(Clone, Debug)]
+pub struct RingCapacityLaw {
+    /// The memory-to-slots response curve (`axiom.evidence_ring_curve`). Any monotone shape is
+    /// expressible by its points; a two-point curve is the linear special case.
+    pub curve: Curve,
+    /// The hard ceiling on ring capacity (`axiom.evidence_ring_hard_cap`): a state-hash and
+    /// replay bound on the largest ring any mind may carry, independent of any race's memory.
+    pub hard_cap: usize,
+}
+
+impl RingCapacityLaw {
+    /// The evidence-ring capacity for a being of the given expressed memory: the curve read at
+    /// the memory value, floored below at zero, rounded half-up to a whole number of slots, and
+    /// clamped to `[0, hard_cap]`. Pure fixed-point arithmetic over the memory value, no float
+    /// and no RNG, so it is bit-identical and order-independent (Principle 3), and it reads only
+    /// the memory value, never a race identifier (Principle 9): two beings of equal expressed
+    /// memory get equal rings whatever their race.
+    pub fn capacity_for(&self, memory: Fixed) -> usize {
+        let y = self.curve.eval(memory);
+        let rounded = (y.max(Fixed::ZERO) + Fixed::from_ratio(1, 2)).to_int();
+        (rounded.max(0) as usize).min(self.hard_cap)
+    }
+
+    /// Build the law from the calibration manifest: the response curve from
+    /// `axiom.evidence_ring_curve` (through [`CalibrationManifest::require_curve`]) and the
+    /// ceiling from `axiom.evidence_ring_hard_cap` (through [`CalibrationManifest::require_i64`]),
+    /// both fail-loud while reserved (Principle 11), so a canonical run obtains them from the
+    /// owner's manifest rather than a fabricated default. A negative ceiling is a bad value,
+    /// never a silent wrap.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
+        let curve = m.require_curve("axiom.evidence_ring_curve")?;
+        let raw_cap = m.require_i64("axiom.evidence_ring_hard_cap")?;
+        if raw_cap < 0 {
+            return Err(CalibrationError::BadValue {
+                id: "axiom.evidence_ring_hard_cap".to_string(),
+                detail: format!("ring-capacity ceiling cannot be negative: {raw_cap}"),
+            });
+        }
+        Ok(RingCapacityLaw {
+            curve,
+            hard_cap: raw_cap as usize,
+        })
+    }
 }
 
 /// The confidence-weighted mean stance of a group on one axiom axis (the group aggregate of
@@ -698,28 +740,91 @@ mod tests {
         }
     }
 
+    fn ring_law(
+        points: impl IntoIterator<Item = (Fixed, Fixed)>,
+        hard_cap: usize,
+    ) -> RingCapacityLaw {
+        RingCapacityLaw {
+            curve: Curve::new(points),
+            hard_cap,
+        }
+    }
+
     #[test]
-    fn the_evidence_ring_capacity_derives_from_memory_and_diverges_by_race() {
-        // The reserved value is now a hard replay ceiling, not a flat capacity.
-        let ceiling = 32;
-        // Two races whose genes express Mind.memory to different magnitudes get different
-        // ring capacities from the same mechanism, with no shared human span authored.
-        let mindful = ring_capacity_from_memory(Fixed::from_int(10), ceiling);
-        let forgetful = ring_capacity_from_memory(Fixed::from_int(4), ceiling);
-        assert_eq!(mindful, 10);
-        assert_eq!(forgetful, 4);
-        assert!(
-            mindful > forgetful,
-            "the race that invests in memory tracks more evidence"
+    fn ring_capacity_reproduces_the_curve_at_reference_points() {
+        // A curve 0 -> 0, 1 -> 8, 2 -> 14: the reserved reference points (Miller's 7 plus or
+        // minus 2 kept only as a candidate point on the curve, not a universal count) read back
+        // exactly, and the curve is the law, no flat span authored.
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::ONE, Fixed::from_int(8)),
+                (Fixed::from_int(2), Fixed::from_int(14)),
+            ],
+            32,
         );
-        // The ceiling is a hard replay bound: a vast memory cannot exceed it.
+        assert_eq!(l.capacity_for(Fixed::ONE), 8, "memory one reads the curve");
+        assert_eq!(l.capacity_for(Fixed::ZERO), 0, "no memory, no ring");
         assert_eq!(
-            ring_capacity_from_memory(Fixed::from_int(1000), ceiling),
-            ceiling
+            l.capacity_for(Fixed::ZERO - Fixed::ONE),
+            0,
+            "negative memory clamps to zero, never a negative capacity"
         );
-        // A neutral or empty memory still holds at least one evidence.
-        assert_eq!(ring_capacity_from_memory(Fixed::ONE, ceiling), 1);
-        assert_eq!(ring_capacity_from_memory(Fixed::ZERO, ceiling), 1);
+    }
+
+    #[test]
+    fn ring_capacity_clamps_to_the_hard_cap() {
+        // A curve whose plateau exceeds the ceiling: a vast memory cannot buy a ring past the
+        // hard replay-and-state-hash bound.
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::ONE, Fixed::from_int(50)),
+            ],
+            32,
+        );
+        assert_eq!(
+            l.capacity_for(Fixed::from_int(1000)),
+            32,
+            "the ceiling holds"
+        );
+    }
+
+    #[test]
+    fn ring_capacity_is_a_pure_deterministic_function() {
+        // A linear curve y = 4x: the same memory maps to the same capacity every call, and the
+        // map is monotone (more memory never yields fewer slots).
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::from_int(4), Fixed::from_int(16)),
+            ],
+            64,
+        );
+        let m = Fixed::from_ratio(5, 2);
+        assert_eq!(
+            l.capacity_for(m),
+            l.capacity_for(m),
+            "the same memory maps to the same capacity every call"
+        );
+        assert!(l.capacity_for(Fixed::from_int(3)) >= l.capacity_for(Fixed::from_int(1)));
+        // Round half-up: memory 2.5 through y = 4x reads 10 exactly.
+        assert_eq!(l.capacity_for(m), 10);
+    }
+
+    #[test]
+    fn ring_capacity_law_from_manifest_fails_loud_while_reserved_and_reads_a_set_pair() {
+        use crate::calibration::CalibrationManifest;
+        // Both entries reserved: fail loud, never a fabricated law (Principle 11).
+        let reserved = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"curve\"\nsource = \"s\"\n[[reserved]]\nid = \"axiom.evidence_ring_hard_cap\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"count\"\nsource = \"s\"\n";
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert!(RingCapacityLaw::from_manifest(&m).is_err());
+        // Both set: the law reads the curve and the ceiling exactly.
+        let set = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0=0,1=8\"\nunit = \"curve\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n[[reserved]]\nid = \"axiom.evidence_ring_hard_cap\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"32\"\nunit = \"count\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n";
+        let m2 = CalibrationManifest::from_toml_str(set).unwrap();
+        let law = RingCapacityLaw::from_manifest(&m2).unwrap();
+        assert_eq!(law.hard_cap, 32);
+        assert_eq!(law.capacity_for(Fixed::ONE), 8);
     }
 
     #[test]

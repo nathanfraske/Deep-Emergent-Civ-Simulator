@@ -26,6 +26,7 @@
 //! which the build refuses to start if any enabled system has a required value
 //! still reserved.
 
+use crate::decision::Curve;
 use civsim_core::Fixed;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -264,6 +265,48 @@ impl CalibrationManifest {
         Ok(map)
     }
 
+    /// A required response-curve value, for a reserved value whose shape is a set of `(x, y)`
+    /// points (the memory-to-ring-slots map, an entrenchment-threshold curve). Parsed from an
+    /// `"x1=y1,x2=y2"` string into a [`Curve`], each coordinate taking the same exact
+    /// decimal-to-fixed path as [`require_fixed`] so the curve is bit-identical across machines,
+    /// and the membership (the number and placement of points) grows with the data rather than
+    /// being fixed in code (Principle 11). The points need not be pre-sorted; [`Curve::new`]
+    /// orders them. Fails loud if reserved, malformed, or empty.
+    pub fn require_curve(&self, id: &str) -> Result<Curve, CalibrationError> {
+        let raw = self.require_str(id)?;
+        let mut points: Vec<(Fixed, Fixed)> = Vec::new();
+        for pair in raw.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                continue;
+            }
+            let (xs, ys) = pair
+                .split_once('=')
+                .ok_or_else(|| CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("curve point '{pair}' is not x=y"),
+                })?;
+            let x =
+                parse_decimal_fixed(xs.trim()).map_err(|detail| CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("point x '{}': {detail}", xs.trim()),
+                })?;
+            let y =
+                parse_decimal_fixed(ys.trim()).map_err(|detail| CalibrationError::BadValue {
+                    id: id.to_string(),
+                    detail: format!("point y '{}': {detail}", ys.trim()),
+                })?;
+            points.push((x, y));
+        }
+        if points.is_empty() {
+            return Err(CalibrationError::BadValue {
+                id: id.to_string(),
+                detail: "empty curve".to_string(),
+            });
+        }
+        Ok(Curve::new(points))
+    }
+
     /// Enforce the calibrated profile: every id in `enabled` must exist and be set.
     /// Returns the list of unsatisfied (unknown or reserved) ids as an error.
     pub fn ensure_all_set(&self, enabled: &[&str]) -> Result<(), CalibrationError> {
@@ -484,6 +527,40 @@ source = "test fixture"
         .unwrap();
         assert!(matches!(
             bad.require_map("x").unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+    }
+
+    #[test]
+    fn require_curve_fails_loud_while_reserved() {
+        let m = CalibrationManifest::from_toml_str(SAMPLE).unwrap();
+        // A reserved id read as a curve fails loud, never a fabricated shape.
+        assert!(matches!(
+            m.require_curve("compose.max_depth").unwrap_err(),
+            CalibrationError::Reserved(_)
+        ));
+        // An unknown id is distinct from reserved.
+        assert!(matches!(
+            m.require_curve("no.such.curve").unwrap_err(),
+            CalibrationError::Unknown(_)
+        ));
+    }
+
+    #[test]
+    fn require_curve_parses_points_like_require_map() {
+        let toml = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0=0,1=8,2=14\"\nunit = \"curve\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n";
+        let m = CalibrationManifest::from_toml_str(toml).unwrap();
+        let curve = m.require_curve("axiom.evidence_ring_curve").unwrap();
+        // The parsed curve takes the same exact decimal-to-fixed path as require_map, so it
+        // reads its reference points back exactly.
+        assert_eq!(curve.eval(Fixed::ZERO), Fixed::ZERO);
+        assert_eq!(curve.eval(Fixed::ONE), Fixed::from_int(8));
+        assert_eq!(curve.eval(Fixed::from_int(2)), Fixed::from_int(14));
+        // A malformed point (no x=y) is a BadValue, never a silent guess.
+        let bad = "[[reserved]]\nid = \"x\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"nopoint\"\nunit = \"curve\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n";
+        let mbad = CalibrationManifest::from_toml_str(bad).unwrap();
+        assert!(matches!(
+            mbad.require_curve("x").unwrap_err(),
             CalibrationError::BadValue { .. }
         ));
     }

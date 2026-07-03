@@ -242,13 +242,30 @@ source = "Part 25 genome model; record 62.5; audit section 1d"
 
 # --- R-AXIOM: axiomatic beliefs (Part 28, record 62.4) ---
 
+# axiom.evidence_ring_capacity RETIRED (worksheet §13b, derive audit): the single flat capacity
+# is split into the memory-to-slots CURVE plus a hard CEILING below, because the ring size now
+# DERIVES per being from its own expressed Mind.memory through axiom::RingCapacityLaw::capacity_for
+# (curve read, round half-up, clamp to the ceiling), wired at the dawn and at birth to each being's
+# own memory phenotype (crates/sim/src/world.rs). The interim ring_capacity_from_memory (a
+# to_int-clamped linear form) is superseded by the curve, whose two-point case reproduces it. The
+# reserved value is no longer a single count: see axiom.evidence_ring_curve and
+# axiom.evidence_ring_hard_cap below.
+
 [[reserved]]
-id = "axiom.evidence_ring_capacity"
-basis = "DERIVE per race (worksheet §13b, function built): the ring capacity is derived from the being's own Mind.memory datum through axiom::ring_capacity_from_memory, clamped to at least one and to this reserved value as a hard replay CEILING, not a flat capacity. A flat 8 echoed Miller's 7 plus or minus 2; the memory-derived form removes that steer, so a race that invests in memory tracks more evidence. Reserved: the ceiling only (a state-hash and replay bound), pending the wiring of the founder ring to the expressed memory."
+id = "axiom.evidence_ring_curve"
+basis = "the memory-phenotype-to-ring-slots map: a response curve read by axiom::RingCapacityLaw over each being's own expressed Mind.memory, so a race that invests in memory tracks more evidence and a forgetful one less, derived from that race's own body with no shared human span authored. Set the (memory, slots) points that place the ring size against the memory phenotype; Miller's 7 plus or minus 2 is kept only as a candidate reference point on the curve, not a universal count. Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case."
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
+
+[[reserved]]
+id = "axiom.evidence_ring_hard_cap"
+basis = "the performance and determinism budget: the per-tick and per-save cost of the largest evidence ring any mind may carry, a hard state-hash and replay bound independent of any race's memory. Set from the ring's per-tick scan cost and its serialized size against the population, the ceiling past which the curve is clamped no matter how much memory a being expresses; a bound found by trial, raised for deeper justification memory or lowered for compute and save size."
 status = "reserved"
 value = ""
 unit = "count"
-source = "Part 28 axiom model; record 62.4; audit section 1c; derived in axiom::ring_capacity_from_memory"
+source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
 
 [[reserved]]
 id = "axiom.entrenchment_curve"

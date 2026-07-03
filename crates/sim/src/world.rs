@@ -45,7 +45,7 @@ use civsim_world::OrbitalElements;
 
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
-use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
+use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::clock::LIFE_CADENCE_TICKS;
 use crate::decision::{ActionId, Behaviour, Curve, DriveId};
@@ -728,8 +728,9 @@ impl World {
     /// band differ genetically, design 25.8), the member's mind is expressed from that genome
     /// through the race's gene set ([`Mind::from_genome`], the cognition phenotype of Part
     /// 25.6), its innate disposition is seeded from the race ([`crate::axiom::IntrinsicBeliefs`],
-    /// Part 28), and it is placed. Returns the seeded ids in seeding order. A band whose race
-    /// is not in `races` is skipped.
+    /// Part 28) with each axiom's evidence ring sized from the member's own expressed memory
+    /// through `ring_law` ([`RingCapacityLaw::capacity_for`]), and it is placed. Returns the
+    /// seeded ids in seeding order. A band whose race is not in `races` is skipped.
     ///
     /// This is the convergence point of the deep being model: the map, the genome, the value
     /// substrate (Part 21), and the axiom kernel (Part 28) first run together here. It is
@@ -745,6 +746,7 @@ impl World {
         &mut self,
         races: &BTreeMap<RaceId, Race>,
         bands: &[BandSpec],
+        ring_law: &RingCapacityLaw,
     ) -> Vec<StableId> {
         let mut seeded = Vec::new();
         for band in bands {
@@ -755,9 +757,19 @@ impl World {
                 let id = self.reg.mint();
                 let genome = race.pool.promote(self.seed, id.0, race.ploidy());
                 let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
+                // The dawn member's evidence ring is sized from its own expressed memory through
+                // the shared ring-capacity law, not copied from the race template's literal cap,
+                // so a mindful founder carries a larger ring than a forgetful one of the same
+                // race (design Part 25.6, Part 9; the law reads only the memory value, never the
+                // race, Principle 9).
+                let cap = ring_law.capacity_for(mind.memory);
+                let mut intrinsic = race.intrinsic.clone();
+                for ax in &mut intrinsic.axioms {
+                    ax.evidence = EvidenceRing::new(cap);
+                }
                 self.minds.insert(id, mind);
                 self.genomes.insert(id, genome);
-                self.intrinsic.insert(id, race.intrinsic.clone());
+                self.intrinsic.insert(id, intrinsic);
                 // Seed the mate preference with unbiased variation: a weight in [-1, 1] drawn per
                 // being under Phase::MATE_CHOICE. The draw is symmetric about zero (indifference),
                 // so the dawn population carries variation without an authored direction; which
@@ -986,16 +998,19 @@ impl World {
     /// spread are reserved owner values supplied by the caller; the per-axis heritability of the
     /// axiom registry is the refinement. The child copies the parent's epistemic stance and
     /// value profile (their deeper inheritance is a follow-on), and each child axiom gets a
-    /// fresh empty evidence ring of the parent axiom's capacity. Returns the child's id, or
-    /// `None` if the parent holds no intrinsic beliefs.
+    /// fresh empty evidence ring sized from the child's own `child_memory` through `ring_law`
+    /// ([`RingCapacityLaw::capacity_for`]), not copied from the parent axiom's cap. Returns the
+    /// child's id, or `None` if the parent holds no intrinsic beliefs.
     ///
-    /// This is the intrinsic-belief half of a birth. The genome half (a genome from
-    /// `GeneticScheme::reproduce` and a mind from [`Mind::from_genome`]) and combining the two
-    /// into one birth are the integration follow-on, so the returned child carries beliefs but
-    /// no mind or genome yet. Deterministic: the draw is keyed on the child's canonical id, so
-    /// it is reproducible as long as birth order is a deterministic function of canonical state
-    /// (an observer-driven birth path would key on a birth-event coordinate instead, the
-    /// Principle 10 caveat).
+    /// This is the intrinsic-belief half of a birth, decoupled from `self.minds`: the caller
+    /// pushes the child's expressed memory in (the axiom-only harness passes [`Fixed::ONE`], the
+    /// neutral memory of a bare being). The genome half (a genome from `GeneticScheme::reproduce`
+    /// and a mind from [`Mind::from_genome`]) and combining the two into one birth are
+    /// [`World::birth`], which passes the child's own expressed memory. Deterministic: the draw is
+    /// keyed on the child's canonical id, so it is reproducible as long as birth order is a
+    /// deterministic function of canonical state (an observer-driven birth path would key on a
+    /// birth-event coordinate instead, the Principle 10 caveat).
+    #[allow(clippy::too_many_arguments)]
     pub fn inherit_child(
         &mut self,
         parent: StableId,
@@ -1003,6 +1018,8 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        child_memory: Fixed,
+        ring_law: &RingCapacityLaw,
     ) -> Option<StableId> {
         let child = self.reg.mint();
         let beliefs = self.inherited_beliefs(
@@ -1012,6 +1029,8 @@ impl World {
             heritability,
             mutation_spread,
             generation,
+            child_memory,
+            ring_law,
         )?;
         self.intrinsic.insert(child, beliefs);
         Some(child)
@@ -1022,8 +1041,11 @@ impl World {
     /// each axiom the parent holds, the child's innate seed (and starting stance) is the
     /// heritable-plus-encultured blend of the parent's seed and the band's local mean plus a
     /// bounded mutation drawn under [`Phase::AXIOM_INHERIT`] keyed on the child and the axis;
-    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings.
-    /// `None` if the parent holds no intrinsic beliefs.
+    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings
+    /// sized from the child's own `child_memory` through `ring_law`. Kept decoupled from
+    /// `self.minds` so the axiom-only harness can drive it with an explicit memory; `None` if the
+    /// parent holds no intrinsic beliefs.
+    #[allow(clippy::too_many_arguments)]
     fn inherited_beliefs(
         &self,
         child: StableId,
@@ -1032,6 +1054,8 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        child_memory: Fixed,
+        ring_law: &RingCapacityLaw,
     ) -> Option<IntrinsicBeliefs> {
         let parent_beliefs = self.intrinsic.get(&parent)?;
         let mut child_axioms = Vec::with_capacity(parent_beliefs.axioms.len());
@@ -1063,7 +1087,7 @@ impl World {
                 salience: pax.salience,
                 stubbornness: pax.stubbornness,
                 innate_seed: seed,
-                evidence: EvidenceRing::new(pax.evidence.cap()),
+                evidence: EvidenceRing::new(ring_law.capacity_for(child_memory)),
             });
         }
         Some(IntrinsicBeliefs {
@@ -1079,9 +1103,14 @@ impl World {
     /// scheme (`GeneticScheme::reproduce`, keyed under [`Phase::REPRODUCE`] on the parents and
     /// the generation), its mind is expressed from that genome through the race's gene set
     /// ([`Mind::from_genome`]), and its intrinsic beliefs are inherited from the first parent
-    /// and the local band (the heritable-plus-encultured blend). The child is registered with a
-    /// genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id, or
-    /// `None` if either parent has no genome or the first parent has no beliefs.
+    /// and the local band (the heritable-plus-encultured blend), with each axiom's evidence ring
+    /// sized from the child's own recombined memory through `ring_law`. The child is registered
+    /// with a genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id,
+    /// or `None` if either parent has no genome or the first parent has no beliefs.
+    ///
+    /// The genome and the mind are expressed before the beliefs are inherited, so the ring cap
+    /// reads the child's own recombined memory phenotype rather than the first parent's cap; the
+    /// counter-keyed RNG makes the ordering immaterial to determinism.
     ///
     /// Deterministic and reproducible from the seed and the inputs: the genome draws key on the
     /// parents and the generation, the belief mutation keys on the child id and the axis. The
@@ -1099,18 +1128,15 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        ring_law: &RingCapacityLaw,
     ) -> Option<StableId> {
         let genome_a = self.genomes.get(&parent_a)?.clone();
         let genome_b = self.genomes.get(&parent_b)?.clone();
         let child = self.reg.mint();
-        let beliefs = self.inherited_beliefs(
-            child,
-            parent_a,
-            band,
-            heritability,
-            mutation_spread,
-            generation,
-        )?;
+        // Express the child's genome and mind first, so its evidence ring is sized from its own
+        // recombined memory phenotype rather than the first parent's cap (the counter-keyed RNG
+        // is order-independent, so computing these before the belief inheritance does not change
+        // any draw).
         let child_genome = race.scheme.reproduce(
             &genome_a,
             parent_a.0,
@@ -1121,6 +1147,16 @@ impl World {
             generation,
         );
         let mind = Mind::from_genome(child, &race.genes, &child_genome, race.environment);
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent_a,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+            mind.memory,
+            ring_law,
+        )?;
         self.minds.insert(child, mind);
         self.genomes.insert(child, child_genome);
         self.intrinsic.insert(child, beliefs);
