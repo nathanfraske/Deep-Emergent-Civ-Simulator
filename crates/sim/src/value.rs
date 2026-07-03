@@ -300,6 +300,33 @@ impl GroundMetric {
         }
         self.dist[i * self.k + j]
     }
+
+    /// The grid's separability floor: the smallest positive finite structural distance the metric
+    /// resolves, the granularity below which two positions are not held apart (design Part 21, the
+    /// ground-metric granularity the semantic-substrate quantization keys off, Part 33.1). For a
+    /// graph metric it is the lightest positive off-diagonal distance in the compiled table (the
+    /// finest hop the integer edge weights lay down); for the independent (orthogonal) metric, whose
+    /// distinct axes do not connect, it is [`Fixed::ONE`], the unit step the integer weights sit on,
+    /// so a quantization taken consistent with it never collapses to zero. A pure function of the
+    /// compiled table, so it is bit-identical on every machine.
+    pub fn resolution(&self) -> Fixed {
+        let mut best: Option<Fixed> = None;
+        for i in 0..self.k {
+            for j in 0..self.k {
+                if i == j {
+                    continue;
+                }
+                let d = self.dist[i * self.k + j];
+                if d > Fixed::ZERO && d != GroundMetric::UNREACHABLE {
+                    best = Some(match best {
+                        Some(b) => b.min(d),
+                        None => d,
+                    });
+                }
+            }
+        }
+        best.unwrap_or(Fixed::ONE)
+    }
 }
 
 /// The pinned independent-axes distance: plain Euclidean over the axes both profiles have a
@@ -464,6 +491,27 @@ pub fn cross_race_distance(
         }
         StructureKind::Graph | StructureKind::Relationship => None,
     }
+}
+
+/// The incommensurability ceiling of a race-pair: the summed measured etic projection loss of the
+/// two sides, the untranslatable magnitude neither race carries into the shared frame (design Part
+/// 21). A pure ALIAS of what [`project_to_etic_with_loss`] already measures (Wave 1): the same two
+/// loss terms [`cross_race_distance`] folds into its sum-of-squares, surfaced on their own so a
+/// caller that needs the ceiling reads the measured loss rather than a separately authored constant.
+/// It is the value-space primitive the language-distance layer's no-shared-form ceiling and per-cell
+/// one-sided-coverage contribution are the normalised image of (Part 33.5): a wholly untranslatable
+/// pair is the ceiling, exactly as a wholly non-cognate lexicon is the top of the lexical share.
+/// Symmetric under swapping the two sides (the sum of the two losses is order-free), and it never
+/// branches on a race identifier: it reads only whether each carried axis has an etic image.
+pub fn incommensurability_ceiling(
+    a: &ValueProfile,
+    ra: &RaceProjection,
+    b: &ValueProfile,
+    rb: &RaceProjection,
+) -> Fixed {
+    let (_, loss_a) = project_to_etic_with_loss(a, ra);
+    let (_, loss_b) = project_to_etic_with_loss(b, rb);
+    loss_a + loss_b
 }
 
 /// Conflict pressure between two groups from their value distance and relationship state
@@ -741,6 +789,67 @@ mod tests {
             projected.axes().count(),
             1,
             "the untranslatable axis does not appear"
+        );
+    }
+
+    #[test]
+    fn ground_metric_resolution_is_the_grid_separability_floor() {
+        // A graph with a lightest edge of 1 and a heavier of 3: the finest resolvable hop is 1.
+        let edges = vec![
+            GraphEdge {
+                a: 0,
+                b: 1,
+                weight: 1,
+            },
+            GraphEdge {
+                a: 1,
+                b: 2,
+                weight: 3,
+            },
+        ];
+        let g = GroundMetric::compile(&ValueStructure::Graph { k: 3, edges });
+        assert_eq!(
+            g.resolution(),
+            Fixed::from_int(1),
+            "the lightest positive hop is the granularity"
+        );
+        // Independent axes do not connect, so the resolution defaults to the unit grid step, never
+        // zero: a quantization taken consistent with it cannot collapse distinct regions.
+        let ind = GroundMetric::compile(&ValueStructure::Independent { k: 3 });
+        assert_eq!(ind.resolution(), Fixed::ONE);
+    }
+
+    #[test]
+    fn incommensurability_ceiling_is_the_measured_projection_loss_of_the_pair() {
+        // The ceiling equals the sum of the two sides' measured projection losses, the same terms
+        // cross_race_distance folds in, surfaced on their own. Symmetric, and no RaceId enters.
+        let etic = EticAxisId(100);
+        let ra = onto_shared(axis(0), etic); // axes 1, 2 untranslatable under ra
+        let rb = onto_shared(axis(0), etic);
+        let a = ValueProfile::with([(axis(0), 4), (axis(1), 3)]); // loss_a = 3^2 = 9
+        let b = ValueProfile::with([(axis(0), 2), (axis(2), -2), (axis(3), 4)]); // loss_b = 4 + 16 = 20
+        let (_, loss_a) = project_to_etic_with_loss(&a, &ra);
+        let (_, loss_b) = project_to_etic_with_loss(&b, &rb);
+        assert_eq!(
+            incommensurability_ceiling(&a, &ra, &b, &rb),
+            loss_a + loss_b,
+            "the ceiling is a pure alias of the measured projection loss"
+        );
+        assert_eq!(
+            incommensurability_ceiling(&a, &ra, &b, &rb),
+            Fixed::from_int(29)
+        );
+        // Symmetric under swapping the two sides.
+        assert_eq!(
+            incommensurability_ceiling(&a, &ra, &b, &rb),
+            incommensurability_ceiling(&b, &rb, &a, &ra),
+            "the pair ceiling is symmetric"
+        );
+        // A fully-translatable pair has a zero ceiling: nothing is untranslatable.
+        let full = ValueProfile::with([(axis(0), 7)]);
+        assert_eq!(
+            incommensurability_ceiling(&full, &ra, &full, &rb),
+            Fixed::ZERO
         );
     }
 

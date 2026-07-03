@@ -371,7 +371,7 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "lang.concept_thresholds"
-basis = "the discrimination and lexicalisation thresholds and the concept drift rate"
+basis = "DERIVES (2026-07-03) through semantics::concept_thresholds (crates/sim/src/semantics.rs): the discrimination threshold is the minimum positive inter-meaning distance the semantic substrate exhibits (Euclidean over concept prototypes, the pinned independent-axes form of the Part 21 metric), floored by the perceptual just-noticeable difference the sensorium resolution reads (langmod::perceptual_geometry), because a gap below what the channel resolves cannot be discriminated; the lexicalisation threshold is the occupied meaning span spread over the channel's contrast budget (langmod::PerceptualGeometry::contrast_budget), floored by the discrimination threshold, because a distinction finer than discrimination cannot be lexicalised distinctly. Two races with different meaning prototypes discriminate and lexicalise at different thresholds from the one kernel, no authored human concept set and no race id (Principle 9), the thresholds data-derived (Principle 11). The one remaining reserved input is the concept drift rate (the per-generation rate a concept prototype migrates), surfaced fail-loud with basis: the meaning-drift cadence set against the transmission and salience drift/usage cadence."
 status = "reserved"
 value = ""
 unit = "threshold"
@@ -397,7 +397,7 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.distance_component_weights"
-basis = "the three language-distance component weights; lexical distance dominates mutual-intelligibility measurement; normalised to sum to exactly one by deterministic residual absorption into the lexical component (R-LANG-DET)"
+basis = "DERIVES (2026-07-03) through langdist::distance_component_weights (crates/sim/src/langdist.rs): each of the three components' weight is its own order-2 diversity across a corpus (the Hill number N^2 / sum(c_i^2), the inverse-Simpson effective count typology::information_weights already uses), the lexical layer over the pooled word-forms of every lexicon, the phonological layer over the pooled producible primitives of every form system, and the grammatical layer over the pooled (parameter, value) settings of every typology profile, each divided by the total and normalised to sum to exactly one by deterministic residual absorption into the lexical component (R-LANG-DET). Lexical dominance EMERGES from the entropy of real lexicons (far more effectively-distinct forms than a form inventory carries phonemes or a grammar carries settings) rather than the authored 0.6/0.25/0.15. No reserved input remains: the weights key off the corpus data (Principle 11), are invariant to permuting which language is which, and never read a race id (Principle 9)."
 status = "reserved"
 value = ""
 unit = "weight"
@@ -521,7 +521,7 @@ source = "Part 33.4; record 62.12; audit section 1n; Part 9 belief deterioration
 
 [[reserved]]
 id = "langdet.substrate_quantization"
-basis = "the shared-semantic-substrate quantisation granularity; basis the coarsest grid that keeps distinct concept regions separable, consistent with the Part 21 ground-metric granularity; one knob reused for the distance walk, the walk key, and the correspondence tie window"
+basis = "DERIVES (2026-07-03) through semantics::substrate_quantization (crates/sim/src/semantics.rs) as a small integer fraction (semantics::QUANTIZATION_DIVISOR = 2) of the derived lang.concept_thresholds discrimination threshold: the coarsest grid that still keeps two concepts one discrimination-threshold apart in distinct cells is half that threshold (the separability sampling bound, not an owner tuneable), consistent with the Part 21 ground-metric granularity (value::GroundMetric::resolution, the grid's separability floor). The one knob is reused for the distance walk, the walk key, and the correspondence tie window (the cognate window langdist::lexical_distance reads). No reserved input remains: the step keys off the derived threshold, never a race id (Principle 9)."
 status = "reserved"
 value = ""
 unit = "granularity"
@@ -529,7 +529,7 @@ source = "Part 33.5; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "langdet.incommensurability_ceiling"
-basis = "the no-shared-form distance ceiling and the per-cell one-sided-coverage contribution; the per-cell contribution set equal to the existing language-distance floor rather than a new constant; the same no-shared-form ceiling applies to a cross-modality (form-disjoint) pair, so cross-modal difficulty emerges rather than being a separate authored constant (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground)"
+basis = "DERIVES (2026-07-03) through langdist::lexical_distance and langdist::phonological_distance (crates/sim/src/langdist.rs) as the normalised language image of value::incommensurability_ceiling (crates/sim/src/value.rs, a pure alias of the measured per-race-pair etic projection loss project_to_etic_with_loss, Wave 1): a concept one side lacks (one-sided coverage) counts as fully non-cognate and a form-disjoint or cross-modality pair reaches the ceiling of one, both emerging from the non-cognate share rather than a separately authored constant, exactly as a wholly untranslatable value pair is the projection-loss ceiling. The cross-modality case reuses the same no-shared-form ceiling (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground). No reserved input remains: the ceiling and the one-sided contribution are the top of the normalised [0,1] lexical and phonological share, never an owner number, keying off forms and modalities and never a race id (Principle 9)."
 status = "reserved"
 value = ""
 unit = "distance"

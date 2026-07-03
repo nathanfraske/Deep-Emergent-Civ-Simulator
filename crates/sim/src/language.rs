@@ -250,6 +250,12 @@ impl FormSystem {
         self.inventory.is_empty()
     }
 
+    /// The producible primitives this system coins from, in canonical (sorted) order: the
+    /// phonological inventory the language-distance layer reads as a feature-value set (Part 33.5).
+    pub fn inventory(&self) -> &[FormSegment] {
+        &self.inventory
+    }
+
     /// The modality this system builds forms in.
     pub fn modality(&self) -> ProductionModalityId {
         self.modality

@@ -81,6 +81,7 @@ pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
 pub mod institution;
+pub mod langdist;
 pub mod langmod;
 pub mod language;
 pub mod lineage;
@@ -94,6 +95,7 @@ pub mod primes;
 pub mod race;
 pub mod runner;
 pub mod scenario;
+pub mod semantics;
 pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
@@ -173,6 +175,10 @@ pub use institution::{
     FunctionVec, Institution, Norm, NormType, Predicate, RecognitionTemplate, Role, RoleId,
     TemplateId, TemplateLibrary, STRUCTURAL_FEATURES,
 };
+pub use langdist::{
+    distance_component_weights, language_distance, lexical_distance, phonological_distance,
+    ComponentWeights,
+};
 pub use langmod::{
     acquisition_split, capability_gate, capability_halves, phoneme_priors, CapabilityGate,
 };
@@ -187,6 +193,10 @@ pub use mate_choice::{choose, genetic_distance, realised_fitness, MatePreference
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
+pub use semantics::{
+    concept_thresholds, substrate_quantization, Concept, ConceptThresholds, SemanticSubstrate,
+    QUANTIZATION_DIVISOR,
+};
 pub use sensorium::{SenseChannelId, Sensorium};
 pub use substrate::Substrate;
 pub use tom::{
@@ -209,9 +219,9 @@ pub use typology::{
     TypologyRegistry, TypologyValueDef, TypologyValueId, ValueMetric,
 };
 pub use value::{
-    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic,
-    project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId, EticProfile,
-    EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind, ValueAxisId,
-    ValueProfile, ValueStructure,
+    conflict_pressure, cross_race_distance, euclidean_distance, incommensurability_ceiling,
+    project_to_etic, project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId,
+    EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind,
+    ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use world::{build_etic_substrate, GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
