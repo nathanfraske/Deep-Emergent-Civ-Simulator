@@ -200,10 +200,11 @@ id = "bio.respiratory_surface"
 measures = "gas-exchange surface area a respiratory tissue presents per unit organ development (the area the Fick membrane law exchanges over)"
 unit = "m^2"
 dimension = "area"
-scale = "m^2 (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "m^2"
 tier = 0
-range_reserved = "proposed bounds [0, 200], reserved-with-basis pending the owner's set (the R-MEDIUM floor is not yet owner-calibrated; basis in the real citation below)"
-real = "West, Respiratory Physiology (human alveolar surface ~70 m^2); fish gill lamellar surface tables; a non-respiratory tissue carries 0, so a body with no respiratory organ presents no exchange area and cannot breathe. A composition axis read sim-side to derive a being's exchange area (the law.membrane_gas_flux area port), the same way bio.energy_density feeds the metabolic reserve"
+range_lo = "0"
+range_hi = "200"
+real = "West, Respiratory Physiology (human alveolar surface ~70 m^2); fish gill lamellar surface tables; a non-respiratory tissue carries 0, so a body with no respiratory organ presents no exchange area and cannot breathe. Window [0, 200] m^2 owner-ratified 2026-07-03 (0 for a non-respiratory tissue, ~70 human alveolar, up to ~200 for a large or high-surface taxon), fitting the canonical scale. A composition axis read sim-side to derive a being's exchange area (the law.membrane_gas_flux area port), the same way bio.energy_density feeds the metabolic reserve"
 
 # --- Derived score axes (the produced outputs of the two fold laws, read by edibility) ---
 

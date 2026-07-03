@@ -346,21 +346,20 @@ mod tests {
     }
 
     #[test]
-    fn the_catalogue_covers_every_set_axis_and_omits_the_reserved_one() {
+    fn the_catalogue_covers_every_set_axis_and_omits_the_reserved_ones() {
         let reg = floors();
         let cat = build_catalogue(&reg, 16, 1);
-        // Every axis with a set range is in the catalogue; the one reserved axis over this stack
-        // (mech.second_moment_of_area) has no envelope and is omitted.
+        // Every axis with a set range is in the catalogue (one quantity each, no per-class axis over
+        // this stack), and every reserved axis is omitted for want of an envelope to derive from.
         let set_axes = reg.axes().filter(|a| a.range.is_set()).count();
         assert_eq!(cat.len(), set_axes, "one quantity per set axis");
-        assert!(
-            !reg.axis("mech.second_moment_of_area")
-                .unwrap()
-                .range
-                .is_set()
-                && cat.id_of("mech.second_moment_of_area").is_none(),
-            "the reserved axis is not in the catalogue"
-        );
+        for axis in reg.axes().filter(|a| !a.range.is_set()) {
+            assert!(
+                cat.id_of(&axis.id).is_none(),
+                "the reserved axis {} is not in the catalogue",
+                axis.id
+            );
+        }
         // Each registered quantity carries the axis dimension.
         let acidity = cat.id_of("chem.acidity").expect("acidity is set");
         assert!(cat.get(acidity).unwrap().dimension.is_dimensionless());
@@ -477,6 +476,31 @@ real = "test envelope"
             axis_scale(acidity, 16, 1).unwrap().scale_bits,
             CANONICAL_SCALE,
             "a fitting axis still keeps the canonical Q32.32 scale under the decimal path"
+        );
+    }
+
+    #[test]
+    fn the_two_ratified_windows_derive_scales_that_fit_their_envelopes() {
+        // The 2026-07-03 windows derive correctly through the catalogue, not just as raw ranges: the
+        // second moment of area's 1e-12 low end (which underflows the stored Fixed to zero) forces a
+        // fine per-quantity scale that resolves it, and the respiratory surface fits the canonical.
+        let reg = floors(); // mechanical carries second_moment_of_area
+        let smoa = reg.axis("mech.second_moment_of_area").unwrap();
+        let d = axis_scale(smoa, 16, 1).unwrap();
+        let lo_log2 = decimal_log2_floor("0.000000000001").unwrap();
+        assert!(
+            d.scale_bits as i32 + lo_log2 >= 0,
+            "second moment scale {} must resolve the 1e-12 low end at 2^{}",
+            d.scale_bits,
+            lo_log2
+        );
+        // respiratory_surface lives in the biology floor, which the shared fixture does not load.
+        let bio = PhysicsRegistry::load(data_path("biology_floor.toml")).unwrap();
+        let resp = bio.axis("bio.respiratory_surface").unwrap();
+        assert_eq!(
+            axis_scale(resp, 16, 1).unwrap().scale_bits,
+            CANONICAL_SCALE,
+            "the [0, 200] m^2 respiratory surface fits the canonical scale"
         );
     }
 

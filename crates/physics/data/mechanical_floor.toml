@@ -84,8 +84,9 @@ unit = "m^4"
 dimension = "4,0,0,0"
 scale = "m^4"
 tier = 0
-range_reserved = "the structural-section envelope; reserved because a small section's m^4 underflows Q32.32, so a per-quantity scale is settled under R-UNITS-PIN, jointly with the geometry domain"
-real = "Timoshenko, Theory of Elastic Stability"
+range_lo = "0.000000000001"
+range_hi = "1"
+real = "Timoshenko, Theory of Elastic Stability; window [1e-12, 1] m^4 owner-ratified 2026-07-03 (a fine structural wire's section ~1e-13 to 1e-12 to a large built-up girder ~1e-1 to 1, I = b*h^3/12 or pi*r^4/4); the small-section m^4 underflows Q32.32, so it derives a fine per-quantity scale from the declared decimal envelope (R-UNITS-PIN). Basis: Gere and Goodno, Mechanics of Materials; Roark's Formulas for Stress and Strain"
 
 [[axis]]
 id = "mech.arm_length"
