@@ -80,6 +80,7 @@ pub mod evolve;
 pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
+pub mod institution;
 pub mod langmod;
 pub mod language;
 pub mod lineage;
@@ -137,7 +138,9 @@ pub use census::{
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
-pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
 pub use demography::{hazard_age, AgeHistogram};
 pub use dialogue::{
     conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
@@ -161,6 +164,14 @@ pub use genome::{
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
     HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
+};
+pub use institution::{
+    crystallization_order, crystallize, emit_undertaking, institution_distance, norm_fires,
+    recognize, signature_distance, weighted_tanimoto, AggregateInstitution, Atom, AttributeSel,
+    ConditionExpr, Conditions, CoordinationObservation, CrystallizationParams, DecisionPropensity,
+    Deontic, EticDescriptor, FeatureSignature, FunctionAxisDef, FunctionAxisId, FunctionRegistry,
+    FunctionVec, Institution, Norm, NormType, Predicate, RecognitionTemplate, Role, RoleId,
+    TemplateId, TemplateLibrary, STRUCTURAL_FEATURES,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,

@@ -140,6 +140,13 @@ impl Phase {
     /// several beliefs perturbs each independently and the lift replays bit for bit. The dispersion
     /// magnitude is a reserved calibration; the draw keys on no belief's identity (Principle 9).
     pub const BELIEF_LIFT: Phase = Phase(0x19);
+    /// The institution-crystallization tie-break draw (the Part 36 institution substrate): when
+    /// two ripe coordination patterns share an exact canonical key and must be assigned a
+    /// crystallization order, this stream breaks the tie, folding the master seed, the locus, the
+    /// tick, and this phase, with the pattern's secondary key as the RNG locus. It is reached only
+    /// for a genuine key tie; distinct patterns sort by their canonical key alone and never touch
+    /// the stream, so crystallization order is a pure function of canonical state (Principle 3).
+    pub const CRYSTALLIZE: Phase = Phase(0x1A);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -280,6 +287,17 @@ mod tests {
         assert_ne!(belief_lift, development);
         assert_ne!(Phase::BELIEF_LIFT, Phase::TRANSMIT);
         assert_ne!(Phase::BELIEF_LIFT, Phase::KNOW_LOSS);
+        // The institution-crystallization phase (0x1A) is the next free value after BELIEF_LIFT
+        // (0x19) and must not alias the belief-lift or perception phases it neighbours, on counter
+        // zero, so a crystallization tie-break, a belief-lift dispersion, and a perception roll
+        // never collide.
+        let crystallize = DrawKey::entity(42, 9, Phase::CRYSTALLIZE).rng(seed).at(0);
+        assert_eq!(Phase::CRYSTALLIZE, Phase(0x1A));
+        assert_ne!(crystallize, belief_lift);
+        assert_ne!(crystallize, perception);
+        assert_ne!(crystallize, know_loss);
+        assert_ne!(Phase::CRYSTALLIZE, Phase::BELIEF_LIFT);
+        assert_ne!(Phase::CRYSTALLIZE, Phase::MORTALITY);
     }
 
     #[test]

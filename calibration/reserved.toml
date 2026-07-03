@@ -595,6 +595,35 @@ value = ""
 unit = "per_tick"
 source = "Part 36 institutions; record 62.8; audit section 1k"
 
+# The crystallization-rates umbrella above is refined into the two parameters the built substrate
+# reads (crates/sim/src/institution.rs, CrystallizationParams), each supplied to crystallize() as a
+# parameter and never hardcoded. The distance metric also takes its own per-feature weights, split
+# out from the similarity weights so the recognition and distance passes can be weighted apart.
+
+[[reserved]]
+id = "inst.crystallization_threshold"
+basis = "the propensity threshold a recurring coordination pattern must cross to crystallize (read by institution.rs crystallize / emit_undertaking, the same threshold as tier.decision_propensity for an aggregate collective undertaking); the intended institution-formation cadence in playtest, the hardest of these to set"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
+
+[[reserved]]
+id = "inst.crystallization_rate"
+basis = "the propensity added per firing coordination observation (read by institution.rs crystallize); with the threshold above it sets how many recurrences build an institution, calibrated against playtest cadence"
+status = "reserved"
+value = ""
+unit = "per_tick"
+source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
+
+[[reserved]]
+id = "inst.distance_weights"
+basis = "the per-feature weights of the institution-distance metric (read by institution.rs signature_distance / institution_distance), split out from inst.similarity_feature_weights so the recognition and distance passes weigh features apart; which structural and function-space features count toward how far two institutions read"
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
+
 # --- R-DEEPTECH-COMPOSE: recursive technology composition (Part 41, record 62.10) ---
 
 [[reserved]]

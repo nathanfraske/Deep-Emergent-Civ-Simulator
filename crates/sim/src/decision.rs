@@ -40,6 +40,15 @@ pub struct DriveId(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ActionId(pub u32);
 
+/// A data-defined world-fact input: a named reading an agent (or an institution's norm) can
+/// condition on, drawn from the same open registry a [`Consideration`] reads (a drive level, a
+/// value-axis stance, a perceived world fact). It is a newtype like [`DriveId`] and [`ActionId`],
+/// not a closed enum, so a race or a world can condition on facts the engine's authors never
+/// enumerated (Principle 11). The institution substrate's ADICO conditions key off this
+/// registry rather than authoring a predicate catalogue of their own (design Part 36).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct InputId(pub u32);
+
 /// A response curve as data: sorted `(x, y)` points in the unit interval, linearly
 /// interpolated, clamped to the end points outside the range. Any monotone or
 /// non-monotone shape is expressible by its points, so the curve family is open rather

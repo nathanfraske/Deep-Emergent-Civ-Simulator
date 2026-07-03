@@ -18,10 +18,13 @@
 //! and that no relationship edge dangles. This is the second standing harness the
 //! runbook requires in CI from the first tick, alongside the determinism harness.
 
-use civsim_core::{Fixed, StableId};
+use civsim_core::{EventId, Fixed, StableId};
 use civsim_sim::conservation::ConservationRegistry;
 use civsim_sim::lod::TwoTierWorld;
-use civsim_sim::{AgeHistogram, AttrKindId, BeliefKey, BeliefParams, Curve, FacetStrength};
+use civsim_sim::{
+    crystallization_order, AgeHistogram, AggregateInstitution, AttrKindId, BeliefKey, BeliefParams,
+    Curve, EticDescriptor, FacetStrength, FunctionVec, TemplateId,
+};
 
 /// The total age-tracked population across both tiers: the members held in pool age
 /// distributions plus the promoted individuals carrying an age. The conserved projection the
@@ -297,4 +300,195 @@ fn a_deliberate_belief_mass_leak_is_caught() {
         .check_against(&baseline, &w)
         .expect_err("invented belief mass must be caught");
     assert_eq!(err.projection, "aggregate_belief_mass");
+}
+
+/// A fixture aggregate institution (a labelled test fixture, never an owner value): chosen
+/// coordinate mass, structural counts, and legitimacy that exercise the conservation invariant.
+fn fixture_agg(
+    coords: Vec<Fixed>,
+    roles: i32,
+    members: i32,
+    norms: i32,
+    rules: i32,
+    obligations: i32,
+    legitimacy: Fixed,
+) -> AggregateInstitution {
+    AggregateInstitution::from_parts(
+        FunctionVec::from_intensities(coords),
+        roles,
+        members,
+        norms,
+        rules,
+        obligations,
+        legitimacy,
+    )
+}
+
+fn fx(n: i64, d: i64) -> Fixed {
+    Fixed::from_ratio(n, d)
+}
+
+#[test]
+fn institution_feature_and_legitimacy_mass_conserved_across_the_tier_boundary() {
+    // Design Part 36 + R-TIER-CONSIST: the institution feature vector and the legitimacy mass are
+    // conserved projections across promotion, demotion, merge, and split, and the promoted
+    // institution's feature signature reproduces the pool's compact vector. Registering the two
+    // projections is all it takes to cover them, with nothing special-cased.
+    let mut reg = ConservationRegistry::new();
+    reg.register("institution_feature_mass", |w: &TwoTierWorld| {
+        w.institution_feature_mass()
+    });
+    reg.register("institution_legitimacy_mass", |w: &TwoTierWorld| {
+        w.institution_legitimacy_mass()
+    });
+
+    let mut w = TwoTierWorld::new();
+    let pa = w.add_pool(0, Fixed::ZERO);
+    let pb = w.add_pool(0, Fixed::ZERO);
+    let agg_a = fixture_agg(
+        vec![fx(4, 10), fx(6, 10), Fixed::ZERO],
+        2,
+        5,
+        4,
+        1,
+        3,
+        fx(3, 4),
+    );
+    let agg_b = fixture_agg(
+        vec![fx(1, 10), fx(2, 10), fx(5, 10)],
+        1,
+        3,
+        2,
+        0,
+        1,
+        fx(1, 4),
+    );
+    w.set_pool_institution(pa, agg_a.clone());
+    w.set_pool_institution(pb, agg_b.clone());
+    let baseline = reg.snapshot(&w);
+    assert!(reg.check_against(&baseline, &w).is_ok());
+
+    // Promote pa's aggregate: it materializes into an explicit institution whose feature signature
+    // reproduces the pool's compact vector, and feature + legitimacy mass are conserved.
+    let id = w.promote_institution(pa, EventId(0));
+    let promoted = w
+        .institutions
+        .iter()
+        .find(|i| i.id == id)
+        .expect("the promoted institution exists");
+    assert_eq!(
+        promoted.feature_signature(),
+        agg_a.feature_signature,
+        "the promoted institution's signature reproduces the pool's compact vector"
+    );
+    reg.check_against(&baseline, &w)
+        .expect("promotion conserves feature and legitimacy mass");
+
+    // Demote it into pb: it folds back into pb's aggregate, still conserved.
+    w.demote_institution(id, pb);
+    reg.check_against(&baseline, &w)
+        .expect("demotion conserves feature and legitimacy mass");
+
+    // Merge the two pools: their aggregate institutions combine, still conserved.
+    let merged = w.merge_pools(pa, pb);
+    reg.check_against(&baseline, &w)
+        .expect("merge conserves feature and legitimacy mass");
+
+    // Split the merged pool: the aggregate partitions into two halves that recombine exactly.
+    w.split_pool(merged, 0, Fixed::ZERO);
+    reg.check_against(&baseline, &w)
+        .expect("split conserves feature and legitimacy mass");
+}
+
+#[test]
+fn a_deliberate_institution_feature_leak_is_caught() {
+    // The institution projection has teeth: inventing feature mass in a pool with no promoted
+    // counterpart must fail the check.
+    let mut reg = ConservationRegistry::new();
+    reg.register("institution_feature_mass", |w: &TwoTierWorld| {
+        w.institution_feature_mass()
+    });
+    let mut w = TwoTierWorld::new();
+    let p = w.add_pool(0, Fixed::ZERO);
+    let baseline = reg.snapshot(&w);
+    w.set_pool_institution(p, fixture_agg(vec![fx(9, 10)], 1, 1, 1, 0, 0, fx(1, 2)));
+    let err = reg
+        .check_against(&baseline, &w)
+        .expect_err("invented institution feature mass must be caught");
+    assert_eq!(err.projection, "institution_feature_mass");
+}
+
+#[test]
+fn mutating_only_the_descriptor_does_not_change_the_state_hash() {
+    // Design Part 36, Principle 10: the derived etic descriptor is a pure function of the rest of
+    // the institution and recomputable, so it does not enter the state hash the way render state
+    // does not. Mutating only the descriptor leaves the hash bit-identical; mutating an
+    // authoritative field changes it.
+    let mut w = TwoTierWorld::new();
+    let p = w.add_pool(0, Fixed::ZERO);
+    w.set_pool_institution(
+        p,
+        fixture_agg(vec![fx(4, 10), fx(6, 10)], 1, 2, 1, 0, 0, fx(1, 2)),
+    );
+    let id = w.promote_institution(p, EventId(0));
+    let before = w.state_hash();
+
+    let inst = w
+        .institutions
+        .iter_mut()
+        .find(|i| i.id == id)
+        .expect("the promoted institution exists");
+    inst.descriptor = EticDescriptor {
+        best_match: Some(TemplateId(42)),
+        similarity: Fixed::ONE,
+    };
+    assert_eq!(
+        w.state_hash(),
+        before,
+        "the derived descriptor is out of the state hash"
+    );
+
+    // A change to an authoritative field does move the hash.
+    let inst = w
+        .institutions
+        .iter_mut()
+        .find(|i| i.id == id)
+        .expect("the promoted institution exists");
+    inst.legitimacy = Fixed::from_int(9);
+    assert_ne!(
+        w.state_hash(),
+        before,
+        "an authoritative field change moves the hash"
+    );
+}
+
+#[test]
+fn crystallization_order_is_identical_across_thread_counts() {
+    // Determinism replay (design Part 36's determinism pin): the crystallization order is a pure
+    // function of canonical state, so running it across any number of threads yields the same
+    // result as the serial computation. The candidates include an exact primary-key tie (the three
+    // entries with primary 10), which is the only path that consults the CRYSTALLIZE draw stream.
+    let candidates = vec![
+        (10u64, 1u64),
+        (10u64, 2u64),
+        (3u64, 9u64),
+        (7u64, 4u64),
+        (10u64, 3u64),
+    ];
+    let seed = 0xABCDEF;
+    let serial = crystallization_order(&candidates, seed, 42, 5);
+    for widths in [2usize, 3, 8] {
+        let results: Vec<Vec<usize>> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..widths)
+                .map(|_| s.spawn(|| crystallization_order(&candidates, seed, 42, 5)))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for r in results {
+            assert_eq!(
+                r, serial,
+                "thread count does not change the crystallization order"
+            );
+        }
+    }
 }
