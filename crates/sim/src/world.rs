@@ -131,9 +131,12 @@ fn assertion_move(
 /// is the environmental-variance (V_E) source that makes [`crate::genome::GeneSet::express`] vary
 /// between members of one cohort: today every member rides one shared `race.environment`, so V_E
 /// is identically zero; adding this per-being offset to that baseline authors variance without a
-/// direction, because the map `(2 * unit - 1)` is symmetric about zero and its expectation over a
-/// uniform `unit_fixed` draw in `[0, ONE)` is exactly zero, so it shifts no cohort mean
-/// (Principle 9). `spread` is the race's reserved `environment_variance`, the half-width of the
+/// direction, because the map `(2 * unit - 1)` is symmetric about zero. Its expectation over a
+/// uniform `unit_fixed` draw on the half-open grid `[0, ONE)` is `-2^-32` (one fixed-point ULP
+/// below zero, since the grid includes 0 but excludes ONE), not exactly zero: the residual cohort
+/// mean shift is one ULP times `spread`, physically negligible and dwarfed by the per-being spread,
+/// so no direction is authored (Principle 9). `spread` is the race's reserved `environment_variance`,
+/// the half-width of the
 /// deviation; at [`Fixed::ZERO`] the offset is exactly zero and the expressed mind is bit-identical
 /// to the pre-offset dawn (the interim that reproduces the homogeneous world). Deterministic:
 /// `unit_fixed` lies in `[0, ONE)` and the symmetric map is a pure function of the seed, the being,
@@ -169,6 +172,27 @@ impl GossipParams {
         })
     }
 }
+
+/// The race-normalized mortality pass ([`World::apply_mortality_by_race`]) could not race-normalize
+/// a being: its race is untracked or absent from the supplied `races`, so there is no lifespan to
+/// map its raw age onto the life-fraction domain the shared hazard curve is evaluated in. Rather
+/// than read the curve in the wrong domain (raw age against a fraction curve, which would silently
+/// make the unraced class near-immortal or cull it wholesale), the pass fails loud, naming the being
+/// it could not normalize. Carries the offending being's id.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct UnraceableBeing(pub StableId);
+
+impl std::fmt::Display for UnraceableBeing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "being {:?} cannot be race-normalized for the life-fraction mortality pass (no tracked race with a lifespan); refusing rather than reading the hazard in the raw-age domain",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnraceableBeing {}
 
 /// One stimulus delivered to a mind on a tick: either a first-order observation about
 /// the world, or a second-order observation about a target mind's access. Phase 1
@@ -444,6 +468,14 @@ pub struct World {
     /// [`World::birth`] and seeded at the dawn; a window transient like the pool-tier accumulator,
     /// so it is kept out of [`World::state_hash`] and carries its own stamped reduction hash.
     census: ReproductiveCensus,
+    /// The stamped integer-Gaussian approximation the world's mean-zero draws use (design 25.10;
+    /// `genome.gauss_approx`, a world-identity value). One shape for the whole world, so the
+    /// axiom-inheritance belief-mutation deviate ([`World::inherited_beliefs`]) draws through the
+    /// same approximation the genome's continuous mutation and the controller mutation do, rather
+    /// than a bare `k = 12` literal duplicated at each consumer. [`World::new`] seeds the labelled
+    /// stamped default; a canonical build overrides it with [`World::set_gauss_approx`] from the
+    /// manifest.
+    gauss_approx: GaussApprox,
 }
 
 impl World {
@@ -491,6 +523,11 @@ impl World {
             mortality_hazard: None,
             breeding_systems: BreedingSystemRegistry::new(),
             census: ReproductiveCensus::new(),
+            // The labelled stamped default (design 25.10, `genome.gauss_approx = SumOfUniforms{k=12}`):
+            // the same shape the genome and controller mutations draw through, so the belief-mutation
+            // deviate shares one world-identity approximation. A canonical build overrides it from the
+            // manifest via `set_gauss_approx`.
+            gauss_approx: GaussApprox::SumOfUniforms { k: 12 },
         }
     }
 
@@ -560,6 +597,20 @@ impl World {
         self.mortality_hazard = Some(hazard);
     }
 
+    /// Stamp the world's integer-Gaussian approximation (design 25.10, `genome.gauss_approx`), the
+    /// one world-identity shape the mean-zero draws use. Overrides the labelled [`World::new`]
+    /// default so the axiom-inheritance belief mutation draws through the same approximation the
+    /// genome and controller mutations do. A canonical build reads it from the manifest and installs
+    /// it here; changing it re-rolls the world (it feeds every quantitative lineage).
+    pub fn set_gauss_approx(&mut self, gauss: GaussApprox) {
+        self.gauss_approx = gauss;
+    }
+
+    /// The world's stamped integer-Gaussian approximation.
+    pub fn gauss_approx(&self) -> GaussApprox {
+        self.gauss_approx
+    }
+
     /// Set the master seed that keys every stochastic draw (perception rolls and, in
     /// later phases, gossip pairing and decisions). The seed and the world alone
     /// determine the canonical timeline (design Principle 10).
@@ -578,7 +629,42 @@ impl World {
         channels: &AccessChannelRegistry,
         profile: Profile,
     ) -> Result<Self, CalibrationError> {
-        let required = [
+        // The two per-world orbital scalars join the required gate list here (alongside the base
+        // tick), so the PRODUCTION constructor derives the life cadence from the world's own orbit
+        // rather than inheriting World::new's Earth-year LIFE_CADENCE_TICKS fallback. A calibrated
+        // world with a reserved orbit fails loud (its year is unknown), never runs on the Earth
+        // constant. The orbit is read through the same fail-loud manifest path as every other value.
+        let mut world = World::from_manifest_gated(
+            manifest,
+            channels,
+            profile,
+            &[
+                "world.orbital_period_seconds",
+                "world.rotation_period_seconds",
+                "time.base_tick_seconds",
+            ],
+        )?;
+        let orbital = crate::clock::orbital_from_manifest(manifest)?;
+        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        world.set_life_cadence(cadence);
+        Ok(world)
+    }
+
+    /// The shared gate-and-build core of the two manifest constructors: it enforces the profile gate
+    /// over the base required set plus `extra_required`, reads the cognition, theory-of-mind, access,
+    /// and gossip calibrations, and returns a world whose life cadence is still the [`World::new`]
+    /// fallback (the caller derives and installs the real cadence). Split out so
+    /// [`World::from_manifest`] can gate on the manifest orbit while
+    /// [`World::from_manifest_with_orbital`] gates only on the base tick (the caller supplies the
+    /// orbit), without either constructor gating the other's orbital keys.
+    fn from_manifest_gated(
+        manifest: &CalibrationManifest,
+        channels: &AccessChannelRegistry,
+        profile: Profile,
+        extra_required: &[&str],
+    ) -> Result<Self, CalibrationError> {
+        let mut required = vec![
             "evidence.log_odds_clamp",
             "evidence.commit_threshold",
             "evidence.runner_up_margin",
@@ -589,6 +675,7 @@ impl World {
             "gossip.trust_baseline",
             "gossip.trust_penalty",
         ];
+        required.extend_from_slice(extra_required);
         manifest.gate(profile, &required)?;
         let belief_params = InferenceParams::from_manifest(manifest)?;
         let meta_params = tom::meta_params_from_manifest(manifest)?;
@@ -601,22 +688,22 @@ impl World {
     }
 
     /// A world whose calibrations are loaded from the manifest and whose life-cadence beat is
-    /// derived from the world's orbit (design Parts 14.6, 20, 54). This is [`World::from_manifest`]
-    /// plus the celestial derivation: the life-cadence period becomes
-    /// [`crate::clock::ticks_from_seconds`] of the orbital year over the base tick, so aging and
-    /// mortality beat on the world's own year rather than the hardcoded [`LIFE_CADENCE_TICKS`] dev
-    /// fallback. The orbital elements are supplied by the caller (a labelled fixture in tests,
-    /// [`crate::clock::orbital_from_manifest`] once the owner sets the two per-world scalars), never
-    /// fabricated here; the base tick is read live from the manifest as a canonical [`Fixed`]. Fails
-    /// loud if the base tick is reserved or the derived cadence is degenerate, so a world never runs
-    /// on a fabricated or zero cadence.
+    /// derived from a CALLER-SUPPLIED orbit (design Parts 14.6, 20, 54). Unlike
+    /// [`World::from_manifest`], which reads the orbit from the manifest's reserved per-world
+    /// scalars, this takes the orbital elements as an argument (a labelled fixture in tests, a
+    /// world's declared orbit from a tool), so it does NOT gate on the manifest orbit and can run a
+    /// calibrated determinism check against a reserved manifest that has not yet declared its orbit.
+    /// The base tick is still read live from the manifest as a canonical [`Fixed`]. Fails loud if the
+    /// base tick is reserved or the derived cadence is degenerate, so a world never runs on a
+    /// fabricated or zero cadence.
     pub fn from_manifest_with_orbital(
         manifest: &CalibrationManifest,
         channels: &AccessChannelRegistry,
         profile: Profile,
         orbital: OrbitalElements,
     ) -> Result<Self, CalibrationError> {
-        let mut world = World::from_manifest(manifest, channels, profile)?;
+        let mut world =
+            World::from_manifest_gated(manifest, channels, profile, &["time.base_tick_seconds"])?;
         let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
         let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
         world.set_life_cadence(cadence);
@@ -1155,11 +1242,14 @@ impl World {
                 });
                 axiom::confidence_weighted_mean(pairs).unwrap_or(pax.innate_seed)
             };
+            // Draw the belief-mutation deviate through the world's stamped Gaussian approximation
+            // (design 25.10), the one shape the genome and controller mutations also draw through,
+            // rather than a bare k=12 literal at this consumer.
             let deviate = gaussian_unit(
                 &DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
                     .rng(self.seed),
                 0,
-                GaussApprox::SumOfUniforms { k: 12 },
+                self.gauss_approx,
             );
             let seed = axiom::inherit_seed(
                 pax.innate_seed,
@@ -1463,29 +1553,41 @@ impl World {
 
     /// Run one mortality pass that evaluates the hazard at each being's race-normalized life
     /// fraction rather than its raw age (design Part 20, R-AGING). For each being in id order, its
-    /// race is looked up through `race_of`; if the race is known, the hazard is evaluated at
-    /// [`Race::life_fraction`] (raw age divided by that race's own lifespan), so one shared curve
-    /// culls a short-lived and a long-lived race each on its own scale, keyed only off per-race
-    /// data (Principle 9). A being whose race is untracked, or whose race is absent from `races`,
-    /// falls back to the raw-age hazard of [`World::apply_mortality`] through
-    /// [`crate::demography::hazard_age`], so an unraced being behaves exactly as before. Only the
-    /// curve's x-input changes: the [`Phase::MORTALITY`] roll, the comparison, and the removal path
-    /// are identical to [`World::apply_mortality`], so the two share a deterministic,
-    /// observer-independent, thread-count-independent roll and differ only in where on the curve
-    /// each being is read.
+    /// race is looked up through `race_of` and the hazard is evaluated at [`Race::life_fraction`]
+    /// (raw age divided by that race's own lifespan), so one shared curve culls a short-lived and a
+    /// long-lived race each on its own scale, keyed only off per-race data (Principle 9). The
+    /// `hazard` curve here is defined on the life-fraction domain `[0, 1]`, distinct from the
+    /// raw-age curve [`World::apply_mortality`] reads.
+    ///
+    /// A being whose race is untracked, or whose race is absent from `races`, cannot be mapped onto
+    /// the life-fraction domain (there is no lifespan to normalize its age by), so the pass FAILS
+    /// LOUD with [`UnraceableBeing`] rather than reading the curve in the wrong domain. The earlier
+    /// fallback evaluated such a being at its RAW age against this fraction curve, a domain mismatch
+    /// that read the curve's far end (making the unraced class either near-immortal or culled
+    /// wholesale depending on the curve). The check runs before any removal, so a refused pass
+    /// leaves the population untouched. Only the curve's x-input differs from
+    /// [`World::apply_mortality`]: the [`Phase::MORTALITY`] roll, the comparison, and the removal
+    /// path are identical, so the two share a deterministic, observer-independent,
+    /// thread-count-independent roll.
     pub fn apply_mortality_by_race(
         &mut self,
         races: &BTreeMap<RaceId, Race>,
         hazard: &Curve,
-    ) -> Vec<StableId> {
-        let dead: Vec<StableId> = self
-            .ages
-            .iter()
-            .filter_map(|(&id, &age)| {
-                let x = match self.race_of.get(&id).and_then(|rid| races.get(rid)) {
-                    Some(race) => race.life_fraction(age),
-                    None => crate::demography::hazard_age(age),
-                };
+    ) -> Result<Vec<StableId>, UnraceableBeing> {
+        // Resolve every being's life fraction first, refusing on the first being that cannot be
+        // race-normalized, so no partial cull runs before the refusal.
+        let mut fractions: Vec<(StableId, u32, Fixed)> = Vec::with_capacity(self.ages.len());
+        for (&id, &age) in &self.ages {
+            let race = self
+                .race_of
+                .get(&id)
+                .and_then(|rid| races.get(rid))
+                .ok_or(UnraceableBeing(id))?;
+            fractions.push((id, age, race.life_fraction(age)));
+        }
+        let dead: Vec<StableId> = fractions
+            .into_iter()
+            .filter_map(|(id, age, x)| {
                 let chance = hazard.eval(x).clamp(Fixed::ZERO, Fixed::ONE);
                 let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
                     .rng(self.seed)
@@ -1496,7 +1598,7 @@ impl World {
         for id in &dead {
             self.remove_being(*id);
         }
-        dead
+        Ok(dead)
     }
 
     /// The life-cadence beat, run once per [`World::tick`] but firing only on the cadence period
@@ -2683,6 +2785,24 @@ impl World {
             h.write_stable(*mind);
             h.write_u32(lang.0);
         }
+        // The life-cadence period and the installed mortality-hazard curve are canonical timeline
+        // state (design Part 20): two worlds that age and die on different schedules are different
+        // worlds, so they fold in at a pinned tail position, the way LivingWorld::state_hash folds
+        // the orbit. Aging and mortality are RNG-free beats keyed off these, so an unfolded change
+        // would silently diverge replay. The curve folds as its length then its ascending-x points;
+        // an absent hazard folds as a sentinel length distinct from any real curve.
+        h.write_u64(self.life_cadence_ticks);
+        match &self.mortality_hazard {
+            None => h.write_u64(u64::MAX),
+            Some(curve) => {
+                let pts = curve.points();
+                h.write_u64(pts.len() as u64);
+                for (x, y) in pts {
+                    h.write_fixed(*x);
+                    h.write_fixed(*y);
+                }
+            }
+        }
         h.finish()
     }
 
@@ -2861,6 +2981,131 @@ name = "said"
             earth.life_cadence_ticks(),
             fast.life_cadence_ticks(),
             "two orbits, two cadences from one formula"
+        );
+    }
+
+    /// A full inline manifest for the production `from_manifest` path, differing only in the orbital
+    /// period, so the regression exercises the constructor that ships (not the test-only
+    /// `from_manifest_with_orbital`).
+    fn manifest_with_orbit(orbit_seconds: &str) -> String {
+        let set = |id: &str, v: &str| {
+            format!(
+                "[[reserved]]\nid = \"{id}\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"{v}\"\nsource = \"s\"\n"
+            )
+        };
+        [
+            set("evidence.log_odds_clamp", "4"),
+            set("evidence.commit_threshold", "2"),
+            set("evidence.runner_up_margin", "1"),
+            set("tom.meta_log_odds_clamp", "4"),
+            set("tom.meta_commit_threshold", "2"),
+            set("tom.meta_runner_up_margin", "1"),
+            set("gossip.told_weight", "1"),
+            set("gossip.trust_baseline", "0.5"),
+            set("gossip.trust_penalty", "0.2"),
+            set("time.base_tick_seconds", "1"),
+            set("world.orbital_period_seconds", orbit_seconds),
+            set("world.rotation_period_seconds", "86400"),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn from_manifest_derives_the_cadence_from_the_manifest_orbit() {
+        // Regression (audit CRITICAL defect 1): the PRODUCTION constructor `from_manifest` derives
+        // the life cadence from the world's orbit read from the manifest, not from World::new's
+        // Earth-year LIFE_CADENCE_TICKS fallback. Two manifests differing only in the orbital period
+        // yield two different life_cadence_ticks, and neither is the bare 31_536_000 unless the orbit
+        // says so.
+        let chans = AccessChannelRegistry::default();
+        let fast = CalibrationManifest::from_toml_str(&manifest_with_orbit("86400")).unwrap();
+        let slow = CalibrationManifest::from_toml_str(&manifest_with_orbit("126144000")).unwrap();
+        let wf = World::from_manifest(&fast, &chans, Profile::Calibrated).unwrap();
+        let ws = World::from_manifest(&slow, &chans, Profile::Calibrated).unwrap();
+        assert_eq!(
+            wf.life_cadence_ticks(),
+            86_400,
+            "the fast orbit's year in ticks"
+        );
+        assert_eq!(
+            ws.life_cadence_ticks(),
+            126_144_000,
+            "the slow orbit's year"
+        );
+        assert_ne!(
+            wf.life_cadence_ticks(),
+            ws.life_cadence_ticks(),
+            "two orbital periods, two derived cadences"
+        );
+        assert_ne!(
+            wf.life_cadence_ticks(),
+            crate::clock::LIFE_CADENCE_TICKS,
+            "the derived cadence is not the bare Earth constant unless the orbit says so"
+        );
+        // And an Earth orbit does reproduce the Earth constant (the orbit says so), so the constant
+        // is not banished, only no longer the unconditional default.
+        let earth = CalibrationManifest::from_toml_str(&manifest_with_orbit("31536000")).unwrap();
+        let we = World::from_manifest(&earth, &chans, Profile::Calibrated).unwrap();
+        assert_eq!(we.life_cadence_ticks(), crate::clock::LIFE_CADENCE_TICKS);
+    }
+
+    #[test]
+    fn from_manifest_fails_loud_under_calibrated_when_the_orbit_is_reserved() {
+        // The other half of defect 1: a calibrated world whose orbit is unset cannot run on the
+        // Earth constant; it fails loud, because its year is unknown.
+        let mut toml = manifest_with_orbit("31536000");
+        toml = toml.replace(
+            "[[reserved]]\nid = \"world.orbital_period_seconds\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"31536000\"\nsource = \"s\"\n",
+            "[[reserved]]\nid = \"world.orbital_period_seconds\"\nbasis = \"b\"\nstatus = \"reserved\"\nsource = \"s\"\n",
+        );
+        let m = CalibrationManifest::from_toml_str(&toml).unwrap();
+        assert!(
+            World::from_manifest(&m, &AccessChannelRegistry::default(), Profile::Calibrated)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn state_hash_folds_the_life_cadence_and_the_mortality_hazard() {
+        // Regression (audit defect 4): two worlds differing only in the life cadence, or only in the
+        // installed mortality hazard, get different state hashes, so those canonical timeline fields
+        // cannot silently diverge replay.
+        let make = || World::new(params(), params(), AccessWeights::default()).with_seed(0x5EED);
+        // Two cadences.
+        let mut a = make();
+        let mut b = make();
+        a.set_life_cadence(1000);
+        b.set_life_cadence(2000);
+        assert_ne!(
+            a.state_hash(),
+            b.state_hash(),
+            "a different life cadence changes the state hash"
+        );
+        // Two hazards (same cadence).
+        let mut c = make();
+        let mut d = make();
+        c.set_life_cadence(1000);
+        d.set_life_cadence(1000);
+        c.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::ONE, Fixed::ONE),
+        ]));
+        d.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::ONE, Fixed::from_ratio(1, 2)),
+        ]));
+        assert_ne!(
+            c.state_hash(),
+            d.state_hash(),
+            "a different mortality-hazard curve changes the state hash"
+        );
+        // An absent hazard differs from a present one.
+        let mut e = make();
+        e.set_life_cadence(1000);
+        assert_ne!(
+            c.state_hash(),
+            e.state_hash(),
+            "installing a hazard changes the state hash"
         );
     }
 

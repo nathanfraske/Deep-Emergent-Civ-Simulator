@@ -72,8 +72,16 @@ impl ProxyKernel {
 
     /// The signed margin interval this proxy reports over an aggregated vector, or `None` if a
     /// required port is absent (the proxy is inactive under this substrate). A non-negative margin is
-    /// in-band; a negative margin is a whole-system violation the weighted penalty charges.
-    pub fn margin(self, reg: &InterfaceRegistry, v: &PortVector) -> Option<Interval> {
+    /// in-band; a negative margin is a whole-system violation the weighted penalty charges. `refs`
+    /// carries the reserved-with-basis reference levels the kernels subtract (the resonance
+    /// natural-frequency floor and the control-loop efficiency floor), supplied by the caller from
+    /// the manifest, never fabricated here.
+    pub fn margin(
+        self,
+        reg: &InterfaceRegistry,
+        v: &PortVector,
+        refs: &ProxyRefs,
+    ) -> Option<Interval> {
         let read = |role: &str| -> Option<Interval> {
             let slot = reg.slot_of_role(role)?;
             Some(v.interval_at(slot))
@@ -82,9 +90,16 @@ impl ProxyKernel {
             ProxyKernel::Resonance => {
                 let k = read("resonance_input")?;
                 let m = read("budget")?;
-                // sqrt is nonlinear in the additive mass: the tier-resolution dependence lives here.
-                let lo = sat_sub(sqrt_nonneg(k.lo), sqrt_nonneg(m.hi));
-                let hi = sat_sub(sqrt_nonneg(k.hi), sqrt_nonneg(m.lo));
+                // The natural frequency omega = sqrt(k/m), a dimensionally coherent resonance measure,
+                // against the reserved resonance floor. (The earlier sqrt(k) - sqrt(m) subtracted
+                // incommensurate roots: a stiffness root minus a mass root has no coherent unit.) The
+                // ratio is nonlinear in the additive mass, so the tier-resolution dependence lives here.
+                // The interval extremes take the worst-case ratio: lowest stiffness over highest mass
+                // for the low bound, highest over lowest for the high bound.
+                let omega_lo = sqrt_ratio(k.lo, m.hi);
+                let omega_hi = sqrt_ratio(k.hi, m.lo);
+                let lo = sat_sub(omega_lo, refs.resonance_floor);
+                let hi = sat_sub(omega_hi, refs.resonance_floor);
                 Some(Interval::new(lo, hi))
             }
             ProxyKernel::ThermalBalance => {
@@ -95,13 +110,35 @@ impl ProxyKernel {
             }
             ProxyKernel::ControlLoopStability => {
                 let e = read("chain_efficiency")?;
-                // The chain must pass enough signal to be controllable; the margin is the efficiency
-                // itself against the implicit zero floor (a lossless chain is fully controllable). The
-                // caller's criticality weight decides how hard a low efficiency bites.
-                Some(e)
+                // The chain must pass MORE than the reserved efficiency floor to carry a control
+                // signal; the margin is the efficiency above that floor, so a lossy chain (below the
+                // floor) reads negative and the weighted penalty charges. Returning the raw efficiency
+                // against an implicit zero was structurally inert: an efficiency in [0, 1] is never
+                // negative, so no lossy chain ever registered.
+                let lo = sat_sub(e.lo, refs.control_efficiency_floor);
+                let hi = sat_sub(e.hi, refs.control_efficiency_floor);
+                Some(Interval::new(lo, hi))
             }
         }
     }
+}
+
+/// The reserved-with-basis reference levels the whole-system proxy margins subtract (design Part 41).
+/// Supplied by the caller from the calibration manifest (fail-loud while reserved), never fabricated
+/// in this crate; a margin subtracts the relevant floor so a below-floor design registers as a
+/// whole-system violation rather than being structurally inert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProxyRefs {
+    /// The control-loop through-chain efficiency floor (`compose.control_efficiency_floor`): the
+    /// minimum transmission efficiency below which a chain cannot carry a control signal. Basis: the
+    /// fraction of a signal a chain must pass to close a control loop, the loss beyond which feedback
+    /// is unreliable; below it the [`ProxyKernel::ControlLoopStability`] margin goes negative.
+    pub control_efficiency_floor: Fixed,
+    /// The resonance natural-frequency floor (`compose.resonance_floor`): the minimum
+    /// `omega = sqrt(k/m)` below which a design is too slack to hold its form. Basis: the lowest
+    /// natural frequency a load-bearing assembly must clear so it does not resonate destructively
+    /// under its service loads; below it the [`ProxyKernel::Resonance`] margin goes negative.
+    pub resonance_floor: Fixed,
 }
 
 /// A non-negative square root that is total on any input (a negative reads zero), so the proxy fold
@@ -112,6 +149,23 @@ fn sqrt_nonneg(v: Fixed) -> Fixed {
         Fixed::ZERO
     } else {
         v.sqrt()
+    }
+}
+
+/// The natural frequency `omega = sqrt(num/den)`, total on any input. A non-positive numerator
+/// (no stiffness) reads zero; a non-positive denominator (no mass) reads the saturating maximum
+/// (an unbounded natural frequency), so the proxy never divides by zero or roots a negative.
+#[inline]
+fn sqrt_ratio(num: Fixed, den: Fixed) -> Fixed {
+    if num <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    if den <= Fixed::ZERO {
+        return Fixed::MAX;
+    }
+    match num.checked_div(den) {
+        Some(r) => sqrt_nonneg(r),
+        None => Fixed::MAX,
     }
 }
 

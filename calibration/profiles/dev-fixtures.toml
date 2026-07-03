@@ -180,3 +180,19 @@ status = "set"
 value = "1"
 unit = "seconds_per_tick"
 source = "dev fixture for Part 14.6; crates/sim/src/clock.rs"
+
+[[reserved]]
+id = "world.orbital_period_seconds"
+basis = "FIXTURE placeholder, not the owner's per-world value; an Earth year in world-seconds (365 days of 86400 s) so a development world derives a concrete life cadence from its orbit through World::from_manifest. The owner's real per-world orbit is reserved fail-loud in calibration/reserved.toml; Earth is one option among many (OrbitalElements::dev_earth)"
+status = "set"
+value = "31536000"
+unit = "seconds_per_orbit"
+source = "dev fixture for Parts 14.6, 20; crates/sim/src/clock.rs"
+
+[[reserved]]
+id = "world.rotation_period_seconds"
+basis = "FIXTURE placeholder, not the owner's per-world value; an Earth day in world-seconds (86400 s) so a development world has a concrete rotation period. The owner's real per-world value is reserved fail-loud in calibration/reserved.toml"
+status = "set"
+value = "86400"
+unit = "seconds_per_rotation"
+source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"

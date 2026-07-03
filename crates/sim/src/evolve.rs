@@ -101,6 +101,11 @@ pub struct EvolveParams {
     /// enough that a small weight change is a small behaviour change (smooth evolution) yet large
     /// enough to explore the weight space, a stress-test tunable.
     pub mutation_step: Fixed,
+    /// The stamped integer-Gaussian approximation the controller-weight mutation draws through
+    /// (design 25.10, `genome.gauss_approx`, a world-identity value). Carried here so the controller
+    /// mutation shares the world's one Gaussian shape rather than a bare `k = 12` literal, the same
+    /// shape the genome's continuous mutation and the axiom-inheritance belief mutation draw through.
+    pub gauss: GaussApprox,
 }
 
 impl EvolveParams {
@@ -113,6 +118,9 @@ impl EvolveParams {
             init_spread: Fixed::from_int(2),
             mutation_rate: Fixed::from_ratio(1, 6),
             mutation_step: Fixed::from_ratio(2, 5),
+            // The labelled stamped default (design 25.10, SumOfUniforms{k=12}); a canonical build
+            // reads the world's genome.gauss_approx and installs it here.
+            gauss: GaussApprox::SumOfUniforms { k: 12 },
         }
     }
 }
@@ -192,14 +200,13 @@ pub fn mutate(
                     .slot(SLOT_MUT_STEP)
                     .rng(seed);
                 // A mean-zero Gaussian step of standard deviation `mutation_step`, through the
-                // stamped world-identity approximation (genome.gauss_approx, SumOfUniforms k=12),
-                // the same integer-Gaussian primitive the genome's continuous mutation now uses;
-                // it replaces the former bounded-uniform step in [-step, step).
-                let delta = params.mutation_step.mul(gaussian_unit(
-                    &step_rng,
-                    0,
-                    GaussApprox::SumOfUniforms { k: 12 },
-                ));
+                // world's stamped integer-Gaussian approximation (genome.gauss_approx), the same
+                // primitive the genome's continuous mutation and the axiom-inheritance belief
+                // mutation draw through, rather than a bare k=12 literal; it replaces the former
+                // bounded-uniform step in [-step, step).
+                let delta = params
+                    .mutation_step
+                    .mul(gaussian_unit(&step_rng, 0, params.gauss));
                 allele.additive += delta;
             }
         }

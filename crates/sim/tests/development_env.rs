@@ -339,16 +339,18 @@ fn the_offset_preserves_the_mean_and_is_an_odd_reflection() {
 }
 
 // (5) Backward compatibility: a zero environment_variance reproduces the pre-offset dawn state
-// hash exactly. The golden constant was captured from the tree before the offset was added, with
-// this same fixture, seed, and band; a zero spread makes the offset exactly zero, so the seeded
-// world must fold to the identical canonical hash.
+// hash exactly. The golden constant is captured with this same fixture, seed, and band; a zero
+// spread makes the offset exactly zero, so the seeded world must fold to the identical canonical
+// hash. The golden was refreshed when World::state_hash began folding the canonical life-cadence
+// period and mortality-hazard curve (audit defect 4); the zero-variance backward-compat property
+// (a zero spread reproduces the no-offset dawn) is unchanged, only the folded field set grew.
 #[test]
 fn zero_variance_reproduces_the_pre_offset_state_hash() {
     let (w, ids) = seed_cohort(0xDE0D_0007, race(0, Fixed::from_int(4), Fixed::ZERO), 7, 12);
     assert_eq!(ids.len(), 12);
     assert_eq!(
         w.state_hash(),
-        0x0bb32e17483353930a9c45b20c5dd540u128,
+        0x622b4be8daf65dcd0330dc4437247663u128,
         "a zero developmental variance reproduces the pre-offset dawn bit for bit"
     );
 }

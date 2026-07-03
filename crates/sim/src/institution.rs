@@ -266,7 +266,14 @@ impl Institution {
     /// exactly. The counts are order-independent aggregations, so shuffling the insertion order of
     /// roles, members, or norms leaves the signature bit-identical.
     pub fn feature_signature(&self) -> FeatureSignature {
-        let rules = self.rules.iter().filter(|n| n.or_else.is_some()).count() as i32;
+        // A RULE is deontic AND sanction (A.D.I.C.O), not a bare sanction: gate on both, matching
+        // Norm::norm_type. Counting `or_else.is_some()` alone miscounted a sanction-without-deontic
+        // (an ill-formed O-without-D, which reads as a strategy) as a rule.
+        let rules = self
+            .rules
+            .iter()
+            .filter(|n| n.deontic.is_some() && n.or_else.is_some())
+            .count() as i32;
         let obligations = self.rules.iter().filter(|n| n.deontic.is_some()).count() as i32;
         FeatureSignature::build(
             &self.coordinates.intensity,
@@ -612,10 +619,14 @@ pub struct Norm {
 }
 
 /// A total canonical ordering key for a norm: (provenance, aim, enforcement bits, deontic tag,
-/// sanction tag). Used to sort norms deterministically for hashing and to dedup distinct norms in
-/// [`crystallize`], so the aggregation is a pure function of the norm content rather than its
-/// arrival order.
-pub type NormKey = (u64, u32, i64, u32, u32);
+/// sanction tag, attribute digest, condition digest). Used to sort norms deterministically for
+/// hashing and to dedup distinct norms in [`crystallize`], so the aggregation is a pure function of
+/// the norm content rather than its arrival order. The two trailing 128-bit digests fold the
+/// attribute (whom the norm binds) and the condition (when it fires), so two norms that differ ONLY
+/// in role/member binding or firing condition get distinct keys: the earlier key omitted both, so
+/// such distinct norms collided (undercounting the dedup) and sorted by arrival order (a
+/// non-canonical hash).
+pub type NormKey = (u64, u32, i64, u32, u32, u128, u128);
 
 /// The emergent type of a norm, DERIVED from which optional fields are present, never stored.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -641,14 +652,25 @@ impl Norm {
         }
     }
 
-    /// A total canonical ordering key for deterministic norm sorts and tie-breaks.
+    /// A total canonical ordering key for deterministic norm sorts and tie-breaks, a FULL norm
+    /// identity: the scalar components plus 128-bit content digests of the attribute (whom it binds)
+    /// and the condition (when it fires). Two norms that differ only in attribute or condition get
+    /// distinct keys, so [`crystallize`]'s dedup counts them separately and the norm sort in
+    /// [`Institution::hash_into`] orders them stably. The scalar prefix leads, so previously-distinct
+    /// norms keep their old relative order (the digests are consulted only on a scalar-prefix tie).
     fn sort_key(&self) -> NormKey {
+        let mut ah = StateHasher::new();
+        self.attribute.hash_into(&mut ah);
+        let mut ch = StateHasher::new();
+        self.condition.hash_into(&mut ch);
         (
             self.provenance.0,
             self.aim.0,
             self.enforcement.to_bits(),
             self.deontic.map(|d| d.disc() + 1).unwrap_or(0),
             self.or_else.map(|s| s.0 + 1).unwrap_or(0),
+            ah.finish(),
+            ch.finish(),
         )
     }
 
@@ -935,12 +957,31 @@ fn combine_weights(world: &[Fixed], template: &[Fixed]) -> Vec<Fixed> {
 /// weights consistently leaves the distance bit-identical (the label-blind guarantee).
 pub fn signature_distance(a: &FeatureSignature, b: &FeatureSignature, weights: &[Fixed]) -> Fixed {
     let n = a.values.len().min(b.values.len()).min(weights.len());
-    let mut acc = Fixed::ZERO;
+    // Accumulate the weighted sum of squared differences in i128 Q32.32 bit space. The structural
+    // components are extensive counts (members, norms) that can reach the thousands, so a component
+    // difference and its square overflow Fixed::mul's i64 narrowing (a diff >= ~46341 wraps the
+    // square NEGATIVE, dragging the accumulator below zero so sqrt reads zero and two very different
+    // large institutions read distance ~0). Each term w*d^2 is kept exact in i128 bits here, and the
+    // final root is a widened integer sqrt, so a large difference reads a large (non-zero) distance.
+    let mut acc: i128 = 0; // Q32.32 bits of the weighted sum of squares, non-negative
     for ((av, bv), w) in a.values[..n].iter().zip(&b.values[..n]).zip(&weights[..n]) {
-        let d = *av - *bv;
-        acc += w.mul(d.mul(d));
+        let d = (av.to_bits() as i128) - (bv.to_bits() as i128); // Q32.32 diff, exact in i128
+        let d2 = (d * d) >> Fixed::FRAC_BITS; // Q32.32 bits of d^2, non-negative
+        let term = ((w.to_bits() as i128) * d2) >> Fixed::FRAC_BITS; // Q32.32 bits of w*d^2
+        acc = acc.saturating_add(term);
     }
-    acc.sqrt()
+    if acc <= 0 {
+        return Fixed::ZERO;
+    }
+    // sqrt of a Q32.32 value in i128 bits: sqrt(acc / 2^F) * 2^F = isqrt(acc << F). Guard the shift
+    // against u128 overflow (unreachable at realistic counts); a saturating radicand caps the
+    // distance at Fixed::MAX rather than wrapping.
+    let radicand = (acc as u128).checked_shl(Fixed::FRAC_BITS);
+    let bits = match radicand {
+        Some(r) => r.isqrt(),
+        None => return Fixed::MAX,
+    };
+    Fixed::from_bits(bits.min(i64::MAX as u128) as i64)
 }
 
 /// The institution distance between two explicit institutions: [`signature_distance`] over their
@@ -1183,7 +1224,12 @@ impl AggregateInstitution {
                 },
                 aim: ActionId(0),
                 condition: ConditionExpr::always(),
-                or_else: if i < rule_count {
+                // A rule is deontic AND sanction: only give a sanction to a norm that also gets a
+                // deontic, so a sanctioned norm materializes as a well-formed Rule (not an
+                // O-without-D that would recount as a strategy). Under the valid invariant
+                // rule_count <= obligation_count this is identical to `i < rule_count`; the extra
+                // guard keeps the round-trip exact even on a malformed input signature.
+                or_else: if i < rule_count && i < obligation_count {
                     Some(ActionId(0))
                 } else {
                     None
@@ -1295,7 +1341,12 @@ pub fn crystallize(
             for r in &n.attribute.roles {
                 role_ids.insert(*r);
             }
-            norms.insert(n.sort_key(), (n.or_else.is_some(), n.deontic.is_some()));
+            // The dedup keys on the FULL norm identity (sort_key now folds attribute and condition),
+            // so norms that differ only in binding or firing condition count separately. The rule
+            // flag is deontic AND sanction (A.D.I.C.O), not a bare sanction (matching Norm::norm_type
+            // and feature_signature), so an ill-formed O-without-D is not miscounted as a rule.
+            let is_rule = n.deontic.is_some() && n.or_else.is_some();
+            norms.insert(n.sort_key(), (is_rule, n.deontic.is_some()));
         }
     }
 
@@ -1391,6 +1442,84 @@ mod tests {
             Fixed::ZERO,
         )
         .materialize(InstId(id), EventId(0))
+    }
+
+    #[test]
+    fn large_different_institutions_have_a_large_nonzero_signature_distance() {
+        // Regression (audit defect 7): two institutions with large, very different extensive counts
+        // (members, norms) read a LARGE (non-zero) distance. The old i64 squaring wrapped the squared
+        // component difference NEGATIVE for a diff >= ~46341, dragging the accumulator below zero so
+        // sqrt read zero and two very different large institutions collapsed to distance ~0.
+        let a = FeatureSignature::build(&[Fixed::ZERO], 1, 50_000, 40_000, 0, 0);
+        let b = FeatureSignature::build(&[Fixed::ZERO], 1, 100, 80, 0, 0);
+        let w = unit_weights(a.values.len());
+        let d = signature_distance(&a, &b, &w);
+        assert!(
+            d > Fixed::from_int(10_000),
+            "very different large institutions are far apart, not distance ~0 (got {d:?})"
+        );
+        // Identical signatures are exactly distance zero (the fix does not perturb the zero case).
+        assert_eq!(signature_distance(&a, &a, &w), Fixed::ZERO);
+    }
+
+    #[test]
+    fn crystallize_does_not_dedup_norms_differing_only_in_attribute_or_condition() {
+        // Regression (audit defect 8): two norms that differ ONLY in whom they bind (attribute) or
+        // ONLY in their firing condition are distinct norms, not one. The old dedup keyed on a
+        // sort_key that omitted attribute and condition, so such norms collided and were undercounted.
+        let params = CrystallizationParams {
+            threshold: fx(1, 4),
+            rate: fx(1, 2),
+        };
+        let base = || Norm {
+            attribute: AttributeSel::everyone(),
+            deontic: Some(Deontic::Must),
+            aim: ActionId(0),
+            condition: ConditionExpr::always(),
+            or_else: None,
+            enforcement: Fixed::ZERO,
+            provenance: EventId(0),
+        };
+        // Two norms differing only in attribute (everyone vs a role binding).
+        let n_all = base();
+        let n_role = Norm {
+            attribute: AttributeSel::role(RoleId(0)),
+            ..base()
+        };
+        let obs = CoordinationObservation {
+            coordinates: FunctionVec::from_intensities(vec![fx(1, 2)]),
+            members: vec![StableId(1)],
+            norms: vec![n_all.clone(), n_role],
+            legitimacy: fx(1, 10),
+            conditions: Conditions::new(),
+        };
+        let agg = crystallize(&[obs.clone(), obs], 1, &params).expect("crystallizes");
+        // structural_counts: [roles, members, norms, rules, obligations]; norms is index 2.
+        assert_eq!(
+            agg.feature_signature.structural_counts()[2],
+            2,
+            "two attribute-distinct norms count as two, not deduped into one"
+        );
+
+        // Two norms differing only in condition (unconditional vs a single-atom condition).
+        let n_cond = Norm {
+            condition: ConditionExpr::atom(InputId(0), Predicate::AtLeast, fx(1, 2)),
+            ..base()
+        };
+        let obs2 = CoordinationObservation {
+            coordinates: FunctionVec::from_intensities(vec![fx(1, 2)]),
+            members: vec![StableId(1)],
+            norms: vec![n_all, n_cond],
+            legitimacy: fx(1, 10),
+            // The conditioned norm must fire too, so supply the fact its atom reads.
+            conditions: Conditions::with([(InputId(0), Fixed::ONE)]),
+        };
+        let agg2 = crystallize(&[obs2.clone(), obs2], 1, &params).expect("crystallizes");
+        assert_eq!(
+            agg2.feature_signature.structural_counts()[2],
+            2,
+            "two condition-distinct norms count as two, not deduped into one"
+        );
     }
 
     // (1) THE NON-STEERING TEST.

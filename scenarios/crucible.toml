@@ -39,7 +39,7 @@ affinity_weight = "moderate"
 # including mutation) and from Venus (environmental lethality rather than contest).
 "genome.mutation_rates" = "real"
 "genome.point_mutation_rate" = "real"
-"genome.mutation_step" = "real"
+"genome.additive_mutation_step" = "real"
 "genome.selection_scaling" = "high"           # a lethal, contested world selects hard
 "genome.effective_population_size" = "low"    # small basin-bound pools drift and diverge
 "genome.speciation_distance" = "low"          # fast radiation into many distinct peoples

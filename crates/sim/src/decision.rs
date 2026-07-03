@@ -66,6 +66,13 @@ impl Curve {
         Curve { points }
     }
 
+    /// The curve's sorted `(x, y)` points, for a canonical fold into a state hash (design Part 20:
+    /// the mortality-hazard curve is canonical timeline state). The slice is in ascending-x order,
+    /// so two curves built from the same points in any order expose the same slice.
+    pub fn points(&self) -> &[(Fixed, Fixed)] {
+        &self.points
+    }
+
     /// Evaluate the curve at `x`, clamped to the end points. A flat curve with no points
     /// reads as zero.
     pub fn eval(&self, x: Fixed) -> Fixed {

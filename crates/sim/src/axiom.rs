@@ -192,7 +192,10 @@ pub struct EvidenceRing {
 }
 
 impl EvidenceRing {
-    /// A ring of the given capacity (the reserved `axiom.evidence_ring_capacity`).
+    /// A ring of the given capacity. The capacity is DERIVED per being from its memory through the
+    /// reserved `axiom.evidence_ring_curve` (the memory-to-slots response curve), bounded by the
+    /// reserved `axiom.evidence_ring_hard_cap`; the earlier flat `axiom.evidence_ring_capacity` is
+    /// retired (see [`RingCapacityLaw`]).
     pub fn new(cap: usize) -> Self {
         EvidenceRing {
             cap,

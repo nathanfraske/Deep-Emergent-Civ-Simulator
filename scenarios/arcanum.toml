@@ -25,7 +25,7 @@ affinity_weight = "high"        # weighted high in the genome (Part 25 imbued ch
 # to realism (Part 23, Part 9).
 "genome.mutation_rates" = "high"
 "genome.point_mutation_rate" = "high"
-"genome.mutation_step" = "high"
+"genome.additive_mutation_step" = "high"
 "genome.selection_scaling" = "real"
 "genome.effective_population_size" = "real"
 "genome.speciation_distance" = "real"

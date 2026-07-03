@@ -148,15 +148,16 @@ fn compute_content_id(body: &NodeBody, param: &[Fixed]) -> u128 {
             assembly_join,
         } => {
             h.write_u32(2); // composite tag
-                            // Sort children by target so a permuted assembly hashes identically; the overrides ride
-                            // with their target, so a re-sort cannot detach an override from its child.
-            let mut sorted: Vec<&ComponentRef> = children.iter().collect();
-            sorted.sort_by(|a, b| {
-                a.target
-                    .cmp(&b.target)
-                    .then(a.transform.0.cmp(&b.transform.0))
-            });
-            for c in sorted {
+                            // Sort children by their FULL per-child content digest (target, transform, AND overrides)
+                            // so a permuted assembly canonicalizes to one id even when two children share a target
+                            // and transform but carry different overrides. Keying the sort on (target, transform)
+                            // alone left such children in arrival order, so swapping them changed the id; the digest
+                            // key folds the overrides in, so order is immaterial and two children that differ only in
+                            // overrides still hash to distinct ids.
+            let mut sorted: Vec<(u128, &ComponentRef)> =
+                children.iter().map(|c| (child_key(c), c)).collect();
+            sorted.sort_by(|a, b| a.0.cmp(&b.0));
+            for (_, c) in sorted {
                 write_u128(&mut h, c.target);
                 h.write_u32(c.transform.0);
                 h.write_u64(0); // separator
@@ -180,4 +181,95 @@ fn compute_content_id(body: &NodeBody, param: &[Fixed]) -> u128 {
 #[inline]
 fn write_u128(h: &mut StateHasher, v: u128) {
     h.write_bytes(&v.to_le_bytes());
+}
+
+/// The full per-child content digest a composite orders its children by: the target, the transform,
+/// and every override, in fixed order. Two children that differ in ANY of these get distinct keys,
+/// so the child sort is a total canonical order over distinct children and a permuted assembly folds
+/// identically. Distinct from the child's own `target` (a child's content id): this also folds the
+/// per-assembly transform and overrides, which are not part of the child design's own address.
+fn child_key(c: &ComponentRef) -> u128 {
+    let mut h = StateHasher::new();
+    write_u128(&mut h, c.target);
+    h.write_u32(c.transform.0);
+    for o in &c.overrides {
+        h.write_fixed(*o);
+    }
+    h.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interface::PortVector;
+
+    fn leaf(material: u128) -> CompositionNode {
+        CompositionNode::new(
+            IntentRef(0),
+            NodeBody::Leaf {
+                primitives: vec![FormId(1)],
+                material,
+                joining: JoinId(0),
+            },
+            PortVector::from_slots(vec![]),
+            vec![],
+        )
+    }
+
+    fn child(target: u128, transform: u32, overrides: Vec<Fixed>) -> ComponentRef {
+        ComponentRef {
+            target,
+            transform: TransformId(transform),
+            overrides,
+        }
+    }
+
+    fn composite(children: Vec<ComponentRef>) -> CompositionNode {
+        CompositionNode::new(
+            IntentRef(7),
+            NodeBody::Composite {
+                children,
+                assembly_material: 99,
+                assembly_join: JoinId(0),
+            },
+            PortVector::from_slots(vec![]),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn permuting_same_target_same_transform_children_with_distinct_overrides_is_canonical() {
+        // Regression (audit defect 3): two children sharing a target and transform but carrying
+        // DIFFERENT overrides used to keep their arrival order in the content fold, so swapping them
+        // changed the id. Folding the full per-child content (overrides included) into the ordering
+        // key makes the two assembly orders canonicalize to one id.
+        let a = child(0xAA, 3, vec![Fixed::from_int(1)]);
+        let b = child(0xAA, 3, vec![Fixed::from_int(2)]);
+        let forward = composite(vec![a.clone(), b.clone()]);
+        let reversed = composite(vec![b, a]);
+        assert_eq!(
+            forward.content_id(),
+            reversed.content_id(),
+            "child order does not change the content id"
+        );
+    }
+
+    #[test]
+    fn children_differing_only_in_overrides_produce_distinct_ids() {
+        // The other half: overrides are content. Two assemblies with the same single child target and
+        // transform but different overrides must hash differently.
+        let one = composite(vec![child(0xBB, 1, vec![Fixed::from_int(1)])]);
+        let two = composite(vec![child(0xBB, 1, vec![Fixed::from_int(5)])]);
+        assert_ne!(
+            one.content_id(),
+            two.content_id(),
+            "a different override is a different design"
+        );
+    }
+
+    #[test]
+    fn the_material_content_ids_are_unaffected_by_the_leaf_helper() {
+        // A sanity anchor so the fixtures are meaningful: two leaves of different material differ.
+        assert_ne!(leaf(1).content_id(), leaf(2).content_id());
+    }
 }

@@ -443,6 +443,25 @@ fn absorption_rises_with_frequency_and_saturates() {
 }
 
 #[test]
+fn a_small_reference_absorbs_finitely_above_the_old_frequency_ceiling() {
+    // Regression (audit defect 16): there is no frequency-alone early return. A frequency above the
+    // former sqrt(2^31) ~ 46340 ceiling used to route straight to the cap, over-saturating a medium
+    // whose reference is small enough that reference*f*f is still representable. With a tiny reference
+    // a high frequency now yields a FINITE absorption strictly below the cap, equal to the staged
+    // product, rather than the cap.
+    let alpha_max = Fixed::from_int(10);
+    let beta = f(1, 1_000_000_000); // 1e-9, representable in Q32.32
+    let freq = Fixed::from_int(50_000); // above the old 46340 ceiling
+    let a = laws::acoustic_absorption(beta, freq, alpha_max);
+    assert!(
+        a > Fixed::ZERO && a < alpha_max,
+        "a low-reference medium absorbs finitely above the old ceiling, not saturated: {a:?}"
+    );
+    // It equals the exact staged product beta*f*f (no early return truncated it).
+    assert_eq!(a, beta.mul(freq).mul(freq));
+}
+
+#[test]
 fn resonance_rises_with_speed_and_falls_with_length_and_hits_human_formants() {
     let freq_max = Fixed::from_int(100000);
     let l = f(17, 100); // 0.17 m, a neutral human vocal tract

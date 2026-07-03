@@ -175,11 +175,23 @@ pub fn copy_drift(base_drift_rate: Fixed, memory: Fixed, perception: Fixed) -> F
     base_drift_rate.mul(infidelity)
 }
 
-/// The canonical draw stream for one transmission copy: keyed on the holder, the design's
-/// content address, the tick, and [`Phase::TRANSMIT`] (R-RNG-COORD). Callers build the stream
-/// here so every copy keys the same way and a copy-of-a-copy replays bit for bit.
-pub fn transmit_draw(holder: StableId, design: DesignId, tick: u64, seed: u64) -> Rng {
-    DrawKey::pair(holder.0, design, tick, Phase::TRANSMIT).rng(seed)
+/// The canonical draw stream for one transmission copy: keyed on the LEARNER (the region
+/// coordinate), the holder and the design's content address (the two loci), the tick, and
+/// [`Phase::TRANSMIT`] (R-RNG-COORD). Folding the learner in is what makes N learners copying the
+/// same design from the same holder on the same tick draw N DISTINCT perturbations; keying on
+/// (holder, design, tick) alone gave every learner the identical stream. A copy-of-a-copy still
+/// replays bit for bit, since the learner, holder, design, and tick are all a deterministic function
+/// of canonical state.
+pub fn transmit_draw(
+    learner: StableId,
+    holder: StableId,
+    design: DesignId,
+    tick: u64,
+    seed: u64,
+) -> Rng {
+    DrawKey::pair(holder.0, design, tick, Phase::TRANSMIT)
+        .in_region(learner.0)
+        .rng(seed)
 }
 
 /// A learner copies a design from a holder (the transmission law). The learner takes the holder's
@@ -192,7 +204,9 @@ pub fn transmit_draw(holder: StableId, design: DesignId, tick: u64, seed: u64) -
 /// The design's content address is not mutated here: origination (which content owns which
 /// address) is the Part 41 evaluator's, so a copy of design `d` is still design `d`. What drifts
 /// is the learner's proficiency at `d`. The perturbation is symmetric about zero (its expectation
-/// over a uniform `draw` is exactly zero), so it authors no direction.
+/// over a uniform `draw` is `-2^-32`, one fixed-point ULP below zero, since the unit grid is the
+/// half-open `[0, ONE)`; the residual bias is one ULP times `drift_rate`, negligible against the
+/// drift scale), so it authors no direction.
 ///
 /// The copy takes only if it lands above the structural cull floor: a high-fidelity copy lands at
 /// high proficiency and the design ratchets in; a low-fidelity copy, whose scaled proficiency is
@@ -211,8 +225,9 @@ pub fn transmit(
     let fidelity = copier_fidelity.clamp(Fixed::ZERO, Fixed::ONE);
     // The fidelity-scaled copy of the holder's proficiency (like told_weight * trust).
     let copied = holder_proficiency.mul(fidelity);
-    // A bounded, mean-zero copy perturbation. `2 * unit - 1` lies in [-1, 1) with expectation
-    // zero over a uniform unit draw, so scaling by drift_rate authors magnitude, never direction.
+    // A bounded, near-mean-zero copy perturbation. `2 * unit - 1` lies in [-1, 1) with expectation
+    // -2^-32 (one ULP below zero, since the unit grid is the half-open [0, ONE)); scaling by
+    // drift_rate authors magnitude, and the one-ULP residual is negligible against that scale.
     let signed = Fixed::from_int(2).mul(draw.unit_fixed(0)) - Fixed::ONE;
     let perturb = signed.mul(drift_rate);
     let prof = (copied + perturb).clamp(Fixed::ZERO, Fixed::ONE);
@@ -420,7 +435,7 @@ mod tests {
                 if !pop.get(&holder).unwrap().holds(d) {
                     continue;
                 }
-                let draw = transmit_draw(holder, d, 0, seed);
+                let draw = transmit_draw(learner, holder, d, 0, seed);
                 let mut k = pop.remove(&learner).unwrap();
                 transmit(&mut k, d, hp, fidelity, drift, draw);
                 pop.insert(learner, k);
@@ -468,7 +483,7 @@ mod tests {
                     pop.get(&holder).unwrap().known.iter().copied().collect();
                 for d in designs {
                     let hp = pop.get(&holder).unwrap().proficiency_of(d);
-                    let draw = transmit_draw(holder, d, tick, seed);
+                    let draw = transmit_draw(learner, holder, d, tick, seed);
                     let mut k = pop.remove(&learner).unwrap();
                     transmit(&mut k, d, hp, f(85, 100), p.drift_rate, draw);
                     pop.insert(learner, k);
@@ -477,6 +492,27 @@ mod tests {
             erode_and_cull(&mut pop, &p, tick, seed);
         }
         pop
+    }
+
+    #[test]
+    fn distinct_learners_from_one_holder_draw_distinct_perturbations() {
+        // Regression (audit defect 12): two learners copying the SAME design from the SAME holder on
+        // the SAME tick must draw distinct perturbation streams, now that the learner is folded into
+        // the draw key. The same learner reproduces its own stream (determinism preserved).
+        let holder = StableId(1);
+        let design: DesignId = 42;
+        let (l1, l2) = (StableId(10), StableId(11));
+        let d1 = transmit_draw(l1, holder, design, 5, 0xC0FFEE).unit_fixed(0);
+        let d2 = transmit_draw(l2, holder, design, 5, 0xC0FFEE).unit_fixed(0);
+        assert_ne!(
+            d1, d2,
+            "two learners at one holder draw different perturbations"
+        );
+        let d1_again = transmit_draw(l1, holder, design, 5, 0xC0FFEE).unit_fixed(0);
+        assert_eq!(
+            d1, d1_again,
+            "the same learner reproduces its own perturbation"
+        );
     }
 
     #[test]
@@ -507,7 +543,7 @@ mod tests {
             let mut prof = f(1, 2);
             let mut k = Knowledge::new();
             for h in 0..hops {
-                let draw = transmit_draw(StableId(h), d, 0, seed);
+                let draw = transmit_draw(StableId(h + 1), StableId(h), d, 0, seed);
                 prof = transmit(&mut k, d, prof, Fixed::ONE, drift, draw);
             }
             finals.push(prof);
@@ -597,7 +633,7 @@ mod tests {
         let b_holder = StableId(10);
         let hp = culture_b.get(&b_holder).unwrap().proficiency_of(design);
         let learner = StableId(0);
-        let draw = transmit_draw(b_holder, design, 100, 0x10ADED);
+        let draw = transmit_draw(learner, b_holder, design, 100, 0x10ADED);
         let mut k = culture_a.remove(&learner).unwrap();
         transmit(&mut k, design, hp, f(9, 10), p.drift_rate, draw);
         culture_a.insert(learner, k);

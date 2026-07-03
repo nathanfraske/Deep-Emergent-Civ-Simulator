@@ -122,6 +122,14 @@ pub struct TraceKindDef {
     /// RESERVED. Basis: the likelihood the causal event produces the trace, the numerator of Good's
     /// weight of evidence, per trace kind rather than a shared human table.
     pub reliability: Fixed,
+    /// `P(trace arises | its implied cause is FALSE)`: the false-attribution likelihood, how often
+    /// this trace appears when the implied cause did not occur (a corpse from a decoy, a bloodstain
+    /// from a non-fatal injury). RESERVED. Basis: the base incidence of the trace absent its cause,
+    /// the DENOMINATOR of Good's weight of evidence. Distinct from the race's background mortality,
+    /// which is the belief's PRIOR (applied via [`crate::evidence::InferenceFrame::seed_prior`]),
+    /// never part of the weight. A near-zero value makes the trace strongly diagnostic; a value near
+    /// the reliability makes it nearly useless as evidence.
+    pub false_attribution: Fixed,
     /// What perceiving the trace is evidence about (a trace kind can imply several things).
     pub implies: Vec<TraceImplicationSpec>,
     /// The physical law the trace's perceptibility decays under.
@@ -150,6 +158,9 @@ impl TraceKindRegistry {
             TraceKindDef {
                 id: DEV_CORPSE,
                 reliability: Fixed::from_ratio(9, 10),
+                // A corpse almost never arises when the subject is alive: a small false-attribution
+                // likelihood, so it is strongly diagnostic of death.
+                false_attribution: Fixed::from_ratio(1, 100),
                 implies: vec![TraceImplicationSpec {
                     attr: AttrKindId(0),
                     toward: 1,
@@ -162,6 +173,10 @@ impl TraceKindRegistry {
             TraceKindDef {
                 id: DEV_BLOODSTAIN,
                 reliability: Fixed::from_ratio(1, 2),
+                // Blood is a weaker death-signal: a living subject sheds it from a non-fatal injury
+                // fairly often, so the false-attribution likelihood is higher and the trace less
+                // diagnostic.
+                false_attribution: Fixed::from_ratio(1, 5),
                 implies: vec![TraceImplicationSpec {
                     attr: AttrKindId(0),
                     toward: 1,
@@ -174,6 +189,7 @@ impl TraceKindRegistry {
             TraceKindDef {
                 id: DEV_CORRODED_BLADE,
                 reliability: Fixed::from_ratio(3, 4),
+                false_attribution: Fixed::from_ratio(1, 10),
                 implies: vec![TraceImplicationSpec {
                     attr: AttrKindId(1),
                     toward: 1,
@@ -196,27 +212,20 @@ pub const DEV_BLOODSTAIN: TraceKindId = TraceKindId(1);
 /// The corroded-blade dev-fixture trace kind.
 pub const DEV_CORRODED_BLADE: TraceKindId = TraceKindId(2);
 
-/// The weight of evidence a mortality-implying trace of `kind` carries for a member of the race
-/// whose base rates are `race`, at observation age `context_age`.
+/// The weight of evidence a mortality-implying trace of `kind` carries: Good's log-likelihood ratio
+/// of two LIKELIHOODS, `ln[P(trace | cause true) / P(trace | cause false)]`
+/// ([`crate::evidence::good_weight`]), with the trace kind's `reliability` as `P(trace | dead)` and
+/// its `false_attribution` as `P(trace | alive)`. Both are per-trace-kind data (Principle 11), so a
+/// strongly diagnostic trace (low false attribution) carries a large weight and a weak one a small
+/// weight, and swapping two kinds' likelihoods swaps their weights.
 ///
-/// This is Good's weight of evidence ([`crate::evidence::good_weight`]) with the trace kind's
-/// reliability as `P(trace | dead)` and the race's own natural mortality at that age as the base
-/// rate `P(cause true anyway)`. A race that dies of natural causes constantly (a high background
-/// hazard) finds a corpse less surprising, so its death-trace carries strictly less weight; a
-/// long-lived race's corpse is strongly diagnostic. The weight derives from the race's own life
-/// table, never an authored per-race table, so it is steering-neutral (Principle 9). The `clamp`
-/// is the evidence engine's certainty clamp, reused rather than re-invented.
-pub fn mortality_implication_weight(
-    kind: &TraceKindDef,
-    race: &RaceBaseRates,
-    context_age: Fixed,
-    clamp: Fixed,
-) -> Fixed {
-    let base_rate = race
-        .natural_mortality
-        .eval(context_age)
-        .clamp(Fixed::ZERO, Fixed::ONE);
-    good_weight(kind.reliability, base_rate, clamp)
+/// The base rate (a race's background mortality, `P(dead)`) is the belief's PRIOR, not the weight:
+/// it enters through [`crate::evidence::InferenceFrame::seed_prior`] at wire-up, never here. Feeding
+/// the prior into the likelihood-ratio slot (the earlier form) double-counted it as evidence and
+/// conflated a prior with a likelihood. The `clamp` is the evidence engine's certainty clamp, reused
+/// rather than re-invented.
+pub fn mortality_implication_weight(kind: &TraceKindDef, clamp: Fixed) -> Fixed {
+    good_weight(kind.reliability, kind.false_attribution, clamp)
 }
 
 /// The perceptibility (salience) remaining on an organic trace of `kind` after `elapsed` time at
@@ -342,37 +351,76 @@ mod tests {
             .clone()
     }
 
-    // === Non-steering swap (1): background mortality is the sole author of the implication weight ===
+    // === The implication weight is Good's log-likelihood ratio of two LIKELIHOODS, not a prior ===
 
     #[test]
-    fn higher_background_mortality_gives_a_lower_implication_weight() {
+    fn the_weight_is_the_log_likelihood_ratio_of_two_likelihoods_not_a_prior() {
+        // Regression (audit defect 6): the weight equals good_weight over the trace kind's two
+        // LIKELIHOODS (reliability = P(trace|dead), false_attribution = P(trace|alive)), never the
+        // race's background mortality (a PRIOR). It is exactly Good's log-likelihood ratio.
         let kind = corpse();
-        let age = Fixed::from_int(30);
-
-        // Two races identical except their natural mortality: the higher-background-mortality race
-        // gets the strictly LOWER weight, because a death is less surprising for it.
-        let high = base_rates(0, flat_mortality(4, 10), Fixed::ONE);
-        let low = base_rates(1, flat_mortality(1, 10), Fixed::ONE);
-        let w_high = mortality_implication_weight(&kind, &high, age, CLAMP);
-        let w_low = mortality_implication_weight(&kind, &low, age, CLAMP);
-        assert!(
-            w_high < w_low,
-            "the higher-mortality race's death-trace is worth less ({w_high:?} < {w_low:?})"
-        );
-
-        // Swap which race carries the higher rate and the assignment swaps. The label carries no
-        // bias; only the base rate does.
-        let high2 = base_rates(0, flat_mortality(1, 10), Fixed::ONE);
-        let low2 = base_rates(1, flat_mortality(4, 10), Fixed::ONE);
-        let w_high2 = mortality_implication_weight(&kind, &high2, age, CLAMP);
-        let w_low2 = mortality_implication_weight(&kind, &low2, age, CLAMP);
-        assert!(
-            w_high2 > w_low2,
-            "swapping the rates swaps the assignment ({w_high2:?} > {w_low2:?})"
-        );
+        let w = mortality_implication_weight(&kind, CLAMP);
         assert_eq!(
-            w_high, w_low2,
-            "the weight tracks the rate, not the race label"
+            w,
+            good_weight(kind.reliability, kind.false_attribution, CLAMP),
+            "the weight is the LLR of the kind's two likelihoods"
+        );
+        // It does not read the race's base rate at all: the signature no longer takes one, and the
+        // weight is a pure function of the kind's likelihoods (the prior is applied separately as the
+        // belief's seed_prior, never folded into the weight).
+        assert!(
+            w > Fixed::ZERO,
+            "a reliable, rarely-spurious trace is positive evidence"
+        );
+    }
+
+    // === Non-steering swap: the trace kind's two likelihoods are the sole author of the weight ===
+
+    #[test]
+    fn a_more_diagnostic_trace_kind_carries_more_weight() {
+        // A strongly diagnostic kind (high reliability, low false attribution) carries strictly more
+        // weight of evidence than a weak one (lower reliability, higher false attribution). Swapping
+        // the two kinds' likelihoods swaps the assignment, so the weight tracks the per-kind data,
+        // never a label.
+        let strong = TraceKindDef {
+            id: DEV_CORPSE,
+            reliability: Fixed::from_ratio(9, 10),
+            false_attribution: Fixed::from_ratio(1, 100),
+            implies: vec![],
+            decay: DecayLaw::Static,
+        };
+        let weak = TraceKindDef {
+            id: DEV_BLOODSTAIN,
+            reliability: Fixed::from_ratio(1, 2),
+            false_attribution: Fixed::from_ratio(1, 5),
+            implies: vec![],
+            decay: DecayLaw::Static,
+        };
+        let w_strong = mortality_implication_weight(&strong, CLAMP);
+        let w_weak = mortality_implication_weight(&weak, CLAMP);
+        assert!(
+            w_strong > w_weak,
+            "the more diagnostic kind is worth more ({w_strong:?} > {w_weak:?})"
+        );
+        // Swap the likelihoods between the two ids: the assignment swaps, so the id carries no bias.
+        let strong2 = TraceKindDef {
+            id: DEV_CORPSE,
+            reliability: Fixed::from_ratio(1, 2),
+            false_attribution: Fixed::from_ratio(1, 5),
+            implies: vec![],
+            decay: DecayLaw::Static,
+        };
+        let weak2 = TraceKindDef {
+            id: DEV_BLOODSTAIN,
+            reliability: Fixed::from_ratio(9, 10),
+            false_attribution: Fixed::from_ratio(1, 100),
+            implies: vec![],
+            decay: DecayLaw::Static,
+        };
+        assert!(
+            mortality_implication_weight(&strong2, CLAMP)
+                < mortality_implication_weight(&weak2, CLAMP),
+            "swapping the likelihoods swaps which id carries more weight"
         );
     }
 
@@ -382,6 +430,7 @@ mod tests {
         TraceKindDef {
             id: DEV_CORRODED_BLADE,
             reliability: Fixed::from_ratio(3, 4),
+            false_attribution: Fixed::from_ratio(1, 10),
             implies: vec![],
             decay: DecayLaw::Corroding {
                 material_potential: Fixed::from_ratio(-44, 100),
@@ -438,6 +487,7 @@ mod tests {
         let kind = TraceKindDef {
             id: DEV_CORPSE,
             reliability: Fixed::from_ratio(9, 10),
+            false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
             decay: DecayLaw::Organic {
                 barrier: Fixed::from_int(10),
@@ -483,6 +533,7 @@ mod tests {
         let kind = TraceKindDef {
             id: TraceKindId(9),
             reliability: Fixed::ONE,
+            false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
             decay: DecayLaw::Static,
         };

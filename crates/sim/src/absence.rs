@@ -100,9 +100,19 @@ impl AbsenceScheduleDef {
 pub const LIFESPAN_HAZARD_THRESHOLD: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1));
 
 /// The step, in age units, at which [`characteristic_lifespan`]'s scan advances when called from
-/// [`absence_window`], and the ceiling it scans to. These are a DETERMINISM-AND-PERFORMANCE scan
-/// resolution and bound (a finite, reproducible scan), not biology values; a finer step is more
-/// accurate at more cost.
+/// [`absence_window`], and the ceiling it scans to. `ABSENCE_PROBE_STEP` is a pure
+/// determinism-and-performance scan resolution (a finer step is more accurate at more cost, never a
+/// biology value). `ABSENCE_PROBE_MAX` carries a DUAL role: it is the scan ceiling, but because the
+/// characteristic lifespan it returns caps the presumed-dead absence window (`absence_window`), it
+/// also becomes the presumed-dead ceiling for a race whose hazard never crosses
+/// [`LIFESPAN_HAZARD_THRESHOLD`] within the scan. That content-path role is why it is surfaced as the
+/// reserved owner value `absence.characteristic_lifespan_scan_ceiling` (calibration/reserved.toml)
+/// with its scan-bound basis: the labelled 4096 here is the engine default (set well past any
+/// expected characteristic lifespan so it never truncates a real one), and the owner may raise it for
+/// a long-lived world so the ceiling is never a fabricated presumption. Deriving the ceiling from race
+/// hazard alone is impossible for a race whose hazard never crosses the threshold (no natural
+/// characteristic lifespan exists), so a finite scan bound is unavoidable and is reserved rather than
+/// hidden.
 const ABSENCE_PROBE_STEP: u32 = 1;
 const ABSENCE_PROBE_MAX: u32 = 4096;
 

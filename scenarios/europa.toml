@@ -30,7 +30,7 @@ affinity_fraction = "none"
 # but does not run under the Calibrated profile until the owner sets them.
 "genome.mutation_rates" = "low"               # a buffered, stable world drifts slowly
 "genome.point_mutation_rate" = "low"
-"genome.mutation_step" = "low"
+"genome.additive_mutation_step" = "low"
 "genome.selection_scaling" = "real"
 "genome.effective_population_size" = "real"
 "genome.speciation_distance" = "real"

@@ -269,7 +269,9 @@ fn two_races_diverge_by_data_not_by_branch() {
     // One shared curve, one shared call, one shared RNG. The short being's life fraction is
     // 50/80 = 0.625 (above the step, so it dies); the long being's is 50/700 (below the step, so
     // it survives). The divergence is forced by each race's lifespan datum, not a code branch.
-    let dead = w.apply_mortality_by_race(&races, &step_hazard());
+    let dead = w
+        .apply_mortality_by_race(&races, &step_hazard())
+        .expect("both beings are raced");
     assert!(
         dead.contains(&short_being),
         "the short-lived being crossed the step and died"
@@ -281,30 +283,59 @@ fn two_races_diverge_by_data_not_by_branch() {
 }
 
 #[test]
-fn mortality_by_race_falls_back_to_raw_age_for_an_untracked_being() {
-    // With no race identity recorded and an empty races map, the race-keyed pass must behave
-    // exactly like the raw-age apply_mortality: same beings, same ages, same seed, same curve,
-    // so the two cull the identical set.
-    let hazard = Curve::new([
-        (Fixed::ZERO, Fixed::ZERO),
-        (Fixed::from_int(100), Fixed::ONE),
-    ]);
-    let build = || {
-        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0xFA11);
-        let ids: Vec<StableId> = (0..8).map(|_| w.spawn(Fixed::ONE)).collect();
-        for (k, &id) in ids.iter().enumerate() {
-            w.set_age(id, 40 + k as u32); // a spread of ages around the half-hazard region
-        }
-        w
-    };
-    let mut raw = build();
-    let mut by_race = build();
+fn mortality_by_race_refuses_an_untracked_being_rather_than_reading_the_wrong_domain() {
+    // Regression (audit defect 5): the race-keyed pass evaluates a LIFE-FRACTION hazard curve. An
+    // untracked being has no lifespan to normalize its age by, so it cannot be placed on that domain.
+    // Rather than read the curve at the being's RAW age (a domain mismatch that made the unraced
+    // class near-immortal or culled wholesale), the pass fails loud with UnraceableBeing.
+    let hazard = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0xFA11);
+    let ids: Vec<StableId> = (0..8).map(|_| w.spawn(Fixed::ONE)).collect();
+    for (k, &id) in ids.iter().enumerate() {
+        w.set_age(id, 40 + k as u32);
+    }
     let empty: BTreeMap<RaceId, Race> = BTreeMap::new();
-    let raw_dead = raw.apply_mortality(&hazard);
-    let by_race_dead = by_race.apply_mortality_by_race(&empty, &hazard);
-    assert_eq!(
-        raw_dead, by_race_dead,
-        "an untracked being falls back to the raw-age hazard, identical to apply_mortality"
+    let before = w.population();
+    let result = w.apply_mortality_by_race(&empty, &hazard);
+    assert!(
+        result.is_err(),
+        "an untracked being is refused, never read in the raw-age domain"
     );
-    assert!(!raw_dead.is_empty(), "the hazard culled some beings");
+    assert_eq!(
+        w.population(),
+        before,
+        "the refused pass removes no one (no partial cull)"
+    );
+}
+
+#[test]
+fn a_mixed_raced_and_unraced_population_does_not_make_one_class_immortal() {
+    // Regression (audit defect 5): a population mixing raced and unraced beings does not silently
+    // make one class immortal (the old fallback made the unraced class near-immortal against a
+    // fraction curve). The pass refuses the whole cull and removes NEITHER class, so no class is
+    // silently spared while the other is culled.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), race_with(RaceId(0), 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 1,
+    }];
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0x5EED);
+    let seeded = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+    let raced = seeded[0];
+    w.set_age(raced, 60); // life fraction 60/80, above the step: would die if the pass ran
+                          // An unraced being (spawned directly, no race identity), aged into the lethal zone.
+    let unraced = w.spawn(Fixed::ONE);
+    w.set_age(unraced, 60);
+    let before = w.population();
+    let err = w
+        .apply_mortality_by_race(&races, &step_hazard())
+        .expect_err("a mixed population is refused");
+    assert_eq!(err.0, unraced, "the refusal names the unraceable being");
+    assert_eq!(
+        w.population(),
+        before,
+        "neither class is culled: no class is silently made immortal by a domain mismatch"
+    );
 }

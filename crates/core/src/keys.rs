@@ -121,11 +121,12 @@ impl Phase {
     /// expression and never folded back into a pool's allele frequencies.
     pub const DEVELOPMENT: Phase = Phase(0x16);
     /// A knowledge-transmission copy draw (the transmission substrate): the bounded, mean-zero
-    /// proficiency drift a learner incurs when copying a design from a holder, keyed on the holder,
-    /// the design's content address, and the tick, so a copy-of-a-copy replays bit for bit and two
-    /// copies at distinct sites draw distinct perturbations. The perturbation magnitude is a
-    /// function of the copier's per-race perception and memory (Principle 9), never an authored
-    /// per-race fidelity table.
+    /// proficiency drift a learner incurs when copying a design from a holder, keyed on the LEARNER
+    /// (the region coordinate), the holder and the design's content address, and the tick, so a
+    /// copy-of-a-copy replays bit for bit and N learners copying one design from one holder on one
+    /// tick draw N DISTINCT perturbations (keying on holder, design, and tick alone gave every
+    /// learner the identical stream). The perturbation magnitude is a function of the copier's
+    /// per-race perception and memory (Principle 9), never an authored per-race fidelity table.
     pub const TRANSMIT: Phase = Phase(0x17);
     /// A knowledge-loss erosion draw (the transmission substrate): the per-design, per-tick
     /// forgetting roll that erodes the proficiency of a design held by fewer than the

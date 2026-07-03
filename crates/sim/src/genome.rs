@@ -638,6 +638,16 @@ pub struct GenePool {
 // from the default slot 0 the discrete state draw uses, so the two never collide (R-RNG-COORD).
 const SLOT_ADDITIVE: u32 = 1;
 
+/// The environmental variance V_E of the uniform developmental-environment offset (design 25.6): the
+/// offset is drawn on `[-a, +a]` (`crate::world` `env_offset`), where `a` is the race's reserved
+/// half-width `crate::race::Race::environment_variance`. A uniform deviate on `[-a, a]` has variance
+/// `a^2 / 3`, so a caller holding the HALF-WIDTH converts through this before feeding V_E to
+/// [`GenePool::narrow_sense_heritability`] (the half-width and the variance are NOT interchangeable;
+/// passing the raw half-width overstates V_E). Pure fixed-point.
+pub fn uniform_offset_variance(half_width: Fixed) -> Fixed {
+    half_width.mul(half_width).div(Fixed::from_int(3))
+}
+
 impl GenePool {
     /// A pool over the given per-locus state-1 frequencies, with a flat additive spine (every
     /// effect zero) and the unset Gaussian sentinel. A pool built this way promotes with zero
@@ -728,11 +738,14 @@ impl GenePool {
     /// Narrow-sense heritability, the derived read `V_A / (V_A + V_E)` (design 25.6, 25.10): the
     /// fraction of phenotypic variance that is additive-genetic and so transmitted to offspring
     /// (Falconer's offspring-on-midparent regression). `env_var` is the environmental variance V_E
-    /// the developmental-environment offset supplies (`crate::race::Race::environment_variance`).
-    /// This graduates the former authored `genome.narrow_sense_heritability` constant into a
-    /// population statistic read from the pool's own effects and frequencies (Principle 11). A pool
-    /// with no additive and no environmental variance returns zero (there is no heritable spread to
-    /// speak of), rather than dividing by zero.
+    /// (a VARIANCE, not a half-width). The developmental-environment offset is a uniform deviate on
+    /// `[-a, +a]` whose half-width `a` is `crate::race::Race::environment_variance`; its variance is
+    /// `a^2 / 3`, NOT `a`, so a caller holding the half-width must convert through
+    /// [`uniform_offset_variance`] before passing it here (the two are not interchangeable). This
+    /// graduates the former authored `genome.narrow_sense_heritability` constant into a population
+    /// statistic read from the pool's own effects and frequencies (Principle 11). A pool with no
+    /// additive and no environmental variance returns zero (there is no heritable spread to speak
+    /// of), rather than dividing by zero.
     pub fn narrow_sense_heritability(&self, env_var: Fixed) -> Fixed {
         let va = self.additive_variance();
         let denom = va + env_var;

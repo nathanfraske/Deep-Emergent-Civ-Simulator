@@ -38,7 +38,7 @@ use crate::form::{FormRegistry, JoinRegistry};
 use crate::interface::{gather_slot, InterfaceRegistry, PortSlot, PortVector};
 use crate::interval::{sat_add, sat_mul, sat_sub, Interval};
 use crate::node::{CompositionNode, NodeBody};
-use crate::proxy::{ProxyRegistry, ProxyWeights};
+use crate::proxy::{ProxyRefs, ProxyRegistry, ProxyWeights};
 use civsim_core::Fixed;
 use civsim_physics::{laws, AxisRange, Dimension, PhysicsRegistry, QuantityAxis, Substance};
 use std::collections::BTreeMap;
@@ -109,6 +109,9 @@ pub struct EvalParams {
     pub penalty_curve: PenaltyCurve,
     /// The per-proxy criticality weights.
     pub proxy_weights: ProxyWeights,
+    /// The reserved-with-basis proxy reference levels (the control-loop efficiency floor and the
+    /// resonance natural-frequency floor) the whole-system proxy margins subtract.
+    pub proxy_refs: ProxyRefs,
 }
 
 /// What can go wrong wiring the evaluation substrate.
@@ -117,6 +120,14 @@ pub enum ComposeError {
     /// A proxy in the registry has no criticality weight (the fail-loud sentinel: a proxy must never
     /// contribute nothing silently).
     UnweightedProxy(u32),
+    /// An interface axis names a combinator key the combinator registry does not hold, so its fold
+    /// semantics would silently default. Fail loud rather than fold on an unintended kernel.
+    UnknownCombinator {
+        /// The interface axis id whose combinator key is dangling.
+        axis: u32,
+        /// The unresolved combinator key.
+        combinator: u32,
+    },
 }
 
 impl std::fmt::Display for ComposeError {
@@ -125,6 +136,10 @@ impl std::fmt::Display for ComposeError {
             ComposeError::UnweightedProxy(id) => write!(
                 f,
                 "proxy {id} has no criticality weight; compose.emergent_proxy_weights must set one before evaluation (never fabricate a value)"
+            ),
+            ComposeError::UnknownCombinator { axis, combinator } => write!(
+                f,
+                "interface axis {axis} names combinator key {combinator}, which the combinator registry does not hold; the fold semantics must be defined, never silently defaulted"
             ),
         }
     }
@@ -172,6 +187,17 @@ impl Memo {
     ) -> Result<Self, ComposeError> {
         if let Some(id) = params.proxy_weights.first_unweighted(&proxies) {
             return Err(ComposeError::UnweightedProxy(id.0));
+        }
+        // Every interface axis's combinator key must resolve to a kernel in the registry, so the
+        // composite fold never silently defaults a missing key to LimitingMin (a different fold
+        // semantics). Validate once here rather than papering over a miss at fold time.
+        for axis in interface.axes() {
+            if combinators.kernel(axis.combinator).is_none() {
+                return Err(ComposeError::UnknownCombinator {
+                    axis: axis.id.0,
+                    combinator: axis.combinator.0,
+                });
+            }
         }
         Ok(Memo {
             store: BTreeMap::new(),
@@ -420,10 +446,12 @@ fn eval_composite(
     let mut slots: Vec<PortSlot> = Vec::with_capacity(memo.interface.width());
     let assembly_eff = memo.joins.efficiency(assembly_join);
     for (i, axis) in memo.interface.axes().enumerate() {
+        // Every axis's combinator key was validated to resolve in Memo::new, so this never falls
+        // back to a default fold; the expect documents that construction-time invariant.
         let kernel = memo
             .combinators
             .kernel(axis.combinator)
-            .unwrap_or(CombinatorKernel::LimitingMin);
+            .expect("combinator key validated in Memo::new");
         let gathered = gather_slot(&child_vectors, i);
         let mut agg = kernel.fold(&gathered);
         // The assembly's own join is one more loss stage on a transmission chain.
@@ -454,7 +482,10 @@ fn eval_composite(
     // The whole-system proxies: a proxy whose ports are absent is inactive; an active proxy with a
     // negative margin charges its criticality-weighted shortfall against viability.
     for def in memo.proxies.defs() {
-        if let Some(margin) = def.kernel.margin(&memo.interface, &vector) {
+        if let Some(margin) = def
+            .kernel
+            .margin(&memo.interface, &vector, &memo.params.proxy_refs)
+        {
             if margin.lo < Fixed::ZERO {
                 let weight = memo.params.proxy_weights.get(def.id).unwrap_or(Fixed::ZERO);
                 let shortfall = sat_sub(Fixed::ZERO, margin.lo);

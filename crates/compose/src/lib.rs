@@ -71,7 +71,7 @@ pub use promote::{
     drift_similarity_radius, is_stabilised, promote, promoted_library, stability_span,
     DesignEvidence, Promotion, PromotionParams,
 };
-pub use proxy::{ProxyDef, ProxyId, ProxyKernel, ProxyRegistry, ProxyWeights};
+pub use proxy::{ProxyDef, ProxyId, ProxyKernel, ProxyRefs, ProxyRegistry, ProxyWeights};
 
 /// A convenience builder for the labelled DEV-SEED evaluation substrate a people evaluates against: the
 /// four-axis base interface, the four combinators, the three proxies, and the form-and-join floor.

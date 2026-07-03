@@ -78,16 +78,12 @@ pub const ENERGY_DENSITY: &str = "bio.energy_density";
 const RATE_MAX: Fixed = Fixed::from_int(1_000_000_000);
 /// A representability cap for the thermoregulatory heat-loss flux (W). Engine-mechanics bound.
 const FLUX_MAX: Fixed = Fixed::from_int(1_000_000_000);
-/// A representability cap for the mechanical work power (kW, the `laws::power` scale). Engine-mechanics.
+/// A representability cap for the mechanical work power (W, the `laws::power_watts` scale, matching the
+/// watt-scale basal rate the exertion coupling is summed with). Engine-mechanics.
 const POWER_MAX: Fixed = Fixed::from_int(1_000_000_000);
 /// The drain-fraction cap: a reserve cannot lose more than its whole capacity in one tick, so the
 /// derived fraction is bounded to one. A physical bound, not an owner value.
 const FRAC_MAX: Fixed = Fixed::ONE;
-
-/// The baseline whole-body specific heat (J/(kg*K)) for a body whose organs declare none: water, a body
-/// being mostly water. Labelled fixture, basis: the specific heat of water and soft tissue (CRC ~4186);
-/// the labelled value here is not owner canon, and it is used only when no tissue carries the axis.
-const BODY_SPECIFIC_HEAT_BASELINE: Fixed = Fixed::from_int(4186);
 
 /// The reserved owner anchors the derived metabolism needs, surfaced with their basis and fail-loud in
 /// the manifest, never fabricated (Principle 11). The kernels are fixed Rust; these are the owner's to
@@ -165,9 +161,14 @@ pub fn whole_body_surface(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
 }
 
 /// A being's whole-body specific heat (J/(kg*K)): the development-weighted average over its organs of
-/// their `therm.specific_heat` composition, or the water baseline if no organ declares one. The same
-/// composition-average shape [`crate::medium::body_density`] uses, so the body's thermal mass follows its
-/// tissue. Order-independent (saturating sums, one checked division).
+/// their `therm.specific_heat` composition, or ZERO if no organ declares one (the absence convention
+/// its siblings [`whole_body_surface`] and [`whole_body_energy_density`] use). The same
+/// composition-average shape [`crate::medium::body_density`] uses, so the body's thermal mass follows
+/// its tissue rather than a hidden terran-water default: a body whose tissue carries no specific heat
+/// has no defined thermal mass, and the body-to-medium coupling then falls to its own
+/// no-thermal-mass branch ([`derive_body_exchange_rate`]) rather than converging on the specific heat
+/// of water (Principle 9: no terran constant on the content path). Order-independent (saturating
+/// sums, one checked division).
 pub fn whole_body_specific_heat(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
     let mut weighted = Fixed::ZERO;
     let mut total_dev = Fixed::ZERO;
@@ -183,11 +184,9 @@ pub fn whole_body_specific_heat(plan: &BodyPlan, organs: &BodyPlanRegistry) -> F
         }
     }
     if total_dev <= Fixed::ZERO {
-        return BODY_SPECIFIC_HEAT_BASELINE;
+        return Fixed::ZERO;
     }
-    weighted
-        .checked_div(total_dev)
-        .unwrap_or(BODY_SPECIFIC_HEAT_BASELINE)
+    weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
 }
 
 /// A being's whole-body energy density: the development-weighted average over its organs of their
@@ -273,14 +272,14 @@ pub fn derive_base_drain(
 }
 
 /// The derived exertion drain coupling: the added fraction of the energy reserve drained per tick per
-/// unit of exertion, from the mechanical work power a full-exertion body sustains (`force * velocity`,
-/// [`civsim_physics::laws::power`]) bridged to a reserve fraction. This replaces the authored
-/// `exertion_drain_coupling`; [`crate::homeostasis::Homeostasis::metabolize_derived`] scales it by the
-/// being's exertion signal, so the extra work-heat rides the same drain path as the basal rate. Honest
-/// units limit: `laws::power` is on the kilowatt scale (the mechanical-floor power convention) while the
-/// basal term is watts, so the base and exertion fractions live on different power scales; each fraction
-/// is internally consistent, and the scale reconciliation is the R-UNITS-PIN bridge (the same honest
-/// limit the base drain's joule bridge carries).
+/// unit of exertion, from the mechanical work power a full-exertion body sustains (`force * velocity`),
+/// bridged to a reserve fraction. This replaces the authored `exertion_drain_coupling`;
+/// [`crate::homeostasis::Homeostasis::metabolize_derived`] scales it by the being's exertion signal
+/// and ADDS it to the base drain, so the two must share one power scale. It reads the work power on
+/// the WATT scale ([`civsim_physics::laws::power_watts`]), the same scale the basal rate and the
+/// `metabolic_drain_fraction` bridge use, so the base and exertion fractions are commensurate rather
+/// than off by the kilowatt factor (the earlier `laws::power` returned kilowatts, making the summed
+/// exertion term a thousand times too small).
 pub fn derive_exertion_coupling(
     plan: &BodyPlan,
     organs: &BodyPlanRegistry,
@@ -290,7 +289,7 @@ pub fn derive_exertion_coupling(
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
-    let work_power = laws::power(force, velocity, POWER_MAX);
+    let work_power = laws::power_watts(force, velocity, POWER_MAX);
     // The same size-scaled reserve-energy bridge as the base drain (see derive_base_drain).
     let reserve_mass = energy_capacity
         .checked_mul(body_mass_kg(plan, anchors))
@@ -445,18 +444,43 @@ mod tests {
     }
 
     #[test]
-    fn whole_body_specific_heat_averages_the_tissue_and_falls_back_to_water() {
+    fn whole_body_specific_heat_averages_the_tissue_and_is_zero_without_it() {
         let (organs, skin, flesh, _fat) = registry();
         assert_eq!(
             whole_body_specific_heat(&body((1, 2), vec![organ(flesh, (1, 1))]), &organs),
             Fixed::from_int(3500),
             "one flesh organ carries its specific heat"
         );
-        // No tissue declares specific heat (skin carries only surface): the water baseline.
+        // No tissue declares specific heat (skin carries only surface): the absence convention reads
+        // ZERO, not a hidden terran-water default (audit defect 2, Principle 9).
         assert_eq!(
             whole_body_specific_heat(&body((1, 2), vec![organ(skin, (1, 1))]), &organs),
-            BODY_SPECIFIC_HEAT_BASELINE,
-            "no specific-heat tissue, the water baseline"
+            Fixed::ZERO,
+            "no specific-heat tissue reads zero (the absence convention), never the water constant"
+        );
+    }
+
+    #[test]
+    fn two_specific_heat_free_bodies_do_not_converge_on_the_earth_water_value() {
+        // Regression (audit defect 2): two distinct bodies that both declare no specific-heat tissue
+        // must not both read the same hidden 4186 water value. Under the absence convention both read
+        // ZERO thermal mass, so the body-to-medium coupling takes its own no-thermal-mass branch
+        // (rate one, instant equilibration) rather than converging on the terran-water constant.
+        let (organs, skin, _flesh, _fat) = registry();
+        let anchors = MetabolicAnchors::dev_fixture();
+        let a = body((1, 2), vec![organ(skin, (1, 1))]);
+        let b = body((1, 4), vec![organ(skin, (1, 2))]);
+        assert_eq!(whole_body_specific_heat(&a, &organs), Fixed::ZERO);
+        assert_eq!(whole_body_specific_heat(&b, &organs), Fixed::ZERO);
+        // The coupling is not authored from a hidden water thermal mass; the no-thermal-mass branch
+        // reads rate one for both.
+        assert_eq!(
+            derive_body_exchange_rate(&a, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            Fixed::ONE
+        );
+        assert_eq!(
+            derive_body_exchange_rate(&b, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            Fixed::ONE
         );
     }
 
@@ -560,31 +584,32 @@ mod tests {
         let anchors = MetabolicAnchors::dev_fixture();
         let plan = body((1, 1), vec![organ(fat, (1, 1))]);
         let cap = Homeostasis::new(&reg, &plan, &organs).capacity(ENERGY);
-        let slow = derive_exertion_coupling(
-            &plan,
-            &organs,
-            cap,
-            Fixed::from_int(100),
-            Fixed::ONE,
-            Fixed::ONE,
-            &anchors,
-        );
+        // A modest force on the WATT scale (force*velocity, no kilowatt bridge, matching the
+        // watt-scale basal drain it is summed with), kept below the full-drain saturation so the
+        // scaling with velocity is visible.
+        let force = Fixed::ONE;
+        let slow =
+            derive_exertion_coupling(&plan, &organs, cap, force, Fixed::ONE, Fixed::ONE, &anchors);
         let fast = derive_exertion_coupling(
             &plan,
             &organs,
             cap,
-            Fixed::from_int(100),
+            force,
             Fixed::from_int(4),
             Fixed::ONE,
             &anchors,
         );
         assert!(
             fast > slow,
-            "faster work at the same force adds a larger exertion drain"
+            "faster work at the same force adds a larger exertion drain ({fast:?} > {slow:?})"
         );
         assert!(
             slow > Fixed::ZERO,
             "work exacts a nonzero exertion coupling"
+        );
+        assert!(
+            fast < FRAC_MAX,
+            "the exertion coupling stays below full drain here"
         );
     }
 

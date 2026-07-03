@@ -541,15 +541,32 @@ fn derived_tilt(
     harmony: &HarmonyModel,
     tilt: &TiltParams,
 ) -> Fixed {
-    let extent = Fixed::saturating_sum(
+    let reduction = integrated_parse_cost(
         harmony
             .biases()
             .iter()
             .filter(|b| b.then_param == param && b.then_value == value)
             .map(|b| linearization_domain(b, drawn)),
+        tilt.memory_capacity,
+        tilt.cost_max,
     );
-    let reduction = laws::parse_cost(extent, tilt.memory_capacity, tilt.cost_max);
     laws::harmony_tilt(reduction, tilt.temperature, tilt.tilt_max)
+}
+
+/// The one integration semantics both the sampling tilt ([`derived_tilt`]) and the whole-grammar
+/// cost ([`grammar_parse_cost`]) route through: the structural weights of the relevant biases are
+/// summed FIRST (working memory holds them at once, a shared resource), then the softening
+/// [`laws::parse_cost`] law is applied ONCE to that aggregate load. The alternative (apply the
+/// nonlinear law per bias then sum) double-softens and makes the two consumers disagree when two
+/// biases fire on one value, which is the defect this reconciles. Order-independent (the sum is a
+/// saturating fold), so it is invariant to bias order.
+fn integrated_parse_cost(
+    weights: impl IntoIterator<Item = Fixed>,
+    memory_capacity: Fixed,
+    cost_max: Fixed,
+) -> Fixed {
+    let total = Fixed::saturating_sum(weights);
+    laws::parse_cost(total, memory_capacity, cost_max)
 }
 
 /// The tilted per-value weights for one parameter, given the values already drawn this pass: each
@@ -602,14 +619,21 @@ pub fn grammar_parse_cost(
     memory_capacity: Fixed,
     cost_max: Fixed,
 ) -> Fixed {
-    Fixed::saturating_sum(harmony.biases().iter().map(|b| {
-        match (profile.get(b.given_param), profile.get(b.then_param)) {
-            (Some(gv), Some(tv)) if gv == b.given_value && tv != b.then_value => {
-                laws::parse_cost(b.structural_weight, memory_capacity, cost_max)
+    // Route through the one integration semantics (sum the violated structural weights, then one
+    // parse_cost), the same fold derived_tilt uses, so the sampling tilt and the whole-grammar cost
+    // never disagree when two biases fire on one value.
+    integrated_parse_cost(
+        harmony.biases().iter().filter_map(|b| {
+            match (profile.get(b.given_param), profile.get(b.then_param)) {
+                (Some(gv), Some(tv)) if gv == b.given_value && tv != b.then_value => {
+                    Some(b.structural_weight)
+                }
+                _ => None,
             }
-            _ => Fixed::ZERO,
-        }
-    }))
+        }),
+        memory_capacity,
+        cost_max,
+    )
 }
 
 /// Sample one culture's typology profile: the seeded, deterministic pass of the scoped

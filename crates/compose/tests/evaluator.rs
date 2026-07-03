@@ -20,7 +20,7 @@ use civsim_compose::{
     evaluate_node, evaluate_uncached, promote, promoted_library, CombinatorKernel,
     CombinatorRegistry, ComponentRef, CompositionNode, DesignEvidence, EvalParams, FormId,
     FormRegistry, IntentRef, InterfaceRegistry, Interval, JoinId, JoinRegistry, Memo, NodeBody,
-    PenaltyCurve, Promotion, PromotionParams, ProxyRegistry, ProxyWeights,
+    PenaltyCurve, Promotion, PromotionParams, ProxyRefs, ProxyRegistry, ProxyWeights,
 };
 use civsim_core::Fixed;
 use civsim_physics::PhysicsRegistry;
@@ -142,6 +142,18 @@ fn params() -> EvalParams {
     EvalParams {
         penalty_curve: PenaltyCurve::new([(fx("0"), fx("0")), (fx("0.5"), fx("0.5"))]),
         proxy_weights: weights,
+        proxy_refs: proxy_refs(),
+    }
+}
+
+/// Labelled dev proxy reference floors, not owner production numbers: a control-loop efficiency floor
+/// (a chain must pass more than half its signal to be controllable) and a resonance natural-frequency
+/// floor set inside the fixture's omega band so the resonance gate still separates the light design
+/// from the heavy one under the exotic substrate.
+fn proxy_refs() -> ProxyRefs {
+    ProxyRefs {
+        control_efficiency_floor: fx("0.5"),
+        resonance_floor: fx("3"),
     }
 }
 
@@ -541,6 +553,7 @@ fn an_unweighted_proxy_fails_loud() {
     let params = EvalParams {
         penalty_curve: PenaltyCurve::new([(fx("0"), fx("0"))]),
         proxy_weights: ProxyWeights::new(), // no weights at all
+        proxy_refs: proxy_refs(),
     };
     let built = Memo::new(
         InterfaceRegistry::dev_seed_base(),

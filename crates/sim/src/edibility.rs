@@ -241,9 +241,22 @@ pub fn assess(comp: &Composition, phys: &Physiology, caps: &FloorCaps) -> Edibil
         .collect();
     let net_harm = laws::net_harm(&harm_classes, caps.harm_cap, caps.total_harm_cap);
 
-    // Aggregate dose and tolerance for the safety margin (an applicable tolerance only).
-    let dose_aggregate = Fixed::saturating_sum(comp.toxins.values().copied());
-    let tolerance_aggregate = Fixed::saturating_sum(harm_classes.iter().filter_map(|&(_, t, _)| t));
+    // Aggregate dose and tolerance for the safety margin over the SAME set of classes: only classes
+    // the consumer carries a tolerance for (Some). A class the composition doses but the consumer has
+    // no tolerance for contributes to neither aggregate, so an inert meal (a "toxin" the consumer
+    // does not register) does not accrue an unbalanced dose against a zero tolerance. Summing every
+    // dose while summing only paired tolerances made the margin read as if the whole dose were
+    // untolerated.
+    let (dose_aggregate, tolerance_aggregate) = harm_classes.iter().fold(
+        (Fixed::ZERO, Fixed::ZERO),
+        |(dose_acc, tol_acc), &(dose, tol, _)| match tol {
+            Some(tolerance) => (
+                dose_acc.saturating_add(dose),
+                tol_acc.saturating_add(tolerance),
+            ),
+            None => (dose_acc, tol_acc),
+        },
+    );
     laws::edibility(
         net_nutrition,
         net_harm,

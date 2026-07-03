@@ -19,7 +19,7 @@ affinity_fraction = "none"
 [dials]
 "genome.mutation_rates" = "high"
 "genome.point_mutation_rate" = "high"
-"genome.mutation_step" = "high"
+"genome.additive_mutation_step" = "high"
 "genome.selection_scaling" = "high"
 "genome.effective_population_size" = "low"   # small Ne drifts harder: chance fixation, divergence
 "genome.speciation_distance" = "low"          # speciate sooner: fast radiation and extinction

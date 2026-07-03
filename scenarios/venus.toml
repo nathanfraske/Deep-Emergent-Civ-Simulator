@@ -33,7 +33,7 @@ affinity_weight = "moderate"
 # cloud-deck pools and the belief-and-cohesion sharpening a constant threat produces.
 "genome.mutation_rates" = "real"
 "genome.point_mutation_rate" = "real"
-"genome.mutation_step" = "real"
+"genome.additive_mutation_step" = "real"
 "genome.selection_scaling" = "high"           # a lethal world selects hard
 "genome.effective_population_size" = "low"    # small, isolated cloud-deck pools drift
 "genome.speciation_distance" = "real"

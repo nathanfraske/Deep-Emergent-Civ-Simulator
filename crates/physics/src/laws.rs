@@ -533,6 +533,18 @@ pub fn power(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
     }
 }
 
+/// Mechanical power on the WATT scale: force times velocity with no kilowatt bridge, the
+/// SI-watt sibling of [`power`]. This is the scale the metabolism bridge
+/// ([`metabolic_drain_fraction`]) and the basal rate ([`basal_metabolic_rate`]) work in, so a
+/// derived exertion drain and the resting drain share one power scale rather than differing by the
+/// kilowatt factor. An overflowing product routes to the reserved power cap.
+pub fn power_watts(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
+    match force.checked_mul(velocity) {
+        Some(p) => p.min(power_max),
+        None => power_max,
+    }
+}
+
 // === Materials (R-PHYS-MECH) ===
 
 /// The Euler critical buckling load. The slenderness square is guarded before it is
@@ -1183,30 +1195,25 @@ pub fn speed_of_sound(bulk_modulus: Fixed, density: Fixed, c_max: Fixed) -> Fixe
     }
 }
 
-/// The overflow-safe frequency ceiling for [`acoustic_absorption`]: `sqrt(2^31) = 46340`, the largest
-/// frequency whose square fits Q32.32. Above it the frequency-squared absorption law exceeds the
-/// representable range, so the (unbounded-in-frequency) absorption saturates to its cap. Forced by
-/// Q32.32, not a reserved realism value (the [`V2_MAX`] precedent for a squared quantity).
-const F_ABS_MAX: Fixed = Fixed::from_int(46340);
-
 /// Stokes thermoviscous sound absorption alpha = reference * f^2 (1/m), the frequency-squared law that
 /// makes a medium absorb high frequencies over distance (an authored universal physics affordance,
 /// Principle 9). Report the linear absorption coefficient; its path attenuation is the existing
 /// [`optical_depth`] (report the measured indicator, defer the transcendental transform), so no new
 /// path kernel is introduced. The square is staged as `reference*frequency` then `*frequency`, so the
 /// tiny per-square-frequency reference shrinks the product before the second frequency grows it and
-/// the unrepresentable f^2 never forms; a frequency above the overflow-safe ceiling routes to the cap.
-/// A non-positive frequency has no absorption and reads zero; a checked overflow routes to the cap.
+/// the unrepresentable f^2 never forms; the two staged [`Fixed::checked_mul`] carry the overflow
+/// guard, routing a genuinely unrepresentable product to the cap. There is no frequency-alone early
+/// return: a small reference keeps `reference*f*f` representable well past any single-multiply
+/// ceiling, so gating on the frequency alone would over-saturate a low-reference medium at a high
+/// frequency it still absorbs finitely. A non-positive frequency has no absorption and reads zero.
 pub fn acoustic_absorption(reference: Fixed, frequency: Fixed, alpha_max: Fixed) -> Fixed {
     if frequency <= ZERO {
         return ZERO;
     }
-    if frequency > F_ABS_MAX {
-        return alpha_max;
-    }
     // Interleave the two frequency multiplies around the reference (the poiseuille grow/shrink
     // discipline): reference*frequency stays tiny, then the second *frequency lifts it to the
     // absorption scale, so no intermediate exceeds the representable ceiling for a physical reference.
+    // Only a product that truly overflows i64 routes to the cap.
     match reference
         .checked_mul(frequency)
         .and_then(|x| x.checked_mul(frequency))

@@ -106,6 +106,14 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 # fail-loud sentinel for a value the engine no longer authors.
 
 [[reserved]]
+id = "absence.characteristic_lifespan_scan_ceiling"
+basis = "the age ceiling absence::characteristic_lifespan scans to (crates/sim/src/absence.rs ABSENCE_PROBE_MAX). Primarily a determinism-and-performance scan bound, but it carries a content-path role: for a race whose natural-mortality hazard never crosses the LIFESPAN_HAZARD_THRESHOLD within the scan, this ceiling becomes its characteristic lifespan and so the presumed-dead absence-window cap. Set well past any expected characteristic lifespan so it never truncates a real one; the engine default is 4096 age-cadences, raised per world for a very long-lived race so the presumed-dead ceiling is never a fabricated presumption. Deriving the ceiling from race hazard alone is impossible for a never-crossing hazard, so a finite scan bound is unavoidable and is reserved rather than hidden"
+status = "reserved"
+value = ""
+unit = "age_cadences"
+source = "Part 20, Part 40; crates/sim/src/absence.rs characteristic_lifespan/absence_window"
+
+[[reserved]]
 id = "evidence.concealment_suppression"
 basis = "the suppression factor on trace perceptibility, with its skill and time costs"
 status = "set"
@@ -684,6 +692,22 @@ value = ""
 unit = "weight"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/proxy.rs"
 
+[[reserved]]
+id = "compose.control_efficiency_floor"
+basis = "the through-chain transmission efficiency floor the ControlLoopStability proxy subtracts (crates/compose/src/proxy.rs ProxyKernel::ControlLoopStability): the minimum fraction of a control signal a chain must pass to close a feedback loop, the loss beyond which control is unreliable. Its basis is the signal-to-noise margin a controllable loop needs, a fraction in (0, 1); below it the proxy margin goes negative and the criticality weight charges viability. Reserved-with-basis because returning the raw efficiency (always in [0, 1], never negative) against an implicit zero was structurally inert, so a lossy chain never registered"
+status = "reserved"
+value = ""
+unit = "efficiency_fraction"
+source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel::ControlLoopStability"
+
+[[reserved]]
+id = "compose.resonance_floor"
+basis = "the natural-frequency floor the Resonance proxy subtracts (crates/compose/src/proxy.rs ProxyKernel::Resonance): the minimum omega = sqrt(k/m) below which an assembly is too slack to hold its form under service loads. Its basis is the lowest natural frequency a load path must clear so it does not resonate destructively, in the interface substrate's stiffness-over-mass units; below it the proxy margin goes negative. Reserved-with-basis because the earlier sqrt(k) - sqrt(m) subtracted incommensurate roots (a stiffness root minus a mass root), so the margin was dimensionally incoherent"
+status = "reserved"
+value = ""
+unit = "natural_frequency"
+source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel::Resonance"
+
 # --- Knowledge-transmission substrate: the drift and loss rates compose.transmission_stability
 # derives from (Parts 20, 23, 25, 41; crates/sim/src/transmission.rs). The transmit and loss
 # kernels are race-blind and read per-race perception and memory (Principle 9); these are the base
@@ -977,15 +1001,13 @@ set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 25.4"
 
-[[reserved]]
-id = "genome.mutation_step"
-basis = "the size of the continuous additive perturbation a point mutation applies to an allele's quantitative value (the deferred half of mutation); set with the integer-Gaussian approximation and precision of 25.10, an owner method decision, so it is integer and float-free"
-status = "set"
-value = "0.1"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "trait_units"
-source = "Part 25.5, 25.10"
+# genome.mutation_step RETIRED (2026-07-03, superseded by genome.additive_mutation_step): the
+# placeholder "size of the continuous additive perturbation" is replaced by the fail-loud Gaussian-
+# standard-deviation form genome.additive_mutation_step (line above; its basis names this retirement),
+# the value GeneticScheme.additive_mutation_step actually reads. The direction siblings .high and .low
+# are retired with it (below); the seven canonical scenarios repoint their mutation-step dial to
+# genome.additive_mutation_step (and its .high/.low). Removed rather than left a dead set value that
+# no code reads, the retirement discipline the sibling derive-audit ids already follow.
 
 [[reserved]]
 id = "biosphere.predawn_generations"
@@ -1468,19 +1490,24 @@ value = ""
 unit = "probability"
 source = "Part 25.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
 
+# genome.mutation_step.high and genome.mutation_step.low RETIRED (2026-07-03, with their retired
+# baseline genome.mutation_step): the direction siblings of the superseded placeholder. Replaced by
+# genome.additive_mutation_step.high and .low below, in the Gaussian-standard-deviation units the
+# live mutation reads; the retired .high carried a 0.5 in the OLD perturbation-size semantics, not
+# carried over because the replacement is a standard deviation of a different meaning. The seven
+# canonical scenarios repoint their mutation-step dial to genome.additive_mutation_step.
+
 [[reserved]]
-id = "genome.mutation_step.high"
-basis = "the large-step end Tempest and Arcanum push toward, so a single mutation moves a trait far and novelty is coarse rather than incremental; the baseline is genome.mutation_step"
-status = "set"
-value = "0.5"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+id = "genome.additive_mutation_step.high"
+basis = "the large-step end Tempest and Arcanum push toward: a larger per-gene Gaussian additive standard deviation so a single mutation moves a trait far and novelty is coarse rather than incremental; the baseline is genome.additive_mutation_step, in the same standing-per-locus-standard-deviation units (design 25.5, 25.10). Reserved fail-loud with its baseline, since the baseline standard deviation is itself the owner's to set against the mutation-selection-drift balance"
+status = "reserved"
+value = ""
 unit = "trait_units"
 source = "Part 25.5, 25.10; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
 
 [[reserved]]
-id = "genome.mutation_step.low"
-basis = "the small-step end Europa pulls, below the baseline so an additive mutation perturbs a trait less, slow fine drift; the baseline is genome.mutation_step"
+id = "genome.additive_mutation_step.low"
+basis = "the small-step end Europa pulls: a smaller per-gene Gaussian additive standard deviation, below the baseline so an additive mutation perturbs a trait less (slow fine drift); the baseline is genome.additive_mutation_step (design 25.10)"
 status = "reserved"
 value = ""
 unit = "trait_units"

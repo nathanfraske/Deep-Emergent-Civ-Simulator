@@ -19,7 +19,7 @@ affinity_fraction = "none"
 [dials]
 "genome.mutation_rates" = "real"
 "genome.point_mutation_rate" = "real"
-"genome.mutation_step" = "real"
+"genome.additive_mutation_step" = "real"
 "genome.selection_scaling" = "real"
 "genome.effective_population_size" = "real"
 "genome.speciation_distance" = "real"

@@ -25,7 +25,7 @@ affinity_weight = "moderate_to_high"
 # The grounded settings of Mirror, run together with a present-and-potent MagicLaws.
 "genome.mutation_rates" = "real"
 "genome.point_mutation_rate" = "real"
-"genome.mutation_step" = "real"
+"genome.additive_mutation_step" = "real"
 "genome.selection_scaling" = "real"
 "genome.effective_population_size" = "real"
 "genome.speciation_distance" = "real"

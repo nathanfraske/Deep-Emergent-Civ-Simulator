@@ -181,6 +181,13 @@ pub fn step_generation(
         let coeffs = selection_coefficients(suit, loci, p);
         let sp = bio.species.get_mut(*id).unwrap();
         sp.pool.select(&coeffs);
+        // NAMED SEAM (audit defect 23): the drift strength here reads the pool's authored
+        // effective_size (GeneratorParams.pool_size), not a census-derived Ne. The census Ne kernel
+        // (ReproductiveMoments::effective_size) reduces a reproductive census (sex split, offspring
+        // moments) to Ne, but the pre-dawn aggregate tier carries no such census, only a
+        // suitability-scaled carrying-capacity Stock (pops) that is not a breeding census. Feeding a
+        // real per-species reproductive census into this drift is a design addition, not a local
+        // rewire; until it lands, the authored pool_size is the honest aggregate-tier Ne.
         sp.pool.drift(seed, id.0 as u64, g);
 
         // Population dynamics: capacity tracks suitability; collapse is extinction.
