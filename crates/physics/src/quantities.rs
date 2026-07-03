@@ -25,7 +25,7 @@
 //! canonical thirty-two-bit scale and which derive a finer one is the owner's choice, not a fixed
 //! property of the domain: a lower significance target holds more axes at the canonical scale.
 
-use crate::{AxisRange, Dimension, PhysicsRegistry, QuantityAxis};
+use crate::{AxisRange, Dimension, PerClassRange, PhysicsRegistry, QuantityAxis};
 use civsim_core::Fixed;
 use civsim_units::{
     derive_scale_bits, BaseDimensionRegistry, DerivedScale, Dimension as UnitsDimension,
@@ -180,15 +180,61 @@ pub fn axis_scale(axis: &QuantityAxis, sig_target: u32, guard: u32) -> Option<De
     ))
 }
 
+/// The scale one class of a per-class-scale axis derives from its declared decimal envelope, keyed
+/// off the same decimal-envelope log2 the single-scale axes use so a sub-epsilon per-class bound (a
+/// nanogram-per-kilogram toxin tolerance) keeps its magnitude. `None` when the class's bounds are not
+/// both set: an unset per-class entry is reserved and omitted from the catalogue, the same as a
+/// reserved single axis, rather than silently taking the canonical scale (the `""` and `"0"` decimals
+/// both read as no-magnitude, so a blank bound must be caught by its emptiness, not its log2).
+pub fn per_class_scale(entry: &PerClassRange, sig_target: u32, guard: u32) -> Option<DerivedScale> {
+    let (lo, hi) = &entry.bounds;
+    if lo.trim().is_empty() || hi.trim().is_empty() {
+        return None;
+    }
+    let present: Vec<i32> = [decimal_log2_floor(lo), decimal_log2_floor(hi)]
+        .into_iter()
+        .flatten()
+        .collect();
+    let (hi_log2, lo_log2) = match (present.iter().max(), present.iter().min()) {
+        (Some(h), Some(l)) => (*h, *l),
+        // A degenerate [0, 0] envelope (both bounds present and zero) is a point at the origin: it
+        // needs no scale beyond the canonical, the same as the single-axis path.
+        _ => (0, 0),
+    };
+    Some(derive_scale_bits(
+        hi_log2,
+        lo_log2,
+        sig_target,
+        guard,
+        CANONICAL_SCALE,
+    ))
+}
+
 /// Build the canonical physics quantity catalogue: one `QuantityDef` per axis with a set range, its
 /// dimension the physics dimension in base-exponent form and its scale derived from the axis
-/// envelope. Axes with a reserved (unset) range are omitted until their range is set. Iteration is
-/// over the registry's id-sorted axes, so the catalogue is deterministic. The overflow policy is the
-/// substrate default (saturate), which every physics quantity uses.
+/// envelope. An axis whose scale is reserved per class registers one quantity per class instead
+/// (named `<axis>@<class>`), each with its own scale, the class being the quantity granularity
+/// (R-UNITS-PIN). Axes with a reserved (unset) range and no per-class breakdown are omitted until
+/// their range is set. Iteration is over the registry's id-sorted axes, so the catalogue is
+/// deterministic. The overflow policy is the substrate default (saturate), which every physics
+/// quantity uses.
 pub fn build_catalogue(reg: &PhysicsRegistry, sig_target: u32, guard: u32) -> QuantityRegistry {
     let mut q = QuantityRegistry::new();
     for axis in reg.axes() {
-        if let Some(derived) = axis_scale(axis, sig_target, guard) {
+        if !axis.per_class.is_empty() {
+            // A per-class-scale axis: one quantity per class whose bounds are set, each on its own
+            // derived scale; an unset (reserved) class is omitted like a reserved single axis.
+            for entry in &axis.per_class {
+                if let Some(derived) = per_class_scale(entry, sig_target, guard) {
+                    q.register(QuantityDef {
+                        name: format!("{}@{}", axis.id, entry.class),
+                        dimension: units_dimension(&axis.dimension),
+                        scale_bits: derived.scale_bits,
+                        overflow: OverflowPolicy::Saturate,
+                    });
+                }
+            }
+        } else if let Some(derived) = axis_scale(axis, sig_target, guard) {
             q.register(QuantityDef {
                 name: axis.id.clone(),
                 dimension: units_dimension(&axis.dimension),
@@ -431,6 +477,141 @@ real = "test envelope"
             axis_scale(acidity, 16, 1).unwrap().scale_bits,
             CANONICAL_SCALE,
             "a fitting axis still keeps the canonical Q32.32 scale under the decimal path"
+        );
+    }
+
+    #[test]
+    fn a_per_class_axis_registers_one_quantity_per_class_each_on_its_own_scale() {
+        // The bio.consumer.reference_tolerance case: a scale reserved per toxin class, whose
+        // pg/kg-to-g/kg envelope no single scale spans. The class is the quantity granularity, so the
+        // catalogue registers one quantity per class, each deriving its own scale from that class's
+        // envelope through the same decimal-envelope path, so a nanogram-per-kilogram class keeps its
+        // magnitude while a milligram class fits the canonical scale.
+        let toml = r#"
+[[axis]]
+id = "test.tolerance"
+measures = "per-toxin-class reference tolerance"
+unit = "mg/kg-body"
+dimension = "dimensionless"
+scale = "per-class"
+tier = 0
+range_reserved = "per toxin class (R-UNITS-PIN)"
+real = "test"
+per_class = [
+  { class = "alkaloid", range_lo = "0.001", range_hi = "5000" },
+  { class = "cardiac_glycoside", range_lo = "0.000000000001", range_hi = "4000" },
+]
+"#;
+        let reg = PhysicsRegistry::from_toml_str(toml).unwrap();
+        let cat = build_catalogue(&reg, 16, 1);
+        // Two per-class quantities, and the bare axis id is not registered (the class is the grain).
+        let alkaloid = cat
+            .id_of("test.tolerance@alkaloid")
+            .expect("the alkaloid class is a quantity");
+        let cardiac = cat
+            .id_of("test.tolerance@cardiac_glycoside")
+            .expect("the cardiac-glycoside class is a quantity");
+        assert!(
+            cat.id_of("test.tolerance").is_none(),
+            "the bare per-class axis is not itself a quantity"
+        );
+        // The milligram class fits the canonical scale; the sub-epsilon class (a picogram low end
+        // underflowing Q32.32) derives a finer per-quantity scale, so the two differ.
+        let alk_scale = cat.get(alkaloid).unwrap().scale_bits;
+        let car_scale = cat.get(cardiac).unwrap().scale_bits;
+        assert_eq!(alk_scale, CANONICAL_SCALE, "the mg/kg class fits canonical");
+        assert!(
+            car_scale > CANONICAL_SCALE,
+            "the sub-epsilon class derives a finer scale ({car_scale} > {CANONICAL_SCALE})"
+        );
+        // Each per-class quantity carries the axis dimension (dimensionless here).
+        assert!(cat.get(alkaloid).unwrap().dimension.is_dimensionless());
+    }
+
+    #[test]
+    fn a_reserved_per_class_entry_is_omitted_and_a_duplicate_class_fails_loud() {
+        // An entry with unset bounds is reserved: omitted from the catalogue, not silently taking the
+        // canonical scale (the failure mode this arc exists to prevent).
+        let toml = r#"
+[[axis]]
+id = "test.tol"
+measures = "per-class tolerance"
+unit = "mg/kg-body"
+dimension = "dimensionless"
+scale = "per-class"
+tier = 0
+range_reserved = "per class (R-UNITS-PIN)"
+real = "test"
+per_class = [
+  { class = "set", range_lo = "0.001", range_hi = "5000" },
+  { class = "reserved" },
+]
+"#;
+        let reg = PhysicsRegistry::from_toml_str(toml).unwrap();
+        let cat = build_catalogue(&reg, 16, 1);
+        assert!(
+            cat.id_of("test.tol@set").is_some(),
+            "the set class registers"
+        );
+        assert!(
+            cat.id_of("test.tol@reserved").is_none(),
+            "the reserved class is omitted, not registered at the canonical scale"
+        );
+        // A duplicate class id would collide the quantity name, so it fails to load, not at build.
+        let dup = r#"
+[[axis]]
+id = "test.dup"
+measures = "per-class tolerance"
+unit = "mg/kg-body"
+dimension = "dimensionless"
+scale = "per-class"
+tier = 0
+range_reserved = "per class"
+real = "test"
+per_class = [
+  { class = "x", range_lo = "1", range_hi = "2" },
+  { class = "x", range_lo = "3", range_hi = "4" },
+]
+"#;
+        assert!(
+            PhysicsRegistry::from_toml_str(dup).is_err(),
+            "a duplicate per-class class fails loud at load"
+        );
+    }
+
+    #[test]
+    fn an_at_sign_in_an_axis_or_class_id_fails_loud() {
+        // `@` is the per-class quantity separator, so an id carrying it could alias a per-class
+        // quantity name and hit the catalogue's duplicate-name panic. Both are rejected at load.
+        let bad_axis = r#"
+[[axis]]
+id = "tox@bar"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test"
+"#;
+        assert!(
+            PhysicsRegistry::from_toml_str(bad_axis).is_err(),
+            "an axis id containing '@' fails loud"
+        );
+        let bad_class = r#"
+[[axis]]
+id = "test.tol"
+dimension = "dimensionless"
+scale = "per-class"
+tier = 0
+range_reserved = "per class"
+real = "test"
+per_class = [
+  { class = "al@kaloid", range_lo = "0.001", range_hi = "5000" },
+]
+"#;
+        assert!(
+            PhysicsRegistry::from_toml_str(bad_class).is_err(),
+            "a class id containing '@' fails loud"
         );
     }
 }
