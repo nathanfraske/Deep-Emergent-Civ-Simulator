@@ -117,6 +117,108 @@ pub(crate) fn q32_mul(a: i64, b: i64) -> i64 {
     (i64::cast_from(hi) << 32u32) | i64::cast_from(lo)
 }
 
+/// Saturating Q32.32 multiply on `i64` operands: the Fixed product when it fits `i64`, else the signed
+/// extreme (`i64::MIN` when the operands' signs differ, `i64::MAX` when they agree), matching the
+/// controller's `sat_mul` (`Fixed::checked_mul` or saturate). Same sign-magnitude limb product as
+/// [`q32_mul`], but it also keeps the top word `w3` (bits [96, 128) of the product magnitude, which
+/// `q32_mul` discards) so an overflow of the [32, 96) result is detectable: the Q32.32 magnitude is the
+/// 96-bit value `(w3 : w2 : w1)`, and it fits the signed range iff `w3 == 0` and the sign bit of the
+/// result is not forced by `w2`. No `i128`; the product is the same u32-limb accumulation the Stage 0
+/// multiply proves.
+#[cube]
+pub(crate) fn sat_mul(a: i64, b: i64) -> i64 {
+    let alo = u32::cast_from(a);
+    let ahi = u32::cast_from(a >> 32u32);
+    let blo = u32::cast_from(b);
+    let bhi = u32::cast_from(b >> 32u32);
+
+    let a_neg = ahi >> 31u32;
+    let b_neg = bhi >> 31u32;
+    let neg = a_neg ^ b_neg;
+
+    let na_lo = (!alo) + 1u32;
+    let ca = select(alo == 0u32, 1u32, 0u32);
+    let na_hi = (!ahi) + ca;
+    let ma_lo = select(a_neg == 1u32, na_lo, alo);
+    let ma_hi = select(a_neg == 1u32, na_hi, ahi);
+
+    let nb_lo = (!blo) + 1u32;
+    let cb = select(blo == 0u32, 1u32, 0u32);
+    let nb_hi = (!bhi) + cb;
+    let mb_lo = select(b_neg == 1u32, nb_lo, blo);
+    let mb_hi = select(b_neg == 1u32, nb_hi, bhi);
+
+    let mut aa = Array::<u32>::new(4usize);
+    aa[0usize] = ma_lo & 0xFFFFu32;
+    aa[1usize] = ma_lo >> 16u32;
+    aa[2usize] = ma_hi & 0xFFFFu32;
+    aa[3usize] = ma_hi >> 16u32;
+    let mut bb = Array::<u32>::new(4usize);
+    bb[0usize] = mb_lo & 0xFFFFu32;
+    bb[1usize] = mb_lo >> 16u32;
+    bb[2usize] = mb_hi & 0xFFFFu32;
+    bb[3usize] = mb_hi >> 16u32;
+
+    let mut acc = Array::<u32>::new(8usize);
+    #[unroll]
+    for i in 0usize..8usize {
+        acc[i] = 0u32;
+    }
+    #[unroll]
+    for i in 0usize..4usize {
+        #[unroll]
+        for j in 0usize..4usize {
+            let p = aa[i] * bb[j];
+            acc[i + j] = acc[i + j] + (p & 0xFFFFu32);
+            acc[i + j + 1usize] = acc[i + j + 1usize] + (p >> 16u32);
+        }
+    }
+    let mut carry = 0u32;
+    #[unroll]
+    for d in 0usize..8usize {
+        let t = acc[d] + carry;
+        acc[d] = t & 0xFFFFu32;
+        carry = t >> 16u32;
+    }
+    let w0 = acc[0usize] | (acc[1usize] << 16u32);
+    let w1 = acc[2usize] | (acc[3usize] << 16u32); // bits [32, 64) of the magnitude
+    let w2 = acc[4usize] | (acc[5usize] << 16u32); // bits [64, 96)
+    let w3 = acc[6usize] | (acc[7usize] << 16u32); // bits [96, 128), overflow beyond the result window
+
+    // The fitting narrowed result (two's complement of words 0..2 when signs differ), as in q32_mul.
+    let v0 = !w0;
+    let s0 = v0 + 1u32;
+    let k0 = select(s0 < v0, 1u32, 0u32);
+    let v1 = !w1;
+    let s1 = v1 + k0;
+    let k1 = select(s1 < v1, 1u32, 0u32);
+    let v2 = !w2;
+    let s2 = v2 + k1;
+    let use_neg = neg == 1u32;
+    let lo = select(use_neg, s1, w1);
+    let hi = select(use_neg, s2, w2);
+    let fit = (i64::cast_from(hi) << 32u32) | i64::cast_from(lo);
+
+    // Overflow: the shifted result is `product >> 32`, whose magnitude for a negative product is
+    // ceil(|product| / 2^32), so the discarded low word `w0` counts. A positive result fits iff the full
+    // magnitude <= 2^63 - 1, i.e. w3 == 0 and the top bit of w2 (bit 63) is clear. A negative result fits
+    // iff the full magnitude <= 2^63; the sole extra value it admits is |product| == 2^95 EXACTLY (w3 ==
+    // 0, w2 == 0x80000000, w1 == 0, AND w0 == 0), which shifts to -2^63 = i64::MIN and is already produced
+    // by `fit`. Any nonzero w0 pushes the ceiling to 2^63 + 1 (below i64::MIN), so it must overflow: the
+    // `w0 == 0` conjunct is required (a converged blind-audit finding, since without it a product like
+    // (2^32 + 1) * -(2^63 - 2^31 + 1) returns i64::MAX instead of saturating to i64::MIN).
+    let hibit = w2 >> 31u32;
+    let at_min = (w2 == 0x80000000u32) && (w1 == 0u32) && (w0 == 0u32);
+    let over_pos = (w3 != 0u32) || (hibit == 1u32);
+    let over_neg = (w3 != 0u32) || (hibit == 1u32 && !at_min);
+    let overflow = select(use_neg, over_neg, over_pos);
+
+    let i64_max = 9223372036854775807i64;
+    let i64_min = -9223372036854775807i64 - 1i64; // i64::MIN, split so the literal does not overflow
+    let sat = select(use_neg, i64_min, i64_max);
+    select(overflow, sat, fit)
+}
+
 /// The pinned Q32.32 divide on `i64` operands (sign-magnitude 96-step restoring long division,
 /// truncate toward zero). Same algorithm as the Stage 0 `emu_div`, decomposed at the i64 boundary.
 /// The divisor must be non-zero (the oracle precondition).
