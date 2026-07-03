@@ -27,6 +27,111 @@ use crate::stage0::CudaClient;
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
 
+/// The maximum term count one `activate` sums (a literal unroll bound; the launcher clamps `n_terms`).
+/// The controller's largest activation is `n_in + hidden` terms; 32 covers the dev layout with headroom.
+const MAX_TERMS: u32 = 32;
+
+/// Clamp a signed 128-bit accumulator `(hi, lo)` (value `V = hi * 2^64 + lo`, two's complement) to the
+/// unit interval `[-1, 1]` in Q32.32 bits, matching `acc.clamp(-1, 1)` after the controller's
+/// `saturating_sum`: return `ONE` when `V > ONE`, `-ONE` when `V < -ONE`, else `V` (which then fits
+/// `i64`, and its low word reinterpreted as `i64` is the value). Because the final interval is inside
+/// `i64`, clamping the 128-bit sum straight to `[-1, 1]` subsumes `saturating_sum`'s prior clamp to the
+/// `i64` range.
+#[cube]
+fn clamp_unit(hi: i64, lo: u64) -> i64 {
+    let one = 4294967296i64; // ONE = 1 << 32
+    let neg_one = -4294967296i64;
+    let one_u = 4294967296u64; // ONE as u64
+    let neg_thresh = 0xFFFF_FFFF_0000_0000u64; // 2^64 - 2^32: |V| > ONE on the negative side below this
+    let lo_i = i64::cast_from(lo); // the low word reinterpreted as i64 (= V when V fits [-ONE, ONE])
+    let pos_over = (hi > 0i64) || (hi == 0i64 && lo > one_u);
+    let neg_over = (hi < -1i64) || (hi == -1i64 && lo < neg_thresh);
+    select(pos_over, one, select(neg_over, neg_one, lo_i))
+}
+
+/// One controller activation per thread: `clamp(sum_t sat_mul(weights[t], inputs[t]), -1, 1)`, the
+/// oracle's `activate`. `base = act * n_terms` locates this activation's contiguous term block. Two
+/// passes keep the DSL happy: pass one writes the saturating products into a per-thread array (distinct
+/// slots, so no carried accumulator crosses the `sat_mul` call); pass two sums them into a signed
+/// 128-bit accumulator `(hi, lo)` with no `#[cube]` call in the loop, so the carried accumulator
+/// survives. A dead term (`t >= n_terms`) contributes zero and reads a clamped index.
+#[cube(launch)]
+fn activate_kernel(weights: &Array<i64>, inputs: &Array<i64>, n_terms: u32, out: &mut Array<i64>) {
+    let act = ABSOLUTE_POS;
+    if act < out.len() {
+        let nt = n_terms as usize;
+        let base = act * nt;
+        let mut prod = Array::<i64>::new(32usize);
+        #[unroll]
+        for t in 0usize..32usize {
+            let live = t < nt;
+            let tt = select(live, t, 0usize);
+            let p = sat_mul(weights[base + tt], inputs[base + tt]);
+            prod[t] = select(live, p, 0i64);
+        }
+        let mut hi = 0i64;
+        let mut lo = 0u64;
+        #[unroll]
+        for t in 0usize..32usize {
+            let p = prod[t];
+            let p_lo = u64::cast_from(p);
+            let p_hi = p >> 63u32; // sign extension: 0 or -1
+            let new_lo = lo + p_lo;
+            let carry = select(new_lo < lo, 1i64, 0i64);
+            hi = hi + p_hi + carry;
+            lo = new_lo;
+        }
+        out[act] = clamp_unit(hi, lo);
+    }
+}
+
+/// Run a batch of controller activations on the GPU, bit-identical to the oracle `activate` on CUDA:
+/// `out[a] = clamp(sum_t sat_mul(weights[a*n_terms + t], inputs[a*n_terms + t]), -1, 1)`. `weights` and
+/// `inputs` are row-major `i64` Q32.32 bits, `n_terms` term pairs per activation. Returns one Q32.32
+/// value per activation. `n_terms` is clamped to at most `MAX_TERMS`.
+pub fn gpu_activate(
+    client: &CudaClient,
+    weights: &[i64],
+    inputs: &[i64],
+    n_terms: u32,
+) -> Vec<i64> {
+    assert_eq!(
+        weights.len(),
+        inputs.len(),
+        "gpu_activate: weights and inputs differ"
+    );
+    assert!(
+        n_terms <= MAX_TERMS,
+        "gpu_activate: n_terms {n_terms} exceeds the unroll bound {MAX_TERMS}"
+    );
+    if n_terms == 0 || weights.is_empty() {
+        return Vec::new();
+    }
+    let n_acts = weights.len() / (n_terms as usize);
+    assert_eq!(
+        n_acts * (n_terms as usize),
+        weights.len(),
+        "gpu_activate: length must be a multiple of n_terms"
+    );
+    let w_h = client.create_from_slice(i64::as_bytes(weights));
+    let x_h = client.create_from_slice(i64::as_bytes(inputs));
+    let out_h = client.empty(n_acts * core::mem::size_of::<i64>());
+    let threads = 256u32;
+    let blocks = (n_acts as u32).div_ceil(threads);
+    unsafe {
+        activate_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(w_h.clone(), weights.len()),
+            ArrayArg::from_raw_parts(x_h.clone(), inputs.len()),
+            n_terms,
+            ArrayArg::from_raw_parts(out_h.clone(), n_acts),
+        );
+    }
+    i64::from_bytes(&client.read_one_unchecked(out_h)).to_vec()
+}
+
 /// Elementwise saturating Q32.32 multiply, so the controller's saturating product (`crate::prim::sat_mul`)
 /// can be gated over the full corner and overflow range against the oracle before it is used inside the
 /// reaction-norm activation. See [`gpu_sat_mul`].
