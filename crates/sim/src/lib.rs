@@ -79,6 +79,7 @@ pub mod evolve;
 pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
+pub mod langmod;
 pub mod language;
 pub mod lineage;
 pub mod located;

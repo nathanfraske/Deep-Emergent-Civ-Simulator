@@ -1183,6 +1183,78 @@ pub fn speed_of_sound(bulk_modulus: Fixed, density: Fixed, c_max: Fixed) -> Fixe
     }
 }
 
+/// The overflow-safe frequency ceiling for [`acoustic_absorption`]: `sqrt(2^31) = 46340`, the largest
+/// frequency whose square fits Q32.32. Above it the frequency-squared absorption law exceeds the
+/// representable range, so the (unbounded-in-frequency) absorption saturates to its cap. Forced by
+/// Q32.32, not a reserved realism value (the [`V2_MAX`] precedent for a squared quantity).
+const F_ABS_MAX: Fixed = Fixed::from_int(46340);
+
+/// Stokes thermoviscous sound absorption alpha = reference * f^2 (1/m), the frequency-squared law that
+/// makes a medium absorb high frequencies over distance (an authored universal physics affordance,
+/// Principle 9). Report the linear absorption coefficient; its path attenuation is the existing
+/// [`optical_depth`] (report the measured indicator, defer the transcendental transform), so no new
+/// path kernel is introduced. The square is staged as `reference*frequency` then `*frequency`, so the
+/// tiny per-square-frequency reference shrinks the product before the second frequency grows it and
+/// the unrepresentable f^2 never forms; a frequency above the overflow-safe ceiling routes to the cap.
+/// A non-positive frequency has no absorption and reads zero; a checked overflow routes to the cap.
+pub fn acoustic_absorption(reference: Fixed, frequency: Fixed, alpha_max: Fixed) -> Fixed {
+    if frequency <= ZERO {
+        return ZERO;
+    }
+    if frequency > F_ABS_MAX {
+        return alpha_max;
+    }
+    // Interleave the two frequency multiplies around the reference (the poiseuille grow/shrink
+    // discipline): reference*frequency stays tiny, then the second *frequency lifts it to the
+    // absorption scale, so no intermediate exceeds the representable ceiling for a physical reference.
+    match reference
+        .checked_mul(frequency)
+        .and_then(|x| x.checked_mul(frequency))
+    {
+        Some(a) => a.clamp(ZERO, alpha_max),
+        None => alpha_max,
+    }
+}
+
+/// Quarter-wave closed-open tube resonance f_n = (2n-1)*c/(4L) (Hz), the source-filter formant law (an
+/// authored universal physics affordance, Principle 9): a tube closed at one end and open at the other
+/// resonates on the odd harmonics of c/(4L), the standing-wave series a vocal tract (or a stopped horn)
+/// imposes on a sound speed c and a resonator length L. Stage c/L first, then apply the odd multiplier
+/// (2n-1) and the quarter-wave divide by four, so the large intermediate (2n-1)*c never forms; a zero
+/// or near-zero length overflows the divide and reads the cap (the frequency grows without bound as L
+/// shrinks), and a zero sound speed reads zero (no medium, no resonance, the speed-of-sound zero-guard).
+/// A non-positive mode number has no resonance and reads zero.
+pub fn tube_resonance(
+    harmonic: Fixed,
+    speed_of_sound: Fixed,
+    resonator_length: Fixed,
+    freq_max: Fixed,
+) -> Fixed {
+    if speed_of_sound <= ZERO {
+        return ZERO;
+    }
+    if resonator_length <= ZERO {
+        return freq_max;
+    }
+    // The odd multiplier (2n-1) of the closed-open quarter-wave series; a non-positive mode has none.
+    let odd = sat_sub(harmonic.saturating_add(harmonic), ONE);
+    if odd <= ZERO {
+        return ZERO;
+    }
+    let c_over_l = match speed_of_sound.checked_div(resonator_length) {
+        Some(x) => x,
+        None => return freq_max,
+    };
+    let scaled = match c_over_l.checked_mul(odd) {
+        Some(x) => x,
+        None => return freq_max,
+    };
+    match scaled.checked_div(Fixed::from_int(4)) {
+        Some(f) => f.min(freq_max),
+        None => freq_max,
+    }
+}
+
 /// Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
 /// density field. The pressure is bridged to pascals. A zero or sub-floor R_s*T reads the dense cap.
 pub fn ideal_gas_density(

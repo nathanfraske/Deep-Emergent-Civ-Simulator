@@ -33,13 +33,14 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // axes, so it merges onto the mechanical floor and the whole revalidates.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
-    // 38 mechanical + 17 fluids axes; 20 + 16 laws; 2 + 2 substances.
+    // 38 mechanical + 20 fluids axes; 20 + 18 laws; 2 + 2 substances (the three acoustic
+    // channel-physics axes and the acoustic_absorption and tube_resonance laws are the 2026-07-03 add).
     assert_eq!(
         reg.axis_count(),
-        55,
+        58,
         "the mechanical and fluids axes together"
     );
-    assert_eq!(reg.law_count(), 37, "the wave-1 and wave-2 fluid laws");
+    assert_eq!(reg.law_count(), 39, "the wave-1 and wave-2 fluid laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
     // water carry values only on existing axes and participate only in existing laws.
@@ -51,8 +52,9 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
 #[test]
 fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
     // The owner ratified the wave-2 fluids ranges from their cited bounds (2026-07-02). A set range
-    // now reads back exactly, and no fluids axis stays reserved: the only reserved axis over the
-    // mechanical-and-fluids stack is the scale-pending geometry second moment of area (R-UNITS-PIN).
+    // now reads back exactly. The only reserved axes over the mechanical-and-fluids stack are the
+    // three acoustic channel-physics axes added 2026-07-03, whose ranges are surfaced reserved-with-
+    // basis (the owner's to set, never fabricated), the reserved-value discipline.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     let (lo, hi) = reg
@@ -63,10 +65,14 @@ fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
         .unwrap();
     assert_eq!(lo, Fixed::from_ratio(1, 100000), "0.00001 Pa*s (air)");
     assert_eq!(hi, Fixed::from_int(100), "100 Pa*s (lava end)");
-    assert!(
-        reg.reserved_axis_ids().is_empty(),
-        "the fluids and geometry ranges are all graduated, got reserved {:?}",
-        reg.reserved_axis_ids()
+    assert_eq!(
+        reg.reserved_axis_ids(),
+        vec![
+            "acoustic.absorption_reference",
+            "acoustic.formant_frequency",
+            "acoustic.resonator_length",
+        ],
+        "exactly the three new acoustic axes are reserved-with-basis"
     );
 }
 
@@ -327,4 +333,224 @@ fn reynolds_gates_the_regime_and_the_kernels_replay() {
         Fixed::from_int(100000),
     );
     assert_eq!(a, b, "the same inputs replay bit for bit");
+}
+
+// --- Acoustic channel physics (2026-07-03): frequency-squared absorption and quarter-wave tube
+// resonance, and the non-steering divergence the perceptual-geometry read-out derives over. ---
+
+#[test]
+fn the_acoustic_laws_load_and_pass_the_graph_dimensional_check() {
+    // Load proof: the two new laws bind their kernels, their monomials close on the produced axes
+    // (alpha = beta*f^2 reduces to 1/m; c/L reduces to Hz), and the three acoustic axes are present,
+    // so the dimensional-neutrality check at load accepts both. Both read only ground axes (a reserved
+    // range is still a ground axis), so they derive to tier 1.
+    let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
+    reg.extend(data_path("fluids_floor.toml")).unwrap();
+    assert!(reg.law("law.acoustic_absorption").is_some());
+    assert!(reg.law("law.tube_resonance").is_some());
+    assert!(reg.axis("acoustic.absorption_reference").is_some());
+    assert!(reg.axis("acoustic.resonator_length").is_some());
+    assert!(reg.axis("acoustic.formant_frequency").is_some());
+    assert_eq!(reg.derived_tier("law.acoustic_absorption"), Some(1));
+    assert_eq!(reg.derived_tier("law.tube_resonance"), Some(1));
+}
+
+#[test]
+fn a_wrong_absorption_dimension_fails_loud() {
+    // The absorption monomial is checked, not asserted: wiring the reference to a plain 1/m axis (one
+    // that drops the residual 1/Hz^2) makes beta*f^2 reduce to 1/(m*s^2), not 1/m, and the load rejects
+    // it. The closed-monomial discipline: a checkable law is verified, never waived to Asserted.
+    let toml = r#"
+[[axis]]
+id = "acoustic.frequency"
+dimension = "0,0,-1,0"
+scale = "Hz"
+range_lo = "1"
+range_hi = "200000"
+real = "audition"
+
+[[axis]]
+id = "acoustic.bad_reference"
+dimension = "-1,0,0,0"
+scale = "1/m"
+range_lo = "0"
+range_hi = "1"
+real = "a mis-dimensioned reference"
+
+[[axis]]
+id = "acoustic.absorption_coefficient"
+dimension = "-1,0,0,0"
+scale = "1/m"
+range_lo = "0"
+range_hi = "10"
+real = "absorption"
+
+[[law]]
+id = "law.acoustic_absorption"
+kernel = "acoustic_absorption"
+ports = [
+  { role = "reference", axis = "acoustic.bad_reference" },
+  { role = "frequency", axis = "acoustic.frequency" },
+]
+produces = ["acoustic.absorption_coefficient"]
+dimension = "-1,0,0,0"
+"#;
+    assert!(
+        matches!(
+            PhysicsRegistry::from_toml_str(toml).unwrap_err(),
+            civsim_physics::PhysicsError::DimensionUnreachable { .. }
+        ),
+        "a reference that drops the 1/Hz^2 residual must fail the monomial check"
+    );
+}
+
+#[test]
+fn absorption_rises_with_frequency_and_saturates() {
+    let alpha_max = Fixed::from_int(10);
+    // A representative reference (scale-bridged; the true SI beta is sub-epsilon, its exact bridge the
+    // reserved R-UNITS-PIN per-quantity scale), chosen so the audible band stays below the cap.
+    let beta = f(1, 1000000);
+    let low = laws::acoustic_absorption(beta, Fixed::from_int(100), alpha_max);
+    let mid = laws::acoustic_absorption(beta, Fixed::from_int(200), alpha_max);
+    let high = laws::acoustic_absorption(beta, Fixed::from_int(300), alpha_max);
+    assert!(
+        low < mid && mid < high,
+        "absorption rises with frequency (f^2)"
+    );
+    assert!(
+        mid.to_f64_lossy() > 3.5 * low.to_f64_lossy(),
+        "doubling frequency quadruples absorption"
+    );
+    assert_eq!(
+        laws::acoustic_absorption(beta, Fixed::ZERO, alpha_max),
+        Fixed::ZERO,
+        "zero frequency, no absorption"
+    );
+    assert_eq!(
+        laws::acoustic_absorption(beta, Fixed::from_int(200000), alpha_max),
+        alpha_max,
+        "an ultrasonic frequency past the overflow-safe ceiling saturates, never wraps"
+    );
+    // A huge reference overflows the staged product and routes to the cap, never wraps.
+    assert_eq!(
+        laws::acoustic_absorption(
+            Fixed::from_int(1_000_000),
+            Fixed::from_int(40000),
+            alpha_max
+        ),
+        alpha_max
+    );
+}
+
+#[test]
+fn resonance_rises_with_speed_and_falls_with_length_and_hits_human_formants() {
+    let freq_max = Fixed::from_int(100000);
+    let l = f(17, 100); // 0.17 m, a neutral human vocal tract
+    let air_c = Fixed::from_int(343);
+    // HUMAN ROW: L = 0.17 m in air (c = 343 m/s) yields the schwa formant series near 500/1500/2500 Hz,
+    // the closed-open quarter-wave odd-harmonic series (F1..F3 in the cardinal-vowel formant range).
+    let f1 = laws::tube_resonance(Fixed::from_int(1), air_c, l, freq_max).to_f64_lossy();
+    let f2 = laws::tube_resonance(Fixed::from_int(2), air_c, l, freq_max).to_f64_lossy();
+    let f3 = laws::tube_resonance(Fixed::from_int(3), air_c, l, freq_max).to_f64_lossy();
+    assert!(
+        (250.0..800.0).contains(&f1),
+        "F1 in the cardinal-vowel range, got {f1}"
+    );
+    assert!(
+        (600.0..2300.0).contains(&f2),
+        "F2 in the cardinal-vowel range, got {f2}"
+    );
+    assert!((2200.0..2800.0).contains(&f3), "F3 near 2500, got {f3}");
+    assert!(f1 < f2 && f2 < f3, "the odd-harmonic series rises");
+    // Rises with the sound speed, falls with the resonator length.
+    let faster = laws::tube_resonance(Fixed::from_int(1), Fixed::from_int(1480), l, freq_max);
+    let slower = laws::tube_resonance(Fixed::from_int(1), air_c, l, freq_max);
+    assert!(faster > slower, "a faster medium resonates higher");
+    let longer = laws::tube_resonance(Fixed::from_int(1), air_c, f(34, 100), freq_max);
+    let shorter = laws::tube_resonance(Fixed::from_int(1), air_c, f(17, 100), freq_max);
+    assert!(longer < shorter, "a longer tube resonates lower");
+}
+
+#[test]
+fn tube_resonance_overflow_and_zero_guards() {
+    let freq_max = Fixed::from_int(100000);
+    let air_c = Fixed::from_int(343);
+    // A near-zero length overflows the divide and reads the cap, never wraps.
+    assert_eq!(
+        laws::tube_resonance(Fixed::from_int(1), air_c, Fixed::from_bits(1), freq_max),
+        freq_max,
+        "a near-zero tube reads the cap"
+    );
+    assert_eq!(
+        laws::tube_resonance(Fixed::from_int(1), air_c, Fixed::ZERO, freq_max),
+        freq_max
+    );
+    // Zero sound speed reads zero (no medium, no resonance).
+    assert_eq!(
+        laws::tube_resonance(Fixed::from_int(1), Fixed::ZERO, f(17, 100), freq_max),
+        Fixed::ZERO
+    );
+    // A non-positive mode has no resonance.
+    assert_eq!(
+        laws::tube_resonance(Fixed::ZERO, air_c, f(17, 100), freq_max),
+        Fixed::ZERO
+    );
+}
+
+#[test]
+fn the_acoustic_kernels_are_deterministic() {
+    let alpha_max = Fixed::from_int(10);
+    let freq_max = Fixed::from_int(100000);
+    let a = laws::acoustic_absorption(f(1, 1000000), Fixed::from_int(440), alpha_max);
+    let b = laws::acoustic_absorption(f(1, 1000000), Fixed::from_int(440), alpha_max);
+    assert_eq!(a, b, "absorption replays bit for bit");
+    let r1 = laws::tube_resonance(
+        Fixed::from_int(2),
+        Fixed::from_int(343),
+        f(17, 100),
+        freq_max,
+    );
+    let r2 = laws::tube_resonance(
+        Fixed::from_int(2),
+        Fixed::from_int(343),
+        f(17, 100),
+        freq_max,
+    );
+    assert_eq!(r1, r2, "resonance replays bit for bit");
+}
+
+#[test]
+fn two_media_diverge_in_formants_from_physics_alone_no_authored_table() {
+    // The non-steering divergence (Principle 9): the SAME resonator length fed through tube_resonance
+    // in two real media gives two different formant vectors, purely because each medium's sound speed
+    // differs (c from law.speed_of_sound over its floor bulk_modulus and density). No per-race
+    // confusability table, no RaceId: the derived geometry diverges from the channel physics alone.
+    let c_max = Fixed::from_int(100000);
+    let freq_max = Fixed::from_int(100000);
+    let air = laws::speed_of_sound(f(142, 1000), f(1225, 1000), c_max); // ~340 m/s
+    let water = laws::speed_of_sound(Fixed::from_int(2200), Fixed::from_int(998), c_max); // ~1480 m/s
+    let l = f(17, 100);
+    let air_f: Vec<Fixed> = (1..=3)
+        .map(|n| laws::tube_resonance(Fixed::from_int(n), air, l, freq_max))
+        .collect();
+    let water_f: Vec<Fixed> = (1..=3)
+        .map(|n| laws::tube_resonance(Fixed::from_int(n), water, l, freq_max))
+        .collect();
+    assert_ne!(
+        air_f, water_f,
+        "the same length in two media gives different formant vectors"
+    );
+    for (a, w) in air_f.iter().zip(&water_f) {
+        assert!(
+            w > a,
+            "the faster medium raises every formant, monotone in c"
+        );
+    }
+    // Neither vector is a hardcoded reference: the air F1 is the physics-derived schwa value, not a
+    // round authored 500 Hz.
+    assert_ne!(
+        air_f[0],
+        Fixed::from_int(500),
+        "no authored reference table; the value is derived from physics"
+    );
 }
