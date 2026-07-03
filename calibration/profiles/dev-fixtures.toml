@@ -163,13 +163,10 @@ value = "1.0"
 unit = "probability"
 source = "dev fixture for Part 33.4 drift"
 
-[[reserved]]
-id = "language.generation_ticks"
-basis = "FIXTURE placeholder, not the owner's value; a short generation so several form changes land in a 40-tick demo"
-status = "set"
-value = "4"
-unit = "ticks"
-source = "dev fixture for Part 33.4 drift"
+# language.generation_ticks RETIRED (per-lineage drift cadence built, 2026-07-03): the drift cadence
+# now derives per lineage from the speaking race's maturity_years times the world's life_cadence_ticks
+# (world::drift_languages), so this global-generation fixture is no longer read. A demo shrinks the
+# life cadence and sets a small race maturity instead (see crates/sim/tests/drift.rs).
 
 # --- celestial and time (Parts 14.6, 20, 32) ---
 

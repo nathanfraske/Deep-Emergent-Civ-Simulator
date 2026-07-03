@@ -49,6 +49,7 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 use crate::body::{Body, FunctionId};
+use crate::language::FeatureValueId;
 use crate::sensorium::{SenseChannelId, Sensorium};
 
 /// Caller-supplied caps and the structural mode count for a perceptual-geometry read-out. These are
@@ -325,6 +326,79 @@ pub fn capability_gate(
     .gate()
 }
 
+/// The acquisition split of a being on one communication channel: its perceive capability minus its
+/// produce capability, in `[-ONE, ONE]` (design Part 33.6, the R-LANG-MODALITY acquisition work).
+/// The receptive-bilingual asymmetry, where a learner understands more of a language than it can
+/// produce, is not an authored bias: it falls straight out of the gap between the two capability
+/// halves [`capability_halves`] already computes. A positive split (perception outstrips production)
+/// is the receptive learner; a negative split the reverse; a zero split a channel matched in both
+/// halves. The mechanism reads the same body, sensorium, and reserved threshold as the capability
+/// gate, so two races diverge only through their body integrity and sensorium acuity data run
+/// through one kernel, never a race branch (Principle 9), and it is a pure, float-free, saturating
+/// function that replays bit for bit (Principle 3).
+pub fn acquisition_split(
+    body: &Body,
+    produce_function: FunctionId,
+    sensorium: &Sensorium,
+    channel: SenseChannelId,
+    function_loss_threshold: Fixed,
+) -> Fixed {
+    let halves = capability_halves(
+        body,
+        produce_function,
+        sensorium,
+        channel,
+        function_loss_threshold,
+    );
+    sat_sub(halves.perception, halves.production)
+}
+
+/// A dispersion prior over a race's own producible-sound geometry: for each feature value, a
+/// spread-maximising weight that is higher where the value is more distinguishable from the rest of
+/// the inventory, masked by the being's capability on that value (design Part 33.3, the
+/// R-LANG-MODALITY / R-LANG-DET phoneme-prior seam). This replaces an authored phoneme inventory:
+/// UPSID and PHOIBLE describe the human vocal tract's confusability geometry, so they become the
+/// human race's data row (its resonator lengths and sensorium acuity, read through
+/// [`perceptual_geometry`]) rather than the global prior every race is pulled toward. A value's
+/// distinctiveness is the sum over the other values of `ONE / (ONE + confusability)`, so a value
+/// well separated from the rest scores high and a value confusable with many scores low; the
+/// per-value capability `gate` then masks it, so a value the race cannot produce or perceive (gate
+/// zero) gets zero prior, and a partly-producible value is scaled down. No race id enters and no
+/// human inventory is authored (Principle 9): two races with different confusability geometry (from
+/// different media or vocal geometries, through [`perceptual_geometry`]) get different priors from
+/// the one kernel.
+///
+/// The prior is returned in feature-value order, the same order the geometry was built from its
+/// values, each paired with [`FeatureValueId`] carrying that index; a caller with arbitrary value
+/// ids zips the returned priors with its own value list, which the geometry was built in step with.
+/// `gate` shorter than the value count masks the missing tail to zero (an unrated value is not
+/// producible). Pure fixed-point over a canonical walk, so it replays bit for bit.
+pub fn phoneme_priors(geo: &PerceptualGeometry, gate: &[Fixed]) -> Vec<(FeatureValueId, Fixed)> {
+    let n = geo.formants().len();
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        // The value's total distinctiveness: how separable it is from every other value, summed as
+        // ONE / (ONE + confusability). A distinct pair (low confusability) contributes near ONE, a
+        // confusable pair (high confusability) contributes near zero.
+        let distinctiveness = Fixed::saturating_sum((0..n).filter(|&j| j != i).map(|j| {
+            let conf = geo.confusability_of(i, j).unwrap_or(Fixed::ZERO);
+            Fixed::ONE
+                .checked_div(Fixed::ONE.saturating_add(conf))
+                .unwrap_or(Fixed::ZERO)
+        }));
+        // The capability mask: a value the race cannot produce or perceive (gate zero) is masked to
+        // zero prior; a partly-producible value scales its dispersion by its capability.
+        let cap = gate.get(i).copied().unwrap_or(Fixed::ZERO);
+        let prior = if cap <= Fixed::ZERO {
+            Fixed::ZERO
+        } else {
+            distinctiveness.checked_mul(cap).unwrap_or(Fixed::ZERO)
+        };
+        out.push((FeatureValueId(i as u32), prior));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +648,75 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn phoneme_priors_differ_by_geometry_and_mask_below_the_gate_no_raceid() {
+        // The dispersion prior derives from the race's OWN confusability geometry, not an authored
+        // human inventory. The same lengths in two media (air, water) give two confusability
+        // geometries, so two different phoneme priors, from the channel physics alone. The function
+        // reads no race id and no phoneme table.
+        let jnd = Fixed::from_int(50);
+        let beta = ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        let air = perceptual_geometry(
+            &lengths(),
+            air_speed(),
+            beta,
+            path,
+            &ear(jnd),
+            HEARING,
+            params(),
+        )
+        .unwrap();
+        let water = perceptual_geometry(
+            &lengths(),
+            water_speed(),
+            beta,
+            path,
+            &ear(jnd),
+            HEARING,
+            params(),
+        )
+        .unwrap();
+        let n = lengths().len();
+        let full_gate = vec![Fixed::ONE; n];
+        let pa = phoneme_priors(&air, &full_gate);
+        let pw = phoneme_priors(&water, &full_gate);
+        assert_eq!(pa.len(), n, "one prior per feature value");
+        assert_ne!(
+            pa, pw,
+            "two media give two different phoneme priors (no authored inventory, no RaceId)"
+        );
+        // Returned in feature-value order, each a non-negative producible prior.
+        for (idx, (id, prior)) in pa.iter().enumerate() {
+            assert_eq!(id.0 as usize, idx, "priors returned in feature-value order");
+            assert!(*prior > Fixed::ZERO, "a producible value carries a prior");
+        }
+        // Masking: a value the race cannot produce or perceive (gate zero) gets zero prior; the
+        // producible siblings keep theirs.
+        let mut masked = vec![Fixed::ONE; n];
+        masked[1] = Fixed::ZERO;
+        let pm = phoneme_priors(&air, &masked);
+        assert_eq!(
+            pm[1].1,
+            Fixed::ZERO,
+            "a value below the gate gets zero prior"
+        );
+        assert!(
+            pm[0].1 > Fixed::ZERO && pm[2].1 > Fixed::ZERO,
+            "the producible values keep a prior"
+        );
+        // A partly-producible value scales its prior down (mask is multiplicative, not just binary).
+        let mut half = vec![Fixed::ONE; n];
+        half[0] = Fixed::from_ratio(1, 2);
+        let ph = phoneme_priors(&air, &half);
+        assert!(
+            ph[0].1 < pa[0].1 && ph[0].1 > Fixed::ZERO,
+            "a half-producible value keeps a reduced, positive prior"
+        );
+        // Deterministic replay.
+        assert_eq!(phoneme_priors(&air, &full_gate), pa);
+    }
 }
 
 #[cfg(test)]
@@ -725,5 +868,55 @@ mod capability_gate_tests {
             capability_gate(&b, F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD).to_bits()
         };
         assert_eq!(run(), run(), "the same inputs gate to the same bits");
+    }
+
+    #[test]
+    fn the_acquisition_split_is_perceive_minus_produce_and_mirrors_on_swap_no_raceid() {
+        // A being strong in perception, weak in production: a full ear, a manual channel weakened by
+        // a lost limb (production degraded below full, perception intact). The split is the perceive
+        // minus produce gap, positive: the receptive-bilingual asymmetry falls out of the gap, not
+        // an authored bias. The function reads no race id.
+        let mut perceptive = body();
+        let limb = perceptive
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
+        perceptive.parts[limb].condition.severed = true;
+        let full_ear = Sensorium::with([(VOICE, Fixed::ONE)]);
+        let halves = capability_halves(&perceptive, F_LOCOMOTION, &full_ear, VOICE, LOSS_THRESHOLD);
+        assert!(
+            halves.perception > halves.production,
+            "a keen ear, a weakened voice"
+        );
+        let split = acquisition_split(&perceptive, F_LOCOMOTION, &full_ear, VOICE, LOSS_THRESHOLD);
+        assert!(
+            split > Fixed::ZERO,
+            "the receptive learner: perceive outstrips produce"
+        );
+
+        // The swap gives the mirror: an intact voice (production full) and an ear tuned to the
+        // earlier production level (perception equal to that production), so the split is exactly
+        // negated. Two halves swapped, one kernel.
+        let prod = halves.production;
+        let intact = body();
+        let tuned_ear = Sensorium::with([(VOICE, prod)]);
+        let mirror = acquisition_split(&intact, F_LOCOMOTION, &tuned_ear, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            mirror.to_bits(),
+            -split.to_bits(),
+            "the swap gives the mirror split"
+        );
+
+        // Equal halves split to zero: a full voice and a full ear.
+        let full = body();
+        let matched = Sensorium::with([(VOICE, Fixed::ONE)]);
+        let zero = acquisition_split(&full, F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
+        assert_eq!(zero, Fixed::ZERO, "equal halves split zero");
+
+        // Two races with identical body and sensorium data split identically: no race id enters.
+        let a = acquisition_split(&body(), F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
+        let b = acquisition_split(&body(), F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
+        assert_eq!(a, b, "identical data splits to identical bits");
     }
 }

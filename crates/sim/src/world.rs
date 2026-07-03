@@ -397,6 +397,17 @@ pub struct World {
     /// (see [`World::apply_mortality_by_race`]) rather than a single hardcoded scale. A being with
     /// no entry is untracked, and a race-keyed pass falls back to its raw-age behaviour for it.
     race_of: BTreeMap<StableId, RaceId>,
+    /// The race records the world knows, by id (design Part 20, Part 33.4). Populated at the dawn by
+    /// [`World::seed_dawn_populations`] (which already receives the registry) and settable directly
+    /// with [`World::set_races`]. It is the registry the per-lineage drift cadence reads: a
+    /// lineage's [`Language::race`] is looked up here for its `maturity_years`, so drift derives its
+    /// generation length per lineage (see [`World::drift_languages`]) rather than one global scalar.
+    /// A lineage whose race is absent has no maturity to derive a cadence from and does not drift (a
+    /// fabricated cadence is never invented, Principle 11). This is owner config, not per-tick state:
+    /// like the manifest and the mortality curve it is not folded into [`World::state_hash`] (the
+    /// lineage's race id is folded there, so a divergent race assignment still shows up); the
+    /// observable divergence is the drift the derived cadence produces over time.
+    races: BTreeMap<RaceId, Race>,
     /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
     /// with no entry reads every channel, so perception is gated only where a sensorium is set.
     sensorium: BTreeMap<StableId, Sensorium>,
@@ -500,6 +511,7 @@ impl World {
             affect: BTreeMap::new(),
             ages: BTreeMap::new(),
             race_of: BTreeMap::new(),
+            races: BTreeMap::new(),
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
@@ -807,10 +819,27 @@ impl World {
     /// Install the articulation system words are built from (data) as the default lineage
     /// (`LangId(0)`), which every mind speaks unless assigned otherwise. Until set, the naming
     /// game is a no-op. For several lineages, use [`World::add_language`] and
-    /// [`World::set_language_of`].
+    /// [`World::set_language_of`]. The default lineage belongs to [`RaceId`] zero (the conventional
+    /// first race, matching how [`World::lang_of_mind`] defaults to [`LangId`] zero); use
+    /// [`World::set_form_system_for`] to place it on a named race, which the drift cadence reads.
     pub fn set_form_system(&mut self, fs: FormSystem) {
+        self.set_form_system_for(RaceId(0), fs);
+    }
+
+    /// Install the default-lineage articulation system on a named race, whose `maturity_years` the
+    /// per-lineage drift cadence derives its generation length from (design Part 33.4). The race
+    /// must be present in the world's registry (through [`World::set_races`] or the dawn seeding)
+    /// for that lineage to drift.
+    pub fn set_form_system_for(&mut self, race: RaceId, fs: FormSystem) {
         self.languages
-            .insert(LangId(0), Language::new(LangId(0), fs));
+            .insert(LangId(0), Language::new(LangId(0), race, fs));
+    }
+
+    /// Install the race records the world knows, by id (design Part 20, Part 33.4). This is the
+    /// registry the per-lineage drift cadence reads for each lineage's `maturity_years`; the dawn
+    /// seeding populates it automatically, and a test or a lineage-only world sets it directly.
+    pub fn set_races(&mut self, races: BTreeMap<RaceId, Race>) {
+        self.races = races;
     }
 
     /// Register a language lineage (its own articulation system, change log, and parent).
@@ -906,6 +935,11 @@ impl World {
         bands: &[BandSpec],
         ring_law: &RingCapacityLaw,
     ) -> Vec<StableId> {
+        // Record the race registry so the per-lineage drift cadence can read each lineage's race
+        // maturity without the registry being threaded through every tick (design Part 33.4).
+        for (id, race) in races {
+            self.races.entry(*id).or_insert_with(|| race.clone());
+        }
         let mut seeded = Vec::new();
         for band in bands {
             let Some(race) = races.get(&band.race) else {
@@ -1815,7 +1849,7 @@ impl World {
         self.converse();
         self.gossip();
         self.converse_language();
-        self.drift_languages();
+        self.drift_step();
         self.life_cadence();
     }
 
@@ -1848,7 +1882,7 @@ impl World {
         self.converse_language();
         ns[4] = s.elapsed().as_nanos();
         let s = Instant::now();
-        self.drift_languages();
+        self.drift_step();
         ns[5] = s.elapsed().as_nanos();
         // The coarse life beat runs after the six cognition phases so tick_timed produces the same
         // state tick would; it is not one of the profiled six (it fires only on the cadence period).
@@ -1927,26 +1961,58 @@ impl World {
         }
     }
 
+    /// The tick's drift beat: run [`World::drift_languages`] against the world's own race registry.
+    /// The registry is moved out and back rather than borrowed so the drift pass can hold `&mut
+    /// self` for the lexicon rewrites while reading each lineage's race maturity; the move is a
+    /// cheap pointer swap and cannot change the state, so replay is bit-identical.
+    fn drift_step(&mut self) {
+        let races = std::mem::take(&mut self.races);
+        self.drift_languages(&races);
+        self.races = races;
+    }
+
     /// The drift step (design 33.4): once per generation each lineage may innovate a regular
     /// form change, which is then applied in innovation order to every word its speakers hold,
     /// so the lineage's lexicon drifts as a unit and two separated lineages diverge into
-    /// sisters. A no-op until the drift calibration is set. Deterministic: each lineage's
-    /// innovation is keyed by counter RNG on the lineage, the generation, and the phase, and
-    /// the speaker walk is id-ordered.
-    fn drift_languages(&mut self) {
+    /// sisters. The generation length is not one global scalar: it DERIVES per lineage from the
+    /// speaking race's `maturity_years` against the world's `life_cadence_ticks` (the orbital year
+    /// in ticks), so lineages of races with different maturities drift on different cadences from
+    /// one mechanism, and `races` is the registry the per-lineage race maturity is read from. A
+    /// no-op until the drift calibration is set, and a lineage whose race is absent does not drift.
+    /// Deterministic: each lineage's innovation is keyed by counter RNG on the lineage, its own
+    /// generation, and the phase, and the speaker walk is id-ordered.
+    fn drift_languages(&mut self, races: &BTreeMap<RaceId, Race>) {
         let params = match self.drift {
             Some(p) => p,
             None => return,
         };
-        if self.languages.is_empty()
-            || self.clock == 0
-            || !self.clock.is_multiple_of(params.generation_ticks)
-        {
+        if self.languages.is_empty() || self.clock == 0 {
             return;
         }
-        let generation = self.clock / params.generation_ticks;
+        let base_cadence = self.life_cadence_ticks;
         let lang_ids: Vec<LangId> = self.languages.keys().copied().collect();
         for lang_id in lang_ids {
+            // The drift cadence DERIVES per lineage from the speaking race's own maturity: a
+            // generation is that race's `maturity_years` in world-time, its maturity times the
+            // orbital year in ticks (`life_cadence_ticks`, itself derived from the world's orbit).
+            // Two lineages of races with different `maturity_years` therefore beat drift on
+            // different cadences from this one mechanism, retiring the single Earth-year scalar. A
+            // lineage whose race is absent from the registry has no maturity to derive a cadence
+            // from and does not drift (a fabricated cadence is never invented, Principle 11).
+            let Some(race) = self
+                .languages
+                .get(&lang_id)
+                .and_then(|l| races.get(&l.race()))
+            else {
+                continue;
+            };
+            let cadence = (race.maturity_years as u64)
+                .saturating_mul(base_cadence)
+                .max(1);
+            if !self.clock.is_multiple_of(cadence) {
+                continue;
+            }
+            let generation = self.clock / cadence;
             let rng = DrawKey::entity(lang_id.0 as u64, generation, Phase::DRIFT).rng(self.seed);
             let new_rules = match self.languages.get_mut(&lang_id) {
                 Some(l) => l.innovate(rng, &params),
@@ -2799,9 +2865,11 @@ impl World {
                 }
             }
         }
-        // Language lineages, by id: parent and the regular-form-change log.
+        // Language lineages, by id: race (the drift-cadence datum), parent, and the
+        // regular-form-change log.
         for (id, lang) in &self.languages {
             h.write_u32(id.0);
+            h.write_u32(lang.race().0);
             h.write_u32(lang.parent().map(|p| p.0).unwrap_or(u32::MAX));
             for rule in lang.change_log() {
                 h.write_u32(rule.dim.0);

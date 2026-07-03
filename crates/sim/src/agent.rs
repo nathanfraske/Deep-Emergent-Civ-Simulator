@@ -39,6 +39,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::decision::Curve;
 use crate::evidence::{AttrKindId, InferenceFrame, InferenceParams, ValueId};
 use crate::genome::{Channel, CognitionChannel, GeneSet, Genome};
 use crate::tom::{
@@ -88,9 +89,11 @@ pub struct Mind {
     /// read by [`Mind::consider`], [`Mind::model`], and the world's perception roll.
     pub acuity: Fixed,
     /// The mind's memory capacity (design Part 25.6): it governs belief deterioration (Part
-    /// 9), how well a belief resists decay over time. Carried from the genome; its consumer,
-    /// the deterioration step, is the named follow-on, so this is the phenotype the engine
-    /// holds ready rather than a live modifier yet. Neutral (no modulation) at [`Fixed::ONE`].
+    /// 9), how well a belief resists decay over time. Carried from the genome; its consumer is
+    /// [`RetentionLaw`], which scales a retention window by this memory (a sharper mind holds a
+    /// belief or a usage-recency window longer), so the phenotype now has a derived law that reads
+    /// it. Wiring that law into the canonical deterioration step of the tick is the named follow-on.
+    /// Neutral (no modulation) at [`Fixed::ONE`].
     pub memory: Fixed,
     /// The mind's belief plasticity (design Part 25.6, Part 20): it governs how readily
     /// beliefs update under new evidence. Carried from the genome; its consumer, the
@@ -359,6 +362,43 @@ impl Mind {
     }
 }
 
+/// The retention law: how long a memory-governed window lasts, as a function of a mind's memory
+/// capacity (design Parts 9 and 25.6, the belief-deterioration consumer of [`Mind::memory`]). A
+/// window over the mind's history, a belief-deterioration span or the R-LANG-DET usage-recency
+/// window, is not one fixed length: a sharper-memoried mind holds it longer. The law scales a base
+/// window (in ticks) by a data [`Curve`] read at the mind's memory, so the same base window becomes
+/// a longer effective window in a high-memory mind and a shorter one in a forgetful mind. The
+/// mechanism is fixed Rust; the base window and the curve are data (Principle 11), and the law keys
+/// on the memory scalar, never a race id (Principle 9), so it differentiates per being and per race
+/// from one rule. The usage-recency window reads it at the representative memory (the band's mean
+/// memory) with the base window `langdet.usage_recency_window` and the scaling curve
+/// `langdet.retention_memory_scale`.
+#[derive(Clone, Debug)]
+pub struct RetentionLaw {
+    /// The window-scaling curve: a memory capacity in, a multiplier on the base window out. Owner
+    /// data; an increasing curve lengthens the window for a sharper memory, and a flat curve yields
+    /// the base window for every memory (the memory-independent special case).
+    pub scale_by_memory: Curve,
+}
+
+impl RetentionLaw {
+    /// The retention window in whole ticks for a mind of the given `memory`, scaling `base_window`
+    /// by the curve read at that memory. The multiply and the floor are done in i128 so a large base
+    /// window cannot overflow the fixed-point grid, and the result is floored at one tick (a window
+    /// is never zero-length). A non-positive scale (a curve dipping below zero) floors to one tick
+    /// rather than vanishing. A pure, deterministic function of its inputs, so it replays bit for bit
+    /// and carries no race branch.
+    pub fn window_ticks_for(&self, memory: Fixed, base_window: u64) -> u64 {
+        let scale_bits = self.scale_by_memory.eval(memory).to_bits().max(0) as i128;
+        // base_window * scale, with scale carried as its Q32.32 bits: the product is
+        // base_window * scale * 2^32, and the arithmetic shift right by the fractional bits is the
+        // exact floor to whole ticks.
+        let product = (base_window as i128) * scale_bits;
+        let ticks = (product >> Fixed::FRAC_BITS) as u64;
+        ticks.max(1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,5 +590,57 @@ mod tests {
         );
 
         assert_eq!(a.state_hash(&p, &p), b.state_hash(&p, &p));
+    }
+
+    #[test]
+    fn a_retention_window_scales_with_memory_and_a_flat_curve_holds_one_window_no_raceid() {
+        // An increasing scale curve: memory 0 keeps the base window, memory 1 doubles it. A sharper
+        // mind holds the window longer, from the memory scalar alone, no race id anywhere.
+        let law = RetentionLaw {
+            scale_by_memory: Curve::new([
+                (Fixed::ZERO, Fixed::ONE),
+                (Fixed::ONE, Fixed::from_int(2)),
+            ]),
+        };
+        let base = 1000u64;
+        let forgetful = law.window_ticks_for(Fixed::ZERO, base);
+        let sharp = law.window_ticks_for(Fixed::ONE, base);
+        assert_eq!(forgetful, base, "the base window at the low-memory end");
+        assert_eq!(sharp, 2 * base, "a sharper memory holds the window longer");
+        assert!(
+            sharp > forgetful,
+            "different memory gives different windows ({sharp} > {forgetful})"
+        );
+        // A mid-memory mind reads a window between the two ends (the curve interpolates).
+        let mid = law.window_ticks_for(Fixed::from_ratio(1, 2), base);
+        assert!(
+            mid > forgetful && mid < sharp,
+            "a mid memory reads a mid window"
+        );
+
+        // A flat curve reproduces one window for every memory: the memory channel is switched off,
+        // the degenerate single-window special case.
+        let flat = RetentionLaw {
+            scale_by_memory: Curve::new([
+                (Fixed::ZERO, Fixed::from_int(3)),
+                (Fixed::ONE, Fixed::from_int(3)),
+            ]),
+        };
+        let w0 = flat.window_ticks_for(Fixed::ZERO, base);
+        let w1 = flat.window_ticks_for(Fixed::from_ratio(1, 2), base);
+        let w2 = flat.window_ticks_for(Fixed::from_int(4), base);
+        assert_eq!(w0, 3 * base);
+        assert_eq!(w0, w1);
+        assert_eq!(w1, w2);
+
+        // A large base window does not overflow the fixed-point grid (the i128 multiply), and the
+        // window is never zero-length.
+        let big = law.window_ticks_for(Fixed::ONE, 31_536_000);
+        assert_eq!(big, 63_072_000);
+        assert_eq!(
+            law.window_ticks_for(Fixed::ZERO, 0),
+            1,
+            "a window is at least one tick"
+        );
     }
 }

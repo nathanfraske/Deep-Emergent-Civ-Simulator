@@ -109,7 +109,7 @@ pub use absence::{
     LIFESPAN_HAZARD_THRESHOLD,
 };
 pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
-pub use agent::{AccessObs, Mind, SharedBelief};
+pub use agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
     enculturation_pull_rate, entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef,
@@ -173,11 +173,13 @@ pub use institution::{
     FunctionVec, Institution, Norm, NormType, Predicate, RecognitionTemplate, Role, RoleId,
     TemplateId, TemplateLibrary, STRUCTURAL_FEATURES,
 };
-pub use langmod::{capability_gate, capability_halves, CapabilityGate};
+pub use langmod::{
+    acquisition_split, capability_gate, capability_halves, phoneme_priors, CapabilityGate,
+};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
-    FormSegment, FormSystem, LanguageParams, Lexicon, Linearization, ProductionModalityDef,
-    ProductionModalityId, SalienceDecayLaw, Word,
+    FormSegment, FormSystem, L2AcquisitionLaw, LangKnowledge, LanguageParams, Lexicon,
+    Linearization, ProductionModalityDef, ProductionModalityId, SalienceDecayLaw, Word,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};

@@ -379,11 +379,11 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.phoneme_priors"
-basis = "DERIVE per race, worksheet §13b: sample the inventory from the race's own producible-sound set, its perceptual_geometry, and its capability_gates; UPSID/PHOIBLE priors are the human vocal tract's system and become the human race's data row, never the global prior."
+basis = "DERIVES (2026-07-03) through langmod::phoneme_priors (crates/sim/src/langmod.rs): a spread-maximising dispersion prior over the race's OWN perceptual_geometry confusability, higher where a feature value is more distinguishable from the rest of the inventory (each value's prior is the sum over the others of 1/(1+confusability)), then MASKED by the per-value capability gate so a value the race cannot produce or perceive gets zero prior and a partly-producible one scales down. UPSID/PHOIBLE describe the human vocal tract's confusability geometry, so they become the human race's DATA ROW (its resonator lengths and sensorium acuity, read through langmod::perceptual_geometry) rather than the global prior. Two races with different confusability geometry (different media or vocal geometries) get different priors from the one kernel, with no authored human inventory and no race id (Principle 9). The reserved inputs are the same physics-and-sensorium data perceptual_geometry reads plus the per-feature-value resonator_length now carried on FeatureValueDef; no separate prior table remains."
 status = "reserved"
 value = ""
 unit = "prior"
-source = "Part 33 language system; record 62.7; audit section 1g"
+source = "Part 33 language system; record 62.7; audit section 1g; Part 33.3 record 62.13"
 
 [[reserved]]
 id = "lang.drift_operator_rates"
@@ -405,11 +405,11 @@ source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET rec
 
 [[reserved]]
 id = "lang.l2_acquisition"
-basis = "DERIVE per race, worksheet §13b: the age-of-acquisition breakpoint falls out of each race's neuro-maturation (being.plasticity_by_age, R-AGING); 'after the late teens' is the human critical period and must not be fixed for every race."
+basis = "DERIVES (2026-07-03) through language::L2AcquisitionLaw::increment_for (crates/sim/src/language.rs): the per-tick second-language proficiency increment is a DECREASING data curve read at the learner's maturation fraction (Race::maturation_fraction, raw age normalized by that race's own maturity_years). The age-of-acquisition breakpoint is therefore each race's own maturity, not the human late teens: two races with different maturity_years cross the critical period at different raw ages from this one kernel and one curve, never a per-race branch (Principle 9), and the increment slows to the curve's adult residual once the fraction saturates at one (maturity). The reserved input is this increment-by-maturation curve (parsed by require_curve as maturation_fraction=increment points, decreasing; a flat curve is the no-critical-period special case); no shared human age remains. The mechanism is fixed Rust, the curve is data (Principle 11)."
 status = "reserved"
 value = ""
-unit = "rate"
-source = "Part 33 language system; record 62.7; audit section 1g"
+unit = "curve"
+source = "Part 33.6 language system; record 62.7; audit section 1g; Part 20 R-AGING"
 
 [[reserved]]
 id = "lang.writing_invention_threshold"
@@ -505,11 +505,19 @@ source = "Part 33.4; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "langdet.usage_recency_window"
-basis = "the recency window over which concept usage is taken as a normalised rate in [0,1]; basis the recency window the retention record uses"
+basis = "the BASE recency window in ticks over which concept usage is taken as a normalised rate in [0,1]. It is no longer one fixed length: agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs) scales this base by the memory-scaling curve langdet.retention_memory_scale below, read at the representative memory (the band's mean memory, world::band_mean_memory), so a sharper-memoried culture holds a longer usage-recency window from the same base and a forgetful one a shorter, keying on the memory scalar rather than a race id (Principle 9). Basis: the recency window a mind of neutral memory (curve multiplier one) uses; the retention record's recency window, set in ticks against the drift/usage cadence."
 status = "reserved"
 value = ""
 unit = "ticks"
 source = "Part 33.4; record 62.12; audit section 1n"
+
+[[reserved]]
+id = "langdet.retention_memory_scale"
+basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9)."
+status = "reserved"
+value = ""
+unit = "curve"
+source = "Part 33.4; record 62.12; audit section 1n; Part 9 belief deterioration"
 
 [[reserved]]
 id = "langdet.substrate_quantization"
@@ -555,7 +563,7 @@ source = "Part 33.3; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "langmod.acquisition_split"
-basis = "the split of the second-language acquisition increment into a comprehension track (perceive-bounded) and a production track (produce-capacity-bounded) and the rate ratio between them; basis the receptive-bilingual asymmetry, with the production track capped by channel capacity"
+basis = "DERIVES (2026-07-03) through langmod::acquisition_split (crates/sim/src/langmod.rs): the receptive-bilingual asymmetry is the being's perceive capability minus its produce capability, read straight from the two capability halves langmod::capability_halves already computes (the sensorium perceive acuity minus the body-integrity produce capacity). A positive split is the receptive learner (comprehension outstripping production), the mirror the reverse, equal halves zero. No authored rate ratio and no comprehension/production track constants remain: the split falls out of the capability gap, keying only on the same body, sensorium, and reserved body.function_loss_threshold the gate reads, never a race id (Principle 9). No reserved input remains."
 status = "reserved"
 value = ""
 unit = "rate"
@@ -907,15 +915,18 @@ set_date = "2026-07-02"
 unit = "probability"
 source = "Part 33.4 drift; record 62.12; audit section 1n"
 
-[[reserved]]
-id = "language.generation_ticks"
-basis = "how many ticks make one generation, the drift cadence; basis the world's tick-to-year scale and the generation length of the modelled beings, so drift runs once a generation rather than once a tick STEER FLAG (worksheet §13a): derive from each race's maturation age (R-AGING) times base_tick_seconds, not one Earth year. Kept set as the flagged interim (read by DriftParams) pending the R-AGING derivation."
-status = "set"
-value = "31536000"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "ticks"
-source = "Part 33.4 drift; record 62.12; audit section 1n"
+# language.generation_ticks RETIRED (per-lineage drift cadence built, 2026-07-03): the drift cadence
+# is no longer one global Earth-year scalar. It DERIVES per lineage through world::drift_languages
+# (crates/sim/src/world.rs) as the speaking race's maturity_years times the world's life_cadence_ticks
+# (the orbital year in ticks, itself derived from the world's orbit through clock::ticks_from_seconds,
+# R-CELESTIAL). DriftParams no longer carries generation_ticks and DriftParams::from_manifest no
+# longer reads this id; Language now carries its race (Language::race, set at Language::new, carried
+# through fork) and the cadence is looked up per lineage against the world's race registry. Two
+# lineages of races with different maturity_years therefore drift on different cadences from one
+# mechanism (Principle 9); a lineage whose race is absent does not drift on a fabricated cadence
+# (Principle 11). Removed rather than left the flagged Earth interim, the same treatment as
+# genome.mutation_step: the engine no longer authors or reads it. The STEER FLAG (worksheet §13a) is
+# resolved.
 
 # --- Genome and deep-time evolution (Part 25, R-GENOME). Surfaced as the genome
 # representation, inheritance, and aggregate-tier pool are built; the method forks

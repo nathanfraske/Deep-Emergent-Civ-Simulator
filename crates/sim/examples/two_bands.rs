@@ -34,6 +34,7 @@ use civsim_sim::language::{ArticulationSubstrate, ConceptId, LangId, Language, L
 use civsim_sim::located::{LocationIndex, OccupantId};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
 use civsim_sim::tom::AccessWeights;
+use civsim_sim::value::RaceId;
 use civsim_sim::world::World;
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
 
@@ -80,8 +81,8 @@ fn main() {
         2,
         3,
     );
-    w.add_language(Language::new(LangId(1), forms_a));
-    w.add_language(Language::new(LangId(2), forms_b));
+    w.add_language(Language::new(LangId(1), RaceId(1), forms_a));
+    w.add_language(Language::new(LangId(2), RaceId(2), forms_b));
 
     // Seed the two bands: place A at home A speaking language 1, place B at home B speaking 2.
     let mut located = LocationIndex::new();
