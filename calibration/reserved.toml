@@ -346,13 +346,29 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.dawn_round_cap"
-basis = "a determinism safety upper bound on the dawn coordination, modality-blind and scaled to the coordinating-unit size; the dawn now runs until the founding cohort coordinates form-meaning pairings for its NSM semantic primes (the primitive axes, the grounding floor of 33.1, about 65 primes), the cap guaranteeing termination rather than being the stopping condition, so a cohort too small to converge on the full prime set within the cap yields a thinner starter; the anchor set is the NSM prime inventory, and the cap is set above the rounds a founding cohort needs to coordinate those primes"
+basis = "a determinism safety upper bound on the dawn coordination, modality-blind; the dawn coordinates a differentiated NSM prime floor (record 62.24), the resilient primes at the dawn and a lagging subset closing over later generations, so the cap guarantees termination and is never a cohort-size thinner-language lever (the rejected steer); the anchor set is the NSM prime floor and the cap is set above the rounds a founding cohort needs for its resilient primes"
 status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
 
 # --- R-LANG-TYPOLOGY: the typological substrate (Part 33.4; scoped proposal) ---
+
+[[reserved]]
+id = "lang.prime_closing_threshold"
+basis = "the accumulated-transmission threshold at which a lagging prime closes into a language's floor (the uniform mechanism read from community size, generational depth, and contact); basis: the one-to-two-generation lag the emergence record shows (Pyers and Senghas 2009; Sandler and colleagues 2011); record 62.24"
+status = "reserved"
+value = ""
+unit = "threshold"
+source = "Part 33.9; record 62.24"
+
+[[reserved]]
+id = "lang.prime_founding_resilience"
+basis = "each NSM prime's founding-resilience rank (data, per prime and per-race adjustable): whether it coordinates at a culture's dawn or lags and closes over generations; grounded in the language-emergence record (concrete and desiderative primes resilient from the start, epistemic, logical, and exact-quantification primes lagging a generation or more), a data table not a closed list; record 62.24"
+status = "reserved"
+value = ""
+unit = "ranks"
+source = "Part 33.1, 33.9; record 62.24"
 
 [[reserved]]
 id = "lang.typology_harmony_strong"
