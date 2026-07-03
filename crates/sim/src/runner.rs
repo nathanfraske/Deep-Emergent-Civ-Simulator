@@ -455,6 +455,13 @@ pub struct Runner {
     /// as the thermal state the field drives; the body-arc harm mapping from a temperature outside a
     /// race's comfort band is a reserved consumer (the two-sided band the body arc deferred).
     body_temp: BTreeMap<StableId, Fixed>,
+    /// The per-being DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
+    /// ([`crate::physiology::derive_body_exchange_rate`]), when the caller has supplied it. A being with
+    /// an entry couples to its cell at its own derived rate (a high-surface, low-thermal-mass body
+    /// faster, a compact dense one slower); a being with no entry falls back to the labelled-fixture
+    /// [`FieldCalib::exchange`] override. This frees the authored `field.body_exchange` scalar on the
+    /// canonical path while keeping the field-fixture fallback for beings placed without a body.
+    body_exchange_rate: BTreeMap<StableId, Fixed>,
     /// The cognition world composed onto this spine, ticked as a fixed sub-phase after the field
     /// phases. `None` for a field-only runner ([`Runner::new`]), `Some` for the composed runner
     /// ([`Runner::with_world`]). The world carries disjoint mutable state, its own seed, and its own
@@ -478,6 +485,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
         }
@@ -509,6 +517,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
         }
@@ -543,6 +552,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: Some(embodiment),
         }
@@ -625,10 +635,26 @@ impl Runner {
             if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
                 let env = self.field.at(coord.x, coord.y);
                 let bt = self.body_temp[&id];
-                let next = bt + self.calib.exchange.mul(env - bt);
+                // The being's own DERIVED coupling rate h*A/(m*c) when supplied, else the labelled
+                // FieldCalib.exchange fixture override (a being placed without a body).
+                let rate = self
+                    .body_exchange_rate
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(self.calib.exchange);
+                let next = bt + rate.mul(env - bt);
                 self.body_temp.insert(id, next);
             }
         }
+    }
+
+    /// Set a located being's DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
+    /// ([`crate::physiology::derive_body_exchange_rate`]), so its core temperature couples to its cell at
+    /// a rate its own surface and thermal mass set rather than the shared [`FieldCalib::exchange`] scalar.
+    /// A being with no rate set falls back to that fixture override. The rate is a fraction in `[0, 1]`
+    /// (the derivation clamps it); a caller passes what the physics derivation returns.
+    pub fn set_body_exchange_rate(&mut self, id: StableId, rate: Fixed) {
+        self.body_exchange_rate.insert(id, rate);
     }
 
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
@@ -833,6 +859,122 @@ value = "0.25"
 unit = "ratio_per_tick"
 source = "test"
 "#;
+
+    /// A FieldCalib fixture (labelled, not owner canon): a still field (no diffusion or relaxation) so
+    /// the body-exchange phase is exercised in isolation, and a fallback exchange rate.
+    fn calib() -> FieldCalib {
+        FieldCalib {
+            diffusion: Fixed::ZERO,
+            relaxation: Fixed::ZERO,
+            exchange: Fixed::from_ratio(1, 4),
+        }
+    }
+
+    #[test]
+    fn per_being_exchange_cools_a_high_surface_body_faster_and_replays_bit_for_bit() {
+        use crate::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
+        use crate::physiology::{
+            derive_body_exchange_rate, MetabolicAnchors, CONVECTIVE_SURFACE, TISSUE_SPECIFIC_HEAT,
+        };
+
+        // A registry with a skin tissue (convective surface) and a flesh tissue (specific heat).
+        let mut organs = crate::anatomy::BodyPlanRegistry::dev_default();
+        let skin = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: skin,
+            name: "skin".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(CONVECTIVE_SURFACE, Fixed::from_int(2))]),
+        });
+        let flesh = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: flesh,
+            name: "flesh".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(
+                TISSUE_SPECIFIC_HEAT,
+                Fixed::from_int(3500),
+            )]),
+        });
+        let temperament = Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(1, 2),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        };
+        let make = |skin_dev: (i64, i64)| BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![
+                Part {
+                    kind: skin,
+                    development: Fixed::from_ratio(skin_dev.0, skin_dev.1),
+                },
+                Part {
+                    kind: flesh,
+                    development: Fixed::ONE,
+                },
+            ],
+            temperament,
+        };
+        let anchors = MetabolicAnchors::dev_fixture();
+        let high_body = make((1, 1)); // full skin: large surface
+        let compact_body = make((1, 8)); // little skin: small surface
+        let rate_high =
+            derive_body_exchange_rate(&high_body, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+        let rate_compact = derive_body_exchange_rate(
+            &compact_body,
+            &organs,
+            anchors.medium_h,
+            Fixed::ONE,
+            &anchors,
+        );
+        assert!(
+            rate_high > rate_compact,
+            "the high-surface body couples faster"
+        );
+
+        // Run: a uniform cold field, both beings starting hot in the same cell, each coupled at its own
+        // derived rate. The high-surface body cools further toward the cold cell in one step.
+        let start = Fixed::from_int(310);
+        let cold = Fixed::from_int(250);
+        let run = || {
+            let field = Field::new(2, 1, vec![cold, cold]);
+            let mut r = Runner::new(field, calib());
+            let high = StableId(1);
+            let compact = StableId(2);
+            r.place_being(high, Coord3::ground(0, 0), start);
+            r.place_being(compact, Coord3::ground(1, 0), start);
+            r.set_body_exchange_rate(high, rate_high);
+            r.set_body_exchange_rate(compact, rate_compact);
+            r.step();
+            (
+                r.body_temp(high).unwrap(),
+                r.body_temp(compact).unwrap(),
+                r.state_hash(),
+            )
+        };
+        let (t_high, t_compact, hash1) = run();
+        assert!(
+            t_high < start && t_compact < start,
+            "both cooled toward the cold cell"
+        );
+        assert!(
+            t_high < t_compact,
+            "the high-surface body cooled more: {t_high:?} < {t_compact:?}"
+        );
+        let (_t2h, _t2c, hash2) = run();
+        assert_eq!(hash1, hash2, "the same run replays bit for bit");
+    }
 
     #[test]
     fn field_calib_reads_the_three_values_from_a_set_manifest() {

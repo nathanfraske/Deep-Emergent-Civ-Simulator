@@ -1522,6 +1522,100 @@ pub fn radiative_equilibrium(
     t2.sqrt().min(t_max)
 }
 
+// === Metabolism (R-METABOLIZE): resting metabolic power and the drain bridge ===
+//
+// The resting-metabolism kernels that free the authored base_metabolic_drain, exertion_drain_coupling,
+// and field.body_exchange scalars: the drain a body pays derives from its mass and tissue against the
+// physics, not from a per-axis authored number. Every kernel is total, integer, and overflow-capped in
+// the house style (checked arithmetic routing an out-of-range product to its physical limit, caps the
+// reserved representability bounds passed by the caller). Nothing here reads an identity: two bodies
+// diverge from mass, composition, medium, and temperature alone (Principle 9).
+
+/// Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
+/// is an authored universal physics affordance (West, Brown, and Enquist's fractal-network derivation
+/// holds across taxa; Principle 9 permits authored physics), evaluated by the EXACT two-square-root
+/// fixed-point identity m^(3/4) = sqrt(m * sqrt(m)): `m^(1/2)` then `m * m^(1/2) = m^(3/2)` then its
+/// square root, so no exp/ln is touched and the result is bit-identical on every machine (both roots
+/// are the exact deterministic integer isqrt). The coefficient `a` is the caller's reserved owner
+/// anchor. Zero (or negative) mass has no metabolism and reads zero; an out-of-range product routes to
+/// the reserved rate cap.
+pub fn basal_metabolic_rate(mass: Fixed, coeff_a: Fixed, rate_max: Fixed) -> Fixed {
+    if mass <= ZERO {
+        return ZERO;
+    }
+    // m^(3/4) = sqrt(m * sqrt(m)): the two exact square roots of the identity, no transcendental.
+    let root = mass.sqrt(); // m^(1/2)
+    let inner = match mass.checked_mul(root) {
+        Some(x) => x, // m^(3/2)
+        None => return rate_max,
+    };
+    let m34 = inner.sqrt(); // m^(3/4)
+    match coeff_a.checked_mul(m34) {
+        Some(p) => p.min(rate_max),
+        None => rate_max,
+    }
+}
+
+/// The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
+/// convective flux ([`convective_flux`]) and the Stefan-Boltzmann radiant emission ([`radiant_emission`])
+/// over the body's exposed surface area, the power a body must replace by metabolism to hold its core
+/// temperature against the medium. It reuses the two resolved heat-transport kernels unchanged, reads
+/// only the body and medium temperatures, the surface area, and the two surface constants (`h`,
+/// emissivity, sigma), and takes no identity, so a hot body in a cold medium and its temperature mirror
+/// diverge from temperature alone (Principle 9). Capped at the reserved flux limit; a body at the medium
+/// temperature loses nothing (equilibrium).
+pub fn resting_heat_loss(
+    h: Fixed,
+    area: Fixed,
+    body_temp: Fixed,
+    medium_temp: Fixed,
+    emissivity: Fixed,
+    sigma: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
+    let convective = convective_flux(h, area, body_temp, medium_temp, flux_max);
+    let radiant = radiant_emission(emissivity, area, body_temp, medium_temp, sigma, flux_max);
+    Fixed::saturating_sum([convective, radiant]).min(flux_max)
+}
+
+/// Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
+/// resting demand is the order-independent saturating sum of the basal rate and the thermoregulatory
+/// replacement (`basal + heat_loss`, W); the energy the reserve holds is `energy_capacity *
+/// energy_density` (the reserve's energy-storing tissue times its per-unit energy content, J); the
+/// fraction is the energy spent this tick over the energy stored, `(power * tick_seconds) / stored`,
+/// with the spent energy formed before the divide (a modest per-tick joule figure) so a representable
+/// fraction is never pre-saturated. A zero-power demand drains nothing; a zero-energy store (no reserve
+/// tissue) drains fully (the cap); an out-of-range spend routes to the cap. Clamped to `[0, frac_max]`.
+pub fn metabolic_drain_fraction(
+    basal: Fixed,
+    heat_loss: Fixed,
+    energy_capacity: Fixed,
+    energy_density: Fixed,
+    tick_seconds: Fixed,
+    frac_max: Fixed,
+) -> Fixed {
+    let power = Fixed::saturating_sum([basal, heat_loss]);
+    if power <= ZERO {
+        return ZERO;
+    }
+    let stored = match energy_capacity.checked_mul(energy_density) {
+        Some(e) => e,
+        // A store so large it overflows is effectively inexhaustible over one tick: negligible fraction.
+        None => return ZERO,
+    };
+    if stored <= ZERO {
+        return frac_max;
+    }
+    let spent = match power.checked_mul(tick_seconds) {
+        Some(x) => x, // the joules spent this tick
+        None => return frac_max,
+    };
+    match spent.checked_div(stored) {
+        Some(f) => f.clamp(ZERO, frac_max),
+        None => frac_max,
+    }
+}
+
 // === Electricity and magnetism (R-PHYS-W3, wave 3) ===
 //
 // The reserved constants (the Coulomb coefficient on its x1e9 scale, the vacuum permeability MU_0,
@@ -2125,6 +2219,142 @@ mod tests {
         // caps are test stand-ins for the owner's reserved values, never canon.
         assert_eq!(F_INT(7), Fixed::from_int(7));
         assert_eq!(cap(3), Fixed::from_int(3));
+    }
+
+    // --- Metabolism (R-METABOLIZE) ---
+
+    #[test]
+    fn basal_rate_reproduces_a_mass_three_quarters_by_the_two_sqrt_identity() {
+        // m^(3/4) = sqrt(m * sqrt(m)), exact where m is a perfect fourth power: 16^(3/4) = 8 and
+        // 256^(3/4) = 64, reconstructed to the last fixed-point bit by the two integer square roots.
+        let a = Fixed::ONE;
+        let big = cap(1_000_000);
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(16), a, big),
+            Fixed::from_int(8),
+            "16^(3/4) = 8 by the two-sqrt identity"
+        );
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(256), a, big),
+            Fixed::from_int(64),
+            "256^(3/4) = 64"
+        );
+        // The coefficient scales the power linearly.
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(16), Fixed::from_int(3), big),
+            Fixed::from_int(24),
+            "a scales the rate: 3 * 16^(3/4) = 24"
+        );
+    }
+
+    #[test]
+    fn basal_rate_is_zero_at_zero_mass_and_saturates_to_the_cap() {
+        assert_eq!(
+            basal_metabolic_rate(ZERO, Fixed::ONE, cap(1_000_000)),
+            ZERO,
+            "no mass, no metabolism"
+        );
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(256), Fixed::ONE, Fixed::from_int(10)),
+            Fixed::from_int(10),
+            "64 W against a 10 W cap routes to the cap"
+        );
+    }
+
+    #[test]
+    fn basal_rate_is_monotone_increasing_yet_sublinear() {
+        let a = Fixed::ONE;
+        let big = cap(1_000_000);
+        let small = basal_metabolic_rate(Fixed::from_int(16), a, big); // 8
+        let large = basal_metabolic_rate(Fixed::from_int(256), a, big); // 64
+        assert!(large > small, "a larger body has the higher resting rate");
+        // Sublinear: mass rose 16x (16 -> 256) but the rate rose only 8x (8 -> 64), so the rate is
+        // below the linear extrapolation of the smaller body (the Kleiber signature).
+        assert!(
+            large < small.checked_mul(Fixed::from_int(16)).unwrap(),
+            "the rate grows slower than mass: 64 < 8 * 16"
+        );
+    }
+
+    #[test]
+    fn resting_loss_is_the_saturating_sum_of_convection_and_radiation() {
+        // The thermoregulatory loss is exactly convective_flux + radiant_emission over the area, the two
+        // resolved heat-transport kernels reused unchanged. A body warmer than its medium so both terms
+        // are positive.
+        let h = Fixed::from_ratio(1, 10);
+        let area = Fixed::from_int(2);
+        let body = Fixed::from_int(310);
+        let medium = Fixed::from_int(280);
+        let emissivity = Fixed::from_ratio(95, 100);
+        let sigma = Fixed::from_ratio(567, 10_000_000_000); // 5.67e-8
+        let big = cap(1_000_000_000);
+        let convective = convective_flux(h, area, body, medium, big);
+        let radiant = radiant_emission(emissivity, area, body, medium, sigma, big);
+        let want = Fixed::saturating_sum([convective, radiant]).min(big);
+        assert_eq!(
+            resting_heat_loss(h, area, body, medium, emissivity, sigma, big),
+            want,
+            "resting loss = convective_flux + radiant_emission over the area"
+        );
+        // A body at the medium temperature loses nothing.
+        assert_eq!(
+            resting_heat_loss(h, area, body, body, emissivity, sigma, big),
+            ZERO,
+            "no gradient, no loss (equilibrium)"
+        );
+    }
+
+    #[test]
+    fn drain_fraction_is_energy_spent_over_energy_stored() {
+        // basal 10 W, no heat loss, reserve 100 units at density 1 (stored 100 J), one-second tick:
+        // spent 10 J over stored 100 J is a tenth of the reserve per tick.
+        let frac = metabolic_drain_fraction(
+            Fixed::from_int(10),
+            ZERO,
+            Fixed::from_int(100),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+        assert_eq!(frac, Fixed::from_ratio(1, 10));
+        // A larger store drains a smaller fraction of itself for the same power (the reserve-side half of
+        // the Kleiber signature): ten times the stored energy, a tenth of the fraction.
+        let bigger = metabolic_drain_fraction(
+            Fixed::from_int(10),
+            ZERO,
+            Fixed::from_int(1000),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+        assert!(bigger < frac, "a larger reserve drains a smaller fraction");
+        assert_eq!(bigger, Fixed::from_ratio(1, 100));
+        // A zero-energy reserve (no energy tissue) drains fully to the cap; a zero-power demand drains
+        // nothing.
+        assert_eq!(
+            metabolic_drain_fraction(
+                Fixed::from_int(10),
+                ZERO,
+                ZERO,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE
+            ),
+            Fixed::ONE,
+            "no reserve tissue, full drain"
+        );
+        assert_eq!(
+            metabolic_drain_fraction(
+                ZERO,
+                ZERO,
+                Fixed::from_int(100),
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE
+            ),
+            ZERO,
+            "no resting power, no drain"
+        );
     }
 
     // --- Hardening: product-before-divide reassociation (the wave-1 discipline, extended) ---

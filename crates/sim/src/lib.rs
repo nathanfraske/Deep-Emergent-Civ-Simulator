@@ -86,6 +86,7 @@ pub mod locomotion;
 pub mod lod;
 pub mod mate_choice;
 pub mod medium;
+pub mod physiology;
 pub mod primes;
 pub mod race;
 pub mod runner;

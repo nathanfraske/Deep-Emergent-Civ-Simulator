@@ -1024,19 +1024,19 @@ source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
 
 [[reserved]]
 id = "physiology.base_metabolic_drain"
-basis = "the resting per-tick drain of a homeostatic axis as a fraction of its capacity, the basal metabolic rate of Part 20 mapped onto the base tick (one in-world second, owner-set); per axis, since water is lost slower than energy is burnt"
+basis = "DERIVE (R-METABOLIZE, derive audit): the resting per-tick energy drain is no longer an authored per-axis fraction. It DERIVES through physiology::derive_base_drain (crates/sim/src/physiology.rs) as the Kleiber basal rate laws::basal_metabolic_rate(a*mass^0.75, the exact two-sqrt fixed-point identity) plus the thermoregulatory heat loss laws::resting_heat_loss (convective_flux + radiant_emission over the whole-body convective surface), bridged to a fraction of the reserve's stored energy by laws::metabolic_drain_fraction. So two bodies diverge in resting drain from their mass, tissue, medium, and temperature alone, not a hardcoded number. The reserved inputs are the metabolism.* owner anchors below (the Kleiber coefficient, the kilogram bridge, the medium coefficient, the emissivity, and sigma); the drain fraction itself is a derived read, kept a fail-loud DERIVE sentinel rather than an authored value."
 status = "reserved"
 value = ""
 unit = "fraction_of_capacity_per_tick"
-source = "Part 20; crates/sim/src/homeostasis.rs"
+source = "Part 20, Part 41; crates/sim/src/physiology.rs derive_base_drain; laws::basal_metabolic_rate, resting_heat_loss, metabolic_drain_fraction"
 
 [[reserved]]
 id = "physiology.exertion_drain_coupling"
-basis = "how much body exertion (a unit-interval activity signal) adds to a homeostatic axis's per-tick drain, the movement-and-work energy cost of Part 20; per axis, since energy couples strongly to exertion and water less"
+basis = "DERIVE (R-METABOLIZE, derive audit): the exertion drain coupling is no longer an authored per-axis fraction. It DERIVES through physiology::derive_exertion_coupling (crates/sim/src/physiology.rs) from the mechanical work power a full-exertion body sustains, laws::power(force*velocity), bridged to a reserve fraction by laws::metabolic_drain_fraction, so metabolize_derived scales the derived work-heat by the being's exertion signal. Kept a fail-loud DERIVE sentinel rather than an authored value; its inputs are the strike/work-force data (Part 35) and the metabolism.* anchors below."
 status = "reserved"
 value = ""
 unit = "fraction_of_capacity_per_tick_per_exertion"
-source = "Part 20; crates/sim/src/homeostasis.rs"
+source = "Part 20, Part 35; crates/sim/src/physiology.rs derive_exertion_coupling; laws::power, metabolic_drain_fraction"
 
 [[reserved]]
 id = "physiology.death_floor"
@@ -1232,11 +1232,59 @@ source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 
 [[reserved]]
 id = "field.body_exchange"
-basis = "the body-to-environment convective coupling per tick, the discrete Newton-cooling rate from the fluids-floor convective coefficient and the body surface-to-thermal-mass ratio (law.convective_flux); the body core-temperature exchange the body arc deferred until a located world existed"
+basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate, and this stays a fail-loud fixture-fallback sentinel"
 status = "reserved"
 value = ""
 unit = "ratio_per_tick"
-source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
+source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/src/physiology.rs derive_body_exchange_rate; design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
+
+# --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
+# The three headline anchors the derivation is built on (the Kleiber coefficient a, the normalized
+# body-mass-to-kilograms bridge, and the medium convective coefficient h), plus the two the radiant
+# thermoregulatory term reads (the body-surface emissivity and the Stefan-Boltzmann constant). Each is
+# surfaced fail-loud rather than fabricated; the kernels are fixed Rust (crates/physics/src/laws.rs
+# basal_metabolic_rate, resting_heat_loss, metabolic_drain_fraction), these are the owner's to set.
+# Read together by MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
+
+[[reserved]]
+id = "metabolism.kleiber_coefficient"
+basis = "the Kleiber coefficient a in the resting metabolic rate P = a*mass^(3/4) (W per kg^(3/4)), the one owner anchor of the allometric law (the 3/4 exponent is a baked universal physics affordance, West/Brown/Enquist's fractal-network derivation; Principle 9). Set to the normalization the modelled biota's resting oxygen consumption implies at the reference mass; the mammalian anchor is roughly 3.4 W/kg^(3/4) (Kleiber 1932; Savage et al. 2004), a per-race datum rather than a universal, since a cold-blooded or exotic metabolism scales the coefficient though not the exponent"
+status = "reserved"
+value = ""
+unit = "watt_per_kg_three_quarter"
+source = "Part 20, Part 41; crates/sim/src/physiology.rs; laws::basal_metabolic_rate"
+
+[[reserved]]
+id = "metabolism.body_mass_kg_scale"
+basis = "the kilograms a body carries at the normalized body_mass = 1 (the master size trait's trait-to-kilograms bridge, R-UNITS-PIN). NOT derivable: it pins where the normalized [0,1] body-mass trait lands on the physical kilogram scale the Kleiber law and the thermal mass read, so it is an owner units anchor, not a realism value. Set per the largest-taxon body mass the world's size distribution reaches at body_mass = 1"
+status = "reserved"
+value = ""
+unit = "kilograms_at_body_mass_one"
+source = "Part 25.14 body plan, R-UNITS-PIN; crates/sim/src/physiology.rs"
+
+[[reserved]]
+id = "metabolism.medium_convective_coefficient"
+basis = "the medium convective heat-transfer coefficient h (W/(m^2*K)) the body-to-medium exchange law reads (law.convective_flux, law h*A/(m*c)), a fluids-floor medium datum, not a body property: a still gas couples slowly (natural convection ~2 to 25 W/(m^2*K)), stirred water fast (~50 to 1000+); set per the ambient medium the world runs in (Incropera and DeWitt convective coefficient tables), so a body in dense hot air or immersed in water couples faster than one in still thin air"
+status = "reserved"
+value = ""
+unit = "watt_per_m2_kelvin"
+source = "Part 35 body arc, Part 41 fluids floor; crates/sim/src/physiology.rs; laws::resting_heat_loss, derive_body_exchange_rate"
+
+[[reserved]]
+id = "metabolism.surface_emissivity"
+basis = "the body-surface emissivity for the radiant half of the thermoregulatory heat loss (law.radiant_emission), dimensionless in [0,1]; a surface property, roughly 0.95 to 0.98 for biological tissue and most non-metallic coverings (Incropera and DeWitt emissivity tables), lower for a reflective or metallic covering, so it is a per-race / per-covering datum rather than a universal"
+status = "reserved"
+value = ""
+unit = "emissivity"
+source = "Part 35 body arc; crates/sim/src/physiology.rs; laws::resting_heat_loss (radiant_emission)"
+
+[[reserved]]
+id = "metabolism.stefan_boltzmann"
+basis = "the Stefan-Boltzmann constant sigma = 5.670374e-8 W/(m^2*K^4), the universal proportionality of the radiant heat-loss law (law.radiant_emission). A CODATA physical constant, not an owner taste value, surfaced fail-loud (an authored Principle-9 physics affordance) rather than hardcoded inline; the same value the other radiant-law callers pass"
+status = "reserved"
+value = ""
+unit = "watt_per_m2_kelvin4"
+source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
 
 # --- Scenario direction siblings (docs/working/TEST_WORLDS.md) ---
 #
