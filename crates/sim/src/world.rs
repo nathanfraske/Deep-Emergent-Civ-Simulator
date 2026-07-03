@@ -339,6 +339,12 @@ pub struct World {
     affect: BTreeMap<StableId, AffectState>,
     /// Per-being age in life-cadence ticks, for the aging-and-mortality loop (the R-AGING gap).
     ages: BTreeMap<StableId, u32>,
+    /// Per-being race identity: which [`RaceId`] a being belongs to (design Part 20, R-AGING).
+    /// Mirrors `ages` (seeded at the dawn and at birth, pruned on death), and lets a per-being
+    /// mechanism reach its race's data, so mortality can normalize age by the race's own lifespan
+    /// (see [`World::apply_mortality_by_race`]) rather than a single hardcoded scale. A being with
+    /// no entry is untracked, and a race-keyed pass falls back to its raw-age behaviour for it.
+    race_of: BTreeMap<StableId, RaceId>,
     /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
     /// with no entry reads every channel, so perception is gated only where a sensorium is set.
     sensorium: BTreeMap<StableId, Sensorium>,
@@ -422,6 +428,7 @@ impl World {
             mate_prefs: BTreeMap::new(),
             affect: BTreeMap::new(),
             ages: BTreeMap::new(),
+            race_of: BTreeMap::new(),
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
@@ -729,6 +736,7 @@ impl World {
                 self.mate_prefs.insert(id, MatePreference::new(weight));
                 self.place_of.insert(id, band.place);
                 self.ages.insert(id, 0);
+                self.race_of.insert(id, band.race);
                 seeded.push(id);
             }
         }
@@ -1084,6 +1092,7 @@ impl World {
         self.genomes.insert(child, child_genome);
         self.intrinsic.insert(child, beliefs);
         self.ages.insert(child, 0);
+        self.race_of.insert(child, race.id);
         // Inherit the mate preference as a quantitative trait: the midparent of the two parents'
         // weights plus a bounded mutation drawn under Phase::MATE_CHOICE keyed on the child,
         // scaled by the same `mutation_spread` the belief inheritance uses (so no new value is
@@ -1210,6 +1219,13 @@ impl World {
         self.ages.insert(id, age);
     }
 
+    /// A being's race, if its identity is tracked (seeded at the dawn and at birth). A being with
+    /// no recorded race returns `None`, and the race-keyed mortality pass falls back to raw-age
+    /// hazard for it (see [`World::apply_mortality_by_race`]).
+    pub fn race_of(&self, id: StableId) -> Option<RaceId> {
+        self.race_of.get(&id).copied()
+    }
+
     /// Advance every tracked being's age by one life-cadence step (design Part 20). This is the
     /// life-process beat the gap names: the caller runs it once per life cadence (the cadence
     /// period in ticks is a reserved owner value, so wiring it into [`World::tick`] on a fixed
@@ -1239,6 +1255,44 @@ impl World {
                 let chance = hazard
                     .eval(crate::demography::hazard_age(age))
                     .clamp(Fixed::ZERO, Fixed::ONE);
+                let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                (roll < chance).then_some(id)
+            })
+            .collect();
+        for id in &dead {
+            self.remove_being(*id);
+        }
+        dead
+    }
+
+    /// Run one mortality pass that evaluates the hazard at each being's race-normalized life
+    /// fraction rather than its raw age (design Part 20, R-AGING). For each being in id order, its
+    /// race is looked up through `race_of`; if the race is known, the hazard is evaluated at
+    /// [`Race::life_fraction`] (raw age divided by that race's own lifespan), so one shared curve
+    /// culls a short-lived and a long-lived race each on its own scale, keyed only off per-race
+    /// data (Principle 9). A being whose race is untracked, or whose race is absent from `races`,
+    /// falls back to the raw-age hazard of [`World::apply_mortality`] through
+    /// [`crate::demography::hazard_age`], so an unraced being behaves exactly as before. Only the
+    /// curve's x-input changes: the [`Phase::MORTALITY`] roll, the comparison, and the removal path
+    /// are identical to [`World::apply_mortality`], so the two share a deterministic,
+    /// observer-independent, thread-count-independent roll and differ only in where on the curve
+    /// each being is read.
+    pub fn apply_mortality_by_race(
+        &mut self,
+        races: &BTreeMap<RaceId, Race>,
+        hazard: &Curve,
+    ) -> Vec<StableId> {
+        let dead: Vec<StableId> = self
+            .ages
+            .iter()
+            .filter_map(|(&id, &age)| {
+                let x = match self.race_of.get(&id).and_then(|rid| races.get(rid)) {
+                    Some(race) => race.life_fraction(age),
+                    None => crate::demography::hazard_age(age),
+                };
+                let chance = hazard.eval(x).clamp(Fixed::ZERO, Fixed::ONE);
                 let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
                     .rng(self.seed)
                     .unit_fixed(0);
@@ -1285,6 +1339,7 @@ impl World {
         self.mate_prefs.remove(&id);
         self.affect.remove(&id);
         self.ages.remove(&id);
+        self.race_of.remove(&id);
         self.sensorium.remove(&id);
         self.drive_levels.remove(&id);
         self.last_action.remove(&id);

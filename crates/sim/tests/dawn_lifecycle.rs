@@ -86,6 +86,9 @@ fn a_race() -> Race {
         scheme,
         beliefs(Fixed::ZERO),
         Fixed::from_int(2),
+        // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
+        80,
+        18,
     )
 }
 

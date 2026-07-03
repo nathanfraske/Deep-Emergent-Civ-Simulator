@@ -97,6 +97,9 @@ fn a_race(id: u32) -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
+        80,
+        18,
     )
 }
 

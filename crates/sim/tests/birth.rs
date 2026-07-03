@@ -97,6 +97,9 @@ fn a_race() -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
+        80,
+        18,
     )
 }
 
@@ -214,6 +217,9 @@ fn diverse_race() -> Race {
         scheme,
         intrinsic,
         Fixed::from_int(2),
+        // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
+        80,
+        18,
     )
 }
 

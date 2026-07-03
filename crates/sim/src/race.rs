@@ -60,10 +60,23 @@ pub struct Race {
     /// nurture baseline). At the dawn this is the race's environmental cognition floor; richer
     /// per-context environment is a follow-on.
     pub environment: Fixed,
+    /// The race's natural lifespan in life-cadence steps (design Part 20, R-AGING), an owner-set
+    /// per-race datum (design.md:1593). It normalizes a being's raw age into the life fraction a
+    /// life-hazard curve is evaluated at (see [`Race::life_fraction`]), so a long-lived and a
+    /// short-lived race face the same curve on their own scale from this one number, never a
+    /// per-race code branch (Principle 9). A plain count with no formula: the owner sets it.
+    pub lifespan_years: u32,
+    /// The race's age of maturity in life-cadence steps, the same units as `lifespan_years`, an
+    /// owner-set per-race datum (design.md:1594). It normalizes raw age into the maturation
+    /// fraction (see [`Race::maturation_fraction`]) and gates [`Race::is_mature`], so when a being
+    /// crosses into adulthood is per-race data, not a hardcoded threshold. A plain count, no
+    /// formula: the owner sets it.
+    pub maturity_years: u32,
 }
 
 impl Race {
     /// A race record.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: RaceId,
         genes: GeneSet,
@@ -71,6 +84,8 @@ impl Race {
         scheme: GeneticScheme,
         intrinsic: IntrinsicBeliefs,
         environment: Fixed,
+        lifespan_years: u32,
+        maturity_years: u32,
     ) -> Self {
         Race {
             id,
@@ -79,6 +94,8 @@ impl Race {
             scheme,
             intrinsic,
             environment,
+            lifespan_years,
+            maturity_years,
         }
     }
 
@@ -89,6 +106,46 @@ impl Race {
             ReproductionMode::SexualDiploid => 2,
             ReproductionMode::Haploid | ReproductionMode::Clonal => 1,
         }
+    }
+
+    /// The maturation fraction of a being of this race at `age` life-cadence steps: [`Fixed::ZERO`]
+    /// at birth, rising linearly to [`Fixed::ONE`] at `maturity_years` and saturating there
+    /// (design Part 20). A race whose `maturity_years` is zero (mature from birth) reads
+    /// [`Fixed::ONE`] at any age, which also guards the ratio against a zero denominator, since
+    /// [`Fixed::from_ratio`] panics on a zero divisor. Age is capped at `maturity_years` before the
+    /// ratio, so the result is always in the unit interval and the division never overflows. The
+    /// fraction is shaped only by the per-race `maturity_years` datum, so two races diverge here
+    /// through the one function rather than a per-race branch (Principle 9).
+    pub fn maturation_fraction(&self, age: u32) -> Fixed {
+        if self.maturity_years == 0 {
+            return Fixed::ONE;
+        }
+        let capped = age.min(self.maturity_years);
+        Fixed::from_ratio(capped as i64, self.maturity_years as i64)
+    }
+
+    /// The life fraction of a being of this race at `age` life-cadence steps: [`Fixed::ZERO`] at
+    /// birth, rising linearly to [`Fixed::ONE`] at `lifespan_years` and saturating there, the
+    /// race-normalized age a life-hazard curve is evaluated at (design Part 20, R-AGING). A race
+    /// whose `lifespan_years` is zero reads [`Fixed::ONE`] at any age, which also guards the ratio
+    /// against a zero denominator. Age is capped at `lifespan_years` before the ratio, so the
+    /// result is always in the unit interval and the division never overflows. The fraction is
+    /// shaped only by the per-race `lifespan_years` datum, so a long-lived and a short-lived race
+    /// map the same hazard curve onto their own scale through the one function (Principle 9).
+    pub fn life_fraction(&self, age: u32) -> Fixed {
+        if self.lifespan_years == 0 {
+            return Fixed::ONE;
+        }
+        let capped = age.min(self.lifespan_years);
+        Fixed::from_ratio(capped as i64, self.lifespan_years as i64)
+    }
+
+    /// Whether a being of this race is mature at `age`: at or past `maturity_years` (design Part
+    /// 20). A race whose `maturity_years` is zero is mature at any age, including birth. The gate
+    /// reads only the per-race `maturity_years` datum, never a hardcoded threshold or a per-race
+    /// code branch (Principle 9).
+    pub fn is_mature(&self, age: u32) -> bool {
+        age >= self.maturity_years
     }
 }
 
