@@ -38,7 +38,7 @@
 
 [[reserved]]
 id = "evidence.implication_weights"
-basis = "the weight-of-evidence of each observation type; a fresh corpse far heavier than a stale stain"
+basis = "DERIVE at runtime, worksheet §13b: Good's weight of evidence, log(P(E|H)/P(E|not H)), computed from trace_decay, concealment_suppression, and the race's own mortality and visibility base rates over the Part 40 trace-kind registry; 'fresh corpse 5, stale stain 1' is a human forensic table a hive or dispersing-body race has no analogue for."
 status = "reserved"
 value = ""
 unit = "log_odds"
@@ -76,7 +76,7 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.trace_decay_curves"
-basis = "real decay and fading timescales at the tick rate"
+basis = "DERIVE, worksheet §13b: each trace's persistence from the material's decomposition and reaction susceptibility through the reaction and corrosion kernel (laws.rs) against local temperature and medium; 'blood days, bone years' is terran organic chemistry a silicate or dispersing race has no analogue for. Keep only the exponential-at-tick-rate shape."
 status = "reserved"
 value = ""
 unit = "per_tick"
@@ -84,7 +84,7 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.absence_windows"
-basis = "the spread of death-in-absentia waiting periods mapped onto the prominence axis, scaled by visibility"
+basis = "DERIVE per race, worksheet §13b: each race's own mortality hazard curve (demography.rs) expected-remaining-lifespan times its visibility interval; the seven-year Anglo-American death-in-absentia window is a human legal anchor scaled to a human lifespan. Keep the scaled-by-visibility mechanism."
 status = "reserved"
 value = ""
 unit = "ticks"
@@ -102,11 +102,9 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.aggregate_diffusion_rate"
-basis = "the per-tick fraction by which delayed knowledge diffuses at the aggregate tier; anchored to a target diffusion half-life in generations through the tick-to-year scale and matched to the aggregate-tier LOD cadence, so the diffusion timescale is checkable rather than an unanchored slow rate"
-status = "set"
-value = "0.02"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE, worksheet §13a: a mean-field of the individual-tier gossip parameters and contact density, calibrated to the tier-consistency invariant, not an authored Earth-village diffusion rate."
+status = "reserved"
+value = ""
 unit = "per_tick"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
@@ -122,17 +120,15 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "being.heritable_fraction"
-basis = "the per-axis heritable fraction; the literature centres near one half but must not be fabricated into a constant"
-status = "set"
-value = "0.5"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE, worksheet §13a: narrow-sense heritability is an emergent population statistic, h2 = V_A/(V_A+V_E) read from the express() variance decomposition, not an owner-set input; a flat value is the human twin-study midpoint this entry's own basis forbids. Wire to the genome variance readout."
+status = "reserved"
+value = ""
 unit = "fraction"
 source = "Part 20 being model; record 62.2; audit section 1a"
 
 [[reserved]]
 id = "being.plasticity_by_age"
-basis = "the plasticity-by-age curve so cumulative drift and rising rank-order stability match the Part 62.2 targets"
+basis = "DERIVE the timing per race, worksheet §13b: the inflection derives from each race's maturity_years and lifespan_years (per-race TraitDef data); the high-youth-to-low-plateau shape (rising rank-order stability) is the human maturity principle (Roberts and DelVecchio) and is the steer as the only worked example. Reserve only the residual steepness per race."
 status = "reserved"
 value = ""
 unit = "curve"
@@ -140,7 +136,7 @@ source = "Part 20 being model; record 62.2; audit section 1a"
 
 [[reserved]]
 id = "being.maturity_targets"
-basis = "the maturity-target directions and magnitudes"
+basis = "DERIVE per race, worksheet §13b: the maturity-target directions are per-race TraitDef data, not a fixed set; rising conscientiousness and falling novelty-seeking is the human Big-Five aging literature and is the steer as the only worked example."
 status = "reserved"
 value = ""
 unit = "axis_units"
@@ -178,27 +174,23 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.enculturation_pull_rate"
-basis = "the per-tick fraction by which a being's values relax toward the group mean along the geodesic; anchored to a target enculturation half-life in generations through the tick-to-year scale (time.life_cadence_ticks) so the convergence timescale is checkable, rather than left as an unanchored small rate; the pull follows the geodesic"
-status = "set"
-value = "0.01"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE, worksheet §13a: the pull strength keys off each race's belief_plasticity, mirroring axiom.enculturate's per-mind stubbornness; a flat cross-race rate would regress against the sibling mechanism already built."
+status = "reserved"
+value = ""
 unit = "per_tick"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.incommensurability_floor"
-basis = "the additive residual loss of projecting one race's emic value structure onto the shared etic substrate when it lacks an axis (a theory-of-mind blind spot, Part 21), added on top of the emergent structural value distance rather than capping it; a floor on translation loss between races, not a ceiling on the emergent distance"
-status = "set"
-value = "0.2"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE per race-pair, worksheet §13a: the measured etic projection loss for that pair (project_to_etic drop), not a flat floor added to every pairing; the owner leans toward no fixed floor."
+status = "reserved"
+value = ""
 unit = "distance"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.etic_substrate_axes"
-basis = "the membership of the etic substrate axes themselves"
+basis = "DERIVE bottom-up, worksheet §13b: grow the shared comparison axes from those that recur across the world's per-race emic data, not a hardcoded human moral-psychology set (record 62.3: no single human structure can be hardcoded as universal). FLAG: design.md:1799 feeds this substrate into conflict_pressure and theory-of-mind friend-or-foe, in tension with 'never a behavioural input'; resolve before it graduates."
 status = "reserved"
 value = ""
 unit = "set"
@@ -208,11 +200,9 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "genome.narrow_sense_heritability"
-basis = "the per-channel narrow-sense heritability; Part 20 already centres it near one half"
-status = "set"
-value = "0.5"
-set_by = "Nathan M. Fraske"
-set_date = "2026-06-30"
+basis = "DERIVE, worksheet §13a: the same quantity as being.heritable_fraction, an emergent V_A/(V_A+V_E) readout from express(), not an authored constant; 0.5 is the human twin-study figure. Wire to the genome variance decomposition."
+status = "reserved"
+value = ""
 unit = "fraction"
 source = "Part 25 genome model; record 62.5; audit section 1d"
 
@@ -254,11 +244,9 @@ source = "Part 25 genome model; record 62.5; audit section 1d"
 
 [[reserved]]
 id = "axiom.evidence_ring_capacity"
-basis = "the number of recent evidences the axiom's FIFO ring retains, the recency depth over which older observations age out of the belief update; a small representational bound (working-memory span is a candidate anchor, Miller), set against the update dynamics and the per-mind memory budget rather than an unjustified small buffer"
-status = "set"
-value = "8"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE per race, worksheet §13a: map the race's Part 20 memory datum to a ring capacity; a flat 8 structurally echoes Miller's 7 plus or minus 2. Reserve only a hard replay ceiling separately as a budget."
+status = "reserved"
+value = ""
 unit = "count"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
 
@@ -272,13 +260,13 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.calcification_rate"
-basis = "the per-tick rate at which a held belief calcifies toward its cap (axiom.calcification_cap); the cap and the brittleness are separate entries, so this scalar is the dial the worlds push"
+basis = "the per-tick rate a held belief calcifies toward its cap (axiom.calcification_cap); the dial the worlds push. STEER FLAG (worksheet §13a): an absolute per-tick rate bakes in a human-generation lifespan; re-express as a dimensionless lifespans-to-harden divided by each race's lifespan, then it is a clean world-dialing lever (§14). Kept set as the dial base until re-expressed."
 status = "set"
 value = "0.001"
 set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_tick"
-source = "Part 28 axiom model; record 62.4; audit section 1c"
+source = "Part 28 axiom model; record 62.4; audit section 1c; world-dialing lever, worksheet §14"
 
 [[reserved]]
 id = "axiom.conformity_prestige_strengths"
@@ -310,7 +298,7 @@ source = "Part 33 language system; record 62.7; audit section 1g"
 
 [[reserved]]
 id = "lang.phoneme_priors"
-basis = "the phoneme inventory sampling priors and implicational and dispersion tendencies, grounded in phonological typology"
+basis = "DERIVE per race, worksheet §13b: sample the inventory from the race's own producible-sound set, its perceptual_geometry, and its capability_gates; UPSID/PHOIBLE priors are the human vocal tract's system and become the human race's data row, never the global prior."
 status = "reserved"
 value = ""
 unit = "prior"
@@ -336,7 +324,7 @@ source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET rec
 
 [[reserved]]
 id = "lang.l2_acquisition"
-basis = "the second-language acquisition rate, aptitude range, and age-of-acquisition breakpoint after the late teens"
+basis = "DERIVE per race, worksheet §13b: the age-of-acquisition breakpoint falls out of each race's neuro-maturation (being.plasticity_by_age, R-AGING); 'after the late teens' is the human critical period and must not be fixed for every race."
 status = "reserved"
 value = ""
 unit = "rate"
@@ -378,7 +366,7 @@ source = "Part 33.1, 33.9; record 62.24"
 
 [[reserved]]
 id = "lang.typology_harmony_strong"
-basis = "the strong-tier multiplicative harmony tilt; the typological record reports proportions of genera rather than coefficients, so the tier is ordinal and its numeric tilt is the owner's, anchored on the adposition axis running about 94 to 97 percent harmonic (WALS 95A: 472 OV-postpositional and 456 VO-prepositional against 14 and 42 disharmonic)"
+basis = "DERIVE, worksheet §13b: a parse-and-processing-cost tilt gated by the modality's simultaneous-versus-sequential flag; the WALS 95A adposition proportions (94 to 97 percent) are human word order and become the human data row. Honest limit: the parse-cost law is not in laws.rs yet, so WALS stays a flagged interim until it is written."
 status = "reserved"
 value = ""
 unit = "tilt"
@@ -386,7 +374,7 @@ source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PRO
 
 [[reserved]]
 id = "lang.typology_harmony_weak"
-basis = "the weak-tier multiplicative harmony tilt; anchored on the genitive pair, which correlates weakly and one-sidedly (Dryer 1992: 0.89 of OV genera Genitive-Noun against 0.45 of VO genera)"
+basis = "DERIVE, worksheet §13b: the same parse-cost tilt at lower coupling; the Dryer 1992 genitive proportion (0.89 versus 0.45) is human and becomes the human data row, pending the parse-cost law."
 status = "reserved"
 value = ""
 unit = "tilt"
@@ -454,7 +442,7 @@ source = "Part 33.3; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "langmod.perceptual_geometry"
-basis = "the per-modality perceptual-distance geometry (dimensionality, confusability weights, simultaneous-vs-sequential flag) the dawn dispersion game settles over; basis each channel's cited confusability and capacity, dispersed to the same target separation as the acoustic modality, the contrast budget a read-out of cited physics and never a free expressivity weight, validated under the convergence audit's permuted-basis test"
+basis = "DERIVE per modality, worksheet §13b: per-channel confusability from channel physics (speed_of_sound, medium coupling, laws.rs) composed with the race's own sensorium resolution; dispersing to the human acoustic target homogenizes every channel toward human hearing. Honest limit: no attenuation or formant law in laws.rs yet, so the read-out is partial until it lands."
 status = "reserved"
 value = ""
 unit = "granularity"
@@ -504,7 +492,7 @@ source = "Part 33.3; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "inst.function_substrate_axes"
-basis = "the membership of the institution-function substrate axes; force, the sacred, exchange, knowledge, and care a starting menu, exotic axes added per race"
+basis = "DERIVE per race, worksheet §13b: cluster the race's own recurring need-vectors (value substrate Part 21, resource and need Parts 15 and 19, the drive layer Part 8) into its founding axes; force, the sacred, exchange, knowledge, and care are a human anthropological taxonomy (Parsons, Malinowski) and stay only as the human-analogue fallback. Carry the R-BIO-REGISTRY circularity flag."
 status = "reserved"
 value = ""
 unit = "set"
@@ -735,7 +723,7 @@ source = "Part 9.5 gossip loop; audit section"
 
 [[reserved]]
 id = "gossip.trust_baseline"
-basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight; 0.5, the share senders entrust a stranger in the investment/trust game (Berg, Dickhaut, McCabe 1995)"
+basis = "the trust a fresh listener extends to a speaker, a 0..1 multiplier on the heard weight; 0.5, the share senders entrust a stranger in the investment/trust game (Berg, Dickhaut, McCabe 1995) STEER FLAG (worksheet §13a): 0.5 is the human investment-game figure (Berg, Dickhaut, McCabe); it should become per-race epistemic-stance data or derive from the race's reciprocal-altruism structure. Kept set as the human-analogue interim (read by GossipParams) pending the per-race stance axis."
 status = "set"
 value = "0.5"
 set_by = "Nathan M. Fraske"
@@ -745,7 +733,7 @@ source = "Part 9.5 gossip loop; Part 37 trust"
 
 [[reserved]]
 id = "gossip.trust_penalty"
-basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter; 0.5 halves trust on a caught lie, consistent with the asymmetry that trust is destroyed faster than built (Slovic 1993)"
+basis = "how much trust drops when a listener sees through a speaker's lie, the reputational decay that makes betrayal matter; 0.5 halves trust on a caught lie, consistent with the asymmetry that trust is destroyed faster than built (Slovic 1993) STEER FLAG (worksheet §13a): 0.5 is a human trust-asymmetry figure; it should become per-race data paired with trust_baseline. Kept set as the human-analogue interim (read by GossipParams) pending the per-race stance axis."
 status = "set"
 value = "0.5"
 set_by = "Nathan M. Fraske"
@@ -777,7 +765,7 @@ source = "Part 33.4 drift; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "language.generation_ticks"
-basis = "how many ticks make one generation, the drift cadence; basis the world's tick-to-year scale and the generation length of the modelled beings, so drift runs once a generation rather than once a tick"
+basis = "how many ticks make one generation, the drift cadence; basis the world's tick-to-year scale and the generation length of the modelled beings, so drift runs once a generation rather than once a tick STEER FLAG (worksheet §13a): derive from each race's maturation age (R-AGING) times base_tick_seconds, not one Earth year. Kept set as the flagged interim (read by DriftParams) pending the R-AGING derivation."
 status = "set"
 value = "31536000"
 set_by = "Nathan M. Fraske"
@@ -792,13 +780,13 @@ source = "Part 33.4 drift; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "genome.effective_population_size"
-basis = "Ne, the drift strength of a pool: smaller Ne drifts harder (founder effects, neutral divergence). Set per the modelled census size and the breeding structure; the molecular-clock divergence pace follows from it (Wright-Fisher; Kimura neutral theory)"
+basis = "Ne, the drift strength of a pool: smaller Ne drifts harder (founder effects, neutral divergence). Set per the modelled census size and the breeding structure; the molecular-clock divergence pace follows from it (Wright-Fisher; Kimura neutral theory) NOTE (worksheet §13a/§14): the canonical Ne should derive from census, sex ratio, and reproductive-success variance; only the pre-dawn founder seed is a world-dialing lever. Kept set as the dial base."
 status = "set"
 value = "200"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "individuals"
-source = "Part 25.7-25.8; biosphere candidate; audit follow-up"
+source = "Part 25.7-25.8; biosphere candidate; audit follow-up; world-dialing lever, worksheet §14"
 
 [[reserved]]
 id = "genome.speciation_distance"
@@ -892,7 +880,7 @@ source = "Part 14.6, Part 54; docs/time_and_playback.md"
 
 [[reserved]]
 id = "time.life_cadence_ticks"
-basis = "the period between aging-and-mortality beats, the unit the age-hazard curve is scaled to (Part 20, R-AGING); set to one in-world year, the demographic unit real life tables use, which at a one-second base tick is 31536000 ticks. Note: revisit one in-world month (2592000 ticks) if it is within the compute budget, for smoother visible aging"
+basis = "the period between aging-and-mortality beats, the unit the age-hazard curve is scaled to (Part 20, R-AGING); set to one in-world year, the demographic unit real life tables use, which at a one-second base tick is 31536000 ticks. Note: revisit one in-world month (2592000 ticks) if it is within the compute budget, for smoother visible aging STEER FLAG (worksheet §13a): 31,536,000 is Earth's year in seconds; derive from the world's orbital_period over base_tick_seconds once R-CELESTIAL is wired. Kept set as the flagged Earth interim, not a ratified per-world value."
 status = "set"
 value = "31536000"
 set_by = "Nathan M. Fraske"
@@ -951,11 +939,9 @@ source = "Part 20; crates/sim/src/homeostasis.rs"
 
 [[reserved]]
 id = "physiology.intake_yield"
-basis = "the fraction of a reserve's capacity restored by one tick of ingesting a source of it; the interim stand-in for the net-nutrition and water-content per bite the resolved edibility floor measures (R-PHYS-BIO), until the floor's measure is wired to the located matter"
-status = "set"
-value = "0.25"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE, worksheet §13a: the net nutrition and water content per bite the edibility floor measures (laws::edibility, net_nutrition) over the located matter, not an authored fraction; the design already flags this interim (R-PHYS-BIO). Wire ingest to the floor measure."
+status = "reserved"
+value = ""
 unit = "fraction_of_capacity_per_tick"
 source = "Part 41 (R-PHYS-BIO), Part 8; crates/sim/src/locomotion.rs"
 
@@ -1067,11 +1053,9 @@ source = "Part 35, Part 41; crates/sim/src/body.rs"
 
 [[reserved]]
 id = "body.fluid_critical_fraction"
-basis = "the fraction of a fluid pool that may be lost before the body fails on it (Part 35's critical fraction), per fluid; the survivable fractional loss (for a mammal, roughly a third of blood volume, Guyton and Hall)"
-status = "set"
-value = "0.33"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
+basis = "DERIVE per fluid, worksheet §13a: a per-fluid circulatory-physiology datum in the biology registry, sibling to tissue_properties; a single 0.33 is the mammalian (Guyton and Hall) figure applied to every race and fluid. Author per fluid, not as a global default."
+status = "reserved"
+value = ""
 unit = "fraction_of_volume"
 source = "Part 35; crates/sim/src/body.rs"
 
