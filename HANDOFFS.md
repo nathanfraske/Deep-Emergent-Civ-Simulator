@@ -66,6 +66,20 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): saturating multiply sat_mul, and a blind audit that caught a real critical bug
+
+Continuing step 3 (the being-kernel), the foundational new primitive both remaining pieces (the controller forward pass and the homeostasis drain) need was built: a saturating Q32.32 multiply. And the fully-blind audit (AGENTIC_ADDENDUM section 7), rerun with the packet-fidelity lesson applied (verbatim code in Section B), earned its keep this time. On `claude/gpu-sat-mul`.
+
+**Built (`crates/gpu/src/prim.rs`, `crates/gpu/src/being.rs`).** `sat_mul`: the Fixed product when it fits i64, else the signed extreme (i64::MIN on differing signs, i64::MAX on agreeing signs), matching the controller's `sat_mul` (Fixed::checked_mul or saturate). It reuses q32_mul's u32-limb sign-magnitude product (no i128) and keeps the top word w3 (bits [96,128), which q32_mul discards) so overflow of the [32,96) result window is detectable. Elementwise `gpu_sat_mul` launcher + a gate over corners, the 2^31/2^63 boundary, and ~9000 random pairs (both the saturating and fitting paths).
+
+**The blind audit found a CRITICAL bug the gate missed.** A verbatim-code packet, a pilot plus a three-auditor panel (one on Opus for the overflow reasoning), each blind. All four CONVERGED on the same defect: the negative-overflow check `at_min` omitted the `w0 == 0` conjunct. A product whose low-96 magnitude is exactly 2^63 (w1 == 0, w2 == 0x80000000, w3 == 0) but with a nonzero discarded low word w0 has true shifted value -(2^63 + 1), below i64::MIN, so a differing-sign product must saturate to i64::MIN; the code returned i64::MAX, the OPPOSITE extreme. Example: (2^32 + 1) * -(2^63 - 2^31 + 1). Verified against first-principles arithmetic (Prime Directive 1) and by a negative control (reverting the fix makes the gate fail with exactly got=i64::MAX/want=i64::MIN), fixed (`at_min` now requires `w0 == 0`), and locked with band regression cases. WHY the gate missed it: every boundary case the integer sweep generated has w0 == 0 (from_int * from_int has w0 = w1 = 0), the exact same blind spot the code had, which is the method's whole premise (a test written against the same assumption passes). This redeems the earlier run's packet-fidelity false positive: verbatim Section B is what let the panel derive the true defect.
+
+**Green.** fmt, clippy `-D warnings`, the being gate (body-thermal + sat_mul, now with the regression), and the full GPU suite pass on the 5090.
+
+**Where it stopped, and next.** `sat_mul` is on `claude/gpu-sat-mul`. The controller `activate` still needs the saturating 128-bit accumulation (sum the sat_mul products in a two-limb hi:lo accumulator, then clamp to [-1, 1]) and the matvec over the runtime-sized weight matrix; the homeostasis drain is per-axis saturating arithmetic on top of sat_mul and saturating_add. Those complete step 3's being-kernel. Lesson banked: run the blind audit with VERBATIM code, and it catches real bugs a co-designed test suite shares the blind spot for.
+
+---
+
 ## 2026-07-02 (continued): offload-map step 3 first slice (being-kernel body-thermal) + a fully-blind self-audit
 
 Continuing the offload map, the being-kernel (step 3) is begun with its cleanest slice, and the new fully-blind audit method (AGENTIC_ADDENDUM section 7) was run against it as a self-check. On `claude/gpu-being-thermal`.

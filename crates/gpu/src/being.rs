@@ -22,10 +22,49 @@
 //! The controller forward pass and the homeostasis drain (both saturating, `i128`-accumulated) are the
 //! remaining being-kernel computations to fuse onto this pass.
 
-use crate::prim::q32_mul;
+use crate::prim::{q32_mul, sat_mul};
 use crate::stage0::CudaClient;
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
+
+/// Elementwise saturating Q32.32 multiply, so the controller's saturating product (`crate::prim::sat_mul`)
+/// can be gated over the full corner and overflow range against the oracle before it is used inside the
+/// reaction-norm activation. See [`gpu_sat_mul`].
+#[cube(launch)]
+fn sat_mul_kernel(a: &Array<i64>, b: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = sat_mul(a[pos], b[pos]);
+    }
+}
+
+/// Elementwise saturating Q32.32 multiply: the Fixed product when it fits, else the signed extreme
+/// (`i64::MIN` on differing signs, `i64::MAX` on agreeing signs), matching the controller's `sat_mul`.
+/// `a`, `b`, and the result are raw `i64` Fixed bit patterns; bit-identical to the CPU `sat_mul` on
+/// CUDA. `a` and `b` must have equal length.
+pub fn gpu_sat_mul(client: &CudaClient, a: &[i64], b: &[i64]) -> Vec<i64> {
+    assert_eq!(a.len(), b.len(), "gpu_sat_mul: mismatched input lengths");
+    let n = a.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let a_h = client.create_from_slice(i64::as_bytes(a));
+    let b_h = client.create_from_slice(i64::as_bytes(b));
+    let out_h = client.empty(core::mem::size_of_val(a));
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        sat_mul_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(a_h.clone(), n),
+            ArrayArg::from_raw_parts(b_h.clone(), n),
+            ArrayArg::from_raw_parts(out_h.clone(), n),
+        );
+    }
+    i64::from_bytes(&client.read_one_unchecked(out_h)).to_vec()
+}
 
 /// One being's body-thermal exchange, matching the runner's `phase_body_exchange`:
 /// `next = bt + exchange * (env - bt)`, where `bt` is the being's body temperature, `env` is the
