@@ -71,4 +71,4 @@ pub use stage0::{
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,
 };
-pub use worldgen::gpu_worldgen_noise;
+pub use worldgen::{gpu_worldgen, gpu_worldgen_noise};

@@ -141,6 +141,80 @@ fn fractal(seed: u64, x: i64, y: i64, field: u64, base_period: i64, octaves: u32
     q32_div(acc, total)
 }
 
+/// The maximum biome count the classify scan covers (a literal loop bound; the launcher clamps `num`).
+const MAX_BIOMES: u32 = 16;
+
+/// The biome for a cell's three field values, bit-identical to `BiomeSet::classify`: the first biome in
+/// declaration order whose three `[lo, hi)` bands all contain `(elev, moist, temp)`, else `fallback`.
+/// The bands are laid out three per biome in `lo`/`hi` (elevation, moisture, temperature). A branchless
+/// first-match latch over a literal-bounded scan: a dead lane (`b >= num`) is masked out and its index
+/// clamped to zero so no read runs past the band arrays. The scan body calls no `#[cube]` fn, so the
+/// carried `result`/`found` latch survives the unroll (unlike the octave accumulator in `fractal`).
+#[cube]
+fn classify(
+    elev: i64,
+    moist: i64,
+    temp: i64,
+    lo: &Array<i64>,
+    hi: &Array<i64>,
+    ids: &Array<u32>,
+    num: u32,
+    fallback: u32,
+) -> u32 {
+    let mut result = fallback;
+    let mut found = false;
+    #[unroll]
+    for b in 0..16u32 {
+        let live = b < num;
+        let bi = select(live, b, 0u32); // clamp the index so a dead lane never reads out of range
+        let b3 = bi * 3u32;
+        let in_e = lo[b3 as usize] <= elev && elev < hi[b3 as usize];
+        let in_m = lo[(b3 + 1u32) as usize] <= moist && moist < hi[(b3 + 1u32) as usize];
+        let in_t = lo[(b3 + 2u32) as usize] <= temp && temp < hi[(b3 + 2u32) as usize];
+        let take = live && in_e && in_m && in_t && !found;
+        result = select(take, ids[bi as usize], result);
+        found = found || take;
+    }
+    result
+}
+
+/// Per-cell fused worldgen kernel: the three fractal fields plus the classified biome id at each cell,
+/// row-major. Fuses `classify` onto the noise so the biome scan runs on the field values already in
+/// registers, the offload map's "rides the worldgen GPU win for free."
+#[cube(launch)]
+#[allow(clippy::too_many_arguments)]
+fn worldgen_kernel(
+    elev: &mut Array<i64>,
+    moist: &mut Array<i64>,
+    temp: &mut Array<i64>,
+    biome: &mut Array<u32>,
+    lo: &Array<i64>,
+    hi: &Array<i64>,
+    ids: &Array<u32>,
+    width: u32,
+    height: u32,
+    seed: u64,
+    base_period: i64,
+    octaves: u32,
+    num_biomes: u32,
+    fallback: u32,
+) {
+    let x = ABSOLUTE_POS_X;
+    let y = ABSOLUTE_POS_Y;
+    if x < width && y < height {
+        let idx = (y * width + x) as usize;
+        let xi = i64::cast_from(x);
+        let yi = i64::cast_from(y);
+        let e = fractal(seed, xi, yi, 0u64, base_period, octaves);
+        let m = fractal(seed, xi, yi, 1u64, base_period, octaves);
+        let t = fractal(seed, xi, yi, 2u64, base_period, octaves);
+        elev[idx] = e;
+        moist[idx] = m;
+        temp[idx] = t;
+        biome[idx] = classify(e, m, t, lo, hi, ids, num_biomes, fallback);
+    }
+}
+
 /// Per-cell worldgen kernel: `elev`, `moist`, `temp` are the three fractal fields (slots 0, 1, 2) at
 /// each cell, row-major, `i64` Q32.32 bits. The thread's `(x, y)` is the sole input (coordinate-keyed),
 /// so no field uploads, only the results read back.
@@ -212,4 +286,86 @@ pub fn gpu_worldgen_noise(
     let moist = i64::from_bytes(&client.read_one_unchecked(moist_h)).to_vec();
     let temp = i64::from_bytes(&client.read_one_unchecked(temp_h)).to_vec();
     (elev, moist, temp)
+}
+
+/// Generate the three worldgen noise fields AND the classified biome id on the GPU in one fused pass,
+/// bit-identical to `noise::fractal` and `BiomeSet::classify` per cell on CUDA. `lo` and `hi` are the
+/// biome bands (three per biome, in elevation/moisture/temperature order), `ids` the biome ids in
+/// declaration order, and `fallback` the id for a cell no band claims. The band arrays are uploaded once
+/// and stay resident; the biome scan runs on the field values already in registers. Returns
+/// `(elevation, moisture, temperature, biome)`.
+#[allow(clippy::too_many_arguments)]
+pub fn gpu_worldgen(
+    client: &CudaClient,
+    width: u32,
+    height: u32,
+    seed: u64,
+    base_period: i64,
+    octaves: u32,
+    lo: &[i64],
+    hi: &[i64],
+    ids: &[u32],
+    fallback: u32,
+) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<u32>) {
+    let n = (width as usize) * (height as usize);
+    if n == 0 {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    }
+    let octaves = octaves.max(1);
+    assert!(
+        octaves <= MAX_OCTAVES,
+        "gpu_worldgen: octaves {octaves} exceeds {MAX_OCTAVES}"
+    );
+    let num = ids.len() as u32;
+    assert!(num >= 1, "gpu_worldgen: need at least one biome");
+    assert!(
+        num <= MAX_BIOMES,
+        "gpu_worldgen: biomes {num} exceeds {MAX_BIOMES}"
+    );
+    assert_eq!(
+        lo.len(),
+        3 * num as usize,
+        "gpu_worldgen: lo is 3 bands/biome"
+    );
+    assert_eq!(
+        hi.len(),
+        3 * num as usize,
+        "gpu_worldgen: hi is 3 bands/biome"
+    );
+    let elev_h = client.empty(n * core::mem::size_of::<i64>());
+    let moist_h = client.empty(n * core::mem::size_of::<i64>());
+    let temp_h = client.empty(n * core::mem::size_of::<i64>());
+    let biome_h = client.empty(n * core::mem::size_of::<u32>());
+    let lo_h = client.create_from_slice(i64::as_bytes(lo));
+    let hi_h = client.create_from_slice(i64::as_bytes(hi));
+    let ids_h = client.create_from_slice(u32::as_bytes(ids));
+    let tile = 16u32;
+    let bx = width.div_ceil(tile);
+    let by = height.div_ceil(tile);
+    unsafe {
+        worldgen_kernel::launch::<CudaRuntime>(
+            client,
+            CubeCount::Static(bx, by, 1),
+            CubeDim::new_3d(tile, tile, 1),
+            ArrayArg::from_raw_parts(elev_h.clone(), n),
+            ArrayArg::from_raw_parts(moist_h.clone(), n),
+            ArrayArg::from_raw_parts(temp_h.clone(), n),
+            ArrayArg::from_raw_parts(biome_h.clone(), n),
+            ArrayArg::from_raw_parts(lo_h.clone(), lo.len()),
+            ArrayArg::from_raw_parts(hi_h.clone(), hi.len()),
+            ArrayArg::from_raw_parts(ids_h.clone(), ids.len()),
+            width,
+            height,
+            seed,
+            base_period,
+            octaves,
+            num,
+            fallback,
+        );
+    }
+    let elev = i64::from_bytes(&client.read_one_unchecked(elev_h)).to_vec();
+    let moist = i64::from_bytes(&client.read_one_unchecked(moist_h)).to_vec();
+    let temp = i64::from_bytes(&client.read_one_unchecked(temp_h)).to_vec();
+    let biome = u32::from_bytes(&client.read_one_unchecked(biome_h)).to_vec();
+    (elev, moist, temp, biome)
 }
