@@ -185,11 +185,11 @@ id = "acoustic.source_power"
 measures = "acoustic source power, how far a call, shout, or song carries"
 unit = "W"
 dimension = "2,1,-3,0"
-scale = "W (per-quantity scale reserved, R-UNITS-PIN)"
+scale = "W"
 tier = 0
 range_lo = "0.000001"
 range_hi = "1000000"
-real = "acoustic source-power ranges; the sub-microwatt low end reserves a per-quantity scale"
+real = "Beranek, Acoustics; Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics. Anchor magnitudes over [1e-6, 1e6] W: conversational speech ~1e-5 W, a shout ~1e-3 W, an orchestra ~1 to 10 W, a jet engine ~1e4 W, a large siren ~1e6 W. The sub-microwatt to megawatt span derives a fine per-quantity scale from the declared decimal envelope (R-UNITS-PIN)"
 
 [[axis]]
 id = "acoustic.absorption_coefficient"
