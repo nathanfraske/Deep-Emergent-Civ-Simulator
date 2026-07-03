@@ -39,6 +39,7 @@
 
 pub mod graph;
 pub mod laws;
+pub mod quantities;
 
 use civsim_core::{Fixed, StateHasher};
 use serde::{Deserialize, Serialize};

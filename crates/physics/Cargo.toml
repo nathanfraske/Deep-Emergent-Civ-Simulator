@@ -10,6 +10,10 @@ rust-version.workspace = true
 
 [dependencies]
 civsim-core = { path = "../core" }
+# The absolute unit and dimensional system (design Part 55, R-UNITS-PIN): physics is the authored
+# quantity catalogue this crate populates into the units QuantityRegistry, deriving each axis's
+# per-quantity fixed-point scale from its owner-set envelope.
+civsim-units = { path = "../units" }
 # serde and toml only, the mature stable pair (not the fast-moving GPU/ECS stack),
 # used to load the data-driven axis, law, and substance definitions. Values are
 # carried as decimal strings and parsed to Fixed by integer arithmetic, so no
