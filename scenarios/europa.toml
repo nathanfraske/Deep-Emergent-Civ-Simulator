@@ -12,6 +12,7 @@ id = "europa"
 name = "Europa"
 summary = "A global liquid-water ocean beneath an ice crust, lightless in the deep, warmed and fed at the seafloor by hydrothermal and tidal vents. Life is fully aquatic and chemosynthetic. The thermally-buffered ocean damps change, so the world is placid and slow-drifting. No magic."
 grounding = "real"
+medium = "water"                 # cold vent-oxygenated water: dense, low dissolved gas, gill breathing
 
 [races]
 count = "several"

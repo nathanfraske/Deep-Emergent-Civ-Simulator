@@ -4,6 +4,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-03 (continued): the medium lever, the last §3 piece, on `claude/reserved-values-worksheet`
+
+The owner said to do the medium next and then work through all the dials. Built the medium lever, completing §3 as plumbing.
+
+**The medium selection (`crates/sim/src/scenario.rs`).** A medium is a coherent physics `Substance` bundle, not a `real`/`high`/`low` dial, so it is selected categorically: `ScenarioMeta` gains a `medium: Option<String>` key in `[scenario]`, and `Scenario::resolve` resolves it to the manifest profile `medium.{name}` (a `require_map` bundle of axis values), returned as a new `ResolvedMedium` on the resolution and carried into `reserved_ids`/`is_fully_set` alongside the dials. A world naming a medium with no manifest profile fails loud like a dangling dial. `ResolvedMedium` is the categorical sibling of `ResolvedDial`.
+
+**Manifest (reserved, the recommended axis map in each basis).** `medium.air` (temperate default: density ~1.2, respirable ~9, toxicity 0, exchange ~0.05), `medium.water` (Europa: ~1000, ~0.3, 0, ~0.20), `medium.dense_toxic` (Venus: ~65, ~0.1, toxicity > 0, ~0.20). `venus.toml` selects `dense_toxic`, `europa.toml` selects `water`; the canonical worlds default to air. Dedicated test confirms both resolve their medium and surface it in the review queue, and a bogus medium fails loud.
+
+**Gate-green.** Full sim lib 390 tests (scenario 10, +1), fmt and clippy clean, scenario and manifest prose clean. Manifest now 153 entries, 76 set, 77 reserved. Worksheet §12 records it.
+
+**Where it stopped.** Committed on `claude/reserved-values-worksheet` (PR #59), pending push. §3 is complete as plumbing (field, thermal band, medium all levered). Two honest limits: `medium.toxicity` is a proposed floor harm-axis whose applying kernel is a future build, and the per-organ `respiratory_surface` scale is separate. NEXT (the owner's "work through all of the dials"): ratify the reserved `[environment]` and medium magnitudes (the §3 batch, presented for sign-off), then the §4 world-invariant values.
+
+---
+
 ## 2026-07-03 (continued): the environmental levers promoted (field and thermal band), on `claude/reserved-values-worksheet`
 
 The owner said to take the §3 environmental-lever promotion so Venus and Europa run their environment through the lever system. Did the two parts that map to the existing direction-token mechanism; scoped the medium as a separate increment.

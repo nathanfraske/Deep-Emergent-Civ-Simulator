@@ -510,3 +510,21 @@ The manifest gained the sibling and thermal-band entries, all **reserved** (surf
 Remaining in §3: the medium (§3c, gill respiration, buoyancy, the toxicity harm axis). Unlike the field and thermal band, a world's medium is a physics `Substance` selected categorically (air, water, dense-toxic atmosphere) from the floors (`crates/physics/data/*.toml`), not a `real`/`high`/`low` dial, and `medium.toxicity` is a proposed floor extension. That is a separate, larger increment (a categorical medium selection plus the harm-axis extension), the next step to make Venus's toxic-poor respiration and Europa's gill breathing first-class.
 
 Manifest counts after the environment-lever pass: 150 entries, 76 set, 74 reserved.
+
+---
+
+## §12. The medium lever (2026-07-03), the last §3 piece
+
+The medium (§3c) is the ambient physics `Substance` a world's life breathes and floats in. Unlike the field and thermal band, it is not a `real`/`high`/`low` dial: a medium is a coherent bundle (water is dense and low in dissolved gas together), so it is selected categorically by name. A scenario's `[scenario]` block carries a `medium = "water"` key (alongside `grounding`), which `Scenario::resolve` resolves to the manifest profile `medium.{name}`, a `require_map` bundle of the medium's axis values, carried into the same review queue as the dials and the environment levers. A world naming a medium with no manifest profile fails loud like a dangling dial.
+
+Three reserved medium profiles were added, the recommended axis map in each basis (surfaced, not set):
+
+- **`medium.air`**: the temperate default (Mirror and the grounded worlds name no medium and fall to it). Recommended density ~1.2, respirable_content ~9 (an air-oxygen analogue), toxicity 0, in_medium_exchange_rate ~0.05.
+- **`medium.water`** (Europa): density ~1000, respirable_content ~0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, exchange ~0.20. Buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice).
+- **`medium.dense_toxic`** (Venus): density ~65 (buoyancy lifts a light body toward the cooler cloud decks), respirable_content ~0.1 (the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, the proposed harm-axis extension), exchange ~0.20 (the dense hot medium cooks).
+
+`venus.toml` selects `dense_toxic`, `europa.toml` selects `water`; the four canonical worlds name none and default to air. A dedicated test confirms both worlds resolve their medium against the real manifest and surface the profile in the review queue, and that a bogus medium fails loud.
+
+Two honest limits stay open: `medium.toxicity` is a proposed floor harm-axis extension, so a profile can carry the value but the kernel that applies toxicity harm to an immersed body is a future floor build; and the per-organ `respiratory_surface` scale is a separate reserved value, not part of the medium profile. With the field, the thermal band, and the medium all levered, §3 is complete as plumbing; the magnitudes are the reserved `[environment]`-and-medium dials to ratify.
+
+Manifest counts after the medium pass: 153 entries, 76 set, 77 reserved.

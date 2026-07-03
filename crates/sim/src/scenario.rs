@@ -65,6 +65,14 @@ pub struct ScenarioMeta {
     /// Grounding posture: "real" or "minimal".
     #[serde(default)]
     pub grounding: String,
+    /// The ambient medium a world's life breathes and floats in, selected categorically by
+    /// name (for example "water", "dense_toxic"): a physics `Substance`, resolved to the
+    /// manifest medium profile `medium.{name}`. Unlike the field and thermal-band levers this
+    /// is not a `real`/`high`/`low` dial, because a medium is a coherent bundle (water is dense
+    /// and low in dissolved gas together) rather than independent axes. `None` is the default
+    /// temperate air.
+    #[serde(default)]
+    pub medium: Option<String>,
 }
 
 /// The seeded sentient-race posture (design Part 20), as owner-given categorical choices.
@@ -179,9 +187,28 @@ impl Scenario {
                 entry,
             });
         }
+        // The ambient medium is selected by name, so it resolves to the manifest profile
+        // `medium.{name}` (a require_map bundle of axis values) rather than through a direction.
+        // A world naming a medium the manifest has no profile for fails loud like a dangling dial.
+        let medium = match &self.scenario.medium {
+            Some(name) => {
+                let manifest_id = format!("medium.{name}");
+                let entry = manifest
+                    .get(&manifest_id)
+                    .ok_or_else(|| CalibrationError::Unknown(manifest_id.clone()))?
+                    .clone();
+                Some(ResolvedMedium {
+                    name: name.clone(),
+                    manifest_id,
+                    entry,
+                })
+            }
+            None => None,
+        };
         Ok(ScenarioResolution {
             scenario: self.scenario.id.clone(),
             dials,
+            medium,
         })
     }
 }
@@ -213,6 +240,18 @@ pub struct ResolvedDial {
     pub entry: ReservedValue,
 }
 
+/// A scenario's ambient medium, resolved to its manifest profile: the categorical sibling of
+/// [`ResolvedDial`], since a medium is selected by name rather than pushed by a direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMedium {
+    /// The medium name the scenario selected (for example "water").
+    pub name: String,
+    /// The manifest id it resolves to (`medium.{name}`, a `require_map` profile of axis values).
+    pub manifest_id: String,
+    /// The manifest entry found at `manifest_id`, set or still reserved.
+    pub entry: ReservedValue,
+}
+
 /// A scenario resolved against a base manifest: the whole override set the scenario pulls, with
 /// each dial mapped to its manifest entry. The caller reads the set dials and takes the reserved
 /// ones to the owner ([`reserved_ids`](Self::reserved_ids)), the per-scenario review queue.
@@ -222,6 +261,9 @@ pub struct ScenarioResolution {
     pub scenario: String,
     /// Each dial the scenario pushes, resolved to its manifest entry, in dial-id order.
     pub dials: Vec<ResolvedDial>,
+    /// The scenario's ambient medium, resolved to its manifest profile, or `None` for the
+    /// default temperate air.
+    pub medium: Option<ResolvedMedium>,
 }
 
 impl ScenarioResolution {
@@ -235,6 +277,12 @@ impl ScenarioResolution {
             .iter()
             .filter(|d| !d.entry.is_set())
             .map(|d| d.manifest_id.as_str())
+            .chain(
+                self.medium
+                    .iter()
+                    .filter(|m| !m.entry.is_set())
+                    .map(|m| m.manifest_id.as_str()),
+            )
             .collect()
     }
 
@@ -245,6 +293,7 @@ impl ScenarioResolution {
     /// postures is fully calibrated when this holds.
     pub fn is_fully_set(&self) -> bool {
         self.dials.iter().all(|d| d.entry.is_set())
+            && self.medium.as_ref().is_none_or(|m| m.entry.is_set())
     }
 
     /// The manifest id a given base dial resolves to under this scenario, or `None` if the scenario
@@ -572,6 +621,49 @@ name = "Probe"
             mirror.environment.is_empty(),
             "Mirror is the temperate baseline"
         );
+    }
+
+    #[test]
+    fn the_medium_selection_resolves_to_a_manifest_profile() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+
+        // Europa breathes cold water; the medium resolves to its manifest profile, which is
+        // reserved (surfaced for the owner), so it is carried in the review queue.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert_eq!(europa.scenario.medium.as_deref(), Some("water"));
+        let r = europa.resolve(&manifest).unwrap();
+        let med = r.medium.as_ref().expect("Europa selects a medium");
+        assert_eq!(med.manifest_id, "medium.water");
+        assert!(r.reserved_ids().contains(&"medium.water"));
+
+        // Venus breathes a dense toxic atmosphere.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert_eq!(
+            venus
+                .resolve(&manifest)
+                .unwrap()
+                .medium
+                .unwrap()
+                .manifest_id,
+            "medium.dense_toxic"
+        );
+
+        // The canonical worlds name no medium: temperate air is the default.
+        let mirror = Scenario::load(format!("{dir}mirror.toml")).unwrap();
+        assert!(mirror.scenario.medium.is_none(), "Mirror defaults to air");
+        assert!(mirror.resolve(&manifest).unwrap().medium.is_none());
+
+        // A world naming a medium the manifest has no profile for fails loud, like a dangling
+        // dial, rather than silently defaulting.
+        let bogus =
+            Scenario::from_toml_str("[scenario]\nid = \"b\"\nname = \"B\"\nmedium = \"plasma\"\n")
+                .unwrap();
+        assert!(bogus.resolve(&manifest).is_err());
     }
 
     #[test]

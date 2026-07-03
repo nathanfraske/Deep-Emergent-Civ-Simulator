@@ -1206,6 +1206,30 @@ unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
+id = "medium.air"
+basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved; reserved for the owner"
+status = "reserved"
+value = ""
+unit = "medium_profile"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+
+[[reserved]]
+id = "medium.water"
+basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice); reserved"
+status = "reserved"
+value = ""
+unit = "medium_profile"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+
+[[reserved]]
+id = "medium.dense_toxic"
+basis = "the crushing hot toxic atmosphere (Venus), a require_map profile; recommended density about 65 (dense enough that buoyancy lifts a light body to the cooler cloud decks), respirable_content about 0.1 (thin in anything respirable, the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, a proposed harm-axis extension mapping to the wound and edibility harm channel), in_medium_exchange_rate about 0.20 (the dense hot medium couples fast, it cooks); reserved"
+status = "reserved"
+value = ""
+unit = "medium_profile"
+source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs"
+
+[[reserved]]
 id = "genome.mutation_rates.high"
 basis = "the volatile structural-mutation end Tempest and Arcanum push toward, above the baseline so genomes churn and schemes drift fast; its upper bound is where legibility or a determinism replay breaks; the baseline is genome.mutation_rates"
 status = "set"

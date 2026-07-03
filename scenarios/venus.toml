@@ -12,6 +12,7 @@ id = "venus"
 name = "Venus"
 summary = "A uniformly super-hot world under a dense, toxic, crushing atmosphere: the surface lethal everywhere, life banded high in the cooler cloud decks, buoyant in the dense air and breathing a medium thin in anything respirable and laced with harm. A scarce, costly magic is a survival edge, not an ambient utility."
 grounding = "real"
+medium = "dense_toxic"           # the crushing hot toxic atmosphere: dense, thin in respirable, corrosive
 
 [races]
 count = "few"
