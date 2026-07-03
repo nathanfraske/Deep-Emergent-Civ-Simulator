@@ -68,8 +68,10 @@
 //! machinery it would move; the substrate it will act over is this registry.
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::language::Linearization;
 use crate::value::GroundMetric;
 use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_physics::laws;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -130,6 +132,47 @@ pub const MAX_PRIOR_COUNT: u32 = 1 << 24;
 /// wrapping, and with at most [`MAX_VALUES_PER_PARAM`] values the total stays below
 /// 2^62, so the pick draw is exact in u128. Engine mechanics, not a realism value.
 const WEIGHT_CAP: u128 = 1 << 56;
+
+/// The normalized parse-cost ceiling passed to [`laws::parse_cost`]: parse cost is reported as a
+/// FRACTION in `[0, 1]`, so the softmax temperature is the single scale of the derived tilt and no
+/// second free magnitude hides in the cost cap. Engine mechanics, not a realism value.
+const COST_MAX: Fixed = Fixed::ONE;
+
+/// The representability ceiling on the derived tilt passed to [`laws::harmony_tilt`]: the saturating
+/// exponential is bounded here so the tilt stays a small `Fixed`, well inside the per-value
+/// [`WEIGHT_CAP`] that keeps the cumulative pick exact. Engine mechanics, not a realism value.
+const TILT_MAX: Fixed = Fixed::from_int(1 << 20);
+
+/// The parse-cost tilt parameters threaded to the sampler: the per-race working-memory capacity that
+/// softens parse cost, the single reserved softmax temperature that scales the derived tilt, and the
+/// two engine caps ([`COST_MAX`], [`TILT_MAX`]). Memory is per-race DATA (a race that invests in
+/// working memory feels weaker harmony pressure, proven by test); the temperature is the one reserved
+/// manifest scale (validated against the human WALS/Dryer row, not authored as tiers); the caps are
+/// representability bounds. Bundled so the sampler signature stays readable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TiltParams {
+    /// The parser's working-memory capacity (per-race data): softens the parse cost of a domain.
+    pub memory_capacity: Fixed,
+    /// The softmax temperature (the single reserved tilt scale): a smaller temperature bites harder.
+    pub temperature: Fixed,
+    /// The normalized parse-cost ceiling (engine mechanics; [`COST_MAX`]).
+    pub cost_max: Fixed,
+    /// The tilt representability ceiling (engine mechanics; [`TILT_MAX`]).
+    pub tilt_max: Fixed,
+}
+
+impl TiltParams {
+    /// The tilt parameters for a race with the given working-memory capacity and the reserved
+    /// softmax temperature, filling the two engine caps so they stay out of every call site.
+    pub fn new(memory_capacity: Fixed, temperature: Fixed) -> Self {
+        TiltParams {
+            memory_capacity,
+            temperature,
+            cost_max: COST_MAX,
+            tilt_max: TILT_MAX,
+        }
+    }
+}
 
 impl TypologyRegistry {
     /// An empty registry.
@@ -211,11 +254,15 @@ impl TypologyPrior {
     }
 }
 
-/// One directional harmonic bias: given that `given_param` drew `given_value`, the prior
-/// mass of `then_value` on `then_param` is multiplied by `weight`. The weight is a
-/// reserved tier read from the calibration manifest (the typological record reports
-/// proportions of genera, not coefficients, so the honest encoding is an ordinal tier
-/// whose numeric value is the owner's), and the row carries the proportion as provenance.
+/// One directional harmonic bias: given that `given_param` drew `given_value`, choosing
+/// `then_value` on `then_param` keeps the branching direction consistent. The row no longer
+/// carries an authored tilt; it carries a data-defined `structural_weight`, how many
+/// linearization decisions the pairing constrains (its dependency-integration domain extent).
+/// The multiplicative tilt DERIVES from that structural weight through the parse-cost floor
+/// (`laws::parse_cost` then `laws::harmony_tilt`), so the strong-versus-weak distinction is DATA
+/// (a larger structural weight for a pairing that constrains more decisions) rather than two
+/// authored numbers. The tilt scale is the single reserved softmax temperature, validated against
+/// the human WALS/Dryer proportions the row carries as provenance rather than authored from them.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct HarmonyBias {
     /// The conditioning parameter (must draw earlier in the canonical order).
@@ -224,10 +271,13 @@ pub struct HarmonyBias {
     pub given_value: TypologyValueId,
     /// The conditioned parameter.
     pub then_param: TypologyParamId,
-    /// The value whose prior mass the bias multiplies.
+    /// The harmonic (branching-consistent) value on the conditioned parameter.
     pub then_value: TypologyValueId,
-    /// The multiplicative tilt (above one favours; validated positive).
-    pub weight: Fixed,
+    /// The structural weight: how many head-dependent linearization decisions this pairing
+    /// constrains, as a dependency-integration domain extent (data, validated positive). A
+    /// two-sided fully-phrasal pairing constrains more than a one-sided partly-non-phrasal one
+    /// (Dryer's Branching Direction Theory), so strong-vs-weak is this magnitude, never a tilt.
+    pub structural_weight: Fixed,
     /// Provenance: the correlation record this row encodes.
     pub source: String,
 }
@@ -449,9 +499,9 @@ pub fn validate(
                 b.given_param, b.then_param
             )));
         }
-        if b.weight <= Fixed::ZERO {
+        if b.structural_weight <= Fixed::ZERO {
             return Err(TypologyError::BadBias(format!(
-                "bias {:?} -> {:?} has a non-positive weight",
+                "bias {:?} -> {:?} has a non-positive structural weight",
                 b.given_param, b.then_param
             )));
         }
@@ -459,40 +509,107 @@ pub fn validate(
     Ok(())
 }
 
-/// The tilted per-value weights for one parameter, given the values already drawn this
-/// pass: each value's prior count widened to Q32.32 bits, multiplied by the weight of
-/// every applicable bias, saturating at the representability cap. Exposed as a pure
-/// function so the permutation invariant is testable bit-exactly. The caller has
+/// The dependency-integration domain extent one harmony bias contributes given the values already
+/// drawn: its data-defined `structural_weight` (how many linearization decisions the pairing
+/// constrains) when its conditioning value has been drawn, and zero otherwise. The scalar magnitude
+/// the parse-cost floor reads. Direction-blind and label-blind: it reads the structural weight and
+/// whether the condition is present, never which value id is head-initial, so the kernels it feeds
+/// cannot privilege a direction (Principle 9).
+fn linearization_domain(bias: &HarmonyBias, drawn: &[(TypologyParamId, TypologyValueId)]) -> Fixed {
+    if drawn
+        .iter()
+        .any(|&(dp, dv)| dp == bias.given_param && dv == bias.given_value)
+    {
+        bias.structural_weight
+    } else {
+        Fixed::ZERO
+    }
+}
+
+/// The derived multiplicative tilt for choosing `value` on `param`, composing the
+/// [`linearization_domain`] fold through [`laws::parse_cost`] and [`laws::harmony_tilt`]. The
+/// harmonic value's avoided dependency-integration cost is the ORDER-INDEPENDENT saturating sum of
+/// the structural weights of every firing bias for `(param, value)`; that folded extent runs through
+/// the softening parse-cost law and the softmax tilt law to a weight `>= ONE`. A value no bias
+/// favours folds to a zero extent, a zero cost, and a tilt of exactly one (its bare marginal). This
+/// is the mechanism that REPLACES the former authored per-bias tilt: the tilt derives from the
+/// parse-cost floor, and strong-versus-weak lives in the structural weights (data).
+fn derived_tilt(
+    param: TypologyParamId,
+    value: TypologyValueId,
+    drawn: &[(TypologyParamId, TypologyValueId)],
+    harmony: &HarmonyModel,
+    tilt: &TiltParams,
+) -> Fixed {
+    let extent = Fixed::saturating_sum(
+        harmony
+            .biases()
+            .iter()
+            .filter(|b| b.then_param == param && b.then_value == value)
+            .map(|b| linearization_domain(b, drawn)),
+    );
+    let reduction = laws::parse_cost(extent, tilt.memory_capacity, tilt.cost_max);
+    laws::harmony_tilt(reduction, tilt.temperature, tilt.tilt_max)
+}
+
+/// The tilted per-value weights for one parameter, given the values already drawn this pass: each
+/// value's prior count widened to Q32.32 bits, multiplied by its DERIVED parse-cost tilt (never a
+/// stored coefficient), saturating at the representability cap. When `suppress` is set (a
+/// simultaneous modality, or the disharmony gate open) the tilt is one for every value, so the
+/// weights fall back to the untilted marginal. Exposed as a pure function so the permutation
+/// invariant and the direction-neutrality invariant are testable bit-exactly. The caller has
 /// validated; an unresolved reference here reads as an untouched weight.
 pub fn tilted_weights(
     prior_counts: &[(TypologyValueId, u32)],
     param: TypologyParamId,
     drawn: &[(TypologyParamId, TypologyValueId)],
     harmony: &HarmonyModel,
+    tilt: &TiltParams,
+    suppress: bool,
 ) -> Vec<(TypologyValueId, u128)> {
     prior_counts
         .iter()
         .map(|&(v, c)| {
             // Q32.32: the integer count as fixed-point bits.
-            let mut w = (c as u128) << 32;
-            for b in harmony.biases() {
-                if b.then_param == param
-                    && b.then_value == v
-                    && drawn
-                        .iter()
-                        .any(|&(dp, dv)| dp == b.given_param && dv == b.given_value)
-                {
-                    // Fixed multiply in u128: (w * bits) >> 32, saturating at the cap.
-                    w = w
-                        .checked_mul(b.weight.to_bits() as u128)
-                        .map(|x| x >> 32)
-                        .unwrap_or(WEIGHT_CAP)
-                        .min(WEIGHT_CAP);
-                }
-            }
-            (v, w.min(WEIGHT_CAP))
+            let w = (c as u128) << 32;
+            let t = if suppress {
+                Fixed::ONE
+            } else {
+                derived_tilt(param, v, drawn, harmony, tilt)
+            };
+            // Fixed multiply in u128: (w * tilt_bits) >> 32, saturating at the cap. The derived tilt
+            // is >= ONE, so an untouched value keeps its marginal (ONE.to_bits() == 1 << 32).
+            let w = w
+                .checked_mul(t.to_bits() as u128)
+                .map(|x| x >> 32)
+                .unwrap_or(WEIGHT_CAP)
+                .min(WEIGHT_CAP);
+            (v, w)
         })
         .collect()
+}
+
+/// The total dependency-integration parse cost of a candidate grammar: the ORDER-INDEPENDENT
+/// saturating sum, over every harmony bias whose conditioning value the grammar drew, of the parse
+/// cost the pairing incurs when the grammar VIOLATES it (the conditioned parameter took some value
+/// other than the harmonic one), and zero when the grammar satisfies it. A fully harmonic grammar
+/// violates no bias and costs zero; a mixed-branching grammar holds the structural weight of each
+/// violated pairing long and pays for it. Direction-blind: the cost reads structural weights and the
+/// equal-or-not of value ids, never which id is head-initial, so it cannot prefer one linear order.
+pub fn grammar_parse_cost(
+    profile: &TypologyProfile,
+    harmony: &HarmonyModel,
+    memory_capacity: Fixed,
+    cost_max: Fixed,
+) -> Fixed {
+    Fixed::saturating_sum(harmony.biases().iter().map(|b| {
+        match (profile.get(b.given_param), profile.get(b.then_param)) {
+            (Some(gv), Some(tv)) if gv == b.given_value && tv != b.then_value => {
+                laws::parse_cost(b.structural_weight, memory_capacity, cost_max)
+            }
+            _ => Fixed::ZERO,
+        }
+    }))
 }
 
 /// Sample one culture's typology profile: the seeded, deterministic pass of the scoped
@@ -500,18 +617,32 @@ pub fn tilted_weights(
 /// each, draws the disharmony gate then the value, both under
 /// `DrawKey::entity(culture, tick, Phase::LANG_TYPOLOGY)` with the parameter's canonical
 /// position as the slot, so every draw coordinate is canonical and camera-free (33.10,
-/// R-RNG-COORD). With the gate open (disharmonic) the parameter draws from its untilted
-/// marginal, so a disharmonic language is rarer, never unreachable.
+/// R-RNG-COORD). The word-order harmony tilt DERIVES from the parse-cost floor through
+/// [`tilted_weights`] rather than from an authored coefficient. Two gates suppress it back to the
+/// untilted marginal, on the same branch: the reserved disharmony gate (open with a small
+/// probability so a disharmonic language stays reachable) and a `Linearization::Simultaneous`
+/// modality (a modality with no linear word order for the tilt to act on). No new draw enters: the
+/// modality gate is a deterministic conditional on the data flag.
+// The nine arguments are the substrate (registry, prior, harmony), the reserved calibration (tilt,
+// disharmony), the modality flag, and the canonical draw coordinate (seed, culture, tick); each is a
+// distinct axis of the pass, so bundling would only hide the coordinate. The laws.rs kernels take the
+// same `#[allow]` for the same reason.
+#[allow(clippy::too_many_arguments)]
 pub fn sample_profile(
     registry: &TypologyRegistry,
     prior: &TypologyPrior,
     harmony: &HarmonyModel,
+    tilt: &TiltParams,
+    linearization: Linearization,
     disharmony: Fixed,
     master_seed: u64,
     culture: u64,
     tick: u64,
 ) -> Result<TypologyProfile, TypologyError> {
     validate(registry, prior, harmony)?;
+    // A simultaneous modality has no linear word order, so the harmony tilt has nothing to act on:
+    // it is suppressed for every parameter with no extra draw (a deterministic conditional on data).
+    let simultaneous = matches!(linearization, Linearization::Simultaneous);
     let order = registry.sampling_order();
     let mut drawn: Vec<(TypologyParamId, TypologyValueId)> = Vec::with_capacity(order.len());
     for (pos, &i) in order.iter().enumerate() {
@@ -523,11 +654,10 @@ pub fn sample_profile(
         // Counter 0: the disharmony gate. Open means this parameter ignores the tilt and
         // draws from its own marginal, the reserved leak that keeps disharmony reachable.
         let disharmonic = rng.unit_fixed(0) < disharmony;
-        let weights = if disharmonic {
-            tilted_weights(counts, p.id, &[], &HarmonyModel::new())
-        } else {
-            tilted_weights(counts, p.id, &drawn, harmony)
-        };
+        // Suppress the tilt when the gate is open OR the modality is simultaneous: both fall back to
+        // the untilted marginal, the one branch.
+        let suppress = disharmonic || simultaneous;
+        let weights = tilted_weights(counts, p.id, &drawn, harmony, tilt, suppress);
         // Counter 1: the value pick, a cumulative walk in value-id order over the exact
         // integer weights. The total stays below 2^62 by the caps, so the scaled draw is
         // exact in u128.
@@ -603,15 +733,16 @@ pub fn typology_distance(
     Fixed::saturating_sum(terms)
 }
 
-/// The reserved typology calibrations, read fail-loud from the manifest (Principle 11):
-/// the two harmony tier weights (the typological record reports proportions, so the tiers
-/// are ordinal and their numeric tilts are the owner's) and the disharmony probability.
+/// The reserved typology calibrations, read fail-loud from the manifest (Principle 11). The two
+/// former harmony tier tilts are retired: the harmony tilt now DERIVES from the parse-cost floor over
+/// the per-pair structural weights (data), so the single reserved tilt scale is the softmax
+/// temperature. The disharmony probability is kept (the gate that keeps a disharmonic language
+/// reachable). To build a [`TiltParams`], the caller pairs this manifest temperature with a race's
+/// own working-memory capacity (per-race data), never a manifest scalar.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TypologyParams {
-    /// The strong-tier multiplicative tilt (the adposition-class correlations).
-    pub harmony_strong: Fixed,
-    /// The weak-tier multiplicative tilt (the genitive-class correlation).
-    pub harmony_weak: Fixed,
+    /// The softmax temperature: the single reserved scale of the derived harmony tilt.
+    pub temperature: Fixed,
     /// The probability a parameter ignores the tilt and draws from its marginal.
     pub disharmony: Fixed,
 }
@@ -620,10 +751,15 @@ impl TypologyParams {
     /// Read the typology calibration from the manifest, failing loud while reserved.
     pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
         Ok(TypologyParams {
-            harmony_strong: m.require_fixed("lang.typology_harmony_strong")?,
-            harmony_weak: m.require_fixed("lang.typology_harmony_weak")?,
+            temperature: m.require_fixed("lang.typology_temperature")?,
             disharmony: m.require_fixed("lang.typology_disharmony")?,
         })
+    }
+
+    /// The tilt parameters for a race with the given working-memory capacity, pairing the reserved
+    /// softmax temperature with that per-race datum.
+    pub fn tilt_params(&self, memory_capacity: Fixed) -> TiltParams {
+        TiltParams::new(memory_capacity, self.temperature)
     }
 }
 
@@ -631,10 +767,13 @@ impl TypologyParams {
 /// data, each count verified against wals.info (Dryer and Haspelmath eds., 2013) on
 /// 2026-07-02. This is the human-grounded floor the registry opens from, a starting menu
 /// and not a ceiling (the modality-registry stance), and the shared default prior a race
-/// may override with its own shape over the same descriptive space. The two tier weights
-/// are the caller's, read from the manifest (reserved); passing them as arguments keeps
-/// the tier vocabulary out of the mechanism, so a future tier is data plus one more
-/// manifest entry, never an enum case.
+/// may override with its own shape over the same descriptive space. The harmony rows carry a
+/// data-defined `structural_weight` (how many linearization decisions the pairing constrains) rather
+/// than an authored tilt: strong adposition and relative-clause pairs constrain more (two-sided,
+/// fully phrasal) than the weak one-sided genitive pair (Dryer's Branching Direction Theory), so
+/// strong-vs-weak is this magnitude in data. The tilt itself DERIVES from the parse-cost floor with
+/// the single reserved softmax temperature, validated against the WALS/Dryer proportions the rows
+/// cite as provenance rather than authored from them (`wals_seed` takes no tilt arguments).
 ///
 /// Encoded negative results, as load-bearing as the positive rows: the adjective (87A),
 /// demonstrative (88A), and numeral (89A) orders carry NO harmony row, per Dryer 1992's
@@ -644,7 +783,7 @@ impl TypologyParams {
 /// the 83A anchor could draw contradictions (an SVO language classed OV), so the anchor
 /// is 83A and the subject-order refinement waits for a coherence rule, recorded in the
 /// proposal's decision batch.
-pub fn wals_seed(strong: Fixed, weak: Fixed) -> (TypologyRegistry, TypologyPrior, HarmonyModel) {
+pub fn wals_seed() -> (TypologyRegistry, TypologyPrior, HarmonyModel) {
     let mut reg = TypologyRegistry::new();
     let mut prior = TypologyPrior::new();
     let mut harmony = HarmonyModel::new();
@@ -901,32 +1040,44 @@ pub fn wals_seed(strong: Fixed, weak: Fixed) -> (TypologyRegistry, TypologyPrior
         &mut prior,
     );
 
-    // The harmony rows. Strong: the adposition pairs both ways and the VO relative-clause
-    // pair. Weak: the genitive pair, OV side only (the VO side shows no preference).
+    // The harmony rows. The structural weight is DATA: how many head-dependent linearization
+    // decisions the pairing constrains, grounded in Dryer's Branching Direction Theory. The
+    // adposition pairs (both ways) and the VO relative-clause pair are two-sided, fully-phrasal
+    // head-complement correlations, so they constrain more (two decisions each); the genitive pair
+    // is one-sided and often non-phrasal, so it constrains fewer (one). Strong-vs-weak is this
+    // magnitude, and the tilt derives from it through the parse-cost floor at the reserved
+    // temperature (validated against the cited proportions, not authored from them).
+    const STRONG_WEIGHT: Fixed = Fixed::from_int(2);
+    const WEAK_WEIGHT: Fixed = Fixed::from_int(1);
     harmony.add(HarmonyBias {
         given_param: TypologyParamId(0),
         given_value: TypologyValueId(0), // OV
         then_param: TypologyParamId(1),
         then_value: TypologyValueId(0), // postpositions
-        weight: strong,
-        source: "WALS 95A: 472 OV-postpositional against 14 OV-prepositional".to_string(),
+        structural_weight: STRONG_WEIGHT,
+        source: "WALS 95A: 472 OV-postpositional against 14 OV-prepositional; two-sided \
+                 fully-phrasal head-complement pairing (structural weight 2)"
+            .to_string(),
     });
     harmony.add(HarmonyBias {
         given_param: TypologyParamId(0),
         given_value: TypologyValueId(1), // VO
         then_param: TypologyParamId(1),
         then_value: TypologyValueId(1), // prepositions
-        weight: strong,
-        source: "WALS 95A: 456 VO-prepositional against 42 VO-postpositional".to_string(),
+        structural_weight: STRONG_WEIGHT,
+        source: "WALS 95A: 456 VO-prepositional against 42 VO-postpositional; two-sided \
+                 fully-phrasal head-complement pairing (structural weight 2)"
+            .to_string(),
     });
     harmony.add(HarmonyBias {
         given_param: TypologyParamId(0),
         given_value: TypologyValueId(1), // VO
         then_param: TypologyParamId(3),
         then_value: TypologyValueId(0), // noun-relative clause
-        weight: strong,
+        structural_weight: STRONG_WEIGHT,
         source: "Dryer 1992: VO languages are overwhelmingly NRel; prenominal relatives \
-                 are essentially confined to OV languages"
+                 are essentially confined to OV languages; a maximally-phrasal clause \
+                 pairing (structural weight 2)"
             .to_string(),
     });
     harmony.add(HarmonyBias {
@@ -934,9 +1085,10 @@ pub fn wals_seed(strong: Fixed, weak: Fixed) -> (TypologyRegistry, TypologyPrior
         given_value: TypologyValueId(0), // OV
         then_param: TypologyParamId(2),
         then_value: TypologyValueId(0), // genitive-noun
-        weight: weak,
+        structural_weight: WEAK_WEIGHT,
         source: "Dryer 1992: 0.89 of OV genera are GenN against 0.45 of VO genera, the \
-                 weak correlation, one side only"
+                 weak correlation, one side only; a one-sided partly-non-phrasal pairing \
+                 (structural weight 1)"
             .to_string(),
     });
 
@@ -947,27 +1099,71 @@ pub fn wals_seed(strong: Fixed, weak: Fixed) -> (TypologyRegistry, TypologyPrior
 mod tests {
     use super::*;
 
-    // Dev fixtures: labelled tier weights and a disharmony rate for the harness, never
-    // canon. The owner's set values reach the sampler through the calibration manifest.
-    fn strong() -> Fixed {
-        Fixed::from_int(64)
-    }
-    fn weak() -> Fixed {
-        Fixed::from_int(4)
+    // Canonical WALS-seed ids, for readable tests.
+    const P_OV: TypologyParamId = TypologyParamId(0); // order of object and verb (the anchor)
+    const P_ADP: TypologyParamId = TypologyParamId(1); // adposition order
+    const P_GEN: TypologyParamId = TypologyParamId(2); // genitive order
+    const P_REL: TypologyParamId = TypologyParamId(3); // relative-clause order
+    const OV: TypologyValueId = TypologyValueId(0);
+    const VO: TypologyValueId = TypologyValueId(1);
+    const POST: TypologyValueId = TypologyValueId(0); // postpositions (OV-harmonic)
+    const PREP: TypologyValueId = TypologyValueId(1); // prepositions
+    const GENN: TypologyValueId = TypologyValueId(0); // genitive-noun (OV-harmonic)
+    const NGEN: TypologyValueId = TypologyValueId(1); // noun-genitive
+    const NREL: TypologyValueId = TypologyValueId(0); // noun-relative clause (VO-harmonic)
+
+    // Dev fixtures, never canon: the human race's working-memory capacity paired with the reserved
+    // softmax temperature, the pair the human-row calibration validates against. The owner's set
+    // temperature reaches the sampler through the calibration manifest; memory is per-race data.
+    fn tilt() -> TiltParams {
+        TiltParams::new(Fixed::from_ratio(19, 4), Fixed::from_ratio(92, 1000))
     }
     fn disharmony() -> Fixed {
         Fixed::from_ratio(1, 20)
     }
+    fn seq() -> Linearization {
+        Linearization::Sequential
+    }
 
     fn seed() -> (TypologyRegistry, TypologyPrior, HarmonyModel) {
-        wals_seed(strong(), weak())
+        wals_seed()
+    }
+
+    /// The tilted proportion of `value` on `param` given `drawn`: the exact, deterministic
+    /// probability the cumulative pick realizes (weight over total), read straight off
+    /// `tilted_weights`. The measure the human-row calibration and the direction-neutrality
+    /// invariant both assert against.
+    fn tilted_proportion(
+        prior: &TypologyPrior,
+        harmony: &HarmonyModel,
+        tilt: &TiltParams,
+        param: TypologyParamId,
+        drawn: &[(TypologyParamId, TypologyValueId)],
+        value: TypologyValueId,
+    ) -> f64 {
+        let counts = prior.counts(param).unwrap();
+        let w = tilted_weights(counts, param, drawn, harmony, tilt, false);
+        let total: u128 = w.iter().map(|&(_, x)| x).sum();
+        let target: u128 = w.iter().find(|&&(v, _)| v == value).unwrap().1;
+        target as f64 / total as f64
     }
 
     #[test]
     fn wals_seed_validates_and_samples_every_parameter() {
         let (reg, prior, harmony) = seed();
         validate(&reg, &prior, &harmony).expect("the shipped seed validates");
-        let p = sample_profile(&reg, &prior, &harmony, disharmony(), 0xC17, 7, 0).expect("samples");
+        let p = sample_profile(
+            &reg,
+            &prior,
+            &harmony,
+            &tilt(),
+            seq(),
+            disharmony(),
+            0xC17,
+            7,
+            0,
+        )
+        .expect("samples");
         assert_eq!(p.len(), reg.params().len(), "every parameter drew a value");
         for def in reg.params() {
             let v = p.get(def.id).expect("value present");
@@ -978,12 +1174,24 @@ mod tests {
     #[test]
     fn sampling_replays_bit_for_bit_and_keys_on_the_culture() {
         let (reg, prior, harmony) = seed();
-        let a = sample_profile(&reg, &prior, &harmony, disharmony(), 42, 7, 3).unwrap();
-        let b = sample_profile(&reg, &prior, &harmony, disharmony(), 42, 7, 3).unwrap();
+        let t = tilt();
+        let a = sample_profile(&reg, &prior, &harmony, &t, seq(), disharmony(), 42, 7, 3).unwrap();
+        let b = sample_profile(&reg, &prior, &harmony, &t, seq(), disharmony(), 42, 7, 3).unwrap();
         assert_eq!(a, b, "same coordinates, bit-identical profile");
         let mut any_differs = false;
         for culture in 0..50u64 {
-            let c = sample_profile(&reg, &prior, &harmony, disharmony(), 42, culture, 3).unwrap();
+            let c = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                seq(),
+                disharmony(),
+                42,
+                culture,
+                3,
+            )
+            .unwrap();
             if c != a {
                 any_differs = true;
                 break;
@@ -998,13 +1206,25 @@ mod tests {
     #[test]
     fn registration_order_never_shows() {
         let (reg, prior, harmony) = seed();
+        let t = tilt();
         let mut reversed = TypologyRegistry::new();
         for p in reg.params().iter().rev() {
             reversed.add_param(p.clone());
         }
         assert_eq!(reg, reversed, "the registry walk is canonical");
-        let a = sample_profile(&reg, &prior, &harmony, disharmony(), 9, 1, 0).unwrap();
-        let b = sample_profile(&reversed, &prior, &harmony, disharmony(), 9, 1, 0).unwrap();
+        let a = sample_profile(&reg, &prior, &harmony, &t, seq(), disharmony(), 9, 1, 0).unwrap();
+        let b = sample_profile(
+            &reversed,
+            &prior,
+            &harmony,
+            &t,
+            seq(),
+            disharmony(),
+            9,
+            1,
+            0,
+        )
+        .unwrap();
         assert_eq!(a, b, "insertion order never reaches a draw");
     }
 
@@ -1013,12 +1233,17 @@ mod tests {
         // With the disharmony gate at one every parameter ignores the tilt: bit-identical
         // to sampling under an empty harmony model. The tilt can bias, never dictate.
         let (reg, prior, harmony) = seed();
+        let t = tilt();
         for culture in 0..20u64 {
-            let gated = sample_profile(&reg, &prior, &harmony, Fixed::ONE, 5, culture, 0).unwrap();
+            let gated =
+                sample_profile(&reg, &prior, &harmony, &t, seq(), Fixed::ONE, 5, culture, 0)
+                    .unwrap();
             let empty = sample_profile(
                 &reg,
                 &prior,
                 &HarmonyModel::new(),
+                &t,
+                seq(),
                 Fixed::ONE,
                 5,
                 culture,
@@ -1031,9 +1256,10 @@ mod tests {
 
     #[test]
     fn the_anchor_conditions_its_dependents() {
-        // A two-parameter toy: anchor {0,1} even prior, dependent {0,1} even prior, one
-        // enormous bias anchor=0 -> dependent=0, disharmony zero. The tilted weights are
-        // exact, and over a fixed seed the conditional holds on every drawn culture.
+        // A two-parameter toy: anchor {0,1} even prior, dependent {0,1} even prior, one pairing
+        // with a large structural weight and a tiny temperature so the derived tilt saturates at
+        // TILT_MAX and binds the dependent. The tilted weights are exact, and over a fixed seed the
+        // conditional holds on every drawn culture.
         let mut reg = TypologyRegistry::new();
         reg.add_param(TypologyParamDef {
             id: TypologyParamId(0),
@@ -1084,29 +1310,52 @@ mod tests {
             given_value: TypologyValueId(0),
             then_param: TypologyParamId(1),
             then_value: TypologyValueId(0),
-            weight: Fixed::from_int(1 << 24),
+            structural_weight: Fixed::from_int(1000),
             source: "test".into(),
         });
-        // The tilted weights are exact: d0 carries count*(1<<24) in Q32.32 bits, d1 the
-        // bare count.
+        // A large structural weight (cost near the normalized ceiling) over a tiny temperature
+        // saturates the derived tilt at TILT_MAX, so d0 carries count*TILT_MAX in Q32.32 bits
+        // (1 * 2^20 * 2^32 = 2^52) and d1 the bare count.
+        let strong = TiltParams::new(Fixed::from_int(1), Fixed::from_ratio(1, 100));
         let w = tilted_weights(
             prior.counts(TypologyParamId(1)).unwrap(),
             TypologyParamId(1),
             &[(TypologyParamId(0), TypologyValueId(0))],
             &harmony,
+            &strong,
+            false,
         );
-        assert_eq!(w[0], (TypologyValueId(0), 1u128 << 56));
-        assert_eq!(w[1], (TypologyValueId(1), 1u128 << 32));
+        assert_eq!(
+            w[0],
+            (TypologyValueId(0), 1u128 << 52),
+            "d0 tilt saturates at TILT_MAX"
+        );
+        assert_eq!(
+            w[1],
+            (TypologyValueId(1), 1u128 << 32),
+            "d1 keeps its bare marginal"
+        );
         // And on every culture this seed draws with the anchor at 0, the dependent is 0.
         let mut conditioned = 0;
         for culture in 0..64u64 {
-            let p = sample_profile(&reg, &prior, &harmony, Fixed::ZERO, 77, culture, 0).unwrap();
+            let p = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &strong,
+                seq(),
+                Fixed::ZERO,
+                77,
+                culture,
+                0,
+            )
+            .unwrap();
             if p.get(TypologyParamId(0)) == Some(TypologyValueId(0)) {
                 conditioned += 1;
                 assert_eq!(
                     p.get(TypologyParamId(1)),
                     Some(TypologyValueId(0)),
-                    "a 2^24 tilt binds the dependent on this fixed seed"
+                    "a saturated tilt binds the dependent on this fixed seed"
                 );
             }
         }
@@ -1118,12 +1367,12 @@ mod tests {
         // The typology-permutation invariant (the modality-swap analogue): relabel the
         // dependent's value ids through a permutation, map the drawn condition and the
         // bias rows the same way, and the tilted weights map bit-exactly. No value is
-        // privileged by its index.
+        // privileged by its index and the derived tilt never reads an id.
         let (_reg, prior, harmony) = seed();
-        let adposition = TypologyParamId(1);
-        let counts = prior.counts(adposition).unwrap().to_vec();
-        let drawn = [(TypologyParamId(0), TypologyValueId(0))];
-        let base = tilted_weights(&counts, adposition, &drawn, &harmony);
+        let t = tilt();
+        let counts = prior.counts(P_ADP).unwrap().to_vec();
+        let drawn = [(P_OV, OV)];
+        let base = tilted_weights(&counts, P_ADP, &drawn, &harmony, &t, false);
         // The permutation: value id v -> (v + 1) mod 5 on the adposition parameter.
         let perm = |v: TypologyValueId| TypologyValueId((v.0 + 1) % 5);
         let permuted_counts: Vec<(TypologyValueId, u32)> = {
@@ -1134,12 +1383,19 @@ mod tests {
         let mut permuted_harmony = HarmonyModel::new();
         for b in harmony.biases() {
             let mut nb = b.clone();
-            if nb.then_param == adposition {
+            if nb.then_param == P_ADP {
                 nb.then_value = perm(nb.then_value);
             }
             permuted_harmony.add(nb);
         }
-        let mapped = tilted_weights(&permuted_counts, adposition, &drawn, &permuted_harmony);
+        let mapped = tilted_weights(
+            &permuted_counts,
+            P_ADP,
+            &drawn,
+            &permuted_harmony,
+            &t,
+            false,
+        );
         for &(v, w) in &base {
             let target = perm(v);
             let found = mapped.iter().find(|&&(mv, _)| mv == target).unwrap().1;
@@ -1148,36 +1404,343 @@ mod tests {
     }
 
     #[test]
-    fn glosses_and_sources_never_reach_a_draw() {
-        // Two seeds differing only in every gloss and provenance string sample
-        // bit-identically: the draw reads structure and counts, never labels.
+    fn direction_neutrality_no_steering() {
+        // THE non-steering, direction-neutrality invariant. Two races identical but for a
+        // permutation swapping which adposition value id is head-initial (postpositions 0 <-> 1)
+        // produce IDENTICAL parse cost, IDENTICAL derived tilts, and IDENTICAL sampled harmonic
+        // proportions. The law rewards CONSISTENCY, never a direction: the kernels see only
+        // structural-weight scalars, never a word-order value.
         let (reg, prior, harmony) = seed();
-        let mut relabelled = TypologyRegistry::new();
+        let t = tilt();
+        let swap01 = |v: TypologyValueId| match v.0 {
+            0 => TypologyValueId(1),
+            1 => TypologyValueId(0),
+            _ => v,
+        };
+        // Build the head-initial-swapped race: only the adposition parameter's value ids move.
+        let mut reg2 = TypologyRegistry::new();
         for p in reg.params() {
             let mut q = p.clone();
-            q.gloss = format!("param-{}", q.id.0);
-            for v in &mut q.values {
-                v.gloss = format!("value-{}", v.id.0);
+            if q.id == P_ADP {
+                for v in &mut q.values {
+                    v.id = swap01(v.id);
+                }
             }
-            q.source = "relabelled".into();
-            relabelled.add_param(q);
+            reg2.add_param(q);
         }
         let mut prior2 = TypologyPrior::new();
         for pid in prior.params() {
-            prior2.set(pid, prior.counts(pid).unwrap().to_vec(), "relabelled");
+            let counts: Vec<(TypologyValueId, u32)> = prior
+                .counts(pid)
+                .unwrap()
+                .iter()
+                .map(|&(v, c)| if pid == P_ADP { (swap01(v), c) } else { (v, c) })
+                .collect();
+            prior2.set(pid, counts, prior.source(pid).unwrap());
         }
         let mut harmony2 = HarmonyModel::new();
         for b in harmony.biases() {
             let mut nb = b.clone();
-            nb.source = "relabelled".into();
+            if nb.then_param == P_ADP {
+                nb.then_value = swap01(nb.then_value);
+            }
             harmony2.add(nb);
         }
-        for culture in 0..10u64 {
-            let a = sample_profile(&reg, &prior, &harmony, disharmony(), 3, culture, 1).unwrap();
-            let b = sample_profile(&relabelled, &prior2, &harmony2, disharmony(), 3, culture, 1)
-                .unwrap();
-            assert_eq!(a, b, "labels are etic surface, never draw input");
+
+        // (a) IDENTICAL derived tilt: the harmonic value's tilt is the same regardless of the id it
+        // wears (postpositions is id 0 in race A, id 1 in race B).
+        let tilt_a = derived_tilt(P_ADP, POST, &[(P_OV, OV)], &harmony, &t);
+        let tilt_b = derived_tilt(P_ADP, swap01(POST), &[(P_OV, OV)], &harmony2, &t);
+        assert_eq!(tilt_a, tilt_b, "the derived tilt never reads a direction");
+        assert!(
+            tilt_a > Fixed::ONE,
+            "the harmonic value is favoured (a real tilt)"
+        );
+
+        // (b) IDENTICAL parse cost: a mixed OV grammar and its head-initial swap cost the same.
+        let mixed_a = TypologyProfile::new(vec![(P_OV, OV), (P_ADP, PREP), (P_GEN, GENN)]);
+        let mixed_b = TypologyProfile::new(vec![(P_OV, OV), (P_ADP, swap01(PREP)), (P_GEN, GENN)]);
+        let m = t.memory_capacity;
+        assert_eq!(
+            grammar_parse_cost(&mixed_a, &harmony, m, Fixed::ONE),
+            grammar_parse_cost(&mixed_b, &harmony2, m, Fixed::ONE),
+            "the grammar parse cost is direction-blind"
+        );
+
+        // (c) IDENTICAL sampled harmonic proportions: the exact tilted probability of postpositions
+        // given OV is the same in both races.
+        let p_a = tilted_proportion(&prior, &harmony, &t, P_ADP, &[(P_OV, OV)], POST);
+        let p_b = tilted_proportion(&prior2, &harmony2, &t, P_ADP, &[(P_OV, OV)], swap01(POST));
+        assert_eq!(
+            p_a, p_b,
+            "the harmonic proportion is identical under the swap"
+        );
+
+        // The realized sweep confirms it: the non-adposition parameters draw bit-identically, and
+        // the empirical postpositions-given-OV proportions match within sampling tolerance.
+        let n = 4000u64;
+        let (mut ov_a, mut post_a, mut post_b) = (0u64, 0u64, 0u64);
+        for culture in 0..n {
+            let ga = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                seq(),
+                disharmony(),
+                5,
+                culture,
+                0,
+            )
+            .unwrap();
+            let gb = sample_profile(
+                &reg2,
+                &prior2,
+                &harmony2,
+                &t,
+                seq(),
+                disharmony(),
+                5,
+                culture,
+                0,
+            )
+            .unwrap();
+            assert_eq!(
+                ga.get(P_GEN),
+                gb.get(P_GEN),
+                "a non-permuted parameter draws bit-identically"
+            );
+            if ga.get(P_OV) == Some(OV) {
+                ov_a += 1;
+                if ga.get(P_ADP) == Some(POST) {
+                    post_a += 1;
+                }
+                if gb.get(P_ADP) == Some(swap01(POST)) {
+                    post_b += 1;
+                }
+            }
         }
+        assert!(ov_a > 0, "OV drew somewhere");
+        let (fa, fb) = (post_a as f64 / ov_a as f64, post_b as f64 / ov_a as f64);
+        assert!(
+            (fa - fb).abs() < 0.03,
+            "the sampled harmonic proportion is direction-neutral: {fa} vs {fb}"
+        );
+    }
+
+    #[test]
+    fn a_simultaneous_modality_suppresses_the_tilt() {
+        // The divergent-modality invariant. Two cultures identical but for the modality's
+        // simultaneous flag diverge: the sequential one shows a harmony tilt in its sampled
+        // profile, the simultaneous one shows NONE (the untilted marginal). A modality with no
+        // linear word order has nothing for the tilt to act on.
+        let (reg, prior, harmony) = seed();
+        let t = tilt();
+        // The suppressed weights equal the bare marginal; the tilted ones boost the harmonic value.
+        let counts = prior.counts(P_ADP).unwrap();
+        let suppressed = tilted_weights(counts, P_ADP, &[(P_OV, OV)], &harmony, &t, true);
+        for &(v, w) in &suppressed {
+            let c = counts.iter().find(|&&(cv, _)| cv == v).unwrap().1;
+            assert_eq!(
+                w,
+                (c as u128) << 32,
+                "a suppressed weight is the bare marginal"
+            );
+        }
+        let tilted = tilted_weights(counts, P_ADP, &[(P_OV, OV)], &harmony, &t, false);
+        let w_post_tilted = tilted.iter().find(|&&(v, _)| v == POST).unwrap().1;
+        let w_post_marginal = (577u128) << 32;
+        assert!(
+            w_post_tilted > w_post_marginal,
+            "the sequential tilt boosts the harmonic value"
+        );
+
+        // Sampled: the simultaneous culture's postpositions-given-OV proportion sits at the untilted
+        // marginal, the sequential one's well above it, and the two profiles diverge.
+        let marginal = 577.0 / 1184.0;
+        let n = 4000u64;
+        let (mut ov, mut seq_post, mut sim_post, mut diverged) = (0u64, 0u64, 0u64, false);
+        for culture in 0..n {
+            let s = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                seq(),
+                disharmony(),
+                8,
+                culture,
+                0,
+            )
+            .unwrap();
+            let m = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                Linearization::Simultaneous,
+                disharmony(),
+                8,
+                culture,
+                0,
+            )
+            .unwrap();
+            if s != m {
+                diverged = true;
+            }
+            if s.get(P_OV) == Some(OV) {
+                ov += 1;
+                if s.get(P_ADP) == Some(POST) {
+                    seq_post += 1;
+                }
+            }
+            if m.get(P_OV) == Some(OV) && m.get(P_ADP) == Some(POST) {
+                sim_post += 1;
+            }
+        }
+        assert!(diverged, "the two modalities produce different grammars");
+        assert!(ov > 0, "OV drew somewhere");
+        let f_seq = seq_post as f64 / ov as f64;
+        // The simultaneous OV count is over the same anchor distribution (same seed), so use ov.
+        let f_sim = sim_post as f64 / ov as f64;
+        assert!(
+            f_seq > marginal + 0.2,
+            "the sequential modality shows a strong harmony tilt: {f_seq}"
+        );
+        assert!(
+            (f_sim - marginal).abs() < 0.05,
+            "the simultaneous modality shows the untilted marginal ~{marginal}: {f_sim}"
+        );
+    }
+
+    #[test]
+    fn larger_working_memory_weakens_harmony() {
+        // Per-race differentiation. Two races differing ONLY in the working-memory parameter get
+        // different tilt magnitudes: a larger memory softens the parse cost, so the harmony
+        // pressure is weaker (a smaller tilt and a lower harmonic proportion).
+        let (_reg, prior, harmony) = seed();
+        let temp = Fixed::from_ratio(92, 1000);
+        let small_mem = TiltParams::new(Fixed::from_int(2), temp);
+        let large_mem = TiltParams::new(Fixed::from_int(20), temp);
+        let tilt_small = derived_tilt(P_ADP, POST, &[(P_OV, OV)], &harmony, &small_mem);
+        let tilt_large = derived_tilt(P_ADP, POST, &[(P_OV, OV)], &harmony, &large_mem);
+        assert!(
+            tilt_large < tilt_small && tilt_large > Fixed::ONE,
+            "a larger memory weakens (but keeps) the harmony tilt: {tilt_large:?} < {tilt_small:?}"
+        );
+        let p_small = tilted_proportion(&prior, &harmony, &small_mem, P_ADP, &[(P_OV, OV)], POST);
+        let p_large = tilted_proportion(&prior, &harmony, &large_mem, P_ADP, &[(P_OV, OV)], POST);
+        assert!(
+            p_large < p_small,
+            "a larger memory lowers the harmonic proportion: {p_large} < {p_small}"
+        );
+    }
+
+    #[test]
+    fn harmonic_grammar_costs_less_than_a_mixed_one() {
+        // Monotonicity at grammar scope: a fully harmonic candidate grammar costs strictly less
+        // parse cost than a mixed-branching one, and each additional violation adds cost.
+        let (_reg, _prior, harmony) = seed();
+        let m = tilt().memory_capacity;
+        let harmonic = TypologyProfile::new(vec![
+            (P_OV, OV),
+            (P_ADP, POST),
+            (P_GEN, GENN),
+            (P_REL, NREL),
+        ]);
+        let one_violation = TypologyProfile::new(vec![
+            (P_OV, OV),
+            (P_ADP, PREP),
+            (P_GEN, GENN),
+            (P_REL, NREL),
+        ]);
+        let mixed = TypologyProfile::new(vec![
+            (P_OV, OV),
+            (P_ADP, PREP),
+            (P_GEN, NGEN),
+            (P_REL, NREL),
+        ]);
+        let c_harmonic = grammar_parse_cost(&harmonic, &harmony, m, Fixed::ONE);
+        let c_one = grammar_parse_cost(&one_violation, &harmony, m, Fixed::ONE);
+        let c_mixed = grammar_parse_cost(&mixed, &harmony, m, Fixed::ONE);
+        assert_eq!(
+            c_harmonic,
+            Fixed::ZERO,
+            "a fully harmonic grammar holds no long domains"
+        );
+        assert!(
+            c_harmonic < c_one && c_one < c_mixed,
+            "parse cost rises strictly with mixed branching: {c_harmonic:?} < {c_one:?} < {c_mixed:?}"
+        );
+    }
+
+    #[test]
+    fn sampling_is_deterministic_across_repeats_and_call_order() {
+        // Determinism and observer independence (Principle 10). The profile is a pure function of
+        // the registry, prior, harmony, tilt params, modality flag, and coordinates: bit-identical
+        // on repeat and independent of any surrounding computation, so it is the same at every LOD
+        // tier (no tier enters the draw). Thread-count invariance of the internal folds is proven
+        // separately in crates/sim/tests/reduce_order.rs; here the fold order-independence is
+        // structural (Fixed::saturating_sum in derived_tilt and grammar_parse_cost).
+        let (reg, prior, harmony) = seed();
+        let t = tilt();
+        let first =
+            sample_profile(&reg, &prior, &harmony, &t, seq(), disharmony(), 0xABC, 7, 2).unwrap();
+        // Interleave a swathe of other draws, then repeat: no hidden state leaks in.
+        for culture in 0..30u64 {
+            let _ = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                seq(),
+                disharmony(),
+                0xABC,
+                culture,
+                9,
+            )
+            .unwrap();
+        }
+        let again =
+            sample_profile(&reg, &prior, &harmony, &t, seq(), disharmony(), 0xABC, 7, 2).unwrap();
+        assert_eq!(
+            first, again,
+            "the pass replays bit for bit regardless of call order"
+        );
+        // The derived tilt itself is a pure function of its inputs (the observer-independence unit).
+        let a = derived_tilt(P_ADP, POST, &[(P_OV, OV)], &harmony, &t);
+        let b = derived_tilt(P_ADP, POST, &[(P_OV, OV)], &harmony, &t);
+        assert_eq!(a, b, "the derived tilt is a pure function");
+    }
+
+    #[test]
+    fn the_single_temperature_reconstructs_the_human_row() {
+        // The human-data-row calibration gate. With the single softmax temperature at the human
+        // calibration (and the human race's working memory), the sampled harmonic proportion on the
+        // adposition axis reconstructs WALS 95A (94 to 97 percent) and the genitive axis
+        // reconstructs Dryer (~0.89 on the OV side), proving the ONE free scale is VALIDATED against
+        // the human row, not the tiers set directly. The untilted VO/genitive side sits at the
+        // WALS-language-count marginal (about 0.55), the model's honest one-sided prediction (Dryer's
+        // 0.45 is a genera-based figure the one-sided bias does not tilt toward).
+        let (_reg, prior, harmony) = seed();
+        let t = tilt();
+        let p_post = tilted_proportion(&prior, &harmony, &t, P_ADP, &[(P_OV, OV)], POST);
+        assert!(
+            (0.94..=0.975).contains(&p_post),
+            "WALS 95A adposition harmony reconstructs ~95%: {p_post}"
+        );
+        let p_gen = tilted_proportion(&prior, &harmony, &t, P_GEN, &[(P_OV, OV)], GENN);
+        assert!(
+            (0.85..=0.93).contains(&p_gen),
+            "Dryer genitive OV-side reconstructs ~0.89: {p_gen}"
+        );
+        // The untilted side (no OV anchor firing) sits at the bare marginal, the one-sided result.
+        let p_gen_vo = tilted_proportion(&prior, &harmony, &t, P_GEN, &[(P_OV, VO)], GENN);
+        let marginal = 685.0 / 1249.0;
+        assert!(
+            (p_gen_vo - marginal).abs() < 1e-6,
+            "the VO genitive side is untilted at the marginal ~{marginal}: {p_gen_vo}"
+        );
     }
 
     #[test]
@@ -1185,11 +1748,11 @@ mod tests {
         let (reg, prior, mut harmony) = seed();
         // Adposition (priority 1) conditioning the anchor (priority 0): backwards.
         harmony.add(HarmonyBias {
-            given_param: TypologyParamId(1),
-            given_value: TypologyValueId(0),
-            then_param: TypologyParamId(0),
-            then_value: TypologyValueId(0),
-            weight: Fixed::from_int(2),
+            given_param: P_ADP,
+            given_value: POST,
+            then_param: P_OV,
+            then_value: OV,
+            structural_weight: Fixed::from_int(2),
             source: "test".into(),
         });
         assert!(matches!(
@@ -1205,7 +1768,7 @@ mod tests {
         let mut short = TypologyPrior::new();
         for pid in prior.params() {
             let mut counts = prior.counts(pid).unwrap().to_vec();
-            if pid == TypologyParamId(0) {
+            if pid == P_OV {
                 counts.pop();
             }
             short.set(pid, counts, "test");
@@ -1217,11 +1780,11 @@ mod tests {
         // A bias naming a value its parameter does not carry.
         let mut bad_value = HarmonyModel::new();
         bad_value.add(HarmonyBias {
-            given_param: TypologyParamId(0),
+            given_param: P_OV,
             given_value: TypologyValueId(9),
-            then_param: TypologyParamId(1),
-            then_value: TypologyValueId(0),
-            weight: Fixed::from_int(2),
+            then_param: P_ADP,
+            then_value: POST,
+            structural_weight: Fixed::from_int(2),
             source: "test".into(),
         });
         assert!(matches!(
@@ -1231,15 +1794,29 @@ mod tests {
         // A self-conditioning bias.
         let mut self_bias = HarmonyModel::new();
         self_bias.add(HarmonyBias {
-            given_param: TypologyParamId(1),
-            given_value: TypologyValueId(0),
-            then_param: TypologyParamId(1),
-            then_value: TypologyValueId(1),
-            weight: Fixed::from_int(2),
+            given_param: P_ADP,
+            given_value: POST,
+            then_param: P_ADP,
+            then_value: PREP,
+            structural_weight: Fixed::from_int(2),
             source: "test".into(),
         });
         assert!(matches!(
             validate(&reg, &prior, &self_bias),
+            Err(TypologyError::BadBias(_))
+        ));
+        // A non-positive structural weight.
+        let mut bad_weight = HarmonyModel::new();
+        bad_weight.add(HarmonyBias {
+            given_param: P_OV,
+            given_value: OV,
+            then_param: P_ADP,
+            then_value: POST,
+            structural_weight: Fixed::ZERO,
+            source: "test".into(),
+        });
+        assert!(matches!(
+            validate(&reg, &prior, &bad_weight),
             Err(TypologyError::BadBias(_))
         ));
         // A duplicate parameter id.
@@ -1256,7 +1833,18 @@ mod tests {
     #[test]
     fn distance_is_symmetric_categorical_and_weighted() {
         let (reg, prior, harmony) = seed();
-        let a = sample_profile(&reg, &prior, &harmony, disharmony(), 11, 0, 0).unwrap();
+        let a = sample_profile(
+            &reg,
+            &prior,
+            &harmony,
+            &tilt(),
+            seq(),
+            disharmony(),
+            11,
+            0,
+            0,
+        )
+        .unwrap();
         let mut weights = BTreeMap::new();
         for p in reg.params() {
             weights.insert(p.id, Fixed::from_ratio(1, 13));
@@ -1288,17 +1876,17 @@ mod tests {
     fn typology_params_read_fail_loud_from_the_manifest() {
         let toml = r#"
 [[reserved]]
-id = "lang.typology_harmony_strong"
+id = "lang.typology_temperature"
 basis = "test fixture"
 status = "reserved"
 value = ""
-unit = "tilt"
+unit = "temperature"
 source = "test"
 "#;
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         assert!(
             TypologyParams::from_manifest(&m).is_err(),
-            "a reserved tier weight fails loud, never a fabricated default"
+            "a reserved temperature fails loud, never a fabricated default"
         );
     }
 }

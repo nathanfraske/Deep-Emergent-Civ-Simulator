@@ -102,6 +102,22 @@ pub struct FeatureDimDef {
     pub obligatory: bool,
 }
 
+/// Whether a modality lays its forms out in a linear sequence (so word order, and the
+/// dependency-integration parse cost of holding one constituent before its head arrives, apply)
+/// or presents its structure simultaneously (a chromatic flash carrying every feature at once, a
+/// posture held whole), where a linear word-order harmony tilt has nothing to act on. The gate on
+/// the R-LANG-TYPOLOGY harmony tilt: a simultaneous modality suppresses it and the typology draws
+/// from its untilted marginal. Data on the modality, not a race branch (Principle 9). The default
+/// is `Sequential`, so the existing acoustic and manual modality data keep their linear word order.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub enum Linearization {
+    /// Forms are a left-to-right sequence: word order exists and the parse-cost tilt applies.
+    #[default]
+    Sequential,
+    /// Forms are presented all at once: there is no linear order for a harmony tilt to bias.
+    Simultaneous,
+}
+
 /// A production modality definition: the feature dimensions its primitives are built from,
 /// in id order.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -110,6 +126,9 @@ pub struct ProductionModalityDef {
     pub id: ProductionModalityId,
     /// The feature dimensions a primitive in this modality contrasts over, sorted by id.
     pub dims: Vec<FeatureDimId>,
+    /// Whether this modality is laid out sequentially or presented simultaneously: the gate on
+    /// whether the linear word-order harmony tilt applies (default [`Linearization::Sequential`]).
+    pub linearization: Linearization,
 }
 
 /// One form primitive: a canonical bundle of simultaneous feature values over a modality's
@@ -326,6 +345,8 @@ impl ArticulationSubstrate {
         substrate.add_modality(ProductionModalityDef {
             id: modality,
             dims: vec![dim],
+            // The syllabic convenience is a sequential (spoken/signed) modality: word order applies.
+            linearization: Linearization::default(),
         });
         let forms = FormSystem::new(modality, inventory, min_len, max_len);
         (substrate, forms)

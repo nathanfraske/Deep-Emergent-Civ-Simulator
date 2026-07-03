@@ -428,21 +428,29 @@ value = ""
 unit = "ranks"
 source = "Part 33.1, 33.9; record 62.24"
 
-[[reserved]]
-id = "lang.typology_harmony_strong"
-basis = "DERIVE, worksheet §13b: a parse-and-processing-cost tilt gated by the modality's simultaneous-versus-sequential flag; the WALS 95A adposition proportions (94 to 97 percent) are human word order and become the human data row. Honest limit: the parse-cost law is not in laws.rs yet, so WALS stays a flagged interim until it is written."
-status = "reserved"
-value = ""
-unit = "tilt"
-source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+# lang.typology_harmony_strong RETIRED (parse-cost floor built, 2026-07-03): the strong-tier harmony
+# tilt is no longer an authored number. The word-order harmony tilt DERIVES through
+# crates/sim/src/typology.rs derived_tilt, which composes the per-pair structural weight (how many
+# linearization decisions the pairing constrains: the two-sided fully-phrasal adposition and
+# relative-clause pairs constrain more, structural weight 2, shipped as typology DATA on the harmony
+# rows) through the parse-cost floor (crates/physics/src/laws.rs parse_cost then harmony_tilt) at the
+# single reserved lang.typology_temperature. The WALS 95A adposition proportion (94 to 97 percent) is
+# the human calibration ROW the one temperature is validated against, not authored as a tier. Removed
+# rather than left a fail-loud sentinel for a value the engine no longer authors, the same treatment
+# as evidence.implication_weights.
+#
+# lang.typology_harmony_weak RETIRED (parse-cost floor built, 2026-07-03): the same derivation at a
+# smaller structural weight, the one-sided partly-non-phrasal genitive pair constraining fewer
+# decisions (structural weight 1). The Dryer 1992 genitive proportion (about 0.89 on the OV side) is
+# the human ROW the one temperature reconstructs. Removed, not left a sentinel.
 
 [[reserved]]
-id = "lang.typology_harmony_weak"
-basis = "DERIVE, worksheet §13b: the same parse-cost tilt at lower coupling; the Dryer 1992 genitive proportion (0.89 versus 0.45) is human and becomes the human data row, pending the parse-cost law."
+id = "lang.typology_temperature"
+basis = "the softmax temperature that scales the derived word-order harmony tilt: the tilt is exp(cost_reduction / temperature) over the parse-cost floor (laws::parse_cost then laws::harmony_tilt), where cost_reduction is the dependency-integration cost a branching-consistent choice avoids (Hawkins 1983/2004) and the per-pair structural weight (how many linearization decisions the pairing constrains) is typology data, not a tilt. This is the ONE free scale that replaces the two retired tier tilts; set it against the human calibration ROW, at which the sampled harmonic proportion reconstructs WALS 95A (94 to 97 percent on the adposition axis) and Dryer 1992 (about 0.89 on the OV genitive side), validated against rather than authored as the tiers. A smaller temperature makes harmony bite harder, a larger one flattens it toward the marginal; the per-race working-memory capacity softens the parse cost (data), and a simultaneous modality suppresses the tilt entirely."
 status = "reserved"
 value = ""
-unit = "tilt"
-source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
+unit = "temperature"
+source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/physics/src/laws.rs parse_cost/harmony_tilt; crates/sim/src/typology.rs"
 
 [[reserved]]
 id = "lang.typology_disharmony"

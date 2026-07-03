@@ -40,9 +40,10 @@ use civsim_core::{canonical_sorted, Fixed, StableId};
 use civsim_sim::evidence::{AttrKindId, InferenceParams, ValueId};
 use civsim_sim::tom::{AccessChannelId, AccessWeights};
 use civsim_sim::typology::{
-    sample_profile, tilted_weights, wals_seed, HarmonyModel, TypologyParamId, TypologyPrior,
-    TypologyRegistry, TypologyValueId,
+    sample_profile, tilted_weights, wals_seed, HarmonyModel, TiltParams, TypologyParamId,
+    TypologyPrior, TypologyRegistry, TypologyValueId,
 };
+use civsim_sim::Linearization;
 use civsim_sim::{AccessObs, Mind};
 
 // --- Site (a): the gossip conflict apply ---
@@ -187,12 +188,11 @@ fn gossip_apply_is_order_independent_for_mismatched_candidate_sets() {
 
 // --- Site (b): the typology weighted pick ---
 
-// Fixture tier weights and disharmony (labelled, never owner canon) so the sampler runs.
-fn strong() -> Fixed {
-    Fixed::from_int(64)
-}
-fn weak() -> Fixed {
-    Fixed::from_int(4)
+// Fixture tilt params and disharmony (labelled, never owner canon) so the sampler runs. The tilt
+// now derives from the parse-cost floor over the per-pair structural weights, scaled by the reserved
+// softmax temperature and softened by the per-race working memory; these are dev fixtures.
+fn tilt() -> TiltParams {
+    TiltParams::new(Fixed::from_ratio(19, 4), Fixed::from_ratio(92, 1000))
 }
 fn disharmony() -> Fixed {
     Fixed::from_ratio(1, 20)
@@ -234,19 +234,33 @@ fn typology_weighted_pick_is_input_order_independent() {
     // R-REDUCE-ORDER site (b): the typology weighted pick (typology.rs, the cumulative walk in
     // sample_profile). Proven two ways: the whole sampler is invariant to construction order, and
     // value id is the total key that recovers the canonical weight vector from any permutation.
-    let (reg, prior, harmony) = wals_seed(strong(), weak());
+    let (reg, prior, harmony) = wals_seed();
     let (reg2, prior2, harmony2) = reversed_construction(&reg, &prior, &harmony);
+    let t = tilt();
+    let seq = Linearization::Sequential;
 
     // End to end: the sampled profile is bit-identical across the construction shuffle, over a
     // sweep of cultures and ticks. A permuted value or count arrival cannot move a draw.
     for culture in 0..40u64 {
         for &tick in &[0u64, 3, 9] {
-            let a =
-                sample_profile(&reg, &prior, &harmony, disharmony(), 0x7ED, culture, tick).unwrap();
+            let a = sample_profile(
+                &reg,
+                &prior,
+                &harmony,
+                &t,
+                seq,
+                disharmony(),
+                0x7ED,
+                culture,
+                tick,
+            )
+            .unwrap();
             let b = sample_profile(
                 &reg2,
                 &prior2,
                 &harmony2,
+                &t,
+                seq,
                 disharmony(),
                 0x7ED,
                 culture,
@@ -266,11 +280,11 @@ fn typology_weighted_pick_is_input_order_independent() {
     let adposition = TypologyParamId(1);
     let drawn = [(TypologyParamId(0), TypologyValueId(0))]; // OV, which tilts postpositions
     let counts = prior.counts(adposition).unwrap().to_vec(); // value-id sorted (canonical)
-    let canonical_w = tilted_weights(&counts, adposition, &drawn, &harmony);
+    let canonical_w = tilted_weights(&counts, adposition, &drawn, &harmony, &t, false);
 
     let mut permuted = counts.clone();
     permuted.reverse();
-    let permuted_w = tilted_weights(&permuted, adposition, &drawn, &harmony);
+    let permuted_w = tilted_weights(&permuted, adposition, &drawn, &harmony, &t, false);
 
     assert_ne!(
         canonical_w, permuted_w,

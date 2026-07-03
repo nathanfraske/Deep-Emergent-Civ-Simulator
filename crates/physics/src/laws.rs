@@ -1949,6 +1949,78 @@ pub fn inductor_energy(inductance: Fixed, current: Fixed, e_max: Fixed) -> Fixed
     }
 }
 
+// === Language processing cost (R-LANG-TYPOLOGY, the word-order harmony floor) ===
+//
+// The two direction-NEUTRAL kernels the sim-side word-order harmony tilt derives from
+// (crates/sim/src/typology.rs owns the branching-consistency mapping that turns a grammar into an
+// extent). Both are LABEL-BLIND and DIRECTION-BLIND: they see only a scalar domain extent and a
+// scalar cost reduction, never a word-order value, so they cannot privilege one linear order over
+// its mirror and they author no attractor (Principle 9). What they reward is CONSISTENCY (a shorter
+// dependency-integration domain costs less to hold), never a specific direction. Each is a pure
+// closed-form Fixed function, saturation-capped in the house idiom, and total on adversarial input.
+
+/// The dependency-integration parse cost of holding a linearization domain in working memory
+/// (Hawkins 1983/2004's processing account of the branching-direction anchor; Gibson 1998 dependency
+/// locality): a monotone-increasing, saturating function of how much material a head must hold before
+/// it is integrated (`domain_extent`), SOFTENED by the parser's working-memory capacity. The
+/// integer-Hill saturating form `extent / (extent + memory)` (the same dose-response shape
+/// [`harm_class`] uses) scaled by the reserved `cost_max`: a zero extent is zero cost, an unbounded
+/// extent saturates at `cost_max`, and at `extent == memory` the cost is half of `cost_max`. A larger
+/// memory capacity shifts the half-cost point outward, so the same domain costs a higher-capacity
+/// parser less (the per-race softening). Direction-blind: `domain_extent` is a magnitude, never a
+/// word-order value.
+pub fn parse_cost(domain_extent: Fixed, memory_capacity: Fixed, cost_max: Fixed) -> Fixed {
+    if domain_extent <= ZERO {
+        return ZERO;
+    }
+    // den = extent + memory (both taken non-negative), saturating: a saturated sum is a huge
+    // denominator, handled by the divide (frac routes toward the extent/extent = one limit).
+    let den = domain_extent.saturating_add(memory_capacity.max(ZERO));
+    if den <= ZERO {
+        // den >= extent > 0 always holds, so this is unreachable; guard so the divide is total and a
+        // degenerate denominator routes to the full cost rather than a wrap.
+        return cost_max.max(ZERO);
+    }
+    // frac = extent / den in (0, 1]; against a fixed memory, frac -> one as the extent grows.
+    let frac = match domain_extent.checked_div(den) {
+        Some(f) => f,
+        None => return cost_max.max(ZERO),
+    };
+    // Scale the [0, 1] cost fraction by the reserved ceiling, capped rather than wrapped.
+    match cost_max.checked_mul(frac) {
+        Some(c) => c.clamp(ZERO, cost_max.max(ZERO)),
+        None => cost_max.max(ZERO),
+    }
+}
+
+/// The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
+/// softmax weight of the lower-cost (consistent) option relative to the baseline, floored at one and
+/// saturating at `tilt_max`. `cost_reduction` is the parse cost a consistent choice AVOIDS (a
+/// [`parse_cost`] output), and `temperature` is the softmax scale: a small temperature makes the tilt
+/// bite hard, a large one flattens it toward one. A zero (or negative) reduction earns no tilt (the
+/// weight floors at one, so the law never pushes a weight below its prior), and the deterministic
+/// zero-temperature limit saturates at `tilt_max`. The exponential is the canon-pinned deterministic
+/// [`Fixed::exp`] (R-GPU-CANON-PIN), integer-only and bit-identical on every backend; for a large
+/// argument it saturates, and the clamp routes that to `tilt_max`. Direction-blind: the argument is a
+/// scalar cost, never a word-order value.
+pub fn harmony_tilt(cost_reduction: Fixed, temperature: Fixed, tilt_max: Fixed) -> Fixed {
+    if cost_reduction <= ZERO {
+        return ONE;
+    }
+    if temperature <= ZERO {
+        // exp(reduction / 0+) -> infinity: the hard-max (deterministic) limit saturates at the cap.
+        return tilt_max.max(ONE);
+    }
+    let z = match cost_reduction.checked_div(temperature) {
+        Some(z) => z,
+        // A reduction-over-temperature past the representable range is the same hard-max limit.
+        None => return tilt_max.max(ONE),
+    };
+    // exp(z) with z >= 0 is >= 1 (and saturates to Fixed::MAX for a large z); clamp to a bounded
+    // boost in [ONE, tilt_max] so the tilt never wraps and never falls below one.
+    z.exp().clamp(ONE, tilt_max.max(ONE))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2824,5 +2896,121 @@ mod tests {
             margin > ZERO,
             "MAX strength minus MIN stress saturates positive"
         );
+    }
+
+    // --- Language processing cost (R-LANG-TYPOLOGY) ---
+
+    #[test]
+    fn parse_cost_is_zero_at_zero_extent_and_below() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::ONE;
+        assert_eq!(parse_cost(ZERO, m, cap), ZERO, "no domain, no cost");
+        assert_eq!(
+            parse_cost(Fixed::from_int(-3), m, cap),
+            ZERO,
+            "a negative extent has no cost"
+        );
+    }
+
+    #[test]
+    fn parse_cost_saturates_at_the_cap_for_an_unbounded_extent() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::from_int(7);
+        // A huge extent against a finite memory drives extent/(extent+memory) -> one, so the cost
+        // reaches the cap rather than wrapping.
+        assert_eq!(
+            parse_cost(Fixed::MAX, m, cap),
+            cap,
+            "unbounded extent saturates"
+        );
+        // And it never exceeds the cap on the way there.
+        assert!(parse_cost(Fixed::from_int(1000), m, cap) <= cap);
+        assert!(
+            parse_cost(Fixed::from_int(1000), m, cap) < cap,
+            "still below the cap at a finite extent"
+        );
+    }
+
+    #[test]
+    fn parse_cost_is_monotone_increasing_in_extent() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::ONE;
+        let c1 = parse_cost(Fixed::from_int(1), m, cap);
+        let c2 = parse_cost(Fixed::from_int(2), m, cap);
+        let c3 = parse_cost(Fixed::from_int(8), m, cap);
+        assert!(c1 < c2 && c2 < c3, "cost rises with the held domain extent");
+        // At extent == memory the cost is half the cap (the Hill half-saturation point).
+        let half = parse_cost(m, m, cap);
+        assert_eq!(
+            half,
+            Fixed::from_ratio(1, 2),
+            "half cost at extent == memory"
+        );
+    }
+
+    #[test]
+    fn parse_cost_is_softened_by_working_memory() {
+        let cap = Fixed::ONE;
+        let extent = Fixed::from_int(4);
+        let small = parse_cost(extent, Fixed::from_int(1), cap);
+        let large = parse_cost(extent, Fixed::from_int(16), cap);
+        assert!(
+            large < small,
+            "a larger working-memory capacity lowers the parse cost of the same domain"
+        );
+    }
+
+    #[test]
+    fn parse_cost_caps_rather_than_wraps_at_extremes() {
+        // Adversarial extremes route to a bounded [0, cap], never a wrap or panic.
+        let cap = Fixed::from_int(5);
+        for &e in &[Fixed::MIN, ZERO, Fixed::ONE, Fixed::MAX] {
+            for &mem in &[Fixed::MIN, ZERO, Fixed::from_int(3), Fixed::MAX] {
+                let c = parse_cost(e, mem, cap);
+                assert!(
+                    c >= ZERO && c <= cap,
+                    "parse_cost stayed in [0, cap] for e and mem"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn harmony_tilt_floors_at_one_and_needs_a_reduction() {
+        let temp = Fixed::from_ratio(1, 10);
+        let cap = Fixed::from_int(64);
+        assert_eq!(harmony_tilt(ZERO, temp, cap), ONE, "no reduction, no tilt");
+        assert_eq!(
+            harmony_tilt(Fixed::from_int(-2), temp, cap),
+            ONE,
+            "a negative reduction never pushes below one"
+        );
+        // A positive reduction earns a tilt strictly above one.
+        let t = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
+        assert!(
+            t > ONE && t <= cap,
+            "a real reduction earns a bounded boost"
+        );
+    }
+
+    #[test]
+    fn harmony_tilt_saturates_at_the_cap_for_an_unbounded_reduction() {
+        let tiny_temp = Fixed::from_ratio(1, 1000);
+        let cap = Fixed::from_int(32);
+        // A large reduction over a tiny temperature drives exp past the representable range: it
+        // saturates at the cap rather than wrapping.
+        assert_eq!(harmony_tilt(Fixed::from_int(100), tiny_temp, cap), cap);
+        // The deterministic zero-temperature limit is the same hard max.
+        assert_eq!(harmony_tilt(Fixed::from_ratio(1, 4), ZERO, cap), cap);
+    }
+
+    #[test]
+    fn harmony_tilt_is_monotone_in_the_reduction() {
+        let temp = Fixed::from_ratio(1, 4);
+        let cap = Fixed::from_int(1 << 16);
+        let a = harmony_tilt(Fixed::from_ratio(1, 10), temp, cap);
+        let b = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
+        let c = harmony_tilt(Fixed::from_ratio(6, 10), temp, cap);
+        assert!(a < b && b < c, "a larger avoided cost earns a larger tilt");
     }
 }

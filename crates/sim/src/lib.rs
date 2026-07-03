@@ -158,8 +158,8 @@ pub use homeostasis::{
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
-    FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
-    Word,
+    FormSegment, FormSystem, LanguageParams, Lexicon, Linearization, ProductionModalityDef,
+    ProductionModalityId, Word,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
@@ -183,10 +183,10 @@ pub use transmission::{
     TransmissionParams,
 };
 pub use typology::{
-    sample_profile, tilted_weights, typology_distance, validate as validate_typology, wals_seed,
-    HarmonyBias, HarmonyModel, TypologyError, TypologyParamDef, TypologyParamId, TypologyParams,
-    TypologyPrior, TypologyProfile, TypologyRegistry, TypologyValueDef, TypologyValueId,
-    ValueMetric,
+    grammar_parse_cost, sample_profile, tilted_weights, typology_distance,
+    validate as validate_typology, wals_seed, HarmonyBias, HarmonyModel, TiltParams, TypologyError,
+    TypologyParamDef, TypologyParamId, TypologyParams, TypologyPrior, TypologyProfile,
+    TypologyRegistry, TypologyValueDef, TypologyValueId, ValueMetric,
 };
 pub use value::{
     conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
