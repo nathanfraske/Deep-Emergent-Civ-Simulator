@@ -120,6 +120,19 @@ impl Phase {
     /// single environment shared across the whole cohort. Non-heritable: it is applied at
     /// expression and never folded back into a pool's allele frequencies.
     pub const DEVELOPMENT: Phase = Phase(0x16);
+    /// A knowledge-transmission copy draw (the transmission substrate): the bounded, mean-zero
+    /// proficiency drift a learner incurs when copying a design from a holder, keyed on the holder,
+    /// the design's content address, and the tick, so a copy-of-a-copy replays bit for bit and two
+    /// copies at distinct sites draw distinct perturbations. The perturbation magnitude is a
+    /// function of the copier's per-race perception and memory (Principle 9), never an authored
+    /// per-race fidelity table.
+    pub const TRANSMIT: Phase = Phase(0x17);
+    /// A knowledge-loss erosion draw (the transmission substrate): the per-design, per-tick
+    /// forgetting roll that erodes the proficiency of a design held by fewer than the
+    /// minimum-viable practitioner count, keyed on the design and the tick so every below-floor
+    /// holder erodes in lockstep and the erosion replays bit for bit. Its expectation is the
+    /// reserved loss rate and it is always non-negative, so proficiency only erodes.
+    pub const KNOW_LOSS: Phase = Phase(0x18);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -230,6 +243,24 @@ mod tests {
         let mate_choice = DrawKey::entity(42, 9, Phase::MATE_CHOICE).rng(seed).at(0);
         assert_ne!(development, mate_choice);
         assert_ne!(development, perception);
+        // The two transmission-substrate phases (0x17 TRANSMIT, 0x18 KNOW_LOSS) must be distinct
+        // from each other and from the gossip and drift phases they conceptually neighbour, so a
+        // transmission copy, a forgetting roll, a gossip exchange, and a sound-change drift never
+        // alias on counter zero.
+        let transmit = DrawKey::entity(42, 9, Phase::TRANSMIT).rng(seed).at(0);
+        let know_loss = DrawKey::entity(42, 9, Phase::KNOW_LOSS).rng(seed).at(0);
+        let drift = DrawKey::entity(42, 9, Phase::DRIFT).rng(seed).at(0);
+        assert_ne!(transmit, know_loss);
+        assert_ne!(transmit, gossip);
+        assert_ne!(transmit, drift);
+        assert_ne!(know_loss, gossip);
+        assert_ne!(know_loss, drift);
+        assert_ne!(transmit, development);
+        // The two phase values are the next two free after DEVELOPMENT (0x16), and distinct.
+        assert_eq!(Phase::TRANSMIT, Phase(0x17));
+        assert_eq!(Phase::KNOW_LOSS, Phase(0x18));
+        assert_ne!(Phase::TRANSMIT, Phase::GOSSIP);
+        assert_ne!(Phase::KNOW_LOSS, Phase::DRIFT);
     }
 
     #[test]

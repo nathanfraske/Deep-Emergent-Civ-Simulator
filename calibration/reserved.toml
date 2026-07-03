@@ -567,11 +567,11 @@ source = "Part 41 composition mechanism; record 62.10; audit section 1l"
 
 [[reserved]]
 id = "compose.transmission_stability"
-basis = "the stability span and drift-similarity radius; set equal to the drift and loss rates the transmission subsystem already uses, for consistency"
+basis = "the stability span and drift-similarity radius; derives, set equal to transmission.drift_rate and transmission.loss_rate, the drift and loss rates the transmission substrate already uses (stability_span := ceil(ONE / loss_rate), drift_similarity_radius := 2 * drift_rate), so it is not fabricated but read off the transmission rates for consistency"
 status = "reserved"
 value = ""
 unit = "ticks"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; transmission substrate (crates/sim/src/transmission.rs)"
 
 [[reserved]]
 id = "compose.reuse_compression_threshold"
@@ -596,6 +596,35 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l"
+
+# --- Knowledge-transmission substrate: the drift and loss rates compose.transmission_stability
+# derives from (Parts 20, 23, 25, 41; crates/sim/src/transmission.rs). The transmit and loss
+# kernels are race-blind and read per-race perception and memory (Principle 9); these are the base
+# scales, never a per-race fidelity table. ---
+
+[[reserved]]
+id = "transmission.drift_rate"
+basis = "the per-race perception-and-memory copy fidelity; the half-width of the mean-zero proficiency perturbation a maximally unfaithful copier incurs, scaled per copier by copy_drift(base, memory, perception). Weber's roughly 3% just-noticeable difference is one calibration point for the perceptual resolution, not the law (design.md:2756); a real value is set per-race data through the perception model, this scalar is only the base"
+status = "reserved"
+value = ""
+unit = "proficiency_per_copy"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
+
+[[reserved]]
+id = "transmission.loss_rate"
+basis = "the erosion timescale a below-floor design loses proficiency at per tick; set equal to evidence.decay_rate (0.25/day) for consistency with the trace-and-memory decay the evidence subsystem already uses, since forgetting a technique and forgetting a trace are the same decay physics"
+status = "reserved"
+value = ""
+unit = "proficiency_per_tick"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
+
+[[reserved]]
+id = "transmission.loss_practitioner_floor"
+basis = "the minimum-viable practitioner count below which a design erodes; the minimum-viable-practitioner count the pool substrate already tracks, so a technique held by too few hands is lost the same way a population below its viable count is"
+status = "reserved"
+value = ""
+unit = "practitioners"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
 
 # --- R-TIER-CONSIST: tier consistency (Part 54, record 62.9) ---
 

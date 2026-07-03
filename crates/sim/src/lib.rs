@@ -43,6 +43,12 @@
 //!   minds, is deceived, and sees lies through, all deterministically. It does not yet
 //!   decide or act (design Part 8); that half is gated on the systems and reserved
 //!   numbers the gating notes name.
+//! - [`transmission`]: the knowledge-transmission substrate (design Parts 20, 23, 25, 41). A
+//!   culture copies opaque content-addressed designs; the copy drifts a fidelity-scaled amount
+//!   and an under-practised design is lost, exposing the drift and loss rates
+//!   `compose.transmission_stability` derives from. The transmit and loss kernels are race-blind,
+//!   reading per-race perception and memory rather than an authored per-race fidelity table
+//!   (Principle 9), and the transmitted unit is a `DesignId`, never a technique enum (Principle 4).
 //! - [`world`]: the runtime spine (design Parts 4, 57). A [`world::World`] owns the
 //!   minds, the event log, a clock, and the calibrations, and a serial deterministic
 //!   tick applies a batch of stimuli to the minds in one canonical order. The parallel
@@ -84,6 +90,7 @@ pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
 pub mod tom;
+pub mod transmission;
 pub mod typology;
 pub mod value;
 pub mod world;
@@ -145,6 +152,11 @@ pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use transmission::{
+    copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
+    stability_span, transmit, transmit_draw, DesignHistory, DesignId, Knowledge,
+    TransmissionParams,
 };
 pub use typology::{
     sample_profile, tilted_weights, typology_distance, validate as validate_typology, wals_seed,
