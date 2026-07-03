@@ -427,3 +427,24 @@ The physics floors carry their own reserved values, a separate reservation syste
 - **§5**: sign-off on the two new scenario definitions, after which I write `venus.toml` and `europa.toml` and extend the resolution test.
 
 Nothing above is written into the manifest, the floors, or the scenario files yet. On your sign-off (per value, per world, or in bulk), each recommended value graduates to `status = "set"` with your name and the date, and the reserved-and-set counts move in step.
+
+---
+
+## §7. Graduation record (2026-07-03): Batches 1 through 11, post-audit
+
+Batch 1 (the deep-time genome stress ends) graduated earlier. Batches 2 through 11 were then run as one whole-batch fully-blind steering and basis audit (the hardened AGENTIC_ADDENDUM §7 method: tiered panel, Opus synthesis over flagged findings, the packet basis fidelity-checked against the manifest, every surviving flag re-verified against source before any change). Of the 42 audited values, 32 were clean and 10 drew a surviving flag: nine were wording, not the number, and one was a magnitude for the owner to re-decide.
+
+On the audit and your sign-off (including "keep it and flag" on the one magnitude), the following graduated to `status = "set"` in `calibration/reserved.toml`, 30 in all (27 existing entries plus 3 new `.low` siblings Europa needs):
+
+- Clean scalars, set as recommended: `genome.mutation_step` (0.1) and `.high` (0.5), `genome.speciation_incompatibilities.low` (1), `language.sound_change_rate.high` (0.10), `language.generation_ticks` (31,536,000), `value_metric.conflict_coefficient` (1.0), `being.life_event_impulse` (0.3), `biosphere.predawn_generations.high` (120), `being.heritable_fraction` (0.5), `evidence.concealment_suppression` (0.5), `physiology.death_floor` (0), `physiology.intake_yield` (0.25, disclosed interim), `behavior.controller_init_spread` (2.0), `behavior.controller_mutation_rate` (0.166667), `behavior.controller_mutation_step` (0.4), `behavior.selection_pop_size` (32), `behavior.selection_generations` (40, set equal to the pre-dawn radiation depth), `body.fracture_damage` (0.9), `body.fluid_critical_fraction` (0.33), `behavior.episode_ticks` (200).
+- Basis reworded on graduation (the number unchanged, the ground regrounded per the audit): `language.innovation_rate.high` (0.10, the naming-game overclaim dropped for a plain fast-drift dial), `value_metric.enculturation_pull_rate` (0.01, anchored to an enculturation half-life through the tick-to-year scale), `value_metric.incommensurability_floor` (0.2, restated as an additive projection residual, not a cap), `axiom.evidence_ring_capacity` (8, grounded on the update-dynamics recency depth), `evidence.aggregate_diffusion_rate` (0.02, anchored to a diffusion half-life).
+- Steering reworded (the two conflict dials): `value_metric.conflict_coefficient.high` (3.0) and the new `value_metric.conflict_coefficient.low` (0.3), both regrounded on the generated-physics scarcity variable (`conflict_pressure`'s caller-supplied coefficient) rather than a named-world outcome.
+- New `.low` siblings Europa needs, set: `language.sound_change_rate.low` (0.005), `language.innovation_rate.low` (0.005), `value_metric.conflict_coefficient.low` (0.3).
+- Kept and flagged, on your call: `being.life_event_impulse.high` (0.75 axis-SD, 2.5x the base). The basis carries the flag that this exceeds the attested single-event envelope in the personality-change literature, a deliberate stress-test lever rather than a realism claim.
+
+Held reserved on purpose, surfaced rather than fabricated:
+
+- Entangled with a pending semantic design-change (they graduate with it): `genome.mutation_rates` and `.high` (the structural-rearrangement re-semanticization), `lang.drift_operator_rates` and `.high` (the non-sound-change re-semanticization; the `.low` sibling waits with them).
+- Compound or per-axis values with no consumer format yet (a single manifest string cannot represent them without inventing a format their unbuilt reader would have to match): `axiom.calcification_rate` and `.high` (rate, cap, brittleness), `axiom.conformity_prestige_strengths` and `.high` (conformity, prestige, fission and deviation thresholds), `physiology.base_metabolic_drain` and `physiology.exertion_drain_coupling` (per homeostatic axis), `body.burn_scale` (a physics-derived temperature rise from the tissue thermal-damage threshold).
+
+Manifest counts after graduation: 131 entries, 66 set, 65 reserved. Still open in this lever batch: the eleven held entries above (their design-changes and structured-value formats), the §3 environmental levers (thermal band and medium promotion to dials), and the §5 scenario files. The physics floors (§6) remain their own separate owner batch.
