@@ -292,6 +292,10 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("mass", 1), cur("specific_heat", 1)] },
             output: Asserted("Q = m*c*dT; dT is a composed temperature difference supplied by the caller, not a registry axis, so the port product is a heat capacity, not the energy output"),
         },
+        "sensible_rise" => KernelContract {
+            ports: const { &[cur("mass", -1), cur("specific_heat", -1)] },
+            output: Asserted("dT = Q/(m*c); Q is a delivered energy supplied by the caller, not a registry axis, so the port product is the inverse of a heat capacity, not the temperature output"),
+        },
         "phase_change_energy" => KernelContract {
             ports: const {
                 &[

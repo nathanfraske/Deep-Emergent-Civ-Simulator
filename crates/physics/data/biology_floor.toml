@@ -267,7 +267,7 @@ ports = [
   { role = "net_nutrition", axis = "bio.net_nutrition" },
   { role = "net_harm", axis = "bio.net_harm" },
   { role = "tolerance_aggregate", axis = "bio.consumer.reference_tolerance" },
-  { role = "dose_aggregate", axis = "bio.consumer.requirement" },
+  { role = "dose_aggregate", axis = "bio.toxin_load_coarse" },
 ]
 output_measure = "the measured edibility tuple (net nutrition, net harm, margin); the valuation lives in the agent layer"
 dimension = "dimensionless"

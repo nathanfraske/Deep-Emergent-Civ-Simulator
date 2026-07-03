@@ -94,18 +94,42 @@ regression test.
 - Energy is not uniformly scaled on the wire: `kinetic_energy`, `power`, and torque emit
   kilo-scaled values, while `sensible_energy` and the sensible half of a phase change emit raw
   joules. The `phase_change_energy` fix bridges the one internal case; the broader convention
-  should be pinned so a future consumer wiring an energy port knows the scale.
-- `net_nutrition` declares a `fermentation` port its kernel never consumes; `edibility` binds
-  `dose_aggregate` to the nutrition `bio.consumer.requirement` axis rather than an aggregate toxin
-  dose; `sensible_rise` has a kernel but no law entry in the floor data; and `harm_class` divides a
-  mg/kg dose by a per-toxin-class tolerance whose scale R-UNITS-PIN settles (the per-class scale is
-  a quantity-per-class registry entry, section 7 of the units proposal). These are the substrate's
-  reader-and-spec seams, distinct from the closed-form arithmetic fixed above.
+  should be pinned so a future consumer wiring an energy port knows the scale. Still open.
+- `harm_class` divides a mg/kg dose by a per-toxin-class tolerance whose scale R-UNITS-PIN settles
+  (the per-class scale is a quantity-per-class registry entry, section 7 of the units proposal).
+  Still open, gated on that arc.
+- `net_nutrition` declares a `fermentation` port its kernel never consumes. The floor carries a
+  `bio.structural_carbohydrate_fraction` axis that the supply fold omits and a
+  `bio.consumer.fermentation` capacity described as converting that structural carbohydrate to
+  available energy, so the intended wiring is a fermentation-gated structural-carbohydrate
+  contribution to the supply, a kernel-and-contract change with a reserved conversion efficiency,
+  a modeling call surfaced for the owner rather than decided here. Still open.
+
+Two of the seams are now closed (fixed and tested):
+
+- `edibility` bound `dose_aggregate` to the nutrition `bio.consumer.requirement` axis, a category
+  error: the safety margin `tolerance / dose` was a toxin tolerance over a nutrition requirement,
+  two unrelated quantities. The sim reader (`crates/sim/src/edibility.rs`) already forms the dose as
+  the saturating sum of the toxins, so the descriptor had drifted from the running engine. The floor
+  now binds `dose_aggregate` to `bio.toxin_load_coarse` (the Tier-0 saturating sum of the toxin-class
+  concentrations), so the margin reads a toxin dose against a toxin tolerance, the right category,
+  and the descriptor matches the runtime. A graph test pins the binding. One caveat stays open, the
+  same one `harm_class` carries above: the tolerance axis `bio.consumer.reference_tolerance` is
+  mg/kg-body while `bio.toxin_load_coarse` is mg/kg-food, and the tolerance's scale is reserved under
+  R-UNITS-PIN, so the ratio's exact dimensional reconciliation (the body-versus-food mass base, the
+  tolerance scale) is settled by that arc, not by this rebind.
+- `sensible_rise` had a kernel (the delivered-energy inverse of `sensible_energy`) but no law
+  entry, so the data-driven graph could not reach it though its forward sibling `law.sensible_heat`
+  could. It is now a first-class `law.sensible_rise` binding the kernel, with a kernel contract
+  (an `Asserted` output, since the delivered energy is caller-composed, mirroring `sensible_energy`)
+  and a regression test for the kernel (which had none) and for the law's presence. The reserved
+  `RISE_MAX` bound follows the interval-bound symbol convention, surfaced not fabricated.
 
 ## Recommended order
 
-The scale, precision, and logic fixes are landed; `corrosion` and the latent overflow-direction
-class are now closed as well. Remaining, in order: the energy-wire-scale pin and the four
-specification seams (which touch the floor data and the graph descriptor rather than the kernels),
-folded in alongside the R-UNITS-PIN arc, since `harm_class`'s per-toxin-class tolerance scale is a
-quantity-per-class registry entry that arc settles.
+The scale, precision, and logic fixes are landed; `corrosion`, the latent overflow-direction
+class, and two of the wiring seams (`edibility`'s dose binding and the `sensible_rise` law entry)
+are now closed. Remaining, in order: the energy-wire-scale pin, the `net_nutrition` fermentation
+wiring (a modeling call for the owner), and `harm_class`'s per-toxin-class tolerance scale, the
+last folded in alongside the R-UNITS-PIN arc since that scale is a quantity-per-class registry
+entry that arc settles.
