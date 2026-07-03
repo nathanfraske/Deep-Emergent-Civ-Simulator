@@ -36,13 +36,18 @@
 
 # --- R-EVIDENCE: belief formation from the world (Part 9, record 62.6) ---
 
-[[reserved]]
-id = "evidence.implication_weights"
-basis = "DERIVE at runtime, worksheet §13b: Good's weight of evidence, log(P(E|H)/P(E|not H)), computed from trace_decay, concealment_suppression, and the race's own mortality and visibility base rates over the Part 40 trace-kind registry; 'fresh corpse 5, stale stain 1' is a human forensic table a hive or dispersing-body race has no analogue for."
-status = "reserved"
-value = ""
-unit = "log_odds"
-source = "Part 9 evidence engine; record 62.6; audit section 1f"
+# evidence.implication_weights RETIRED (worksheet §13b, derive audit): the belief weight a trace
+# implies about its cause is no longer an authored per-kind number. It DERIVES through
+# trace::mortality_implication_weight (crates/sim/src/trace.rs), which is I.J. Good's weight of
+# evidence (evidence::good_weight, ln(P(E|H)/P(E|not H))) with the trace kind's own reliability as
+# the numerator and the race's own natural-mortality base rate as the denominator, so a race that
+# dies of natural causes constantly finds a corpse less diagnostic. "Fresh corpse 5, stale stain 1"
+# was a human forensic table a hive or dispersing-body race has no analogue for. The reserved inputs
+# (each trace kind's reliability, each race's natural_mortality curve) now live as typed data on the
+# trace-kind and race-base-rate registries (labelled dev fixtures TraceKindRegistry::dev_default and
+# RaceBaseRateRegistry::dev_default), not as a manifest entry. Removed rather than left a fail-loud
+# sentinel for a value the engine no longer authors, the same treatment as
+# physiology.reserve_capacity_per_mass and physiology.intake_yield below.
 
 [[reserved]]
 id = "evidence.commit_threshold"
@@ -74,21 +79,31 @@ set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
-[[reserved]]
-id = "evidence.trace_decay_curves"
-basis = "DERIVE, worksheet §13b: each trace's persistence from the material's decomposition and reaction susceptibility through the reaction and corrosion kernel (laws.rs) against local temperature and medium; 'blood days, bone years' is terran organic chemistry a silicate or dispersing race has no analogue for. Keep only the exponential-at-tick-rate shape."
-status = "reserved"
-value = ""
-unit = "per_tick"
-source = "Part 9 evidence engine; record 62.6; audit section 1f"
+# evidence.trace_decay_curves RETIRED (worksheet §13b, derive audit): a trace's persistence over
+# time is no longer an authored per-kind curve. It DERIVES through trace::organic_salience and
+# trace::corroding_salience (crates/sim/src/trace.rs): the organic path gates decomposition on the
+# physics reaction kernel (laws::reaction, thermal-activation barrier) and then decays exponentially
+# (Fixed::exp) at the kind's decomposition rate scaled by the race's own decay_multiplier; the
+# corroding path integrates the physics corrosion kernel (laws::corrosion) linearly against elapsed
+# time. "Blood days, bone years" was terran organic chemistry a silicate or dispersing race has no
+# analogue for; the exponential-at-rate shape is kept. The reserved inputs (each trace kind's
+# DecayLaw parameters: barrier, decomposition_rate, material_potential, susceptibility, acidity,
+# corrosion_max; each race's decay_multiplier) live as typed data on the trace-kind and
+# race-base-rate registries (labelled dev fixtures), not as a manifest entry. Removed rather than
+# left a fail-loud sentinel for a value the engine no longer authors.
 
-[[reserved]]
-id = "evidence.absence_windows"
-basis = "DERIVE per race, worksheet §13b: each race's own mortality hazard curve (demography.rs) expected-remaining-lifespan times its visibility interval; the seven-year Anglo-American death-in-absentia window is a human legal anchor scaled to a human lifespan. Keep the scaled-by-visibility mechanism."
-status = "reserved"
-value = ""
-unit = "ticks"
-source = "Part 9 evidence engine; record 62.6; audit section 1f"
+# evidence.absence_windows RETIRED (worksheet §13b, derive audit): the presumed-dead window is no
+# longer an authored per-race number. It DERIVES through absence::absence_window
+# (crates/sim/src/absence.rs) from the race's own visibility (a less visible race's absence takes
+# longer to confirm, so the window is longer), capped against absence::characteristic_lifespan of
+# the race's own natural-mortality curve (no one is presumed merely absent for longer than their own
+# lifespan allows). The seven-year Anglo-American death-in-absentia window was a human legal anchor
+# scaled to a human lifespan; the scaled-by-visibility mechanism is kept. The reserved inputs (each
+# race's visibility and natural_mortality, the universal absence-stage multipliers) live as typed
+# data on the race-base-rate registry and the AbsenceScheduleDef (labelled dev fixtures), not as a
+# manifest entry. The characteristic-lifespan cap uses the LIFESPAN_HAZARD_THRESHOLD percentile
+# convention (a scale definition, not an authored biology value). Removed rather than left a
+# fail-loud sentinel for a value the engine no longer authors.
 
 [[reserved]]
 id = "evidence.concealment_suppression"

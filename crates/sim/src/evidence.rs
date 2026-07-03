@@ -230,6 +230,36 @@ fn clamp_i128(v: i128, bound: i128) -> i128 {
     v.clamp(-bound, bound)
 }
 
+/// I.J. Good's weight of evidence, `W = ln(P(E|H) / P(E|not H)) = ln P(E|H) - ln P(E|not H)`
+/// (Good 1950; Jaynes 2003), the log-likelihood ratio a single observation contributes to the
+/// additive log-odds total the inference engine sums. It is general over any two probabilities:
+/// nothing here reads a trace kind, a race, or an attribute, so the same primitive serves the
+/// mortality-implication weight, a corroboration weight, or any other likelihood contrast.
+///
+/// A zero probability has no finite log. Rather than introduce a fabricated floor-probability
+/// value, the weight saturates to the certainty clamp the engine already reserves
+/// (`evidence.log_odds_clamp`, passed in as `clamp`): a zero numerator (`P(E|H) = 0`, the
+/// observation is impossible if the hypothesis holds) drives the weight to `-clamp`, and a zero
+/// denominator (`P(E|not H) = 0`, impossible unless the hypothesis holds, so decisive for it)
+/// drives it to `+clamp`. Both zero is no evidence either way, exactly zero. The finite result is
+/// clamped into `[-clamp, +clamp]` too, so no likelihood contrast exceeds the maximum admissible
+/// certainty. Deterministic: `Fixed::ln` is the pinned integer CORDIC log, no float.
+pub fn good_weight(p_given_true: Fixed, p_given_false: Fixed, clamp: Fixed) -> Fixed {
+    let neg_clamp = Fixed::ZERO - clamp;
+    match (p_given_true <= Fixed::ZERO, p_given_false <= Fixed::ZERO) {
+        (true, true) => Fixed::ZERO,
+        (true, false) => neg_clamp,
+        (false, true) => clamp,
+        (false, false) => {
+            // Both logs lie in the representable window (probabilities give a log in roughly
+            // [-22.2, 21.5] nats), so the difference cannot overflow; clamp it to the certainty
+            // bound to match the engine's log-odds ceiling.
+            let w = p_given_true.ln() - p_given_false.ln();
+            w.clamp(neg_clamp, clamp)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +427,55 @@ source = "Part 9"
         assert_eq!(p.clamp, Fixed::from_int(10));
         assert_eq!(p.commit_threshold, Fixed::from_int(3));
         assert_eq!(p.margin, Fixed::from_int(2));
+    }
+
+    #[test]
+    fn good_weight_is_symmetric_at_equal_probabilities() {
+        // Equal likelihoods carry no evidence: ln(p/p) = 0, exactly, for any probability.
+        let clamp = Fixed::from_int(20);
+        for (n, d) in [(1, 10), (1, 2), (9, 10), (3, 4)] {
+            let p = Fixed::from_ratio(n, d);
+            assert_eq!(
+                good_weight(p, p, clamp),
+                Fixed::ZERO,
+                "equal probabilities give zero weight"
+            );
+        }
+    }
+
+    #[test]
+    fn good_weight_is_monotonic_in_p_true() {
+        // Holding P(E|not H) fixed, a larger P(E|H) is stronger evidence for H.
+        let clamp = Fixed::from_int(20);
+        let p_false = Fixed::from_ratio(1, 2);
+        let low = good_weight(Fixed::from_ratio(1, 5), p_false, clamp);
+        let mid = good_weight(Fixed::from_ratio(1, 2), p_false, clamp);
+        let high = good_weight(Fixed::from_ratio(4, 5), p_false, clamp);
+        assert!(low < mid, "weight rises with P(E|H) ({low:?} < {mid:?})");
+        assert!(mid < high, "weight rises with P(E|H) ({mid:?} < {high:?})");
+        assert_eq!(mid, Fixed::ZERO, "the equal-probability case sits at zero");
+    }
+
+    #[test]
+    fn good_weight_zero_probability_saturates_to_the_clamp_exactly() {
+        // A zero has no finite log; the weight saturates to the certainty clamp, not a fabricated
+        // floor. A zero numerator is decisive against H, a zero denominator decisive for it.
+        let clamp = Fixed::from_int(7);
+        let p = Fixed::from_ratio(3, 10);
+        assert_eq!(
+            good_weight(Fixed::ZERO, p, clamp),
+            Fixed::ZERO - clamp,
+            "an impossible observation under H hits -clamp exactly"
+        );
+        assert_eq!(
+            good_weight(p, Fixed::ZERO, clamp),
+            clamp,
+            "an observation impossible except under H hits +clamp exactly"
+        );
+        assert_eq!(
+            good_weight(Fixed::ZERO, Fixed::ZERO, clamp),
+            Fixed::ZERO,
+            "both impossible is no evidence either way"
+        );
     }
 }

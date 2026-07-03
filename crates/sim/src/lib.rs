@@ -55,10 +55,12 @@
 //!   command scheduler is held for its open determinism design (R-CMD-ORDER,
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
+pub mod absence;
 pub mod affect;
 pub mod agent;
 pub mod anatomy;
 pub mod axiom;
+pub mod base_rates;
 pub mod biosphere;
 pub mod body;
 pub mod calibration;
@@ -90,11 +92,16 @@ pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
 pub mod tom;
+pub mod trace;
 pub mod transmission;
 pub mod typology;
 pub mod value;
 pub mod world;
 
+pub use absence::{
+    absence_window, characteristic_lifespan, AbsenceScheduleDef, AbsenceScheduleId, AbsenceStage,
+    LIFESPAN_HAZARD_THRESHOLD,
+};
 pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
 pub use agent::{AccessObs, Mind, SharedBelief};
 pub use axiom::{
@@ -103,6 +110,7 @@ pub use axiom::{
     AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
     EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
 };
+pub use base_rates::{RaceBaseRateRegistry, RaceBaseRates};
 pub use body::{
     apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
     DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
@@ -120,7 +128,7 @@ pub use dialogue::{
     ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
-pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use evidence::{good_weight, AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
 pub use evolve::{
     controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
     selection_gradient, EvolveParams, EvolveReport,
@@ -152,6 +160,10 @@ pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
+};
+pub use trace::{
+    corroding_salience, mortality_implication_weight, organic_salience, DecayLaw,
+    TraceImplicationSpec, TraceKindDef, TraceKindId, TraceKindRegistry,
 };
 pub use transmission::{
     copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
