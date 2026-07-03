@@ -64,7 +64,7 @@ pub mod stage0;
 pub mod transcendental;
 pub mod worldgen;
 
-pub use being::{gpu_body_thermal, gpu_sat_mul};
+pub use being::{gpu_activate, gpu_body_thermal, gpu_sat_mul};
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul};
 pub use perceive::gpu_notice;
 pub use stage0::{

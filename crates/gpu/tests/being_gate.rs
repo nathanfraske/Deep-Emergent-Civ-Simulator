@@ -17,7 +17,7 @@
 //! is the exact same update written against `civsim_core::Fixed`. Self-skips unless `CIVSIM_GPU` is set.
 
 use civsim_core::Fixed;
-use civsim_gpu::{cuda_client, gpu_body_thermal, gpu_sat_mul};
+use civsim_gpu::{cuda_client, gpu_activate, gpu_body_thermal, gpu_sat_mul};
 
 fn gpu_enabled() -> bool {
     std::env::var("CIVSIM_GPU").is_ok()
@@ -191,5 +191,102 @@ fn sat_mul_is_bit_identical_to_the_controller_sat_mul() {
         mism, 0,
         "GPU sat_mul must equal the CPU sat_mul over all {} pairs (saturating {n_sat}, fitting {n_fit})",
         a.len()
+    );
+}
+
+/// The CPU oracle for the controller's activation: the saturating sum of the saturating products,
+/// clamped to [-1, 1]. Mirrors `activate` in `controller.rs`.
+fn cpu_activate(weights: &[i64], inputs: &[i64]) -> i64 {
+    let neg_one = Fixed::from_int(-1);
+    let terms = weights.iter().zip(inputs).map(|(&w, &x)| {
+        match Fixed::from_bits(w).checked_mul(Fixed::from_bits(x)) {
+            Some(p) => p,
+            None => {
+                if (w < 0) ^ (x < 0) {
+                    Fixed::MIN
+                } else {
+                    Fixed::MAX
+                }
+            }
+        }
+    });
+    Fixed::saturating_sum(terms)
+        .clamp(neg_one, Fixed::ONE)
+        .to_bits()
+}
+
+#[test]
+fn activate_is_bit_identical_to_the_controller_activate() {
+    if !gpu_enabled() {
+        eprintln!("civsim-gpu: skipping activate gate (set CIVSIM_GPU=1 to run)");
+        return;
+    }
+    let client = cuda_client();
+    let n_terms = 12usize;
+    let mut s = 0xAC71_5A7E_0BAD_F00Du64;
+    let mut nxt = || {
+        s = s.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = s;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        (z ^ (z >> 31)) as i64
+    };
+    let (mut w, mut x) = (Vec::new(), Vec::new());
+    // Batch A: moderate weights (~[-4,4]) and unit-ish inputs, so sums straddle +/-1 and clamp often.
+    // Batch B: full-range weights, so sat_mul saturates and the 128-bit sum overflows i64.
+    // Batch C: tiny weights and inputs, so the sum stays inside [-1, 1] (the pass-through path).
+    for _ in 0..1500 {
+        for _ in 0..n_terms {
+            w.push(nxt() >> 30);
+            x.push(nxt() >> 33);
+        }
+    }
+    for _ in 0..1500 {
+        for _ in 0..n_terms {
+            w.push(nxt());
+            x.push(nxt() >> 20);
+        }
+    }
+    for _ in 0..1500 {
+        for _ in 0..n_terms {
+            w.push(nxt() >> 40);
+            x.push(nxt() >> 40);
+        }
+    }
+
+    let got = gpu_activate(&client, &w, &x, n_terms as u32);
+    let n_acts = w.len() / n_terms;
+    assert_eq!(got.len(), n_acts);
+    let one = Fixed::ONE.to_bits();
+    let neg_one = Fixed::from_int(-1).to_bits();
+    let (mut mism, mut hi_clamp, mut lo_clamp, mut pass) = (0u64, 0u64, 0u64, 0u64);
+    for a in 0..n_acts {
+        let ww = &w[a * n_terms..(a + 1) * n_terms];
+        let xx = &x[a * n_terms..(a + 1) * n_terms];
+        let want = cpu_activate(ww, xx);
+        if want == one {
+            hi_clamp += 1;
+        } else if want == neg_one {
+            lo_clamp += 1;
+        } else {
+            pass += 1;
+        }
+        if got[a] != want {
+            mism += 1;
+            if mism <= 8 {
+                eprintln!(
+                    "activate mismatch act={a} got={:#018x} want={:#018x}",
+                    got[a], want
+                );
+            }
+        }
+    }
+    assert!(
+        hi_clamp > 0 && lo_clamp > 0 && pass > 0,
+        "sweep must hit both clamps and the pass-through (hi={hi_clamp} lo={lo_clamp} pass={pass})"
+    );
+    assert_eq!(
+        mism, 0,
+        "GPU activate must equal the CPU activate over all {n_acts} activations (hi={hi_clamp} lo={lo_clamp} pass={pass})"
     );
 }
