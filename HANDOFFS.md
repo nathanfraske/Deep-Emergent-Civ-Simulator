@@ -46,6 +46,22 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): offload-map steps 1 and 2 built, three GPU kernels bit-identical on the 5090
+
+Following the offload map, the owner picked step 2 (worldgen noise + fused biome) and step 1 (the runner field kernel). All three are built and gated bit-identical on the 5090, on `claude/gpu-field-step`.
+
+**Step 1: the runner field kernel (`crates/gpu/src/field.rs`).** The survey found the built `diffuse_kernel` matched `diffusion_bench` (toroidal, diffusion-only), not the runner's `Field::step`. `field_step_kernel` / `gpu_field_step` closes that: the clamped-Neumann (zero-flux, edge=self) five-point stencil plus the relaxation term, `g = c + diffusion*lap + relaxation*(baseline - c)`, with the baseline uploaded once and resident across iterations (only the field ping-pongs). Bit-identical to the CPU `Field::step` over 37x23 after 50 iters (`tests/field_step_gate.rs`).
+
+**Step 2: worldgen noise + fused biome (`crates/gpu/src/worldgen.rs`).** The cleanest standalone GPU offload: coordinate-keyed, zero input transfer, one-shot. `gpu_worldgen_noise` ports `noise::fractal` (the DrawKey lattice fold on the shared `splitmix64`, Q32.32 smoothstep/lerp, octaves with halving amplitude/period, normalised by the pinned `q32_div`), bit-identical over 48x24 x 3 fields. `gpu_worldgen` fuses `BiomeSet::classify` (first-match [lo,hi)-band scan) onto the same pass, bit-identical over 48x24. `splitmix64` was lifted from `perceive.rs` to `prim.rs` so both share one copy (perceive gate re-run green).
+
+**DSL gotchas banked (in the transcendental/worldgen module docs + the gpu-canon-pin memory).** Three real ones caught this session: (1) an accumulator carried across an `#[unroll]` loop whose body calls a `#[cube]` fn is silently dropped (the octaves are manually unrolled straight-line instead, as `transcendental::exp` already does); (2) a runtime or `const` loop bound yields zero iterations, so bounds must be literals; (3) array indices must be cast `as usize` inline. A branchless `#[unroll]` latch whose body calls no `#[cube]` fn does carry its accumulator (the biome scan), matching CORDIC.
+
+**Green.** fmt, clippy `-D warnings`, rustdoc `-D warnings`, and the full ten-file GPU suite (all gates: stage0, cross-backend, field, field-step, perceive, worldgen noise + biome, transcendentals) pass on the 5090.
+
+**Where it stopped, and next.** Steps 1 and 2 complete on `claude/gpu-field-step`. The offload map's remaining priorities: step 3 (the fused resident being-kernel: controller + homeostasis + body-thermal, the enabling infrastructure that unlocks the field offload), then step 4 (pool-tier aggregate mortality), step 5 (Wright-Fisher drift), and perceive to production. Every GPU verdict stays gated on residency AND scale, routed by a profile (the dev map 48x24 sits below the launch threshold; these are scale arguments). The worldgen noise, being one-shot with no per-tick transfer, is the one that pays at any map worth generating.
+
+---
+
 ## 2026-07-02 (continued): the GPU-vs-CPU offload map scoped (docs/working/GPU_CPU_OFFLOAD_MAP.md)
 
 The owner asked to scope what all can and should be offloaded to the GPU versus kept on the parallelised CPU. A five-agent subsystem survey (environment/fields, cognition/language, embodiment/life, physics laws, determinism/aggregation) classified every engine compute workload against a consistent GPU-fit framework grounded in the code, and a synthesis produced the map. On `claude/gpu-offload-scope`. Also merged this session: PR #66, the canonical GPU perceive notice-roll spike (bit-identical on the 5090).
