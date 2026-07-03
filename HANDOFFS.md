@@ -66,6 +66,25 @@ The owner said to keep on. The R-REPRO emergence arc had proven the mechanism au
 
 ---
 
+## 2026-07-02 (continued): step 3 being-kernel arithmetic complete (metabolize), all four kernels blind-audited
+
+The homeostasis drain (`gpu_metabolize`, PR #78) lands, completing the being-kernel's arithmetic. All four being-kernel kernels are now on main and each was run through the fully-blind audit (AGENTIC_ADDENDUM section 7): body-thermal (#72), sat_mul (#75), activate (#76), metabolize (#78).
+
+**The being-kernel (crates/gpu/src/being.rs), all bit-identical on the 5090:**
+- `gpu_body_thermal`: the runner's `phase_body_exchange` (Newton cooling over the resident field).
+- `gpu_sat_mul`: the saturating Q32.32 multiply (the controller/drain building block).
+- `gpu_activate`: the controller activation, `clamp(sum sat_mul(w,x), -1, 1)`, the saturating sum in a two-limb signed 128-bit accumulator (a two-pass kernel: products array, then 128-bit sum, then clamp).
+- `gpu_metabolize`: the homeostasis drain (`metabolize` + `Stock::step` + logistic `regen_increment`).
+The shared `mul_checked` in prim.rs returns `[fit, overflow, use_neg]`, so `sat_mul` and `checked_mul_zero` share one overflow decision and cannot drift; `sat_add` (i64 saturating add) is the other new primitive.
+
+**The blind-audit track record this session (the honest picture of the method):** body-thermal converged on a "critical" `ceil(n/threads)` finding that VERIFICATION showed was a phantom, laundered by pseudocode in the packet (the method's own limit #1); with the lesson applied (verbatim code in Section B), the sat_mul audit CONVERGED ON A REAL CRITICAL BUG the gate missed (the negative-overflow check omitted `w0 == 0`, returning i64::MAX for i64::MIN; the gate's integer-product boundary cases all had w0==0, the same blind spot as the code), fixed and regression-locked; and the activate and metabolize audits both converged on "correct" (verbatim packets, subtle 128-bit and regen/divisor logic, held up). So: verbatim code in, real bugs out; pseudocode in, phantoms out. Always verify converged findings against first-principles arithmetic.
+
+**Where the GPU offload arc stands.** The being-kernel arithmetic is done. What remains on the GPU track (fuse the four over one resident being buffer, the reaction-norm matvec over the per-being weight matrix, wiring into World::tick behind a profile) is SCALE-GATED: the offload map's own caveat is that the dev map (48x24) and dev populations sit below every launch threshold, so these only pay on a large world.
+
+**The whole-engine next step is a pivot, not more kernels.** Everything built (determinism proofs, bit-identity gates, GPU offloads, the scheduler) is machinery correctness on short ticks with dev fixtures; the engine's purpose (emergent language, tech, money, governance) has never been observed because a real world has never run for a long horizon. The gating unblock is the OWNER's reserved-value calibration (the manifest now carries 128 entries, 67 set and ~98 fail-loud sentinels; the Calibrated profile refuses to start on any unset value; a `claude/reserved-values-worksheet` branch is in flight). After that, the unhit milestone is a long-horizon run of the composed runner to observe whether emergence arises (so far only individual-tier emergence, the evolved foragers, has been shown). Recommended to the owner: assemble the reserved-value worksheet first (unblocks calibration), then build a long-horizon run-and-observe harness. Awaiting the owner's direction on which to start.
+
+---
+
 ## 2026-07-02 (continued): saturating multiply sat_mul, and a blind audit that caught a real critical bug
 
 Continuing step 3 (the being-kernel), the foundational new primitive both remaining pieces (the controller forward pass and the homeostasis drain) need was built: a saturating Q32.32 multiply. And the fully-blind audit (AGENTIC_ADDENDUM section 7), rerun with the packet-fidelity lesson applied (verbatim code in Section B), earned its keep this time. On `claude/gpu-sat-mul`.
