@@ -285,6 +285,12 @@ pub struct QuantityAxis {
     pub scale_unit: String,
     /// The fixed-point range, set or reserved.
     pub range: AxisRange,
+    /// The raw declared decimal bounds `(lo, hi)` of a set range, retained verbatim from the data.
+    /// A bound below the Q32.32 epsilon (a picofarad capacitance, say) underflows the stored `Fixed`
+    /// `range` to zero, losing the magnitude the per-quantity scale derivation (R-UNITS-PIN) reads;
+    /// the declared decimal keeps it. The `Fixed` `range` remains the clamp representation, this is
+    /// the derivation source of truth. `None` for a reserved range.
+    pub range_decimal: Option<(String, String)>,
     /// The tier (0 the grounded floor).
     pub tier: u8,
     /// Whether the axis is real-with-source or fantasy-reserved.
@@ -802,6 +808,13 @@ impl PhysicsRegistry {
                     h.write_fixed(*hi);
                 }
             }
+            // The declared decimal bounds distinguish two set ranges whose sub-epsilon low ends
+            // both underflow the stored Fixed to zero (a picofarad versus a femtofarad), which the
+            // Fixed lo/hi above cannot.
+            if let Some((lo, hi)) = &axis.range_decimal {
+                h.write_bytes(lo.as_bytes());
+                h.write_bytes(hi.as_bytes());
+            }
             h.write_u32(axis.tier as u32);
             write_provenance(&mut h, &axis.provenance);
         }
@@ -994,10 +1007,13 @@ impl AxisDef {
                 id: self.id.clone(),
                 detail,
             })?;
-        let range = if !self.range_reserved.trim().is_empty() {
-            AxisRange::Reserved {
-                basis: self.range_reserved.trim().to_string(),
-            }
+        let (range, range_decimal) = if !self.range_reserved.trim().is_empty() {
+            (
+                AxisRange::Reserved {
+                    basis: self.range_reserved.trim().to_string(),
+                },
+                None,
+            )
         } else if !self.range_lo.trim().is_empty() && !self.range_hi.trim().is_empty() {
             let lo = Fixed::from_decimal_str(&self.range_lo).map_err(|detail| {
                 PhysicsError::BadValue {
@@ -1011,7 +1027,13 @@ impl AxisDef {
                     detail,
                 }
             })?;
-            AxisRange::Set { lo, hi }
+            (
+                AxisRange::Set { lo, hi },
+                Some((
+                    self.range_lo.trim().to_string(),
+                    self.range_hi.trim().to_string(),
+                )),
+            )
         } else {
             return Err(PhysicsError::BadRange(self.id.clone()));
         };
@@ -1023,6 +1045,7 @@ impl AxisDef {
             dimension,
             scale_unit: self.scale,
             range,
+            range_decimal,
             tier: self.tier,
             provenance,
         })
