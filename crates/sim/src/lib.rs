@@ -63,7 +63,9 @@ pub mod axiom;
 pub mod base_rates;
 pub mod biosphere;
 pub mod body;
+pub mod breeding;
 pub mod calibration;
+pub mod census;
 pub mod clock;
 pub mod conservation;
 pub mod controller;
@@ -117,7 +119,15 @@ pub use body::{
     MeasureKind, PartCondition, TissueLayer, TissueMaterial, TissueMaterialId, TissueRegistry,
     WoundRecord,
 };
+pub use breeding::{
+    fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
+};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
+pub use census::{
+    effective_size_classes, effective_size_sex, effective_size_var, ReproductiveCensus,
+    ReproductiveMoments,
+};
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};

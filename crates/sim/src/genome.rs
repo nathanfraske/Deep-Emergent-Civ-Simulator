@@ -131,10 +131,10 @@ pub enum LifeHistoryChannel {
 }
 
 /// A phenotype channel a gene's effect feeds. The fixed mechanism interface the genotype
-/// expresses into: a Part 20 trait setpoint keyed by a data trait id, or one of the
-/// cognition, build, imbued, or life-history channels. Anatomy is intentionally absent
-/// (25.1). New phenotype interfaces are an engine extension, never world data; what genes
-/// reach these channels, and with what weight, is the data.
+/// expresses into: a Part 20 trait setpoint keyed by a data trait id, one of the
+/// cognition, build, imbued, or life-history channels, or the sex-determination coordinate.
+/// Anatomy is intentionally absent (25.1). New phenotype interfaces are an engine extension,
+/// never world data; what genes reach these channels, and with what weight, is the data.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Channel {
     /// An additive push on a Part 20 personality trait setpoint, by trait-axis id.
@@ -163,6 +163,16 @@ pub enum Channel {
     /// authored (Principle 9). The variant is the fixed engine interface; the controller's
     /// topology and how many parameters it has are data ([`crate::controller`]).
     Controller(ControllerParamId),
+    /// A sex (mating-type) determination coordinate: the value read off a race's designated
+    /// sex-determination locus (R-REPRO, design Part 25). A data-driven
+    /// [`crate::breeding::BreedingSystem`] maps this expressed value to a
+    /// [`crate::breeding::SexClass`], so the number of sex classes a race carries and how a
+    /// genotype assigns to one are data, and the population sex ratio emerges from Fisherian
+    /// selection on the locus rather than a drawn ratio (Principle 8). This variant is the fixed
+    /// engine interface; which gene feeds it, and with what weight, is data, exactly like every
+    /// other channel. Sex is therefore read through [`GeneSet::express`] like any other
+    /// phenotype, with no bespoke sex-determination phase and no reserved ratio.
+    SexDetermination,
 }
 
 /// A controller-parameter id, an index into a being's behaviour controller's flat weight vector

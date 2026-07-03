@@ -24,6 +24,8 @@
 //! The behaviour here (who promotes when, how wealth is apportioned) is not the
 //! point and is not calibrated; the point is that the structural invariants hold.
 
+use crate::breeding::SexClass;
+use crate::census::ReproductiveMoments;
 use crate::decision::Curve;
 use crate::demography::AgeHistogram;
 use civsim_core::{EntityHandle, EntityLocation, Fixed, PoolId, Registry, StableId, StateHasher};
@@ -59,12 +61,35 @@ pub struct Pool {
     pub wealth: Fixed,
     /// The pool's age distribution, empty for an age-untracked pool.
     pub ages: AgeHistogram,
+    /// The pool's reproductive-moment accumulator for the current census window (design Parts 25,
+    /// 54; the R-REPRO census tier). It carries the sex split of this window's breeders and the two
+    /// reproductive moments, so the pool derives an effective population size Ne from
+    /// [`Pool::effective_size`] without holding any individual. A window accumulator, not persisted
+    /// canonical state: it is empty by default and rebuilt as births flow in through
+    /// [`Pool::add_births`], so it stays out of the snapshot and the state hash exactly as the
+    /// individual-tier census stays out of the world hash.
+    pub repro: ReproductiveMoments,
 }
 
 impl Pool {
     /// Whether this pool tracks an age distribution (as opposed to a plain head count).
     pub fn is_age_tracked(&self) -> bool {
         self.ages.total() > 0
+    }
+
+    /// The pool-tier birth inflow: a breeder of sex `parent_sex` produced `offspring` young this
+    /// window (design Parts 20, 25, 54). The newborns enter the age-zero cohort and the breeder's
+    /// reproductive contribution feeds this pool's moment accumulator, so a coarse pool ages, grows,
+    /// and derives Ne with no individuals. Delegates to [`AgeHistogram::add_births`].
+    pub fn add_births(&mut self, parent_sex: SexClass, offspring: u32) {
+        self.ages.add_births(&mut self.repro, parent_sex, offspring);
+    }
+
+    /// The effective population size the pool's census window implies, through the same race-blind
+    /// kernel the individual tier uses ([`ReproductiveMoments::effective_size`]), so a pool-only
+    /// world derives Ne consistently with a modelled one (record 62.9).
+    pub fn effective_size(&self) -> u32 {
+        self.repro.effective_size()
     }
 
     /// Whether this pool holds members but no age distribution (a plain head count). Distinct
@@ -132,6 +157,7 @@ impl TwoTierWorld {
             count,
             wealth,
             ages: AgeHistogram::new(),
+            repro: ReproductiveMoments::new(),
         });
         id
     }
@@ -154,6 +180,7 @@ impl TwoTierWorld {
             count,
             wealth,
             ages,
+            repro: ReproductiveMoments::new(),
         });
         id
     }
@@ -499,6 +526,9 @@ impl TwoTierWorld {
                     count: p.count,
                     wealth: Fixed::from_bits(p.wealth_bits),
                     ages: AgeHistogram::from_pairs(p.ages.iter().copied()),
+                    // The reproductive-moment accumulator is a window transient, not persisted; a
+                    // reloaded pool starts a fresh window, exactly as the individual census does.
+                    repro: ReproductiveMoments::new(),
                 })
                 .collect(),
             edges: s

@@ -32,6 +32,7 @@
 use civsim_core::Fixed;
 
 use crate::axiom::IntrinsicBeliefs;
+use crate::breeding::BreedingSystemId;
 use crate::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
 use crate::value::RaceId;
 use crate::world::PlaceId;
@@ -84,6 +85,14 @@ pub struct Race {
     /// crosses into adulthood is per-race data, not a hardcoded threshold. A plain count, no
     /// formula: the owner sets it.
     pub maturity_years: u32,
+    /// The race's breeding system, by id into the world's [`crate::breeding::BreedingSystemRegistry`]
+    /// (design Part 25, R-REPRO). It names how many sex classes the race carries and how a genotype
+    /// assigns to one, so a race's sex is a gene-fed phenotype read off its sex-determination locus,
+    /// and the number of mating types is per-race data rather than a closed binary enum (Principle
+    /// 8, Principle 11). Defaults to [`BreedingSystemId`] zero (the conventional first-registered
+    /// system) in [`Race::new`]; set another with [`Race::with_breeding`]. An id the registry does
+    /// not hold falls back to a single class, so a world with no registered system authors no ratio.
+    pub breeding: BreedingSystemId,
 }
 
 impl Race {
@@ -110,7 +119,15 @@ impl Race {
             environment_variance,
             lifespan_years,
             maturity_years,
+            breeding: BreedingSystemId(0),
         }
+    }
+
+    /// Set the race's breeding system by id (a builder over [`Race::new`]). The mechanism is fixed;
+    /// which system a race breeds under is data (Principle 11).
+    pub fn with_breeding(mut self, breeding: BreedingSystemId) -> Self {
+        self.breeding = breeding;
+        self
     }
 
     /// The ploidy a member is promoted or born at, derived from the reproduction mode: two for

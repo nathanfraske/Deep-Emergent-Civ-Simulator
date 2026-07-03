@@ -873,13 +873,13 @@ source = "Part 33.4 drift; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "genome.effective_population_size"
-basis = "Ne, the drift strength of a pool: smaller Ne drifts harder (founder effects, neutral divergence). Set per the modelled census size and the breeding structure; the molecular-clock divergence pace follows from it (Wright-Fisher; Kimura neutral theory) NOTE (worksheet §13a/§14): the canonical Ne should derive from census, sex ratio, and reproductive-success variance; only the pre-dawn founder seed is a world-dialing lever. Kept set as the dial base."
+basis = "Ne, the drift strength of a pool: smaller Ne drifts harder (founder effects, neutral divergence; Wright-Fisher; Kimura neutral theory). RE-SCOPED to the pre-dawn FOUNDER seed only (worksheet §13a/§14, R-REPRO census tier). The canonical per-window Ne now DERIVES from the reproductive census rather than being authored: crates/sim/src/census.rs composes the breeding sex ratio (the k-class harmonic generalization of Wright 1931) and the reproductive-success variance (Crow-Kimura 1970) through one race-blind kernel and feeds GenePool::effective_size, so two races diverge in Ne through their census data, not a per-world number. This value is retained solely as the effective size a founding pool carries before any census exists, the one world-dialing lever the scenarios still tune; set per the modelled founding census size and breeding structure."
 status = "set"
 value = "200"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "individuals"
-source = "Part 25.7-25.8; biosphere candidate; audit follow-up; world-dialing lever, worksheet §14"
+source = "Part 25.7-25.8; R-REPRO census tier (crates/sim/src/census.rs); pre-dawn founder seed / world-dialing lever, worksheet §13a/§14"
 
 [[reserved]]
 id = "genome.speciation_distance"
@@ -1554,7 +1554,7 @@ value = "30"
 set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "individuals"
-source = "Part 25.7-25.8; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
+source = "Part 25.7-25.8; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest); dials the pre-dawn founder seed (the canonical Ne now derives from the census, R-REPRO census tier, crates/sim/src/census.rs)"
 
 [[reserved]]
 id = "genome.speciation_distance.low"

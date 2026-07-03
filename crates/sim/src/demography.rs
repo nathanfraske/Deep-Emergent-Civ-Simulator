@@ -48,6 +48,8 @@
 //! advance the temporal-LOD work reserves), surfaced rather than fabricated, so only the
 //! exact reference sampler is built here.
 
+use crate::breeding::SexClass;
+use crate::census::ReproductiveMoments;
 use crate::decision::Curve;
 use civsim_core::{DrawKey, Fixed, Phase, StateHasher};
 use serde::{Deserialize, Serialize};
@@ -216,6 +218,27 @@ impl AgeHistogram {
         }
         self.counts = survivors;
         deaths
+    }
+
+    /// The pool-tier birth inflow (design Parts 20, 25, 54; the R-REPRO census tier). A breeder of
+    /// sex `parent_sex` produced `offspring` young this window: the newborns enter the age-zero
+    /// cohort of this distribution (the inflow the aging loop leaves empty), and the breeder's
+    /// contribution is recorded into the reproductive-moment accumulator `moments` (its sex and its
+    /// offspring count), so the pool tier derives an effective population size Ne without ever
+    /// holding an individual ([`ReproductiveMoments::effective_size`]). This is the aggregate
+    /// counterpart of the individual tier's [`crate::census::ReproductiveCensus::record_birth`]; fed
+    /// the same events the two tiers reduce to the same moments and so to the same Ne (record 62.9).
+    /// Adding zero offspring still records the breeder (a parent that reproduced this window),
+    /// keeping the sex split and the breeder count consistent with the individual tier. Conserves as
+    /// an inflow: the age-zero cohort rises by exactly `offspring`.
+    pub fn add_births(
+        &mut self,
+        moments: &mut ReproductiveMoments,
+        parent_sex: SexClass,
+        offspring: u32,
+    ) {
+        self.add(0, offspring as u64);
+        moments.record_parent(parent_sex, offspring);
     }
 
     /// Merge another distribution into this one, adding member counts age by age. Conserves:
@@ -490,6 +513,37 @@ mod tests {
         assert!(
             (pool_frac - indiv_frac).abs() < 0.05,
             "the two tiers agree in expectation ({pool_frac} vs {indiv_frac})"
+        );
+    }
+
+    #[test]
+    fn add_births_feeds_the_moment_accumulator_and_conserves() {
+        // The pool-tier birth inflow: newborns enter the age-zero cohort and the breeder's
+        // reproductive contribution feeds the moment accumulator, so a coarse pool derives Ne with
+        // no individuals. Population is conserved as an inflow (age zero rises by the offspring
+        // added), and the moments reduce to a positive effective size.
+        use crate::breeding::SexClass;
+        let mut ages = AgeHistogram::from_pairs([(20, 30), (40, 20)]);
+        let mut moments = ReproductiveMoments::new();
+        let before = ages.total();
+        // Two breeding classes, a spread of family sizes.
+        ages.add_births(&mut moments, SexClass(0), 3);
+        ages.add_births(&mut moments, SexClass(1), 1);
+        ages.add_births(&mut moments, SexClass(0), 2);
+        assert_eq!(
+            ages.count_at(0),
+            6,
+            "the newborns enter the age-zero cohort"
+        );
+        assert_eq!(
+            ages.total(),
+            before + 6,
+            "the inflow conserves as a pure addition"
+        );
+        assert_eq!(moments.breeders(), 3, "each breeder is recorded once");
+        assert!(
+            moments.effective_size() > 0,
+            "the pool derives Ne from the moments alone"
         );
     }
 

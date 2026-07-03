@@ -46,14 +46,16 @@ use civsim_world::OrbitalElements;
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
+use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
+use crate::census::ReproductiveCensus;
 use crate::clock::LIFE_CADENCE_TICKS;
 use crate::decision::{ActionId, Behaviour, Curve, DriveId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::genome::Genome;
+use crate::genome::{Channel, Genome, ReproductionMode};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
@@ -431,6 +433,17 @@ pub struct World {
     /// cadence is then a no-op, so the hazard shape is never fabricated: aging (a bare increment)
     /// runs on the cadence regardless, but a being dies only against an owner-supplied curve.
     mortality_hazard: Option<Curve>,
+    /// The data-driven breeding-system registry (design Part 25, R-REPRO): resolves a race's
+    /// [`crate::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
+    /// sex is read off its sex-determination locus. Empty by default; when a race's system is not
+    /// registered, sex determination falls back to a single class, so the census authors no ratio.
+    breeding_systems: BreedingSystemRegistry,
+    /// The reproductive-success census for the current window (design Part 25, R-REPRO): the sex of
+    /// each being and the offspring credited to each contributing parent, from which an effective
+    /// population size Ne derives ([`ReproductiveCensus::effective_size`]). Credited in
+    /// [`World::birth`] and seeded at the dawn; a window transient like the pool-tier accumulator,
+    /// so it is kept out of [`World::state_hash`] and carries its own stamped reduction hash.
+    census: ReproductiveCensus,
 }
 
 impl World {
@@ -476,7 +489,41 @@ impl World {
             workers: 1,
             life_cadence_ticks: LIFE_CADENCE_TICKS,
             mortality_hazard: None,
+            breeding_systems: BreedingSystemRegistry::new(),
+            census: ReproductiveCensus::new(),
         }
+    }
+
+    /// Install the breeding-system registry (design Part 25, R-REPRO). Until set, sex determination
+    /// falls back to a single class and the reproductive census records every breeder as that class,
+    /// so a world that has not declared its mating types authors no sex ratio.
+    pub fn set_breeding_systems(&mut self, registry: BreedingSystemRegistry) {
+        self.breeding_systems = registry;
+    }
+
+    /// The reproductive-success census for the current window, for inspecting the sex tally and the
+    /// derived effective population size Ne (design Part 25, R-REPRO).
+    pub fn census(&self) -> &ReproductiveCensus {
+        &self.census
+    }
+
+    /// Close the current census window and open the next (bumps the window stamp and clears the
+    /// tally). A run drives this on its generation cadence so each window's Ne measures a fresh
+    /// cohort; between windows the tally accumulates births.
+    pub fn reset_census_window(&mut self) {
+        self.census.reset();
+    }
+
+    /// A being's sex class, read off its race's sex-determination locus through the ordinary
+    /// expression map (design Part 25, R-REPRO). Deterministic and RNG-free: sex is a pure function
+    /// of the genome and the race's gene set and breeding system. `None` when the race's breeding
+    /// system is not registered, so a caller never runs on a fabricated class.
+    fn express_sex(&self, race: &Race, genome: &Genome) -> Option<SexClass> {
+        let system = self.breeding_systems.get(race.breeding)?;
+        let expressed = race
+            .genes
+            .express(genome, Channel::SexDetermination, Fixed::ZERO);
+        Some(system.assign(expressed))
     }
 
     /// Set the execution width of the parallel read stage (the ActionStage worker
@@ -812,6 +859,16 @@ impl World {
                 self.place_of.insert(id, band.place);
                 self.ages.insert(id, 0);
                 self.race_of.insert(id, band.race);
+                // Stamp the founder's gene-fed sex into the census (read off its sex-determination
+                // locus, no RNG). A founding cohort thus carries a sex ratio that emerged from its
+                // pool's sex-determination allele frequencies rather than being drawn.
+                let founder_sex = self
+                    .genomes
+                    .get(&id)
+                    .and_then(|g| self.express_sex(race, g));
+                if let Some(sex) = founder_sex {
+                    self.census.record_sex(id, sex);
+                }
                 seeded.push(id);
             }
         }
@@ -1226,6 +1283,33 @@ impl World {
         let mutation = (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(mutation_spread);
         let child_w = (midparent + mutation).clamp(Fixed::from_int(-1), Fixed::from_int(1));
         self.mate_prefs.insert(child, MatePreference::new(child_w));
+        // Credit the reproductive census (design Part 25, R-REPRO). Sex is a gene-fed phenotype read
+        // off the sex-determination locus, deterministic and RNG-free: the child's sex, and each
+        // contributing parent's sex, are expressed the same way any other channel is. A two-parent
+        // (sexual diploid) birth credits both parents once; a single-parent (haploid or clonal)
+        // birth credits only the first, so the offspring tally stays exactly the summed parental
+        // contribution. An unknown sex (no registered breeding system) folds into the default class,
+        // so the tally never leaks a credit even before mating types are declared.
+        let child_sex = self
+            .genomes
+            .get(&child)
+            .and_then(|g| self.express_sex(race, g))
+            .unwrap_or_default();
+        let a_sex = self
+            .genomes
+            .get(&parent_a)
+            .and_then(|g| self.express_sex(race, g))
+            .unwrap_or_default();
+        let mut parents = vec![(parent_a, a_sex)];
+        if matches!(race.scheme.reproduction, ReproductionMode::SexualDiploid) {
+            let b_sex = self
+                .genomes
+                .get(&parent_b)
+                .and_then(|g| self.express_sex(race, g))
+                .unwrap_or_default();
+            parents.push((parent_b, b_sex));
+        }
+        self.census.record_birth(&parents, child, child_sex);
         Some(child)
     }
 
