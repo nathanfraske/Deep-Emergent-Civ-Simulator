@@ -88,6 +88,7 @@ use crate::controller::ControllerLayout;
 use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::scenario::ScenarioResolution;
 use crate::world::{TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
@@ -185,6 +186,25 @@ impl FieldCalib {
             relaxation: manifest.require_fixed("field.relaxation")?,
             exchange: manifest.require_fixed("field.body_exchange")?,
         })
+    }
+
+    /// The field calibrations for a resolved scenario: the world-build path's field constructor
+    /// (design Part 5.4/5.5). The diffusion coefficient DERIVES from the scenario's selected medium
+    /// through [`FieldCalib::from_manifest_with_medium`], so a world's field conducts at its medium's
+    /// physics rate (`k/(rho*c)`) and the free-scalar `field.diffusion` an `[environment]` block may
+    /// push is retired on this path entirely: the medium is the lever and the diffusivity is physics
+    /// (the owner's ruling). A scenario that names no medium is the documented default temperate air,
+    /// which resolves to the `medium.air` physics profile
+    /// ([`ScenarioResolution::medium_manifest_id`]), so even an air-default world derives its diffusion
+    /// from air's real k/rho/c rather than a fabricated number, and no world on this path reads a free
+    /// diffusion scalar (Principle 9, Principle 11). The relaxation and body-exchange calibrations are
+    /// read from the manifest as before. Fail-loud throughout: a reserved or missing medium profile,
+    /// cell size, or timestep refuses to build, so no fabricated calibration reaches canonical state.
+    pub fn from_resolution(
+        manifest: &CalibrationManifest,
+        resolution: &ScenarioResolution,
+    ) -> Result<FieldCalib, CalibrationError> {
+        FieldCalib::from_manifest_with_medium(manifest, resolution.medium_manifest_id())
     }
 }
 
@@ -916,6 +936,7 @@ impl Runner {
 mod tests {
     use super::*;
     use crate::calibration::CalibrationManifest;
+    use crate::scenario::Scenario;
 
     /// A manifest with the three field calibrations set to labelled fixture values.
     const SET: &str = r#"
@@ -1086,6 +1107,153 @@ source = "test"
             "the derived diffusion is positive and sub-bound ({:?})",
             calib.diffusion
         );
+    }
+
+    /// A fixture manifest carrying the real air and water medium profiles (Incropera and DeWitt) set,
+    /// a one-centimetre cell and one-second base tick chosen so both derived coefficients land
+    /// representable and sub-bound, and a still-field relaxation (zero) so the observable test isolates
+    /// diffusion. Labelled fixtures, not owner canon: a canonical run reads the reserved
+    /// `medium.{name}` profiles, which are fail-loud until the owner sets them.
+    const WIRING_MANIFEST: &str = r#"
+[[reserved]]
+id = "medium.air"
+basis = "fixture: Incropera and DeWitt air near 300 K"
+status = "set"
+value = "conductivity=0.0262,density=1.2,specific_heat=1005"
+unit = "medium_profile"
+source = "test"
+[[reserved]]
+id = "medium.water"
+basis = "fixture: Incropera and DeWitt liquid water near 300 K"
+status = "set"
+value = "conductivity=0.606,density=1000,specific_heat=4186"
+unit = "medium_profile"
+source = "test"
+[[reserved]]
+id = "field.cell_size"
+basis = "fixture: one-centimetre cell, both media representable and sub-bound"
+status = "set"
+value = "0.01"
+unit = "metres_per_cell"
+source = "test"
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "fixture"
+status = "set"
+value = "1"
+unit = "s"
+source = "test"
+[[reserved]]
+id = "field.relaxation"
+basis = "fixture: a still field, so the test isolates medium-derived diffusion"
+status = "set"
+value = "0"
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.body_exchange"
+basis = "fixture"
+status = "set"
+value = "0.1"
+unit = "ratio_per_tick"
+source = "test"
+"#;
+
+    /// A hot-spot field: a cool plane with one hot cell at its centre. The baseline carries the spot
+    /// and the relaxation coefficient is zero on this path, so a step conducts the spot outward at the
+    /// calibration's diffusion rate and nothing pulls it back.
+    fn hot_spot_field() -> Field {
+        let (w, h) = (5, 5);
+        let mut baseline = vec![Fixed::ZERO; (w * h) as usize];
+        baseline[(2 * w + 2) as usize] = Fixed::from_int(100);
+        Field::new(w, h, baseline)
+    }
+
+    #[test]
+    fn medium_derived_field_diffusion_is_wired_through_the_world_build_path() {
+        // The milestone (design Part 5.4/5.5): two worlds identical but for their ambient medium get
+        // DIFFERENT field diffusion coefficients derived from the medium's physics alone, their
+        // temperature fields diverge after stepping a hot spot, and the field is bit-identical under
+        // the scheduler variant (scheduler == pinned order). The medium is the lever and the
+        // diffusivity is physics; the free scalar field.diffusion is retired on this path.
+        let manifest = CalibrationManifest::from_toml_str(WIRING_MANIFEST).unwrap();
+
+        // Two scenarios identical but for the medium: one names water, one names none (the documented
+        // default temperate air, which resolves to the medium.air physics profile).
+        let air_world =
+            Scenario::from_toml_str("[scenario]\nid = \"air\"\nname = \"Air\"\n").unwrap();
+        let water_world = Scenario::from_toml_str(
+            "[scenario]\nid = \"water\"\nname = \"Water\"\nmedium = \"water\"\n",
+        )
+        .unwrap();
+        let air_res = air_world.resolve(&manifest).unwrap();
+        let water_res = water_world.resolve(&manifest).unwrap();
+
+        // The air-default world reads the medium.air profile; the water world reads medium.water. No
+        // world reads a free diffusion scalar.
+        assert_eq!(air_res.medium_manifest_id(), "medium.air");
+        assert_eq!(water_res.medium_manifest_id(), "medium.water");
+
+        // The world-build path derives each field calibration from its medium's k/(rho*c).
+        let air_calib = FieldCalib::from_resolution(&manifest, &air_res).unwrap();
+        let water_calib = FieldCalib::from_resolution(&manifest, &water_res).unwrap();
+        assert_ne!(
+            air_calib.diffusion, water_calib.diffusion,
+            "two media give different diffusion coefficients from the world-build path"
+        );
+        assert!(
+            air_calib.diffusion > water_calib.diffusion,
+            "air conducts faster than water from k/(rho*c) alone ({:?} > {:?})",
+            air_calib.diffusion,
+            water_calib.diffusion
+        );
+        assert!(
+            air_calib.diffusion > Fixed::ZERO
+                && water_calib.diffusion > Fixed::ZERO
+                && air_calib.diffusion < STENCIL_STABILITY_BOUND
+                && water_calib.diffusion < STENCIL_STABILITY_BOUND,
+            "both derived coefficients are positive and sub-bound"
+        );
+        // The relaxation and body-exchange calibrations are the medium-independent manifest reads, so
+        // they match: only the diffusion coefficient tracks the medium.
+        assert_eq!(air_calib.relaxation, water_calib.relaxation);
+        assert_eq!(air_calib.exchange, water_calib.exchange);
+
+        // The two worlds diverge under the hot spot: identical field baselines, medium-derived calibs,
+        // so after stepping the temperature-field state hashes must differ (the field is folded into
+        // state_hash, so this is the whole-runner canonical hash).
+        let mut air_runner = Runner::new(hot_spot_field(), air_calib);
+        let mut water_runner = Runner::new(hot_spot_field(), water_calib);
+        assert_eq!(
+            air_runner.state_hash(),
+            water_runner.state_hash(),
+            "the two runners start from the same field"
+        );
+        for _ in 0..8 {
+            air_runner.step();
+            water_runner.step();
+        }
+        assert_ne!(
+            air_runner.state_hash(),
+            water_runner.state_hash(),
+            "the medium-derived diffusion diverges the two worlds' temperature fields"
+        );
+
+        // The field is bit-identical under the scheduler variant (the field-only runner's version of
+        // worker-width invariance: the pinned-order step and the scheduled step must track exactly).
+        for calib in [air_calib, water_calib] {
+            let mut pinned = Runner::new(hot_spot_field(), calib);
+            let mut scheduled = Runner::new(hot_spot_field(), calib);
+            for _ in 0..8 {
+                pinned.step();
+                scheduled.step_scheduled(&[]);
+                assert_eq!(
+                    scheduled.state_hash(),
+                    pinned.state_hash(),
+                    "the medium-derived field diverged under the scheduler variant"
+                );
+            }
+        }
     }
 
     #[test]

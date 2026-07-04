@@ -240,6 +240,13 @@ pub struct ResolvedDial {
     pub entry: ReservedValue,
 }
 
+/// The manifest profile id of the default temperate-air ambient medium, the medium a scenario that
+/// names none defaults to ([`ScenarioMeta::medium`] is `None`). A label pointer to the owner's
+/// reserved `medium.air` physics profile, never a magnitude: the world-build path derives an
+/// air-default world's field diffusion from air's real k/rho/c exactly as it derives a water world's
+/// from water's, so no world reads a free diffusion scalar (design Part 5.4/5.5).
+pub const DEFAULT_MEDIUM_ID: &str = "medium.air";
+
 /// A scenario's ambient medium, resolved to its manifest profile: the categorical sibling of
 /// [`ResolvedDial`], since a medium is selected by name rather than pushed by a direction.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +301,20 @@ impl ScenarioResolution {
     pub fn is_fully_set(&self) -> bool {
         self.dials.iter().all(|d| d.entry.is_set())
             && self.medium.as_ref().is_none_or(|m| m.entry.is_set())
+    }
+
+    /// The manifest profile id of this scenario's ambient medium: the resolved medium's profile id
+    /// (`medium.{name}`), or the default temperate-air profile ([`DEFAULT_MEDIUM_ID`]) when the
+    /// scenario names no medium. A scenario that selects no medium is the documented default temperate
+    /// air ([`ScenarioMeta::medium`] is `None`), and air is a real physics profile with its own thermal
+    /// axes rather than a fabricated field default, so the world-build path reads this to derive the
+    /// field's diffusion coefficient from the medium's physics (`k/(rho*c)`) for every world, the
+    /// medium-named ones and the air-default ones alike. This is a label pointer to a manifest profile,
+    /// never a magnitude: the profile behind it stays the owner's reserved value.
+    pub fn medium_manifest_id(&self) -> &str {
+        self.medium
+            .as_ref()
+            .map_or(DEFAULT_MEDIUM_ID, |m| m.manifest_id.as_str())
     }
 
     /// The manifest id a given base dial resolves to under this scenario, or `None` if the scenario
