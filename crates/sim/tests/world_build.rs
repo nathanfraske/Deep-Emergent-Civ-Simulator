@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use civsim_core::{Fixed, GaussApprox};
+use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
@@ -895,6 +895,218 @@ fn the_dawn_runner_embodies_each_founder_as_a_mind_and_a_body() {
             pinned.state_hash(),
             scheduled.state_hash(),
             "the scheduled order stays bit-identical with the embodiment coupled"
+        );
+    }
+}
+
+#[test]
+fn the_unified_dawn_pairs_a_body_to_every_newborn_across_generations() {
+    // Real-world unification step 3c (lifecycle pairing): with reproduction armed on the unified dawn
+    // runner, a World birth mints a paired body, so a child of embodied parents is itself an embodied
+    // being. Over several generations the population grows and EVERY mind stays paired to a body (a
+    // body_temp entry and a walker at the same id), since the only race carries a body plan. The whole
+    // trace replays bit for bit, matches the scheduled order, and is bit-identical across worker widths.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    // Build the embodied dawn, then override the life cadence small and age the founders past maturity so
+    // reproduction fires within a test budget (the manifest cadence is one Earth year in ticks).
+    let build = |seed: u64, workers: usize| {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &embodied_peoples(),
+            seed,
+        )
+        .expect("an embodied sex-determined dawn assembles");
+        {
+            let w = runner.world_mut().unwrap();
+            w.set_life_cadence(4);
+            w.set_workers(workers);
+            let ids = w.being_ids();
+            for id in ids {
+                w.set_age(id, 20);
+            }
+        }
+        runner
+    };
+
+    // Every mind is a body and every body is a mind: the two id sets agree exactly at each tick a birth
+    // could have fired. A newborn (a mind not among the founders) must gain a body_temp entry and a
+    // walker sharing its id, or the paired halves have desynced.
+    let founders = build(0x5EED1, 1).world().unwrap().being_ids().len();
+    let mut runner = build(0x5EED1, 1);
+    let mut trace = Vec::new();
+    for _ in 0..40 {
+        runner.step();
+        trace.push(runner.state_hash());
+        let minds: std::collections::BTreeSet<StableId> =
+            runner.world().unwrap().being_ids().into_iter().collect();
+        let walkers: std::collections::BTreeSet<StableId> = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        assert_eq!(
+            minds, walkers,
+            "every mind is paired to a body and every body to a mind (no desync)"
+        );
+        for &id in &minds {
+            assert!(
+                runner.body_temp(id).is_some(),
+                "being {id:?} carries a body temperature (an embodied newborn or founder)"
+            );
+        }
+    }
+    let grown = runner.world().unwrap().being_ids().len();
+    assert!(
+        grown > founders,
+        "the embodied population grew across generations: {founders} -> {grown}"
+    );
+
+    // Bit-for-bit replay.
+    let mut replay = build(0x5EED1, 1);
+    let mut trace2 = Vec::new();
+    for _ in 0..40 {
+        replay.step();
+        trace2.push(replay.state_hash());
+    }
+    assert_eq!(
+        trace, trace2,
+        "the embodied multi-generation dawn replays bit for bit"
+    );
+
+    // The scheduled order matches the pinned order through the birth-and-pairing beat.
+    let mut pinned = build(0x5EED1, 1);
+    let mut scheduled = build(0x5EED1, 1);
+    for _ in 0..40 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the scheduled order stays bit-identical with lifecycle pairing armed"
+        );
+    }
+
+    // Worker-width invariance: the whole trace is bit-identical at widths 2, 3, 8.
+    for workers in [2usize, 3, 8] {
+        let mut wide = build(0x5EED1, workers);
+        let mut wtrace = Vec::new();
+        for _ in 0..40 {
+            wide.step();
+            wtrace.push(wide.state_hash());
+        }
+        assert_eq!(
+            trace, wtrace,
+            "the embodied dawn trace diverged at {workers} workers: a beat leaked the thread schedule"
+        );
+    }
+}
+
+#[test]
+fn the_unified_dawn_retires_a_body_when_its_mind_is_culled() {
+    // Real-world unification step 3c (the death half): when world mortality culls a mind, the lifecycle
+    // pairing retires its paired body, so no dead being's body keeps metabolizing (referential
+    // integrity, design Part 58). With a rising age hazard armed, the population turns over: minds die
+    // and their bodies are retired, while the two id sets stay in exact agreement every tick. The trace
+    // still replays bit for bit and is bit-identical across worker widths, so the retirement is
+    // deterministic and worker-count independent.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    // A rising raw-age hazard (certain survival young, certain death by age 100), armed on the embodied
+    // dawn so mortality culls minds within the run.
+    let mortal_peoples = || {
+        let mut p = embodied_peoples();
+        p.mortality_hazard = Some(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(100), Fixed::ONE),
+        ]));
+        p
+    };
+    let build = |seed: u64, workers: usize| {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &mortal_peoples(),
+            seed,
+        )
+        .expect("a mortal embodied dawn assembles");
+        {
+            let w = runner.world_mut().unwrap();
+            w.set_life_cadence(4);
+            w.set_workers(workers);
+            let ids = w.being_ids();
+            // Age the founders near the lethal end of the hazard so mortality culls some each generation.
+            for id in ids {
+                w.set_age(id, 70);
+            }
+        }
+        runner
+    };
+
+    let start = build(0x0DEAD, 1).world().unwrap().being_ids().len();
+    let mut runner = build(0x0DEAD, 1);
+    let mut trace = Vec::new();
+    let mut min_seen = start;
+    for _ in 0..40 {
+        runner.step();
+        trace.push(runner.state_hash());
+        let minds: std::collections::BTreeSet<StableId> =
+            runner.world().unwrap().being_ids().into_iter().collect();
+        let walkers: std::collections::BTreeSet<StableId> = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        // The pairing invariant holds through death as it does through birth: a culled mind's body is
+        // retired in the same tick, so the two sets never diverge and no dead being keeps a body
+        // temperature.
+        assert_eq!(
+            minds, walkers,
+            "a culled mind's body is retired in lockstep (no orphaned body)"
+        );
+        assert_eq!(
+            runner.embodiment().unwrap().walkers().len(),
+            minds.len(),
+            "the walker count tracks the living mind count exactly"
+        );
+        min_seen = min_seen.min(minds.len());
+    }
+    assert!(
+        min_seen < start,
+        "the age hazard culled some minds (and retired their bodies): {start} fell to {min_seen}"
+    );
+
+    // Bit-for-bit replay and worker-width invariance through the culling.
+    let mut replay = build(0x0DEAD, 1);
+    let mut trace2 = Vec::new();
+    for _ in 0..40 {
+        replay.step();
+        trace2.push(replay.state_hash());
+    }
+    assert_eq!(trace, trace2, "the culling dawn replays bit for bit");
+    for workers in [2usize, 3, 8] {
+        let mut wide = build(0x0DEAD, workers);
+        let mut wtrace = Vec::new();
+        for _ in 0..40 {
+            wide.step();
+            wtrace.push(wide.state_hash());
+        }
+        assert_eq!(
+            trace, wtrace,
+            "the culling dawn trace diverged at {workers} workers"
         );
     }
 }

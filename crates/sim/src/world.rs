@@ -1855,6 +1855,15 @@ impl World {
         self.race_of.get(&id).copied()
     }
 
+    /// A registered race by id, for reading its data (its body plan, genes, and pool). The race
+    /// registry is recorded by the dawn seeding and read by the drift and mortality cadences; this
+    /// exposes it to the unified runner's lifecycle pairing, which expresses a newborn's body from its
+    /// race's body plan and genes (real-world unification, step 3c). A race not in the registry (a
+    /// lineage-only or unraced world) returns `None`.
+    pub fn race(&self, rid: RaceId) -> Option<&Race> {
+        self.races.get(&rid)
+    }
+
     /// Advance every tracked being's age by one life-cadence step (design Part 20). This is the
     /// life-process beat the gap names: the caller runs it once per life cadence (the cadence
     /// period in ticks is a reserved owner value, so wiring it into [`World::tick`] on a fixed

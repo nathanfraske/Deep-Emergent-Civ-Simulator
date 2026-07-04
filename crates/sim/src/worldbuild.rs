@@ -55,12 +55,14 @@ use crate::locomotion::{LocomotionParams, Walker};
 use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
-use crate::runner::{BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, Runner};
+use crate::runner::{
+    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, Runner,
+};
 use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
 use crate::tom::AccessChannelRegistry;
 use crate::value::RaceId;
-use crate::world::{ReproductionParams, World};
+use crate::world::{PlaceId, ReproductionParams, World};
 
 /// The declared peoples of a world at the dawn of sentience (design Part 28): the race records, the
 /// founding band placements, and the two registries the dawn seeding reads (the breeding systems a
@@ -104,7 +106,8 @@ pub struct DawnPeoples {
 /// The inputs the founder step embodies the dawn population from (real-world unification step 3): the
 /// data-defined registries a body's reserves, affordances, and movement read against, the organ
 /// registry a body plan's tissue composition is scored on, the controller hidden width, and the
-/// submerged and emergent medium ids the per-cell medium field folds the map into. A founder's own body diverges through its race's
+/// submerged and emergent medium ids the per-cell medium field folds the map into. A founder's own
+/// body diverges through its race's
 /// [`crate::race::Race::body`] plan and its genome-expressed controller, never a `RaceId` branch
 /// (Principle 9); these registries are the shared substrate the divergence is read against. The
 /// physiology and thermal-band reserved values are read fail-loud from the manifest at assembly.
@@ -357,11 +360,15 @@ pub fn build_dawn_runner(
     // runner exactly as before.
     match &peoples.embodiment {
         Some(genesis) => {
-            let embodiment =
+            let (embodiment, kit) =
                 assemble_dawn_embodiment(&world, map, peoples, &founders, genesis, manifest, seed)?;
-            Ok(Runner::with_world_and_embodiment(
-                field, calib, world, embodiment,
-            ))
+            let mut runner = Runner::with_world_and_embodiment(field, calib, world, embodiment);
+            // Arm the lifecycle pairing (real-world unification, step 3c): a World birth now mints a
+            // paired body and a death retires it, so a multi-generation embodied run keeps minds and
+            // bodies in lockstep. Without arming, the runner ticks minds and bodies but never embodies
+            // a newborn (the pre-3c behaviour).
+            runner.arm_lifecycle(kit);
+            Ok(runner)
         }
         None => Ok(Runner::with_world(field, calib, world)),
     }
@@ -408,12 +415,17 @@ fn assemble_dawn_embodiment(
     genesis: &EmbodimentGenesis,
     manifest: &CalibrationManifest,
     seed: u64,
-) -> Result<Embodiment, CalibrationError> {
+) -> Result<(Embodiment, LifecycleKit), CalibrationError> {
     // The reserved comfort band every founder's thermoregulation reads (fail-loud while reserved). The
     // spawn temperature is the set point (a founder is born at its comfort centre; physical state, not
-    // a reserved value).
+    // a reserved value). The same band is the lifecycle kit's template, so a newborn is born into it too.
     let setpoint = manifest.require_fixed("physiology.thermal_setpoint")?;
     let half_band = manifest.require_fixed("physiology.thermal_half_band")?;
+    let thermal = BeingThermal {
+        setpoint,
+        half_band,
+        initial_temp: setpoint,
+    };
     // The map extent a band's spawn coordinate is placed within. Coord3 is authoritative and each
     // being's PlaceId stays frozen at its dawn band; a habitability-filtered placement rides step 4's
     // reserved submersion threshold (a documented coupling), so this arc places each band at a
@@ -428,11 +440,17 @@ fn assemble_dawn_embodiment(
         seed,
     );
     let layout = emb.layout().clone();
-    for (band_index, (race_id, ids)) in
-        group_founders_by_band(founders, &peoples.bands, &peoples.races)
-            .iter()
-            .enumerate()
-    {
+    // The per-band spawn map the lifecycle pairing reads to place a newborn at its band's frozen dawn
+    // site (real-world unification, step 3c). The grouping filters bands whose race is registered in the
+    // same order as this filtered band list, so the two align by index.
+    let grouped = group_founders_by_band(founders, &peoples.bands, &peoples.races);
+    let filtered_bands: Vec<&BandSpec> = peoples
+        .bands
+        .iter()
+        .filter(|b| peoples.races.contains_key(&b.race))
+        .collect();
+    let mut spawn_by_place: BTreeMap<PlaceId, Coord3> = BTreeMap::new();
+    for (band_index, (race_id, ids)) in grouped.iter().enumerate() {
         let Some(race) = peoples.races.get(race_id) else {
             continue;
         };
@@ -440,6 +458,11 @@ fn assemble_dawn_embodiment(
             continue; // a race with no body plan founds minds without bodies
         };
         let coord = Coord3::ground((band_index as i32 * 5) % mw, (band_index as i32 * 3) % mh);
+        // Record this band's spawn coordinate under its PlaceId, so a newborn of the band (whose place
+        // it inherits from its parents) spawns at the same site.
+        if let Some(band) = filtered_bands.get(band_index) {
+            spawn_by_place.insert(band.place, coord);
+        }
         for &id in ids {
             let homeostasis = Homeostasis::new(&genesis.homeostatic, plan, &genesis.organs);
             let controller = match world.genome_of(id) {
@@ -451,14 +474,7 @@ fn assemble_dawn_embodiment(
             // genesis being a caller-supplied bundle).
             let physiology = Physiology::dev_for_registry(&genesis.homeostatic);
             let walker = Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
-            emb.add(
-                walker,
-                BeingThermal {
-                    setpoint,
-                    half_band,
-                    initial_temp: setpoint,
-                },
-            );
+            emb.add(walker, thermal);
         }
     }
     emb.set_physiology(EmbodiedPhysiology::from_manifest(
@@ -468,5 +484,5 @@ fn assemble_dawn_embodiment(
         &genesis.submerged_medium_id,
         &genesis.emergent_medium_id,
     )?);
-    Ok(emb)
+    Ok((emb, LifecycleKit::new(thermal, spawn_by_place)))
 }

@@ -84,10 +84,11 @@
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::controller::ControllerLayout;
+use crate::controller::{Controller, ControllerLayout};
+use crate::edibility::Physiology;
 use crate::homeostasis::{
-    AffordanceRegistry, DerivedDrain, HomeostaticAxisId, HomeostaticRegistry, RESPIRATION,
-    TEMPERATURE,
+    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
+    RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -96,7 +97,7 @@ use crate::physiology::{
     self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
-use crate::world::{TickInput, World};
+use crate::world::{PlaceId, TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -767,6 +768,35 @@ impl Embodiment {
     }
 }
 
+/// The data the unified runner needs to embody a newborn mind at the lifecycle-pairing beat (real-world
+/// unification, step 3c): the reserved comfort band a newborn thermoregulates within, and the spawn
+/// coordinate each dawn band's [`PlaceId`] maps to. Everything else a newborn body needs (its body plan
+/// and genes, its genome) is read from the [`World`] at the birth, and the organ and homeostatic
+/// registries from the installed [`Embodiment`], so this kit carries only the two dawn-assembly inputs
+/// that live on neither side. Armed by the world-build ([`Runner::arm_lifecycle`]); without it a newborn
+/// stays a bodiless mind (a run that never armed the kit does not embody births).
+#[derive(Clone, Debug)]
+pub struct LifecycleKit {
+    /// The comfort band a newborn is born into (the reserved set point and half-band, born at the set
+    /// point). Uniform across the dawn founders this arc, so a newborn inherits the same band.
+    thermal: BeingThermal,
+    /// The spawn coordinate each dawn band's [`PlaceId`] maps to (`PlaceId` stays frozen at the dawn
+    /// band, owner ruling 2026-07-04), so a newborn spawns at its band's site. A newborn whose place is
+    /// not in this map is not embodied (a defensive skip, never a fabricated coordinate).
+    spawn_by_place: BTreeMap<PlaceId, Coord3>,
+}
+
+impl LifecycleKit {
+    /// The lifecycle kit from its comfort band and per-band spawn map. The world-build builds this from
+    /// the same reserved thermal band and band placement the dawn assembly reads.
+    pub fn new(thermal: BeingThermal, spawn_by_place: BTreeMap<PlaceId, Coord3>) -> LifecycleKit {
+        LifecycleKit {
+            thermal,
+            spawn_by_place,
+        }
+    }
+}
+
 /// The canonical runner: the temperature field, the located population, and their deterministic
 /// coupling. Constructed with an explicit [`FieldCalib`] (no authored default).
 pub struct Runner {
@@ -796,6 +826,11 @@ pub struct Runner {
     /// runner's `body_temp` and `index` (they are the located population), and the coupling reads the
     /// field only through the comfort-band map, writing back only the beings' coordinates.
     embodiment: Option<Embodiment>,
+    /// The lifecycle-pairing kit (real-world unification, step 3c), armed on the unified path so a
+    /// [`World`] birth mints a paired body and a death retires it. `None` on every other path (and until
+    /// [`Runner::arm_lifecycle`] is called), so a world-only, embodiment-only, or unarmed runner never
+    /// embodies a newborn and the reconciliation beat is a no-op.
+    lifecycle: Option<LifecycleKit>,
 }
 
 impl Runner {
@@ -811,6 +846,7 @@ impl Runner {
             body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
+            lifecycle: None,
         }
     }
 
@@ -843,6 +879,7 @@ impl Runner {
             body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
+            lifecycle: None,
         }
     }
 
@@ -894,6 +931,7 @@ impl Runner {
             body_exchange_rate,
             world: None,
             embodiment: Some(embodiment),
+            lifecycle: None,
         }
     }
 
@@ -968,7 +1006,17 @@ impl Runner {
             body_exchange_rate,
             world: Some(world),
             embodiment: Some(embodiment),
+            lifecycle: None,
         }
+    }
+
+    /// Arm the lifecycle-pairing kit (real-world unification, step 3c), so a [`World`] birth mints a
+    /// paired body and a death retires it at the reconciliation beat. The world-build calls this after
+    /// [`Runner::with_world_and_embodiment`] with the reserved comfort band and the per-band spawn map
+    /// the dawn assembly already built. Without it the unified runner ticks minds and bodies but never
+    /// embodies a newborn (the pre-3c behaviour), so arming is opt-in and additive.
+    pub fn arm_lifecycle(&mut self, kit: LifecycleKit) {
+        self.lifecycle = Some(kit);
     }
 
     /// Place a being on the map at a coordinate with an initial body temperature.
@@ -1044,6 +1092,7 @@ impl Runner {
         if let Some(world) = self.world.as_mut() {
             world.tick(world_inputs);
         }
+        self.reconcile_lifecycle();
         self.clock += 1;
     }
 
@@ -1142,6 +1191,11 @@ impl Runner {
     pub fn step_scheduled(&mut self, world_inputs: &[TickInput]) {
         let sch = schedule(&self.tick_systems());
         run_serial(&sch, |sid| self.run_phase(sid, world_inputs));
+        // The lifecycle pairing runs after the scheduled phases exactly as it does after the pinned
+        // order in step_inner: it is a pure deterministic function of the post-tick world and embodiment
+        // state (worker-count independent), so both tick entry points reconcile identically and stay
+        // bit-identical (real-world unification, step 3c).
+        self.reconcile_lifecycle();
         self.clock += 1;
     }
 
@@ -1290,6 +1344,160 @@ impl Runner {
         for w in emb.walkers.iter() {
             self.index.place(OccupantId::being(w.id), w.coord());
         }
+    }
+
+    /// Reconcile the embodied population against the cognition world after a tick (real-world
+    /// unification, step 3c: lifecycle pairing). Births in [`crate::world::World`] reproduction and
+    /// deaths in world mortality and in locomotion each happen on their own half; this beat re-pairs the
+    /// two so a shared being's body and mind stay in lockstep before [`Runner::state_hash`] folds, so no
+    /// dead being's body keeps metabolizing and a child of embodied parents is itself embodied. It is a
+    /// pure deterministic function of the post-tick world and embodiment state (no RNG: a newborn's body
+    /// plan, genome-expressed controller, and comfort band are all deterministic), walked in canonical
+    /// id order, so it replays bit for bit and is independent of the field-worker width. It runs only on
+    /// the unified path (both world and embodiment present) and identically after the pinned
+    /// ([`Runner::step`]) and scheduled ([`Runner::step_scheduled`]) orders.
+    ///
+    /// The reconciliations, in order: (1) a body that died in locomotion (`alive = false`) propagates
+    /// its death to the world, so a starved or suffocated body ends the whole being; (2) every body
+    /// whose mind is gone from the world (world mortality culled it, or step 1 just did) is retired;
+    /// (3) every newborn mind whose race carries a body plan and has no body yet is embodied, its body
+    /// expressed from its race and genome as the dawn assembly expresses a founder. A mind whose race
+    /// carries no body plan stays a bodiless mind (owner ruling 2026-07-04), so the pairing is optional.
+    fn reconcile_lifecycle(&mut self) {
+        if self.world.is_none() || self.embodiment.is_none() {
+            return;
+        }
+        // (1) Locomotion deaths propagate to the world.
+        let dead_bodies: Vec<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .filter(|w| !w.alive)
+            .map(|w| w.id)
+            .collect();
+        if !dead_bodies.is_empty() {
+            let world = self.world.as_mut().unwrap();
+            for id in &dead_bodies {
+                world.remove_being(*id);
+            }
+        }
+        // (2) Retire every body whose mind is gone from the world, in canonical id order.
+        let live_minds: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .unwrap()
+            .being_ids()
+            .into_iter()
+            .collect();
+        let retire: Vec<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .map(|w| w.id)
+            .filter(|id| !live_minds.contains(id))
+            .collect();
+        for id in retire {
+            self.retire_body(id);
+        }
+        // (3) Embody every newborn (a world mind whose race carries a body plan and has no body yet), in
+        // canonical id order. Requires the lifecycle kit; without it a newborn stays a bodiless mind.
+        if self.lifecycle.is_none() {
+            return;
+        }
+        let embodied: BTreeSet<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        let newborns: Vec<StableId> = {
+            let world = self.world.as_ref().unwrap();
+            world
+                .being_ids()
+                .into_iter()
+                .filter(|id| !embodied.contains(id))
+                .filter(|&id| {
+                    world
+                        .race_of(id)
+                        .and_then(|rid| world.race(rid))
+                        .map(|race| race.body.is_some())
+                        .unwrap_or(false)
+                })
+                .collect()
+        };
+        for id in newborns {
+            self.embody_newborn(id);
+        }
+    }
+
+    /// Retire a body from the embodiment and every runner-side map it appears in: its walker, comfort
+    /// band, body temperature, derived exchange rate, and located-index entry, so a dead being leaves no
+    /// half behind (referential integrity, design Part 58). Preserves the relative order of the
+    /// surviving walkers, which does not affect [`Runner::state_hash`] (it sorts walkers by id) but keeps
+    /// the walk deterministic.
+    fn retire_body(&mut self, id: StableId) {
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.walkers.retain(|w| w.id != id);
+            emb.thermal.remove(&id);
+        }
+        self.body_temp.remove(&id);
+        self.body_exchange_rate.remove(&id);
+        self.index.remove(OccupantId::being(id));
+    }
+
+    /// Embody a newborn mind: mint a paired body reusing the mind id (never a second registry), its body
+    /// plan and genes its race's and its genome its own, expressed exactly as the dawn assembly expresses
+    /// a founder, then seed its runner-side state (comfort band, body temperature, located index, derived
+    /// exchange rate) as [`Runner::with_world_and_embodiment`] seeds a founder. Everything is gathered
+    /// under shared borrows and released before the mutation. A newborn whose place is not in the spawn
+    /// map, or a run with no installed physiology, is skipped rather than embodied on a fabricated input.
+    fn embody_newborn(&mut self, id: StableId) {
+        let gathered = {
+            let world = self.world.as_ref().unwrap();
+            let emb = self.embodiment.as_ref().unwrap();
+            let kit = self.lifecycle.as_ref().unwrap();
+            let expressed = world
+                .race_of(id)
+                .and_then(|rid| world.race(rid))
+                .and_then(|race| race.body.clone().map(|plan| (race, plan)));
+            let place_coord = world
+                .place_of(id)
+                .and_then(|place| kit.spawn_by_place.get(&place).copied());
+            match (expressed, place_coord, emb.physiology.as_ref()) {
+                (Some((race, plan)), Some(coord), Some(phys)) => {
+                    let homeostasis = Homeostasis::new(&emb.homeo, &plan, &phys.organs);
+                    let controller = match world.genome_of(id) {
+                        Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
+                        None => Controller::zeros(&emb.layout),
+                    };
+                    let physiology = Physiology::dev_for_registry(&emb.homeo);
+                    let exchange_rate = derive_body_exchange_rate(
+                        &plan,
+                        &phys.organs,
+                        phys.anchors.medium_h,
+                        phys.tick_seconds,
+                        &phys.anchors,
+                    );
+                    let walker = Walker::new(id, coord, plan, homeostasis, physiology, controller);
+                    Some((walker, kit.thermal, coord, exchange_rate))
+                }
+                _ => None,
+            }
+        };
+        let Some((walker, thermal, coord, exchange_rate)) = gathered else {
+            return;
+        };
+        let emb = self.embodiment.as_mut().unwrap();
+        emb.add(walker, thermal);
+        self.body_temp.insert(id, thermal.initial_temp);
+        self.index.place(OccupantId::being(id), coord);
+        self.body_exchange_rate.insert(id, exchange_rate);
     }
 
     /// The canonical state hash: the clock, the field, and every located being's temperature in id

@@ -506,12 +506,16 @@ fn mobile_body() -> BodyPlan {
     }
 }
 
-/// A viable thermal band fixture around a set point of thirty-seven, the spawn temperature the same.
+/// A viable thermal band fixture centred on the `field_fixture` temperature range (its cells hold `i %
+/// 5`, so 0 to 4), the spawn temperature the same, so a being stays inside its comfort band on that
+/// field rather than freezing out of it. This matters since the lifecycle pairing (step 3c) retires the
+/// mind of a body that dies of thermal exposure: a band matched to the field keeps the crux sweep's
+/// population alive so it exercises a rich command set, and the dedicated 3c test exercises death.
 fn thermal_band() -> BeingThermal {
     BeingThermal {
-        setpoint: Fixed::from_int(37),
+        setpoint: Fixed::from_int(2),
         half_band: Fixed::from_int(8),
-        initial_temp: Fixed::from_int(37),
+        initial_temp: Fixed::from_int(2),
     }
 }
 
