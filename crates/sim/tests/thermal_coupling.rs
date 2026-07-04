@@ -42,6 +42,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_core::{Fixed, StableId};
 use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
 use civsim_sim::controller::{Controller, ControllerLayout};
+use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, MOVE, TEMPERATURE,
 };
@@ -155,6 +156,7 @@ fn walker(id: u64, tile: Coord3, controller: Controller) -> Walker {
         tile,
         mobile_body(),
         Homeostasis::from_mass(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2)),
+        Physiology::dev_for_registry(&HomeostaticRegistry::dev_thermal()),
         controller,
     )
 }

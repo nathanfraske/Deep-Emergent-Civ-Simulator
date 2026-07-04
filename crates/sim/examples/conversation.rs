@@ -155,10 +155,12 @@ fn band_world() -> World {
             AccessChannelDef {
                 id: WITNESSED,
                 name: "witnessed".to_string(),
+                margin_steps: Some(1),
             },
             AccessChannelDef {
                 id: SAID,
                 name: "said".to_string(),
+                margin_steps: Some(-1),
             },
         ],
     });

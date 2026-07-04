@@ -65,6 +65,14 @@ pub struct ScenarioMeta {
     /// Grounding posture: "real" or "minimal".
     #[serde(default)]
     pub grounding: String,
+    /// The ambient medium a world's life breathes and floats in, selected categorically by
+    /// name (for example "water", "dense_toxic"): a physics `Substance`, resolved to the
+    /// manifest medium profile `medium.{name}`. Unlike the field and thermal-band levers this
+    /// is not a `real`/`high`/`low` dial, because a medium is a coherent bundle (water is dense
+    /// and low in dissolved gas together) rather than independent axes. `None` is the default
+    /// temperate air.
+    #[serde(default)]
+    pub medium: Option<String>,
 }
 
 /// The seeded sentient-race posture (design Part 20), as owner-given categorical choices.
@@ -119,6 +127,12 @@ pub struct Scenario {
     /// The direction each change-and-extremes dial is pushed, by reserved dial id.
     #[serde(default)]
     pub dials: BTreeMap<String, Direction>,
+    /// The direction each environmental lever is pushed, by reserved id: the temperature
+    /// field (`field.*`) and the per-race thermal band (`physiology.thermal_*`) that make a
+    /// world hot, cold, or temperate. Resolved by the same mechanism as `dials`; kept in its
+    /// own block so a world's environment reads apart from its change-engine dials.
+    #[serde(default)]
+    pub environment: BTreeMap<String, Direction>,
 }
 
 impl Scenario {
@@ -138,6 +152,11 @@ impl Scenario {
         self.dials.get(id).copied()
     }
 
+    /// The direction this scenario pushes an environmental lever, or `None` if unset.
+    pub fn environment_dial(&self, id: &str) -> Option<Direction> {
+        self.environment.get(id).copied()
+    }
+
     /// Resolve this scenario against a base calibration manifest: the bulk lever. Pull one
     /// scenario and its whole dial set resolves at once, each dial to the manifest entry behind
     /// its direction ([`dial_manifest_id`]). Every resolved id must exist in the manifest, so a
@@ -150,8 +169,12 @@ impl Scenario {
         &self,
         manifest: &CalibrationManifest,
     ) -> Result<ScenarioResolution, CalibrationError> {
-        let mut dials = Vec::with_capacity(self.dials.len());
-        for (dial, direction) in &self.dials {
+        let mut dials = Vec::with_capacity(self.dials.len() + self.environment.len());
+        // The change-and-extremes dials and the environmental levers resolve by the same
+        // mechanism (direction to manifest id); both are carried in the resolution's review
+        // queue, so a world's environment is levered and calibration-gated exactly like its
+        // change dials, and a dangling environment reference fails loud the same way.
+        for (dial, direction) in self.dials.iter().chain(self.environment.iter()) {
             let manifest_id = dial_manifest_id(dial, *direction);
             let entry = manifest
                 .get(&manifest_id)
@@ -164,9 +187,28 @@ impl Scenario {
                 entry,
             });
         }
+        // The ambient medium is selected by name, so it resolves to the manifest profile
+        // `medium.{name}` (a require_map bundle of axis values) rather than through a direction.
+        // A world naming a medium the manifest has no profile for fails loud like a dangling dial.
+        let medium = match &self.scenario.medium {
+            Some(name) => {
+                let manifest_id = format!("medium.{name}");
+                let entry = manifest
+                    .get(&manifest_id)
+                    .ok_or_else(|| CalibrationError::Unknown(manifest_id.clone()))?
+                    .clone();
+                Some(ResolvedMedium {
+                    name: name.clone(),
+                    manifest_id,
+                    entry,
+                })
+            }
+            None => None,
+        };
         Ok(ScenarioResolution {
             scenario: self.scenario.id.clone(),
             dials,
+            medium,
         })
     }
 }
@@ -198,6 +240,25 @@ pub struct ResolvedDial {
     pub entry: ReservedValue,
 }
 
+/// The manifest profile id of the default temperate-air ambient medium, the medium a scenario that
+/// names none defaults to ([`ScenarioMeta::medium`] is `None`). A label pointer to the owner's
+/// reserved `medium.air` physics profile, never a magnitude: the world-build path derives an
+/// air-default world's field diffusion from air's real k/rho/c exactly as it derives a water world's
+/// from water's, so no world reads a free diffusion scalar (design Part 5.4/5.5).
+pub const DEFAULT_MEDIUM_ID: &str = "medium.air";
+
+/// A scenario's ambient medium, resolved to its manifest profile: the categorical sibling of
+/// [`ResolvedDial`], since a medium is selected by name rather than pushed by a direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMedium {
+    /// The medium name the scenario selected (for example "water").
+    pub name: String,
+    /// The manifest id it resolves to (`medium.{name}`, a `require_map` profile of axis values).
+    pub manifest_id: String,
+    /// The manifest entry found at `manifest_id`, set or still reserved.
+    pub entry: ReservedValue,
+}
+
 /// A scenario resolved against a base manifest: the whole override set the scenario pulls, with
 /// each dial mapped to its manifest entry. The caller reads the set dials and takes the reserved
 /// ones to the owner ([`reserved_ids`](Self::reserved_ids)), the per-scenario review queue.
@@ -207,6 +268,9 @@ pub struct ScenarioResolution {
     pub scenario: String,
     /// Each dial the scenario pushes, resolved to its manifest entry, in dial-id order.
     pub dials: Vec<ResolvedDial>,
+    /// The scenario's ambient medium, resolved to its manifest profile, or `None` for the
+    /// default temperate air.
+    pub medium: Option<ResolvedMedium>,
 }
 
 impl ScenarioResolution {
@@ -220,6 +284,12 @@ impl ScenarioResolution {
             .iter()
             .filter(|d| !d.entry.is_set())
             .map(|d| d.manifest_id.as_str())
+            .chain(
+                self.medium
+                    .iter()
+                    .filter(|m| !m.entry.is_set())
+                    .map(|m| m.manifest_id.as_str()),
+            )
             .collect()
     }
 
@@ -230,6 +300,21 @@ impl ScenarioResolution {
     /// postures is fully calibrated when this holds.
     pub fn is_fully_set(&self) -> bool {
         self.dials.iter().all(|d| d.entry.is_set())
+            && self.medium.as_ref().is_none_or(|m| m.entry.is_set())
+    }
+
+    /// The manifest profile id of this scenario's ambient medium: the resolved medium's profile id
+    /// (`medium.{name}`), or the default temperate-air profile ([`DEFAULT_MEDIUM_ID`]) when the
+    /// scenario names no medium. A scenario that selects no medium is the documented default temperate
+    /// air ([`ScenarioMeta::medium`] is `None`), and air is a real physics profile with its own thermal
+    /// axes rather than a fabricated field default, so the world-build path reads this to derive the
+    /// field's diffusion coefficient from the medium's physics (`k/(rho*c)`) for every world, the
+    /// medium-named ones and the air-default ones alike. This is a label pointer to a manifest profile,
+    /// never a magnitude: the profile behind it stays the owner's reserved value.
+    pub fn medium_manifest_id(&self) -> &str {
+        self.medium
+            .as_ref()
+            .map_or(DEFAULT_MEDIUM_ID, |m| m.manifest_id.as_str())
     }
 
     /// The manifest id a given base dial resolves to under this scenario, or `None` if the scenario
@@ -417,37 +502,55 @@ name = "Probe"
 
     #[test]
     fn every_canonical_scenario_resolves_against_the_real_manifest() {
-        // The bulk lever's completeness guarantee: every dial each of the four worlds pushes maps
-        // to a real manifest entry (a base id or a direction sibling), so pulling a scenario lever
-        // surfaces a defined reserved value for every dial rather than a dangling reference. This
-        // keeps scenarios/*.toml and calibration/reserved.toml in step.
+        // The bulk lever's completeness guarantee: every dial each world pushes maps to a real
+        // manifest entry (a base id or a direction sibling), so pulling a scenario lever surfaces a
+        // defined reserved value for every dial rather than a dangling reference. This keeps
+        // scenarios/*.toml and calibration/reserved.toml in step. Covers the four canonical worlds
+        // and the three new variants (Venus, Europa, Crucible); Europa's placid low dials resolve to
+        // the reserved .low genome and drift siblings surfaced for it.
         let manifest = CalibrationManifest::load(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../calibration/reserved.toml"
         ))
         .unwrap();
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
-        for world in ["mirror", "tempest", "arcanum", "confluence"] {
+        for world in [
+            "mirror",
+            "tempest",
+            "arcanum",
+            "confluence",
+            "venus",
+            "europa",
+            "crucible",
+        ] {
             let scenario = Scenario::load(format!("{dir}{world}.toml")).unwrap();
             let r = scenario
                 .resolve(&manifest)
                 .unwrap_or_else(|e| panic!("{world} has a dangling dial: {e}"));
             assert_eq!(
                 r.dials.len(),
-                scenario.dials.len(),
-                "{world} resolves every dial it pushes"
+                scenario.dials.len() + scenario.environment.len(),
+                "{world} resolves every dial and environment lever it pushes"
             );
         }
-        // Tempest cranks change, so its direction siblings are the stress-world ends, all reserved:
-        // the per-scenario review queue includes the high mutation and the low effective size.
+        // Tempest cranks change, so its direction siblings are the stress-world ends. As the owner
+        // graduates them through the reserved-values worksheet the review queue shrinks, so this
+        // asserts the MECHANISM rather than a fixed membership, and survives calibration: the review
+        // queue surfaces exactly the dials Tempest pushes whose resolved manifest entry is still
+        // unset, and is_fully_set is precisely that queue being empty.
         let tempest = Scenario::load(format!("{dir}tempest.toml")).unwrap();
         let queue = tempest.resolve(&manifest).unwrap();
         let reserved = queue.reserved_ids();
-        assert!(reserved.contains(&"genome.mutation_rates.high"));
-        assert!(reserved.contains(&"genome.effective_population_size.low"));
-        assert!(
-            !queue.is_fully_set(),
-            "Tempest's stress-world ends are reserved for the owner"
+        for &id in &reserved {
+            assert!(
+                !manifest.get(id).unwrap().is_set(),
+                "the review queue must surface only unset dials, but {id} is set"
+            );
+        }
+        assert_eq!(
+            queue.is_fully_set(),
+            reserved.is_empty(),
+            "a scenario is fully set exactly when its review queue is empty"
         );
     }
 
@@ -482,5 +585,161 @@ name = "Probe"
             "Confluence mixes magical and not"
         );
         assert_eq!(confluence.scenario.grounding, "real");
+    }
+
+    #[test]
+    fn the_environment_block_levers_the_field_and_thermal_band() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+
+        // Venus is levered hot: a dense diffusive field, fast body coupling, and a
+        // heat-shifted, widened thermal band.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert_eq!(
+            venus.environment_dial("field.body_exchange"),
+            Some(Direction::High),
+            "the dense hot medium couples the body fast"
+        );
+        assert_eq!(
+            venus.environment_dial("physiology.thermal_setpoint"),
+            Some(Direction::High),
+            "a heat-shifted thermophile core"
+        );
+
+        // Europa is levered cold and buffered: near-static relaxation under ice, a cold
+        // narrow-banded specialist.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert_eq!(
+            europa.environment_dial("field.relaxation"),
+            Some(Direction::Low),
+            "near-static under lightless ice"
+        );
+        assert_eq!(
+            europa.environment_dial("physiology.thermal_half_band"),
+            Some(Direction::Low),
+            "a narrow band in a stable cold ocean"
+        );
+
+        // Both environments resolve against the real manifest: every environment lever maps
+        // to a defined (reserved) entry, so the two worlds are levered and calibration-gated,
+        // and the resolution surfaces the environment magnitudes in its review queue.
+        let r = europa.resolve(&manifest).unwrap();
+        assert_eq!(r.dials.len(), europa.dials.len() + europa.environment.len());
+        let reserved = r.reserved_ids();
+        assert!(
+            reserved.contains(&"physiology.thermal_setpoint.low"),
+            "Europa's cold set point is surfaced as a reserved environment magnitude"
+        );
+
+        // The four canonical worlds carry no environment block: temperate is the unlevered
+        // baseline, so their resolution is unchanged.
+        let mirror = Scenario::load(format!("{dir}mirror.toml")).unwrap();
+        assert!(
+            mirror.environment.is_empty(),
+            "Mirror is the temperate baseline"
+        );
+    }
+
+    #[test]
+    fn the_medium_selection_resolves_to_a_manifest_profile() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+
+        // Europa breathes cold water; the medium resolves to its manifest profile, which is
+        // reserved (surfaced for the owner), so it is carried in the review queue.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert_eq!(europa.scenario.medium.as_deref(), Some("water"));
+        let r = europa.resolve(&manifest).unwrap();
+        let med = r.medium.as_ref().expect("Europa selects a medium");
+        assert_eq!(med.manifest_id, "medium.water");
+        assert!(r.reserved_ids().contains(&"medium.water"));
+
+        // Venus breathes a dense toxic atmosphere.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert_eq!(
+            venus
+                .resolve(&manifest)
+                .unwrap()
+                .medium
+                .unwrap()
+                .manifest_id,
+            "medium.dense_toxic"
+        );
+
+        // The canonical worlds name no medium: temperate air is the default.
+        let mirror = Scenario::load(format!("{dir}mirror.toml")).unwrap();
+        assert!(mirror.scenario.medium.is_none(), "Mirror defaults to air");
+        assert!(mirror.resolve(&manifest).unwrap().medium.is_none());
+
+        // A world naming a medium the manifest has no profile for fails loud, like a dangling
+        // dial, rather than silently defaulting.
+        let bogus =
+            Scenario::from_toml_str("[scenario]\nid = \"b\"\nname = \"B\"\nmedium = \"plasma\"\n")
+                .unwrap();
+        assert!(bogus.resolve(&manifest).is_err());
+    }
+
+    #[test]
+    fn the_three_new_scenario_files_load_and_read_as_expected() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+
+        // Venus: super-hot toxic world, a thin thread of magic, harsh selection on small pools.
+        let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
+        assert!(venus.magic.laws, "Venus installs a thin MagicLaws");
+        assert!(venus.races.magical_mix, "Venus mixes magical and not");
+        assert_eq!(
+            venus.dial("genome.selection_scaling"),
+            Some(Direction::High),
+            "a lethal world selects hard"
+        );
+        assert_eq!(
+            venus.dial("genome.effective_population_size"),
+            Some(Direction::Low),
+            "small cloud-deck pools drift"
+        );
+
+        // Europa: placid ocean world, no magic, low drift, long pre-dawn.
+        let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
+        assert!(!europa.magic.laws, "Europa has no magic");
+        assert_eq!(
+            europa.dial("genome.mutation_rates"),
+            Some(Direction::Low),
+            "a buffered ocean drifts slowly"
+        );
+        assert_eq!(
+            europa.dial("biosphere.predawn_generations"),
+            Some(Direction::High),
+            "a vent ecology needs deep time to radiate"
+        );
+
+        // Crucible: war as the emergent equilibrium of scarcity and divergence.
+        let crucible = Scenario::load(format!("{dir}crucible.toml")).unwrap();
+        assert!(crucible.magic.laws, "Crucible carries a scarce war-magic");
+        assert_eq!(crucible.races.count, "many", "many peoples, few zones");
+        assert_eq!(
+            crucible.dial("value_metric.conflict_coefficient"),
+            Some(Direction::High),
+            "scarce contested range earns a high conflict coefficient"
+        );
+        assert_eq!(
+            crucible.dial("genome.speciation_distance"),
+            Some(Direction::Low),
+            "fast radiation into many distinct peoples"
+        );
+        // The mutation clock stays real: the extremity is social and environmental, not a churned
+        // genome, which is what distinguishes Crucible from Tempest.
+        assert_eq!(
+            crucible.dial("genome.mutation_rates"),
+            Some(Direction::Real),
+            "Crucible does not crank the mutation clock"
+        );
     }
 }

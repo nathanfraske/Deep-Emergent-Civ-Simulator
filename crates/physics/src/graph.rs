@@ -420,6 +420,21 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("bulk_modulus", 0), cur("density", 0)] },
             output: Asserted("c = sqrt(K/rho); the square root halves the exponents, outside the integer monomial algebra"),
         },
+        "acoustic_absorption" => KernelContract {
+            // alpha = reference*f^2. The reference axis carries the residual per-square-frequency
+            // dimension (1/(m*Hz^2) = length^-1 * time^2), so with the frequency exponent two the port
+            // monomial closes on the absorption coefficient length^-1: a checkable Monomial, not the
+            // Asserted a square-root or a dimensional module constant needs (the closed-monomial rule).
+            ports: const { &[cur("reference", 1), cur("frequency", 2)] },
+            output: Monomial,
+        },
+        "tube_resonance" => KernelContract {
+            // f = (2n-1)*c/(4L). The odd harmonic (2n-1) and the 1/4 are dimensionless scalars (the
+            // pi/8 case of poiseuille), so the port monomial is c^1 * L^-1 = velocity/length = a
+            // frequency, which closes on the formant-frequency axis: a checkable Monomial.
+            ports: const { &[cur("speed_of_sound", 1), cur("resonator_length", -1)] },
+            output: Monomial,
+        },
         "ideal_gas_density" => KernelContract {
             ports: const { &[cur("pressure", 0), cur("temperature", 0)] },
             output: Asserted("rho = P/(R_s*T); the specific gas constant R_s carries residual dimension, outside the port monomial"),

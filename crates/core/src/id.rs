@@ -36,6 +36,14 @@ pub struct StableId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PoolId(pub u32);
 
+/// An emergent institution (design Part 36): a persistent entity that outlives its members,
+/// encodes a role structure and a set of ADICO norms, and crystallizes from repeated
+/// coordinated behaviour. A sibling of [`PoolId`], minted in crystallization (promotion) order
+/// and never a closed category tag; what an institution is, is read off its structure, not
+/// off this id.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct InstId(pub u32);
+
 /// A live entity handle in the ECS. In the full build this is `hecs::Entity`; the
 /// bedrock keeps an opaque handle so the registry and the identity rules can be
 /// built and tested before the ECS crate is wired in.

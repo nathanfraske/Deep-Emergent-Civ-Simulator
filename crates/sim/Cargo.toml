@@ -14,6 +14,10 @@ civsim-core = { path = "../core" }
 # edibility as a relation between an organism's composition and a consumer's physiology.
 # physics depends only on core, so this adds no heavy or fast-moving dependency.
 civsim-physics = { path = "../physics" }
+# The emergent technology-composition evaluator (design Part 41): the simulation wires the calibration
+# manifest's reserved compose values into the evaluator and reads the promoted-primitive library.
+# compose depends only on core and physics, so it adds no heavy or fast-moving dependency.
+civsim-compose = { path = "../compose" }
 # The located-identity join (phase 4) places sim occupants on the world's coordinates, and
 # the full-simulation proof derives biosphere region profiles from the generated map. world
 # depends only on core (and serde/toml), so the simulation sits on the spatial substrate

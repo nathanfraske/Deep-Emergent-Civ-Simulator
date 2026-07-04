@@ -193,6 +193,22 @@ pub const TEMPERATURE: HomeostaticAxisId = HomeostaticAxisId(3);
 /// and suffocates, whatever the medium.
 pub const RESPIRATION: HomeostaticAxisId = HomeostaticAxisId(4);
 
+/// A per-being DERIVED drain for one homeostatic axis: the resting and the exertion
+/// fraction-of-capacity-per-tick the physics derivation produced from the body's mass, tissue, and
+/// medium ([`crate::physiology::derive_base_drain`], [`crate::physiology::derive_exertion_coupling`]),
+/// consumed by [`Homeostasis::metabolize_derived`]. These are the derived siblings of the authored
+/// [`HomeostaticAxisDef::base_drain`] and [`HomeostaticAxisDef::exertion_drain`] scalars, computed per
+/// body against the physics rather than read from a hardcoded axis field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DerivedDrain {
+    /// The resting drain, a fraction of capacity per tick (the Kleiber basal rate plus the
+    /// thermoregulatory replacement, bridged to a reserve fraction).
+    pub base: Fixed,
+    /// The added drain per unit of exertion, a fraction of capacity per tick (the work power bridged to
+    /// a reserve fraction), scaled by the being's exertion signal in `metabolize_derived`.
+    pub exertion: Fixed,
+}
+
 /// A being's homeostatic state: one reserve [`Stock`] per axis, keyed by axis id in canonical
 /// order so a walk over the reserves is reproducible (R-CANON-WALK). The reserves do not self-
 /// regenerate; they drain by metabolism and are restored only by intake.
@@ -320,6 +336,41 @@ impl Homeostasis {
                         .checked_mul(exertion)
                         .unwrap_or(Fixed::ZERO),
                 );
+                let draw = frac.checked_mul(cap).unwrap_or(Fixed::ZERO);
+                stock.step(draw);
+            }
+        }
+        self.is_alive(reg)
+    }
+
+    /// Advance one tick of metabolism from a per-being DERIVED drain vector rather than the axis defs'
+    /// authored scalar drain fields. Each entry is a [`DerivedDrain`] (a resting and an exertion
+    /// fraction-of-capacity) the physics derivation produced for this body from its mass, tissue, and
+    /// medium ([`crate::physiology`]), so the drain a body pays follows its physics and not a
+    /// hardcoded per-axis number (freeing `base_metabolic_drain` and `exertion_drain_coupling`). An axis
+    /// absent from the vector does not drain (a derived non-metabolic axis, integrity or temperature,
+    /// contributes nothing), so the same walk serves an embodied being carrying those axes. Walks
+    /// `reg.axes` in canonical order (R-CANON-WALK) and draws no randomness; returns whether the body is
+    /// still alive after the drain. The scalar-field [`Homeostasis::metabolize`] is kept as the labelled
+    /// fixture path so the dev fixtures and the `from_mass` tests still run.
+    pub fn metabolize_derived(
+        &mut self,
+        reg: &HomeostaticRegistry,
+        drains: &BTreeMap<HomeostaticAxisId, DerivedDrain>,
+        exertion: Fixed,
+    ) -> bool {
+        let exertion = exertion.clamp(Fixed::ZERO, Fixed::ONE);
+        for axis in &reg.axes {
+            let Some(drain) = drains.get(&axis.id) else {
+                continue;
+            };
+            if let Some(stock) = self.reserves.get_mut(&axis.id) {
+                let cap = stock.capacity();
+                // Drain is a fraction of capacity: (base + exertion_coupling * exertion) * capacity,
+                // exactly the shape metabolize uses, but with base and coupling DERIVED per being.
+                let frac = drain
+                    .base
+                    .saturating_add(drain.exertion.checked_mul(exertion).unwrap_or(Fixed::ZERO));
                 let draw = frac.checked_mul(cap).unwrap_or(Fixed::ZERO);
                 stock.step(draw);
             }
@@ -610,6 +661,39 @@ mod tests {
         assert!(!h.is_alive(&reg), "unfed, the body eventually dies");
         assert!(alive_ticks > 0, "it lived for a while first");
         assert!(h.dead_axis(&reg).is_some(), "a cause of death is recorded");
+    }
+
+    #[test]
+    fn metabolize_derived_drains_from_the_derived_vector_not_the_axis_fields() {
+        // The derived path drains each axis by a per-being DerivedDrain, not by the axis def's authored
+        // base_drain / exertion_drain scalars. An axis absent from the vector does not drain, and the
+        // derived rate governs the pace.
+        let reg = HomeostaticRegistry::dev_default();
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let mut drains = BTreeMap::new();
+        drains.insert(
+            ENERGY,
+            DerivedDrain {
+                base: Fixed::from_ratio(1, 10),
+                exertion: Fixed::ZERO,
+            },
+        );
+        // WATER absent from the vector: it must not drain at all on the derived path.
+        let e0 = h.level(ENERGY);
+        let w0 = h.level(WATER);
+        assert!(h.metabolize_derived(&reg, &drains, Fixed::ZERO));
+        assert!(h.level(ENERGY) < e0, "the derived energy drain applies");
+        assert_eq!(h.level(WATER), w0, "an axis absent from the vector holds");
+        // Ten resting ticks at a tenth of capacity per tick empties and kills on energy.
+        for _ in 0..12 {
+            h.metabolize_derived(&reg, &drains, Fixed::ZERO);
+        }
+        assert!(!h.is_alive(&reg), "the derived drain eventually kills");
+        assert_eq!(
+            h.dead_axis(&reg),
+            Some(ENERGY),
+            "it dies on the drained axis"
+        );
     }
 
     #[test]

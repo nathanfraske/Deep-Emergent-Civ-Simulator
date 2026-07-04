@@ -694,6 +694,46 @@ impl Body {
         }
         muscle.checked_mul(flesh_strength).unwrap_or(Fixed::ZERO)
     }
+
+    /// The production capacity of a body function in `[0, ONE]` (Part 35, the produce half of the
+    /// language capability gate, Part 33.3): the mean structural integrity of the intact parts
+    /// bearing the function, mapped through a knee at the wound function-loss threshold. A destroyed
+    /// bearer reads zero, redundant bearers degrade the capacity gracefully (the mean, so losing one
+    /// of several limbs weakens rather than erases a manual channel), and once the mean falls to or
+    /// below the function-loss threshold the function is lost and the capacity floors to zero; above
+    /// the threshold it ramps linearly to full at intact integrity. A function no part bears reads
+    /// zero (the body lacks the organ). Derived, never stored; deterministic and float-free, a pure
+    /// function of the parts' conditions.
+    ///
+    /// The `function_loss_threshold` is RESERVED (`body.function_loss_threshold` in the calibration
+    /// manifest). Basis: the fraction of a part's structural integrity below which it can no longer
+    /// perform its function, set equal to the wound model's function-loss threshold for consistency
+    /// (the same boundary the language capability-gate floor keys off, record 62.13), so a wound worn
+    /// past it costs the function rather than merely weakening it.
+    pub fn function_integrity(
+        &self,
+        function: FunctionId,
+        function_loss_threshold: Fixed,
+    ) -> Fixed {
+        let mut sum = Fixed::ZERO;
+        let mut count = 0i32;
+        for p in &self.parts {
+            if p.functions.contains(&function) {
+                let eff = if p.destroyed() {
+                    Fixed::ZERO
+                } else {
+                    p.condition.integrity
+                };
+                sum = sum.saturating_add(eff);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Fixed::ZERO; // the body bears no such function: no production
+        }
+        let mean = sum.div(Fixed::from_int(count));
+        loss_knee(mean, function_loss_threshold)
+    }
 }
 
 /// The record of one measured wound: the mode that caused it, the measured severity in `[0, ONE]`,
@@ -941,6 +981,21 @@ fn sub_floor(a: Fixed, b: Fixed) -> Fixed {
     } else {
         r
     }
+}
+
+/// The wound function-loss knee: an integrity reading `x` mapped so that at or below the
+/// function-loss `threshold` it floors to zero (the function is lost, not merely weakened) and above
+/// it ramps linearly from zero at the threshold to one at full integrity. A degenerate threshold at
+/// or above one leaves any intact reading at full. Pure and float-free.
+fn loss_knee(x: Fixed, threshold: Fixed) -> Fixed {
+    if x <= threshold {
+        return Fixed::ZERO;
+    }
+    let span = Fixed::ONE - threshold;
+    if span <= Fixed::ZERO {
+        return Fixed::ONE;
+    }
+    (x - threshold).div(span).clamp(Fixed::ZERO, Fixed::ONE)
 }
 
 #[cfg(test)]
@@ -1351,6 +1406,46 @@ mod tests {
         assert!(
             b.integrity(&fr) < before,
             "a wound to a vital part lowers derived integrity"
+        );
+    }
+
+    #[test]
+    fn function_integrity_knees_at_the_loss_threshold_and_degrades_gracefully() {
+        // FIXTURE threshold, not the manifest value.
+        let thr = Fixed::from_ratio(1, 2);
+        let mut b = body();
+        // An intact function reads full capacity.
+        assert_eq!(
+            b.function_integrity(F_VITAL_CORE, thr),
+            Fixed::ONE,
+            "an intact bearer produces at full"
+        );
+        // A function no part bears reads zero (no organ, no production).
+        assert_eq!(
+            b.function_integrity(FunctionId(9999), thr),
+            Fixed::ZERO,
+            "a function the body does not bear produces nothing"
+        );
+        // Redundant bearers degrade gracefully: destroy one of the four locomotion limbs and the
+        // mean stays above the threshold, so the manual function is weakened, not lost.
+        let limb = b
+            .parts
+            .iter()
+            .position(|p| p.name.starts_with("limb"))
+            .unwrap();
+        b.parts[limb].condition.severed = true;
+        let degraded = b.function_integrity(F_LOCOMOTION, thr);
+        assert!(
+            degraded > Fixed::ZERO && degraded < Fixed::ONE,
+            "losing one of several limbs weakens but does not erase the function ({degraded:?})"
+        );
+        // Wound the single vital-core bearer below the threshold: the function is lost, floored.
+        let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
+        b.parts[torso].condition.integrity = Fixed::from_ratio(1, 4);
+        assert_eq!(
+            b.function_integrity(F_VITAL_CORE, thr),
+            Fixed::ZERO,
+            "a bearer worn below the loss threshold floors production to zero"
         );
     }
 }

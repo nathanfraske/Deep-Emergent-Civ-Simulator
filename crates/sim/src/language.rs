@@ -39,7 +39,10 @@
 use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::decision::Curve;
+use crate::race::Race;
 use crate::typology::TypologyProfile;
+use crate::value::RaceId;
 use civsim_core::{Fixed, Rng};
 
 /// The reserved calibration the naming game needs: how often a speaker coins a fresh
@@ -88,6 +91,15 @@ pub struct FeatureValueDef {
     pub id: FeatureValueId,
     /// The surface token this value renders as.
     pub gloss: String,
+    /// The articulator geometry that produces this value: a resonator length (a vocal-tract or
+    /// stopped-pipe length) that [`crate::langmod::perceptual_geometry`] maps, through the medium's
+    /// sound speed, to the value's formant vector (design Part 33.3). Per-value, per-race data
+    /// (Principle 11): a race's producible-sound set is its own resonator geometry, not an authored
+    /// inventory, so [`crate::langmod::phoneme_priors`] reads a race's own confusability rather than
+    /// a human phoneme table. Reserved owner data with a labelled dev-fixture default: the
+    /// [`ArticulationSubstrate::syllabic`] convenience carries no acoustics and sets it to
+    /// [`Fixed::ZERO`].
+    pub resonator_length: Fixed,
 }
 
 /// A feature dimension: its contrastive values, and whether every well-formed primitive must
@@ -102,6 +114,22 @@ pub struct FeatureDimDef {
     pub obligatory: bool,
 }
 
+/// Whether a modality lays its forms out in a linear sequence (so word order, and the
+/// dependency-integration parse cost of holding one constituent before its head arrives, apply)
+/// or presents its structure simultaneously (a chromatic flash carrying every feature at once, a
+/// posture held whole), where a linear word-order harmony tilt has nothing to act on. The gate on
+/// the R-LANG-TYPOLOGY harmony tilt: a simultaneous modality suppresses it and the typology draws
+/// from its untilted marginal. Data on the modality, not a race branch (Principle 9). The default
+/// is `Sequential`, so the existing acoustic and manual modality data keep their linear word order.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub enum Linearization {
+    /// Forms are a left-to-right sequence: word order exists and the parse-cost tilt applies.
+    #[default]
+    Sequential,
+    /// Forms are presented all at once: there is no linear order for a harmony tilt to bias.
+    Simultaneous,
+}
+
 /// A production modality definition: the feature dimensions its primitives are built from,
 /// in id order.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -110,6 +138,9 @@ pub struct ProductionModalityDef {
     pub id: ProductionModalityId,
     /// The feature dimensions a primitive in this modality contrasts over, sorted by id.
     pub dims: Vec<FeatureDimId>,
+    /// Whether this modality is laid out sequentially or presented simultaneously: the gate on
+    /// whether the linear word-order harmony tilt applies (default [`Linearization::Sequential`]).
+    pub linearization: Linearization,
 }
 
 /// One form primitive: a canonical bundle of simultaneous feature values over a modality's
@@ -219,6 +250,12 @@ impl FormSystem {
         self.inventory.is_empty()
     }
 
+    /// The producible primitives this system coins from, in canonical (sorted) order: the
+    /// phonological inventory the language-distance layer reads as a feature-value set (Part 33.5).
+    pub fn inventory(&self) -> &[FormSegment] {
+        &self.inventory
+    }
+
     /// The modality this system builds forms in.
     pub fn modality(&self) -> ProductionModalityId {
         self.modality
@@ -311,6 +348,9 @@ impl ArticulationSubstrate {
             .map(|(i, gloss)| FeatureValueDef {
                 id: FeatureValueId(i as u32),
                 gloss,
+                // The syllabic convenience carries no acoustics: a labelled dev-fixture zero, never
+                // an authored resonator geometry (the real per-race lengths are owner data).
+                resonator_length: Fixed::ZERO,
             })
             .collect();
         let inventory: Vec<FormSegment> = values
@@ -326,6 +366,8 @@ impl ArticulationSubstrate {
         substrate.add_modality(ProductionModalityDef {
             id: modality,
             dims: vec![dim],
+            // The syllabic convenience is a sequential (spoken/signed) modality: word order applies.
+            linearization: Linearization::default(),
         });
         let forms = FormSystem::new(modality, inventory, min_len, max_len);
         (substrate, forms)
@@ -433,14 +475,23 @@ impl FormChangeRule {
     }
 }
 
-/// The reserved calibrations drift needs: how often a lineage innovates a form change, and
-/// how many ticks make a generation. Read from the manifest, failing loud while reserved.
+/// The reserved calibration drift needs: how often a lineage innovates a form change. Read from
+/// the manifest, failing loud while reserved.
+///
+/// The drift cadence (how many ticks make one generation) is no longer carried here as one global
+/// scalar. It DERIVES per lineage from the speaking race's own maturity: a generation is that race's
+/// maturity in world-time, `race.maturity_years` (in orbits) times the orbital year in ticks
+/// ([`crate::world::World::life_cadence_ticks`], itself derived from the world's orbit through
+/// [`crate::clock::ticks_from_seconds`]). Two lineages of races with different `maturity_years`
+/// therefore drift on different cadences from the one mechanism, never a single Earth-year interim
+/// (the retired `language.generation_ticks`). The derivation lives in
+/// [`crate::world::World::drift_languages`], which reads each lineage's [`Language::race`] against a
+/// `races` registry; a lineage whose race is absent has no maturity to derive a cadence from and
+/// does not drift (a fabricated cadence is never invented, Principle 11).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DriftParams {
     /// The per-generation probability that a lineage innovates one regular form change.
     pub sound_change_rate: Fixed,
-    /// How many ticks make one generation (the drift cadence).
-    pub generation_ticks: u64,
 }
 
 impl DriftParams {
@@ -448,8 +499,116 @@ impl DriftParams {
     pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
         Ok(DriftParams {
             sound_change_rate: m.require_fixed("language.sound_change_rate")?,
-            generation_ticks: m.require_i64("language.generation_ticks")?.max(1) as u64,
         })
+    }
+}
+
+/// The law mapping a representative memory capacity to the rate at which a concept's salience
+/// decays in the leaky-accumulator model (design Part 33.4, the R-LANG-DET salience-decay
+/// calibration `langdet.salience_decay_rate`). A concept's salience is a usage-recency
+/// accumulator: each use lifts it and it leaks down each generation at this rate, so a rarely
+/// used concept fades from the lexicon and a well-used one persists. The rate is not one fixed
+/// constant: a mind that remembers well lets salience leak more slowly, so the same usage
+/// history keeps a concept alive longer in a high-memory being than in a forgetful one. The
+/// shape is a decreasing data [`Curve`] read at the representative memory, floored by the
+/// reserved underflow bound so the leak can never round to zero (a zero rate would freeze the
+/// lexicon). The mechanism is fixed Rust; the curve and the floor are data (Principle 11),
+/// mirroring how the axiom kernel reads its entrenchment threshold from a reserved curve
+/// ([`crate::axiom::entrenchment_threshold`]). The mechanism keys on the supplied memory
+/// scalar, never on a race id, so it differentiates per being and per race from one rule.
+#[derive(Clone, Debug)]
+pub struct SalienceDecayLaw {
+    /// The decreasing rate curve: a representative memory capacity in, a salience-decay rate
+    /// out. Owner data; a flat curve yields the same rate for every memory.
+    pub curve: Curve,
+    /// The hard lower bound the rate is floored to: the reserved underflow bound, so the
+    /// leaky accumulator cannot decay by zero and freeze. Set from the salience scale's
+    /// resolution floor (`decay >= ceil(2^32 / usage_max_bits)`).
+    pub floor: Fixed,
+}
+
+impl SalienceDecayLaw {
+    /// The salience-decay rate for a representative memory capacity: the curve read at that
+    /// memory, floored by the underflow bound. Because the curve is decreasing, a
+    /// higher-memory band decays its concept salience more slowly; the floor guarantees a
+    /// positive leak whatever the curve returns. A pure, deterministic function of its
+    /// inputs, so it replays bit for bit and carries no race branch.
+    pub fn rate_for(&self, memory: Fixed) -> Fixed {
+        self.curve.eval(memory).max(self.floor)
+    }
+}
+
+/// One being's proficiency in each language it is acquiring (design Part 33.6, the R-LANG-MODALITY
+/// second-language work). A per-being, per-language [`Fixed`] in `[0, ONE]`: [`Fixed::ZERO`] is no
+/// command, [`Fixed::ONE`] is full command. Kept in a [`LangId`]-keyed map so the walk is canonical
+/// and deterministic. The proficiency rises each tick by the increment [`L2AcquisitionLaw`] derives
+/// from the learner's own age and race; nothing here reads a race id (Principle 9), so two races
+/// diverge only through the maturation their `maturity_years` datum shapes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LangKnowledge {
+    by_lang: BTreeMap<LangId, Fixed>,
+}
+
+impl LangKnowledge {
+    /// An empty knowledge state: no command of any language yet.
+    pub fn new() -> Self {
+        LangKnowledge::default()
+    }
+
+    /// The being's current proficiency in a language, or [`Fixed::ZERO`] if it is not acquiring it.
+    pub fn proficiency(&self, lang: LangId) -> Fixed {
+        self.by_lang.get(&lang).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Raise the being's proficiency in a language by `increment`, saturating at [`Fixed::ONE`] (full
+    /// command). A non-positive increment leaves the proficiency unchanged, so a fully-slowed learner
+    /// never regresses. Deterministic and float-free.
+    pub fn acquire(&mut self, lang: LangId, increment: Fixed) {
+        if increment <= Fixed::ZERO {
+            self.by_lang.entry(lang).or_insert(Fixed::ZERO);
+            return;
+        }
+        let cur = self.proficiency(lang);
+        let next = cur.saturating_add(increment).min(Fixed::ONE);
+        self.by_lang.insert(lang, next);
+    }
+
+    /// The languages this being is acquiring, in id order, for a canonical walk.
+    pub fn entries(&self) -> impl Iterator<Item = (&LangId, &Fixed)> + '_ {
+        self.by_lang.iter()
+    }
+}
+
+/// The second-language acquisition law: how much a learner's proficiency rises per tick, as a
+/// function of where the learner sits on its own race's maturation curve (design Part 33.6, the
+/// R-LANG-MODALITY / R-AGING seam). The age-of-acquisition breakpoint is not the human late teens
+/// and is not one authored age: it DERIVES from the learner's race, read as
+/// [`crate::race::Race::maturation_fraction`] (raw age normalized by that race's own
+/// `maturity_years`). The increment is a decreasing data [`Curve`] over that maturation fraction, so
+/// the critical period falls where each race matures: a plastic pre-maturity learner gains fast,
+/// and past the breakpoint (the fraction saturating at [`Fixed::ONE`] at `maturity_years`) the
+/// increment slows to the curve's adult residual. Two races with different `maturity_years` cross
+/// their breakpoints at different raw ages from this one kernel, never a per-race branch (Principle
+/// 9). The mechanism is fixed Rust; the curve is data (Principle 11), mirroring how
+/// [`SalienceDecayLaw`] reads its memory-to-rate curve.
+#[derive(Clone, Debug)]
+pub struct L2AcquisitionLaw {
+    /// The decreasing increment curve: a maturation fraction in `[0, ONE]` in, a per-tick
+    /// proficiency increment out. Owner data; a flat curve yields one age-independent increment (the
+    /// no-critical-period special case).
+    pub increment_by_maturation: Curve,
+}
+
+impl L2AcquisitionLaw {
+    /// The per-tick proficiency increment for a learner of the given race at the given raw `age`
+    /// (in life-cadence steps): the increment curve read at that race's maturation fraction. Because
+    /// the curve is decreasing, a learner past its race's maturity (its fraction saturated at
+    /// [`Fixed::ONE`]) gains at the adult residual while a younger one gains faster, and the
+    /// breakpoint sits at each race's own `maturity_years`. A pure, deterministic function of its
+    /// inputs, so it replays bit for bit and carries no race branch.
+    pub fn increment_for(&self, race: &Race, age: u32) -> Fixed {
+        self.increment_by_maturation
+            .eval(race.maturation_fraction(age))
     }
 }
 
@@ -481,23 +640,37 @@ impl FormSystem {
 pub struct Language {
     id: LangId,
     parent: Option<LangId>,
+    /// The race this lineage's speakers belong to (design Part 20, Part 33.4). It is the datum the
+    /// drift cadence derives from: a generation is this race's maturity in world-time, so two
+    /// lineages of races with different `maturity_years` drift on different cadences from one
+    /// mechanism (see [`crate::world::World::drift_languages`]). Set at [`Language::new`] and carried
+    /// unchanged through [`Language::fork`], so a daughter lineage keeps its ancestor's race and
+    /// drifts on the same cadence unless reseeded.
+    race: RaceId,
     form_system: FormSystem,
     change_log: Vec<FormChangeRule>,
     typology: TypologyProfile,
 }
 
 impl Language {
-    /// A root lineage with no parent. The typology profile starts empty; a culture-genesis
-    /// caller samples one over the typological registry (R-LANG-TYPOLOGY) and attaches it
-    /// with [`Language::set_typology`].
-    pub fn new(id: LangId, form_system: FormSystem) -> Self {
+    /// A root lineage with no parent, belonging to `race`. The typology profile starts empty; a
+    /// culture-genesis caller samples one over the typological registry (R-LANG-TYPOLOGY) and
+    /// attaches it with [`Language::set_typology`]. The `race` is the datum the drift cadence
+    /// derives from (see [`Language::race`]).
+    pub fn new(id: LangId, race: RaceId, form_system: FormSystem) -> Self {
         Language {
             id,
             parent: None,
+            race,
             form_system,
             change_log: Vec::new(),
             typology: TypologyProfile::default(),
         }
+    }
+
+    /// The race this lineage's speakers belong to, the datum its drift cadence derives from.
+    pub fn race(&self) -> RaceId {
+        self.race
     }
 
     /// This lineage's typology profile: its grammar as a canonical vector over the
@@ -541,6 +714,9 @@ impl Language {
         Language {
             id: daughter,
             parent: Some(self.id),
+            // The daughter keeps its ancestor's race, so it drifts on the same maturity-derived
+            // cadence until a caller reseeds it onto a different race.
+            race: self.race,
             form_system: self.form_system.clone(),
             change_log: self.change_log.clone(),
             typology: self.typology.clone(),
@@ -733,10 +909,9 @@ mod tests {
             ArticulationSubstrate::syllabic(["ka", "lo", "mi", "tu"].map(String::from), 2, 2);
         let params = DriftParams {
             sound_change_rate: Fixed::ONE,
-            generation_ticks: 1,
         };
-        let mut a = Language::new(LangId(0), forms.clone());
-        let mut b = Language::new(LangId(0), forms);
+        let mut a = Language::new(LangId(0), RaceId(0), forms.clone());
+        let mut b = Language::new(LangId(0), RaceId(0), forms);
         let key = Rng::for_coords(7, &[0, 1]);
         let ra = a.innovate(key, &params);
         let rb = b.innovate(key, &params);
@@ -747,21 +922,91 @@ mod tests {
     }
 
     #[test]
+    fn salience_decay_rate_falls_with_memory_and_is_floored() {
+        // A decreasing curve: memory 0 -> rate 0.5, memory 1 -> rate 0.1. A better-remembering
+        // representative decays its concept salience more slowly.
+        let law = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_ratio(1, 10)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let forgetful = law.rate_for(Fixed::ZERO);
+        let sharp = law.rate_for(Fixed::ONE);
+        assert_eq!(forgetful, Fixed::from_ratio(1, 2));
+        assert_eq!(sharp, Fixed::from_ratio(1, 10));
+        assert!(
+            forgetful > sharp,
+            "a higher-memory representative decays salience more slowly"
+        );
+        // The floor holds: a curve reading below the underflow bound is lifted to it, so the
+        // leak is never zero.
+        let sinking = SalienceDecayLaw {
+            curve: Curve::new([(Fixed::ZERO, Fixed::ZERO)]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        assert_eq!(
+            sinking.rate_for(Fixed::from_int(9)),
+            Fixed::from_ratio(1, 100)
+        );
+    }
+
+    #[test]
+    fn a_flat_salience_curve_gives_one_rate_for_every_memory() {
+        // A flat curve reads the same rate at any memory: the memory channel is switched off,
+        // the degenerate single-rate case, with no race branch anywhere.
+        let flat = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(3, 10)),
+                (Fixed::ONE, Fixed::from_ratio(3, 10)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let r0 = flat.rate_for(Fixed::ZERO);
+        let r1 = flat.rate_for(Fixed::from_ratio(1, 2));
+        let r2 = flat.rate_for(Fixed::from_int(4));
+        assert_eq!(r0, Fixed::from_ratio(3, 10));
+        assert_eq!(r0, r1);
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
     fn a_fork_inherits_the_log_and_points_at_its_parent() {
         let (_s, forms) =
             ArticulationSubstrate::syllabic(["ka", "lo", "mi"].map(String::from), 2, 2);
         let params = DriftParams {
             sound_change_rate: Fixed::ONE,
-            generation_ticks: 1,
         };
-        let mut parent = Language::new(LangId(0), forms);
+        let mut parent = Language::new(LangId(0), RaceId(7), forms);
         parent.innovate(Rng::for_coords(1, &[1]), &params);
         let daughter = parent.fork(LangId(1));
         assert_eq!(daughter.parent(), Some(LangId(0)));
+        assert_eq!(
+            daughter.race(),
+            RaceId(7),
+            "the daughter carries its ancestor's race unchanged"
+        );
         assert_eq!(
             daughter.change_log(),
             parent.change_log(),
             "the daughter inherits the history"
         );
+    }
+
+    #[test]
+    fn l2_proficiency_rises_toward_full_command_and_saturates() {
+        let mut k = LangKnowledge::new();
+        let lang = LangId(3);
+        assert_eq!(k.proficiency(lang), Fixed::ZERO, "no command to start");
+        k.acquire(lang, Fixed::from_ratio(1, 4));
+        k.acquire(lang, Fixed::from_ratio(1, 4));
+        assert_eq!(k.proficiency(lang), Fixed::from_ratio(1, 2));
+        // It saturates at full command, never overshooting.
+        k.acquire(lang, Fixed::ONE);
+        assert_eq!(k.proficiency(lang), Fixed::ONE, "saturates at full command");
+        // A non-positive increment never regresses a learner.
+        k.acquire(lang, Fixed::from_int(-1));
+        assert_eq!(k.proficiency(lang), Fixed::ONE);
     }
 }

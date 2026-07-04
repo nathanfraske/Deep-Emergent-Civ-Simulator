@@ -23,8 +23,8 @@ use civsim_core::{Fixed, StableId};
 use civsim_sim::{
     AccessWeights, Axiom, AxiomAxisId, BandSpec, Channel, CognitionChannel, Curve, DominanceMode,
     EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
-    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, SchemeId, SourceModeId,
-    ValueAxisId, ValueProfile, World,
+    InferenceParams, IntrinsicBeliefs, Race, RaceId, ReproductionMode, RingCapacityLaw, SchemeId,
+    SourceModeId, ValueAxisId, ValueProfile, World,
 };
 
 const AXIS: AxiomAxisId = AxiomAxisId(0);
@@ -34,6 +34,18 @@ fn params() -> InferenceParams {
         clamp: Fixed::from_int(50),
         commit_threshold: Fixed::from_int(3),
         margin: Fixed::from_int(1),
+    }
+}
+
+/// A labelled test ring-capacity law (not owner data): a linear memory-to-slots curve and a
+/// ceiling, used to size the beings' evidence rings from their expressed memory.
+fn dev_ring_law() -> RingCapacityLaw {
+    RingCapacityLaw {
+        curve: Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(8), Fixed::from_int(16)),
+        ]),
+        hard_cap: 32,
     }
 }
 
@@ -78,6 +90,8 @@ fn a_race() -> Race {
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
         mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
     };
     Race::new(
         RaceId(0),
@@ -86,6 +100,11 @@ fn a_race() -> Race {
         scheme,
         beliefs(Fixed::ZERO),
         Fixed::from_int(2),
+        // Homogeneous developmental environment (V_E zero): reproduces the pre-V_E dawn.
+        Fixed::ZERO,
+        // Fixture lifespan and maturity in life-cadence steps (labelled test values, not owner data).
+        80,
+        18,
     )
 }
 
@@ -100,7 +119,8 @@ fn lifecycle(seed: u64) -> (Vec<(Fixed, i32)>, usize, usize, Fixed) {
         members: 5,
     }];
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
-    let founders = w.seed_dawn_populations(&races, &bands);
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
+    let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
 
     // Spread the founders' stances across the axis so there is something to enculturate and
     // fracture (the dawn seeds an identical disposition; here we set a starting spread).
@@ -132,6 +152,7 @@ fn lifecycle(seed: u64) -> (Vec<(Fixed, i32)>, usize, usize, Fixed) {
             Fixed::from_ratio(1, 2),
             Fixed::from_ratio(1, 50),
             generation,
+            &dev_ring_law(),
         ) {
             if generation == 0 {
                 first_child_seed = w.intrinsic_of(child).unwrap().axioms[0].innate_seed;
@@ -188,7 +209,8 @@ fn turnover(seed: u64) -> (usize, usize, usize) {
         members: 5,
     }];
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
-    let founders = w.seed_dawn_populations(&races, &bands);
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
+    let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
     // Age the founders across the lifespan so the eldest face real mortality from the start.
     for (k, &id) in founders.iter().enumerate() {
         w.set_age(id, 20 + 18 * k as u32); // 20, 38, 56, 74, 92
@@ -221,6 +243,7 @@ fn turnover(seed: u64) -> (usize, usize, usize) {
                 Fixed::from_ratio(1, 2),
                 Fixed::from_ratio(1, 50),
                 generation,
+                &dev_ring_law(),
             ) {
                 roster.push(child);
                 births += 1;

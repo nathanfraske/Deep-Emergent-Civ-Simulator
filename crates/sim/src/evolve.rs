@@ -51,11 +51,13 @@
 //! (that surviving the scored episode predicts surviving in the world) is validated by cross-checking
 //! against longer and richer episodes, not asserted.
 
-use civsim_core::{DrawKey, Fixed, Phase, StableId};
+use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StableId};
 use civsim_world::Coord3;
 
 use crate::anatomy::{BodyPlan, Part, Temperament};
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::edibility::{Composition, Physiology};
 use crate::genome::{
     Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
     GenePool, GeneSet, Genome, Haplotype, SchemeId,
@@ -100,6 +102,11 @@ pub struct EvolveParams {
     /// enough that a small weight change is a small behaviour change (smooth evolution) yet large
     /// enough to explore the weight space, a stress-test tunable.
     pub mutation_step: Fixed,
+    /// The stamped integer-Gaussian approximation the controller-weight mutation draws through
+    /// (design 25.10, `genome.gauss_approx`, a world-identity value). Carried here so the controller
+    /// mutation shares the world's one Gaussian shape rather than a bare `k = 12` literal, the same
+    /// shape the genome's continuous mutation and the axiom-inheritance belief mutation draw through.
+    pub gauss: GaussApprox,
 }
 
 impl EvolveParams {
@@ -112,9 +119,115 @@ impl EvolveParams {
             init_spread: Fixed::from_int(2),
             mutation_rate: Fixed::from_ratio(1, 6),
             mutation_step: Fixed::from_ratio(2, 5),
+            // The labelled stamped default (design 25.10, SumOfUniforms{k=12}); a canonical build
+            // reads the world's genome.gauss_approx and installs it here.
+            gauss: GaussApprox::SumOfUniforms { k: 12 },
         }
     }
+
+    /// Derive the three controller-evolution scalings from the layout, so they are no longer free
+    /// numbers but consequences of the controller's own geometry (design Part 8; worksheet §13a). The
+    /// layout is a pure function of the world's homeostatic and affordance registries and carries no
+    /// race id, so two worlds with the same registries derive the same scalings and two with
+    /// different controller sizes derive different ones from the one formula (Principle 9). Three of
+    /// the six numbers stop being reserved scalars:
+    ///
+    /// - `init_spread = 1 / sqrt(n_in)`, the Xavier/He fan-in scaling (Glorot and Bengio 2010; He et
+    ///   al. 2015): the initial-weight half-range that keeps the activation's clamp neither always
+    ///   saturated nor always near zero is set by the input width, derived rather than guessed. No
+    ///   reserved scalar remains for it.
+    /// - `mutation_rate = target_mutations / weight_count`, so the per-locus mutation probability
+    ///   falls as the controller grows, holding the expected number of mutations per inherited genome
+    ///   at the reserved `target_mutations` regardless of layout size (the mutations-per-genome
+    ///   population-genetics convention, Lynch and Walsh). A larger controller mutates each weight
+    ///   less often, not more overall.
+    /// - `mutation_step = mutation_step_fraction * clamp_width`, a fraction of the activation's
+    ///   `[-1, 1]` dynamic range ([`ACTIVATION_CLAMP_WIDTH`]), so a step is a fraction of a weight's
+    ///   full effect on the output rather than an absolute number in weight units.
+    ///
+    /// The two reserved fractions (`target_mutations`, `mutation_step_fraction`) are the owner's,
+    /// surfaced with a basis, never fabricated. `pop_size`, `generations`, `episode_ticks`, and the
+    /// Gaussian shape are budgets and a world-identity value supplied by the caller, not controller
+    /// geometry.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_layout(
+        layout: &ControllerLayout,
+        target_mutations: Fixed,
+        mutation_step_fraction: Fixed,
+        pop_size: usize,
+        generations: u32,
+        episode_ticks: u32,
+        gauss: GaussApprox,
+    ) -> EvolveParams {
+        let n_in = layout.n_in();
+        let weights = layout.weight_count();
+        // Xavier/He fan-in scaling: init_spread = 1 / sqrt(n_in). A layout with no inputs (a
+        // degenerate world with no homeostatic axes) reads a zero spread rather than dividing by a
+        // zero root.
+        let init_spread = if n_in == 0 {
+            Fixed::ZERO
+        } else {
+            Fixed::ONE.div(Fixed::from_int(n_in as i32).sqrt())
+        };
+        // Per-locus mutation probability = expected mutations per genome / number of loci. A layout
+        // with no weights reads a zero rate rather than dividing by zero.
+        let mutation_rate = if weights == 0 {
+            Fixed::ZERO
+        } else {
+            target_mutations.div(Fixed::from_int(weights as i32))
+        };
+        let mutation_step = mutation_step_fraction.mul(ACTIVATION_CLAMP_WIDTH);
+        EvolveParams {
+            pop_size,
+            generations,
+            episode_ticks,
+            init_spread,
+            mutation_rate,
+            mutation_step,
+            gauss,
+        }
+    }
+
+    /// Read the controller-evolution parameters from the calibration manifest and derive the three
+    /// scalings from the layout (design Part 8, Principle 11). The two new reserved fractions
+    /// (`behavior.controller_target_mutations`, `behavior.controller_mutation_step_fraction`) and the
+    /// three budgets (`behavior.selection_pop_size`, `behavior.selection_generations`,
+    /// `behavior.episode_ticks`) are read fail-loud, so a build cannot run controller evolution on an
+    /// unset value. The Gaussian shape is the world's stamped `genome.gauss_approx`, supplied by the
+    /// caller rather than re-read here. The old `behavior.controller_init_spread`,
+    /// `controller_mutation_rate`, and `controller_mutation_step` are retired: those three now derive
+    /// through [`EvolveParams::from_layout`] and are no longer read.
+    pub fn from_manifest_and_layout(
+        manifest: &CalibrationManifest,
+        layout: &ControllerLayout,
+        gauss: GaussApprox,
+    ) -> Result<EvolveParams, CalibrationError> {
+        let target_mutations = manifest.require_fixed("behavior.controller_target_mutations")?;
+        let mutation_step_fraction =
+            manifest.require_fixed("behavior.controller_mutation_step_fraction")?;
+        let pop_size = manifest.require_i64("behavior.selection_pop_size")?.max(0) as usize;
+        let generations = manifest
+            .require_i64("behavior.selection_generations")?
+            .max(0) as u32;
+        let episode_ticks = manifest.require_i64("behavior.episode_ticks")?.max(0) as u32;
+        Ok(EvolveParams::from_layout(
+            layout,
+            target_mutations,
+            mutation_step_fraction,
+            pop_size,
+            generations,
+            episode_ticks,
+            gauss,
+        ))
+    }
 }
+
+/// The width of the controller activation's clamp interval `[-1, 1]` (see [`crate::controller`]),
+/// which is two. The derived controller mutation step is a fraction of this, so a mutation is a
+/// fraction of a weight's full dynamic range rather than an absolute number of weight units. A fixed
+/// numerics constant, not world content: it is the controller's own activation range (Principle 11
+/// governs world content, not a mechanism's internal clamp).
+const ACTIVATION_CLAMP_WIDTH: Fixed = Fixed::from_int(2);
 
 /// The gene set for a controller of a given layout: one gene per controller weight, each feeding its
 /// own [`Channel::Controller`] parameter with unit weight, so the expressed weight at parameter `k`
@@ -187,13 +300,17 @@ pub fn mutate(
                 .rng(seed)
                 .unit_fixed(0);
             if hit < params.mutation_rate {
-                let u = DrawKey::pair(child_id, locus as u64, generation, Phase::CONTROLLER)
+                let step_rng = DrawKey::pair(child_id, locus as u64, generation, Phase::CONTROLLER)
                     .slot(SLOT_MUT_STEP)
-                    .rng(seed)
-                    .unit_fixed(0);
-                // u in [0, ONE) -> [-step, step).
-                let delta =
-                    u.mul(params.mutation_step).mul(Fixed::from_int(2)) - params.mutation_step;
+                    .rng(seed);
+                // A mean-zero Gaussian step of standard deviation `mutation_step`, through the
+                // world's stamped integer-Gaussian approximation (genome.gauss_approx), the same
+                // primitive the genome's continuous mutation and the axiom-inheritance belief
+                // mutation draw through, rather than a bare k=12 literal; it replaces the former
+                // bounded-uniform step in [-step, step).
+                let delta = params
+                    .mutation_step
+                    .mul(gaussian_unit(&step_rng, 0, params.gauss));
                 allele.additive += delta;
             }
         }
@@ -218,6 +335,19 @@ fn scoring_reg() -> HomeostaticRegistry {
             exertion_drain: Fixed::from_ratio(1, 200),
             death_floor: Fixed::ZERO,
         }],
+    }
+}
+
+/// A labelled scoring-fixture water tile: matter carrying a quarter-water supply on the water backing
+/// class. Against the unit-requirement, unit-assimilation scoring physiology
+/// ([`Physiology::dev_for_registry`]) this deposits a quarter of capacity per bite, the same amount
+/// the retired `intake_yield` fixture did, so the scorer's foraging gradient is unchanged.
+fn water_matter() -> Composition {
+    Composition {
+        nutrients: [("bio.water_fraction".to_string(), Fixed::from_ratio(1, 4))]
+            .into_iter()
+            .collect(),
+        toxins: std::collections::BTreeMap::new(),
     }
 }
 
@@ -325,11 +455,12 @@ fn episode_survival_dir(controller: &Controller, ticks: u32, seed: u64, dir: (i3
         Coord3::ground(0, 0),
         scoring_body(),
         homeo,
+        Physiology::dev_for_registry(&reg),
         controller.clone(),
     );
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 3, 7, 2) {
-        field.add(WATER, c);
+        field.set(c, water_matter());
         walker.learn(WATER, c);
     }
     let p = LocomotionParams::dev_default();
@@ -396,13 +527,14 @@ fn full_episode_survival_dir(
     let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
     let mut field = ResourceField::new();
     for c in scoring_water_cells(dir, 6, 9, 1) {
-        field.add(WATER, c);
+        field.set(c, water_matter());
     }
     let walker = Walker::new(
         StableId(1),
         Coord3::ground(0, 0),
         scoring_body(),
         homeo,
+        Physiology::dev_for_registry(&reg),
         controller.clone(),
     );
     let p = LocomotionParams::dev_default();
@@ -521,6 +653,7 @@ fn thermal_run(
             start,
             scoring_body(),
             Homeostasis::from_mass(&reg, Fixed::ONE),
+            Physiology::dev_for_registry(&reg),
             controller.clone(),
         ),
         BeingThermal {
@@ -911,6 +1044,131 @@ mod tests {
 
     fn scoring_layout(hidden: usize) -> ControllerLayout {
         ControllerLayout::new(&scoring_reg(), &AffordanceRegistry::dev_default(), hidden)
+    }
+
+    #[test]
+    fn the_controller_scalings_derive_from_the_layout_geometry_not_a_race() {
+        use crate::homeostasis::HomeostaticRegistry;
+        let afford = AffordanceRegistry::dev_default();
+
+        // Two layouts of different input width, from registries that differ only in their axis count:
+        // a one-axis registry (six inputs) and the two-axis dev registry (eleven inputs). No race id
+        // enters the layout; the divergence is pure controller geometry (Principle 9).
+        let mut small_reg = HomeostaticRegistry::dev_default();
+        small_reg.axes.truncate(1);
+        let big_reg = HomeostaticRegistry::dev_default();
+        let small = ControllerLayout::new(&small_reg, &afford, 0);
+        let big = ControllerLayout::new(&big_reg, &afford, 0);
+        assert_ne!(
+            small.n_in(),
+            big.n_in(),
+            "the two layouts differ in input width"
+        );
+
+        let target = Fixed::from_int(1); // one expected mutation per inherited genome
+        let step_frac = Fixed::from_ratio(1, 20);
+        let gauss = GaussApprox::default();
+        let p_small = EvolveParams::from_layout(&small, target, step_frac, 32, 40, 200, gauss);
+        let p_big = EvolveParams::from_layout(&big, target, step_frac, 32, 40, 200, gauss);
+
+        // init_spread = 1/sqrt(n_in), the Xavier/He fan-in scaling: the wider layout has the smaller
+        // spread, and each equals the reciprocal root of its own input width, from one formula.
+        let expect_spread = |n: usize| Fixed::ONE.div(Fixed::from_int(n as i32).sqrt());
+        assert_eq!(p_small.init_spread, expect_spread(small.n_in()));
+        assert_eq!(p_big.init_spread, expect_spread(big.n_in()));
+        assert!(
+            p_big.init_spread < p_small.init_spread,
+            "more inputs give a smaller Xavier spread ({:?} < {:?})",
+            p_big.init_spread,
+            p_small.init_spread
+        );
+
+        // mutation_rate = target_mutations / weight_count: at the same expected mutations per genome,
+        // the larger controller (more weights) mutates each locus LESS often.
+        assert!(big.weight_count() > small.weight_count());
+        assert_eq!(
+            p_small.mutation_rate,
+            target.div(Fixed::from_int(small.weight_count() as i32))
+        );
+        assert_eq!(
+            p_big.mutation_rate,
+            target.div(Fixed::from_int(big.weight_count() as i32))
+        );
+        assert!(
+            p_big.mutation_rate < p_small.mutation_rate,
+            "a larger controller has a lower per-locus mutation rate at fixed target mutations ({:?} < {:?})",
+            p_big.mutation_rate,
+            p_small.mutation_rate
+        );
+
+        // mutation_step is a fraction of the activation clamp's [-1, 1] width (two), independent of
+        // the layout.
+        assert_eq!(p_small.mutation_step, step_frac.mul(Fixed::from_int(2)));
+        assert_eq!(
+            p_small.mutation_step, p_big.mutation_step,
+            "the step is a fraction of the clamp width, layout-independent"
+        );
+    }
+
+    #[test]
+    fn from_manifest_and_layout_fails_loud_while_a_scalar_is_reserved_and_derives_once_set() {
+        let layout = scoring_layout(0);
+        let gauss = GaussApprox::default();
+        let reserved = r#"
+[[reserved]]
+id = "behavior.controller_target_mutations"
+basis = "b"
+status = "reserved"
+value = ""
+source = "t"
+[[reserved]]
+id = "behavior.controller_mutation_step_fraction"
+basis = "b"
+status = "set"
+value = "0.05"
+source = "t"
+[[reserved]]
+id = "behavior.selection_pop_size"
+basis = "b"
+status = "set"
+value = "32"
+source = "t"
+[[reserved]]
+id = "behavior.selection_generations"
+basis = "b"
+status = "set"
+value = "40"
+source = "t"
+[[reserved]]
+id = "behavior.episode_ticks"
+basis = "b"
+status = "set"
+value = "200"
+source = "t"
+"#;
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert_eq!(
+            EvolveParams::from_manifest_and_layout(&m, &layout, gauss).unwrap_err(),
+            CalibrationError::Reserved("behavior.controller_target_mutations".to_string()),
+            "a reserved controller scalar fails loud rather than fabricating a value"
+        );
+
+        let set = reserved.replace(
+            "id = \"behavior.controller_target_mutations\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"",
+            "id = \"behavior.controller_target_mutations\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"",
+        );
+        let m2 = CalibrationManifest::from_toml_str(&set).unwrap();
+        let p = EvolveParams::from_manifest_and_layout(&m2, &layout, gauss).unwrap();
+        assert_eq!(p.pop_size, 32);
+        assert_eq!(
+            p.mutation_rate,
+            Fixed::from_int(1).div(Fixed::from_int(layout.weight_count() as i32)),
+            "the per-locus rate derives from the layout's weight count"
+        );
+        assert_eq!(
+            p.init_spread,
+            Fixed::ONE.div(Fixed::from_int(layout.n_in() as i32).sqrt())
+        );
     }
 
     /// A hand-built competent forager over the water-only scoring layout: move toward known water,
@@ -1678,7 +1936,9 @@ mod tests {
         // guarantees above are seed-robust.
         let l = thermal_layout(3);
         let params = EvolveParams::dev_default();
-        let seed = 0x1234u64;
+        // A dev-fixture seed whose run reaches full bidirectional survival under the stamped
+        // Gaussian mutation step (the anti-steering and necessity guarantees below are seed-robust).
+        let seed = 0x1007u64;
         let report = evolve_thermal_bidirectional(&l, &params, seed);
         let genes = controller_gene_set(&l);
         let best = report

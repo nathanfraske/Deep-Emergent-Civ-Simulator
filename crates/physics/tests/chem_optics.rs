@@ -33,13 +33,13 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     reg.extend(data_path("chem_optics_floor.toml")).unwrap();
-    // 38 mech + 17 fluids + 14 chem/optics axes; 20 + 16 + 11 laws; 2 + 2 + 0 substances.
+    // 38 mech + 20 fluids + 14 chem/optics axes; 20 + 18 + 11 laws; 2 + 2 + 0 substances.
     assert_eq!(
         reg.axis_count(),
-        69,
+        72,
         "the mechanical, fluids, and chem/optics axes"
     );
-    assert_eq!(reg.law_count(), 48, "the wave-1 and wave-2 laws");
+    assert_eq!(reg.law_count(), 50, "the wave-1 and wave-2 laws");
     assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
     assert!(reg.law("law.radiative_equilibrium").is_some());
     assert!(reg.axis("chem.formation_enthalpy").is_some());
@@ -66,10 +66,16 @@ fn the_chem_optics_ranges_are_owner_set_and_read_back_exactly() {
         Fixed::from_int(5),
         "the high-index headroom above diamond"
     );
-    assert!(
-        reg.reserved_axis_ids().is_empty(),
-        "the fluids, chem, and geometry ranges are all graduated, got reserved {:?}",
-        reg.reserved_axis_ids()
+    // The only range-reserved axes over the stack are the three acoustic channel-physics axes added
+    // 2026-07-03, surfaced reserved-with-basis (the owner's to set, never fabricated).
+    assert_eq!(
+        reg.reserved_axis_ids(),
+        vec![
+            "acoustic.absorption_reference",
+            "acoustic.formant_frequency",
+            "acoustic.resonator_length",
+        ],
+        "exactly the three new acoustic axes are reserved-with-basis"
     );
 }
 

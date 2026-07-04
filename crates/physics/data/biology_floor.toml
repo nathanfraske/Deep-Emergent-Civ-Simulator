@@ -206,6 +206,21 @@ range_lo = "0"
 range_hi = "200"
 real = "West, Respiratory Physiology (human alveolar surface ~70 m^2); fish gill lamellar surface tables; a non-respiratory tissue carries 0, so a body with no respiratory organ presents no exchange area and cannot breathe. Window [0, 200] m^2 owner-ratified 2026-07-03 (0 for a non-respiratory tissue, ~70 human alveolar, up to ~200 for a large or high-surface taxon), fitting the canonical scale. A composition axis read sim-side to derive a being's exchange area (the law.membrane_gas_flux area port), the same way bio.energy_density feeds the metabolic reserve"
 
+# --- Body-to-medium exchange surface axis (R-METABOLIZE: the convective / radiant surface a tissue
+# presents to the ambient medium, the area the resting thermoregulatory heat-loss law integrates over,
+# sibling to bio.respiratory_surface) ---
+
+[[axis]]
+id = "bio.convective_surface"
+measures = "the body-to-medium exchange surface area a covering or exposed tissue presents per unit organ development (the area the Newton convective and Stefan-Boltzmann radiant heat-loss laws integrate over, and the area the body-to-medium thermal coupling h*A/(m*c) reads)"
+unit = "m^2"
+dimension = "area"
+scale = "m^2"
+tier = 0
+range_lo = "0"
+range_hi = "500"
+real = "DuBois and DuBois body-surface-area allometry; Meeh's law S = k*M^(2/3) (human ~1.8 m^2); an interior or insulated tissue carries 0, so it presents no exchange surface and the body cools only through the tissue that does. Window [0, 500] m^2 owner-ratified 2026-07-03 (0 for interior/insulated tissue, ~1.8 human, up to ~500 for the largest-taxon body surface), fitting the canonical area scale. A composition axis read sim-side to derive a being's whole-body exchange area (crates/sim/src/physiology.rs), the same way bio.respiratory_surface feeds the Fick membrane law's area port"
+
 # --- Derived score axes (the produced outputs of the two fold laws, read by edibility) ---
 
 [[axis]]

@@ -202,6 +202,39 @@ range_lo = "0"
 range_hi = "10"
 real = "atmospheric and material acoustic absorption tables (Kinsler et al.)"
 
+# --- Acoustic channel-physics axes (the perceptual-geometry read-out reads these, added 2026-07-03;
+#     ranges RESERVED with basis, the owner's to set on signoff, never fabricated) ---
+
+[[axis]]
+id = "acoustic.absorption_reference"
+measures = "thermoviscous (Stokes) absorption reference beta, the per-square-frequency coefficient of alpha = beta*f^2 a medium carries"
+unit = "1/(m*Hz^2)"
+dimension = "-1,0,2,0"
+scale = "1/(m*Hz^2) (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "the classical (thermoviscous) absorption coefficient beta = alpha/f^2 the medium's viscosity and thermal data already imply (Stokes); the cited acoustics tables bound air's beta near 1.6e-11 and water's near 2.2e-14 s^2/m, an envelope whose sub-epsilon low end underflows Q32.32 and reserves a per-quantity windowed scale (R-UNITS-PIN)"
+real = "Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics (classical absorption); Beranek, Acoustics"
+
+[[axis]]
+id = "acoustic.resonator_length"
+measures = "acoustic resonator length L, the vocal-tract or stopped-pipe length the source-filter formant law reads"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_reserved = "the resonator-length envelope of the producible-sound apparatus, from a small stridulation chamber (~1e-3 m) to a large horn or vocal tract (a few m); a neutral human vocal tract sits near 0.17 m (the schwa reference)"
+real = "Fant, Acoustic Theory of Speech Production; Titze, Principles of Voice Production"
+
+[[axis]]
+id = "acoustic.formant_frequency"
+measures = "resonant (formant) frequency the quarter-wave tube law writes, the characteristic-frequency the phoneme space clusters over"
+unit = "Hz"
+dimension = "0,0,-1,0"
+scale = "Hz"
+tier = 0
+range_reserved = "the formant band the tube-resonance law produces across the resonator-length envelope, a subset of acoustic.frequency; the vocal formant range spans roughly 50 Hz (a large resonator) to 20 kHz (a small one), human F1 to F3 near 250 to 3500 Hz"
+real = "Fant, Acoustic Theory of Speech Production; Stevens, Acoustic Phonetics"
+
 # --- Fluid and acoustic laws (metadata; kernels in laws.rs) ---
 
 [[law]]
@@ -410,11 +443,37 @@ output_measure = "bidirectional evaporation/condensation mass flux (mass per are
 dimension = "-2,1,-1,0"
 interval_bound = "[0, E_MAX]"
 tier = 0
+
+[[law]]
+id = "law.acoustic_absorption"
+kernel = "acoustic_absorption"
+ports = [
+  { role = "reference", axis = "acoustic.absorption_reference" },
+  { role = "frequency", axis = "acoustic.frequency" },
+]
+produces = ["acoustic.absorption_coefficient"]
+output_measure = "medium sound absorption coefficient per unit path (the alpha that feeds law.optical_depth)"
+dimension = "-1,0,0,0"
+interval_bound = "[0, ALPHA_ABS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.tube_resonance"
+kernel = "tube_resonance"
+ports = [
+  { role = "speed_of_sound", axis = "mech.velocity" },
+  { role = "resonator_length", axis = "acoustic.resonator_length" },
+]
+produces = ["acoustic.formant_frequency"]
+output_measure = "resonant (formant) frequency of a quarter-wave closed-open tube (source-filter model)"
+dimension = "0,0,-1,0"
+interval_bound = "[0, FORMANT_FREQ_MAX]"
+tier = 0
 # --- Substances (fluids as vectors over the axes) ---
 
 [[substance]]
 id = "air"
-participates_in = ["law.dynamic_pressure", "law.drag_force", "law.aerodynamic_lift", "law.ideal_gas_density", "law.speed_of_sound", "law.convective_flux"]
+participates_in = ["law.dynamic_pressure", "law.drag_force", "law.aerodynamic_lift", "law.ideal_gas_density", "law.speed_of_sound", "law.convective_flux", "law.acoustic_absorption", "law.tube_resonance"]
 real = "CRC (dry air at 15C, 1 atm)"
 values = [
   { axis = "mat.density", value = "1.225" },
@@ -424,7 +483,7 @@ values = [
 
 [[substance]]
 id = "water"
-participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure"]
+participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure", "law.acoustic_absorption", "law.tube_resonance"]
 real = "CRC (liquid water at 20C)"
 values = [
   { axis = "mat.density", value = "998" },

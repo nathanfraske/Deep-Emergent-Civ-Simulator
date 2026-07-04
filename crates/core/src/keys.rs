@@ -112,6 +112,42 @@ impl Phase {
     /// under genome-derived offspring fitness, keyed on the lineage and the generation so a
     /// run replays bit for bit (design Part 25, the R-BEHAVIOR-EVOLVE selection precedent).
     pub const MATE_CHOICE: Phase = Phase(0x15);
+    /// The per-being developmental-environment offset draw (design Part 25.6): a mean-zero
+    /// symmetric deviation that makes a member's expressed cognition vary from its cohort, the
+    /// environmental-variance (V_E) half of narrow-sense heritability. Keyed on the being's id
+    /// (the tick coordinate carries the dawn's tick 0 or a birth's generation), so a member's
+    /// developmental deviation is a reproducible function of the seed and the being rather than a
+    /// single environment shared across the whole cohort. Non-heritable: it is applied at
+    /// expression and never folded back into a pool's allele frequencies.
+    pub const DEVELOPMENT: Phase = Phase(0x16);
+    /// A knowledge-transmission copy draw (the transmission substrate): the bounded, mean-zero
+    /// proficiency drift a learner incurs when copying a design from a holder, keyed on the LEARNER
+    /// (the region coordinate), the holder and the design's content address, and the tick, so a
+    /// copy-of-a-copy replays bit for bit and N learners copying one design from one holder on one
+    /// tick draw N DISTINCT perturbations (keying on holder, design, and tick alone gave every
+    /// learner the identical stream). The perturbation magnitude is a function of the copier's
+    /// per-race perception and memory (Principle 9), never an authored per-race fidelity table.
+    pub const TRANSMIT: Phase = Phase(0x17);
+    /// A knowledge-loss erosion draw (the transmission substrate): the per-design, per-tick
+    /// forgetting roll that erodes the proficiency of a design held by fewer than the
+    /// minimum-viable practitioner count, keyed on the design and the tick so every below-floor
+    /// holder erodes in lockstep and the erosion replays bit for bit. Its expectation is the
+    /// reserved loss rate and it is always non-negative, so proficiency only erodes.
+    pub const KNOW_LOSS: Phase = Phase(0x18);
+    /// A belief-lifting per-mind dispersion draw (the belief facet-strength substrate, Part 54):
+    /// the small symmetric mean-zero deviation added around the level-to-strength curve when an
+    /// aggregate pool's prevailing belief is instantiated into a promoting mind's facet strength,
+    /// keyed on the being, the belief's content hash, and the tick, so a mind promoted holding
+    /// several beliefs perturbs each independently and the lift replays bit for bit. The dispersion
+    /// magnitude is a reserved calibration; the draw keys on no belief's identity (Principle 9).
+    pub const BELIEF_LIFT: Phase = Phase(0x19);
+    /// The institution-crystallization tie-break draw (the Part 36 institution substrate): when
+    /// two ripe coordination patterns share an exact canonical key and must be assigned a
+    /// crystallization order, this stream breaks the tie, folding the master seed, the locus, the
+    /// tick, and this phase, with the pattern's secondary key as the RNG locus. It is reached only
+    /// for a genuine key tie; distinct patterns sort by their canonical key alone and never touch
+    /// the stream, so crystallization order is a pure function of canonical state (Principle 3).
+    pub const CRYSTALLIZE: Phase = Phase(0x1A);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -216,6 +252,53 @@ mod tests {
         assert_ne!(perception, gossip);
         assert_ne!(gossip, language);
         assert_ne!(perception, language);
+        // The developmental-environment phase (0x16) must not alias the mate-choice phase
+        // (0x15) it neighbours, nor the perception phase, on counter zero.
+        let development = DrawKey::entity(42, 9, Phase::DEVELOPMENT).rng(seed).at(0);
+        let mate_choice = DrawKey::entity(42, 9, Phase::MATE_CHOICE).rng(seed).at(0);
+        assert_ne!(development, mate_choice);
+        assert_ne!(development, perception);
+        // The two transmission-substrate phases (0x17 TRANSMIT, 0x18 KNOW_LOSS) must be distinct
+        // from each other and from the gossip and drift phases they conceptually neighbour, so a
+        // transmission copy, a forgetting roll, a gossip exchange, and a sound-change drift never
+        // alias on counter zero.
+        let transmit = DrawKey::entity(42, 9, Phase::TRANSMIT).rng(seed).at(0);
+        let know_loss = DrawKey::entity(42, 9, Phase::KNOW_LOSS).rng(seed).at(0);
+        let drift = DrawKey::entity(42, 9, Phase::DRIFT).rng(seed).at(0);
+        assert_ne!(transmit, know_loss);
+        assert_ne!(transmit, gossip);
+        assert_ne!(transmit, drift);
+        assert_ne!(know_loss, gossip);
+        assert_ne!(know_loss, drift);
+        assert_ne!(transmit, development);
+        // The two phase values are the next two free after DEVELOPMENT (0x16), and distinct.
+        assert_eq!(Phase::TRANSMIT, Phase(0x17));
+        assert_eq!(Phase::KNOW_LOSS, Phase(0x18));
+        assert_ne!(Phase::TRANSMIT, Phase::GOSSIP);
+        assert_ne!(Phase::KNOW_LOSS, Phase::DRIFT);
+        // The belief-lift dispersion phase (0x19) is the next free value after KNOW_LOSS (0x18)
+        // and must not alias the transmission phases it neighbours nor the perception phase, on
+        // counter zero, so a belief-lift dispersion, a transmission copy, a forgetting roll, and a
+        // perception roll never collide.
+        let belief_lift = DrawKey::entity(42, 9, Phase::BELIEF_LIFT).rng(seed).at(0);
+        assert_eq!(Phase::BELIEF_LIFT, Phase(0x19));
+        assert_ne!(belief_lift, transmit);
+        assert_ne!(belief_lift, know_loss);
+        assert_ne!(belief_lift, perception);
+        assert_ne!(belief_lift, development);
+        assert_ne!(Phase::BELIEF_LIFT, Phase::TRANSMIT);
+        assert_ne!(Phase::BELIEF_LIFT, Phase::KNOW_LOSS);
+        // The institution-crystallization phase (0x1A) is the next free value after BELIEF_LIFT
+        // (0x19) and must not alias the belief-lift or perception phases it neighbours, on counter
+        // zero, so a crystallization tie-break, a belief-lift dispersion, and a perception roll
+        // never collide.
+        let crystallize = DrawKey::entity(42, 9, Phase::CRYSTALLIZE).rng(seed).at(0);
+        assert_eq!(Phase::CRYSTALLIZE, Phase(0x1A));
+        assert_ne!(crystallize, belief_lift);
+        assert_ne!(crystallize, perception);
+        assert_ne!(crystallize, know_loss);
+        assert_ne!(Phase::CRYSTALLIZE, Phase::BELIEF_LIFT);
+        assert_ne!(Phase::CRYSTALLIZE, Phase::MORTALITY);
     }
 
     #[test]

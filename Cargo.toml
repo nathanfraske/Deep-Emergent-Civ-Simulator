@@ -4,11 +4,11 @@
 # dependency order, and the spatial and worldgen layer (crates/world, roadmap M1)
 # the simulation will sit on.
 [workspace]
-members = ["crates/core", "crates/physics", "crates/units", "crates/sim", "crates/world", "crates/viewer", "crates/gpu"]
+members = ["crates/core", "crates/physics", "crates/units", "crates/compose", "crates/sim", "crates/world", "crates/viewer", "crates/gpu"]
 # crates/gpu carries the heavy CubeCL dependency and needs a CUDA device at run time, so it is kept
 # out of the default set: a plain `cargo build`/`cargo test` stays lean and CUDA-free, and the GPU
 # crate is built and tested explicitly with `cargo {build,test} -p civsim-gpu`.
-default-members = ["crates/core", "crates/physics", "crates/units", "crates/sim", "crates/world", "crates/viewer"]
+default-members = ["crates/core", "crates/physics", "crates/units", "crates/compose", "crates/sim", "crates/world", "crates/viewer"]
 resolver = "2"
 
 [workspace.package]

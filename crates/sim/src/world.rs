@@ -41,28 +41,35 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use civsim_world::OrbitalElements;
+
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
-use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs};
+use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
+use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
+use crate::census::ReproductiveCensus;
 use crate::clock::LIFE_CADENCE_TICKS;
 use crate::decision::{ActionId, Behaviour, Curve, DriveId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::genome::Genome;
+use crate::genome::{Channel, Genome, ReproductionMode};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
 use crate::mate_choice::{choose, MatePreference};
+use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, TraitInstance};
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
-use crate::value::RaceId;
+use crate::value::{
+    EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
+};
 use civsim_core::{
-    CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, Phase, Registry, StableId,
-    StateHasher,
+    gaussian_unit, CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, GaussApprox,
+    Phase, Registry, StableId, StateHasher,
 };
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
@@ -121,6 +128,31 @@ fn assertion_move(
     }
 }
 
+/// The per-being developmental-environment offset (design Part 25.6): a mean-zero symmetric
+/// deviation in `[-spread, +spread)` drawn once per being under [`Phase::DEVELOPMENT`], keyed on
+/// the being's `id` and the `tick` (the dawn passes tick 0, a birth passes the generation). This
+/// is the environmental-variance (V_E) source that makes [`crate::genome::GeneSet::express`] vary
+/// between members of one cohort: today every member rides one shared `race.environment`, so V_E
+/// is identically zero; adding this per-being offset to that baseline authors variance without a
+/// direction, because the map `(2 * unit - 1)` is symmetric about zero. Its expectation over a
+/// uniform `unit_fixed` draw on the half-open grid `[0, ONE)` is `-2^-32` (one fixed-point ULP
+/// below zero, since the grid includes 0 but excludes ONE), not exactly zero: the residual cohort
+/// mean shift is one ULP times `spread`, physically negligible and dwarfed by the per-being spread,
+/// so no direction is authored (Principle 9). `spread` is the race's reserved `environment_variance`,
+/// the half-width of the
+/// deviation; at [`Fixed::ZERO`] the offset is exactly zero and the expressed mind is bit-identical
+/// to the pre-offset dawn (the interim that reproduces the homogeneous world). Deterministic:
+/// `unit_fixed` lies in `[0, ONE)` and the symmetric map is a pure function of the seed, the being,
+/// and the tick, so it replays bit for bit; it is non-heritable, applied at expression and never
+/// folded back into a pool's allele frequencies on demotion. Mirrors the mate-preference draw the
+/// dawn and birth already use for symmetric per-being variation.
+fn env_offset(seed: u64, id: StableId, tick: u64, spread: Fixed) -> Fixed {
+    let unit = DrawKey::entity(id.0, tick, Phase::DEVELOPMENT)
+        .rng(seed)
+        .unit_fixed(0);
+    (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
+}
+
 /// The reserved calibrations the gossip loop needs. Read from the manifest; until set,
 /// reading them fails loud rather than running on a fabricated default.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -143,6 +175,27 @@ impl GossipParams {
         })
     }
 }
+
+/// The race-normalized mortality pass ([`World::apply_mortality_by_race`]) could not race-normalize
+/// a being: its race is untracked or absent from the supplied `races`, so there is no lifespan to
+/// map its raw age onto the life-fraction domain the shared hazard curve is evaluated in. Rather
+/// than read the curve in the wrong domain (raw age against a fraction curve, which would silently
+/// make the unraced class near-immortal or cull it wholesale), the pass fails loud, naming the being
+/// it could not normalize. Carries the offending being's id.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct UnraceableBeing(pub StableId);
+
+impl std::fmt::Display for UnraceableBeing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "being {:?} cannot be race-normalized for the life-fraction mortality pass (no tracked race with a lifespan); refusing rather than reading the hazard in the raw-age domain",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnraceableBeing {}
 
 /// One stimulus delivered to a mind on a tick: either a first-order observation about
 /// the world, or a second-order observation about a target mind's access. Phase 1
@@ -328,6 +381,12 @@ pub struct World {
     genomes: BTreeMap<StableId, Genome>,
     /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
     intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
+    /// The reserved dogmatism/freezing split weight the enculturation band applies through
+    /// [`crate::axiom::EpistemicStance::effective_stubbornness`] (`axiom.stubbornness_dogmatism_weight`).
+    /// `None` until installed with [`World::set_stubbornness_split`], and the enculturation band beats
+    /// are then a no-op rather than running on a fabricated half (Principle 11), the same
+    /// fail-quiet-until-declared convention gossip and the mortality hazard use.
+    stubbornness_split: Option<Fixed>,
     /// Per-being heritable mate preference, the direction of assortment as a per-being trait
     /// (R-REPRO). Seeded at the dawn with unbiased variation (symmetric about indifference, so
     /// no direction is authored) and inherited at birth by midparent plus bounded mutation, so
@@ -339,6 +398,38 @@ pub struct World {
     affect: BTreeMap<StableId, AffectState>,
     /// Per-being age in life-cadence ticks, for the aging-and-mortality loop (the R-AGING gap).
     ages: BTreeMap<StableId, u32>,
+    /// Per-being race identity: which [`RaceId`] a being belongs to (design Part 20, R-AGING).
+    /// Mirrors `ages` (seeded at the dawn and at birth, pruned on death), and lets a per-being
+    /// mechanism reach its race's data, so mortality can normalize age by the race's own lifespan
+    /// (see [`World::apply_mortality_by_race`]) rather than a single hardcoded scale. A being with
+    /// no entry is untracked, and a race-keyed pass falls back to its raw-age behaviour for it.
+    race_of: BTreeMap<StableId, RaceId>,
+    /// The race records the world knows, by id (design Part 20, Part 33.4). Populated at the dawn by
+    /// [`World::seed_dawn_populations`] (which already receives the registry) and settable directly
+    /// with [`World::set_races`]. It is the registry the per-lineage drift cadence reads: a
+    /// lineage's [`Language::race`] is looked up here for its `maturity_years`, so drift derives its
+    /// generation length per lineage (see [`World::drift_languages`]) rather than one global scalar.
+    /// A lineage whose race is absent has no maturity to derive a cadence from and does not drift (a
+    /// fabricated cadence is never invented, Principle 11). This is owner config, not per-tick state,
+    /// so the whole record is not folded into [`World::state_hash`]; but each lineage's own race
+    /// maturity_years and lifespan_years (the two quantities the drift cadence and mortality
+    /// normalization read) ARE folded there in the languages loop, alongside the lineage's race id, so
+    /// a change to a race's maturity or lifespan surfaces in the fingerprint at once rather than only
+    /// through the drift it later produces.
+    races: BTreeMap<RaceId, Race>,
+    /// The per-race personality profiles (design Part 20, R-BEING-REP): the age-personality
+    /// substrate's `being.plasticity_by_age` (the maturation-timed plasticity curves) and
+    /// `being.maturity_targets` (where each trait matures to), per race. Empty until
+    /// [`World::set_personality_registry`] installs one, and the life-cadence personality beat is
+    /// then inert, so a world that declares no personality drift runs exactly as before.
+    personality: PersonalityRegistry,
+    /// Per-being live personality: the current trait values the life-cadence personality beat drifts
+    /// toward each race's maturity targets. Seeded birth-neutral when a being of a race that carries
+    /// a profile is created; a being whose race declares no profile carries no instance. It rides the
+    /// aging cadence, but a divergent personality trajectory is a divergent world (future drift keys
+    /// off it), so it IS folded into [`World::state_hash`] in mind-id then axis-id order, alongside
+    /// the `ages` it rides on.
+    traits: BTreeMap<StableId, TraitInstance>,
     /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
     /// with no entry reads every channel, so perception is gated only where a sensorium is set.
     sensorium: BTreeMap<StableId, Sensorium>,
@@ -401,6 +492,25 @@ pub struct World {
     /// cadence is then a no-op, so the hazard shape is never fabricated: aging (a bare increment)
     /// runs on the cadence regardless, but a being dies only against an owner-supplied curve.
     mortality_hazard: Option<Curve>,
+    /// The data-driven breeding-system registry (design Part 25, R-REPRO): resolves a race's
+    /// [`crate::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
+    /// sex is read off its sex-determination locus. Empty by default; when a race's system is not
+    /// registered, sex determination falls back to a single class, so the census authors no ratio.
+    breeding_systems: BreedingSystemRegistry,
+    /// The reproductive-success census for the current window (design Part 25, R-REPRO): the sex of
+    /// each being and the offspring credited to each contributing parent, from which an effective
+    /// population size Ne derives ([`ReproductiveCensus::effective_size`]). Credited in
+    /// [`World::birth`] and seeded at the dawn; a window transient like the pool-tier accumulator,
+    /// so it is kept out of [`World::state_hash`] and carries its own stamped reduction hash.
+    census: ReproductiveCensus,
+    /// The stamped integer-Gaussian approximation the world's mean-zero draws use (design 25.10;
+    /// `genome.gauss_approx`, a world-identity value). One shape for the whole world, so the
+    /// axiom-inheritance belief-mutation deviate ([`World::inherited_beliefs`]) draws through the
+    /// same approximation the genome's continuous mutation and the controller mutation do, rather
+    /// than a bare `k = 12` literal duplicated at each consumer. [`World::new`] seeds the labelled
+    /// stamped default; a canonical build overrides it with [`World::set_gauss_approx`] from the
+    /// manifest.
+    gauss_approx: GaussApprox,
 }
 
 impl World {
@@ -419,9 +529,14 @@ impl World {
             place_of: BTreeMap::new(),
             genomes: BTreeMap::new(),
             intrinsic: BTreeMap::new(),
+            stubbornness_split: None,
             mate_prefs: BTreeMap::new(),
             affect: BTreeMap::new(),
             ages: BTreeMap::new(),
+            race_of: BTreeMap::new(),
+            races: BTreeMap::new(),
+            personality: PersonalityRegistry::new(),
+            traits: BTreeMap::new(),
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
@@ -445,7 +560,46 @@ impl World {
             workers: 1,
             life_cadence_ticks: LIFE_CADENCE_TICKS,
             mortality_hazard: None,
+            breeding_systems: BreedingSystemRegistry::new(),
+            census: ReproductiveCensus::new(),
+            // The labelled stamped default (design 25.10, `genome.gauss_approx = SumOfUniforms{k=12}`):
+            // the same shape the genome and controller mutations draw through, so the belief-mutation
+            // deviate shares one world-identity approximation. A canonical build overrides it from the
+            // manifest via `set_gauss_approx`.
+            gauss_approx: GaussApprox::SumOfUniforms { k: 12 },
         }
+    }
+
+    /// Install the breeding-system registry (design Part 25, R-REPRO). Until set, sex determination
+    /// falls back to a single class and the reproductive census records every breeder as that class,
+    /// so a world that has not declared its mating types authors no sex ratio.
+    pub fn set_breeding_systems(&mut self, registry: BreedingSystemRegistry) {
+        self.breeding_systems = registry;
+    }
+
+    /// The reproductive-success census for the current window, for inspecting the sex tally and the
+    /// derived effective population size Ne (design Part 25, R-REPRO).
+    pub fn census(&self) -> &ReproductiveCensus {
+        &self.census
+    }
+
+    /// Close the current census window and open the next (bumps the window stamp and clears the
+    /// tally). A run drives this on its generation cadence so each window's Ne measures a fresh
+    /// cohort; between windows the tally accumulates births.
+    pub fn reset_census_window(&mut self) {
+        self.census.reset();
+    }
+
+    /// A being's sex class, read off its race's sex-determination locus through the ordinary
+    /// expression map (design Part 25, R-REPRO). Deterministic and RNG-free: sex is a pure function
+    /// of the genome and the race's gene set and breeding system. `None` when the race's breeding
+    /// system is not registered, so a caller never runs on a fabricated class.
+    fn express_sex(&self, race: &Race, genome: &Genome) -> Option<SexClass> {
+        let system = self.breeding_systems.get(race.breeding)?;
+        let expressed = race
+            .genes
+            .express(genome, Channel::SexDetermination, Fixed::ZERO);
+        Some(system.assign(expressed))
     }
 
     /// Set the execution width of the parallel read stage (the ActionStage worker
@@ -466,12 +620,34 @@ impl World {
         self.life_cadence_ticks = ticks.max(1);
     }
 
+    /// The life-cadence period in ticks the world currently beats aging and mortality on
+    /// (design Part 20). On the canonical path this is the value derived from the world's orbit
+    /// by [`World::from_manifest_with_orbital`]; with the direct constructor it is the labelled
+    /// dev fallback [`LIFE_CADENCE_TICKS`] until [`World::set_life_cadence`] overrides it.
+    pub fn life_cadence_ticks(&self) -> u64 {
+        self.life_cadence_ticks
+    }
+
     /// Install the age-hazard curve the mortality beat rolls against (design Part 20). Until this
     /// is set the mortality half of the life cadence is a no-op, so the world never runs on a
     /// fabricated hazard shape: the owner supplies the curve, its shape reserved with its basis
     /// (the failure boundary of senescence the age data implies). Aging still beats without it.
     pub fn set_mortality_hazard(&mut self, hazard: Curve) {
         self.mortality_hazard = Some(hazard);
+    }
+
+    /// Stamp the world's integer-Gaussian approximation (design 25.10, `genome.gauss_approx`), the
+    /// one world-identity shape the mean-zero draws use. Overrides the labelled [`World::new`]
+    /// default so the axiom-inheritance belief mutation draws through the same approximation the
+    /// genome and controller mutations do. A canonical build reads it from the manifest and installs
+    /// it here; changing it re-rolls the world (it feeds every quantitative lineage).
+    pub fn set_gauss_approx(&mut self, gauss: GaussApprox) {
+        self.gauss_approx = gauss;
+    }
+
+    /// The world's stamped integer-Gaussian approximation.
+    pub fn gauss_approx(&self) -> GaussApprox {
+        self.gauss_approx
     }
 
     /// Set the master seed that keys every stochastic draw (perception rolls and, in
@@ -492,25 +668,84 @@ impl World {
         channels: &AccessChannelRegistry,
         profile: Profile,
     ) -> Result<Self, CalibrationError> {
-        let required = [
+        // The two per-world orbital scalars join the required gate list here (alongside the base
+        // tick), so the PRODUCTION constructor derives the life cadence from the world's own orbit
+        // rather than inheriting World::new's Earth-year LIFE_CADENCE_TICKS fallback. A calibrated
+        // world with a reserved orbit fails loud (its year is unknown), never runs on the Earth
+        // constant. The orbit is read through the same fail-loud manifest path as every other value.
+        let mut world = World::from_manifest_gated(
+            manifest,
+            channels,
+            profile,
+            &[
+                "world.orbital_period_seconds",
+                "world.rotation_period_seconds",
+                "time.base_tick_seconds",
+            ],
+        )?;
+        let orbital = crate::clock::orbital_from_manifest(manifest)?;
+        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        world.set_life_cadence(cadence);
+        Ok(world)
+    }
+
+    /// The shared gate-and-build core of the two manifest constructors: it enforces the profile gate
+    /// over the base required set plus `extra_required`, reads the cognition, theory-of-mind, access,
+    /// and gossip calibrations, and returns a world whose life cadence is still the [`World::new`]
+    /// fallback (the caller derives and installs the real cadence). Split out so
+    /// [`World::from_manifest`] can gate on the manifest orbit while
+    /// [`World::from_manifest_with_orbital`] gates only on the base tick (the caller supplies the
+    /// orbit), without either constructor gating the other's orbital keys.
+    fn from_manifest_gated(
+        manifest: &CalibrationManifest,
+        channels: &AccessChannelRegistry,
+        profile: Profile,
+        extra_required: &[&str],
+    ) -> Result<Self, CalibrationError> {
+        let mut required = vec![
             "evidence.log_odds_clamp",
             "evidence.commit_threshold",
             "evidence.runner_up_margin",
-            "tom.meta_log_odds_clamp",
-            "tom.meta_commit_threshold",
-            "tom.meta_runner_up_margin",
             "gossip.told_weight",
             "gossip.trust_baseline",
             "gossip.trust_penalty",
         ];
+        required.extend_from_slice(extra_required);
         manifest.gate(profile, &required)?;
         let belief_params = InferenceParams::from_manifest(manifest)?;
-        let meta_params = tom::meta_params_from_manifest(manifest)?;
-        let weights = AccessWeights::from_manifest(channels, manifest)?;
+        // The meta-frame params and the witnessed/told/said assertion ladder DERIVE from the
+        // first-order evidence params (record 62.11); only the independent access levers
+        // (reachable, absence, denied) are read from the manifest.
+        let meta_params = tom::meta_params_from_evidence(&belief_params);
+        let weights = AccessWeights::from_evidence_and_manifest(channels, &meta_params, manifest)?;
         let gossip = GossipParams::from_manifest(manifest)?;
         let mut world = World::new(belief_params, meta_params, weights);
         world.channels = channels.clone();
         world.gossip = Some(gossip);
+        Ok(world)
+    }
+
+    /// A world whose calibrations are loaded from the manifest and whose life-cadence beat is
+    /// derived from a CALLER-SUPPLIED orbit (design Parts 14.6, 20, 54). Unlike
+    /// [`World::from_manifest`], which reads the orbit from the manifest's reserved per-world
+    /// scalars, this takes the orbital elements as an argument (a labelled fixture in tests, a
+    /// world's declared orbit from a tool), so it does NOT gate on the manifest orbit and can run a
+    /// calibrated determinism check against a reserved manifest that has not yet declared its orbit.
+    /// The base tick is still read live from the manifest as a canonical [`Fixed`]. Fails loud if the
+    /// base tick is reserved or the derived cadence is degenerate, so a world never runs on a
+    /// fabricated or zero cadence.
+    pub fn from_manifest_with_orbital(
+        manifest: &CalibrationManifest,
+        channels: &AccessChannelRegistry,
+        profile: Profile,
+        orbital: OrbitalElements,
+    ) -> Result<Self, CalibrationError> {
+        let mut world =
+            World::from_manifest_gated(manifest, channels, profile, &["time.base_tick_seconds"])?;
+        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        world.set_life_cadence(cadence);
         Ok(world)
     }
 
@@ -524,6 +759,15 @@ impl World {
     /// Install the gossip calibrations. Until set, the gossip step is a no-op.
     pub fn set_gossip(&mut self, params: GossipParams) {
         self.gossip = Some(params);
+    }
+
+    /// Install the reserved dogmatism/freezing split weight the enculturation band applies
+    /// (`axiom.stubbornness_dogmatism_weight`, read through
+    /// [`crate::axiom::stubbornness_dogmatism_weight`]). Until set, [`World::enculturate_band`] and
+    /// [`World::enculturate_band_bounded`] are a no-op rather than running the Friedkin-Johnsen anchor
+    /// on a fabricated half (Principle 11). A test installs a clearly-labelled fixture weight.
+    pub fn set_stubbornness_split(&mut self, weight: Fixed) {
+        self.stubbornness_split = Some(weight);
     }
 
     /// Install the modelled-dialogue substrate (the move registry and the etic force
@@ -609,10 +853,59 @@ impl World {
     /// Install the articulation system words are built from (data) as the default lineage
     /// (`LangId(0)`), which every mind speaks unless assigned otherwise. Until set, the naming
     /// game is a no-op. For several lineages, use [`World::add_language`] and
-    /// [`World::set_language_of`].
+    /// [`World::set_language_of`]. The default lineage belongs to [`RaceId`] zero (the conventional
+    /// first race, matching how [`World::lang_of_mind`] defaults to [`LangId`] zero); use
+    /// [`World::set_form_system_for`] to place it on a named race, which the drift cadence reads.
     pub fn set_form_system(&mut self, fs: FormSystem) {
+        self.set_form_system_for(RaceId(0), fs);
+    }
+
+    /// Install the default-lineage articulation system on a named race, whose `maturity_years` the
+    /// per-lineage drift cadence derives its generation length from (design Part 33.4). The race
+    /// must be present in the world's registry (through [`World::set_races`] or the dawn seeding)
+    /// for that lineage to drift.
+    pub fn set_form_system_for(&mut self, race: RaceId, fs: FormSystem) {
         self.languages
-            .insert(LangId(0), Language::new(LangId(0), fs));
+            .insert(LangId(0), Language::new(LangId(0), race, fs));
+    }
+
+    /// Install the race records the world knows, by id (design Part 20, Part 33.4). This is the
+    /// registry the per-lineage drift cadence reads for each lineage's `maturity_years`; the dawn
+    /// seeding populates it automatically, and a test or a lineage-only world sets it directly.
+    pub fn set_races(&mut self, races: BTreeMap<RaceId, Race>) {
+        self.races = races;
+    }
+
+    /// Install the per-race personality registry (design Part 20, R-BEING-REP): the age-personality
+    /// substrate's plasticity curves and maturity targets, per race. Until set, the life-cadence
+    /// personality beat is inert and no being carries a trait instance, so a world that declares no
+    /// personality drift is unchanged. Beings seeded at the dawn or born after this is installed,
+    /// whose race carries a profile, get a birth-neutral instance; [`World::install_personality`]
+    /// seeds one directly for a test or an expressed starting personality.
+    pub fn set_personality_registry(&mut self, registry: PersonalityRegistry) {
+        self.personality = registry;
+    }
+
+    /// Install a being's live personality directly (a test seed, or an expressed starting
+    /// personality). The life-cadence personality beat then drifts it toward its race's maturity
+    /// targets at the being's own age-scaled plasticity.
+    pub fn install_personality(&mut self, id: StableId, instance: TraitInstance) {
+        self.traits.insert(id, instance);
+    }
+
+    /// A being's current value on a personality trait axis, or `None` if the being carries no
+    /// personality instance (its race declares no profile, or it was never seeded).
+    pub fn trait_value(&self, id: StableId, axis: TraitAxisId) -> Option<Fixed> {
+        self.traits.get(&id).map(|inst| inst.value(axis))
+    }
+
+    /// Seed a being's birth-neutral personality if its race carries a profile (design Part 20). A
+    /// no-op when no profile is registered for the race, so the seeding path stays inert until a
+    /// world installs personality data.
+    fn seed_personality(&mut self, id: StableId, race: RaceId) {
+        if let Some(profile) = self.personality.profile(race) {
+            self.traits.insert(id, profile.birth_instance());
+        }
     }
 
     /// Register a language lineage (its own articulation system, change log, and parent).
@@ -688,8 +981,9 @@ impl World {
     /// band differ genetically, design 25.8), the member's mind is expressed from that genome
     /// through the race's gene set ([`Mind::from_genome`], the cognition phenotype of Part
     /// 25.6), its innate disposition is seeded from the race ([`crate::axiom::IntrinsicBeliefs`],
-    /// Part 28), and it is placed. Returns the seeded ids in seeding order. A band whose race
-    /// is not in `races` is skipped.
+    /// Part 28) with each axiom's evidence ring sized from the member's own expressed memory
+    /// through `ring_law` ([`RingCapacityLaw::capacity_for`]), and it is placed. Returns the
+    /// seeded ids in seeding order. A band whose race is not in `races` is skipped.
     ///
     /// This is the convergence point of the deep being model: the map, the genome, the value
     /// substrate (Part 21), and the axiom kernel (Part 28) first run together here. It is
@@ -705,7 +999,13 @@ impl World {
         &mut self,
         races: &BTreeMap<RaceId, Race>,
         bands: &[BandSpec],
+        ring_law: &RingCapacityLaw,
     ) -> Vec<StableId> {
+        // Record the race registry so the per-lineage drift cadence can read each lineage's race
+        // maturity without the registry being threaded through every tick (design Part 33.4).
+        for (id, race) in races {
+            self.races.entry(*id).or_insert_with(|| race.clone());
+        }
         let mut seeded = Vec::new();
         for band in bands {
             let Some(race) = races.get(&band.race) else {
@@ -714,10 +1014,28 @@ impl World {
             for _ in 0..band.members {
                 let id = self.reg.mint();
                 let genome = race.pool.promote(self.seed, id.0, race.ploidy());
-                let mind = Mind::from_genome(id, &race.genes, &genome, race.environment);
+                // Express the member's mind on the race's environment baseline plus its own
+                // mean-zero developmental offset (the V_E spread, design Part 25.6), keyed on the
+                // member's id at the dawn tick 0. At the reserved interim `environment_variance` of
+                // zero the offset is exactly zero, so this reproduces the pre-offset dawn bit for
+                // bit; a positive spread makes members of one band express different minds from one
+                // genome-and-environment rule, without shifting the band mean.
+                let env =
+                    race.environment + env_offset(self.seed, id, 0, race.environment_variance);
+                let mind = Mind::from_genome(id, &race.genes, &genome, env);
+                // The dawn member's evidence ring is sized from its own expressed memory through
+                // the shared ring-capacity law, not copied from the race template's literal cap,
+                // so a mindful founder carries a larger ring than a forgetful one of the same
+                // race (design Part 25.6, Part 9; the law reads only the memory value, never the
+                // race, Principle 9).
+                let cap = ring_law.capacity_for(mind.memory);
+                let mut intrinsic = race.intrinsic.clone();
+                for ax in &mut intrinsic.axioms {
+                    ax.evidence = EvidenceRing::new(cap);
+                }
                 self.minds.insert(id, mind);
                 self.genomes.insert(id, genome);
-                self.intrinsic.insert(id, race.intrinsic.clone());
+                self.intrinsic.insert(id, intrinsic);
                 // Seed the mate preference with unbiased variation: a weight in [-1, 1] drawn per
                 // being under Phase::MATE_CHOICE. The draw is symmetric about zero (indifference),
                 // so the dawn population carries variation without an authored direction; which
@@ -729,6 +1047,19 @@ impl World {
                 self.mate_prefs.insert(id, MatePreference::new(weight));
                 self.place_of.insert(id, band.place);
                 self.ages.insert(id, 0);
+                self.race_of.insert(id, band.race);
+                // Seed a birth-neutral personality if the race carries a profile (inert otherwise).
+                self.seed_personality(id, band.race);
+                // Stamp the founder's gene-fed sex into the census (read off its sex-determination
+                // locus, no RNG). A founding cohort thus carries a sex ratio that emerged from its
+                // pool's sex-determination allele frequencies rather than being drawn.
+                let founder_sex = self
+                    .genomes
+                    .get(&id)
+                    .and_then(|g| self.express_sex(race, g));
+                if let Some(sex) = founder_sex {
+                    self.census.record_sex(id, sex);
+                }
                 seeded.push(id);
             }
         }
@@ -811,6 +1142,12 @@ impl World {
     /// selection and the conformist and prestige biases (which sharpen this into schism) are
     /// the deferred next brick; this is the plain anchored average.
     pub fn enculturate_band(&mut self, members: &[StableId], axis: AxiomAxisId) {
+        // The dogmatism/freezing split weight is a reserved value; without it the anchor cannot be
+        // computed without fabricating a half, so the round is a no-op until it is installed.
+        let split = match self.stubbornness_split {
+            Some(w) => w,
+            None => return,
+        };
         let mean = {
             let pairs = members.iter().filter_map(|id| {
                 let intr = self.intrinsic.get(id)?;
@@ -828,7 +1165,7 @@ impl World {
                     axioms, epistemic, ..
                 } = intr;
                 if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
-                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness, split);
                     ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
                 }
             }
@@ -851,6 +1188,12 @@ impl World {
         axis: AxiomAxisId,
         epsilon: Fixed,
     ) {
+        // The dogmatism/freezing split weight is reserved; the round is a no-op until it is installed
+        // rather than fabricating a half.
+        let split = match self.stubbornness_split {
+            Some(w) => w,
+            None => return,
+        };
         let snapshot: Vec<(StableId, Fixed, Fixed)> = members
             .iter()
             .filter_map(|&id| {
@@ -872,7 +1215,7 @@ impl World {
                     axioms, epistemic, ..
                 } = intr;
                 if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
-                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness, split);
                     ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
                 }
             }
@@ -936,6 +1279,34 @@ impl World {
         clusters
     }
 
+    /// The band-mean memory capacity of a founding band: the arithmetic mean of every member's
+    /// [`Mind::memory`], folded in canonical [`StableId`] order (design Part 33.4, the
+    /// R-LANG-DET salience decay). This is the representative memory a
+    /// [`crate::language::SalienceDecayLaw`] reads to set the band's concept-salience decay
+    /// rate, so the rate a founding culture's lexicon leaks at is a consequence of who founds it
+    /// rather than an authored constant. The members are visited in sorted id order, and the sum
+    /// accumulates in 128-bit space before a single divide, so the mean is bit-identical
+    /// regardless of the order the members are supplied or the thread count (Principle 3).
+    /// Returns `None` if no member of the band has a mind (nothing to average), so the caller
+    /// never divides by zero or invents a mean. The fold reads only per-being memory, never a
+    /// race id, so two bands of different composition give different rates from one rule.
+    pub fn band_mean_memory(&self, members: &[StableId]) -> Option<Fixed> {
+        let mut ids: Vec<StableId> = members.to_vec();
+        ids.sort();
+        let mut numerator: i128 = 0;
+        let mut count: i128 = 0;
+        for id in ids {
+            if let Some(mind) = self.minds.get(&id) {
+                numerator += mind.memory.to_bits() as i128;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return None;
+        }
+        Some(Fixed::from_bits((numerator / count) as i64))
+    }
+
     /// Produce a child by inheriting intrinsic beliefs from a parent and the local band (design
     /// Part 28). A fresh id is minted; for each axiom the parent holds, the child's innate seed
     /// (and its starting stance) is the heritable-plus-encultured blend of the parent's seed and
@@ -945,16 +1316,19 @@ impl World {
     /// spread are reserved owner values supplied by the caller; the per-axis heritability of the
     /// axiom registry is the refinement. The child copies the parent's epistemic stance and
     /// value profile (their deeper inheritance is a follow-on), and each child axiom gets a
-    /// fresh empty evidence ring of the parent axiom's capacity. Returns the child's id, or
-    /// `None` if the parent holds no intrinsic beliefs.
+    /// fresh empty evidence ring sized from the child's own `child_memory` through `ring_law`
+    /// ([`RingCapacityLaw::capacity_for`]), not copied from the parent axiom's cap. Returns the
+    /// child's id, or `None` if the parent holds no intrinsic beliefs.
     ///
-    /// This is the intrinsic-belief half of a birth. The genome half (a genome from
-    /// `GeneticScheme::reproduce` and a mind from [`Mind::from_genome`]) and combining the two
-    /// into one birth are the integration follow-on, so the returned child carries beliefs but
-    /// no mind or genome yet. Deterministic: the draw is keyed on the child's canonical id, so
-    /// it is reproducible as long as birth order is a deterministic function of canonical state
-    /// (an observer-driven birth path would key on a birth-event coordinate instead, the
-    /// Principle 10 caveat).
+    /// This is the intrinsic-belief half of a birth, decoupled from `self.minds`: the caller
+    /// pushes the child's expressed memory in (the axiom-only harness passes [`Fixed::ONE`], the
+    /// neutral memory of a bare being). The genome half (a genome from `GeneticScheme::reproduce`
+    /// and a mind from [`Mind::from_genome`]) and combining the two into one birth are
+    /// [`World::birth`], which passes the child's own expressed memory. Deterministic: the draw is
+    /// keyed on the child's canonical id, so it is reproducible as long as birth order is a
+    /// deterministic function of canonical state (an observer-driven birth path would key on a
+    /// birth-event coordinate instead, the Principle 10 caveat).
+    #[allow(clippy::too_many_arguments)]
     pub fn inherit_child(
         &mut self,
         parent: StableId,
@@ -962,6 +1336,8 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        child_memory: Fixed,
+        ring_law: &RingCapacityLaw,
     ) -> Option<StableId> {
         let child = self.reg.mint();
         let beliefs = self.inherited_beliefs(
@@ -971,6 +1347,8 @@ impl World {
             heritability,
             mutation_spread,
             generation,
+            child_memory,
+            ring_law,
         )?;
         self.intrinsic.insert(child, beliefs);
         Some(child)
@@ -981,8 +1359,11 @@ impl World {
     /// each axiom the parent holds, the child's innate seed (and starting stance) is the
     /// heritable-plus-encultured blend of the parent's seed and the band's local mean plus a
     /// bounded mutation drawn under [`Phase::AXIOM_INHERIT`] keyed on the child and the axis;
-    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings.
-    /// `None` if the parent holds no intrinsic beliefs.
+    /// the child copies the parent's epistemic stance and values and gets fresh evidence rings
+    /// sized from the child's own `child_memory` through `ring_law`. Kept decoupled from
+    /// `self.minds` so the axiom-only harness can drive it with an explicit memory; `None` if the
+    /// parent holds no intrinsic beliefs.
+    #[allow(clippy::too_many_arguments)]
     fn inherited_beliefs(
         &self,
         child: StableId,
@@ -991,6 +1372,8 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        child_memory: Fixed,
+        ring_law: &RingCapacityLaw,
     ) -> Option<IntrinsicBeliefs> {
         let parent_beliefs = self.intrinsic.get(&parent)?;
         let mut child_axioms = Vec::with_capacity(parent_beliefs.axioms.len());
@@ -1003,15 +1386,21 @@ impl World {
                 });
                 axiom::confidence_weighted_mean(pairs).unwrap_or(pax.innate_seed)
             };
-            let unit = DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
-                .rng(self.seed)
-                .unit_fixed(0);
+            // Draw the belief-mutation deviate through the world's stamped Gaussian approximation
+            // (design 25.10), the one shape the genome and controller mutations also draw through,
+            // rather than a bare k=12 literal at this consumer.
+            let deviate = gaussian_unit(
+                &DrawKey::pair(child.0, pax.axis.0 as u64, generation, Phase::AXIOM_INHERIT)
+                    .rng(self.seed),
+                0,
+                self.gauss_approx,
+            );
             let seed = axiom::inherit_seed(
                 pax.innate_seed,
                 local_mean,
                 heritability,
                 mutation_spread,
-                unit,
+                deviate,
             );
             child_axioms.push(Axiom {
                 axis: pax.axis,
@@ -1022,7 +1411,7 @@ impl World {
                 salience: pax.salience,
                 stubbornness: pax.stubbornness,
                 innate_seed: seed,
-                evidence: EvidenceRing::new(pax.evidence.cap()),
+                evidence: EvidenceRing::new(ring_law.capacity_for(child_memory)),
             });
         }
         Some(IntrinsicBeliefs {
@@ -1038,9 +1427,14 @@ impl World {
     /// scheme (`GeneticScheme::reproduce`, keyed under [`Phase::REPRODUCE`] on the parents and
     /// the generation), its mind is expressed from that genome through the race's gene set
     /// ([`Mind::from_genome`]), and its intrinsic beliefs are inherited from the first parent
-    /// and the local band (the heritable-plus-encultured blend). The child is registered with a
-    /// genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id, or
-    /// `None` if either parent has no genome or the first parent has no beliefs.
+    /// and the local band (the heritable-plus-encultured blend), with each axiom's evidence ring
+    /// sized from the child's own recombined memory through `ring_law`. The child is registered
+    /// with a genome, a mind, and intrinsic beliefs; the caller places it. Returns the child id,
+    /// or `None` if either parent has no genome or the first parent has no beliefs.
+    ///
+    /// The genome and the mind are expressed before the beliefs are inherited, so the ring cap
+    /// reads the child's own recombined memory phenotype rather than the first parent's cap; the
+    /// counter-keyed RNG makes the ordering immaterial to determinism.
     ///
     /// Deterministic and reproducible from the seed and the inputs: the genome draws key on the
     /// parents and the generation, the belief mutation keys on the child id and the axis. The
@@ -1058,18 +1452,15 @@ impl World {
         heritability: Fixed,
         mutation_spread: Fixed,
         generation: u64,
+        ring_law: &RingCapacityLaw,
     ) -> Option<StableId> {
         let genome_a = self.genomes.get(&parent_a)?.clone();
         let genome_b = self.genomes.get(&parent_b)?.clone();
         let child = self.reg.mint();
-        let beliefs = self.inherited_beliefs(
-            child,
-            parent_a,
-            band,
-            heritability,
-            mutation_spread,
-            generation,
-        )?;
+        // Express the child's genome and mind first, so its evidence ring is sized from its own
+        // recombined memory phenotype rather than the first parent's cap (the counter-keyed RNG
+        // is order-independent, so computing these before the belief inheritance does not change
+        // any draw).
         let child_genome = race.scheme.reproduce(
             &genome_a,
             parent_a.0,
@@ -1079,11 +1470,32 @@ impl World {
             self.seed,
             generation,
         );
-        let mind = Mind::from_genome(child, &race.genes, &child_genome, race.environment);
+        // Express the child's mind on the race's environment baseline plus its own mean-zero
+        // developmental offset (design Part 25.6), keyed on the child's id and this generation.
+        // Two siblings recombined identically from one pair of parents at one generation share a
+        // genome but draw distinct offsets from their distinct ids, so V_E makes their expressed
+        // minds differ; at the reserved interim `environment_variance` of zero the offset vanishes
+        // and this reproduces the pre-offset birth.
+        let env =
+            race.environment + env_offset(self.seed, child, generation, race.environment_variance);
+        let mind = Mind::from_genome(child, &race.genes, &child_genome, env);
+        let beliefs = self.inherited_beliefs(
+            child,
+            parent_a,
+            band,
+            heritability,
+            mutation_spread,
+            generation,
+            mind.memory,
+            ring_law,
+        )?;
         self.minds.insert(child, mind);
         self.genomes.insert(child, child_genome);
         self.intrinsic.insert(child, beliefs);
         self.ages.insert(child, 0);
+        self.race_of.insert(child, race.id);
+        // Seed a birth-neutral personality if the race carries a profile (inert otherwise).
+        self.seed_personality(child, race.id);
         // Inherit the mate preference as a quantitative trait: the midparent of the two parents'
         // weights plus a bounded mutation drawn under Phase::MATE_CHOICE keyed on the child,
         // scaled by the same `mutation_spread` the belief inheritance uses (so no new value is
@@ -1107,6 +1519,33 @@ impl World {
         let mutation = (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(mutation_spread);
         let child_w = (midparent + mutation).clamp(Fixed::from_int(-1), Fixed::from_int(1));
         self.mate_prefs.insert(child, MatePreference::new(child_w));
+        // Credit the reproductive census (design Part 25, R-REPRO). Sex is a gene-fed phenotype read
+        // off the sex-determination locus, deterministic and RNG-free: the child's sex, and each
+        // contributing parent's sex, are expressed the same way any other channel is. A two-parent
+        // (sexual diploid) birth credits both parents once; a single-parent (haploid or clonal)
+        // birth credits only the first, so the offspring tally stays exactly the summed parental
+        // contribution. An unknown sex (no registered breeding system) folds into the default class,
+        // so the tally never leaks a credit even before mating types are declared.
+        let child_sex = self
+            .genomes
+            .get(&child)
+            .and_then(|g| self.express_sex(race, g))
+            .unwrap_or_default();
+        let a_sex = self
+            .genomes
+            .get(&parent_a)
+            .and_then(|g| self.express_sex(race, g))
+            .unwrap_or_default();
+        let mut parents = vec![(parent_a, a_sex)];
+        if matches!(race.scheme.reproduction, ReproductionMode::SexualDiploid) {
+            let b_sex = self
+                .genomes
+                .get(&parent_b)
+                .and_then(|g| self.express_sex(race, g))
+                .unwrap_or_default();
+            parents.push((parent_b, b_sex));
+        }
+        self.census.record_birth(&parents, child, child_sex);
         Some(child)
     }
 
@@ -1210,6 +1649,13 @@ impl World {
         self.ages.insert(id, age);
     }
 
+    /// A being's race, if its identity is tracked (seeded at the dawn and at birth). A being with
+    /// no recorded race returns `None`, and the race-keyed mortality pass falls back to raw-age
+    /// hazard for it (see [`World::apply_mortality_by_race`]).
+    pub fn race_of(&self, id: StableId) -> Option<RaceId> {
+        self.race_of.get(&id).copied()
+    }
+
     /// Advance every tracked being's age by one life-cadence step (design Part 20). This is the
     /// life-process beat the gap names: the caller runs it once per life cadence (the cadence
     /// period in ticks is a reserved owner value, so wiring it into [`World::tick`] on a fixed
@@ -1251,6 +1697,56 @@ impl World {
         dead
     }
 
+    /// Run one mortality pass that evaluates the hazard at each being's race-normalized life
+    /// fraction rather than its raw age (design Part 20, R-AGING). For each being in id order, its
+    /// race is looked up through `race_of` and the hazard is evaluated at [`Race::life_fraction`]
+    /// (raw age divided by that race's own lifespan), so one shared curve culls a short-lived and a
+    /// long-lived race each on its own scale, keyed only off per-race data (Principle 9). The
+    /// `hazard` curve here is defined on the life-fraction domain `[0, 1]`, distinct from the
+    /// raw-age curve [`World::apply_mortality`] reads.
+    ///
+    /// A being whose race is untracked, or whose race is absent from `races`, cannot be mapped onto
+    /// the life-fraction domain (there is no lifespan to normalize its age by), so the pass FAILS
+    /// LOUD with [`UnraceableBeing`] rather than reading the curve in the wrong domain. The earlier
+    /// fallback evaluated such a being at its RAW age against this fraction curve, a domain mismatch
+    /// that read the curve's far end (making the unraced class either near-immortal or culled
+    /// wholesale depending on the curve). The check runs before any removal, so a refused pass
+    /// leaves the population untouched. Only the curve's x-input differs from
+    /// [`World::apply_mortality`]: the [`Phase::MORTALITY`] roll, the comparison, and the removal
+    /// path are identical, so the two share a deterministic, observer-independent,
+    /// thread-count-independent roll.
+    pub fn apply_mortality_by_race(
+        &mut self,
+        races: &BTreeMap<RaceId, Race>,
+        hazard: &Curve,
+    ) -> Result<Vec<StableId>, UnraceableBeing> {
+        // Resolve every being's life fraction first, refusing on the first being that cannot be
+        // race-normalized, so no partial cull runs before the refusal.
+        let mut fractions: Vec<(StableId, u32, Fixed)> = Vec::with_capacity(self.ages.len());
+        for (&id, &age) in &self.ages {
+            let race = self
+                .race_of
+                .get(&id)
+                .and_then(|rid| races.get(rid))
+                .ok_or(UnraceableBeing(id))?;
+            fractions.push((id, age, race.life_fraction(age)));
+        }
+        let dead: Vec<StableId> = fractions
+            .into_iter()
+            .filter_map(|(id, age, x)| {
+                let chance = hazard.eval(x).clamp(Fixed::ZERO, Fixed::ONE);
+                let roll = DrawKey::entity(id.0, age as u64, Phase::MORTALITY)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                (roll < chance).then_some(id)
+            })
+            .collect();
+        for id in &dead {
+            self.remove_being(*id);
+        }
+        Ok(dead)
+    }
+
     /// The life-cadence beat, run once per [`World::tick`] but firing only on the cadence period
     /// (design Part 20, R-AGING). On a tick whose clock is a whole multiple of
     /// [`World::set_life_cadence`]'s period, every tracked being ages one step and then, if an
@@ -1266,8 +1762,37 @@ impl World {
             return;
         }
         self.age_step();
+        self.drift_personalities();
         if let Some(hazard) = self.mortality_hazard.clone() {
             self.apply_mortality(&hazard);
+        }
+    }
+
+    /// The personality beat of the life cadence (design Part 20, R-BEING-REP): every tracked being
+    /// whose race carries a personality profile drifts its traits one step toward that race's
+    /// maturity targets at its own age-scaled plasticity, through the shared
+    /// [`crate::personality::age_personality`] kernel. Beings are walked in canonical id order (the
+    /// `BTreeMap` order), and the drift is a pure fixed-point function of each being's new age and its
+    /// per-race data, with no RNG and no race branch (Principles 3, 9), so the beat replays bit for
+    /// bit. It runs after aging (so a being drifts at its new age) and before mortality, matching the
+    /// established life-cadence order. Inert when no personality registry is installed or no being
+    /// carries an instance, so the world never drifts on a fabricated profile.
+    fn drift_personalities(&mut self) {
+        if self.personality.is_empty() || self.traits.is_empty() {
+            return;
+        }
+        for (id, inst) in self.traits.iter_mut() {
+            let Some(race_id) = self.race_of.get(id).copied() else {
+                continue;
+            };
+            let Some(profile) = self.personality.profile(race_id) else {
+                continue;
+            };
+            let Some(race) = self.races.get(&race_id) else {
+                continue;
+            };
+            let age = self.ages.get(id).copied().unwrap_or(0);
+            age_personality(inst, profile, race, age);
         }
     }
 
@@ -1285,7 +1810,9 @@ impl World {
         self.mate_prefs.remove(&id);
         self.affect.remove(&id);
         self.ages.remove(&id);
+        self.race_of.remove(&id);
         self.sensorium.remove(&id);
+        self.traits.remove(&id);
         self.drive_levels.remove(&id);
         self.last_action.remove(&id);
         self.lexicons.remove(&id);
@@ -1434,7 +1961,7 @@ impl World {
         self.converse();
         self.gossip();
         self.converse_language();
-        self.drift_languages();
+        self.drift_step();
         self.life_cadence();
     }
 
@@ -1467,7 +1994,7 @@ impl World {
         self.converse_language();
         ns[4] = s.elapsed().as_nanos();
         let s = Instant::now();
-        self.drift_languages();
+        self.drift_step();
         ns[5] = s.elapsed().as_nanos();
         // The coarse life beat runs after the six cognition phases so tick_timed produces the same
         // state tick would; it is not one of the profiled six (it fires only on the cadence period).
@@ -1546,26 +2073,58 @@ impl World {
         }
     }
 
+    /// The tick's drift beat: run [`World::drift_languages`] against the world's own race registry.
+    /// The registry is moved out and back rather than borrowed so the drift pass can hold `&mut
+    /// self` for the lexicon rewrites while reading each lineage's race maturity; the move is a
+    /// cheap pointer swap and cannot change the state, so replay is bit-identical.
+    fn drift_step(&mut self) {
+        let races = std::mem::take(&mut self.races);
+        self.drift_languages(&races);
+        self.races = races;
+    }
+
     /// The drift step (design 33.4): once per generation each lineage may innovate a regular
     /// form change, which is then applied in innovation order to every word its speakers hold,
     /// so the lineage's lexicon drifts as a unit and two separated lineages diverge into
-    /// sisters. A no-op until the drift calibration is set. Deterministic: each lineage's
-    /// innovation is keyed by counter RNG on the lineage, the generation, and the phase, and
-    /// the speaker walk is id-ordered.
-    fn drift_languages(&mut self) {
+    /// sisters. The generation length is not one global scalar: it DERIVES per lineage from the
+    /// speaking race's `maturity_years` against the world's `life_cadence_ticks` (the orbital year
+    /// in ticks), so lineages of races with different maturities drift on different cadences from
+    /// one mechanism, and `races` is the registry the per-lineage race maturity is read from. A
+    /// no-op until the drift calibration is set, and a lineage whose race is absent does not drift.
+    /// Deterministic: each lineage's innovation is keyed by counter RNG on the lineage, its own
+    /// generation, and the phase, and the speaker walk is id-ordered.
+    fn drift_languages(&mut self, races: &BTreeMap<RaceId, Race>) {
         let params = match self.drift {
             Some(p) => p,
             None => return,
         };
-        if self.languages.is_empty()
-            || self.clock == 0
-            || !self.clock.is_multiple_of(params.generation_ticks)
-        {
+        if self.languages.is_empty() || self.clock == 0 {
             return;
         }
-        let generation = self.clock / params.generation_ticks;
+        let base_cadence = self.life_cadence_ticks;
         let lang_ids: Vec<LangId> = self.languages.keys().copied().collect();
         for lang_id in lang_ids {
+            // The drift cadence DERIVES per lineage from the speaking race's own maturity: a
+            // generation is that race's `maturity_years` in world-time, its maturity times the
+            // orbital year in ticks (`life_cadence_ticks`, itself derived from the world's orbit).
+            // Two lineages of races with different `maturity_years` therefore beat drift on
+            // different cadences from this one mechanism, retiring the single Earth-year scalar. A
+            // lineage whose race is absent from the registry has no maturity to derive a cadence
+            // from and does not drift (a fabricated cadence is never invented, Principle 11).
+            let Some(race) = self
+                .languages
+                .get(&lang_id)
+                .and_then(|l| races.get(&l.race()))
+            else {
+                continue;
+            };
+            let cadence = (race.maturity_years as u64)
+                .saturating_mul(base_cadence)
+                .max(1);
+            if !self.clock.is_multiple_of(cadence) {
+                continue;
+            }
+            let generation = self.clock / cadence;
             let rng = DrawKey::entity(lang_id.0 as u64, generation, Phase::DRIFT).rng(self.seed);
             let new_rules = match self.languages.get_mut(&lang_id) {
                 Some(l) => l.innovate(rng, &params),
@@ -2378,6 +2937,24 @@ impl World {
                 }
             }
             h.write_u32(self.last_action.get(id).map(|a| a.0).unwrap_or(u32::MAX));
+            // The being's age in life-cadence steps and its live personality trait values (axis
+            // order). Both ride the aging cadence, but a divergent age or personality trajectory is a
+            // divergent world (mortality and future drift key off them), so they surface in the
+            // fingerprint rather than only in the drift they later produce. An untracked being folds a
+            // sentinel age and an empty trait run, each length-prefixed so a boundary is unambiguous.
+            h.write_u32(self.ages.get(id).copied().unwrap_or(u32::MAX));
+            match self.traits.get(id) {
+                None => h.write_u64(u64::MAX),
+                Some(inst) => {
+                    let entries: Vec<(crate::personality::TraitAxisId, Fixed)> =
+                        inst.entries().collect();
+                    h.write_u64(entries.len() as u64);
+                    for (axis, value) in entries {
+                        h.write_u32(axis.0);
+                        h.write_fixed(value);
+                    }
+                }
+            }
         }
         // Active traces, in id order.
         let mut traces: Vec<&Trace> = self.traces.iter().collect();
@@ -2418,9 +2995,28 @@ impl World {
                 }
             }
         }
-        // Language lineages, by id: parent and the regular-form-change log.
+        // Language lineages, by id: race (the drift-cadence datum), parent, and the
+        // regular-form-change log.
         for (id, lang) in &self.languages {
             h.write_u32(id.0);
+            h.write_u32(lang.race().0);
+            // The lineage's race maturity and lifespan in life-cadence steps: the per-lineage drift
+            // cadence derives its generation length from maturity_years, and mortality normalizes age
+            // by lifespan_years, so two worlds whose lineages age or drift on different schedules are
+            // different worlds. These fold alongside the global life_cadence and mortality_hazard
+            // below, so a change to a race's maturity or lifespan surfaces in the fingerprint at once
+            // rather than only through the drift it later produces. A lineage whose race is absent
+            // folds a sentinel pair, distinct from any real race's counts.
+            match self.races.get(&lang.race()) {
+                Some(race) => {
+                    h.write_u32(race.maturity_years);
+                    h.write_u32(race.lifespan_years);
+                }
+                None => {
+                    h.write_u32(u32::MAX);
+                    h.write_u32(u32::MAX);
+                }
+            }
             h.write_u32(lang.parent().map(|p| p.0).unwrap_or(u32::MAX));
             for rule in lang.change_log() {
                 h.write_u32(rule.dim.0);
@@ -2433,6 +3029,24 @@ impl World {
         for (mind, lang) in &self.lang_of {
             h.write_stable(*mind);
             h.write_u32(lang.0);
+        }
+        // The life-cadence period and the installed mortality-hazard curve are canonical timeline
+        // state (design Part 20): two worlds that age and die on different schedules are different
+        // worlds, so they fold in at a pinned tail position, the way LivingWorld::state_hash folds
+        // the orbit. Aging and mortality are RNG-free beats keyed off these, so an unfolded change
+        // would silently diverge replay. The curve folds as its length then its ascending-x points;
+        // an absent hazard folds as a sentinel length distinct from any real curve.
+        h.write_u64(self.life_cadence_ticks);
+        match &self.mortality_hazard {
+            None => h.write_u64(u64::MAX),
+            Some(curve) => {
+                let pts = curve.points();
+                h.write_u64(pts.len() as u64);
+                for (x, y) in pts {
+                    h.write_fixed(*x);
+                    h.write_fixed(*y);
+                }
+            }
         }
         h.finish()
     }
@@ -2465,9 +3079,71 @@ impl World {
     }
 }
 
+/// Grow the shared etic comparison substrate bottom-up from the emic value axes that recur
+/// across races (design Part 21, the R-VALUE-METRIC `value_metric.etic_substrate_axes`
+/// calibration). Cross-race value comparison passes through a shared [`EticSubstrate`], but
+/// its membership is not an authored human set: an etic axis is minted for each emic
+/// [`ValueAxisId`] whose race-count reaches `recurrence_min`, in ascending emic-id order, so
+/// the substrate carries exactly the axes that recur and an idiosyncratic axis held
+/// by one race stays private (a blind spot in cross-race comparison). Each race then projects
+/// identically onto the shared axes it carries: an emic axis that made the substrate maps onto
+/// its minted etic axis with unit weight ([`project_to_etic`] reads these), and a private axis
+/// has no projection and is absent. The mechanism is fixed Rust and iterates races and axes
+/// generically in canonical id order, never branching on a specific race id (Principle 9); the
+/// membership is a consequence of the per-race value profiles (Principle 11). Returns the
+/// substrate and the per-race projections; a `recurrence_min` above the race count yields an
+/// empty substrate and empty projections. Deterministic by construction: the counts and the
+/// mint walk sorted maps.
+///
+/// [`project_to_etic`]: crate::value::project_to_etic
+pub fn build_etic_substrate(
+    races: &BTreeMap<RaceId, ValueProfile>,
+    recurrence_min: usize,
+) -> (EticSubstrate, BTreeMap<RaceId, RaceProjection>) {
+    // Count, per emic axis, how many races carry a stance on it. A BTreeMap walks axes in
+    // ascending id order, so the recurrence pass is canonical.
+    let mut recurrence: BTreeMap<ValueAxisId, usize> = BTreeMap::new();
+    for profile in races.values() {
+        for (axis, _stance) in profile.axes() {
+            *recurrence.entry(axis).or_insert(0) += 1;
+        }
+    }
+    // Mint one fresh etic axis per recurring emic axis, in ascending emic-id order, and record
+    // the emic-to-etic map the identity projections read.
+    let mut shared: BTreeMap<ValueAxisId, EticAxisId> = BTreeMap::new();
+    let mut axes: Vec<EticAxisId> = Vec::new();
+    for (&axis, &count) in &recurrence {
+        if count >= recurrence_min {
+            let etic = EticAxisId(axes.len() as u32);
+            shared.insert(axis, etic);
+            axes.push(etic);
+        }
+    }
+    let substrate = EticSubstrate { axes };
+    // Each race projects identically onto the shared axes it carries; a private axis contributes
+    // no projection entry and stays absent.
+    let mut projections: BTreeMap<RaceId, RaceProjection> = BTreeMap::new();
+    for (&race, profile) in races {
+        let mut per_axis: BTreeMap<ValueAxisId, EmicProjection> = BTreeMap::new();
+        for (axis, _stance) in profile.axes() {
+            if let Some(&etic) = shared.get(&axis) {
+                per_axis.insert(
+                    axis,
+                    EmicProjection {
+                        onto: vec![(etic, Fixed::ONE)],
+                    },
+                );
+            }
+        }
+        projections.insert(race, RaceProjection { per_axis });
+    }
+    (substrate, projections)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::SalienceDecayLaw;
 
     fn params() -> InferenceParams {
         InferenceParams {
@@ -2489,6 +3165,44 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(w.population(), 2);
         assert!(w.mind(a).is_some());
+    }
+
+    #[test]
+    fn the_state_hash_folds_ages_and_personality_trait_trajectories() {
+        // Defect 7: a being's age and live personality ride the aging cadence, but a divergent age or
+        // personality trajectory is a divergent world (mortality and future drift key off them), so
+        // they surface in the fingerprint rather than only in the drift they later produce.
+        use crate::personality::{TraitAxisId, TraitInstance};
+        let hash_of = |age: u32, trait_value: Option<Fixed>| -> u128 {
+            let mut w = world();
+            let a = w.spawn(Fixed::ONE);
+            w.set_age(a, age);
+            if let Some(v) = trait_value {
+                w.install_personality(a, TraitInstance::from_values([(TraitAxisId(0), v)]));
+            }
+            w.state_hash()
+        };
+        let base = hash_of(5, None);
+        assert_eq!(
+            base,
+            hash_of(5, None),
+            "identical age and trait state hashes the same"
+        );
+        assert_ne!(
+            base,
+            hash_of(9, None),
+            "a divergent age trajectory surfaces in the fingerprint"
+        );
+        let drifted = hash_of(5, Some(Fixed::from_ratio(1, 3)));
+        let drifted_more = hash_of(5, Some(Fixed::from_ratio(2, 3)));
+        assert_ne!(
+            base, drifted,
+            "installing a personality trait surfaces in the fingerprint"
+        );
+        assert_ne!(
+            drifted, drifted_more,
+            "a divergent trait value surfaces in the fingerprint"
+        );
     }
 
     #[test]
@@ -2564,6 +3278,183 @@ source = "Part 9"
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         let chans = AccessChannelRegistry::default();
         assert!(World::from_manifest(&m, &chans, Profile::Calibrated).is_err());
+    }
+
+    #[test]
+    fn the_life_cadence_derives_from_the_orbit_via_from_manifest_with_orbital() {
+        // The non-steering property at the world level: two worlds built from the same dev
+        // manifest and channels, differing only in their orbit, get different life_cadence_ticks,
+        // because the cadence derives from the orbital year over the base tick rather than a
+        // hardcoded per-world number. Earth's orbit reproduces today's interim; a faster world
+        // beats aging on a shorter year, all from one derivation.
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/profiles/dev-fixtures.toml"
+        ))
+        .expect("dev fixtures load");
+        let chans = AccessChannelRegistry::from_toml_str(
+            r#"
+[[channels]]
+id = 1
+name = "witnessed"
+margin_steps = 1
+[[channels]]
+id = 2
+name = "told"
+margin_steps = 0
+[[channels]]
+id = 3
+name = "said"
+margin_steps = -1
+"#,
+        )
+        .unwrap();
+        let earth = World::from_manifest_with_orbital(
+            &manifest,
+            &chans,
+            Profile::Development,
+            OrbitalElements::dev_earth(),
+        )
+        .expect("earth world builds");
+        assert_eq!(earth.life_cadence_ticks(), 31_536_000);
+        let fast_orbit = OrbitalElements {
+            orbital_period_seconds: Fixed::from_int(86_400),
+            rotation_period_seconds: Fixed::from_int(3_600),
+        };
+        let fast =
+            World::from_manifest_with_orbital(&manifest, &chans, Profile::Development, fast_orbit)
+                .expect("fast world builds");
+        assert_eq!(fast.life_cadence_ticks(), 86_400);
+        assert_ne!(
+            earth.life_cadence_ticks(),
+            fast.life_cadence_ticks(),
+            "two orbits, two cadences from one formula"
+        );
+    }
+
+    /// A full inline manifest for the production `from_manifest` path, differing only in the orbital
+    /// period, so the regression exercises the constructor that ships (not the test-only
+    /// `from_manifest_with_orbital`).
+    fn manifest_with_orbit(orbit_seconds: &str) -> String {
+        let set = |id: &str, v: &str| {
+            format!(
+                "[[reserved]]\nid = \"{id}\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"{v}\"\nsource = \"s\"\n"
+            )
+        };
+        [
+            set("evidence.log_odds_clamp", "4"),
+            set("evidence.commit_threshold", "2"),
+            set("evidence.runner_up_margin", "1"),
+            set("tom.meta_log_odds_clamp", "4"),
+            set("tom.meta_commit_threshold", "2"),
+            set("tom.meta_runner_up_margin", "1"),
+            set("gossip.told_weight", "1"),
+            set("gossip.trust_baseline", "0.5"),
+            set("gossip.trust_penalty", "0.2"),
+            set("time.base_tick_seconds", "1"),
+            set("world.orbital_period_seconds", orbit_seconds),
+            set("world.rotation_period_seconds", "86400"),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn from_manifest_derives_the_cadence_from_the_manifest_orbit() {
+        // Regression (audit CRITICAL defect 1): the PRODUCTION constructor `from_manifest` derives
+        // the life cadence from the world's orbit read from the manifest, not from World::new's
+        // Earth-year LIFE_CADENCE_TICKS fallback. Two manifests differing only in the orbital period
+        // yield two different life_cadence_ticks, and neither is the bare 31_536_000 unless the orbit
+        // says so.
+        let chans = AccessChannelRegistry::default();
+        let fast = CalibrationManifest::from_toml_str(&manifest_with_orbit("86400")).unwrap();
+        let slow = CalibrationManifest::from_toml_str(&manifest_with_orbit("126144000")).unwrap();
+        let wf = World::from_manifest(&fast, &chans, Profile::Calibrated).unwrap();
+        let ws = World::from_manifest(&slow, &chans, Profile::Calibrated).unwrap();
+        assert_eq!(
+            wf.life_cadence_ticks(),
+            86_400,
+            "the fast orbit's year in ticks"
+        );
+        assert_eq!(
+            ws.life_cadence_ticks(),
+            126_144_000,
+            "the slow orbit's year"
+        );
+        assert_ne!(
+            wf.life_cadence_ticks(),
+            ws.life_cadence_ticks(),
+            "two orbital periods, two derived cadences"
+        );
+        assert_ne!(
+            wf.life_cadence_ticks(),
+            crate::clock::LIFE_CADENCE_TICKS,
+            "the derived cadence is not the bare Earth constant unless the orbit says so"
+        );
+        // And an Earth orbit does reproduce the Earth constant (the orbit says so), so the constant
+        // is not banished, only no longer the unconditional default.
+        let earth = CalibrationManifest::from_toml_str(&manifest_with_orbit("31536000")).unwrap();
+        let we = World::from_manifest(&earth, &chans, Profile::Calibrated).unwrap();
+        assert_eq!(we.life_cadence_ticks(), crate::clock::LIFE_CADENCE_TICKS);
+    }
+
+    #[test]
+    fn from_manifest_fails_loud_under_calibrated_when_the_orbit_is_reserved() {
+        // The other half of defect 1: a calibrated world whose orbit is unset cannot run on the
+        // Earth constant; it fails loud, because its year is unknown.
+        let mut toml = manifest_with_orbit("31536000");
+        toml = toml.replace(
+            "[[reserved]]\nid = \"world.orbital_period_seconds\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"31536000\"\nsource = \"s\"\n",
+            "[[reserved]]\nid = \"world.orbital_period_seconds\"\nbasis = \"b\"\nstatus = \"reserved\"\nsource = \"s\"\n",
+        );
+        let m = CalibrationManifest::from_toml_str(&toml).unwrap();
+        assert!(
+            World::from_manifest(&m, &AccessChannelRegistry::default(), Profile::Calibrated)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn state_hash_folds_the_life_cadence_and_the_mortality_hazard() {
+        // Regression (audit defect 4): two worlds differing only in the life cadence, or only in the
+        // installed mortality hazard, get different state hashes, so those canonical timeline fields
+        // cannot silently diverge replay.
+        let make = || World::new(params(), params(), AccessWeights::default()).with_seed(0x5EED);
+        // Two cadences.
+        let mut a = make();
+        let mut b = make();
+        a.set_life_cadence(1000);
+        b.set_life_cadence(2000);
+        assert_ne!(
+            a.state_hash(),
+            b.state_hash(),
+            "a different life cadence changes the state hash"
+        );
+        // Two hazards (same cadence).
+        let mut c = make();
+        let mut d = make();
+        c.set_life_cadence(1000);
+        d.set_life_cadence(1000);
+        c.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::ONE, Fixed::ONE),
+        ]));
+        d.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::ONE, Fixed::from_ratio(1, 2)),
+        ]));
+        assert_ne!(
+            c.state_hash(),
+            d.state_hash(),
+            "a different mortality-hazard curve changes the state hash"
+        );
+        // An absent hazard differs from a present one.
+        let mut e = make();
+        e.set_life_cadence(1000);
+        assert_ne!(
+            c.state_hash(),
+            e.state_hash(),
+            "installing a hazard changes the state hash"
+        );
     }
 
     fn trace(place: PlaceId, value: ValueId, salience: Fixed) -> Trace {
@@ -3691,5 +4582,114 @@ name = "said"
             build(),
             "the aged-and-culled world replays bit for bit"
         );
+    }
+
+    #[test]
+    fn band_memory_sets_the_salience_decay_rate_per_composition() {
+        let mut w = world();
+        // A forgetful band and a sharp band. Each member's founding memory phenotype is set
+        // directly; the band mean is the representative memory the law reads.
+        let dull = [w.spawn(Fixed::ONE), w.spawn(Fixed::ONE)];
+        for id in dull {
+            w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(1, 5);
+        }
+        let keen = [w.spawn(Fixed::ONE), w.spawn(Fixed::ONE)];
+        for id in keen {
+            w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(4, 5);
+        }
+        let dull_mem = w.band_mean_memory(&dull).unwrap();
+        let keen_mem = w.band_mean_memory(&keen).unwrap();
+        assert_eq!(dull_mem, Fixed::from_ratio(1, 5));
+        assert_eq!(keen_mem, Fixed::from_ratio(4, 5));
+        // The fold is canonical: a reversed member slice gives the same mean.
+        let rev: Vec<StableId> = dull.iter().rev().copied().collect();
+        assert_eq!(w.band_mean_memory(&rev), Some(dull_mem));
+        // A decreasing curve turns the two representative memories into two different rates,
+        // with no race branch anywhere in the path.
+        let law = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_ratio(1, 20)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        let dull_rate = law.rate_for(dull_mem);
+        let keen_rate = law.rate_for(keen_mem);
+        assert!(
+            dull_rate > keen_rate,
+            "the forgetful band decays concept salience faster"
+        );
+        // A flat curve collapses both bands to one rate: the memory channel is switched off.
+        let flat = SalienceDecayLaw {
+            curve: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 4)),
+                (Fixed::ONE, Fixed::from_ratio(1, 4)),
+            ]),
+            floor: Fixed::from_ratio(1, 100),
+        };
+        assert_eq!(flat.rate_for(dull_mem), flat.rate_for(keen_mem));
+        // An empty band has no representative memory, never a fabricated one.
+        assert_eq!(w.band_mean_memory(&[]), None);
+    }
+
+    #[test]
+    fn etic_substrate_grows_from_recurring_emic_axes() {
+        // Three races over emic value axes. Axis 1 recurs in races 0 and 1; axis 3 recurs in
+        // races 0 and 2; axes 5, 7, 9 are each private to one race.
+        let mut races: BTreeMap<RaceId, ValueProfile> = BTreeMap::new();
+        races.insert(
+            RaceId(0),
+            ValueProfile::with([
+                (ValueAxisId(1), 1),
+                (ValueAxisId(3), 1),
+                (ValueAxisId(5), 1),
+            ]),
+        );
+        races.insert(
+            RaceId(1),
+            ValueProfile::with([(ValueAxisId(1), 1), (ValueAxisId(7), 1)]),
+        );
+        races.insert(
+            RaceId(2),
+            ValueProfile::with([(ValueAxisId(3), 1), (ValueAxisId(9), 1)]),
+        );
+        let (substrate, projections) = build_etic_substrate(&races, 2);
+        // Exactly the two shared axes, minted as fresh etic ids 0 and 1 in ascending emic order.
+        assert_eq!(substrate.axes, vec![EticAxisId(0), EticAxisId(1)]);
+        // Race 0 carries both shared axes: identity projections onto etic 0 (from emic 1) and
+        // etic 1 (from emic 3); its private axis 5 is absent.
+        let p0 = &projections[&RaceId(0)];
+        assert_eq!(p0.per_axis.len(), 2);
+        assert_eq!(
+            p0.per_axis[&ValueAxisId(1)].onto,
+            vec![(EticAxisId(0), Fixed::ONE)]
+        );
+        assert_eq!(
+            p0.per_axis[&ValueAxisId(3)].onto,
+            vec![(EticAxisId(1), Fixed::ONE)]
+        );
+        assert!(
+            !p0.per_axis.contains_key(&ValueAxisId(5)),
+            "the private axis is absent from the projection"
+        );
+        // Races 1 and 2 each carry only one shared axis; their private axes are absent.
+        let p1 = &projections[&RaceId(1)];
+        assert_eq!(p1.per_axis.len(), 1);
+        assert_eq!(
+            p1.per_axis[&ValueAxisId(1)].onto,
+            vec![(EticAxisId(0), Fixed::ONE)]
+        );
+        let p2 = &projections[&RaceId(2)];
+        assert_eq!(p2.per_axis.len(), 1);
+        assert_eq!(
+            p2.per_axis[&ValueAxisId(3)].onto,
+            vec![(EticAxisId(1), Fixed::ONE)]
+        );
+        // Raising the recurrence minimum past the race count empties the substrate.
+        let (empty, projs) = build_etic_substrate(&races, 4);
+        assert!(empty.axes.is_empty());
+        for p in projs.values() {
+            assert!(p.per_axis.is_empty(), "no axis recurs four times");
+        }
     }
 }

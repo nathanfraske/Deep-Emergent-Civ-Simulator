@@ -51,9 +51,11 @@
 //!   and disconfirming tags, as the paper specifies); a recency-weighted-pressure hybrid is
 //!   reserved for the stress-test batch.
 //!
-//! Built on top of this brick: enculturation ([`confidence_weighted_mean`] and
-//! [`enculturate`], the Friedkin-Johnsen anchored average, wired over a band by
-//! [`crate::world::World::enculturate_band`]); bounded-confidence schism
+//! Built on top of this brick: enculturation ([`confidence_weighted_mean`] and [`enculturate`], the
+//! Friedkin-Johnsen anchored average, wired over a band by [`crate::world::World::enculturate_band`],
+//! which reads each mind's effective stubbornness through [`EpistemicStance::effective_stubbornness`];
+//! the [`enculturation_pull_rate`] complement, `1 - theta`, is the named rate a later group-drift or
+//! language-drift consumer would read, and has no live call site yet); bounded-confidence schism
 //! ([`bounded_confidence_mean`] and [`confidence_weighted_variance`], wired by
 //! [`crate::world::World::enculturate_band_bounded`], [`crate::world::World::is_fissioning`],
 //! and [`crate::world::World::stance_clusters`]), which fractures a spread band into sects;
@@ -71,6 +73,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use civsim_core::{EventId, Fixed};
 
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::decision::Curve;
 use crate::value::ValueProfile;
 
@@ -191,7 +194,10 @@ pub struct EvidenceRing {
 }
 
 impl EvidenceRing {
-    /// A ring of the given capacity (the reserved `axiom.evidence_ring_capacity`).
+    /// A ring of the given capacity. The capacity is DERIVED per being from its memory through the
+    /// reserved `axiom.evidence_ring_curve` (the memory-to-slots response curve), bounded by the
+    /// reserved `axiom.evidence_ring_hard_cap`; the earlier flat `axiom.evidence_ring_capacity` is
+    /// retired (see [`RingCapacityLaw`]).
     pub fn new(cap: usize) -> Self {
         EvidenceRing {
             cap,
@@ -308,16 +314,19 @@ impl EpistemicStance {
 
     /// The effective Friedkin-Johnsen stubbornness anchor for an axiom, the hybrid of a
     /// per-axiom base and the mind's epistemic temperament (the owner's decision): the base is
-    /// lifted toward one by the mind's dogmatism and freezing, `theta = base + (1 - base) *
-    /// pull` with `pull = (dogmatism + freezing) / 2` clamped to `[0, 1]`. Because the base is
-    /// the floor, theta stays at or above it, so a positive base keeps theta above zero, which
-    /// is what holds a population in lasting disagreement rather than collapsing to consensus
-    /// (the DeGroot degenerate case). The relative weighting of dogmatism versus freezing is a
-    /// tunable; the mean is the chosen form. Used by the deferred enculturation brick.
-    pub fn effective_stubbornness(&self, base: Fixed) -> Fixed {
+    /// lifted toward one by the mind's dogmatism and freezing, `theta = base + (1 - base) * pull`
+    /// with `pull = dogmatism_weight * dogmatism + (1 - dogmatism_weight) * freezing` clamped to
+    /// `[0, 1]`. Because the base is the floor, theta stays at or above it, so a positive base keeps
+    /// theta above zero, which is what holds a population in lasting disagreement rather than
+    /// collapsing to consensus (the DeGroot degenerate case). The relative weighting of dogmatism
+    /// versus freezing is not a hardcoded half: it is the reserved `axiom.stubbornness_dogmatism_weight`
+    /// (`dogmatism_weight`), passed in as data (Principle 11), and the complement weights freezing; at
+    /// one half it reproduces the plain mean. A weight outside `[0, 1]` is clamped. Used by the
+    /// enculturation band path.
+    pub fn effective_stubbornness(&self, base: Fixed, dogmatism_weight: Fixed) -> Fixed {
         let base = base.clamp(Fixed::ZERO, Fixed::ONE);
-        let pull = (self.dogmatism + self.freezing)
-            .mul(Fixed::from_ratio(1, 2))
+        let w = dogmatism_weight.clamp(Fixed::ZERO, Fixed::ONE);
+        let pull = (self.dogmatism.mul(w) + self.freezing.mul(Fixed::ONE - w))
             .clamp(Fixed::ZERO, Fixed::ONE);
         (base + (Fixed::ONE - base).mul(pull)).clamp(Fixed::ZERO, Fixed::ONE)
     }
@@ -549,6 +558,60 @@ pub fn entrenchment_threshold(curve: &Curve, rank: i32) -> Fixed {
     curve.eval(Fixed::from_int(rank))
 }
 
+/// The law mapping a being's expressed memory to its evidence-ring capacity (design Part 25.6
+/// and Part 9): a reserved response curve, read by the same [`Curve`] mechanism the
+/// entrenchment gate uses, plus a hard replay-and-state-hash ceiling. The ring holds as many
+/// recent evidences as the being's own memory phenotype (`Mind.memory`) earns through the
+/// curve, so a race whose genes invest in memory tracks more evidence and a forgetful race
+/// less, derived from that race's own body with no shared human span authored (the flat-eight
+/// Miller steer the derive audit removed, worksheet §13b). The mechanism is fixed Rust; the
+/// curve and the ceiling are data (Principle 11), the owner's reserved values. A two-point
+/// curve reproduces the linear special case the earlier `to_int`-clamped form gave.
+#[derive(Clone, Debug)]
+pub struct RingCapacityLaw {
+    /// The memory-to-slots response curve (`axiom.evidence_ring_curve`). Any monotone shape is
+    /// expressible by its points; a two-point curve is the linear special case.
+    pub curve: Curve,
+    /// The hard ceiling on ring capacity (`axiom.evidence_ring_hard_cap`): a state-hash and
+    /// replay bound on the largest ring any mind may carry, independent of any race's memory.
+    pub hard_cap: usize,
+}
+
+impl RingCapacityLaw {
+    /// The evidence-ring capacity for a being of the given expressed memory: the curve read at
+    /// the memory value, floored below at zero, rounded half-up to a whole number of slots, and
+    /// clamped to `[0, hard_cap]`. Pure fixed-point arithmetic over the memory value, no float
+    /// and no RNG, so it is bit-identical and order-independent (Principle 3), and it reads only
+    /// the memory value, never a race identifier (Principle 9): two beings of equal expressed
+    /// memory get equal rings whatever their race.
+    pub fn capacity_for(&self, memory: Fixed) -> usize {
+        let y = self.curve.eval(memory);
+        let rounded = (y.max(Fixed::ZERO) + Fixed::from_ratio(1, 2)).to_int();
+        (rounded.max(0) as usize).min(self.hard_cap)
+    }
+
+    /// Build the law from the calibration manifest: the response curve from
+    /// `axiom.evidence_ring_curve` (through [`CalibrationManifest::require_curve`]) and the
+    /// ceiling from `axiom.evidence_ring_hard_cap` (through [`CalibrationManifest::require_i64`]),
+    /// both fail-loud while reserved (Principle 11), so a canonical run obtains them from the
+    /// owner's manifest rather than a fabricated default. A negative ceiling is a bad value,
+    /// never a silent wrap.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
+        let curve = m.require_curve("axiom.evidence_ring_curve")?;
+        let raw_cap = m.require_i64("axiom.evidence_ring_hard_cap")?;
+        if raw_cap < 0 {
+            return Err(CalibrationError::BadValue {
+                id: "axiom.evidence_ring_hard_cap".to_string(),
+                detail: format!("ring-capacity ceiling cannot be negative: {raw_cap}"),
+            });
+        }
+        Ok(RingCapacityLaw {
+            curve,
+            hard_cap: raw_cap as usize,
+        })
+    }
+}
+
 /// The confidence-weighted mean stance of a group on one axiom axis (the group aggregate of
 /// design Part 28): `sum(stance * confidence) / sum(confidence)` over the members holding the
 /// axis. The accumulation is in 128-bit integer space and the division is a single final
@@ -588,6 +651,37 @@ pub fn enculturate(group_mean: Fixed, innate_seed: Fixed, theta: Fixed) -> Fixed
     let theta = theta.clamp(Fixed::ZERO, Fixed::ONE);
     ((Fixed::ONE - theta).mul(group_mean) + theta.mul(innate_seed))
         .clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
+}
+
+/// The Friedkin-Johnsen enculturation pull rate for an axiom (design Part 28): how far a member
+/// moves toward its group mean in one enculturation step, the complement of its effective
+/// stubbornness anchor, `1 - theta` with `theta =
+/// EpistemicStance::effective_stubbornness(base, dogmatism_weight)`. This is the `(1 - theta)`
+/// coefficient [`enculturate`] already applies per mind; naming it lets a later group-drift or
+/// language-drift path read one rate rather than each recomputing the complement (it has no live call
+/// site yet). Because [`EpistemicStance::effective_stubbornness`] is clamped to `[0, 1]`, so is the
+/// pull: it pins at zero for a fully stubborn anchor (theta one, a mind that does not move) and at one
+/// for no anchor (theta zero, a mind that moves fully to the mean). A pure function of the stance's
+/// temperament, the per-axiom stubbornness base, and the reserved dogmatism/freezing split weight,
+/// never a race identifier (Principle 9).
+pub fn enculturation_pull_rate(
+    stance: &EpistemicStance,
+    base: Fixed,
+    dogmatism_weight: Fixed,
+) -> Fixed {
+    Fixed::ONE - stance.effective_stubbornness(base, dogmatism_weight)
+}
+
+/// The reserved dogmatism/freezing split weight for the Friedkin-Johnsen stubbornness anchor
+/// (`axiom.stubbornness_dogmatism_weight`), read fail-loud from the manifest (Principle 11). It is the
+/// weight on dogmatism in the temperament pull `w * dogmatism + (1 - w) * freezing` that
+/// [`EpistemicStance::effective_stubbornness`] applies, the complement weighting freezing; the split
+/// was formerly a bare hardcoded half. A pure pass-through read, so a canonical run obtains it from
+/// the owner's manifest rather than a fabricated value; a build that has not installed it (through
+/// [`crate::world::World::set_stubbornness_split`]) runs the enculturation band as a no-op rather than
+/// inventing a weight.
+pub fn stubbornness_dogmatism_weight(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
+    m.require_fixed("axiom.stubbornness_dogmatism_weight")
 }
 
 /// The bounded-confidence mean a member is exposed to (design Part 28, the Deffuant and
@@ -635,26 +729,27 @@ pub fn confidence_weighted_variance(
 }
 
 /// Inherit one axiom's innate seed for a child (design Part 28): the heritable-plus-encultured
-/// blend `h * parental_seed + (1 - h) * local_mean`, plus a bounded mutation in
-/// `[-mutation_spread, +mutation_spread]` derived from `unit_draw`, a counter-RNG sample in
-/// `[0, 1)` the caller keys on the child and the axis. The heritable term is the parent's own
-/// innate seed, the Friedkin-Johnsen prejudice the enculturation rule anchors to, so a child
-/// resembles both its parent and its local culture and varies by the mutation, closing the
-/// loop between inheritance and enculturation. A pure function of its inputs (the RNG draw is
-/// supplied), so it is bit-identical; the result is clamped to the bipolar range. The mutation
-/// is a bounded uniform draw; the integer-Gaussian shape of design 25.10 is the deferred
-/// refinement, the same reserved method the genome's continuous mutation waits on.
+/// blend `h * parental_seed + (1 - h) * local_mean`, plus a mean-zero Gaussian mutation of
+/// standard deviation `mutation_spread`, formed from `unit_deviate`, a zero-mean unit-variance
+/// Gaussian sample the caller draws through the stamped integer-Gaussian approximation
+/// (`civsim_core::gaussian_unit`) and keys on the child and the axis. The heritable term is the
+/// parent's own innate seed, the Friedkin-Johnsen prejudice the enculturation rule anchors to, so
+/// a child resembles both its parent and its local culture and varies by the mutation, closing the
+/// loop between inheritance and enculturation. A pure function of its inputs (the deviate is
+/// supplied), so it is bit-identical; the result is clamped to the bipolar range. The mutation is
+/// now the same integer-Gaussian primitive the genome's continuous mutation uses (design 25.10),
+/// replacing the former bounded-uniform draw.
 pub fn inherit_seed(
     parental_seed: Fixed,
     local_mean: Fixed,
     heritability: Fixed,
     mutation_spread: Fixed,
-    unit_draw: Fixed,
+    unit_deviate: Fixed,
 ) -> Fixed {
     let h = heritability.clamp(Fixed::ZERO, Fixed::ONE);
     let blend = h.mul(parental_seed) + (Fixed::ONE - h).mul(local_mean);
-    // Map the unit draw in [0, 1) to a symmetric bounded mutation in [-spread, +spread].
-    let mutation = (unit_draw.mul(Fixed::from_int(2)) - Fixed::ONE).mul(mutation_spread);
+    // Scale the unit-variance Gaussian deviate to a mean-zero mutation of the given spread.
+    let mutation = unit_deviate.mul(mutation_spread);
     (blend + mutation).clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE)
 }
 
@@ -683,6 +778,93 @@ mod tests {
             innate_seed: stance,
             evidence: ring(cap),
         }
+    }
+
+    fn ring_law(
+        points: impl IntoIterator<Item = (Fixed, Fixed)>,
+        hard_cap: usize,
+    ) -> RingCapacityLaw {
+        RingCapacityLaw {
+            curve: Curve::new(points),
+            hard_cap,
+        }
+    }
+
+    #[test]
+    fn ring_capacity_reproduces_the_curve_at_reference_points() {
+        // A curve 0 -> 0, 1 -> 8, 2 -> 14: the reserved reference points (Miller's 7 plus or
+        // minus 2 kept only as a candidate point on the curve, not a universal count) read back
+        // exactly, and the curve is the law, no flat span authored.
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::ONE, Fixed::from_int(8)),
+                (Fixed::from_int(2), Fixed::from_int(14)),
+            ],
+            32,
+        );
+        assert_eq!(l.capacity_for(Fixed::ONE), 8, "memory one reads the curve");
+        assert_eq!(l.capacity_for(Fixed::ZERO), 0, "no memory, no ring");
+        assert_eq!(
+            l.capacity_for(Fixed::ZERO - Fixed::ONE),
+            0,
+            "negative memory clamps to zero, never a negative capacity"
+        );
+    }
+
+    #[test]
+    fn ring_capacity_clamps_to_the_hard_cap() {
+        // A curve whose plateau exceeds the ceiling: a vast memory cannot buy a ring past the
+        // hard replay-and-state-hash bound.
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::ONE, Fixed::from_int(50)),
+            ],
+            32,
+        );
+        assert_eq!(
+            l.capacity_for(Fixed::from_int(1000)),
+            32,
+            "the ceiling holds"
+        );
+    }
+
+    #[test]
+    fn ring_capacity_is_a_pure_deterministic_function() {
+        // A linear curve y = 4x: the same memory maps to the same capacity every call, and the
+        // map is monotone (more memory never yields fewer slots).
+        let l = ring_law(
+            [
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::from_int(4), Fixed::from_int(16)),
+            ],
+            64,
+        );
+        let m = Fixed::from_ratio(5, 2);
+        assert_eq!(
+            l.capacity_for(m),
+            l.capacity_for(m),
+            "the same memory maps to the same capacity every call"
+        );
+        assert!(l.capacity_for(Fixed::from_int(3)) >= l.capacity_for(Fixed::from_int(1)));
+        // Round half-up: memory 2.5 through y = 4x reads 10 exactly.
+        assert_eq!(l.capacity_for(m), 10);
+    }
+
+    #[test]
+    fn ring_capacity_law_from_manifest_fails_loud_while_reserved_and_reads_a_set_pair() {
+        use crate::calibration::CalibrationManifest;
+        // Both entries reserved: fail loud, never a fabricated law (Principle 11).
+        let reserved = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"curve\"\nsource = \"s\"\n[[reserved]]\nid = \"axiom.evidence_ring_hard_cap\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"count\"\nsource = \"s\"\n";
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert!(RingCapacityLaw::from_manifest(&m).is_err());
+        // Both set: the law reads the curve and the ceiling exactly.
+        let set = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0=0,1=8\"\nunit = \"curve\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n[[reserved]]\nid = \"axiom.evidence_ring_hard_cap\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"32\"\nunit = \"count\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n";
+        let m2 = CalibrationManifest::from_toml_str(set).unwrap();
+        let law = RingCapacityLaw::from_manifest(&m2).unwrap();
+        assert_eq!(law.hard_cap, 32);
+        assert_eq!(law.capacity_for(Fixed::ONE), 8);
     }
 
     #[test]
@@ -721,7 +903,8 @@ mod tests {
     #[test]
     fn effective_stubbornness_floors_at_the_base_and_rises_with_temperament() {
         let base = Fixed::from_ratio(1, 4);
-        // A placid mind: theta equals the base (no epistemic lift).
+        let half = Fixed::from_ratio(1, 2); // a labelled fixture split weight, not an owner value
+                                            // A placid mind: theta equals the base (no epistemic lift), for any split weight.
         let placid = EpistemicStance::new(
             [(EVIDENCE, Fixed::ONE)],
             Fixed::ZERO,
@@ -729,7 +912,8 @@ mod tests {
             Fixed::ZERO,
             Fixed::ZERO,
         );
-        assert_eq!(placid.effective_stubbornness(base), base);
+        assert_eq!(placid.effective_stubbornness(base, half), base);
+        assert_eq!(placid.effective_stubbornness(base, Fixed::ZERO), base);
         // A dogmatic, freezing mind: theta is lifted above the base but stays in range.
         let rigid = EpistemicStance::new(
             [(TRADITION, Fixed::ONE)],
@@ -738,11 +922,73 @@ mod tests {
             Fixed::ONE,
             Fixed::ZERO,
         );
-        let theta = rigid.effective_stubbornness(base);
+        let theta = rigid.effective_stubbornness(base, half);
         assert!(theta > base, "temperament lifts the anchor");
         assert!(theta <= Fixed::ONE);
         // A positive base keeps theta strictly above zero (no DeGroot consensus collapse).
-        assert!(placid.effective_stubbornness(Fixed::from_ratio(1, 10)) > Fixed::ZERO);
+        assert!(placid.effective_stubbornness(Fixed::from_ratio(1, 10), half) > Fixed::ZERO);
+    }
+
+    #[test]
+    fn the_dogmatism_freezing_split_weight_shifts_the_temperament_pull() {
+        // Defect 2: the split weight is the reserved `axiom.stubbornness_dogmatism_weight`, no longer a
+        // hardcoded half. A mind dogmatic but not freezing lifts more at a dogmatism-heavy weight; a
+        // mind freezing but not dogmatic lifts more at a freezing-heavy weight; at one half the two
+        // are symmetric, reproducing the former mean.
+        let base = Fixed::ZERO; // no floor, so theta reads the temperament pull directly
+        let dogmatic = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ONE,  // dogmatism
+            Fixed::ZERO, // seizing
+            Fixed::ZERO, // freezing
+            Fixed::ZERO,
+        );
+        let freezing = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ONE, // freezing
+            Fixed::ZERO,
+        );
+        let quarter = Fixed::from_ratio(1, 4);
+        let three_quarters = Fixed::from_ratio(3, 4);
+        // A dogmatism-heavy weight lifts the dogmatic mind more than a dogmatism-light one.
+        assert!(
+            dogmatic.effective_stubbornness(base, three_quarters)
+                > dogmatic.effective_stubbornness(base, quarter),
+            "a dogmatism-heavy split weights the dogmatic mind more"
+        );
+        // The freezing mind is the mirror image.
+        assert!(
+            freezing.effective_stubbornness(base, quarter)
+                > freezing.effective_stubbornness(base, three_quarters),
+            "a freezing-heavy split weights the freezing mind more"
+        );
+        // At one half the pure-dogmatism and pure-freezing minds are symmetric (the former mean).
+        let half = Fixed::from_ratio(1, 2);
+        assert_eq!(
+            dogmatic.effective_stubbornness(base, half),
+            freezing.effective_stubbornness(base, half),
+            "one half reproduces the symmetric plain mean"
+        );
+    }
+
+    #[test]
+    fn stubbornness_dogmatism_weight_reads_fail_loud_while_reserved() {
+        // Defect 2: the split weight is surfaced as a reserved manifest value, fail-loud until set,
+        // never a fabricated half.
+        let reserved = "[[reserved]]\nid = \"axiom.stubbornness_dogmatism_weight\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"weight\"\nsource = \"Part 28\"\n";
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert_eq!(
+            stubbornness_dogmatism_weight(&m).unwrap_err(),
+            CalibrationError::Reserved("axiom.stubbornness_dogmatism_weight".to_string())
+        );
+        let set = "[[reserved]]\nid = \"axiom.stubbornness_dogmatism_weight\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.5\"\nunit = \"weight\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"Part 28\"\n";
+        let m2 = CalibrationManifest::from_toml_str(set).unwrap();
+        assert_eq!(
+            stubbornness_dogmatism_weight(&m2).unwrap(),
+            Fixed::from_ratio(1, 2)
+        );
     }
 
     #[test]
@@ -933,6 +1179,57 @@ mod tests {
     }
 
     #[test]
+    fn enculturation_pull_rate_is_the_fj_complement_with_pinned_endpoints() {
+        // A placid mind (no epistemic lift) and a rigid one (dogmatic and freezing) exercise
+        // both ends of the temperament term.
+        let placid = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+        );
+        let rigid = EpistemicStance::new(
+            [(TRADITION, Fixed::ONE)],
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::ONE,
+            Fixed::ZERO,
+        );
+        let half = Fixed::from_ratio(1, 2); // a labelled fixture split weight
+                                            // The pull is exactly one minus the effective stubbornness across a base sweep, for
+                                            // either temperament: the same (1 - theta) coefficient enculturate applies.
+        for &(num, den) in &[(0, 1), (1, 10), (1, 4), (1, 2), (3, 4), (1, 1)] {
+            let base = Fixed::from_ratio(num, den);
+            for stance in [&placid, &rigid] {
+                assert_eq!(
+                    enculturation_pull_rate(stance, base, half),
+                    Fixed::ONE - stance.effective_stubbornness(base, half),
+                    "pull is the FJ complement"
+                );
+            }
+        }
+        // Endpoints pin at one and zero. A placid mind at base zero has theta zero, so pull one
+        // (a full move to the mean); base one pins theta at one whatever the temperament, so
+        // pull zero (no move).
+        assert_eq!(
+            enculturation_pull_rate(&placid, Fixed::ZERO, half),
+            Fixed::ONE,
+            "no anchor pulls fully to the mean"
+        );
+        assert_eq!(
+            enculturation_pull_rate(&rigid, Fixed::ONE, half),
+            Fixed::ZERO,
+            "a fully stubborn anchor does not move"
+        );
+        assert_eq!(
+            enculturation_pull_rate(&placid, Fixed::ONE, half),
+            Fixed::ZERO,
+            "base one pins the pull at zero for any temperament"
+        );
+    }
+
+    #[test]
     fn bounded_confidence_mean_admits_only_neighbours_within_the_band() {
         // A member at 0.0 with band 0.1: it averages 0.0 and 0.05 (both within), ignoring 0.9.
         let neighbours = [
@@ -973,38 +1270,26 @@ mod tests {
     fn inherit_seed_blends_parent_and_culture_with_a_bounded_mutation() {
         let parent = Fixed::ZERO;
         let culture = Fixed::ONE;
-        // No mutation (unit draw 0.5 maps to zero): h=0.5 blends to 0.5.
+        // No mutation (a zero Gaussian deviate maps to zero): h=0.5 blends to 0.5.
         let mid = inherit_seed(
             parent,
             culture,
             Fixed::from_ratio(1, 2),
             Fixed::from_ratio(1, 10),
-            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
         );
         assert_eq!(mid, Fixed::from_ratio(1, 2));
-        // h=1 is pure parent, h=0 pure culture (zero-mutation draw).
+        // h=1 is pure parent, h=0 pure culture (zero-mutation deviate).
         assert_eq!(
-            inherit_seed(
-                parent,
-                culture,
-                Fixed::ONE,
-                Fixed::ZERO,
-                Fixed::from_ratio(1, 2)
-            ),
+            inherit_seed(parent, culture, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
             parent
         );
         assert_eq!(
-            inherit_seed(
-                parent,
-                culture,
-                Fixed::ZERO,
-                Fixed::ZERO,
-                Fixed::from_ratio(1, 2)
-            ),
+            inherit_seed(parent, culture, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO),
             culture
         );
-        // The unit draw at its extremes pushes the seed by at most the spread (within
-        // fixed-point rounding of the 0.1 spread): draw 1 -> +spread, draw 0 -> -spread.
+        // A unit-variance Gaussian deviate scales the mutation by the spread: deviate +1 -> +spread,
+        // deviate -1 -> -spread (within fixed-point rounding of the 0.1 spread).
         let tol = Fixed::from_bits(4);
         let spread = Fixed::from_ratio(1, 10);
         let h = Fixed::from_ratio(1, 2); // heritability; with parent 0 and culture 1 the blend is 0.5
@@ -1014,7 +1299,7 @@ mod tests {
             (hi - (expected + spread)).abs() <= tol,
             "blend 0.5 plus the full +spread: {hi:?}"
         );
-        let lo = inherit_seed(parent, culture, h, spread, Fixed::ZERO);
+        let lo = inherit_seed(parent, culture, h, spread, Fixed::from_int(-1));
         assert!(
             (lo - (expected - spread)).abs() <= tol,
             "blend 0.5 minus the full spread: {lo:?}"

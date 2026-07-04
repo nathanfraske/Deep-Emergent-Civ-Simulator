@@ -1,0 +1,95 @@
+# World-Wiring Handoff: drive the built substrate through World::tick
+
+This is a self-contained brief for an agent picking up the world-wiring arc. Read `CLAUDE.md` first for the project customs, then this file. You do not need the prior chat. Everything you need to execute is here: the current state, the tick spine, the ordered increment plan, the exact wiring points, the determinism and Principle-9 guards, and the workflow. Work on the branch this file lives on (`claude/reserved-values-consolidation`, now merged to `main`), or a fresh branch off `main`.
+
+---
+
+## 1. What is already done (do not redo it)
+
+The derive-from-fundamentals program is complete and trusted. About forty reserved values across the whole engine now derive from universal laws or per-race/per-substance data rather than being authored: genetics (heritability, Ne, Hardy-Weinberg allele presence), metabolism (Kleiber drain, body-medium exchange), evidence and belief (Good likelihood weights, memory-derived ring, belief lift), language (acoustic phoneme priors, typology tilt, semantic thresholds, language distance, L2 acquisition, drift cadence), value and culture (etic substrate, enculturation pull, incommensurability), institutions (ADICO), technology (the composition evaluator), and personality (the age-personality substrate). Each derivation was blind-audited twice by independent adversarial panels (26 defects found and fixed on the substrates, 23 on the tail), and the workspace is green throughout. The manifest (`calibration/reserved.toml`) is now only levers, constants, budgets, and the per-race/substance data the derivations read.
+
+World-wiring increment 1 is done (commit on this branch): `FieldCalib::from_resolution` (crates/sim/src/runner.rs) routes the world-build path through `from_manifest_with_medium`, so the field diffusion coefficient derives from the selected medium's thermal diffusivity `k/(rho*c)`. That cleared audit item WP2.
+
+The gap you are closing: the substrate shelf is deep, but the running world is thin. Most of these kernels are built and unit-tested yet **not driven by the canonical tick loop**, so a running world does not yet exhibit the emergence. Your arc makes them live, one increment at a time, preserving bit-exact determinism at every step.
+
+---
+
+## 2. Prime constraints (non-negotiable, enforced by the gates)
+
+- **Determinism (Principle 3).** All canonical math is fixed-point (`civsim_core::Fixed`, Q32.32); no `f64` in canonical state. Every random draw is counter-keyed through `DrawKey`/`Phase` on a stable id, never a sequential index, so replay is bit-exact and worker-count-independent. Reductions fold in canonical id order; a non-associative fixed-point multiply must be canonically ordered; belief and axiom accumulators are order-independent i128 reductions. Any new canonical state must be folded into `state_hash`.
+- **No steering (Principle 9).** No human/terran constant on the path of world content, and no branch on a specific `RaceId` or channel label in a mechanism. Every outcome must fall out of per-being, per-race, or physics data, so two differently-seeded races diverge from data alone. `Runner::with_world` (runner.rs) fails loud on any world carrying an authored behaviour repertoire; that guard stays.
+- **Never fabricate a value (the prime directive).** If a mechanism needs a number, surface it reserved fail-loud in `calibration/reserved.toml` with its basis; never invent a plausible default.
+- **Prose customs.** No em dashes. Never the three banned -ly adverbs listed in CLAUDE.md section 3 (the adverb forms of genuine, honest, and actual). Prose over bullets in explanations. These apply to code comments, the roadmap, and your chat replies.
+- **The gates (all must pass before you commit an increment):** `cargo build`; `cargo test -p civsim-sim -p civsim-physics -p civsim-core`; `cargo fmt --all -- --check`; `cargo clippy --workspace --exclude civsim-gpu --lib --tests` (zero warnings); `bash scripts/verify.sh` (clean); the real manifest parses and every canonical scenario resolves. If a golden `state_hash` fixture shifts because a value now derives, refresh it and say so in the commit.
+
+---
+
+## 3. The tick spine as it stands
+
+Two nested loops carry the world.
+
+The outer loop, `Runner::step_inner` (crates/sim/src/runner.rs, around line 699), runs a pinned within-tick order: `field.step` (temperature diffusion and relaxation) then `phase_body_exchange` (each located body Newton-cools toward its cell) then `step_embodiment` (locomotion, scalar metabolize, ingest, only when an embodiment is present) then `world.tick` then `clock += 1`. A scheduler variant, `step_scheduled`, declares the same four phases as resource-typed systems and is proven bit-identical to the pinned order. When you add a beat you must re-declare it in the scheduler variant and keep that equality.
+
+The inner loop, `World::tick` (crates/sim/src/world.rs, around line 1921), increments the clock, applies the input batch sorted by `(mind, ordinal)` as Observe/Model stimuli, then runs seven beats in fixed order: `perceive` (counter-keyed notice per co-located being, feeding `mind.consider`), `decide` (advances drive levels, writes `last_action`), `converse` (dialogue), `gossip` (trust-scaled assertion into the log-odds accumulator), `converse_language` (the naming game), `drift_step` (per-generation form change), and `life_cadence` (fires on its period: `age_step`, then `drift_personalities`, then mortality only if a hazard is installed).
+
+So the running world today drives evidence and belief at the individual tier, the language naming game and drift, personality maturation drift, aging, and mortality. `decide` is inert on the canonical spine because of the behaviour-refusal guard.
+
+The dormant substrate hooks into named gaps in this spine: there is no birth half inside `life_cadence` (a run can only shrink), no aggregate belief-diffusion beat between `gossip` and `life_cadence`, no enculturation beat between `decide` and `drift_step`, no technology-transmission beat between `gossip` and `drift_step`, no founder step at world construction that arms the language beats (a generated world leaves language and drift `None`, so `converse_language` and `drift_step` early-return), and the genome and physiology tiers freeze after the pre-dawn genesis epoch.
+
+---
+
+## 4. The immediate prerequisite: the production assembly path
+
+Before most increments have anywhere to run, one seam from increment 1 must close: **no production path assembles a whole `Runner` from a resolved scenario and seeds a dawn population.** `FieldCalib::from_resolution` exists but its top-level caller does not; `World::seed_dawn_populations` (world.rs) runs the genome and axiom kernels to found a population but is invoked only by tests; the generated world leaves `language` and `drift` `None`.
+
+Build this first: a production world-build function that takes a resolved scenario (`ScenarioResolution`, which already carries the resolved medium), constructs the `Runner` with `FieldCalib::from_resolution`, seeds a dawn population through `seed_dawn_populations`, and arms the language and drift state. This is the foundation increments 2, 5, and 6 hang their beats on. Keep it fail-loud (a reserved or missing profile refuses to build) and determinism-clean (the seed is counter-keyed).
+
+---
+
+## 5. The increment plan (ordered cheapest-highest-signal-lowest-risk first)
+
+Each increment wires one dormant mechanism into a named beat, is independently testable, preserves determinism, and unlocks one observable emergence milestone. The four audit wire-pending anchors are tagged WP1 through WP4. Increment 1 (WP2, field diffusion from medium) is DONE. Do the rest in this order unless the owner redirects.
+
+**Increment 2: genesis language arming.** Arm the already-live `converse_language` and `drift_step` at the founder step built in section 4. The `FormSystem` and concept set come from `phoneme_priors` and the semantic primes, no authored lexicon. Draws are already counter-keyed (LANGUAGE, INNOVATE, COIN, DRIFT). Milestone: founding bands coin and converge one word per concept, then separated lineages drift shared forms into sister languages on their race cadences (check `word_for`, cognate sets). Cost S to M, low risk. NOTE the wire-pending Sensorium seam (item WP5 in the roadmap): `capability_halves` reads `sensorium.reads(channel)` as a `[0, ONE]` acuity while `perceptual_geometry` reads the same field as a Hz-scale just-noticeable difference. Before `phoneme_priors` feeds a real per-being sensorium, separate the acuity capability from the resolution/JND on `Sensorium` rather than conflate them on one field.
+
+**Increment 3 (WP1): speciation from genetic incompatibility.** Replace the fair-coin `rng.flip(0)` at epoch.rs (around line 244, keyed to `Phase::SPECIATE`) with `IncompatibilityTable::active_between` (genome.rs around 1117), the joint-Hardy-Weinberg cross-probability count, gated by `GenePool::reproductively_isolated` (genome.rs around 997). This drives the already-ticked `epoch::step_generation` (the viewer steps it). Milestone: daughter species appear only where joint-HW divergence crosses threshold; the incompatibility count rises with real allele divergence rather than at a fixed coin rate. The fork draw stays counter-keyed; species walk in `bio.species.ids()` order. Cost M, moderate risk (an expected trajectory shift, so refresh the affected genesis fixtures).
+
+**Increment 4: a belief stabilising into knowledge.** Add a `diffuse_beliefs` beat after `gossip` and before `life_cadence`, and give `World` a per-band `BeliefPool`. Drive `PrevailingBelief::advance_diffusion` (belief.rs around 189, already the SI logistic `rate * distance * level * (1 - level)`). The rate is the mean field of the live gossip loop (from `BeliefParams`, fail-loud, derived from the gossip parameters). Milestone: each band's `knowledge_level` climbs an S-curve to saturation and plateaus, spreading to neighbours on a distance lag; test monotone to above 0.9, no one-step jump, `belief_mass` conserved bit-for-bit. No RNG; canonical `PoolId` then `BeliefKey` walk; fold the new pool into `state_hash` via `hash_into`. Cost M, low-to-moderate.
+
+**Increment 5: reproduction (the keystone).** Add a `reproduce()` half inside `life_cadence` (after `drift_personalities`) that calls `World::choose_mate` (heritable mate preferences, `Phase::MATE_CHOICE`) and `World::birth` (world.rs around 1446, which credits the census, inherits genome and beliefs and mate-preference, seeds ages/race/traits), and swap the raw-age `apply_mortality` for `apply_mortality_by_race` (culls on `life_fraction = age / race lifespan`, one curve across short- and long-lived races). Feed `census.effective_size()` into the pool so drift reads real breeders. Milestone: population grows as well as shrinks, `census().offspring > 0`, Ne tracks real breeders, inherited lexicons and axioms carry across generations so lineages persist and diverge over cadences, and short- and long-lived races cull on their own timescales. This is the largest new-draw surface: key every draw on the reserved `REPRODUCE` and `MATE_CHOICE` phases, never a sequential index; use two-pass gather-then-apply; walk in `StableId` id order; fold the census into `state_hash`. Fecundity must fall out of mate preferences, breeding sex classes, maturity, and lifespan, never an authored rate. Cost L, highest risk.
+
+**Increment 6: regional cultures form.** Add a cadence-gated `enculturate()` beat between `decide` and `drift_step` that walks bands and applies `World::enculturate_band` (world.rs around 1144, the Friedkin-Johnsen anchor toward the band mean on an axiom axis). Milestone: `axiom_variance` within a band falls but never collapses (stubbornness holds lasting disagreement), a spread band splits into sects (`stance_clusters`), isolated bands diverge. Pure fixed-point, synchronous snapshot mean, no RNG; canonical `(PlaceId, StableId)` walk; gated on the reserved `stubbornness_split`. Cost S to M, low.
+
+**Increment 7: a technology promoting and diffusing.** Add a `transmit_step` beat between `gossip` and `drift_step` driving `transmit` and `erode_and_cull` (transmission.rs), and run `evaluate_node` plus `promoted_library` (the compose crate) on origination. Milestone: a design's holder count climbs as it spreads, a below-floor design culls (a dark age) then re-diffuses for free (rediscovery), a high-fidelity culture deepens its library while a low one stays shallow, two isolated cultures under one physics promote different libraries. `transmit_draw` keys on `(learner-region, holder, design, tick, TRANSMIT)`, erosion on `(design, tick, KNOW_LOSS)`, both reserved; gather-then-apply in id order; fold the knowledge map and library into `state_hash`. Seam: bridge the `DesignId` u64 and the compose node u128. Cost L, moderate.
+
+**Increment 8 (WP3): memory-scaled retention.** Use `RetentionLaw::window_ticks_for(memory)` (agent.rs around 391) as the window derivation for increment 7's `erode_and_cull` and the lexical-attrition window. Milestone: a high-memory band holds a design or word over a longer window than a low-memory band. Pure deterministic function of memory, no RNG. Cost S, low.
+
+**Increment 9 (WP4): personality shapes behaviour.** Consume `trait_value` (world.rs around 898) in `decide()` via the shared readings map (per-mind `BTreeMap<InputId, Fixed>` of drive levels plus trait-axis values). Widen through the `InputId` registry (the `institution.rs` Conditions shape), not a second closed field. Milestone: two beings under identical drive pressure diverge in chosen action from differing trait trajectories; the `last_action` distribution shifts by age cohort as traits settle toward `maturity_target`, with no age branch. Caveat: `decide` is inert on the canonical spine (the behaviour-refusal guard), so this milestone is a harness test that arms a repertoire, not the canonical running world. Cost M, low.
+
+**Increment 10 (deferred tail): the post-dawn genome and physiology tiers.** A generational `LivingWorld` beat writing census Ne into `GenePool.effective_size` (audit deviation 23: today drift uses the authored `pool_size`), and the physiology producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration) into `step_inner`. Milestone: live post-dawn allele drift and extinction, and anatomy-driven survival divergence (Kleiber mass, thermoregulation, medium respiration) with no race label. This needs larger scaffolding (a body-plan registry, metabolic anchors, a medium field, a `LivingWorld` step), so it is sequenced last. Cost L.
+
+---
+
+## 6. Determinism and Principle-9 risk map
+
+Three risk shapes recur; each increment is placed to neutralize the one it touches.
+
+A new draw that must be counter-keyed. Only increments 5 (reproduction) and 7 (transmission) add draws. Both key through `DrawKey` on reserved `Phase` constants that already exist (`REPRODUCE`, `MATE_CHOICE`, `TRANSMIT`, `KNOW_LOSS`), on `(entity or ordered pair, clock or generation, Phase)`, with a distinct slot per draw site, never a sequential index. Increment 3 removes a draw (the speciation coin) and replaces it with a pure computation. Increments 1, 4, 6, 8, 9 add no draw.
+
+A fold that must be canonically ordered. Increments 4, 5, 7 introduce canonical state. Reuse the id-ordered fold the world already runs for lexicons, traits, and trust: the `BeliefPool` folds by `BeliefKey` through `hash_into` with mass as an exact-associative i128, the census and offspring fold by `StableId`, the knowledge map and library fold by `StableId` then ascending content id.
+
+A beat order that must be fixed. Every inserted beat takes a pinned slot so a read precedes the mutation depending on it: `diffuse_beliefs` after `gossip` and before `life_cadence`, `transmit_step` between `gossip` and `drift_step`, `enculturate` between `decide` and `drift_step`, `reproduce` inside `life_cadence` after `drift_personalities`. Use the two-pass gather-then-apply shape the existing `perceive` and `gossip` beats use so a beat is worker-count-independent, and re-declare every new beat in the scheduler variant, re-proven bit-identical.
+
+---
+
+## 7. Known limits and seams to respect
+
+- **field.cell_size.** At a map-scale cell and a one-second base tick the medium diffusion coefficient underflows Q32.32, so increment 1's test uses a one-centimetre cell. A scale-appropriate `field.cell_size` (reserved, with basis) or a coarser field sub-step is where a visible map-scale diffusion rate comes from. Surface it, do not fabricate it.
+- **The Sensorium acuity-versus-resolution split (roadmap WP5).** Fix this inside increment 2 before `phoneme_priors` reads a real sensorium (section 5, increment 2).
+- **Census Ne into pre-dawn drift (audit deviation 23).** Wiring a real reproductive census into the epoch is a design addition, not a local rewire; it belongs in increment 10. Until then the authored `pool_size` stays the aggregate-tier Ne.
+
+---
+
+## 8. Workflow per increment
+
+Ground the wiring point in the actual source (the file:line pointers above are anchors, re-grep for the true lines). Build the beat or the arming. Add the observable milestone as a test (two seeds or two media or two races diverging from data through one kernel) plus a determinism assertion (state hash bit-identical across worker widths, or the golden hash refreshed if a value now derives). Run the full gate set in section 2. Tombstone the increment's wire-pending item in `docs/working/CONSENSUS_ROADMAP.md` and append a dated BUILT entry there and in `HANDOFFS.md`. Commit with a message that names the dormant mechanism, the beat, the observable milestone, and the determinism guard. Then take the next increment.

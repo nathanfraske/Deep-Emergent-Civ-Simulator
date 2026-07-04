@@ -533,6 +533,18 @@ pub fn power(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
     }
 }
 
+/// Mechanical power on the WATT scale: force times velocity with no kilowatt bridge, the
+/// SI-watt sibling of [`power`]. This is the scale the metabolism bridge
+/// ([`metabolic_drain_fraction`]) and the basal rate ([`basal_metabolic_rate`]) work in, so a
+/// derived exertion drain and the resting drain share one power scale rather than differing by the
+/// kilowatt factor. An overflowing product routes to the reserved power cap.
+pub fn power_watts(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
+    match force.checked_mul(velocity) {
+        Some(p) => p.min(power_max),
+        None => power_max,
+    }
+}
+
 // === Materials (R-PHYS-MECH) ===
 
 /// The Euler critical buckling load. The slenderness square is guarded before it is
@@ -728,6 +740,35 @@ pub fn sensible_rise(mass: Fixed, specific_heat: Fixed, energy: Fixed, rise_max:
     match energy.checked_div(capacity) {
         Some(dt) => dt.min(rise_max),
         None => rise_max,
+    }
+}
+
+/// The thermal diffusivity of a medium, `alpha = k / (rho * c)` (m^2/s): the conductivity `k` over
+/// the volumetric heat capacity, the density `rho` times the specific heat `c` (Incropera and DeWitt,
+/// Fundamentals of Heat and Mass Transfer). It is the material property that sets how fast a
+/// temperature field conducts toward uniform, the physics the discrete field stencil's diffusion
+/// coefficient is derived from: a medium is the lever (which substance fills the world), and its
+/// diffusivity is this physics, not a free scalar. The same reassociation as `sensible_rise` (which
+/// is `Q / (m*c)`): the volumetric heat capacity is formed first, so an overflow there reads as an
+/// enormous heat capacity and a near-zero diffusivity, a zero heat capacity saturates to the cap, and
+/// a divide overflow saturates to the cap. Deterministic: pinned `checked_mul` and `checked_div`, no
+/// float. Nothing here reads a medium label; only its three thermal axes.
+pub fn thermal_diffusivity(
+    conductivity: Fixed,
+    density: Fixed,
+    specific_heat: Fixed,
+    alpha_max: Fixed,
+) -> Fixed {
+    let capacity = match density.checked_mul(specific_heat) {
+        Some(c) => c,
+        None => return ZERO,
+    };
+    if capacity == ZERO {
+        return alpha_max;
+    }
+    match conductivity.checked_div(capacity) {
+        Some(a) => a.clamp(ZERO, alpha_max),
+        None => alpha_max,
     }
 }
 
@@ -1183,6 +1224,73 @@ pub fn speed_of_sound(bulk_modulus: Fixed, density: Fixed, c_max: Fixed) -> Fixe
     }
 }
 
+/// Stokes thermoviscous sound absorption alpha = reference * f^2 (1/m), the frequency-squared law that
+/// makes a medium absorb high frequencies over distance (an authored universal physics affordance,
+/// Principle 9). Report the linear absorption coefficient; its path attenuation is the existing
+/// [`optical_depth`] (report the measured indicator, defer the transcendental transform), so no new
+/// path kernel is introduced. The square is staged as `reference*frequency` then `*frequency`, so the
+/// tiny per-square-frequency reference shrinks the product before the second frequency grows it and
+/// the unrepresentable f^2 never forms; the two staged [`Fixed::checked_mul`] carry the overflow
+/// guard, routing a genuinely unrepresentable product to the cap. There is no frequency-alone early
+/// return: a small reference keeps `reference*f*f` representable well past any single-multiply
+/// ceiling, so gating on the frequency alone would over-saturate a low-reference medium at a high
+/// frequency it still absorbs finitely. A non-positive frequency has no absorption and reads zero.
+pub fn acoustic_absorption(reference: Fixed, frequency: Fixed, alpha_max: Fixed) -> Fixed {
+    if frequency <= ZERO {
+        return ZERO;
+    }
+    // Interleave the two frequency multiplies around the reference (the poiseuille grow/shrink
+    // discipline): reference*frequency stays tiny, then the second *frequency lifts it to the
+    // absorption scale, so no intermediate exceeds the representable ceiling for a physical reference.
+    // Only a product that truly overflows i64 routes to the cap.
+    match reference
+        .checked_mul(frequency)
+        .and_then(|x| x.checked_mul(frequency))
+    {
+        Some(a) => a.clamp(ZERO, alpha_max),
+        None => alpha_max,
+    }
+}
+
+/// Quarter-wave closed-open tube resonance f_n = (2n-1)*c/(4L) (Hz), the source-filter formant law (an
+/// authored universal physics affordance, Principle 9): a tube closed at one end and open at the other
+/// resonates on the odd harmonics of c/(4L), the standing-wave series a vocal tract (or a stopped horn)
+/// imposes on a sound speed c and a resonator length L. Stage c/L first, then apply the odd multiplier
+/// (2n-1) and the quarter-wave divide by four, so the large intermediate (2n-1)*c never forms; a zero
+/// or near-zero length overflows the divide and reads the cap (the frequency grows without bound as L
+/// shrinks), and a zero sound speed reads zero (no medium, no resonance, the speed-of-sound zero-guard).
+/// A non-positive mode number has no resonance and reads zero.
+pub fn tube_resonance(
+    harmonic: Fixed,
+    speed_of_sound: Fixed,
+    resonator_length: Fixed,
+    freq_max: Fixed,
+) -> Fixed {
+    if speed_of_sound <= ZERO {
+        return ZERO;
+    }
+    if resonator_length <= ZERO {
+        return freq_max;
+    }
+    // The odd multiplier (2n-1) of the closed-open quarter-wave series; a non-positive mode has none.
+    let odd = sat_sub(harmonic.saturating_add(harmonic), ONE);
+    if odd <= ZERO {
+        return ZERO;
+    }
+    let c_over_l = match speed_of_sound.checked_div(resonator_length) {
+        Some(x) => x,
+        None => return freq_max,
+    };
+    let scaled = match c_over_l.checked_mul(odd) {
+        Some(x) => x,
+        None => return freq_max,
+    };
+    match scaled.checked_div(Fixed::from_int(4)) {
+        Some(f) => f.min(freq_max),
+        None => freq_max,
+    }
+}
+
 /// Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
 /// density field. The pressure is bridged to pascals. A zero or sub-floor R_s*T reads the dense cap.
 pub fn ideal_gas_density(
@@ -1522,6 +1630,100 @@ pub fn radiative_equilibrium(
     t2.sqrt().min(t_max)
 }
 
+// === Metabolism (R-METABOLIZE): resting metabolic power and the drain bridge ===
+//
+// The resting-metabolism kernels that free the authored base_metabolic_drain, exertion_drain_coupling,
+// and field.body_exchange scalars: the drain a body pays derives from its mass and tissue against the
+// physics, not from a per-axis authored number. Every kernel is total, integer, and overflow-capped in
+// the house style (checked arithmetic routing an out-of-range product to its physical limit, caps the
+// reserved representability bounds passed by the caller). Nothing here reads an identity: two bodies
+// diverge from mass, composition, medium, and temperature alone (Principle 9).
+
+/// Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
+/// is an authored universal physics affordance (West, Brown, and Enquist's fractal-network derivation
+/// holds across taxa; Principle 9 permits authored physics), evaluated by the EXACT two-square-root
+/// fixed-point identity m^(3/4) = sqrt(m * sqrt(m)): `m^(1/2)` then `m * m^(1/2) = m^(3/2)` then its
+/// square root, so no exp/ln is touched and the result is bit-identical on every machine (both roots
+/// are the exact deterministic integer isqrt). The coefficient `a` is the caller's reserved owner
+/// anchor. Zero (or negative) mass has no metabolism and reads zero; an out-of-range product routes to
+/// the reserved rate cap.
+pub fn basal_metabolic_rate(mass: Fixed, coeff_a: Fixed, rate_max: Fixed) -> Fixed {
+    if mass <= ZERO {
+        return ZERO;
+    }
+    // m^(3/4) = sqrt(m * sqrt(m)): the two exact square roots of the identity, no transcendental.
+    let root = mass.sqrt(); // m^(1/2)
+    let inner = match mass.checked_mul(root) {
+        Some(x) => x, // m^(3/2)
+        None => return rate_max,
+    };
+    let m34 = inner.sqrt(); // m^(3/4)
+    match coeff_a.checked_mul(m34) {
+        Some(p) => p.min(rate_max),
+        None => rate_max,
+    }
+}
+
+/// The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
+/// convective flux ([`convective_flux`]) and the Stefan-Boltzmann radiant emission ([`radiant_emission`])
+/// over the body's exposed surface area, the power a body must replace by metabolism to hold its core
+/// temperature against the medium. It reuses the two resolved heat-transport kernels unchanged, reads
+/// only the body and medium temperatures, the surface area, and the two surface constants (`h`,
+/// emissivity, sigma), and takes no identity, so a hot body in a cold medium and its temperature mirror
+/// diverge from temperature alone (Principle 9). Capped at the reserved flux limit; a body at the medium
+/// temperature loses nothing (equilibrium).
+pub fn resting_heat_loss(
+    h: Fixed,
+    area: Fixed,
+    body_temp: Fixed,
+    medium_temp: Fixed,
+    emissivity: Fixed,
+    sigma: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
+    let convective = convective_flux(h, area, body_temp, medium_temp, flux_max);
+    let radiant = radiant_emission(emissivity, area, body_temp, medium_temp, sigma, flux_max);
+    Fixed::saturating_sum([convective, radiant]).min(flux_max)
+}
+
+/// Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
+/// resting demand is the order-independent saturating sum of the basal rate and the thermoregulatory
+/// replacement (`basal + heat_loss`, W); the energy the reserve holds is `energy_capacity *
+/// energy_density` (the reserve's energy-storing tissue times its per-unit energy content, J); the
+/// fraction is the energy spent this tick over the energy stored, `(power * tick_seconds) / stored`,
+/// with the spent energy formed before the divide (a modest per-tick joule figure) so a representable
+/// fraction is never pre-saturated. A zero-power demand drains nothing; a zero-energy store (no reserve
+/// tissue) drains fully (the cap); an out-of-range spend routes to the cap. Clamped to `[0, frac_max]`.
+pub fn metabolic_drain_fraction(
+    basal: Fixed,
+    heat_loss: Fixed,
+    energy_capacity: Fixed,
+    energy_density: Fixed,
+    tick_seconds: Fixed,
+    frac_max: Fixed,
+) -> Fixed {
+    let power = Fixed::saturating_sum([basal, heat_loss]);
+    if power <= ZERO {
+        return ZERO;
+    }
+    let stored = match energy_capacity.checked_mul(energy_density) {
+        Some(e) => e,
+        // A store so large it overflows is effectively inexhaustible over one tick: negligible fraction.
+        None => return ZERO,
+    };
+    if stored <= ZERO {
+        return frac_max;
+    }
+    let spent = match power.checked_mul(tick_seconds) {
+        Some(x) => x, // the joules spent this tick
+        None => return frac_max,
+    };
+    match spent.checked_div(stored) {
+        Some(f) => f.clamp(ZERO, frac_max),
+        None => frac_max,
+    }
+}
+
 // === Electricity and magnetism (R-PHYS-W3, wave 3) ===
 //
 // The reserved constants (the Coulomb coefficient on its x1e9 scale, the vacuum permeability MU_0,
@@ -1781,6 +1983,78 @@ pub fn inductor_energy(inductance: Fixed, current: Fixed, e_max: Fixed) -> Fixed
         Some(u) => u.min(e_max),
         None => e_max,
     }
+}
+
+// === Language processing cost (R-LANG-TYPOLOGY, the word-order harmony floor) ===
+//
+// The two direction-NEUTRAL kernels the sim-side word-order harmony tilt derives from
+// (crates/sim/src/typology.rs owns the branching-consistency mapping that turns a grammar into an
+// extent). Both are LABEL-BLIND and DIRECTION-BLIND: they see only a scalar domain extent and a
+// scalar cost reduction, never a word-order value, so they cannot privilege one linear order over
+// its mirror and they author no attractor (Principle 9). What they reward is CONSISTENCY (a shorter
+// dependency-integration domain costs less to hold), never a specific direction. Each is a pure
+// closed-form Fixed function, saturation-capped in the house idiom, and total on adversarial input.
+
+/// The dependency-integration parse cost of holding a linearization domain in working memory
+/// (Hawkins 1983/2004's processing account of the branching-direction anchor; Gibson 1998 dependency
+/// locality): a monotone-increasing, saturating function of how much material a head must hold before
+/// it is integrated (`domain_extent`), SOFTENED by the parser's working-memory capacity. The
+/// integer-Hill saturating form `extent / (extent + memory)` (the same dose-response shape
+/// [`harm_class`] uses) scaled by the reserved `cost_max`: a zero extent is zero cost, an unbounded
+/// extent saturates at `cost_max`, and at `extent == memory` the cost is half of `cost_max`. A larger
+/// memory capacity shifts the half-cost point outward, so the same domain costs a higher-capacity
+/// parser less (the per-race softening). Direction-blind: `domain_extent` is a magnitude, never a
+/// word-order value.
+pub fn parse_cost(domain_extent: Fixed, memory_capacity: Fixed, cost_max: Fixed) -> Fixed {
+    if domain_extent <= ZERO {
+        return ZERO;
+    }
+    // den = extent + memory (both taken non-negative), saturating: a saturated sum is a huge
+    // denominator, handled by the divide (frac routes toward the extent/extent = one limit).
+    let den = domain_extent.saturating_add(memory_capacity.max(ZERO));
+    if den <= ZERO {
+        // den >= extent > 0 always holds, so this is unreachable; guard so the divide is total and a
+        // degenerate denominator routes to the full cost rather than a wrap.
+        return cost_max.max(ZERO);
+    }
+    // frac = extent / den in (0, 1]; against a fixed memory, frac -> one as the extent grows.
+    let frac = match domain_extent.checked_div(den) {
+        Some(f) => f,
+        None => return cost_max.max(ZERO),
+    };
+    // Scale the [0, 1] cost fraction by the reserved ceiling, capped rather than wrapped.
+    match cost_max.checked_mul(frac) {
+        Some(c) => c.clamp(ZERO, cost_max.max(ZERO)),
+        None => cost_max.max(ZERO),
+    }
+}
+
+/// The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
+/// softmax weight of the lower-cost (consistent) option relative to the baseline, floored at one and
+/// saturating at `tilt_max`. `cost_reduction` is the parse cost a consistent choice AVOIDS (a
+/// [`parse_cost`] output), and `temperature` is the softmax scale: a small temperature makes the tilt
+/// bite hard, a large one flattens it toward one. A zero (or negative) reduction earns no tilt (the
+/// weight floors at one, so the law never pushes a weight below its prior), and the deterministic
+/// zero-temperature limit saturates at `tilt_max`. The exponential is the canon-pinned deterministic
+/// [`Fixed::exp`] (R-GPU-CANON-PIN), integer-only and bit-identical on every backend; for a large
+/// argument it saturates, and the clamp routes that to `tilt_max`. Direction-blind: the argument is a
+/// scalar cost, never a word-order value.
+pub fn harmony_tilt(cost_reduction: Fixed, temperature: Fixed, tilt_max: Fixed) -> Fixed {
+    if cost_reduction <= ZERO {
+        return ONE;
+    }
+    if temperature <= ZERO {
+        // exp(reduction / 0+) -> infinity: the hard-max (deterministic) limit saturates at the cap.
+        return tilt_max.max(ONE);
+    }
+    let z = match cost_reduction.checked_div(temperature) {
+        Some(z) => z,
+        // A reduction-over-temperature past the representable range is the same hard-max limit.
+        None => return tilt_max.max(ONE),
+    };
+    // exp(z) with z >= 0 is >= 1 (and saturates to Fixed::MAX for a large z); clamp to a bounded
+    // boost in [ONE, tilt_max] so the tilt never wraps and never falls below one.
+    z.exp().clamp(ONE, tilt_max.max(ONE))
 }
 
 #[cfg(test)]
@@ -2046,6 +2320,41 @@ mod tests {
     // --- Thermal ---
 
     #[test]
+    fn thermal_diffusivity_is_k_over_rho_c_and_separates_two_media() {
+        // Real air against real water (Incropera and DeWitt): both diffusivities are positive, small,
+        // and representable, and air diffuses heat far faster than water, purely from k/(rho*c). The
+        // medium is the lever; the diffusivity is not a free scalar.
+        let alpha_max = cap(1);
+        // Air: k=0.0262 W/m/K, rho=1.2 kg/m^3, c=1005 J/kg/K -> alpha ~ 2.17e-5 m^2/s.
+        let air = thermal_diffusivity(
+            Fixed::from_ratio(262, 10_000),
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            alpha_max,
+        );
+        // Water: k=0.606, rho=1000, c=4186 -> alpha ~ 1.45e-7 m^2/s.
+        let water = thermal_diffusivity(
+            Fixed::from_ratio(606, 1000),
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            alpha_max,
+        );
+        assert!(
+            air > ZERO && water > ZERO,
+            "both diffusivities are positive"
+        );
+        assert!(
+            air > water,
+            "air conducts heat faster than water from k/(rho*c) ({air:?} > {water:?})"
+        );
+        // A massless (zero heat capacity) medium saturates to the cap; nothing wraps negative.
+        assert_eq!(
+            thermal_diffusivity(Fixed::from_int(1), ZERO, Fixed::from_int(1), alpha_max),
+            alpha_max
+        );
+    }
+
+    #[test]
     fn conduction_saturates_on_a_zero_path_and_is_finite_otherwise() {
         let max = cap(1_000_000_000);
         // Zero path is infinite conductance, the max flux.
@@ -2125,6 +2434,142 @@ mod tests {
         // caps are test stand-ins for the owner's reserved values, never canon.
         assert_eq!(F_INT(7), Fixed::from_int(7));
         assert_eq!(cap(3), Fixed::from_int(3));
+    }
+
+    // --- Metabolism (R-METABOLIZE) ---
+
+    #[test]
+    fn basal_rate_reproduces_a_mass_three_quarters_by_the_two_sqrt_identity() {
+        // m^(3/4) = sqrt(m * sqrt(m)), exact where m is a perfect fourth power: 16^(3/4) = 8 and
+        // 256^(3/4) = 64, reconstructed to the last fixed-point bit by the two integer square roots.
+        let a = Fixed::ONE;
+        let big = cap(1_000_000);
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(16), a, big),
+            Fixed::from_int(8),
+            "16^(3/4) = 8 by the two-sqrt identity"
+        );
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(256), a, big),
+            Fixed::from_int(64),
+            "256^(3/4) = 64"
+        );
+        // The coefficient scales the power linearly.
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(16), Fixed::from_int(3), big),
+            Fixed::from_int(24),
+            "a scales the rate: 3 * 16^(3/4) = 24"
+        );
+    }
+
+    #[test]
+    fn basal_rate_is_zero_at_zero_mass_and_saturates_to_the_cap() {
+        assert_eq!(
+            basal_metabolic_rate(ZERO, Fixed::ONE, cap(1_000_000)),
+            ZERO,
+            "no mass, no metabolism"
+        );
+        assert_eq!(
+            basal_metabolic_rate(Fixed::from_int(256), Fixed::ONE, Fixed::from_int(10)),
+            Fixed::from_int(10),
+            "64 W against a 10 W cap routes to the cap"
+        );
+    }
+
+    #[test]
+    fn basal_rate_is_monotone_increasing_yet_sublinear() {
+        let a = Fixed::ONE;
+        let big = cap(1_000_000);
+        let small = basal_metabolic_rate(Fixed::from_int(16), a, big); // 8
+        let large = basal_metabolic_rate(Fixed::from_int(256), a, big); // 64
+        assert!(large > small, "a larger body has the higher resting rate");
+        // Sublinear: mass rose 16x (16 -> 256) but the rate rose only 8x (8 -> 64), so the rate is
+        // below the linear extrapolation of the smaller body (the Kleiber signature).
+        assert!(
+            large < small.checked_mul(Fixed::from_int(16)).unwrap(),
+            "the rate grows slower than mass: 64 < 8 * 16"
+        );
+    }
+
+    #[test]
+    fn resting_loss_is_the_saturating_sum_of_convection_and_radiation() {
+        // The thermoregulatory loss is exactly convective_flux + radiant_emission over the area, the two
+        // resolved heat-transport kernels reused unchanged. A body warmer than its medium so both terms
+        // are positive.
+        let h = Fixed::from_ratio(1, 10);
+        let area = Fixed::from_int(2);
+        let body = Fixed::from_int(310);
+        let medium = Fixed::from_int(280);
+        let emissivity = Fixed::from_ratio(95, 100);
+        let sigma = Fixed::from_ratio(567, 10_000_000_000); // 5.67e-8
+        let big = cap(1_000_000_000);
+        let convective = convective_flux(h, area, body, medium, big);
+        let radiant = radiant_emission(emissivity, area, body, medium, sigma, big);
+        let want = Fixed::saturating_sum([convective, radiant]).min(big);
+        assert_eq!(
+            resting_heat_loss(h, area, body, medium, emissivity, sigma, big),
+            want,
+            "resting loss = convective_flux + radiant_emission over the area"
+        );
+        // A body at the medium temperature loses nothing.
+        assert_eq!(
+            resting_heat_loss(h, area, body, body, emissivity, sigma, big),
+            ZERO,
+            "no gradient, no loss (equilibrium)"
+        );
+    }
+
+    #[test]
+    fn drain_fraction_is_energy_spent_over_energy_stored() {
+        // basal 10 W, no heat loss, reserve 100 units at density 1 (stored 100 J), one-second tick:
+        // spent 10 J over stored 100 J is a tenth of the reserve per tick.
+        let frac = metabolic_drain_fraction(
+            Fixed::from_int(10),
+            ZERO,
+            Fixed::from_int(100),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+        assert_eq!(frac, Fixed::from_ratio(1, 10));
+        // A larger store drains a smaller fraction of itself for the same power (the reserve-side half of
+        // the Kleiber signature): ten times the stored energy, a tenth of the fraction.
+        let bigger = metabolic_drain_fraction(
+            Fixed::from_int(10),
+            ZERO,
+            Fixed::from_int(1000),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+        assert!(bigger < frac, "a larger reserve drains a smaller fraction");
+        assert_eq!(bigger, Fixed::from_ratio(1, 100));
+        // A zero-energy reserve (no energy tissue) drains fully to the cap; a zero-power demand drains
+        // nothing.
+        assert_eq!(
+            metabolic_drain_fraction(
+                Fixed::from_int(10),
+                ZERO,
+                ZERO,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE
+            ),
+            Fixed::ONE,
+            "no reserve tissue, full drain"
+        );
+        assert_eq!(
+            metabolic_drain_fraction(
+                ZERO,
+                ZERO,
+                Fixed::from_int(100),
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE
+            ),
+            ZERO,
+            "no resting power, no drain"
+        );
     }
 
     // --- Hardening: product-before-divide reassociation (the wave-1 discipline, extended) ---
@@ -2522,5 +2967,121 @@ mod tests {
             margin > ZERO,
             "MAX strength minus MIN stress saturates positive"
         );
+    }
+
+    // --- Language processing cost (R-LANG-TYPOLOGY) ---
+
+    #[test]
+    fn parse_cost_is_zero_at_zero_extent_and_below() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::ONE;
+        assert_eq!(parse_cost(ZERO, m, cap), ZERO, "no domain, no cost");
+        assert_eq!(
+            parse_cost(Fixed::from_int(-3), m, cap),
+            ZERO,
+            "a negative extent has no cost"
+        );
+    }
+
+    #[test]
+    fn parse_cost_saturates_at_the_cap_for_an_unbounded_extent() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::from_int(7);
+        // A huge extent against a finite memory drives extent/(extent+memory) -> one, so the cost
+        // reaches the cap rather than wrapping.
+        assert_eq!(
+            parse_cost(Fixed::MAX, m, cap),
+            cap,
+            "unbounded extent saturates"
+        );
+        // And it never exceeds the cap on the way there.
+        assert!(parse_cost(Fixed::from_int(1000), m, cap) <= cap);
+        assert!(
+            parse_cost(Fixed::from_int(1000), m, cap) < cap,
+            "still below the cap at a finite extent"
+        );
+    }
+
+    #[test]
+    fn parse_cost_is_monotone_increasing_in_extent() {
+        let m = Fixed::from_int(4);
+        let cap = Fixed::ONE;
+        let c1 = parse_cost(Fixed::from_int(1), m, cap);
+        let c2 = parse_cost(Fixed::from_int(2), m, cap);
+        let c3 = parse_cost(Fixed::from_int(8), m, cap);
+        assert!(c1 < c2 && c2 < c3, "cost rises with the held domain extent");
+        // At extent == memory the cost is half the cap (the Hill half-saturation point).
+        let half = parse_cost(m, m, cap);
+        assert_eq!(
+            half,
+            Fixed::from_ratio(1, 2),
+            "half cost at extent == memory"
+        );
+    }
+
+    #[test]
+    fn parse_cost_is_softened_by_working_memory() {
+        let cap = Fixed::ONE;
+        let extent = Fixed::from_int(4);
+        let small = parse_cost(extent, Fixed::from_int(1), cap);
+        let large = parse_cost(extent, Fixed::from_int(16), cap);
+        assert!(
+            large < small,
+            "a larger working-memory capacity lowers the parse cost of the same domain"
+        );
+    }
+
+    #[test]
+    fn parse_cost_caps_rather_than_wraps_at_extremes() {
+        // Adversarial extremes route to a bounded [0, cap], never a wrap or panic.
+        let cap = Fixed::from_int(5);
+        for &e in &[Fixed::MIN, ZERO, Fixed::ONE, Fixed::MAX] {
+            for &mem in &[Fixed::MIN, ZERO, Fixed::from_int(3), Fixed::MAX] {
+                let c = parse_cost(e, mem, cap);
+                assert!(
+                    c >= ZERO && c <= cap,
+                    "parse_cost stayed in [0, cap] for e and mem"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn harmony_tilt_floors_at_one_and_needs_a_reduction() {
+        let temp = Fixed::from_ratio(1, 10);
+        let cap = Fixed::from_int(64);
+        assert_eq!(harmony_tilt(ZERO, temp, cap), ONE, "no reduction, no tilt");
+        assert_eq!(
+            harmony_tilt(Fixed::from_int(-2), temp, cap),
+            ONE,
+            "a negative reduction never pushes below one"
+        );
+        // A positive reduction earns a tilt strictly above one.
+        let t = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
+        assert!(
+            t > ONE && t <= cap,
+            "a real reduction earns a bounded boost"
+        );
+    }
+
+    #[test]
+    fn harmony_tilt_saturates_at_the_cap_for_an_unbounded_reduction() {
+        let tiny_temp = Fixed::from_ratio(1, 1000);
+        let cap = Fixed::from_int(32);
+        // A large reduction over a tiny temperature drives exp past the representable range: it
+        // saturates at the cap rather than wrapping.
+        assert_eq!(harmony_tilt(Fixed::from_int(100), tiny_temp, cap), cap);
+        // The deterministic zero-temperature limit is the same hard max.
+        assert_eq!(harmony_tilt(Fixed::from_ratio(1, 4), ZERO, cap), cap);
+    }
+
+    #[test]
+    fn harmony_tilt_is_monotone_in_the_reduction() {
+        let temp = Fixed::from_ratio(1, 4);
+        let cap = Fixed::from_int(1 << 16);
+        let a = harmony_tilt(Fixed::from_ratio(1, 10), temp, cap);
+        let b = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
+        let c = harmony_tilt(Fixed::from_ratio(6, 10), temp, cap);
+        assert!(a < b && b < c, "a larger avoided cost earns a larger tilt");
     }
 }

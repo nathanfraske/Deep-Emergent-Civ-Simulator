@@ -88,9 +88,11 @@ use crate::controller::ControllerLayout;
 use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::scenario::ScenarioResolution;
 use crate::world::{TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -119,9 +121,11 @@ fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
 /// labelled fixture. None is an agent-set number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldCalib {
-    /// The per-tick diffusion (conduction) coefficient, dimensionless, in `[0, 0.25)` for the
-    /// four-neighbour stencil's stability bound. Basis: the medium's thermal diffusivity over the
-    /// cell size and the base tick, kept below the explicit stability limit.
+    /// The per-tick diffusion (conduction) coefficient, dimensionless, in `[0, 0.25]` for the
+    /// four-neighbour stencil's stability bound. The bound is inclusive: the von Neumann limit is
+    /// `alpha * dt / dx^2 <= 1/4`, and [`derive_field_diffusion`] clamps to [`STENCIL_STABILITY_BOUND`]
+    /// (exactly 1/4) inclusively. Basis: the medium's thermal diffusivity over the cell size and the
+    /// base tick, kept at or below the explicit stability limit.
     pub diffusion: Fixed,
     /// The per-tick relaxation rate of a cell toward its baseline (the solar and biome forcing), in
     /// `[0, 1]`. Basis: the day-night and seasonal forcing timescale over the base tick.
@@ -145,6 +149,104 @@ impl FieldCalib {
             exchange: manifest.require_fixed("field.body_exchange")?,
         })
     }
+
+    /// The field calibrations with the diffusion coefficient DERIVED from the world's selected medium
+    /// (design Part 5.4/5.5; the owner's ruling that the medium is the lever and the diffusivity is
+    /// physics). The medium's three thermal axes (`conductivity`, `density`, `specific_heat`) are read
+    /// from its `require_map` profile (`medium.{name}`), the cell size from the reserved
+    /// `field.cell_size`, and the timestep from `time.base_tick_seconds`; the diffusion coefficient is
+    /// then [`derive_field_diffusion`] of those, so the field's conduction rate is not a free scalar
+    /// but a consequence of which substance fills the world. The relaxation and body-exchange
+    /// calibrations are read as before. Fail-loud throughout: while the medium profile or the cell
+    /// size is reserved this refuses to run, so no fabricated diffusivity reaches canonical state
+    /// (Principle 11). The medium selection is the caller's (the scenario resolves `medium.{name}`);
+    /// this reads no medium label, only the thermal axes, so a world of air and a world of water
+    /// diverge from their physics, never a branch (Principle 9).
+    pub fn from_manifest_with_medium(
+        manifest: &CalibrationManifest,
+        medium_id: &str,
+    ) -> Result<FieldCalib, CalibrationError> {
+        let profile = manifest.require_map(medium_id)?;
+        let axis = |name: &str| -> Result<Fixed, CalibrationError> {
+            profile
+                .get(name)
+                .copied()
+                .ok_or_else(|| CalibrationError::BadValue {
+                    id: medium_id.to_string(),
+                    detail: format!("medium profile is missing the '{name}' thermal axis"),
+                })
+        };
+        let conductivity = axis("conductivity")?;
+        let density = axis("density")?;
+        let specific_heat = axis("specific_heat")?;
+        let cell_size = manifest.require_fixed("field.cell_size")?;
+        let dt = manifest.require_fixed("time.base_tick_seconds")?;
+        Ok(FieldCalib {
+            diffusion: derive_field_diffusion(conductivity, density, specific_heat, cell_size, dt),
+            relaxation: manifest.require_fixed("field.relaxation")?,
+            exchange: manifest.require_fixed("field.body_exchange")?,
+        })
+    }
+
+    /// The field calibrations for a resolved scenario: the world-build path's field constructor
+    /// (design Part 5.4/5.5). The diffusion coefficient DERIVES from the scenario's selected medium
+    /// through [`FieldCalib::from_manifest_with_medium`], so a world's field conducts at its medium's
+    /// physics rate (`k/(rho*c)`) and the free-scalar `field.diffusion` an `[environment]` block may
+    /// push is retired on this path entirely: the medium is the lever and the diffusivity is physics
+    /// (the owner's ruling). A scenario that names no medium is the documented default temperate air,
+    /// which resolves to the `medium.air` physics profile
+    /// ([`ScenarioResolution::medium_manifest_id`]), so even an air-default world derives its diffusion
+    /// from air's real k/rho/c rather than a fabricated number, and no world on this path reads a free
+    /// diffusion scalar (Principle 9, Principle 11). The relaxation and body-exchange calibrations are
+    /// read from the manifest as before. Fail-loud throughout: a reserved or missing medium profile,
+    /// cell size, or timestep refuses to build, so no fabricated calibration reaches canonical state.
+    pub fn from_resolution(
+        manifest: &CalibrationManifest,
+        resolution: &ScenarioResolution,
+    ) -> Result<FieldCalib, CalibrationError> {
+        FieldCalib::from_manifest_with_medium(manifest, resolution.medium_manifest_id())
+    }
+}
+
+/// The explicit two-dimensional four-neighbour diffusion stencil's stability bound, `1/4`: an
+/// explicit forward-Euler diffusion step is stable only for `alpha * dt / dx^2 <= 1/4` on this
+/// stencil (the von Neumann stability limit; Press et al., Numerical Recipes). This is a numerics law
+/// constant, not world content: it is the mathematics of the discretization, so it is fixed in code
+/// rather than reserved (Principle 11 governs world content, not the stencil's own stability limit).
+const STENCIL_STABILITY_BOUND: Fixed = Fixed::from_bits(1 << (Fixed::FRAC_BITS - 2));
+
+/// The representability cap on a derived thermal diffusivity (m^2/s) passed to
+/// [`laws::thermal_diffusivity`]. No real medium's diffusivity approaches one square metre per second
+/// (silver, among the highest, is about 1.7e-4), so a cap of one is a pure overflow guard that never
+/// binds on a real substance; it exists so a degenerate zero-heat-capacity medium saturates rather
+/// than dividing unbounded.
+const DIFFUSIVITY_MAX: Fixed = Fixed::ONE;
+
+/// Derive the field's dimensionless diffusion coefficient from a medium's thermal properties (design
+/// Part 5.4/5.5): the medium's thermal diffusivity `alpha = k / (rho * c)` (through
+/// [`laws::thermal_diffusivity`]) times the timestep over the squared cell size, `alpha * dt / dx^2`,
+/// the explicit-stencil coefficient, clamped to the four-neighbour stencil's stability bound
+/// ([`STENCIL_STABILITY_BOUND`]). A canonical cell size keeps the physical coefficient well below the
+/// bound (heat does not conduct across a map cell in one base tick), so the clamp is a stability rail
+/// rather than the operating point; it guarantees the derived value can never destabilize the stencil
+/// regardless of the medium selected. Pure fixed-point and deterministic: the physics divide, one
+/// multiply, one divide, and a clamp, no float and no RNG. A zero cell size (a degenerate scale)
+/// reads a zero coefficient rather than dividing by zero. Reads no medium label, only its three
+/// thermal axes, so two media diverge from their physics alone (Principle 9).
+pub fn derive_field_diffusion(
+    conductivity: Fixed,
+    density: Fixed,
+    specific_heat: Fixed,
+    cell_size: Fixed,
+    dt: Fixed,
+) -> Fixed {
+    let alpha = laws::thermal_diffusivity(conductivity, density, specific_heat, DIFFUSIVITY_MAX);
+    let cell_area = cell_size.mul(cell_size);
+    if cell_area == Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    let coefficient = alpha.mul(dt).div(cell_area);
+    coefficient.clamp(Fixed::ZERO, STENCIL_STABILITY_BOUND)
 }
 
 /// A canonical scalar temperature field over the flat bounded map, Q32.32 on the `therm.temperature`
@@ -455,6 +557,13 @@ pub struct Runner {
     /// as the thermal state the field drives; the body-arc harm mapping from a temperature outside a
     /// race's comfort band is a reserved consumer (the two-sided band the body arc deferred).
     body_temp: BTreeMap<StableId, Fixed>,
+    /// The per-being DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
+    /// ([`crate::physiology::derive_body_exchange_rate`]), when the caller has supplied it. A being with
+    /// an entry couples to its cell at its own derived rate (a high-surface, low-thermal-mass body
+    /// faster, a compact dense one slower); a being with no entry falls back to the labelled-fixture
+    /// [`FieldCalib::exchange`] override. This frees the authored `field.body_exchange` scalar on the
+    /// canonical path while keeping the field-fixture fallback for beings placed without a body.
+    body_exchange_rate: BTreeMap<StableId, Fixed>,
     /// The cognition world composed onto this spine, ticked as a fixed sub-phase after the field
     /// phases. `None` for a field-only runner ([`Runner::new`]), `Some` for the composed runner
     /// ([`Runner::with_world`]). The world carries disjoint mutable state, its own seed, and its own
@@ -478,6 +587,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
         }
@@ -509,6 +619,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
         }
@@ -543,6 +654,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: Some(embodiment),
         }
@@ -625,10 +737,26 @@ impl Runner {
             if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
                 let env = self.field.at(coord.x, coord.y);
                 let bt = self.body_temp[&id];
-                let next = bt + self.calib.exchange.mul(env - bt);
+                // The being's own DERIVED coupling rate h*A/(m*c) when supplied, else the labelled
+                // FieldCalib.exchange fixture override (a being placed without a body).
+                let rate = self
+                    .body_exchange_rate
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(self.calib.exchange);
+                let next = bt + rate.mul(env - bt);
                 self.body_temp.insert(id, next);
             }
         }
+    }
+
+    /// Set a located being's DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
+    /// ([`crate::physiology::derive_body_exchange_rate`]), so its core temperature couples to its cell at
+    /// a rate its own surface and thermal mass set rather than the shared [`FieldCalib::exchange`] scalar.
+    /// A being with no rate set falls back to that fixture override. The rate is a fraction in `[0, 1]`
+    /// (the derivation clamps it); a caller passes what the physics derivation returns.
+    pub fn set_body_exchange_rate(&mut self, id: StableId, rate: Fixed) {
+        self.body_exchange_rate.insert(id, rate);
     }
 
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
@@ -808,6 +936,7 @@ impl Runner {
 mod tests {
     use super::*;
     use crate::calibration::CalibrationManifest;
+    use crate::scenario::Scenario;
 
     /// A manifest with the three field calibrations set to labelled fixture values.
     const SET: &str = r#"
@@ -833,6 +962,405 @@ value = "0.25"
 unit = "ratio_per_tick"
 source = "test"
 "#;
+
+    /// A FieldCalib fixture (labelled, not owner canon): a still field (no diffusion or relaxation) so
+    /// the body-exchange phase is exercised in isolation, and a fallback exchange rate.
+    fn calib() -> FieldCalib {
+        FieldCalib {
+            diffusion: Fixed::ZERO,
+            relaxation: Fixed::ZERO,
+            exchange: Fixed::from_ratio(1, 4),
+        }
+    }
+
+    /// Real air and water thermal profiles (Incropera and DeWitt), the medium `require_map` axes the
+    /// derivation reads. Labelled fixtures, not owner canon: a canonical run reads the reserved
+    /// `medium.{name}` profile, which is fail-loud until the owner sets it.
+    const AIR_K: Fixed = Fixed::from_bits((262 << Fixed::FRAC_BITS) / 10_000); // 0.0262 W/m/K
+    const WATER_K: Fixed = Fixed::from_bits((606 << Fixed::FRAC_BITS) / 1_000); // 0.606 W/m/K
+
+    #[test]
+    fn field_diffusion_derives_from_the_medium_and_two_media_diverge_under_the_bound() {
+        // A fixture cell size and the one-second base tick chosen so both media land representable and
+        // sub-bound: at these scales air's derived coefficient is near the stability rail and water's
+        // is far below it, purely from k/(rho*c). The medium SELECTION is the lever.
+        let cell = Fixed::from_ratio(1, 100); // one-centimetre fixture cell
+        let dt = Fixed::ONE; // time.base_tick_seconds = 1
+        let air = derive_field_diffusion(
+            AIR_K,
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            cell,
+            dt,
+        );
+        let water = derive_field_diffusion(
+            WATER_K,
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            cell,
+            dt,
+        );
+        assert!(air > Fixed::ZERO, "air conducts");
+        assert!(water > Fixed::ZERO, "water conducts");
+        assert_ne!(
+            air, water,
+            "the two media give different diffusion coefficients"
+        );
+        assert!(
+            air > water,
+            "air conducts heat faster than water from k/(rho*c) ({air:?} > {water:?})"
+        );
+        assert!(
+            air < STENCIL_STABILITY_BOUND && water < STENCIL_STABILITY_BOUND,
+            "both derived coefficients stay under the four-neighbour stencil's 0.25 stability bound"
+        );
+    }
+
+    #[test]
+    fn a_pathological_medium_is_clamped_to_the_stencil_bound_not_beyond() {
+        // A high-conductivity, tiny-heat-capacity, tiny-cell fixture drives the raw coefficient past
+        // the stability bound; the derivation clamps it to the bound rather than destabilizing the
+        // stencil, so no medium selection can break the field step.
+        let clamped = derive_field_diffusion(
+            Fixed::from_int(500),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(1, 1000),
+            Fixed::ONE,
+        );
+        assert_eq!(
+            clamped, STENCIL_STABILITY_BOUND,
+            "an unstable raw coefficient is clamped to the stability bound"
+        );
+    }
+
+    #[test]
+    fn the_field_step_reads_the_derived_medium_diffusion() {
+        // A hot cell in the middle of a cool row; one step with the medium-derived diffusion spreads
+        // heat to the neighbours, and the denser-conducting air spreads more than water in one step,
+        // so the field's evolution follows the selected medium.
+        let hot_row = || vec![Fixed::ZERO, Fixed::from_int(100), Fixed::ZERO];
+        let cell = Fixed::from_ratio(1, 100);
+        let dt = Fixed::ONE;
+        let air_diff = derive_field_diffusion(
+            AIR_K,
+            Fixed::from_ratio(12, 10),
+            Fixed::from_int(1005),
+            cell,
+            dt,
+        );
+        let water_diff = derive_field_diffusion(
+            WATER_K,
+            Fixed::from_int(1000),
+            Fixed::from_int(4186),
+            cell,
+            dt,
+        );
+        let field_after = |diff: Fixed| {
+            let mut f = Field::new(3, 1, hot_row());
+            f.step(&FieldCalib {
+                diffusion: diff,
+                relaxation: Fixed::ZERO,
+                exchange: Fixed::ZERO,
+            });
+            (f.at(0, 0), f.at(1, 0))
+        };
+        let (air_edge, air_centre) = field_after(air_diff);
+        let (water_edge, _water_centre) = field_after(water_diff);
+        assert!(
+            air_edge > Fixed::ZERO,
+            "the medium-derived diffusion conducted heat into the neighbour"
+        );
+        assert!(
+            air_centre < Fixed::from_int(100),
+            "and drew it out of the hot cell"
+        );
+        assert!(
+            air_edge > water_edge,
+            "air's faster medium diffusion spreads more heat in one step than water's ({air_edge:?} > {water_edge:?})"
+        );
+    }
+
+    #[test]
+    fn from_manifest_with_medium_fails_loud_while_the_profile_is_reserved_and_derives_once_set() {
+        // A manifest whose medium profile is still reserved: the derivation refuses to run rather than
+        // fabricating a diffusivity (Principle 11).
+        let reserved = format!(
+            "{SET}\n[[reserved]]\nid = \"medium.air\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"medium_profile\"\nsource = \"t\"\n[[reserved]]\nid = \"field.cell_size\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.01\"\nunit = \"m\"\nsource = \"t\"\n[[reserved]]\nid = \"time.base_tick_seconds\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"s\"\nsource = \"t\"\n"
+        );
+        let m = CalibrationManifest::from_toml_str(&reserved).unwrap();
+        assert!(
+            FieldCalib::from_manifest_with_medium(&m, "medium.air").is_err(),
+            "a reserved medium profile fails loud"
+        );
+
+        // Once the owner sets the profile (with the conductivity and specific-heat axes), the field
+        // calibration derives its diffusion from it.
+        let set = reserved.replace(
+            "id = \"medium.air\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"",
+            "id = \"medium.air\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"conductivity=0.0262,density=1.2,specific_heat=1005\"",
+        );
+        let m2 = CalibrationManifest::from_toml_str(&set).unwrap();
+        let calib = FieldCalib::from_manifest_with_medium(&m2, "medium.air").unwrap();
+        assert!(
+            calib.diffusion > Fixed::ZERO && calib.diffusion < STENCIL_STABILITY_BOUND,
+            "the derived diffusion is positive and sub-bound ({:?})",
+            calib.diffusion
+        );
+    }
+
+    /// A fixture manifest carrying the real air and water medium profiles (Incropera and DeWitt) set,
+    /// a one-centimetre cell and one-second base tick chosen so both derived coefficients land
+    /// representable and sub-bound, and a still-field relaxation (zero) so the observable test isolates
+    /// diffusion. Labelled fixtures, not owner canon: a canonical run reads the reserved
+    /// `medium.{name}` profiles, which are fail-loud until the owner sets them.
+    const WIRING_MANIFEST: &str = r#"
+[[reserved]]
+id = "medium.air"
+basis = "fixture: Incropera and DeWitt air near 300 K"
+status = "set"
+value = "conductivity=0.0262,density=1.2,specific_heat=1005"
+unit = "medium_profile"
+source = "test"
+[[reserved]]
+id = "medium.water"
+basis = "fixture: Incropera and DeWitt liquid water near 300 K"
+status = "set"
+value = "conductivity=0.606,density=1000,specific_heat=4186"
+unit = "medium_profile"
+source = "test"
+[[reserved]]
+id = "field.cell_size"
+basis = "fixture: one-centimetre cell, both media representable and sub-bound"
+status = "set"
+value = "0.01"
+unit = "metres_per_cell"
+source = "test"
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "fixture"
+status = "set"
+value = "1"
+unit = "s"
+source = "test"
+[[reserved]]
+id = "field.relaxation"
+basis = "fixture: a still field, so the test isolates medium-derived diffusion"
+status = "set"
+value = "0"
+unit = "ratio_per_tick"
+source = "test"
+[[reserved]]
+id = "field.body_exchange"
+basis = "fixture"
+status = "set"
+value = "0.1"
+unit = "ratio_per_tick"
+source = "test"
+"#;
+
+    /// A hot-spot field: a cool plane with one hot cell at its centre. The baseline carries the spot
+    /// and the relaxation coefficient is zero on this path, so a step conducts the spot outward at the
+    /// calibration's diffusion rate and nothing pulls it back.
+    fn hot_spot_field() -> Field {
+        let (w, h) = (5, 5);
+        let mut baseline = vec![Fixed::ZERO; (w * h) as usize];
+        baseline[(2 * w + 2) as usize] = Fixed::from_int(100);
+        Field::new(w, h, baseline)
+    }
+
+    #[test]
+    fn medium_derived_field_diffusion_is_wired_through_the_world_build_path() {
+        // The milestone (design Part 5.4/5.5): two worlds identical but for their ambient medium get
+        // DIFFERENT field diffusion coefficients derived from the medium's physics alone, their
+        // temperature fields diverge after stepping a hot spot, and the field is bit-identical under
+        // the scheduler variant (scheduler == pinned order). The medium is the lever and the
+        // diffusivity is physics; the free scalar field.diffusion is retired on this path.
+        let manifest = CalibrationManifest::from_toml_str(WIRING_MANIFEST).unwrap();
+
+        // Two scenarios identical but for the medium: one names water, one names none (the documented
+        // default temperate air, which resolves to the medium.air physics profile).
+        let air_world =
+            Scenario::from_toml_str("[scenario]\nid = \"air\"\nname = \"Air\"\n").unwrap();
+        let water_world = Scenario::from_toml_str(
+            "[scenario]\nid = \"water\"\nname = \"Water\"\nmedium = \"water\"\n",
+        )
+        .unwrap();
+        let air_res = air_world.resolve(&manifest).unwrap();
+        let water_res = water_world.resolve(&manifest).unwrap();
+
+        // The air-default world reads the medium.air profile; the water world reads medium.water. No
+        // world reads a free diffusion scalar.
+        assert_eq!(air_res.medium_manifest_id(), "medium.air");
+        assert_eq!(water_res.medium_manifest_id(), "medium.water");
+
+        // The world-build path derives each field calibration from its medium's k/(rho*c).
+        let air_calib = FieldCalib::from_resolution(&manifest, &air_res).unwrap();
+        let water_calib = FieldCalib::from_resolution(&manifest, &water_res).unwrap();
+        assert_ne!(
+            air_calib.diffusion, water_calib.diffusion,
+            "two media give different diffusion coefficients from the world-build path"
+        );
+        assert!(
+            air_calib.diffusion > water_calib.diffusion,
+            "air conducts faster than water from k/(rho*c) alone ({:?} > {:?})",
+            air_calib.diffusion,
+            water_calib.diffusion
+        );
+        assert!(
+            air_calib.diffusion > Fixed::ZERO
+                && water_calib.diffusion > Fixed::ZERO
+                && air_calib.diffusion < STENCIL_STABILITY_BOUND
+                && water_calib.diffusion < STENCIL_STABILITY_BOUND,
+            "both derived coefficients are positive and sub-bound"
+        );
+        // The relaxation and body-exchange calibrations are the medium-independent manifest reads, so
+        // they match: only the diffusion coefficient tracks the medium.
+        assert_eq!(air_calib.relaxation, water_calib.relaxation);
+        assert_eq!(air_calib.exchange, water_calib.exchange);
+
+        // The two worlds diverge under the hot spot: identical field baselines, medium-derived calibs,
+        // so after stepping the temperature-field state hashes must differ (the field is folded into
+        // state_hash, so this is the whole-runner canonical hash).
+        let mut air_runner = Runner::new(hot_spot_field(), air_calib);
+        let mut water_runner = Runner::new(hot_spot_field(), water_calib);
+        assert_eq!(
+            air_runner.state_hash(),
+            water_runner.state_hash(),
+            "the two runners start from the same field"
+        );
+        for _ in 0..8 {
+            air_runner.step();
+            water_runner.step();
+        }
+        assert_ne!(
+            air_runner.state_hash(),
+            water_runner.state_hash(),
+            "the medium-derived diffusion diverges the two worlds' temperature fields"
+        );
+
+        // The field is bit-identical under the scheduler variant (the field-only runner's version of
+        // worker-width invariance: the pinned-order step and the scheduled step must track exactly).
+        for calib in [air_calib, water_calib] {
+            let mut pinned = Runner::new(hot_spot_field(), calib);
+            let mut scheduled = Runner::new(hot_spot_field(), calib);
+            for _ in 0..8 {
+                pinned.step();
+                scheduled.step_scheduled(&[]);
+                assert_eq!(
+                    scheduled.state_hash(),
+                    pinned.state_hash(),
+                    "the medium-derived field diverged under the scheduler variant"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn per_being_exchange_cools_a_high_surface_body_faster_and_replays_bit_for_bit() {
+        use crate::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
+        use crate::physiology::{
+            derive_body_exchange_rate, MetabolicAnchors, CONVECTIVE_SURFACE, TISSUE_SPECIFIC_HEAT,
+        };
+
+        // A registry with a skin tissue (convective surface) and a flesh tissue (specific heat).
+        let mut organs = crate::anatomy::BodyPlanRegistry::dev_default();
+        let skin = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: skin,
+            name: "skin".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(CONVECTIVE_SURFACE, Fixed::from_int(2))]),
+        });
+        let flesh = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: flesh,
+            name: "flesh".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(
+                TISSUE_SPECIFIC_HEAT,
+                Fixed::from_int(3500),
+            )]),
+        });
+        let temperament = Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(1, 2),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        };
+        let make = |skin_dev: (i64, i64)| BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![
+                Part {
+                    kind: skin,
+                    development: Fixed::from_ratio(skin_dev.0, skin_dev.1),
+                },
+                Part {
+                    kind: flesh,
+                    development: Fixed::ONE,
+                },
+            ],
+            temperament,
+        };
+        let anchors = MetabolicAnchors::dev_fixture();
+        let high_body = make((1, 1)); // full skin: large surface
+        let compact_body = make((1, 8)); // little skin: small surface
+        let rate_high =
+            derive_body_exchange_rate(&high_body, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+        let rate_compact = derive_body_exchange_rate(
+            &compact_body,
+            &organs,
+            anchors.medium_h,
+            Fixed::ONE,
+            &anchors,
+        );
+        assert!(
+            rate_high > rate_compact,
+            "the high-surface body couples faster"
+        );
+
+        // Run: a uniform cold field, both beings starting hot in the same cell, each coupled at its own
+        // derived rate. The high-surface body cools further toward the cold cell in one step.
+        let start = Fixed::from_int(310);
+        let cold = Fixed::from_int(250);
+        let run = || {
+            let field = Field::new(2, 1, vec![cold, cold]);
+            let mut r = Runner::new(field, calib());
+            let high = StableId(1);
+            let compact = StableId(2);
+            r.place_being(high, Coord3::ground(0, 0), start);
+            r.place_being(compact, Coord3::ground(1, 0), start);
+            r.set_body_exchange_rate(high, rate_high);
+            r.set_body_exchange_rate(compact, rate_compact);
+            r.step();
+            (
+                r.body_temp(high).unwrap(),
+                r.body_temp(compact).unwrap(),
+                r.state_hash(),
+            )
+        };
+        let (t_high, t_compact, hash1) = run();
+        assert!(
+            t_high < start && t_compact < start,
+            "both cooled toward the cold cell"
+        );
+        assert!(
+            t_high < t_compact,
+            "the high-surface body cooled more: {t_high:?} < {t_compact:?}"
+        );
+        let (_t2h, _t2c, hash2) = run();
+        assert_eq!(hash1, hash2, "the same run replays bit for bit");
+    }
 
     #[test]
     fn field_calib_reads_the_three_values_from_a_set_manifest() {

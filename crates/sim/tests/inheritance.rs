@@ -18,8 +18,8 @@
 
 use civsim_core::{Fixed, StableId};
 use civsim_sim::{
-    AccessWeights, Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, InferenceParams,
-    IntrinsicBeliefs, SourceModeId, ValueProfile, World,
+    AccessWeights, Axiom, AxiomAxisId, Curve, EpistemicStance, EvidenceRing, InferenceParams,
+    IntrinsicBeliefs, RingCapacityLaw, SourceModeId, ValueProfile, World,
 };
 
 const AXIS: AxiomAxisId = AxiomAxisId(0);
@@ -29,6 +29,19 @@ fn params() -> InferenceParams {
         clamp: Fixed::from_int(50),
         commit_threshold: Fixed::from_int(3),
         margin: Fixed::from_int(1),
+    }
+}
+
+/// A labelled test ring-capacity law (not owner data): a linear memory-to-slots curve and a
+/// ceiling. The axiom-only harness drives it with an explicit memory of [`Fixed::ONE`], the
+/// neutral memory of a bare being, so inheritance stays decoupled from the genome.
+fn dev_ring_law() -> RingCapacityLaw {
+    RingCapacityLaw {
+        curve: Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(8), Fixed::from_int(16)),
+        ]),
+        hard_cap: 32,
     }
 }
 
@@ -87,7 +100,15 @@ fn a_child_blends_parent_and_local_culture() {
     let (parent, band) = parent_and_band(&mut w);
     // Heritability 0.5, no mutation: child seed = 0.5*0 (parent) + 0.5*1 (band mean) = 0.5.
     let child = w
-        .inherit_child(parent, &band, Fixed::from_ratio(1, 2), Fixed::ZERO, 0)
+        .inherit_child(
+            parent,
+            &band,
+            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
+            0,
+            Fixed::ONE,
+            &dev_ring_law(),
+        )
         .unwrap();
     assert_eq!(child_seed(&w, child), Fixed::from_ratio(1, 2));
 }
@@ -98,12 +119,28 @@ fn heritability_extremes_pick_parent_or_culture() {
     let (parent, band) = parent_and_band(&mut w);
     // h = 1, no mutation: pure parent seed (0).
     let all_parent = w
-        .inherit_child(parent, &band, Fixed::ONE, Fixed::ZERO, 0)
+        .inherit_child(
+            parent,
+            &band,
+            Fixed::ONE,
+            Fixed::ZERO,
+            0,
+            Fixed::ONE,
+            &dev_ring_law(),
+        )
         .unwrap();
     assert_eq!(child_seed(&w, all_parent), Fixed::ZERO);
     // h = 0, no mutation: pure local culture (1.0).
     let all_culture = w
-        .inherit_child(parent, &band, Fixed::ZERO, Fixed::ZERO, 0)
+        .inherit_child(
+            parent,
+            &band,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            0,
+            Fixed::ONE,
+            &dev_ring_law(),
+        )
         .unwrap();
     assert_eq!(child_seed(&w, all_culture), Fixed::ONE);
 }
@@ -113,15 +150,27 @@ fn mutation_stays_within_its_bound() {
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(99);
     let (parent, band) = parent_and_band(&mut w);
     let spread = Fixed::from_ratio(1, 10);
-    // Blend at h=0.5 is 0.5; the mutated seed stays within [0.4, 0.6].
+    // Blend at h=0.5 is 0.5. The mutation is now a mean-zero Gaussian of standard deviation
+    // `spread`, so it is bounded by the stamped sum-of-uniforms tail (+/- 6 standard deviations,
+    // the honest limit of the k=12 approximation) rather than the former uniform +/- spread.
+    let bound = Fixed::from_int(6).mul(spread);
+    let blend = Fixed::from_ratio(1, 2);
     for gen in 0..8u64 {
         let child = w
-            .inherit_child(parent, &band, Fixed::from_ratio(1, 2), spread, gen)
+            .inherit_child(
+                parent,
+                &band,
+                blend,
+                spread,
+                gen,
+                Fixed::ONE,
+                &dev_ring_law(),
+            )
             .unwrap();
         let s = child_seed(&w, child);
         assert!(
-            s >= Fixed::from_ratio(4, 10) && s <= Fixed::from_ratio(6, 10),
-            "the mutation is bounded: {s:?}"
+            (s - blend).abs() <= bound,
+            "the mutation is bounded by the Gaussian tail: {s:?}"
         );
     }
 }
@@ -138,6 +187,8 @@ fn inheritance_replays_deterministically() {
                 Fixed::from_ratio(1, 2),
                 Fixed::from_ratio(1, 10),
                 0,
+                Fixed::ONE,
+                &dev_ring_law(),
             )
             .unwrap();
         child_seed(&w, child)
@@ -154,6 +205,55 @@ fn a_childless_parent_with_no_beliefs_yields_none() {
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(1);
     let ghost = w.spawn(Fixed::ONE); // no intrinsic beliefs set
     assert!(w
-        .inherit_child(ghost, &[], Fixed::from_ratio(1, 2), Fixed::ZERO, 0)
+        .inherit_child(
+            ghost,
+            &[],
+            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
+            0,
+            Fixed::ONE,
+            &dev_ring_law(),
+        )
         .is_none());
+}
+
+#[test]
+fn inherit_child_keeps_the_axiom_harness_decoupled_from_genome() {
+    // The axiom-only harness: the parent and band are bare spawned minds with no genome, and the
+    // belief inheritance is driven by an explicit memory (Fixed::ONE, the neutral memory of a
+    // bare being) pushed in by the caller, so the axiom half runs with no genome present. The
+    // existing suite's assertions are unchanged; this one pins the decoupling.
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0x0DE);
+    let (parent, band) = parent_and_band(&mut w);
+    assert!(
+        w.genome_of(parent).is_none(),
+        "the harness parent carries no genome"
+    );
+    let law = dev_ring_law();
+    let child = w
+        .inherit_child(
+            parent,
+            &band,
+            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
+            0,
+            Fixed::ONE,
+            &law,
+        )
+        .expect("a child inherits beliefs with no genome present");
+    // The child carries the inherited beliefs (the axiom half) but no genome or mind: the harness
+    // stays decoupled from the genome half.
+    let intr = w.intrinsic_of(child).expect("the child inherited beliefs");
+    assert!(
+        w.genome_of(child).is_none(),
+        "no genome is created on this path"
+    );
+    assert!(w.mind(child).is_none(), "no mind is expressed on this path");
+    // The child's fresh evidence ring is sized from the explicit Fixed::ONE memory through the
+    // law, and starts empty.
+    assert_eq!(intr.axioms[0].evidence.cap(), law.capacity_for(Fixed::ONE));
+    assert!(
+        intr.axioms[0].evidence.is_empty(),
+        "the inherited ring starts empty"
+    );
 }

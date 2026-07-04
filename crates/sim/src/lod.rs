@@ -24,13 +24,23 @@
 //! The behaviour here (who promotes when, how wealth is apportioned) is not the
 //! point and is not calibrated; the point is that the structural invariants hold.
 
+use crate::belief::{BeliefKey, BeliefParams, BeliefPool, FacetStrength};
+use crate::breeding::SexClass;
+use crate::census::ReproductiveMoments;
 use crate::decision::Curve;
 use crate::demography::AgeHistogram;
-use civsim_core::{EntityHandle, EntityLocation, Fixed, PoolId, Registry, StableId, StateHasher};
+use crate::institution::{AggregateInstitution, Institution};
+use civsim_core::{
+    EntityHandle, EntityLocation, EventId, Fixed, InstId, PoolId, Registry, StableId, StateHasher,
+};
 use serde::{Deserialize, Serialize};
 
 /// A promoted, fully represented entity holding some wealth.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Not `Copy`: a promoted mind carries the facet strengths it was lifted with (one per
+/// prevailing belief), so demotion can fold exactly those bits back and total belief mass is
+/// conserved across the crossing (design Part 54, R-PROJ-REGISTER).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Individual {
     /// Stable identity, valid across promotion and demotion.
     pub id: StableId,
@@ -41,6 +51,11 @@ pub struct Individual {
     /// unchanged. Carried across the tier boundary so promotion and demotion conserve the
     /// pool's age distribution (design Parts 20, 54; R-AGING pool tier, R-PROJ-REGISTER).
     pub age: Option<u32>,
+    /// The facet strengths this individual was lifted with, one per prevailing belief it holds,
+    /// keyed by [`BeliefKey`]. Empty for an individual promoted from a belief-free pool, so
+    /// existing two-tier worlds are unchanged. Restriction (demotion) folds exactly these bits
+    /// back into the target pool, so the belief mass the lift removed returns exactly.
+    pub beliefs: Vec<(BeliefKey, FacetStrength)>,
 }
 
 /// An aggregate pool of anonymous individuals, tracked as statistics. A pool may carry an
@@ -59,12 +74,48 @@ pub struct Pool {
     pub wealth: Fixed,
     /// The pool's age distribution, empty for an age-untracked pool.
     pub ages: AgeHistogram,
+    /// The pool's reproductive-moment accumulator for the current census window (design Parts 25,
+    /// 54; the R-REPRO census tier). It carries the sex split of this window's breeders and the two
+    /// reproductive moments, so the pool derives an effective population size Ne from
+    /// [`Pool::effective_size`] without holding any individual. A window accumulator, not persisted
+    /// canonical state: it is empty by default and rebuilt as births flow in through
+    /// [`Pool::add_births`], so it stays out of the snapshot and the state hash exactly as the
+    /// individual-tier census stays out of the world hash.
+    pub repro: ReproductiveMoments,
+    /// The pool's prevailing beliefs (design Part 9.14, Part 54): each an extensive belief mass
+    /// and a member count, from which the intensive knowledge level derives. Empty for a
+    /// belief-free pool, so existing two-tier worlds are unchanged. A lift moves belief mass from
+    /// here into a promoted mind's facet strengths and a restriction folds it back, both exact,
+    /// so total belief mass is a conserved projection across the tier boundary.
+    pub beliefs: BeliefPool,
+    /// The compact aggregate institution this pool crystallized, if any (design Part 36): a feature
+    /// vector, a legitimacy mass, and a count rather than explicit roles and members. Promotion
+    /// materializes an explicit [`Institution`] whose feature signature reproduces this vector, and
+    /// the feature mass and legitimacy mass are conserved projections across the tier boundary
+    /// exactly as belief mass is. `None` for a pool that has crystallized no institution, so
+    /// existing two-tier worlds are unchanged.
+    pub institution: Option<AggregateInstitution>,
 }
 
 impl Pool {
     /// Whether this pool tracks an age distribution (as opposed to a plain head count).
     pub fn is_age_tracked(&self) -> bool {
         self.ages.total() > 0
+    }
+
+    /// The pool-tier birth inflow: a breeder of sex `parent_sex` produced `offspring` young this
+    /// window (design Parts 20, 25, 54). The newborns enter the age-zero cohort and the breeder's
+    /// reproductive contribution feeds this pool's moment accumulator, so a coarse pool ages, grows,
+    /// and derives Ne with no individuals. Delegates to [`AgeHistogram::add_births`].
+    pub fn add_births(&mut self, parent_sex: SexClass, offspring: u32) {
+        self.ages.add_births(&mut self.repro, parent_sex, offspring);
+    }
+
+    /// The effective population size the pool's census window implies, through the same race-blind
+    /// kernel the individual tier uses ([`ReproductiveMoments::effective_size`]), so a pool-only
+    /// world derives Ne consistently with a modelled one (record 62.9).
+    pub fn effective_size(&self) -> u32 {
+        self.repro.effective_size()
     }
 
     /// Whether this pool holds members but no age distribution (a plain head count). Distinct
@@ -88,8 +139,15 @@ pub struct TwoTierWorld {
     /// referential integrity: these must resolve after promotion, demotion, merge,
     /// and split.
     pub edges: Vec<(StableId, StableId)>,
+    /// The promoted, explicit institutions (design Part 36): a pool's crystallized
+    /// [`AggregateInstitution`] materializes into one of these, and demotion folds it back. Feature
+    /// mass and legitimacy mass are conserved across the crossing exactly as population and wealth
+    /// are. Empty for a world with no promoted institutions, so existing two-tier worlds are
+    /// unchanged.
+    pub institutions: Vec<Institution>,
     next_pool: u32,
     next_handle: u64,
+    next_inst: u32,
 }
 
 impl TwoTierWorld {
@@ -100,8 +158,10 @@ impl TwoTierWorld {
             individuals: Vec::new(),
             pools: Vec::new(),
             edges: Vec::new(),
+            institutions: Vec::new(),
             next_pool: 0,
             next_handle: 0,
+            next_inst: 0,
         }
     }
 
@@ -123,6 +183,115 @@ impl TwoTierWorld {
         ind + pool
     }
 
+    /// Total belief mass across both tiers (the conserved belief-mass projection): the summed
+    /// extensive masses of every pool's prevailing beliefs, plus the raw bits of every promoted
+    /// mind's carried facet strengths. Belief mass is a raw Q32.32 bit-sum, so addition is exact
+    /// and associative and this total is conserved bit for bit across a lift and a restriction,
+    /// exactly as `total_wealth` is (design Part 54, Part 58, R-PROJ-REGISTER).
+    pub fn belief_mass(&self) -> i128 {
+        let pool: i128 = self.pools.iter().map(|p| p.beliefs.total_mass()).sum();
+        let ind: i128 = self
+            .individuals
+            .iter()
+            .flat_map(|i| i.beliefs.iter().map(|(_, s)| s.to_bits() as i128))
+            .sum();
+        pool + ind
+    }
+
+    /// Total institution feature mass across both tiers (the conserved feature-vector projection of
+    /// design Part 36 and R-TIER-CONSIST): the summed feature-signature bits of every pool's
+    /// compact aggregate institution plus the extracted feature-signature bits of every promoted
+    /// explicit institution. The signature is an extensive bit-sum, so this total is conserved bit
+    /// for bit across promotion, demotion, merge, and split, exactly as `belief_mass` is.
+    pub fn institution_feature_mass(&self) -> i128 {
+        let pool: i128 = self
+            .pools
+            .iter()
+            .filter_map(|p| p.institution.as_ref())
+            .map(|a| a.feature_signature.mass_bits())
+            .sum();
+        let promoted: i128 = self
+            .institutions
+            .iter()
+            .map(|i| i.feature_signature().mass_bits())
+            .sum();
+        pool + promoted
+    }
+
+    /// Total institution legitimacy mass across both tiers (the second conserved projection of the
+    /// institution substrate): the summed legitimacy bits of every pool's aggregate institution
+    /// plus every promoted institution's legitimacy. Conserved bit for bit across the tier
+    /// crossings.
+    pub fn institution_legitimacy_mass(&self) -> i128 {
+        let pool: i128 = self
+            .pools
+            .iter()
+            .filter_map(|p| p.institution.as_ref())
+            .map(|a| a.legitimacy.to_bits() as i128)
+            .sum();
+        let promoted: i128 = self
+            .institutions
+            .iter()
+            .map(|i| i.legitimacy.to_bits() as i128)
+            .sum();
+        pool + promoted
+    }
+
+    /// Attach a crystallized aggregate institution to a pool (the pool-tier crystallization result;
+    /// the live detector that produces it from the running decision layer is a named follow-on). A
+    /// pool that already carries one has the new aggregate merged into it, so feature and
+    /// legitimacy mass are conserved.
+    pub fn set_pool_institution(&mut self, pool: PoolId, agg: AggregateInstitution) {
+        let pi = self.pool_index(pool);
+        self.pools[pi].institution = Some(match self.pools[pi].institution.take() {
+            Some(existing) => existing.merge(&agg),
+            None => agg,
+        });
+    }
+
+    /// Promote a pool's compact aggregate institution into an explicit [`Institution`] (design Part
+    /// 36): the aggregate leaves the pool (`institution` becomes `None`) and an explicit institution
+    /// whose feature signature reproduces the compact vector enters the promoted tier, minted with a
+    /// fresh [`InstId`] and the given founding provenance. Conserves feature mass and legitimacy
+    /// mass: the signature and legitimacy move across the tier boundary unchanged. Panics if the
+    /// pool carries no institution.
+    pub fn promote_institution(&mut self, pool: PoolId, founded: EventId) -> InstId {
+        let pi = self.pool_index(pool);
+        let agg = self.pools[pi]
+            .institution
+            .take()
+            .expect("promoting an institution from a pool that has none");
+        let id = InstId(self.next_inst);
+        self.next_inst += 1;
+        let inst = agg.materialize(id, founded);
+        debug_assert_eq!(
+            inst.feature_signature(),
+            agg.feature_signature,
+            "the materialized institution must reproduce the pool's compact vector"
+        );
+        self.institutions.push(inst);
+        id
+    }
+
+    /// Demote an explicit institution back into a pool's compact aggregate form (design Part 36):
+    /// the institution folds into the target pool's aggregate (merged if the pool already carries
+    /// one), conserving feature mass and legitimacy mass. Panics if no institution with that id is
+    /// promoted.
+    pub fn demote_institution(&mut self, id: InstId, into: PoolId) {
+        let idx = self
+            .institutions
+            .iter()
+            .position(|i| i.id == id)
+            .unwrap_or_else(|| panic!("no promoted institution {id:?}"));
+        let inst = self.institutions.swap_remove(idx);
+        let agg = AggregateInstitution::from_institution(&inst);
+        let pi = self.pool_index(into);
+        self.pools[pi].institution = Some(match self.pools[pi].institution.take() {
+            Some(existing) => existing.merge(&agg),
+            None => agg,
+        });
+    }
+
     /// Add an age-untracked aggregate pool (a plain head count), returning its id.
     pub fn add_pool(&mut self, count: u32, wealth: Fixed) -> PoolId {
         let id = PoolId(self.next_pool);
@@ -132,6 +301,9 @@ impl TwoTierWorld {
             count,
             wealth,
             ages: AgeHistogram::new(),
+            repro: ReproductiveMoments::new(),
+            beliefs: BeliefPool::new(),
+            institution: None,
         });
         id
     }
@@ -154,6 +326,9 @@ impl TwoTierWorld {
             count,
             wealth,
             ages,
+            repro: ReproductiveMoments::new(),
+            beliefs: BeliefPool::new(),
+            institution: None,
         });
         id
     }
@@ -257,7 +432,57 @@ impl TwoTierWorld {
             id,
             wealth: share,
             age,
+            beliefs: Vec::new(),
         });
+        id
+    }
+
+    /// Promote one member of an age-untracked pool into a full individual, lifting the pool's
+    /// prevailing beliefs into the new mind's facet strengths as it crosses the tier boundary
+    /// (design Part 54, the belief lifting operator). It does the same wealth-and-population
+    /// promote [`Self::promote`] does, then for each prevailing belief the pool holds it mints one
+    /// facet strength at the belief's current level through the reserved curve and dispersion
+    /// (`params`), subtracting exactly the minted bits from the pool and dropping that belief's
+    /// count. The minted strengths ride with the individual, so total belief mass is unchanged by
+    /// the crossing and a later demotion folds them back exactly.
+    pub fn promote_lifting(
+        &mut self,
+        pool: PoolId,
+        share: Fixed,
+        params: &BeliefParams,
+        tick: u64,
+        seed: u64,
+    ) -> StableId {
+        let pi = self.pool_index(pool);
+        assert!(
+            !self.pools[pi].is_age_tracked(),
+            "an age-tracked pool must promote with promote_at_age so the age leaves the distribution"
+        );
+        assert!(self.pools[pi].count >= 1, "promoting from an empty pool");
+        assert!(share >= Fixed::ZERO, "a promoted share cannot be negative");
+        assert!(
+            self.pools[pi].wealth >= share,
+            "share exceeds the pool's wealth; the partition would go negative"
+        );
+        self.pools[pi].count -= 1;
+        self.pools[pi].wealth -= share;
+        let id = self.mint_promoted(share, None);
+        // Lift each prevailing belief the pool holds, in canonical key order, into the new mind.
+        let keys = self.pools[pi].beliefs.keys_in_order();
+        let mut carried: Vec<(BeliefKey, FacetStrength)> = Vec::new();
+        for key in keys {
+            let lifted = self.pools[pi].beliefs.get_mut(&key).and_then(|b| {
+                b.lift_one(&params.level_to_strength, params.dispersion, id, tick, seed)
+            });
+            if let Some(strength) = lifted {
+                carried.push((key, strength));
+            }
+        }
+        // The individual minted last is the one to attach the lifted strengths to.
+        if let Some(ind) = self.individuals.last_mut() {
+            debug_assert_eq!(ind.id, id);
+            ind.beliefs = carried;
+        }
         id
     }
 
@@ -291,6 +516,15 @@ impl TwoTierWorld {
         if let Some(age) = ind.age {
             self.pools[pi].ages.add(age, 1);
         }
+        // Restrict the mind's facet strengths back into the target pool's prevailing beliefs
+        // (design Part 54, the belief restriction operator), folding exactly the bits the lift
+        // removed so total belief mass returns. A key the pool did not yet carry is created.
+        for (key, strength) in &ind.beliefs {
+            self.pools[pi]
+                .beliefs
+                .entry_or_default(*key)
+                .fold_one(*strength);
+        }
         self.reg.set_location(
             id,
             EntityLocation::Pooled {
@@ -321,6 +555,14 @@ impl TwoTierWorld {
             .expect("merged pool head count exceeds the u32 ceiling");
         self.pools[ai].wealth += moved.wealth;
         self.pools[ai].ages.merge(&moved.ages);
+        // Combine the two pools' aggregate institutions (design Part 36): their feature signatures
+        // and legitimacy masses add, so total feature mass and legitimacy mass are conserved.
+        self.pools[ai].institution = match (self.pools[ai].institution.take(), moved.institution) {
+            (Some(x), Some(y)) => Some(x.merge(&y)),
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            (None, None) => None,
+        };
         self.reg.repoint_pool(b, a);
         a
     }
@@ -350,7 +592,18 @@ impl TwoTierWorld {
         );
         self.pools[si].count -= take_count;
         self.pools[si].wealth -= take_wealth;
-        self.add_pool(take_count, take_wealth)
+        // Partition the pool's aggregate institution into two halves that recombine exactly (design
+        // Part 36): the source keeps the first half and the new pool takes the second, so total
+        // feature mass and legitimacy mass are conserved across the split.
+        let split_inst = self.pools[si].institution.as_ref().map(|a| a.split_two());
+        let new_pool = self.add_pool(take_count, take_wealth);
+        if let Some((keep, give)) = split_inst {
+            let si = self.pool_index(src);
+            self.pools[si].institution = Some(keep);
+            let ni = self.pool_index(new_pool);
+            self.pools[ni].institution = Some(give);
+        }
+        new_pool
     }
 
     /// Partition a total into `n` exact integer shares (in fixed-point bits) with the
@@ -410,6 +663,15 @@ impl TwoTierWorld {
             // age zero without a wrapping collision at the ceiling.
             h.write_u32(i.age.is_some() as u32);
             h.write_u32(i.age.unwrap_or(0));
+            // The mind's carried facet strengths, length-prefixed and walked in canonical
+            // BeliefKey order (the vector is built in lift order, so it is sorted for the hash).
+            let mut bel = i.beliefs.clone();
+            bel.sort_by_key(|(k, _)| *k);
+            h.write_u64(bel.len() as u64);
+            for (k, s) in bel {
+                k.hash_into(&mut h);
+                h.write_fixed(s.get());
+            }
         }
         let mut pools: Vec<&Pool> = self.pools.iter().collect();
         pools.sort_by_key(|p| p.id.0);
@@ -420,6 +682,13 @@ impl TwoTierWorld {
             h.write_fixed(p.wealth);
             h.write_u64(p.ages.occupied_ages() as u64);
             p.ages.hash_into(&mut h);
+            // The pool's prevailing beliefs, length-prefixed and walked in canonical key order.
+            p.beliefs.hash_into(&mut h);
+            // The pool's compact aggregate institution, a presence flag then its canonical fold.
+            h.write_u32(p.institution.is_some() as u32);
+            if let Some(agg) = &p.institution {
+                agg.hash_into(&mut h);
+            }
         }
         let mut edges = self.edges.clone();
         edges.sort();
@@ -427,6 +696,15 @@ impl TwoTierWorld {
         for (a, b) in edges {
             h.write_stable(a);
             h.write_stable(b);
+        }
+        // The promoted explicit institutions, by ascending InstId. Institution::hash_into folds
+        // every authoritative field EXCEPT the derived descriptor (Principle 10), so mutating a
+        // descriptor never changes the state hash.
+        let mut insts: Vec<&Institution> = self.institutions.iter().collect();
+        insts.sort_by_key(|i| i.id.0);
+        h.write_u64(insts.len() as u64);
+        for i in insts {
+            i.hash_into(&mut h);
         }
         self.reg.hash_into(&mut h);
         h.finish()
@@ -489,6 +767,10 @@ impl TwoTierWorld {
                     id: StableId(i.id),
                     wealth: Fixed::from_bits(i.wealth_bits),
                     age: if i.age < 0 { None } else { Some(i.age as u32) },
+                    // The snapshot schema does not yet carry belief state (a follow-on to the
+                    // rkyv/bincode persistence of R-SAVE-SCHEMA); a reloaded individual starts
+                    // belief-free, exactly as the reproductive-moment window does.
+                    beliefs: Vec::new(),
                 })
                 .collect(),
             pools: s
@@ -499,6 +781,15 @@ impl TwoTierWorld {
                     count: p.count,
                     wealth: Fixed::from_bits(p.wealth_bits),
                     ages: AgeHistogram::from_pairs(p.ages.iter().copied()),
+                    // The reproductive-moment accumulator is a window transient, not persisted; a
+                    // reloaded pool starts a fresh window, exactly as the individual census does.
+                    repro: ReproductiveMoments::new(),
+                    // Belief state is not yet in the snapshot schema (R-SAVE-SCHEMA follow-on); a
+                    // reloaded pool starts belief-free.
+                    beliefs: BeliefPool::new(),
+                    // Institution persistence is a named follow-on (R-SAVE-SCHEMA); a reloaded
+                    // pool starts with no crystallized institution.
+                    institution: None,
                 })
                 .collect(),
             edges: s
@@ -506,8 +797,13 @@ impl TwoTierWorld {
                 .iter()
                 .map(|e| (StableId(e.a), StableId(e.b)))
                 .collect(),
+            // Institution persistence is a named follow-on (R-SAVE-SCHEMA); a reloaded world
+            // starts with no promoted institutions, exactly as belief and reproductive-moment
+            // state restart.
+            institutions: Vec::new(),
             next_pool: s.next_pool,
             next_handle: s.next_handle,
+            next_inst: 0,
         }
     }
 }

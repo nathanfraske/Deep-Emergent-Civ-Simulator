@@ -1,0 +1,59 @@
+# Venus: a uniformly super-hot world under a dense, toxic, crushing atmosphere. A
+# runaway-greenhouse surface lethal everywhere; life banded high in the cooler cloud
+# decks, buoyant in the dense air, breathing a medium thin in anything respirable and
+# laced with harm. A thin thread of magic. The world the medium substrate (R-MEDIUM)
+# stresses hardest: lethal-hot in-medium thermal exchange, toxic-poor respiration, and
+# dense-medium buoyancy at once. See docs/working/RESERVED_VALUES_WORKSHEET.md. Directions
+# are tokens; magnitudes stay reserved. The environment (field, thermal band, medium) is
+# proposed for §3 promotion to manifest dials and is not yet a [dials] entry.
+
+[scenario]
+id = "venus"
+name = "Venus"
+summary = "A uniformly super-hot world under a dense, toxic, crushing atmosphere: the surface lethal everywhere, life banded high in the cooler cloud decks, buoyant in the dense air and breathing a medium thin in anything respirable and laced with harm. A scarce, costly magic is a survival edge, not an ambient utility."
+grounding = "real"
+medium = "dense_toxic"           # the crushing hot toxic atmosphere: dense, thin in respirable, corrosive
+
+[races]
+count = "few"
+diversity = "moderate"
+magical_mix = true
+
+[magic]
+laws = true
+potency = "low_to_moderate"     # present but scarce, a survival edge not an ambient utility
+cost = "real"
+limit_looseness = "low"
+affinity_fraction = "few"
+affinity_weight = "moderate"
+
+[dials]
+# The extremity is environmental (the hot toxic dense medium, §3), not baked into the
+# genetic or linguistic clocks. What the dials crank is the harsh selection on small
+# cloud-deck pools and the belief-and-cohesion sharpening a constant threat produces.
+"genome.mutation_rates" = "real"
+"genome.point_mutation_rate" = "real"
+"genome.additive_mutation_step" = "real"
+"genome.selection_scaling" = "high"           # a lethal world selects hard
+"genome.effective_population_size" = "low"    # small, isolated cloud-deck pools drift
+"genome.speciation_distance" = "real"
+"genome.speciation_incompatibilities" = "real"
+"language.sound_change_rate" = "real"
+"lang.drift_operator_rates" = "real"
+"language.innovation_rate" = "real"
+"axiom.calcification_rate" = "high"           # constant threat hardens belief and cohesion
+"axiom.conformity_prestige_strengths" = "high"
+"value_metric.conflict_coefficient" = "high"  # scarce habitable band, contested
+"being.life_event_impulse" = "high"
+"biosphere.predawn_generations" = "real"
+
+[environment]
+# What makes Venus lethally hot: a dense convective atmosphere smears heat toward uniform,
+# the medium couples the body fast (it cooks), and the race adapts by shifting and widening
+# its survivable band upward, though the runaway surface still lies outside it. Field
+# relaxation stays at its baseline (the thick slow atmosphere buffers day and night into one
+# hot baseline). The magnitudes behind these tokens are reserved for the owner (§3).
+"field.diffusion" = "high"                     # dense convective atmosphere smears heat
+"field.body_exchange" = "high"                 # the dense hot medium cooks the body fast
+"physiology.thermal_setpoint" = "high"         # a heat-shifted thermophile core
+"physiology.thermal_half_band" = "high"        # a widened survivable band, still short of the surface

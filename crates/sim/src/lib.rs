@@ -43,19 +43,30 @@
 //!   minds, is deceived, and sees lies through, all deterministically. It does not yet
 //!   decide or act (design Part 8); that half is gated on the systems and reserved
 //!   numbers the gating notes name.
+//! - [`transmission`]: the knowledge-transmission substrate (design Parts 20, 23, 25, 41). A
+//!   culture copies opaque content-addressed designs; the copy drifts a fidelity-scaled amount
+//!   and an under-practised design is lost, exposing the drift and loss rates
+//!   `compose.transmission_stability` derives from. The transmit and loss kernels are race-blind,
+//!   reading per-race perception and memory rather than an authored per-race fidelity table
+//!   (Principle 9), and the transmitted unit is a `DesignId`, never a technique enum (Principle 4).
 //! - [`world`]: the runtime spine (design Parts 4, 57). A [`world::World`] owns the
 //!   minds, the event log, a clock, and the calibrations, and a serial deterministic
 //!   tick applies a batch of stimuli to the minds in one canonical order. The parallel
 //!   command scheduler is held for its open determinism design (R-CMD-ORDER,
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
+pub mod absence;
 pub mod affect;
 pub mod agent;
 pub mod anatomy;
 pub mod axiom;
+pub mod base_rates;
+pub mod belief;
 pub mod biosphere;
 pub mod body;
+pub mod breeding;
 pub mod calibration;
+pub mod census;
 pub mod clock;
 pub mod conservation;
 pub mod controller;
@@ -69,6 +80,9 @@ pub mod evolve;
 pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
+pub mod institution;
+pub mod langdist;
+pub mod langmod;
 pub mod language;
 pub mod lineage;
 pub mod located;
@@ -76,25 +90,38 @@ pub mod locomotion;
 pub mod lod;
 pub mod mate_choice;
 pub mod medium;
+pub mod personality;
+pub mod physiology;
 pub mod primes;
 pub mod race;
 pub mod runner;
 pub mod scenario;
+pub mod semantics;
 pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
 pub mod tom;
+pub mod trace;
+pub mod transmission;
 pub mod typology;
 pub mod value;
 pub mod world;
 
+pub use absence::{
+    absence_window, characteristic_lifespan, AbsenceScheduleDef, AbsenceScheduleId, AbsenceStage,
+    LIFESPAN_HAZARD_THRESHOLD,
+};
 pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
-pub use agent::{AccessObs, Mind, SharedBelief};
+pub use agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
-    entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef, AxiomAxisId,
-    AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance, EvidenceRing,
-    EvidenceTag, IntrinsicBeliefs, SourceModeDef, SourceModeId,
+    enculturation_pull_rate, entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef,
+    AxiomAxisId, AxiomAxisRegistry, AxiomDomainId, DomainDef, DomainRegistry, EpistemicStance,
+    EvidenceRing, EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
+};
+pub use base_rates::{RaceBaseRateRegistry, RaceBaseRates};
+pub use belief::{
+    instantiate_strength, BeliefKey, BeliefParams, BeliefPool, FacetStrength, PrevailingBelief,
 };
 pub use body::{
     apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
@@ -102,18 +129,31 @@ pub use body::{
     MeasureKind, PartCondition, TissueLayer, TissueMaterial, TissueMaterialId, TissueRegistry,
     WoundRecord,
 };
+pub use breeding::{
+    fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
+};
 pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
+pub use census::{
+    effective_size_classes, effective_size_sex, effective_size_var, ReproductiveCensus,
+    ReproductiveMoments,
+};
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
-pub use decision::{ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId};
+pub use decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
 pub use demography::{hazard_age, AgeHistogram};
 pub use dialogue::{
     conversation_of, ContentGateError, ContentRef, Conversation, EffectSign, FelicityCond,
     ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
-pub use evidence::{AttrKindId, EvidenceRef, InferenceFrame, InferenceParams};
+pub use evidence::{
+    aggregate_diffusion_rate, derive_aggregate_diffusion_rate, good_weight, AttrKindId,
+    EvidenceRef, InferenceFrame, InferenceParams,
+};
 pub use evolve::{
     controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
     selection_gradient, EvolveParams, EvolveReport,
@@ -129,32 +169,65 @@ pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
     HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
 };
+pub use institution::{
+    crystallization_order, crystallize, emit_undertaking, institution_distance, norm_fires,
+    recognize, signature_distance, weighted_tanimoto, AggregateInstitution, Atom, AttributeSel,
+    ConditionExpr, Conditions, CoordinationObservation, CrystallizationParams, DecisionPropensity,
+    Deontic, EticDescriptor, FeatureSignature, FunctionAxisDef, FunctionAxisId, FunctionRegistry,
+    FunctionVec, Institution, Norm, NormType, Predicate, RecognitionTemplate, Role, RoleId,
+    TemplateId, TemplateLibrary, STRUCTURAL_FEATURES,
+};
+pub use langdist::{
+    distance_component_weights, language_distance, lexical_distance, phonological_distance,
+    ComponentWeights,
+};
+pub use langmod::{
+    acquisition_split, capability_gate, capability_halves, phoneme_priors, CapabilityGate,
+};
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
-    FormSegment, FormSystem, LanguageParams, Lexicon, ProductionModalityDef, ProductionModalityId,
-    Word,
+    FormSegment, FormSystem, L2AcquisitionLaw, LangKnowledge, LanguageParams, Lexicon,
+    Linearization, ProductionModalityDef, ProductionModalityId, SalienceDecayLaw, Word,
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
 pub use mate_choice::{choose, genetic_distance, realised_fitness, MatePreference};
+pub use personality::{
+    age_personality, plasticity_at, PersonalityProfile, PersonalityRegistry, TraitAxisId, TraitDef,
+    TraitInstance,
+};
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
+pub use semantics::{
+    concept_thresholds, substrate_quantization, Concept, ConceptThresholds, SemanticSubstrate,
+    QUANTIZATION_DIVISOR,
+};
 pub use sensorium::{SenseChannelId, Sensorium};
 pub use substrate::Substrate;
 pub use tom::{
     detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
+pub use trace::{
+    corroding_salience, mortality_implication_weight, organic_salience, DecayLaw,
+    TraceImplicationSpec, TraceKindDef, TraceKindId, TraceKindRegistry,
+};
+pub use transmission::{
+    copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
+    stability_span, transmit, transmit_draw, DesignHistory, DesignId, Knowledge,
+    TransmissionParams,
+};
 pub use typology::{
-    sample_profile, tilted_weights, typology_distance, validate as validate_typology, wals_seed,
-    HarmonyBias, HarmonyModel, TypologyError, TypologyParamDef, TypologyParamId, TypologyParams,
-    TypologyPrior, TypologyProfile, TypologyRegistry, TypologyValueDef, TypologyValueId,
-    ValueMetric,
+    grammar_parse_cost, information_weights, sample_profile, tilted_weights, typology_distance,
+    validate as validate_typology, wals_seed, HarmonyBias, HarmonyModel, TiltParams, TypologyError,
+    TypologyParamDef, TypologyParamId, TypologyParams, TypologyPrior, TypologyProfile,
+    TypologyRegistry, TypologyValueDef, TypologyValueId, ValueMetric,
 };
 pub use value::{
-    conflict_pressure, cross_race_distance, euclidean_distance, project_to_etic, value_distance,
-    EmicProjection, EticAxisId, EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId,
-    RaceProjection, StructureKind, ValueAxisId, ValueProfile, ValueStructure,
+    conflict_pressure, cross_race_distance, euclidean_distance, incommensurability_ceiling,
+    project_to_etic, project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId,
+    EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind,
+    ValueAxisId, ValueProfile, ValueStructure,
 };
-pub use world::{GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
+pub use world::{build_etic_substrate, GossipParams, PlaceId, Stimulus, TickInput, Trace, World};

@@ -230,9 +230,261 @@ fn clamp_i128(v: i128, bound: i128) -> i128 {
     v.clamp(-bound, bound)
 }
 
+/// The logistic (sigmoid) transform `1 / (1 + e^-x)`, the log-odds-to-probability map the manifest's
+/// unit convention already names (a total `L` maps to `p = 1 / (1 + e^-L)`; Elfes 1989; Thrun,
+/// Burgard, Fox 2005). Deterministic and float-free: `Fixed::exp` is the pinned integer series. The
+/// denominator `1 + e^-x` is at least one for any `x`, so the divide never hits zero; the result is
+/// clamped into `[0, 1]` against fixed-point rounding at the tails.
+fn logistic(x: Fixed) -> Fixed {
+    let e = (Fixed::ZERO - x).exp();
+    Fixed::ONE
+        .checked_div(Fixed::ONE.saturating_add(e))
+        .unwrap_or(Fixed::ZERO)
+        .clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The mean-field aggregate belief-diffusion rate: the per-step transmission probability a prevailing
+/// belief gains, `sigmoid(told_weight * trust_baseline) * contact_density` (the SI-epidemic and
+/// social-diffusion mean field). The individual tier's gossip loop adds `told_weight * trust` in
+/// LOG-ODDS (nats) per contact (crates/sim/src/world.rs `apply_assertion`), so that quantity is not a
+/// probability and cannot be used as a `[0, 1]` hazard directly; it is first mapped through the
+/// logistic (the log-odds-to-probability transform the manifest's unit convention names) to the
+/// per-contact transmission probability, then scaled by `contact_density`, the contacts per step. This
+/// keeps the rate a true probability in `[0, 1]` that never pins the clamp: a per-contact log-odds of
+/// two, which as a raw product would clamp the rate to one and saturate every belief in a single step,
+/// maps to a per-contact probability of about 0.88 instead. Clamped to `[0, 1]` as a diffusion rate.
+/// Nothing here reads a race id: two worlds diverge only through their gossip parameters and contact
+/// density (Principle 9).
+pub fn derive_aggregate_diffusion_rate(
+    told_weight: Fixed,
+    trust_baseline: Fixed,
+    contact_density: Fixed,
+) -> Fixed {
+    let per_contact = logistic(told_weight.mul(trust_baseline));
+    per_contact
+        .mul(contact_density)
+        .clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The aggregate-tier belief diffusion rate (`evidence.aggregate_diffusion_rate`), DERIVED from the
+/// individual-tier gossip parameters rather than authored: the content-blind base rate is
+/// [`derive_aggregate_diffusion_rate`] of `gossip.told_weight` and `gossip.trust_baseline` at unit
+/// contact density, so it is the per-contact transmission PROBABILITY the logistic maps the per-contact
+/// log-odds to. The per-belief spatial or social coupling enters downstream as the `distance` factor
+/// [`crate::belief::PrevailingBelief::advance_diffusion`] applies, and the logistic `level * (1 - level)`
+/// term throttles the step, so the aggregate is a proper SI mean field rather than a raw log-odds
+/// product used as a hazard. The two gossip parameters are read fail-loud, so the rate cannot run on an
+/// unset value (Principle 11), and no independent `evidence.aggregate_diffusion_rate` scalar is
+/// authored: it is the same quantity the gossip loop already carries, kept to one source of truth. Read
+/// here, in the `evidence`-namespaced module the value belongs to, and consumed by the belief substrate
+/// ([`crate::belief::BeliefParams`]).
+pub fn aggregate_diffusion_rate(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
+    let told_weight = m.require_fixed("gossip.told_weight")?;
+    let trust_baseline = m.require_fixed("gossip.trust_baseline")?;
+    Ok(derive_aggregate_diffusion_rate(
+        told_weight,
+        trust_baseline,
+        Fixed::ONE,
+    ))
+}
+
+/// I.J. Good's weight of evidence, `W = ln(P(E|H) / P(E|not H)) = ln P(E|H) - ln P(E|not H)`
+/// (Good 1950; Jaynes 2003), the log-likelihood ratio a single observation contributes to the
+/// additive log-odds total the inference engine sums. It is general over any two probabilities:
+/// nothing here reads a trace kind, a race, or an attribute, so the same primitive serves the
+/// mortality-implication weight, a corroboration weight, or any other likelihood contrast.
+///
+/// A zero probability has no finite log. Rather than introduce a fabricated floor-probability
+/// value, the weight saturates to the certainty clamp the engine already reserves
+/// (`evidence.log_odds_clamp`, passed in as `clamp`): a zero numerator (`P(E|H) = 0`, the
+/// observation is impossible if the hypothesis holds) drives the weight to `-clamp`, and a zero
+/// denominator (`P(E|not H) = 0`, impossible unless the hypothesis holds, so decisive for it)
+/// drives it to `+clamp`. Both zero is no evidence either way, exactly zero. The finite result is
+/// clamped into `[-clamp, +clamp]` too, so no likelihood contrast exceeds the maximum admissible
+/// certainty. Deterministic: `Fixed::ln` is the pinned integer CORDIC log, no float.
+pub fn good_weight(p_given_true: Fixed, p_given_false: Fixed, clamp: Fixed) -> Fixed {
+    let neg_clamp = Fixed::ZERO - clamp;
+    match (p_given_true <= Fixed::ZERO, p_given_false <= Fixed::ZERO) {
+        (true, true) => Fixed::ZERO,
+        (true, false) => neg_clamp,
+        (false, true) => clamp,
+        (false, false) => {
+            // Both logs lie in the representable window (probabilities give a log in roughly
+            // [-22.2, 21.5] nats), so the difference cannot overflow; clamp it to the certainty
+            // bound to match the engine's log-odds ceiling.
+            let w = p_given_true.ln() - p_given_false.ln();
+            w.clamp(neg_clamp, clamp)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_aggregate_rate_is_the_sigmoid_of_the_gossip_log_odds_and_never_pins_the_clamp() {
+        // The mean field maps the per-contact log-odds through the sigmoid to a probability, then
+        // scales by contact density: sigmoid(told_weight * trust) * contact_density.
+        let told = Fixed::from_int(2);
+        let a = derive_aggregate_diffusion_rate(told, Fixed::from_ratio(1, 2), Fixed::ONE);
+        // told * trust = 1 nat; sigmoid(1) is about 0.731 at unit density.
+        assert!(
+            (a.to_bits() - Fixed::from_ratio(731, 1000).to_bits()).abs()
+                < Fixed::ONE.to_bits() / 100,
+            "sigmoid(1) is about 0.731 ({a:?})"
+        );
+        // A second world with lower trust has a smaller log-odds increment, so a lower rate (the
+        // sigmoid is monotone), purely from its gossip parameter.
+        let b = derive_aggregate_diffusion_rate(told, Fixed::from_ratio(1, 5), Fixed::ONE);
+        assert!(
+            b < a,
+            "lower trust gives a lower per-contact probability ({b:?} < {a:?})"
+        );
+        // The units fix: a per-contact log-odds the OLD raw product would clamp to one (told 5 *
+        // trust 1 = 5 nats) instead maps through the sigmoid to a probability STRICTLY below one, so
+        // the rate never pins the clamp and a belief cannot saturate in a single step.
+        let strong = derive_aggregate_diffusion_rate(Fixed::from_int(5), Fixed::ONE, Fixed::ONE);
+        assert!(
+            strong < Fixed::ONE,
+            "a strong log-odds no longer pins the rate at one ({strong:?})"
+        );
+        assert!(
+            strong > Fixed::from_ratio(1, 2),
+            "but a strong positive log-odds is still a high probability ({strong:?})"
+        );
+        // Contact density scales the per-contact probability linearly: half the contacts, half the rate.
+        let sparse =
+            derive_aggregate_diffusion_rate(told, Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        assert!(
+            (sparse.to_bits() - a.to_bits() / 2).abs() < 4,
+            "contact density scales the rate ({sparse:?})"
+        );
+    }
+
+    #[test]
+    fn the_aggregate_diffusion_tracks_the_real_threshold_gated_gossip_loop() {
+        // Non-circular validation (the old test reimplemented advance_diffusion's own formula so it
+        // passed by construction): the individual tier here is the REAL log-odds threshold-gated
+        // mechanism world.rs's gossip loop runs, `Mind::consider` accumulating log-odds and
+        // `Mind::belief` committing when they cross the reserved threshold, not a reimplementation of
+        // the aggregate step. The aggregate `advance_diffusion` is validated as the SI logistic mean
+        // field of that loop. Gossip fixtures (labelled, not owner values): one nat per convinced
+        // contact against a commit threshold of three, so a listener needs several convinced contacts
+        // to commit, the threshold gating the toy tier lacked.
+        use crate::agent::Mind;
+        use crate::belief::{BeliefKey, PrevailingBelief};
+        use civsim_core::{DrawKey, Phase};
+
+        let params = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let told_weight = Fixed::ONE;
+        let trust = Fixed::ONE;
+        let per_contact = told_weight.mul(trust); // one nat per convinced contact
+        const SUBJECT: StableId = StableId(1);
+        const ATTR: AttrKindId = AttrKindId(0);
+        const VALUE: ValueId = 7;
+        const OTHER: ValueId = 8;
+        let hyps = [VALUE, OTHER];
+        let convinced = |m: &Mind| m.belief(SUBJECT, ATTR, &params) == Some(VALUE);
+
+        // Threshold gating (the property the toy test lacked): one told contact does NOT commit; the
+        // reserved threshold takes three.
+        let mut fresh = Mind::new(StableId(9_999), Fixed::ONE);
+        fresh.consider(SUBJECT, ATTR, hyps, VALUE, per_contact, SUBJECT);
+        assert!(
+            !convinced(&fresh),
+            "one told contact does not commit (log-odds gated)"
+        );
+        fresh.consider(SUBJECT, ATTR, hyps, VALUE, per_contact, SUBJECT);
+        fresh.consider(SUBJECT, ATTR, hyps, VALUE, per_contact, SUBJECT);
+        assert!(convinced(&fresh), "three told contacts clear the threshold");
+
+        const N: usize = 1500;
+        let seed = 0x0D1FF_u64;
+        let mut minds: Vec<Mind> = (0..N as u64)
+            .map(|i| Mind::new(StableId(i + 1000), Fixed::ONE))
+            .collect();
+        // Seed about eight percent as convinced with strong first-hand evidence.
+        let seed_count = N / 12;
+        for m in minds.iter_mut().take(seed_count) {
+            m.consider(SUBJECT, ATTR, hyps, VALUE, Fixed::from_int(5), SUBJECT);
+        }
+        let start = minds.iter().filter(|m| convinced(m)).count();
+        assert!(start > 0 && start < N, "a small seed is convinced");
+
+        // The SI contagion over the REAL mechanism: each step every unconvinced mind contacts one
+        // random other (counter-keyed draw), and hears the belief at one nat only if that partner was
+        // convinced at the step-start snapshot (a synchronous update, so a mind convinced this step
+        // does not also transmit this step).
+        let mut individual = vec![start];
+        for t in 0..40u64 {
+            let snapshot: Vec<bool> = minds.iter().map(&convinced).collect();
+            for i in 0..N {
+                if snapshot[i] {
+                    continue;
+                }
+                let partner = DrawKey::entity(i as u64, t, Phase::GOSSIP)
+                    .slot(0)
+                    .rng(seed)
+                    .range_u32(0, N as u32) as usize;
+                if partner != i && snapshot[partner] {
+                    minds[i].consider(
+                        SUBJECT,
+                        ATTR,
+                        hyps,
+                        VALUE,
+                        per_contact,
+                        StableId(partner as u64 + 1000),
+                    );
+                }
+            }
+            individual.push(minds.iter().filter(|m| convinced(m)).count());
+        }
+        // The real loop spreads the belief monotonically to most of the population.
+        for w in individual.windows(2) {
+            assert!(w[1] >= w[0], "the convinced set only grows");
+        }
+        assert!(
+            *individual.last().unwrap() > N * 4 / 5,
+            "the belief saturates through the real threshold-gated gossip loop ({:?})",
+            individual.last()
+        );
+
+        // The aggregate advance_diffusion, seeded at the same initial fraction and run at the DERIVED
+        // rate, is the SI logistic mean field of that loop: it rises monotonically from the seed to
+        // near saturation and does NOT jump to saturation in one step (the units bug the old
+        // raw-product rate caused: a pinned rate of one drove the level to one in a single step).
+        let rate = derive_aggregate_diffusion_rate(told_weight, trust, Fixed::ONE);
+        let key = BeliefKey {
+            subject: SUBJECT,
+            attr: ATTR,
+            value: VALUE,
+        };
+        let start_level = Fixed::from_ratio(start as i64, N as i64);
+        let mut agg = PrevailingBelief::seeded(key, start_level, N as u32);
+        let mut agg_curve = vec![agg.knowledge_level()];
+        for _ in 0..40 {
+            agg.advance_diffusion(rate, Fixed::ONE);
+            agg_curve.push(agg.knowledge_level());
+        }
+        for w in agg_curve.windows(2) {
+            assert!(w[1] >= w[0], "the aggregate level only grows");
+        }
+        assert!(
+            agg_curve[1] < Fixed::from_ratio(1, 2),
+            "the aggregate does not saturate in one step ({:?})",
+            agg_curve[1]
+        );
+        assert!(
+            *agg_curve.last().unwrap() > Fixed::from_ratio(9, 10),
+            "the aggregate logistic reaches saturation ({:?})",
+            agg_curve.last()
+        );
+    }
 
     fn params() -> InferenceParams {
         // Fixture calibration, not the owner's reserved values: this tests the
@@ -397,5 +649,55 @@ source = "Part 9"
         assert_eq!(p.clamp, Fixed::from_int(10));
         assert_eq!(p.commit_threshold, Fixed::from_int(3));
         assert_eq!(p.margin, Fixed::from_int(2));
+    }
+
+    #[test]
+    fn good_weight_is_symmetric_at_equal_probabilities() {
+        // Equal likelihoods carry no evidence: ln(p/p) = 0, exactly, for any probability.
+        let clamp = Fixed::from_int(20);
+        for (n, d) in [(1, 10), (1, 2), (9, 10), (3, 4)] {
+            let p = Fixed::from_ratio(n, d);
+            assert_eq!(
+                good_weight(p, p, clamp),
+                Fixed::ZERO,
+                "equal probabilities give zero weight"
+            );
+        }
+    }
+
+    #[test]
+    fn good_weight_is_monotonic_in_p_true() {
+        // Holding P(E|not H) fixed, a larger P(E|H) is stronger evidence for H.
+        let clamp = Fixed::from_int(20);
+        let p_false = Fixed::from_ratio(1, 2);
+        let low = good_weight(Fixed::from_ratio(1, 5), p_false, clamp);
+        let mid = good_weight(Fixed::from_ratio(1, 2), p_false, clamp);
+        let high = good_weight(Fixed::from_ratio(4, 5), p_false, clamp);
+        assert!(low < mid, "weight rises with P(E|H) ({low:?} < {mid:?})");
+        assert!(mid < high, "weight rises with P(E|H) ({mid:?} < {high:?})");
+        assert_eq!(mid, Fixed::ZERO, "the equal-probability case sits at zero");
+    }
+
+    #[test]
+    fn good_weight_zero_probability_saturates_to_the_clamp_exactly() {
+        // A zero has no finite log; the weight saturates to the certainty clamp, not a fabricated
+        // floor. A zero numerator is decisive against H, a zero denominator decisive for it.
+        let clamp = Fixed::from_int(7);
+        let p = Fixed::from_ratio(3, 10);
+        assert_eq!(
+            good_weight(Fixed::ZERO, p, clamp),
+            Fixed::ZERO - clamp,
+            "an impossible observation under H hits -clamp exactly"
+        );
+        assert_eq!(
+            good_weight(p, Fixed::ZERO, clamp),
+            clamp,
+            "an observation impossible except under H hits +clamp exactly"
+        );
+        assert_eq!(
+            good_weight(Fixed::ZERO, Fixed::ZERO, clamp),
+            Fixed::ZERO,
+            "both impossible is no evidence either way"
+        );
     }
 }

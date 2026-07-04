@@ -199,10 +199,12 @@ fn dawn_world(beings: usize, bands: usize, seed: u64) -> (World, Vec<StableId>) 
             AccessChannelDef {
                 id: WITNESSED,
                 name: "witnessed".to_string(),
+                margin_steps: Some(1),
             },
             AccessChannelDef {
                 id: SAID,
                 name: "said".to_string(),
+                margin_steps: Some(-1),
             },
         ],
     });

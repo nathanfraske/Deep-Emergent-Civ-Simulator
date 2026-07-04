@@ -25,6 +25,7 @@ use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::evidence::AttrKindId;
 use civsim_sim::tom::{AccessChannelId, AccessChannelRegistry};
 use civsim_sim::world::{Stimulus, TickInput, World};
+use civsim_world::OrbitalElements;
 
 const LOCATION: AttrKindId = AttrKindId(0);
 const BASKET: u32 = 10;
@@ -50,12 +51,15 @@ fn channels() -> AccessChannelRegistry {
 [[channels]]
 id = 1
 name = "witnessed"
+margin_steps = 1
 [[channels]]
 id = 2
 name = "told"
+margin_steps = 0
 [[channels]]
 id = 3
 name = "said"
+margin_steps = -1
 "#,
     )
     .unwrap()
@@ -103,8 +107,19 @@ fn model(
 // Run the scripted scene and return the world's per-tick state hashes.
 fn run_scene(path: &str, profile: Profile) -> Vec<u128> {
     let manifest = CalibrationManifest::load(path).expect("manifest loads");
-    let mut w =
-        World::from_manifest(&manifest, &channels(), profile).expect("world builds from manifest");
+    // The reserved manifest leaves the world's orbit unset (owner-set per world), so a calibrated
+    // build supplies a labelled fixture orbit rather than a fabricated one; the dev fixtures declare
+    // their own orbit, so the production from_manifest derives the life cadence from it.
+    let built = match profile {
+        Profile::Calibrated => World::from_manifest_with_orbital(
+            &manifest,
+            &channels(),
+            profile,
+            OrbitalElements::dev_earth(),
+        ),
+        Profile::Development => World::from_manifest(&manifest, &channels(), profile),
+    };
+    let mut w = built.expect("world builds from manifest");
 
     let anna = w.spawn(Fixed::ONE);
     let boris = w.spawn(Fixed::ONE);

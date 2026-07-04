@@ -31,6 +31,7 @@ use civsim_sim::evidence::AttrKindId;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::world::{Trace, World};
+use civsim_world::OrbitalElements;
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -52,12 +53,15 @@ fn channels() -> AccessChannelRegistry {
 [[channels]]
 id = 1
 name = "witnessed"
+margin_steps = 1
 [[channels]]
 id = 2
 name = "told"
+margin_steps = 0
 [[channels]]
 id = 3
 name = "said"
+margin_steps = -1
 "#,
     )
     .unwrap()
@@ -96,9 +100,20 @@ fn behaviour() -> Behaviour {
 
 fn dawn_band(seed: u64, path: &str, profile: Profile) -> (World, Vec<StableId>) {
     let manifest = CalibrationManifest::load(path).expect("manifest loads");
-    let mut w = World::from_manifest(&manifest, &channels(), profile)
-        .expect("world builds from manifest")
-        .with_seed(seed);
+    // The authoritative reserved manifest deliberately leaves the world's orbit unset (owner-set
+    // per world), so a calibrated build supplies a labelled fixture orbit through
+    // from_manifest_with_orbital rather than a fabricated one; the development fixtures declare their
+    // own orbit, so the production from_manifest derives the life cadence directly.
+    let built = match profile {
+        Profile::Calibrated => World::from_manifest_with_orbital(
+            &manifest,
+            &channels(),
+            profile,
+            OrbitalElements::dev_earth(),
+        ),
+        Profile::Development => World::from_manifest(&manifest, &channels(), profile),
+    };
+    let mut w = built.expect("world builds from manifest").with_seed(seed);
     w.set_behaviour(behaviour());
     w.set_language(LanguageParams::from_manifest(&manifest).expect("language fixture"));
     let (_substrate, forms) = ArticulationSubstrate::syllabic(
