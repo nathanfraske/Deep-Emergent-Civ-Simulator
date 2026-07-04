@@ -2700,7 +2700,18 @@ impl World {
         };
         let base_window = stability_span(params.loss_rate);
         let window = law.window_ticks_for(memory, base_window);
-        Fixed::ONE.div(Fixed::from_int(window.min(i32::MAX as u64) as i32))
+        // Scale the raw loss rate by the ratio of the neutral loss window to the memory-adjusted
+        // window: `loss_rate * base_window / window`. At the memory where the retention curve reads
+        // one the window equals the base window, so the effective rate reproduces the raw reserved
+        // `loss_rate` exactly; a longer window (a sharper memory) slows it proportionally. This
+        // preserves the raw rate's precision rather than snapping it to the `1 / window` grid, which
+        // would (through the ceil in `stability_span` and the floor in `window_ticks_for`) quantize a
+        // non-reciprocal rate the moment a retention law was armed. The divisor `window` is floored at
+        // one tick in [`RetentionLaw::window_ticks_for`], so it is never zero; both tick counts clamp
+        // to the fixed-point integer range before the divide.
+        let base = Fixed::from_int(base_window.min(i32::MAX as u64) as i32);
+        let win = Fixed::from_int(window.min(i32::MAX as u64) as i32);
+        params.loss_rate.mul(base).div(win)
     }
 
     /// The tick's drift beat: run [`World::drift_languages`] against the world's own race registry.
