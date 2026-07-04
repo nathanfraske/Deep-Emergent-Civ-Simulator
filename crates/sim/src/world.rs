@@ -1693,6 +1693,18 @@ impl World {
         self.intrinsic.insert(child, beliefs);
         self.ages.insert(child, 0);
         self.race_of.insert(child, race.id);
+        // Inherit the native language: the child joins its first parent's language lineage and
+        // inherits a copy of its lexicon, so a tongue is transmitted across generations and drifts
+        // through the naming game and the per-generation drift step rather than each newborn starting
+        // speechless (which would let reproduction outrun the naming game and dilute a band's shared
+        // speech). A deterministic copy, no draw; the child's lexicon folds into state_hash through the
+        // per-mind lexicon fold. Imperfect acquisition (per-birth transmission loss) is a refinement.
+        if let Some(&lang) = self.lang_of.get(&parent_a) {
+            self.lang_of.insert(child, lang);
+        }
+        if let Some(parent_lexicon) = self.lexicons.get(&parent_a).cloned() {
+            self.lexicons.insert(child, parent_lexicon);
+        }
         // Seed a birth-neutral personality if the race carries a profile (inert otherwise).
         self.seed_personality(child, race.id);
         // Inherit the mate preference as a quantitative trait: the midparent of the two parents'

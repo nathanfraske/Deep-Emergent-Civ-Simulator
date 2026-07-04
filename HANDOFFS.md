@@ -7,6 +7,16 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-04: the real-world unification landed, world stood up and first runs, on main
+
+The real-world unification arc merged (PR #88, all five steps plus lifecycle pairing and the muscle-force ruling); main is green on CPU and the 5090 GPU oracle. Stood up the run harness `crates/sim/examples/run_world.rs` (drives `build_dawn_runner` into one unified minds-and-bodies runner, ticks generations, emits emergence readers plus a state_hash; deterministic and seed-sensitive; Dev run on dev fixtures). Applied one remaining-wiring fix: `World::birth` now inherits the child's native language (its parent's lang lineage and lexicon), so a tongue persists and drifts across generations rather than each newborn starting speechless.
+
+First real runs (Crucible, Confluence, Mirror; 50 generations; several seeds): the world runs, is deterministic, and produces real dynamics, headlined by an unchecked Malthusian population explosion (no carrying capacity yet, Crucible 24 to 4090 in 50 generations) with language consensus collapsing in lockstep (70 to 18 percent, the naming game swamped) while per-race belief stances hold distinct and stable (inherited culture persists, negotiated culture fragments). This is the vivid case for the environmental-fields arc (carrying capacity), recorded in CONSENSUS_ROADMAP as UP NEXT ahead of the celestial arc. NOT-YET-OBSERVABLE on the run path: a speciation reader, design origination (knowledge reads zero), institution crystallization.
+
+NEXT: the environmental-fields arc (hydrology, productivity/carrying-capacity, wind/dust, soil-salinity as a tolerance gradient not a gate), then the celestial arc; both scoped in CONSENSUS_ROADMAP. The rundown of each world plus a non-canon LLM flavor interpretation was delivered to the owner.
+
+---
+
 ## 2026-07-04: real-world unification arc built, audited, and merged to `main` (branch `claude/real-world-unification`)
 
 Turned the wired substrate into a runnable real world: one `Runner` whose founders are at once culture-forming minds and located, metabolizing bodies sharing one `StableId`, ticking N generations deterministically. Built to the five steps and three owner rulings of `docs/working/REAL_WORLD_UNIFICATION_HANDOFF.md`. Whole workspace green throughout (fmt, clippy `--workspace --exclude civsim-gpu --lib --tests` zero warnings, `scripts/verify.sh` clean, the full `civsim-sim` suite, the real-manifest parse and scenarios resolve). Seven feature commits plus the audit note, all on `claude/real-world-unification`.
