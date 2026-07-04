@@ -2029,3 +2029,25 @@ status = "reserved"
 value = ""
 unit = "water_depth"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 5: the belief-diffusion movers armed in build_dawn_runner
+# (crates/sim/src/worldbuild.rs), fail-loud from the manifest. Enculturation drifts each band's intrinsic
+# axiom stances toward the band mean on the life cadence; the pool diffusion advances a seeded aggregate
+# belief pool. The gossip spread the movement coupling drives reads Mind.beliefs directly and needs
+# neither of these. ---
+
+[[reserved]]
+id = "belief.enculturation_stubbornness"
+basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it"
+status = "reserved"
+value = ""
+unit = "ratio"
+source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
+
+[[reserved]]
+id = "belief.diffusion_rate"
+basis = "the per-tick rate an aggregate belief pool advances its diffusion (World::set_belief_diffusion_rate), the contagion speed of a seeded belief through a population. Set from the belief-transmission rate the world's social contact implies. Inert until a belief pool is seeded (no dawn pool is seeded this arc), so it is an armed no-op until the belief-pool seeding lands; surfaced now so the mover is armed fail-loud rather than silently unset"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"

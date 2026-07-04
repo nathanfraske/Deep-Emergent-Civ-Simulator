@@ -87,6 +87,7 @@ use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
+use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
     RESPIRATION, TEMPERATURE,
@@ -98,7 +99,7 @@ use crate::physiology::{
     self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
-use crate::world::{PlaceId, TickInput, World};
+use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -122,6 +123,37 @@ const SYS_FIELD: SystemId = SystemId(0);
 const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
 const SYS_WORLD: SystemId = SystemId(3);
+
+// Base-level liveliness step 5 (conversation liveliness): the movement coupling and an environment-
+// sourced belief. The runner republishes each being's live cell into the cognition world each tick so
+// gossip and converse cluster by where a being stands, and injects a first-order belief about the salt-
+// flat hazard it discovers underfoot, so a fact found in one place rides gossip and a migrant into
+// another band's cell.
+
+/// The offset a live cell coordinate is mapped into a conversational [`PlaceId`] by, `base + y*width + x`,
+/// so a cell-derived conversational place never collides with a small dawn-band `PlaceId` (the frozen
+/// lineage ids). The mapping is a stable function of the coordinate (determinism, R-RNG-COORD).
+const CELL_PLACE_BASE: u32 = 1_000_000;
+
+/// The reserved landmark subject the salt-flat hazard belief is ABOUT (base-level liveliness step 5): a
+/// fixed id far above any minted being id, so the belief "the land holds a hazard" never aliases a
+/// belief about a being. Public so the harness reader measures the same question the runner writes.
+pub const HAZARD_SUBJECT: StableId = StableId(u64::MAX - 1);
+/// The attribute id of the salt-flat hazard belief (a reserved high id, disjoint from other belief attrs).
+pub const HAZARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 1);
+/// The value id meaning "a hazard is present here" (the belief a being forms on a salt flat).
+pub const HAZARD_PRESENT: ValueId = 1;
+/// The value id meaning "no hazard" (the competing hypothesis).
+pub const HAZARD_ABSENT: ValueId = 0;
+/// The signed evidence weight a first-hand encounter with the salt-flat hazard carries into the belief
+/// (a labelled dev value; a first-hand percept is strong evidence).
+const HAZARD_WEIGHT: Fixed = Fixed::ONE;
+/// The salinity dose above which a being registers the cell as a hazard and forms the belief (a labelled
+/// dev value: a dose this high is a lethal salt flat, worth remembering and warning others of).
+const HAZARD_DOSE_THRESHOLD: Fixed = Fixed::ONE;
+/// The tick-input ordinal the env-sourced hazard observation carries, high so it orders after any
+/// external input to the same mind (determinism: the tick sorts inputs by mind then ordinal).
+const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
 
 /// A declared access from resource-id slices (a small local convenience over [`Access::new`]).
 fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
@@ -1164,11 +1196,67 @@ impl Runner {
         if self.embodiment.is_some() {
             self.step_embodiment();
         }
+        // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
+        // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
+        // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
+        // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
+        let inputs = self.couple_conversation(world_inputs);
         if let Some(world) = self.world.as_mut() {
-            world.tick(world_inputs);
+            world.tick(&inputs);
         }
         self.reconcile_lifecycle();
         self.clock += 1;
+    }
+
+    /// The conversation-movement coupling and the environment belief source (base-level liveliness step
+    /// 5). Republishes each located being's live cell into the cognition world as a conversational
+    /// [`PlaceId`] (`CELL_PLACE_BASE + y*width + x`, a stable function of the coordinate), so gossip and
+    /// converse cluster by where a being stands now rather than its frozen dawn band, and builds a
+    /// first-order hazard OBSERVATION for every being standing on a salt flat (a cell whose salinity dose
+    /// exceeds [`HAZARD_DOSE_THRESHOLD`]), so a fact discovered in the world enters `Mind.beliefs` and
+    /// rides gossip. Returns the caller's `world_inputs` merged with the env observations (the env ones
+    /// last, at a high ordinal, so the tick's canonical mind-then-ordinal sort is deterministic). Reads
+    /// the embodiment and environ (immutably) before the mutable world publish, and draws no randomness,
+    /// so it replays and is worker-count invariant. A runner with no embodiment publishes nothing and
+    /// returns the inputs unchanged.
+    fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
+        let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
+        let mut env_inputs: Vec<TickInput> = Vec::new();
+        if let Some(emb) = self.embodiment.as_ref() {
+            let (width, _) = self.field.dims();
+            let environ = self.environ.as_ref();
+            for w in emb.walkers() {
+                let c = w.coord();
+                let cell = CELL_PLACE_BASE.wrapping_add((c.y.max(0) * width + c.x.max(0)) as u32);
+                cells.insert(w.id, cell);
+                if let Some((env, calib)) = environ {
+                    if env.salinity_dose(c.x, c.y, calib) > HAZARD_DOSE_THRESHOLD {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: ENV_HAZARD_ORDINAL,
+                            stim: Stimulus::Observe {
+                                subject: HAZARD_SUBJECT,
+                                attr: HAZARD_ATTR,
+                                hyps: vec![HAZARD_PRESENT, HAZARD_ABSENT],
+                                toward: HAZARD_PRESENT,
+                                weight: HAZARD_WEIGHT,
+                                from: w.id,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(world) = self.world.as_mut() {
+            world.set_conversational_cells(cells);
+        }
+        if env_inputs.is_empty() {
+            world_inputs.to_vec()
+        } else {
+            let mut merged = world_inputs.to_vec();
+            merged.extend(env_inputs);
+            merged
+        }
     }
 
     /// The body-thermal exchange phase: every located being pulls its core temperature toward its
@@ -1246,8 +1334,13 @@ impl Runner {
         } else if sid == SYS_EMBODIMENT {
             self.step_embodiment();
         } else if sid == SYS_WORLD {
+            // The conversation-movement coupling and env belief source run here (base-level liveliness
+            // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
+            // them after step_embodiment, so the scheduled and pinned orders publish identical cells and
+            // inject identical env observations.
+            let inputs = self.couple_conversation(world_inputs);
             if let Some(world) = self.world.as_mut() {
-                world.tick(world_inputs);
+                world.tick(&inputs);
             }
         }
     }

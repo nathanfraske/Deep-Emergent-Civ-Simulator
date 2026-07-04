@@ -328,6 +328,16 @@ pub fn build_dawn_runner(
     world.set_reproduction(ReproductionParams::from_manifest(manifest)?);
     world.arm_generational_drift();
 
+    // Arm the belief-diffusion movers (base-level liveliness step 5), fail-loud from the manifest: the
+    // per-generation enculturation of each band's intrinsic axiom stances (`set_stubbornness_split`, the
+    // conserved split between a being's own conviction and its band's mean) and the aggregate belief-pool
+    // diffusion rate (`set_belief_diffusion_rate`). Enculturation drifts the seeded intrinsic axioms on
+    // the life cadence; the pool diffusion is inert until a belief pool is seeded (no dawn pool is, so it
+    // is an armed no-op this arc, the honest limit). The gossip spread the movement coupling drives reads
+    // `Mind.beliefs` directly and needs neither.
+    world.set_stubbornness_split(manifest.require_fixed("belief.enculturation_stubbornness")?);
+    world.set_belief_diffusion_rate(manifest.require_fixed("belief.diffusion_rate")?);
+
     // Arm the derived per-race languages at the founder step (increment 2e), if a language genesis is
     // supplied: derive each articulating race's phonetic form system from the base geometry and its
     // own articulation, install a per-band lineage, and assign the band's founders, so the naming game

@@ -415,6 +415,14 @@ pub struct World {
     reg: Registry,
     minds: BTreeMap<StableId, Mind>,
     place_of: BTreeMap<StableId, PlaceId>,
+    /// The per-being LIVE conversational cell (base-level liveliness step 5): a cell-derived [`PlaceId`]
+    /// the runner republishes each tick from a being's reconciled located coordinate, so gossip and
+    /// converse cluster by where a being ACTUALLY stands rather than the [`PlaceId`] frozen at its dawn
+    /// band. Empty by default and a being with no entry falls back to its frozen `place_of`
+    /// ([`World::conversational_place`]), so a world whose runner never publishes cells (every existing
+    /// test) buckets exactly as before. `place_of` stays frozen for lineage; this is the movement seam so
+    /// an idea rides a migrant into another band's cell (Part 9), used only by the conversation phases.
+    conversational_cell: BTreeMap<StableId, PlaceId>,
     /// Per-being genome, the inheritance a member was seeded or born with (design Part 25).
     /// Populated at the dawn by [`World::seed_dawn_populations`].
     genomes: BTreeMap<StableId, Genome>,
@@ -610,6 +618,7 @@ impl World {
             reg: Registry::new(),
             minds: BTreeMap::new(),
             place_of: BTreeMap::new(),
+            conversational_cell: BTreeMap::new(),
             genomes: BTreeMap::new(),
             intrinsic: BTreeMap::new(),
             stubbornness_split: None,
@@ -2287,6 +2296,43 @@ impl World {
         idx
     }
 
+    /// Republish the per-being LIVE conversational cells (base-level liveliness step 5), the movement
+    /// coupling: the runner calls this each tick before [`World::tick`] with each located being's
+    /// cell-derived [`PlaceId`], so gossip and converse cluster by where a being stands now rather than
+    /// its frozen dawn `place_of`. Replaces the whole map (a fresh per-tick publication), so a being that
+    /// left the runner's population drops out and no stale cell lingers. `place_of` is untouched (lineage
+    /// stays frozen). A deterministic pure setter; the cells are a stable function of the coordinates.
+    pub fn set_conversational_cells(&mut self, cells: BTreeMap<StableId, PlaceId>) {
+        self.conversational_cell = cells;
+    }
+
+    /// A being's CONVERSATIONAL place (base-level liveliness step 5): its live conversational cell when
+    /// the runner has published one, else its frozen `place_of`. This is what the conversation phases
+    /// bucket by, so a migrant gossips with whoever shares its current cell while its lineage `place_of`
+    /// stays frozen. The fallback makes a world whose runner never publishes cells (every existing test)
+    /// behave exactly as before.
+    fn conversational_place(&self, mind: StableId) -> Option<PlaceId> {
+        self.conversational_cell
+            .get(&mind)
+            .copied()
+            .or_else(|| self.place_of.get(&mind).copied())
+    }
+
+    /// Co-located minds bucketed by their CONVERSATIONAL place (base-level liveliness step 5), the
+    /// per-tick grouping the conversation phases use: each mind falls under its live cell if the runner
+    /// published one, else its frozen `place_of`. Walked in canonical id order (the `place_of` iteration
+    /// order), so the buckets are reproducible and thread-invariant. When no cell is published this is
+    /// exactly [`World::colocated_index`].
+    fn colocated_conversational(&self) -> BTreeMap<PlaceId, Vec<StableId>> {
+        let mut idx: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for &mind in self.place_of.keys() {
+            if let Some(place) = self.conversational_place(mind) {
+                idx.entry(place).or_default().push(mind);
+            }
+        }
+        idx
+    }
+
     /// Drop a perceptible trace into the world. Co-located minds may perceive it on a
     /// later tick. The trace carries its own salience and weight as data; the world adds
     /// no number of its own.
@@ -2914,6 +2960,11 @@ impl World {
                 )
             };
 
+            // Converse (the promoted move-by-move dialogue tier) still clusters by the frozen `place_of`:
+            // its co-location model is bound to WHO is promoted, so its movement coupling belongs with the
+            // arc-scoped promotion policy (its own step), not here. The population-scale belief spread the
+            // milestone drives is gossip, which is coupled to the live cell above (base-level liveliness
+            // step 5).
             let by_place = self.colocated_index();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let clock = self.clock;
@@ -3336,7 +3387,11 @@ impl World {
             None => return,
         };
         let actions: Vec<GossipAction> = {
-            let by_place = self.colocated_index();
+            // Base-level liveliness step 5: bucket by the LIVE conversational cell (the movement
+            // coupling), so a migrant gossips with whoever shares its current cell, not its frozen dawn
+            // band. Falls back to the frozen `place_of` when the runner publishes no cell (every existing
+            // world-only test), so their spread is unchanged.
+            let by_place = self.colocated_conversational();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             let mut out = Vec::new();
             for &speaker in &ids {
@@ -3345,8 +3400,8 @@ impl World {
                 if self.promoted.contains(&speaker) {
                     continue;
                 }
-                let place = match self.place_of.get(&speaker) {
-                    Some(p) => *p,
+                let place = match self.conversational_place(speaker) {
+                    Some(p) => p,
                     None => continue,
                 };
                 let listeners: Vec<StableId> = by_place
@@ -4681,6 +4736,48 @@ name = "said"
             Some(10),
             "the rumour reached the co-located listener"
         );
+    }
+
+    #[test]
+    fn a_rumour_rides_movement_into_another_band() {
+        // Base-level liveliness step 5, the movement coupling: two minds seeded in DIFFERENT frozen dawn
+        // bands do not gossip by lineage. When the runner publishes them into the SAME live conversational
+        // cell (a migrant meeting), gossip clusters by that cell and the belief spreads, while each
+        // being's `place_of` stays frozen for lineage. This is what lets an idea ride a migrant into
+        // another band's cell.
+        let mut w = gossip_world();
+        let speaker = w.spawn(Fixed::ONE);
+        let listener = w.spawn(Fixed::ONE);
+        w.set_place(speaker, 1);
+        w.set_place(listener, 2); // a different frozen band
+        let bp = *w.belief_params();
+        // The speaker forms a belief. Gossip at the end of this tick reaches no one: the two are in
+        // different bands and no live cell couples them.
+        w.tick(&[observe_for(speaker, 10)]);
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            None,
+            "the rumour does not cross frozen band lines on its own"
+        );
+        // The migrant meeting: the runner publishes both into one live conversational cell. Now gossip
+        // clusters by the cell, not the frozen band.
+        let mut cells = BTreeMap::new();
+        cells.insert(speaker, 5000u32);
+        cells.insert(listener, 5000u32);
+        w.set_conversational_cells(cells);
+        w.tick(&[]);
+        assert_eq!(
+            w.mind(listener)
+                .unwrap()
+                .belief(StableId(99), AttrKindId(0), &bp),
+            Some(10),
+            "co-located by movement, the rumour rides into the other band"
+        );
+        // `place_of` stayed frozen for lineage (the movement seam touches only the conversation buckets).
+        assert_eq!(w.place_of(speaker), Some(1));
+        assert_eq!(w.place_of(listener), Some(2));
     }
 
     #[test]

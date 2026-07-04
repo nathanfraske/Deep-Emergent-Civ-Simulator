@@ -513,3 +513,19 @@ status = "set"
 value = "1"
 unit = "water_depth"
 source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "belief.enculturation_stubbornness"
+basis = "FIXTURE placeholder; the conserved split between a being's own conviction and its band mean when the enculturation beat drifts an intrinsic axiom stance"
+status = "set"
+value = "0.5"
+unit = "ratio"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "belief.diffusion_rate"
+basis = "FIXTURE placeholder; the per-tick rate a seeded aggregate belief pool advances its diffusion (an armed no-op until a belief pool is seeded)"
+status = "set"
+value = "0.4"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
