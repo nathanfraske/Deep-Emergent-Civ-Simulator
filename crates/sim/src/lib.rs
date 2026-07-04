@@ -232,5 +232,8 @@ pub use value::{
     EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind,
     ValueAxisId, ValueProfile, ValueStructure,
 };
-pub use world::{build_etic_substrate, GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
+pub use world::{
+    build_etic_substrate, GossipParams, PlaceId, ReproductionParams, Stimulus, TickInput, Trace,
+    World,
+};
 pub use worldbuild::{arm_dawn_languages, build_dawn_runner, DawnPeoples, LanguageGenesis};

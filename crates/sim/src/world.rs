@@ -370,6 +370,25 @@ enum MoveEffect {
     },
 }
 
+/// The reserved calibrations the reproduction beat needs beyond what each race derives for itself
+/// (design Parts 25, 28, R-REPRO). The narrow-sense heritability is derived per race from its own pool
+/// (`GenePool::narrow_sense_heritability`), so it is not carried here; what remains is the belief
+/// inheritance mutation spread (the bounded deviation a child's inherited disposition and mate
+/// preference draw around the midparent) and the evidence-ring law a child's ring is sized through.
+/// The mechanism is fixed Rust; these are data (Principle 11). Fecundity is NOT here: a mature,
+/// compatible pair produces one offspring per reproductive cadence, so lifetime fecundity falls out of
+/// maturity, lifespan, and the cadence, never an authored rate.
+#[derive(Clone, Debug)]
+pub struct ReproductionParams {
+    /// The bounded mutation spread the belief and mate-preference inheritance draw around the
+    /// midparent (reserved; the same spread the belief inheritance already uses). A child's inherited
+    /// disposition is the parent's plus a mean-zero deviation of this half-width.
+    pub mutation_spread: Fixed,
+    /// The evidence-ring capacity law a child's axiom rings are sized through, from its own recombined
+    /// memory phenotype (`RingCapacityLaw`, reserved through the manifest).
+    pub ring_law: RingCapacityLaw,
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
@@ -473,6 +492,14 @@ pub struct World {
     /// The aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from the
     /// gossip parameters). None until set; the belief-diffusion beat is then a no-op.
     belief_diffusion_rate: Option<Fixed>,
+    /// The reproduction calibrations (design Parts 25, 28, R-REPRO). None until set; the reproduce
+    /// half of the life cadence is then a no-op, so a world that installs none only ages and dies.
+    reproduction: Option<ReproductionParams>,
+    /// The life-fraction mortality hazard (a curve on `age / race lifespan`, design Part 20, R-AGING):
+    /// when set, the life cadence culls through [`World::apply_mortality_by_race`], so short- and
+    /// long-lived races die on their own timescales from one curve. Distinct from the raw-age
+    /// [`World::mortality_hazard`]: a world may install either, and the by-race path takes precedence.
+    mortality_hazard_by_race: Option<Curve>,
     /// The drift calibration. None until set; regular form change is then a no-op.
     drift: Option<DriftParams>,
     /// The language calibration. None until set; the naming game is then a no-op.
@@ -563,6 +590,8 @@ impl World {
             lang_of: BTreeMap::new(),
             belief_pools: BTreeMap::new(),
             belief_diffusion_rate: None,
+            reproduction: None,
+            mortality_hazard_by_race: None,
             drift: None,
             language: None,
             events: EventLog::new(),
@@ -646,6 +675,21 @@ impl World {
     /// (the failure boundary of senescence the age data implies). Aging still beats without it.
     pub fn set_mortality_hazard(&mut self, hazard: Curve) {
         self.mortality_hazard = Some(hazard);
+    }
+
+    /// Install the life-fraction mortality hazard (design Part 20, R-AGING): a curve on
+    /// `age / race lifespan` in `[0, 1]`, so one curve culls short- and long-lived races each on its
+    /// own timescale ([`World::apply_mortality_by_race`]). When set it takes precedence over the
+    /// raw-age [`World::set_mortality_hazard`] in the life cadence. Until either is set the mortality
+    /// beat is a no-op. The curve's shape is reserved with its basis (the senescence failure boundary).
+    pub fn set_mortality_hazard_by_race(&mut self, hazard: Curve) {
+        self.mortality_hazard_by_race = Some(hazard);
+    }
+
+    /// Install the reproduction calibrations (design Parts 25, 28, R-REPRO). Until set, the reproduce
+    /// half of the life cadence is a no-op, so a world that installs none only ages and dies.
+    pub fn set_reproduction(&mut self, params: ReproductionParams) {
+        self.reproduction = Some(params);
     }
 
     /// Stamp the world's integer-Gaussian approximation (design 25.10, `genome.gauss_approx`), the
@@ -1815,8 +1859,149 @@ impl World {
         }
         self.age_step();
         self.drift_personalities();
-        if let Some(hazard) = self.mortality_hazard.clone() {
+        self.reproduce();
+        // Mortality: the life-fraction by-race curve takes precedence (short- and long-lived races
+        // cull on their own timescales); else the raw-age curve; else no cull. The by-race pass reads
+        // the race registry, so it is moved out and back around the mutable cull (a cheap pointer swap
+        // that cannot change state). A by-race pass that meets an unraceable being refuses rather than
+        // partially culling, so the population is left intact on a config error.
+        if let Some(hazard) = self.mortality_hazard_by_race.clone() {
+            let races = std::mem::take(&mut self.races);
+            let _ = self.apply_mortality_by_race(&races, &hazard);
+            self.races = races;
+        } else if let Some(hazard) = self.mortality_hazard.clone() {
             self.apply_mortality(&hazard);
+        }
+    }
+
+    /// Whether two beings of a race can mate: both express a sex class through the race's breeding
+    /// system and the two classes are compatible (design Part 25, R-REPRO). A race with no registered
+    /// breeding system, or a being with no genome, cannot pair (fail-quiet), so reproduction requires a
+    /// declared breeding system. Reads the gene-fed sex phenotype, never a race branch (Principle 9).
+    fn sexes_compatible(&self, race: &Race, a: StableId, b: StableId) -> bool {
+        let system = match self.breeding_systems.get(race.breeding) {
+            Some(s) => s,
+            None => return false,
+        };
+        let ga = match self.genomes.get(&a) {
+            Some(g) => g,
+            None => return false,
+        };
+        let gb = match self.genomes.get(&b) {
+            Some(g) => g,
+            None => return false,
+        };
+        match (self.express_sex(race, ga), self.express_sex(race, gb)) {
+            (Some(sa), Some(sb)) => system.compatible(sa, sb),
+            _ => false,
+        }
+    }
+
+    /// The reproduce half of the life cadence (design Parts 25, 28, R-REPRO, the keystone that makes a
+    /// run grow as well as shrink). Within each band, mature compatible beings pair under their own
+    /// heritable mate preference, and each pair bears one child that inherits both halves of its being
+    /// (genome recombined under the race's scheme, mind expressed from it, intrinsic beliefs and mate
+    /// preference inherited from the parents and the band), so lexicons, axioms, and mate preferences
+    /// carry across generations and lineages persist and diverge. Fecundity falls out of the structure,
+    /// not an authored rate: a mature, compatible pair bears one child per cadence, so lifetime
+    /// fecundity is set by maturity, lifespan, and the cadence.
+    ///
+    /// Two passes so it is worker-count independent and free of within-pass order effects (Principle
+    /// 3): pass one is a pure read walk that pairs the mature beings of each band in canonical
+    /// `(PlaceId, StableId)` order, each being paired at most once with the lower-id partner initiating
+    /// under its own preference; pass two bears and places the children. Every draw the birth makes
+    /// keys through [`civsim_core::Phase::REPRODUCE`] and [`civsim_core::Phase::MATE_CHOICE`] on the
+    /// parents and the generation, never a sequential index, so replay is bit-exact and observer
+    /// independent. Inert until [`World::set_reproduction`] installs the calibrations. Reads no race
+    /// branch: the pairing keys off the gene-fed sex phenotype and the heritable preference alone.
+    fn reproduce(&mut self) {
+        let params = match &self.reproduction {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        if self.life_cadence_ticks == 0 {
+            return;
+        }
+        let generation = self.clock / self.life_cadence_ticks;
+
+        // Group the mature beings by band (place), in canonical id order.
+        let mut by_place: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for id in self.minds.keys().copied().collect::<Vec<_>>() {
+            let (Some(place), Some(race_id)) = (
+                self.place_of.get(&id).copied(),
+                self.race_of.get(&id).copied(),
+            ) else {
+                continue;
+            };
+            let Some(race) = self.races.get(&race_id) else {
+                continue;
+            };
+            let age = self.ages.get(&id).copied().unwrap_or(0);
+            if race.is_mature(age) {
+                by_place.entry(place).or_default().push(id);
+            }
+        }
+
+        // Pass one (pure read): pair mature, compatible beings within each band. The lower-id being
+        // initiates and picks its mate under its own preference; each being pairs at most once.
+        let mut pairs: Vec<(RaceId, PlaceId, StableId, StableId)> = Vec::new();
+        for (place, members) in &by_place {
+            let mut paired: std::collections::BTreeSet<StableId> =
+                std::collections::BTreeSet::new();
+            for &chooser in members {
+                if paired.contains(&chooser) {
+                    continue;
+                }
+                let Some(race_id) = self.race_of.get(&chooser).copied() else {
+                    continue;
+                };
+                let Some(race) = self.races.get(&race_id) else {
+                    continue;
+                };
+                let candidates: Vec<StableId> = members
+                    .iter()
+                    .copied()
+                    .filter(|&c| {
+                        c != chooser
+                            && !paired.contains(&c)
+                            && self.race_of.get(&c) == Some(&race_id)
+                            && self.sexes_compatible(race, chooser, c)
+                    })
+                    .collect();
+                if candidates.is_empty() {
+                    continue;
+                }
+                if let Some(mate) = self.choose_mate(chooser, &candidates) {
+                    paired.insert(chooser);
+                    paired.insert(mate);
+                    pairs.push((race_id, *place, chooser, mate));
+                }
+            }
+        }
+
+        // Pass two (the write walk): each pair bears one child, placed into its band. The race is
+        // cloned out so the mutable birth borrow does not conflict with the race registry; heritability
+        // derives from the race's own pool (V_A over V_A+V_E), never authored.
+        for (race_id, place, a, b) in pairs {
+            let Some(race) = self.races.get(&race_id).cloned() else {
+                continue;
+            };
+            let band: Vec<StableId> = by_place.get(&place).cloned().unwrap_or_default();
+            let heritability = race
+                .pool
+                .narrow_sense_heritability(race.environment_variance);
+            if let Some(child) = self.birth(
+                &race,
+                a,
+                b,
+                &band,
+                heritability,
+                params.mutation_spread,
+                generation,
+                &params.ring_law,
+            ) {
+                self.place_of.insert(child, place);
+            }
         }
     }
 
@@ -3115,17 +3300,23 @@ impl World {
         // would silently diverge replay. The curve folds as its length then its ascending-x points;
         // an absent hazard folds as a sentinel length distinct from any real curve.
         h.write_u64(self.life_cadence_ticks);
-        match &self.mortality_hazard {
-            None => h.write_u64(u64::MAX),
-            Some(curve) => {
-                let pts = curve.points();
-                h.write_u64(pts.len() as u64);
-                for (x, y) in pts {
-                    h.write_fixed(*x);
-                    h.write_fixed(*y);
+        for hazard in [&self.mortality_hazard, &self.mortality_hazard_by_race] {
+            match hazard {
+                None => h.write_u64(u64::MAX),
+                Some(curve) => {
+                    let pts = curve.points();
+                    h.write_u64(pts.len() as u64);
+                    for (x, y) in pts {
+                        h.write_fixed(*x);
+                        h.write_fixed(*y);
+                    }
                 }
             }
         }
+        // The reproductive census (design Part 25, R-REPRO): the per-parent offspring tallies and the
+        // gene-fed sex classes are canonical state, so two worlds whose reproduction diverged fold to
+        // different hashes. Walked in canonical id order inside census::hash_into.
+        self.census.hash_into(&mut h);
         // The aggregate belief pools, by place then belief key (canonical walk, R-CANON-WALK): the
         // belief-diffusion trajectory is canonical state, so two worlds whose beliefs diffuse to
         // different levels are different worlds. The place is length-agnostic here (the map is already
