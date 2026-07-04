@@ -2,6 +2,27 @@
 
 Reverse-chronological. Each session appends one entry at the top: what was done, what changed in the documents, where it stopped, and what is queued next. Read the top entry first to recover state. Never rewrite past entries; append. Full detail for earlier sessions lives in the session transcripts.
 
+
+---
+
+## 2026-07-03 (continued): the derive column closed and twice blind-audited, world-wiring begun, merged to main, on `claude/reserved-values-consolidation`
+
+The largest single arc of the project. Cleared the eight owner walls, built the remaining substrates, closed the entire derive column, blind-audited it twice, and wired the first dormant derivation into the running world. All on `claude/reserved-values-consolidation`, merged to `main` at the end. Whole workspace green throughout (fmt/clippy/verify.sh clean, ~920 sim+physics+core tests).
+
+**The substrates (16 total).** The seven pre-wall substrates plus the eight owner-ruled walls (breeding-value tier with the k=12 stamped Gaussian and V_A reconstruction; channel-attenuation perceptual_geometry; the metabolic Kleiber kernel; sex-census Ne; belief-facet strength; the parse-cost harmony law; institution/ADICO; the composition evaluator crate). Each derives from a universal law or per-race/per-substance data, each with a non-steering test.
+
+**Blind audit 1 (the substrates), 43 agents.** Found 26 confirmed defects (1 critical, 8 major, 17 minor), the co-designed-test blind-spot class. The critical: the celestial substrate was not wired into the production `World::from_manifest`, so the Earth-year `LIFE_CADENCE_TICKS` was still live. All fixed with production-path regression tests (commit 4029657).
+
+**The tail (Waves 1-4), 17 derivations, closing the derive column.** Wave 1 (8: capability_gates, incommensurability_floor, enculturation_pull_rate, salience_decay_rate, etic_substrate_axes, typology_distance_weights, tom.* aliases, allele_presence_threshold; built in four parallel worktrees, then re-applied on-branch because worktree isolation branches from origin/main, 31 commits behind: LESSON, do not use `isolation: worktree` on a branch far ahead of main). Cluster 1 (5: the language chain). Cluster 2 (4: the semantics/distance chain, new semantics.rs + langdist.rs). Cluster 3 (4: the age-personality substrate, field.diffusion from the medium per owner ruling, the controller trio, aggregate_diffusion_rate). Commits 6800079, 1cc2102, 9b40c08, 53667b2. The manifest is now only levers, constants, budgets, and the per-race/substance data the derivations read (56 set, 105 reserved of which 37 derive-through-a-built-mechanism and 68 lever/constant/budget, 14 tombstoned).
+
+**Blind audit 2 (the tail), 40 agents.** Found 23 confirmed defects (0 critical, 12 major, 11 minor), the inert-derivation / units-shape class. Fixed: two fabricated constants reopened reserved fail-loud (axiom.stubbornness_dogmatism_weight, value_metric.enculturation_pull_rate); the belief diffusion log-odds-as-hazard bug (sigmoid + level*(1-level), circular test replaced); the tom English-string ladder re-derived from the margin_steps datum; langdist dimensional normalisation; typology overflow guard; state_hash folds. Commit 83fd8c8. Two audit units that hit a transient outage were re-run clean (629e680); their small findings (a doc over-generalization, the acquisition_split clamp, the Sensorium acuity/JND seam, now WIRE-PENDING 5) fixed.
+
+**World-wiring increment 1 (WP2), commit ed5fc88.** `FieldCalib::from_resolution` routes the world-build path through `from_manifest_with_medium`, so the field diffusion coefficient derives from the selected medium's `k/(rho*c)`; air-default worlds derive through the real medium.air profile, the free scalar retired. Observable: air vs water fields diverge; worker-width invariant. Limit: underflows Q32.32 at map-scale cell (needs a reserved field.cell_size).
+
+**The world-wiring handoff.** `docs/working/WORLD_WIRING_HANDOFF.md` is the self-contained brief for the next agent: the tick spine, the 10-increment plan (each a dormant mechanism wired into a named beat with an observable emergence milestone and a determinism guard), the immediate prerequisite (a production scenario-to-Runner assembly that seeds a dawn population and arms the language beats), and the risk map. The running world today drives belief, language drift, personality, aging, and mortality, but NOT reproduction (a run can only shrink), enculturation, institutions, tech, or post-dawn evolution.
+
+**NEXT.** The world-wiring arc, per `WORLD_WIRING_HANDOFF.md`. Immediate: the production assembly path, then increment 2 (genesis language arming, watch languages diverge across bands). The keystone is increment 5 (reproduction), without which the tick only shrinks. Owner is directing a separate agent at the handoff; this session stands by.
+
 ---
 
 ## 2026-07-03 (continued): the derive-from-fundamentals program, seven substrates built to the first wall, on `claude/reserved-values-consolidation`
