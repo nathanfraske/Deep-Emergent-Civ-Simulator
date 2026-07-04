@@ -784,7 +784,8 @@ fn embodied_peoples() -> DawnPeoples {
             locomotion: LocomotionParams::dev_default(),
             organs: BodyPlanRegistry::dev_default(),
             controller_hidden: 0,
-            medium_id: "medium.air".to_string(),
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
         }),
     }
 }

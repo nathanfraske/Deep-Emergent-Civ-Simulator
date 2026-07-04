@@ -217,6 +217,14 @@ unit = "medium_profile"
 source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
 
 [[reserved]]
+id = "medium.submersion_elevation"
+basis = "FIXTURE placeholder, not the owner's value; the waterline set at the dev biome set's ocean-band top (0.40), so a cell below it is submerged (holds medium.water) and one at or above it is emergent (holds medium.air), making the submerged cells exactly the dev classifier's ocean cells. The owner sets a world's real sea level (calibration/reserved.toml); this dev value exercises the per-cell medium fold on the dev map"
+status = "set"
+value = "0.40"
+unit = "normalised_elevation"
+source = "dev fixture for R-MEDIUM per-cell medium; crates/sim/src/medium.rs MediumField::from_map, crates/world/src/terrain.rs ocean band"
+
+[[reserved]]
 id = "field.cell_size"
 basis = "FIXTURE placeholder, not the owner's value; a one-centimetre cell, chosen with the one-second base tick so the medium-derived diffusion coefficient stays representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. A real map-scale cell underflows the coefficient at a one-second tick (the reserved field.cell_size and a coarser sub-step are where a map-scale diffusion rate comes from); this small cell exercises the derivation, not a map scale"
 status = "set"

@@ -487,14 +487,15 @@ const RESPIRATION_FLUX_MAX: Fixed = Fixed::from_int(1_000_000_000);
 /// ([`derive_base_drain`], the Kleiber basal rate plus the thermoregulatory replacement), the exertion
 /// coupling ([`derive_exertion_coupling`]), the body-to-medium exchange rate ([`derive_body_exchange_rate`]),
 /// and, where the physiology registry carries a [`RESPIRATION`] axis, medium respiration
-/// ([`crate::medium::respire`]). So two beings with different body plans diverge in survival from their
+/// ([`crate::medium::respire_at`]). So two beings with different body plans diverge in survival from their
 /// anatomy alone, with no race or label branch (Principle 9). The mechanism is fixed Rust; the organ
 /// registry, the anchors, and the medium are data (Principle 11).
 ///
-/// The medium is a single uniform value this increment (the resolved medium's respirable content and
-/// convective coefficient everywhere); a spatially-varying per-cell [`crate::medium::MediumField`] that
-/// a being reads at its coordinate is the named later refinement, the respiratory sibling of the
-/// per-cell temperature field.
+/// The medium is a spatially-varying per-cell [`crate::medium::MediumField`] (real-world unification step
+/// 4): a being reads the medium of the cell it stands in, so a body in a water cell respires that cell's
+/// content and one in an air cell that cell's, from the same coupling over different axis values. A
+/// single-medium world folds to a uniform field (the regression), so the earlier uniform behaviour is the
+/// one-sample case of this one.
 #[derive(Clone, Debug)]
 pub struct EmbodiedPhysiology {
     /// The organ registry a being's tissue composition (convective surface, specific heat, energy
@@ -505,9 +506,10 @@ pub struct EmbodiedPhysiology {
     /// coefficient, emissivity, Stefan-Boltzmann), read fail-loud from the manifest or a labelled
     /// dev fixture.
     anchors: MetabolicAnchors,
-    /// The uniform respirable content of the ambient medium, the `c_medium` the Fick respiration law
-    /// reads (the resolved medium's `respirable_content` axis). Uniform this increment.
-    medium_respirable: Fixed,
+    /// The per-cell ambient-medium field, the `c_medium` the Fick respiration law reads at a being's
+    /// coordinate ([`crate::medium::respire_at`]). Folded from the worldgen map (`medium.water` below the
+    /// reserved submersion elevation, `medium.air` above) or a labelled uniform dev fixture.
+    medium: medium::MediumField,
     /// The reserved Fick membrane transfer coefficient `k` the respiration law reads. RESERVED owner
     /// value (`metabolism.respiration_transfer_coefficient`), a labelled fixture in tests.
     respiration_transfer_k: Fixed,
@@ -517,46 +519,94 @@ pub struct EmbodiedPhysiology {
 
 impl EmbodiedPhysiology {
     /// The physiology configuration read from the calibration manifest, fail-loud if any input is still
-    /// reserved (Principle 11): the metabolic anchors ([`MetabolicAnchors::from_manifest`]), the uniform
-    /// respirable content from the resolved medium profile (`medium.{name}`'s `respirable_content`
-    /// axis), the reserved respiration transfer coefficient, and the base tick length. This is the
-    /// sanctioned canonical sourcing; a test may instead build a labelled fixture with
-    /// [`EmbodiedPhysiology::dev_fixture`].
+    /// reserved (Principle 11): the metabolic anchors ([`MetabolicAnchors::from_manifest`]), the per-cell
+    /// medium field folded from the worldgen map ([`medium_field_from_manifest`], reading the two medium
+    /// profiles' `respirable_content` and `density` axes and the reserved submersion elevation), the
+    /// reserved respiration transfer coefficient, and the base tick length. The submerged and emergent
+    /// medium ids are the caller's (the scenario resolves them: a grounded world holds `medium.water`
+    /// below the waterline and `medium.air` above; a single-medium world passes the same id for both and
+    /// folds to a uniform field). This is the sanctioned canonical sourcing; a test may instead build a
+    /// labelled fixture with [`EmbodiedPhysiology::dev_fixture`].
     pub fn from_manifest(
         manifest: &CalibrationManifest,
         organs: BodyPlanRegistry,
-        medium_id: &str,
+        map: &TileMap,
+        submerged_medium_id: &str,
+        emergent_medium_id: &str,
     ) -> Result<EmbodiedPhysiology, CalibrationError> {
         let anchors = MetabolicAnchors::from_manifest(manifest)?;
-        let profile = manifest.require_map(medium_id)?;
-        let medium_respirable = profile.get("respirable_content").copied().ok_or_else(|| {
-            CalibrationError::BadValue {
-                id: medium_id.to_string(),
-                detail: "medium profile is missing the 'respirable_content' axis".to_string(),
-            }
-        })?;
+        let medium =
+            medium_field_from_manifest(manifest, map, submerged_medium_id, emergent_medium_id)?;
         Ok(EmbodiedPhysiology {
             organs,
             anchors,
-            medium_respirable,
+            medium,
             respiration_transfer_k: manifest
                 .require_fixed("metabolism.respiration_transfer_coefficient")?,
             tick_seconds: manifest.require_fixed("time.base_tick_seconds")?,
         })
     }
 
-    /// A labelled DEVELOPMENT FIXTURE physiology (dev-fixture anchors, a caller-supplied uniform
-    /// respirable content, a unit transfer coefficient, a one-second base tick), for tests and examples
-    /// only; a canonical run reads [`EmbodiedPhysiology::from_manifest`]. Not owner canon.
-    pub fn dev_fixture(organs: BodyPlanRegistry, medium_respirable: Fixed) -> EmbodiedPhysiology {
+    /// A labelled DEVELOPMENT FIXTURE physiology (dev-fixture anchors, a caller-supplied medium field, a
+    /// unit transfer coefficient, a one-second base tick), for tests and examples only; a canonical run
+    /// reads [`EmbodiedPhysiology::from_manifest`]. Not owner canon. The caller builds the medium field
+    /// (a [`crate::medium::MediumField::uniform`] for a one-medium fixture) sized to cover the beings'
+    /// coordinates, since a being off the field finds no medium and cannot breathe.
+    pub fn dev_fixture(
+        organs: BodyPlanRegistry,
+        medium: medium::MediumField,
+    ) -> EmbodiedPhysiology {
         EmbodiedPhysiology {
             organs,
             anchors: MetabolicAnchors::dev_fixture(),
-            medium_respirable,
+            medium,
             respiration_transfer_k: Fixed::ONE,
             tick_seconds: Fixed::ONE,
         }
     }
+}
+
+/// Fold the per-cell medium field from the worldgen map and the manifest (real-world unification step 4;
+/// owner ruling 2026-07-04), fail-loud if the submersion elevation or either medium profile is still
+/// reserved (Principle 11). Reads the reserved submersion elevation and each medium profile's
+/// `respirable_content` and `density` axes, then assigns each cell its medium by physical elevation alone
+/// ([`crate::medium::MediumField::from_map`]): the submerged medium below the threshold, the emergent
+/// above, no biome-label branch (Principle 9). The submerged and emergent ids may be the same, folding to
+/// a uniform field.
+fn medium_field_from_manifest(
+    manifest: &CalibrationManifest,
+    map: &TileMap,
+    submerged_medium_id: &str,
+    emergent_medium_id: &str,
+) -> Result<medium::MediumField, CalibrationError> {
+    let submersion = manifest.require_fixed("medium.submersion_elevation")?;
+    let submerged = medium_sample(manifest, submerged_medium_id)?;
+    let emergent = medium_sample(manifest, emergent_medium_id)?;
+    Ok(medium::MediumField::from_map(
+        map, submersion, submerged, emergent,
+    ))
+}
+
+/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content` and `density`
+/// axes) from the manifest, fail-loud if the profile is reserved or missing either axis.
+fn medium_sample(
+    manifest: &CalibrationManifest,
+    medium_id: &str,
+) -> Result<medium::MediumSample, CalibrationError> {
+    let profile = manifest.require_map(medium_id)?;
+    let axis = |name: &str| -> Result<Fixed, CalibrationError> {
+        profile
+            .get(name)
+            .copied()
+            .ok_or_else(|| CalibrationError::BadValue {
+                id: medium_id.to_string(),
+                detail: format!("medium profile is missing the '{name}' axis"),
+            })
+    };
+    Ok(medium::MediumSample {
+        respirable: axis("respirable_content")?,
+        density: axis("density")?,
+    })
 }
 
 /// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
@@ -1191,21 +1241,25 @@ impl Runner {
         }
         // (1b) Physics to physiology, medium respiration (R-MEDIUM): when a physiology is installed and
         // the registry carries a RESPIRATION axis, each being exchanges its respirable-gas reserve with
-        // the ambient medium through the Fick membrane law over its respiratory exchange area, in
-        // canonical id order (the walkers are id-sorted on the prior locomotion step). Breathe in before
-        // this tick's metabolic draw (matching the medium coupling's tested order), so the death check
-        // inside locomotion accounts for the tick's uptake. A body with no respiratory surface takes up
-        // nothing and suffocates on its buffer, whatever the medium (Principle 9). Uniform medium content
-        // this increment; a per-cell medium field is the named refinement.
+        // the medium of the cell it stands in, through the Fick membrane law over its respiratory exchange
+        // area, in canonical id order (the walkers are id-sorted on the prior locomotion step). Breathe in
+        // before this tick's metabolic draw (matching the medium coupling's tested order), so the death
+        // check inside locomotion accounts for the tick's uptake. A body with no respiratory surface takes
+        // up nothing and suffocates on its buffer, whatever the medium (Principle 9), and a being off the
+        // field finds no medium and suffocates on its buffer likewise. The medium is now per-cell
+        // ([`medium::respire_at`] reading the being's coordinate), so a body in a water cell respires that
+        // cell's content and one in an air cell that cell's; a single-medium world folds to a uniform field.
         if let Some(phys) = emb.physiology.as_ref() {
             if emb.homeo.axis(RESPIRATION).is_some() {
                 for w in emb.walkers.iter_mut() {
-                    let area = medium::exchange_area(&w.body, &phys.organs);
-                    medium::respire(
+                    let coord = w.coord();
+                    medium::respire_at(
                         &mut w.homeostasis,
-                        area,
+                        &w.body,
+                        &phys.organs,
+                        &phys.medium,
+                        coord,
                         phys.respiration_transfer_k,
-                        phys.medium_respirable,
                         RESPIRATION_FLUX_MAX,
                     );
                 }

@@ -31,7 +31,7 @@ use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE,
 };
 use civsim_sim::locomotion::{LocomotionParams, Walker};
-use civsim_sim::medium::RESPIRATORY_SURFACE;
+use civsim_sim::medium::{MediumField, RESPIRATORY_SURFACE};
 use civsim_sim::physiology::ENERGY_DENSITY;
 use civsim_sim::runner::{BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, Runner};
 use civsim_world::Coord3;
@@ -191,8 +191,11 @@ fn two_body_plans_diverge_in_energy_drain_and_time_to_death_from_anatomy_alone()
         band(setpoint),
     );
     // Install the anatomy-derived physiology: this is the wiring under test. Medium content is
-    // irrelevant here (no respiration axis).
-    emb.set_physiology(EmbodiedPhysiology::dev_fixture(organs, Fixed::ONE));
+    // irrelevant here (no respiration axis), so a uniform field over the runner's extent.
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+        organs,
+        MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+    ));
 
     let mut runner = Runner::with_embodiment(
         uniform_field(10, 10, Fixed::from_int(setpoint)),
@@ -308,7 +311,10 @@ fn the_coupled_physiology_runner_replays_and_matches_the_scheduler() {
             ),
             band(setpoint),
         );
-        emb.set_physiology(EmbodiedPhysiology::dev_fixture(organs, Fixed::ONE));
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
         // A slightly colder field than the set point, so the thermoregulatory term is live (the base
         // drain reads the live body temperature each tick) rather than a thermoneutral constant.
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
@@ -392,7 +398,10 @@ fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
             ),
             band(setpoint),
         );
-        emb.set_physiology(EmbodiedPhysiology::dev_fixture(organs.clone(), respirable));
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(6, 6, respirable, Fixed::ZERO, Fixed::ZERO),
+        ));
         let mut runner =
             Runner::with_embodiment(uniform_field(6, 6, Fixed::from_int(setpoint)), calib(), emb);
         for _ in 0..300 {
@@ -412,11 +421,122 @@ fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
 }
 
 #[test]
+fn beings_respire_the_medium_of_their_own_cell_through_the_runner() {
+    // The per-cell medium field through the full runner tick (real-world unification step 4): two identical
+    // gilled bodies stand in the same MediumField, one in a rich-respirable cell and one in a poor cell, and
+    // diverge in survival from the cell alone. The blank resting controller keeps each body at its spawn
+    // cell, so the outcome is the medium of the cell it stands in, not a label (Principle 9). This is the
+    // wiring the earlier uniform-field respiration test proves the regression of.
+    let setpoint = 300;
+    let reg = {
+        let mut r = civsim_sim::medium::dev_respiration();
+        r.axes.push(HomeostaticAxisDef {
+            id: TEMPERATURE,
+            name: "temperature".to_string(),
+            backing_component: None,
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+        });
+        r
+    };
+    let mut organs = BodyPlanRegistry::dev_default();
+    let gill = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: gill,
+        name: "gill".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[(RESPIRATORY_SURFACE, Fixed::ONE)]),
+    });
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0x0CEA,
+    );
+    let blank = Controller::zeros(emb.layout());
+    // Being 1 stands in the rich left half (x < 3), being 2 in the poor right half (x >= 3).
+    emb.add(
+        resting_walker(
+            1,
+            Coord3::ground(1, 1),
+            body((1, 2), vec![organ(gill, (1, 1))]),
+            &reg,
+            &organs,
+            blank.clone(),
+        ),
+        band(setpoint),
+    );
+    emb.add(
+        resting_walker(
+            2,
+            Coord3::ground(4, 1),
+            body((1, 2), vec![organ(gill, (1, 1))]),
+            &reg,
+            &organs,
+            blank,
+        ),
+        band(setpoint),
+    );
+    // A per-cell medium: the left half (x < 3) rich in the respirable species, the right half poor. Density
+    // and temperature are unread by respiration this increment; only the respirable content differs.
+    let (w, h) = (6i32, 6i32);
+    let respirable: Vec<Fixed> = (0..w * h)
+        .map(|i| {
+            if i % w < 3 {
+                Fixed::ONE
+            } else {
+                Fixed::from_ratio(1, 5)
+            }
+        })
+        .collect();
+    let medium = MediumField::new(
+        w,
+        h,
+        respirable,
+        vec![Fixed::ZERO; (w * h) as usize],
+        vec![Fixed::from_int(setpoint); (w * h) as usize],
+    );
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(organs, medium));
+    let mut runner =
+        Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(setpoint)), calib(), emb);
+    for _ in 0..300 {
+        runner.step();
+    }
+    let alive = |id: u64| {
+        runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .alive
+    };
+    assert!(alive(1), "the body in the rich cell breathes and survives");
+    assert!(
+        !alive(2),
+        "the identical body in the poor cell suffocates: the divergence is the cell's medium"
+    );
+}
+
+#[test]
 fn embodied_physiology_reads_a_set_manifest_and_fails_loud_when_reserved() {
-    // The canonical sourcing: EmbodiedPhysiology::from_manifest reads the metabolic anchors, the medium's
-    // respirable content, the reserved transfer coefficient, and the base tick from a set manifest, and a
-    // reserved input refuses to fabricate a number (Principle 11).
+    // The canonical sourcing: EmbodiedPhysiology::from_manifest reads the metabolic anchors, the per-cell
+    // medium field (the submersion elevation and the submerged and emergent medium profiles), the reserved
+    // transfer coefficient, and the base tick from a set manifest, and a reserved input refuses to
+    // fabricate a number (Principle 11).
     use civsim_sim::calibration::{CalibrationError, CalibrationManifest};
+    use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+    let map = TileMap::generate(
+        7,
+        FlatBounded::new(8, 6, 1),
+        &BiomeSet::dev_default(),
+        &WorldgenParams::dev_default(),
+    );
     let set = r#"
 [[reserved]]
 id = "metabolism.kleiber_coefficient"
@@ -468,6 +588,20 @@ value = "1"
 unit = "s"
 source = "test"
 [[reserved]]
+id = "medium.submersion_elevation"
+basis = "fixture"
+status = "set"
+value = "0.40"
+unit = "normalised_elevation"
+source = "test"
+[[reserved]]
+id = "medium.water"
+basis = "fixture"
+status = "set"
+value = "density=1000,respirable_content=0.3,conductivity=0.606,specific_heat=4186"
+unit = "medium_profile"
+source = "test"
+[[reserved]]
 id = "medium.air"
 basis = "fixture"
 status = "set"
@@ -477,9 +611,11 @@ source = "test"
 "#;
     let m = CalibrationManifest::from_toml_str(set).unwrap();
     let organs = BodyPlanRegistry::dev_default();
-    // The set manifest threads the anchors, the medium respirable content, the transfer coefficient, and
-    // the base tick into a usable physiology.
-    let _phys = EmbodiedPhysiology::from_manifest(&m, organs.clone(), "medium.air").unwrap();
+    // The set manifest threads the anchors, the per-cell medium field (water below the submersion
+    // elevation, air above), the transfer coefficient, and the base tick into a usable physiology.
+    let _phys =
+        EmbodiedPhysiology::from_manifest(&m, organs.clone(), &map, "medium.water", "medium.air")
+            .unwrap();
 
     // A reserved transfer coefficient refuses to build.
     let reserved = set.replace(
@@ -488,7 +624,8 @@ source = "test"
     );
     let mr = CalibrationManifest::from_toml_str(&reserved).unwrap();
     assert_eq!(
-        EmbodiedPhysiology::from_manifest(&mr, organs, "medium.air").unwrap_err(),
+        EmbodiedPhysiology::from_manifest(&mr, organs, &map, "medium.water", "medium.air")
+            .unwrap_err(),
         CalibrationError::Reserved("metabolism.respiration_transfer_coefficient".to_string()),
     );
 }

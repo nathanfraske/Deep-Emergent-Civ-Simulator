@@ -104,7 +104,7 @@ pub struct DawnPeoples {
 /// The inputs the founder step embodies the dawn population from (real-world unification step 3): the
 /// data-defined registries a body's reserves, affordances, and movement read against, the organ
 /// registry a body plan's tissue composition is scored on, the controller hidden width, and the
-/// resolved medium the bodies respire. A founder's own body diverges through its race's
+/// submerged and emergent medium ids the per-cell medium field folds the map into. A founder's own body diverges through its race's
 /// [`crate::race::Race::body`] plan and its genome-expressed controller, never a `RaceId` branch
 /// (Principle 9); these registries are the shared substrate the divergence is read against. The
 /// physiology and thermal-band reserved values are read fail-loud from the manifest at assembly.
@@ -122,9 +122,13 @@ pub struct EmbodimentGenesis {
     /// The controller hidden width (zero is the reaction-norm controller; a positive width is the
     /// recurrent graduation).
     pub controller_hidden: usize,
-    /// The resolved medium id the bodies respire and exchange heat with (for example `"medium.air"`),
-    /// the manifest key [`EmbodiedPhysiology::from_manifest`] reads the respirable content from.
-    pub medium_id: String,
+    /// The submerged medium id a cell below the reserved submersion elevation holds (for example
+    /// `"medium.water"`), the manifest profile the per-cell medium field folds into a water cell.
+    pub submerged_medium_id: String,
+    /// The emergent medium id a cell at or above the submersion elevation holds (for example
+    /// `"medium.air"`), the manifest profile the per-cell medium field folds into a land cell. A
+    /// single-medium world passes the same id for both, folding to a uniform field.
+    pub emergent_medium_id: String,
 }
 
 /// The inputs the founder step derives each race's phonetic form system from (increment 2e): the
@@ -392,8 +396,9 @@ fn group_founders_by_band(
 /// from its race's plan and the shared organ registry, its controller from its own genome (else a blank
 /// reaction norm), and its comfort band from the reserved thermal set point and half-band, so two races
 /// diverge in their bodies from their plan and genome alone, never a `RaceId` branch (Principle 9). The
-/// per-cell medium and the muscle-force datum are later steps; here the medium respirable and the
-/// physiology anchors are the fail-loud manifest reads.
+/// bodies respire the per-cell medium field folded from the worldgen map (`medium.water` below the
+/// reserved submersion elevation, `medium.air` above), and the physiology anchors are the fail-loud
+/// manifest reads.
 #[allow(clippy::too_many_arguments)]
 fn assemble_dawn_embodiment(
     world: &World,
@@ -459,7 +464,9 @@ fn assemble_dawn_embodiment(
     emb.set_physiology(EmbodiedPhysiology::from_manifest(
         manifest,
         genesis.organs.clone(),
-        &genesis.medium_id,
+        map,
+        &genesis.submerged_medium_id,
+        &genesis.emergent_medium_id,
     )?);
     Ok(emb)
 }
