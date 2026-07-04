@@ -129,7 +129,7 @@ fn main() {
             let flyer = loco
                 .iter()
                 .any(|l| *l == "fly" || *l == "glide" || *l == "levitate" || *l == "blink");
-            let swimmer = loco.iter().any(|l| *l == "swim");
+            let swimmer = loco.contains(&"swim");
             if label == "carnivorous plant"
                 || mobile_plant
                 || has_magic
