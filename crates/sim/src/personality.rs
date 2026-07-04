@@ -20,8 +20,10 @@
 //! reserves two data for this (`being.plasticity_by_age`, the timing of that slowdown, and
 //! `being.maturity_targets`, where each trait ends up), and the audit ruled both stay per-race
 //! [`TraitDef`] data rather than a fixed Big Five: the timing derives from each race's own
-//! `maturity_years` and `lifespan_years` through [`crate::race::Race::maturation_fraction`], and the
-//! trait axes, their plasticity curves, and their targets are the race's data. The human maturity
+//! `maturity_years` through [`crate::race::Race::maturation_fraction`] (which reads only
+//! `maturity_years`; `lifespan_years` shapes the separate life-hazard fraction, not this plasticity
+//! timing), and the trait axes, their plasticity curves, and their targets are the race's data. The
+//! human maturity
 //! principle (rising rank-order stability, rising conscientiousness, falling novelty-seeking; Roberts
 //! and DelVecchio 2000; the Big-Five aging literature) is one race's data row, the only worked
 //! example, never the mechanism.
@@ -173,6 +175,12 @@ impl TraitInstance {
     /// The being's current value on a trait axis, neutral zero where the axis is not present.
     pub fn value(&self, axis: TraitAxisId) -> Fixed {
         self.values.get(&axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The `(axis, value)` pairs this instance carries, in ascending axis-id order (the `BTreeMap`'s
+    /// canonical walk), so a state hash folds a being's personality in one deterministic order.
+    pub fn entries(&self) -> impl Iterator<Item = (TraitAxisId, Fixed)> + '_ {
+        self.values.iter().map(|(&axis, &value)| (axis, value))
     }
 
     /// Set the being's value on a trait axis.

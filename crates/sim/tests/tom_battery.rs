@@ -53,12 +53,15 @@ fn registry() -> AccessChannelRegistry {
 [[channels]]
 id = 1
 name = "witnessed"
+margin_steps = 1
 [[channels]]
 id = 2
 name = "told"
+margin_steps = 0
 [[channels]]
 id = 3
 name = "said"
+margin_steps = -1
 "#,
     )
     .expect("registry parses")

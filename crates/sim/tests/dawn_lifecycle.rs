@@ -119,6 +119,7 @@ fn lifecycle(seed: u64) -> (Vec<(Fixed, i32)>, usize, usize, Fixed) {
         members: 5,
     }];
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
 
     // Spread the founders' stances across the axis so there is something to enculturate and
@@ -208,6 +209,7 @@ fn turnover(seed: u64) -> (usize, usize, usize) {
         members: 5,
     }];
     let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
     // Age the founders across the lifespan so the eldest face real mortality from the start.
     for (k, &id) in founders.iter().enumerate() {

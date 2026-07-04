@@ -51,9 +51,9 @@ const NAMES: [&str; 5] = ["Ada", "Boro", "Cael", "Dara", "Esk"];
 
 fn channels() -> AccessChannelRegistry {
     AccessChannelRegistry::from_toml_str(
-        "[[channels]]\nid = 1\nname = \"witnessed\"\n\
-         [[channels]]\nid = 2\nname = \"told\"\n\
-         [[channels]]\nid = 3\nname = \"said\"\n",
+        "[[channels]]\nid = 1\nname = \"witnessed\"\nmargin_steps = 1\n\
+         [[channels]]\nid = 2\nname = \"told\"\nmargin_steps = 0\n\
+         [[channels]]\nid = 3\nname = \"said\"\nmargin_steps = -1\n",
     )
     .unwrap()
 }

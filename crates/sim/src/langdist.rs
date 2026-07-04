@@ -18,13 +18,18 @@
 //! new metric. It has three fixed-point components:
 //!
 //! - [`lexical_distance`] over two lexicons: the share of non-cognate (replaced or one-sided) forms.
-//!   A concept both cultures hold whose forms sit within the correspondence tie window (the
-//!   [`crate::semantics::substrate_quantization`] the caller passes) is cognate; a replaced form or a
-//!   concept one side lacks is non-cognate. Two cases carry no separate authored constant: a concept
-//!   one side lacks (one-sided coverage) counts as fully non-cognate, and a form-disjoint or
-//!   cross-modality pair (whose forms can never correspond) reaches the ceiling of one, both the
-//!   normalised language image of [`crate::value::incommensurability_ceiling`] (the untranslatable
-//!   magnitude) rather than a distinct number.
+//!   A concept both cultures hold whose two forms sit within the correspondence tie window (a
+//!   `cognate_window` the caller passes) is cognate; a replaced form or a concept one side lacks is
+//!   non-cognate. The window is a tolerance in the SAME normalised `[0, 1]` space [`form_distance`]
+//!   reports (zero for exact-form cognates, larger to forgive minor drift), NOT the absolute
+//!   meaning-space quantum [`crate::semantics::substrate_quantization`] returns: that quantum is in
+//!   meaning units of order tens and is not yet rescaled into this normalised form-distance space, so
+//!   the two are not yet wired together (the rescale is a follow-on; today the caller supplies a
+//!   normalised tolerance directly). Two cases carry no separate authored constant: a concept one side
+//!   lacks (one-sided coverage) counts as fully non-cognate, and a form-disjoint or cross-modality
+//!   pair (whose forms can never correspond) reaches the ceiling of one, both the normalised language
+//!   image of [`crate::value::incommensurability_ceiling`] (the untranslatable magnitude) rather than
+//!   a distinct number.
 //! - [`phonological_distance`] over two form systems: the feature-based Jaccard distance between the
 //!   two producible inventories (a form-disjoint or cross-modality pair reaching one), so sounds one
 //!   side cannot make contribute to a phonetic incommensurability.
@@ -34,10 +39,14 @@
 //! [`language_distance`] combines the three under [`ComponentWeights`]. The weights are not the
 //! authored 0.6/0.25/0.15: they DERIVE from each layer's own order-2 diversity across a corpus
 //! ([`distance_component_weights`]), the same Hill-number measure [`crate::typology::information_weights`]
-//! uses, normalised to sum to exactly one by deterministic residual absorption into the lexical
-//! component (R-LANG-DET). Lexical distance dominating mutual intelligibility EMERGES from the
-//! entropy of real lexicons (a lexicon carries far more effectively-distinct forms than a form
-//! inventory carries phonemes or a grammar carries settings) rather than being asserted.
+//! uses. Each layer's diversity is first normalised by its own type-space ceiling (its type richness),
+//! because the raw inverse-Simpson count ranges in `[1, S]` and a lexicon's `S` (thousands of forms)
+//! dwarfs a phoneme inventory's or a grammar's (tens), so summing the raw counts would let lexical
+//! cardinality swamp the other two by scale alone. The normalised evenness ratios are then divided by
+//! their total, each layer taking its own share, with the fixed-point rounding residual absorbed into
+//! whichever layer measured largest (R-LANG-DET), so the three sum to exactly one without biasing a
+//! chosen component. How much a layer weighs then reflects how evenly its corpus spreads across the
+//! categories it uses, not how many categories it happens to carry.
 //!
 //! Everything is integer fixed-point and draws no randomness (Principle 3), keys off forms,
 //! inventories, and typology data rather than a race identifier (Principle 9), and is invariant to
@@ -75,9 +84,12 @@ fn form_distance(a: &Word, b: &Word) -> Fixed {
 
 /// The lexical distance between two lexicons: the share of non-cognate (replaced or one-sided) forms
 /// over the union of concepts either holds (design Part 33.5). A concept both hold is cognate when
-/// its two forms sit within `cognate_window` (the correspondence tie window, the
-/// [`crate::semantics::substrate_quantization`]); a replaced form beyond the window, and a concept
-/// one side lacks, count as non-cognate. The one-sided contribution and the all-non-cognate ceiling
+/// its two forms sit within `cognate_window`, a tolerance in the SAME normalised `[0, 1]` space
+/// [`form_distance`] reports (zero admits only exact-form cognates). It is NOT the absolute
+/// meaning-space quantum [`crate::semantics::substrate_quantization`] returns (order tens): that quantum
+/// is not yet rescaled into this normalised space, so the two are not yet wired: the caller supplies a
+/// normalised tolerance directly today. A replaced form beyond the window, and a concept one side
+/// lacks, count as non-cognate. The one-sided contribution and the all-non-cognate ceiling
 /// are the normalised language image of [`crate::value::incommensurability_ceiling`], not a separate
 /// authored constant: a form-disjoint pair reaches one because every cell is non-cognate. Symmetric
 /// under swapping the two lexicons; the walk is over concept ids in canonical order; no race
@@ -165,10 +177,11 @@ pub fn language_distance(
 
 /// The order-2 diversity (Hill number `N^2 / sum(c_i^2)`, the inverse-Simpson effective count) of a
 /// set of integer counts, read as `Fixed` bits, the same measure [`crate::typology::information_weights`]
-/// uses. Integer-exact and deterministic: `N` and `sum(c_i^2)` accumulate in `u128`, so the result
-/// is bit-identical across machines; an all-zero (or empty) count set has no diversity and reads
-/// zero, never a fabricated one. Saturates at [`Fixed::MAX`] for an astronomically diverse corpus.
-fn order2_diversity(counts: impl IntoIterator<Item = u64>) -> Fixed {
+/// uses (which calls this so the two share one saturating, bit-identical form). Integer-exact and
+/// deterministic: `N` and `sum(c_i^2)` accumulate in `u128`, so the result is bit-identical across
+/// machines; an all-zero (or empty) count set has no diversity and reads zero, never a fabricated
+/// one. Saturates at [`Fixed::MAX`] for an astronomically diverse corpus.
+pub(crate) fn order2_diversity(counts: impl IntoIterator<Item = u64>) -> Fixed {
     let mut n: u128 = 0;
     let mut sum_sq: u128 = 0;
     for c in counts {
@@ -180,7 +193,14 @@ fn order2_diversity(counts: impl IntoIterator<Item = u64>) -> Fixed {
         return Fixed::ZERO;
     }
     let n_sq = n.saturating_mul(n);
-    let shifted = n_sq.checked_shl(32).unwrap_or(u128::MAX);
+    // Guard the shift VALUE, not the shift amount: `<< 32` never overflows the amount (32 < 128),
+    // but the shifted value overflows `u128` once `n_sq` needs more than 96 bits, so saturate
+    // there rather than on a dead `checked_shl` amount check.
+    let shifted = if n_sq.leading_zeros() >= 32 {
+        n_sq << 32
+    } else {
+        u128::MAX
+    };
     let bits = shifted / sum_sq;
     Fixed::from_bits_i128(bits.min(i64::MAX as u128) as i128).unwrap_or(Fixed::MAX)
 }
@@ -195,41 +215,52 @@ fn tally<K: Ord>(items: impl IntoIterator<Item = K>) -> BTreeMap<K, u64> {
 }
 
 /// Derive the three language-distance component weights from a corpus (design Part 33.5), so the
-/// authored 0.6/0.25/0.15 is retired. Each layer's weight is its own order-2 diversity across the
-/// corpus divided by the total: the lexical layer over the pooled word-forms of every lexicon, the
-/// phonological layer over the pooled producible primitives of every form system, and the
-/// grammatical layer over the pooled `(parameter, value)` settings of every typology profile. The
-/// weights are normalised to sum to exactly [`Fixed::ONE`] by deterministic residual absorption into
-/// the lexical component (the R-LANG-DET rule), so the fixed-point rounding lands in one place and
-/// the three always sum to one. Lexical dominance EMERGES from the data (a real lexicon carries far
-/// more effectively-distinct forms than a form inventory carries phonemes), never asserted. A pure
-/// function of the corpus; invariant to permuting which language is which (each diversity reads a
-/// pooled multiset); no race identifier enters. A corpus with no distinguishing entropy in any layer
-/// gives the lexical component the whole weight (the residual), never a fabricated split.
+/// authored 0.6/0.25/0.15 is retired. Each layer's weight is its own type-space-normalised order-2
+/// diversity across the corpus divided by the total: the lexical layer over the pooled word-forms of
+/// every lexicon, the phonological layer over the pooled producible primitives of every form system,
+/// and the grammatical layer over the pooled `(parameter, value)` settings of every typology profile.
+/// Each layer's raw inverse-Simpson count is divided by its own type richness first
+/// ([`normalized_diversity`]), so the three land in one comparable evenness space rather than lexical
+/// cardinality swamping the others by scale. The normalised shares are then divided by their total,
+/// with the fixed-point rounding residual absorbed into whichever layer measured largest (the
+/// R-LANG-DET rule), so the three always sum to exactly [`Fixed::ONE`] without biasing a chosen
+/// component. How much a layer weighs EMERGES from how evenly its corpus spreads across its own
+/// categories, never asserted. A pure function of the corpus; invariant to permuting which language is
+/// which (each diversity reads a pooled multiset); no race identifier enters. A corpus with no
+/// distinguishing entropy in any layer gives the lexical component the whole weight (the residual),
+/// never a fabricated split.
 pub fn distance_component_weights(
     lexicons: &[Lexicon],
     form_systems: &[FormSystem],
     typologies: &[TypologyProfile],
 ) -> ComponentWeights {
+    // Each layer's order-2 diversity is normalised by its OWN type-space ceiling (the number of
+    // distinct types it can carry) before the layers combine. The inverse-Simpson count ranges in
+    // `[1, S]` where `S` is the layer's type richness, so the raw diversities are not commensurable:
+    // a real lexicon carries thousands of distinct forms and a form inventory only tens of phonemes,
+    // so summing the raw counts would let lexical cardinality swamp the other two by scale alone
+    // (lexical near one, the others inert) rather than by evenness. Dividing each by its own richness
+    // maps every layer into the same `(0, 1]` evenness space, so the combined weight reflects how
+    // evenly each layer spreads its corpus, not how many categories it happens to have.
     let lex_counts = tally(
         lexicons
             .iter()
             .flat_map(|l| l.entries().map(|(_, w)| w.clone())),
     );
-    let div_lex = order2_diversity(lex_counts.into_values());
+    let norm_lex = normalized_diversity(&lex_counts);
 
     let phon_counts = tally(
         form_systems
             .iter()
             .flat_map(|f| f.inventory().iter().cloned()),
     );
-    let div_phon = order2_diversity(phon_counts.into_values());
+    let norm_phon = normalized_diversity(&phon_counts);
 
     let gram_counts: BTreeMap<(TypologyParamId, TypologyValueId), u64> =
         tally(typologies.iter().flat_map(|t| t.entries().iter().copied()));
-    let div_gram = order2_diversity(gram_counts.into_values());
+    let norm_gram = normalized_diversity(&gram_counts);
 
-    let total = Fixed::saturating_sum([div_lex, div_phon, div_gram]);
+    let total = Fixed::saturating_sum([norm_lex, norm_phon, norm_gram]);
     if total <= Fixed::ZERO {
         // No distinguishing entropy anywhere: the lexical component (the dominant layer by design)
         // takes the whole weight through the residual, never a fabricated even split.
@@ -239,15 +270,41 @@ pub fn distance_component_weights(
             grammatical: Fixed::ZERO,
         };
     }
-    let phonological = div_phon.checked_div(total).unwrap_or(Fixed::ZERO);
-    let grammatical = div_gram.checked_div(total).unwrap_or(Fixed::ZERO);
-    // Residual absorption into the lexical component: the three sum to exactly one.
-    let lexical = Fixed::ONE - phonological - grammatical;
-    ComponentWeights {
+    let lexical = norm_lex.checked_div(total).unwrap_or(Fixed::ZERO);
+    let phonological = norm_phon.checked_div(total).unwrap_or(Fixed::ZERO);
+    let grammatical = norm_gram.checked_div(total).unwrap_or(Fixed::ZERO);
+    // Each layer gets its own share; the fixed-point rounding residual is absorbed into whichever
+    // layer measured largest (not always lexical), so the three sum to exactly one without biasing a
+    // chosen component. Ties on the largest measured diversity break toward lexical, then
+    // phonological, a deterministic total order.
+    let residual = Fixed::ONE - lexical - phonological - grammatical;
+    let mut w = ComponentWeights {
         lexical,
         phonological,
         grammatical,
+    };
+    if norm_lex >= norm_phon && norm_lex >= norm_gram {
+        w.lexical += residual;
+    } else if norm_phon >= norm_gram {
+        w.phonological += residual;
+    } else {
+        w.grammatical += residual;
     }
+    w
+}
+
+/// A layer's diversity normalised into `(0, 1]` by its own type-space ceiling: the order-2 Hill
+/// number divided by the number of distinct types the layer carries (its richness `S`). The Hill
+/// number lies in `[1, S]`, so this evenness ratio is comparable across layers of wildly different
+/// cardinality. An empty layer (no types) has no diversity and reads zero.
+fn normalized_diversity<K: Ord>(counts: &BTreeMap<K, u64>) -> Fixed {
+    let richness = counts.len();
+    if richness == 0 {
+        return Fixed::ZERO;
+    }
+    let div = order2_diversity(counts.values().copied());
+    div.checked_div(Fixed::from_int(richness as i32))
+        .unwrap_or(Fixed::ZERO)
 }
 
 #[cfg(test)]
@@ -332,42 +389,85 @@ mod tests {
     }
 
     #[test]
-    fn component_weights_derive_from_entropy_sum_to_one_and_differ_by_corpus() {
-        // Two pairs share the same form systems and typologies (so div_phon and div_gram match), and
-        // differ only in lexical entropy, so the weights must differ from the lexicons' own entropy.
+    fn component_weights_derive_from_evenness_sum_to_one_and_differ_by_corpus() {
+        // Two pairs share the same form systems and typologies (so the phonological and grammatical
+        // normalised diversities match), and differ only in how evenly the lexicon spreads its forms,
+        // so the weights must differ from the lexicons' own evenness.
         let fs = [form_system(0, &[1, 2]), form_system(0, &[1, 2])];
         let typ = [typology(&[(0, 0)]), typology(&[(0, 0)])];
 
-        // Pair 1: every form distinct across the two lexicons (high lexical diversity).
-        let hi = [
-            lexicon(0, &[(0, &[1]), (1, &[2]), (2, &[3])]),
-            lexicon(0, &[(0, &[4]), (1, &[5]), (2, &[6])]),
+        // Pair 1: every form distinct (a perfectly even lexicon, normalised diversity one).
+        let even = [
+            lexicon(0, &[(0, &[1]), (1, &[2]), (2, &[3]), (3, &[4])]),
+            lexicon(0, &[(0, &[1]), (1, &[2]), (2, &[3]), (3, &[4])]),
         ];
-        // Pair 2: every form the same (low lexical diversity).
-        let lo = [
-            lexicon(0, &[(0, &[1]), (1, &[1]), (2, &[1])]),
-            lexicon(0, &[(0, &[1]), (1, &[1]), (2, &[1])]),
+        // Pair 2: the same type richness in play, but the corpus is concentrated on one form (low
+        // evenness), so the lexical layer is normalised down.
+        let concentrated = [
+            lexicon(0, &[(0, &[1]), (1, &[1]), (2, &[1]), (3, &[2])]),
+            lexicon(0, &[(0, &[1]), (1, &[1]), (2, &[1]), (3, &[2])]),
         ];
 
-        let w_hi = distance_component_weights(&hi, &fs, &typ);
-        let w_lo = distance_component_weights(&lo, &fs, &typ);
+        let w_even = distance_component_weights(&even, &fs, &typ);
+        let w_conc = distance_component_weights(&concentrated, &fs, &typ);
 
-        // Each pair's weights sum to exactly one (residual absorption).
-        for w in [w_hi, w_lo] {
+        // Each pair's weights sum to exactly one (residual absorbed into the largest layer).
+        for w in [w_even, w_conc] {
             assert_eq!(
                 Fixed::saturating_sum([w.lexical, w.phonological, w.grammatical]),
                 Fixed::ONE,
                 "the weights sum to exactly one"
             );
         }
-        // The high-entropy lexicon corpus weights the lexical component more heavily.
+        // The evenly-spread lexicon weights the lexical component more heavily; evenness (not raw
+        // cardinality) is what the normalised measure reads.
         assert!(
-            w_hi.lexical > w_lo.lexical,
-            "lexical dominance emerges from lexical entropy, not an authored constant"
+            w_even.lexical > w_conc.lexical,
+            "lexical weight emerges from lexical evenness, not an authored constant"
         );
         assert_ne!(
-            w_hi, w_lo,
-            "two corpora with different entropy get different component weights"
+            w_even, w_conc,
+            "two corpora with different evenness get different component weights"
+        );
+    }
+
+    #[test]
+    fn a_high_cardinality_lexical_layer_no_longer_swamps_the_others_by_scale() {
+        // Regression (the raw-Hill-sum bug): a lexicon with a large, evenly-spread type space used to
+        // drive its raw diversity into the hundreds while a small phoneme inventory and grammar stayed
+        // near their tens, so the lexical weight pinned near one and the other two went inert. With
+        // type-space normalisation every perfectly-even layer reads one, so a lexicon of many distinct
+        // forms and a small inventory of equally-even phonemes split the weight by evenness, not by the
+        // lexicon's sheer size.
+        let big_lex = [lexicon(
+            0,
+            &[
+                (0, &[1]),
+                (1, &[2]),
+                (2, &[3]),
+                (3, &[4]),
+                (4, &[5]),
+                (5, &[6]),
+                (6, &[7]),
+                (7, &[8]),
+            ],
+        )];
+        let small_fs = [form_system(0, &[1, 2])]; // two equally-used phonemes: perfectly even
+        let one_typ = [typology(&[(0, 0)])]; // one grammatical setting: perfectly even
+        let w = distance_component_weights(&big_lex, &small_fs, &one_typ);
+        // All three layers are perfectly even, so despite the lexicon carrying four times the phoneme
+        // inventory's type count, the weight splits three ways rather than pinning on lexical. The
+        // largest-layer rounding residual (a single Q32.32 bit on this three-way tie) lands on the
+        // lexical component, so the other two read exactly one third and the three sum to one.
+        assert_eq!(
+            Fixed::saturating_sum([w.lexical, w.phonological, w.grammatical]),
+            Fixed::ONE
+        );
+        assert_eq!(w.phonological, Fixed::from_ratio(1, 3));
+        assert_eq!(w.grammatical, Fixed::from_ratio(1, 3));
+        assert!(
+            w.lexical >= w.phonological && w.lexical < Fixed::from_ratio(9, 10),
+            "cardinality no longer pins the lexical weight near one; the split is even"
         );
     }
 
@@ -399,6 +499,24 @@ mod tests {
         assert_eq!(w.lexical, Fixed::ONE);
         assert_eq!(w.phonological, Fixed::ZERO);
         assert_eq!(w.grammatical, Fixed::ZERO);
+    }
+
+    #[test]
+    fn order2_diversity_saturates_the_shift_value_without_wrapping_negative() {
+        // Defect 5c: `<< 32` never fails on the shift AMOUNT (32 < 128), so the old
+        // `checked_shl(32).unwrap_or(u128::MAX)` branch was dead; the real overflow is the shift
+        // VALUE once N^2 needs more than 96 bits. Counts whose squared sum pushes N^2 past 2^96
+        // exercise that path: the guarded shift saturates and the result stays a finite, non-negative
+        // Fixed rather than a wrapped (possibly negative) one, and nothing panics.
+        let huge = order2_diversity([1u64 << 49, 1u64 << 49]);
+        assert!(huge >= Fixed::ZERO, "no negative wrap on shift saturation");
+        let maxed = order2_diversity([u64::MAX, u64::MAX, u64::MAX]);
+        assert!(
+            maxed >= Fixed::ZERO,
+            "no negative wrap at the count ceiling"
+        );
+        // A modest, in-range corpus still reads the exact inverse-Simpson count (two even types → 2).
+        assert_eq!(order2_diversity([3u64, 3]), Fixed::from_int(2));
     }
 
     #[test]

@@ -77,6 +77,7 @@ fn seed_band(w: &mut World, stances: &[Fixed]) -> Vec<StableId> {
 fn two_far_clusters_do_not_influence_each_other() {
     // Two tight pairs far apart: at band 0.1 the low pair and the high pair never mix.
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let ids = seed_band(
         &mut w,
         &[
@@ -102,6 +103,7 @@ fn two_far_clusters_do_not_influence_each_other() {
 #[test]
 fn a_band_within_one_confidence_band_stays_one_cluster() {
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let ids = seed_band(
         &mut w,
         &[
@@ -122,6 +124,7 @@ fn a_band_within_one_confidence_band_stays_one_cluster() {
 #[test]
 fn variance_signals_fission_for_a_split_band_and_not_a_tight_one() {
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let split = seed_band(&mut w, &[Fixed::ZERO, Fixed::ONE]);
     let tight = seed_band(
         &mut w,
@@ -148,6 +151,7 @@ fn variance_signals_fission_for_a_split_band_and_not_a_tight_one() {
 fn bounded_enculturation_replays_deterministically() {
     let round = || {
         let mut w = World::new(params(), params(), AccessWeights::default());
+        w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
         let ids = seed_band(
             &mut w,
             &[

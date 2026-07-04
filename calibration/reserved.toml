@@ -125,7 +125,7 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 
 [[reserved]]
 id = "evidence.aggregate_diffusion_rate"
-basis = "DERIVES (2026-07-03) through evidence::aggregate_diffusion_rate over derive_aggregate_diffusion_rate (crates/sim/src/evidence.rs): the aggregate belief-diffusion rate is the mean field of the individual-tier gossip loop, told_weight * trust_baseline * contact_density (Bass 1969; the SI-epidemic social-diffusion mean field). The content-blind base rate reads gossip.told_weight and gossip.trust_baseline (already set) at unit contact density; the per-belief contact density enters downstream as the distance coupling PrevailingBelief::advance_diffusion applies, so rate*distance is the full mean-field product. A tier-consistency test (crates/sim/src/evidence.rs) validates that the aggregate logistic run at the derived rate reproduces the mean of a stochastic individual-tier gossip ensemble within a sampling tolerance. No independent Earth-village diffusion rate is authored and no reserved input remains: the rate keys off the gossip parameters (Principle 11), and two worlds diverge only through those, never a race id (Principle 9). This entry stays as the surfaced pointer to the derivation."
+basis = "DERIVES (2026-07-03, units corrected 2026-07-04) through evidence::aggregate_diffusion_rate over derive_aggregate_diffusion_rate (crates/sim/src/evidence.rs): the aggregate belief-diffusion rate is the mean field of the individual-tier gossip loop, sigmoid(told_weight * trust_baseline) * contact_density. The individual gossip loop adds told_weight * trust in LOG-ODDS (nats) per contact (world.rs apply_assertion), so that quantity is not a probability and cannot be a [0,1] hazard directly (the earlier told_weight*trust_baseline*contact_density form used the raw log-odds as a rate, and at the set gossip values 2 * 0.5 * 1 = 1 pinned the clamp and saturated every belief in one step). It is first mapped through the logistic, the log-odds-to-probability transform this manifest's unit convention already names (p = 1 / (1 + e^-L); Elfes 1989; Thrun, Burgard, Fox 2005), giving the per-contact transmission probability, then scaled by contact_density. The content-blind base rate reads gossip.told_weight and gossip.trust_baseline (already set) at unit contact density; the per-belief spatial coupling enters downstream as the distance factor PrevailingBelief::advance_diffusion applies under the SI logistic level*(1-level) term. A non-circular tier-consistency test (crates/sim/src/evidence.rs) validates the aggregate logistic against the REAL log-odds threshold-gated gossip loop (Mind::consider/Mind::belief, the mechanism world.rs runs), not a reimplementation of the aggregate step. No independent Earth-village diffusion rate is authored and no reserved input remains: the rate keys off the gossip parameters (Principle 11), and two worlds diverge only through those, never a race id (Principle 9). This entry stays as the surfaced pointer to the derivation."
 status = "reserved"
 value = ""
 unit = "per_tick"
@@ -198,7 +198,7 @@ source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 
 [[reserved]]
 id = "value_metric.enculturation_pull_rate"
-basis = "DERIVES (2026-07-03) through axiom::enculturation_pull_rate (crates/sim/src/axiom.rs), the Friedkin-Johnsen complement 1 - EpistemicStance::effective_stubbornness(base): the per-axiom, per-mind pull toward the group mean is one minus the effective stubbornness the enculturate kernel already applies, so a flat cross-race pull rate is no longer authored. The pull keys off each mind's temperament and the per-axiom stubbornness base (data), never a race id (Principle 9), pinning at zero for a fully stubborn anchor and one for none. No reserved input remains; the stubbornness base and temperament are already per-race data."
+basis = "RE-RESERVED (2026-07-04, correcting a fabricated resolution): a prior entry claimed this DERIVES through axiom::enculturation_pull_rate (1 - EpistemicStance::effective_stubbornness), but that is the Part 28 AXIOM-axis pull, a different domain: it moves an Axiom's bipolar stance keyed off the axiom's own stubbornness base and the mind's epistemic temperament. This key governs the Part 21 VALUE-metric pull, how far a ValueProfile is drawn toward its group's mean on each value axis, and a ValueProfile carries no stubbornness field, so the axiom complement cannot supply it and the 'no reserved input remains' claim was false. Basis for deciding it: the per-race belief_plasticity a ValueProfile-level enculturation pull would read, the openness of a race's values to social pull versus their anchoring to the innate profile (the value-metric analogue of the axiom stubbornness base, a per-race datum, not a race-id branch, Principle 9). Set it once a ValueProfile enculturation kernel and its per-race belief_plasticity input exist (neither is built yet: Race carries no belief_plasticity field and no ValueProfile pull consumer reads this key). Reserved fail-loud rather than derived-through a different-domain function; never fabricate a value."
 status = "reserved"
 value = ""
 unit = "per_tick"
@@ -366,6 +366,14 @@ status = "reserved"
 value = ""
 unit = "rule"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
+
+[[reserved]]
+id = "axiom.stubbornness_dogmatism_weight"
+basis = "the weight on dogmatism versus freezing in the Friedkin-Johnsen temperament pull the enculturation band applies (EpistemicStance::effective_stubbornness): the effective stubbornness anchor is base + (1 - base) * (w * dogmatism + (1 - w) * freezing), and w is this weight, its complement weighting freezing. Basis for deciding it: which of the two temperament fields (need for closure versus permanence of a locked belief) should drive the anchor harder, calibrated against how fast a dogmatic-but-labile mind versus a freezing-but-open mind hardens in the disagreement-persistence test; w = 0.5 reproduces the former plain mean. Reserved fail-loud rather than the bare hardcoded half it replaced (never fabricate a value); it is read through axiom::stubbornness_dogmatism_weight and installed with World::set_stubbornness_split, and the enculturation band is a no-op until it is set."
+status = "reserved"
+value = ""
+unit = "weight"
+source = "Part 28 axiom model; record 62.4; audit section 1c; crates/sim/src/axiom.rs EpistemicStance::effective_stubbornness"
 
 # --- R-LANG: language and meaning (Part 33, record 62.7) ---
 

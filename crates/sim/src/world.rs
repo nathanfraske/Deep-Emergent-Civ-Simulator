@@ -381,6 +381,12 @@ pub struct World {
     genomes: BTreeMap<StableId, Genome>,
     /// Per-being intrinsic beliefs, the innate disposition seeded at the dawn (design Part 28).
     intrinsic: BTreeMap<StableId, IntrinsicBeliefs>,
+    /// The reserved dogmatism/freezing split weight the enculturation band applies through
+    /// [`crate::axiom::EpistemicStance::effective_stubbornness`] (`axiom.stubbornness_dogmatism_weight`).
+    /// `None` until installed with [`World::set_stubbornness_split`], and the enculturation band beats
+    /// are then a no-op rather than running on a fabricated half (Principle 11), the same
+    /// fail-quiet-until-declared convention gossip and the mortality hazard use.
+    stubbornness_split: Option<Fixed>,
     /// Per-being heritable mate preference, the direction of assortment as a per-being trait
     /// (R-REPRO). Seeded at the dawn with unbiased variation (symmetric about indifference, so
     /// no direction is authored) and inherited at birth by midparent plus bounded mutation, so
@@ -404,10 +410,12 @@ pub struct World {
     /// lineage's [`Language::race`] is looked up here for its `maturity_years`, so drift derives its
     /// generation length per lineage (see [`World::drift_languages`]) rather than one global scalar.
     /// A lineage whose race is absent has no maturity to derive a cadence from and does not drift (a
-    /// fabricated cadence is never invented, Principle 11). This is owner config, not per-tick state:
-    /// like the manifest and the mortality curve it is not folded into [`World::state_hash`] (the
-    /// lineage's race id is folded there, so a divergent race assignment still shows up); the
-    /// observable divergence is the drift the derived cadence produces over time.
+    /// fabricated cadence is never invented, Principle 11). This is owner config, not per-tick state,
+    /// so the whole record is not folded into [`World::state_hash`]; but each lineage's own race
+    /// maturity_years and lifespan_years (the two quantities the drift cadence and mortality
+    /// normalization read) ARE folded there in the languages loop, alongside the lineage's race id, so
+    /// a change to a race's maturity or lifespan surfaces in the fingerprint at once rather than only
+    /// through the drift it later produces.
     races: BTreeMap<RaceId, Race>,
     /// The per-race personality profiles (design Part 20, R-BEING-REP): the age-personality
     /// substrate's `being.plasticity_by_age` (the maturation-timed plasticity curves) and
@@ -417,9 +425,10 @@ pub struct World {
     personality: PersonalityRegistry,
     /// Per-being live personality: the current trait values the life-cadence personality beat drifts
     /// toward each race's maturity targets. Seeded birth-neutral when a being of a race that carries
-    /// a profile is created; a being whose race declares no profile carries no instance. Like the
-    /// `ages` it rides on, it is a reconstructible deterministic function of the age cadence and is
-    /// not folded into [`World::state_hash`].
+    /// a profile is created; a being whose race declares no profile carries no instance. It rides the
+    /// aging cadence, but a divergent personality trajectory is a divergent world (future drift keys
+    /// off it), so it IS folded into [`World::state_hash`] in mind-id then axis-id order, alongside
+    /// the `ages` it rides on.
     traits: BTreeMap<StableId, TraitInstance>,
     /// Per-being sensorium, the channels it can perceive (the R-SENSORIUM channel gate). A being
     /// with no entry reads every channel, so perception is gated only where a sensorium is set.
@@ -520,6 +529,7 @@ impl World {
             place_of: BTreeMap::new(),
             genomes: BTreeMap::new(),
             intrinsic: BTreeMap::new(),
+            stubbornness_split: None,
             mate_prefs: BTreeMap::new(),
             affect: BTreeMap::new(),
             ages: BTreeMap::new(),
@@ -749,6 +759,15 @@ impl World {
     /// Install the gossip calibrations. Until set, the gossip step is a no-op.
     pub fn set_gossip(&mut self, params: GossipParams) {
         self.gossip = Some(params);
+    }
+
+    /// Install the reserved dogmatism/freezing split weight the enculturation band applies
+    /// (`axiom.stubbornness_dogmatism_weight`, read through
+    /// [`crate::axiom::stubbornness_dogmatism_weight`]). Until set, [`World::enculturate_band`] and
+    /// [`World::enculturate_band_bounded`] are a no-op rather than running the Friedkin-Johnsen anchor
+    /// on a fabricated half (Principle 11). A test installs a clearly-labelled fixture weight.
+    pub fn set_stubbornness_split(&mut self, weight: Fixed) {
+        self.stubbornness_split = Some(weight);
     }
 
     /// Install the modelled-dialogue substrate (the move registry and the etic force
@@ -1123,6 +1142,12 @@ impl World {
     /// selection and the conformist and prestige biases (which sharpen this into schism) are
     /// the deferred next brick; this is the plain anchored average.
     pub fn enculturate_band(&mut self, members: &[StableId], axis: AxiomAxisId) {
+        // The dogmatism/freezing split weight is a reserved value; without it the anchor cannot be
+        // computed without fabricating a half, so the round is a no-op until it is installed.
+        let split = match self.stubbornness_split {
+            Some(w) => w,
+            None => return,
+        };
         let mean = {
             let pairs = members.iter().filter_map(|id| {
                 let intr = self.intrinsic.get(id)?;
@@ -1140,7 +1165,7 @@ impl World {
                     axioms, epistemic, ..
                 } = intr;
                 if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
-                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness, split);
                     ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
                 }
             }
@@ -1163,6 +1188,12 @@ impl World {
         axis: AxiomAxisId,
         epsilon: Fixed,
     ) {
+        // The dogmatism/freezing split weight is reserved; the round is a no-op until it is installed
+        // rather than fabricating a half.
+        let split = match self.stubbornness_split {
+            Some(w) => w,
+            None => return,
+        };
         let snapshot: Vec<(StableId, Fixed, Fixed)> = members
             .iter()
             .filter_map(|&id| {
@@ -1184,7 +1215,7 @@ impl World {
                     axioms, epistemic, ..
                 } = intr;
                 if let Some(ax) = axioms.iter_mut().find(|a| a.axis == axis) {
-                    let theta = epistemic.effective_stubbornness(ax.stubbornness);
+                    let theta = epistemic.effective_stubbornness(ax.stubbornness, split);
                     ax.stance = axiom::enculturate(mean, ax.innate_seed, theta);
                 }
             }
@@ -2906,6 +2937,24 @@ impl World {
                 }
             }
             h.write_u32(self.last_action.get(id).map(|a| a.0).unwrap_or(u32::MAX));
+            // The being's age in life-cadence steps and its live personality trait values (axis
+            // order). Both ride the aging cadence, but a divergent age or personality trajectory is a
+            // divergent world (mortality and future drift key off them), so they surface in the
+            // fingerprint rather than only in the drift they later produce. An untracked being folds a
+            // sentinel age and an empty trait run, each length-prefixed so a boundary is unambiguous.
+            h.write_u32(self.ages.get(id).copied().unwrap_or(u32::MAX));
+            match self.traits.get(id) {
+                None => h.write_u64(u64::MAX),
+                Some(inst) => {
+                    let entries: Vec<(crate::personality::TraitAxisId, Fixed)> =
+                        inst.entries().collect();
+                    h.write_u64(entries.len() as u64);
+                    for (axis, value) in entries {
+                        h.write_u32(axis.0);
+                        h.write_fixed(value);
+                    }
+                }
+            }
         }
         // Active traces, in id order.
         let mut traces: Vec<&Trace> = self.traces.iter().collect();
@@ -2951,6 +3000,23 @@ impl World {
         for (id, lang) in &self.languages {
             h.write_u32(id.0);
             h.write_u32(lang.race().0);
+            // The lineage's race maturity and lifespan in life-cadence steps: the per-lineage drift
+            // cadence derives its generation length from maturity_years, and mortality normalizes age
+            // by lifespan_years, so two worlds whose lineages age or drift on different schedules are
+            // different worlds. These fold alongside the global life_cadence and mortality_hazard
+            // below, so a change to a race's maturity or lifespan surfaces in the fingerprint at once
+            // rather than only through the drift it later produces. A lineage whose race is absent
+            // folds a sentinel pair, distinct from any real race's counts.
+            match self.races.get(&lang.race()) {
+                Some(race) => {
+                    h.write_u32(race.maturity_years);
+                    h.write_u32(race.lifespan_years);
+                }
+                None => {
+                    h.write_u32(u32::MAX);
+                    h.write_u32(u32::MAX);
+                }
+            }
             h.write_u32(lang.parent().map(|p| p.0).unwrap_or(u32::MAX));
             for rule in lang.change_log() {
                 h.write_u32(rule.dim.0);
@@ -3102,6 +3168,44 @@ mod tests {
     }
 
     #[test]
+    fn the_state_hash_folds_ages_and_personality_trait_trajectories() {
+        // Defect 7: a being's age and live personality ride the aging cadence, but a divergent age or
+        // personality trajectory is a divergent world (mortality and future drift key off them), so
+        // they surface in the fingerprint rather than only in the drift they later produce.
+        use crate::personality::{TraitAxisId, TraitInstance};
+        let hash_of = |age: u32, trait_value: Option<Fixed>| -> u128 {
+            let mut w = world();
+            let a = w.spawn(Fixed::ONE);
+            w.set_age(a, age);
+            if let Some(v) = trait_value {
+                w.install_personality(a, TraitInstance::from_values([(TraitAxisId(0), v)]));
+            }
+            w.state_hash()
+        };
+        let base = hash_of(5, None);
+        assert_eq!(
+            base,
+            hash_of(5, None),
+            "identical age and trait state hashes the same"
+        );
+        assert_ne!(
+            base,
+            hash_of(9, None),
+            "a divergent age trajectory surfaces in the fingerprint"
+        );
+        let drifted = hash_of(5, Some(Fixed::from_ratio(1, 3)));
+        let drifted_more = hash_of(5, Some(Fixed::from_ratio(2, 3)));
+        assert_ne!(
+            base, drifted,
+            "installing a personality trait surfaces in the fingerprint"
+        );
+        assert_ne!(
+            drifted, drifted_more,
+            "a divergent trait value surfaces in the fingerprint"
+        );
+    }
+
+    #[test]
     fn a_tick_applies_observations_and_advances_the_clock() {
         let mut w = world();
         let anna = w.spawn(Fixed::ONE);
@@ -3193,12 +3297,15 @@ source = "Part 9"
 [[channels]]
 id = 1
 name = "witnessed"
+margin_steps = 1
 [[channels]]
 id = 2
 name = "told"
+margin_steps = 0
 [[channels]]
 id = 3
 name = "said"
+margin_steps = -1
 "#,
         )
         .unwrap();

@@ -69,10 +69,12 @@ fn run(
             AccessChannelDef {
                 id: WITNESSED,
                 name: "witnessed".to_string(),
+                margin_steps: Some(1),
             },
             AccessChannelDef {
                 id: said_id,
                 name: "said".to_string(),
+                margin_steps: Some(-1),
             },
         ],
     });

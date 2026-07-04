@@ -120,9 +120,11 @@ fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
 /// labelled fixture. None is an agent-set number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldCalib {
-    /// The per-tick diffusion (conduction) coefficient, dimensionless, in `[0, 0.25)` for the
-    /// four-neighbour stencil's stability bound. Basis: the medium's thermal diffusivity over the
-    /// cell size and the base tick, kept below the explicit stability limit.
+    /// The per-tick diffusion (conduction) coefficient, dimensionless, in `[0, 0.25]` for the
+    /// four-neighbour stencil's stability bound. The bound is inclusive: the von Neumann limit is
+    /// `alpha * dt / dx^2 <= 1/4`, and [`derive_field_diffusion`] clamps to [`STENCIL_STABILITY_BOUND`]
+    /// (exactly 1/4) inclusively. Basis: the medium's thermal diffusivity over the cell size and the
+    /// base tick, kept at or below the explicit stability limit.
     pub diffusion: Fixed,
     /// The per-tick relaxation rate of a cell toward its baseline (the solar and biome forcing), in
     /// `[0, 1]`. Basis: the day-night and seasonal forcing timescale over the base tick.

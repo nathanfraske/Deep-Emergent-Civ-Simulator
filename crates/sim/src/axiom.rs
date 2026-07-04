@@ -51,9 +51,11 @@
 //!   and disconfirming tags, as the paper specifies); a recency-weighted-pressure hybrid is
 //!   reserved for the stress-test batch.
 //!
-//! Built on top of this brick: enculturation ([`confidence_weighted_mean`], [`enculturate`],
-//! and its [`enculturation_pull_rate`] complement, the Friedkin-Johnsen anchored average, wired
-//! over a band by [`crate::world::World::enculturate_band`]); bounded-confidence schism
+//! Built on top of this brick: enculturation ([`confidence_weighted_mean`] and [`enculturate`], the
+//! Friedkin-Johnsen anchored average, wired over a band by [`crate::world::World::enculturate_band`],
+//! which reads each mind's effective stubbornness through [`EpistemicStance::effective_stubbornness`];
+//! the [`enculturation_pull_rate`] complement, `1 - theta`, is the named rate a later group-drift or
+//! language-drift consumer would read, and has no live call site yet); bounded-confidence schism
 //! ([`bounded_confidence_mean`] and [`confidence_weighted_variance`], wired by
 //! [`crate::world::World::enculturate_band_bounded`], [`crate::world::World::is_fissioning`],
 //! and [`crate::world::World::stance_clusters`]), which fractures a spread band into sects;
@@ -312,16 +314,19 @@ impl EpistemicStance {
 
     /// The effective Friedkin-Johnsen stubbornness anchor for an axiom, the hybrid of a
     /// per-axiom base and the mind's epistemic temperament (the owner's decision): the base is
-    /// lifted toward one by the mind's dogmatism and freezing, `theta = base + (1 - base) *
-    /// pull` with `pull = (dogmatism + freezing) / 2` clamped to `[0, 1]`. Because the base is
-    /// the floor, theta stays at or above it, so a positive base keeps theta above zero, which
-    /// is what holds a population in lasting disagreement rather than collapsing to consensus
-    /// (the DeGroot degenerate case). The relative weighting of dogmatism versus freezing is a
-    /// tunable; the mean is the chosen form. Used by the deferred enculturation brick.
-    pub fn effective_stubbornness(&self, base: Fixed) -> Fixed {
+    /// lifted toward one by the mind's dogmatism and freezing, `theta = base + (1 - base) * pull`
+    /// with `pull = dogmatism_weight * dogmatism + (1 - dogmatism_weight) * freezing` clamped to
+    /// `[0, 1]`. Because the base is the floor, theta stays at or above it, so a positive base keeps
+    /// theta above zero, which is what holds a population in lasting disagreement rather than
+    /// collapsing to consensus (the DeGroot degenerate case). The relative weighting of dogmatism
+    /// versus freezing is not a hardcoded half: it is the reserved `axiom.stubbornness_dogmatism_weight`
+    /// (`dogmatism_weight`), passed in as data (Principle 11), and the complement weights freezing; at
+    /// one half it reproduces the plain mean. A weight outside `[0, 1]` is clamped. Used by the
+    /// enculturation band path.
+    pub fn effective_stubbornness(&self, base: Fixed, dogmatism_weight: Fixed) -> Fixed {
         let base = base.clamp(Fixed::ZERO, Fixed::ONE);
-        let pull = (self.dogmatism + self.freezing)
-            .mul(Fixed::from_ratio(1, 2))
+        let w = dogmatism_weight.clamp(Fixed::ZERO, Fixed::ONE);
+        let pull = (self.dogmatism.mul(w) + self.freezing.mul(Fixed::ONE - w))
             .clamp(Fixed::ZERO, Fixed::ONE);
         (base + (Fixed::ONE - base).mul(pull)).clamp(Fixed::ZERO, Fixed::ONE)
     }
@@ -651,15 +656,32 @@ pub fn enculturate(group_mean: Fixed, innate_seed: Fixed, theta: Fixed) -> Fixed
 /// The Friedkin-Johnsen enculturation pull rate for an axiom (design Part 28): how far a member
 /// moves toward its group mean in one enculturation step, the complement of its effective
 /// stubbornness anchor, `1 - theta` with `theta =
-/// EpistemicStance::effective_stubbornness(base)`. This is the `(1 - theta)` coefficient
-/// [`enculturate`] already applies per mind; naming it lets the group-drift path and the later
-/// language-drift path read one rate rather than each recomputing the complement. Because
-/// [`EpistemicStance::effective_stubbornness`] is clamped to `[0, 1]`, so is the pull: it pins
-/// at zero for a fully stubborn anchor (theta one, a mind that does not move) and at one for no
-/// anchor (theta zero, a mind that moves fully to the mean). A pure function of the stance's
-/// temperament and the per-axiom stubbornness base, never a race identifier (Principle 9).
-pub fn enculturation_pull_rate(stance: &EpistemicStance, base: Fixed) -> Fixed {
-    Fixed::ONE - stance.effective_stubbornness(base)
+/// EpistemicStance::effective_stubbornness(base, dogmatism_weight)`. This is the `(1 - theta)`
+/// coefficient [`enculturate`] already applies per mind; naming it lets a later group-drift or
+/// language-drift path read one rate rather than each recomputing the complement (it has no live call
+/// site yet). Because [`EpistemicStance::effective_stubbornness`] is clamped to `[0, 1]`, so is the
+/// pull: it pins at zero for a fully stubborn anchor (theta one, a mind that does not move) and at one
+/// for no anchor (theta zero, a mind that moves fully to the mean). A pure function of the stance's
+/// temperament, the per-axiom stubbornness base, and the reserved dogmatism/freezing split weight,
+/// never a race identifier (Principle 9).
+pub fn enculturation_pull_rate(
+    stance: &EpistemicStance,
+    base: Fixed,
+    dogmatism_weight: Fixed,
+) -> Fixed {
+    Fixed::ONE - stance.effective_stubbornness(base, dogmatism_weight)
+}
+
+/// The reserved dogmatism/freezing split weight for the Friedkin-Johnsen stubbornness anchor
+/// (`axiom.stubbornness_dogmatism_weight`), read fail-loud from the manifest (Principle 11). It is the
+/// weight on dogmatism in the temperament pull `w * dogmatism + (1 - w) * freezing` that
+/// [`EpistemicStance::effective_stubbornness`] applies, the complement weighting freezing; the split
+/// was formerly a bare hardcoded half. A pure pass-through read, so a canonical run obtains it from
+/// the owner's manifest rather than a fabricated value; a build that has not installed it (through
+/// [`crate::world::World::set_stubbornness_split`]) runs the enculturation band as a no-op rather than
+/// inventing a weight.
+pub fn stubbornness_dogmatism_weight(m: &CalibrationManifest) -> Result<Fixed, CalibrationError> {
+    m.require_fixed("axiom.stubbornness_dogmatism_weight")
 }
 
 /// The bounded-confidence mean a member is exposed to (design Part 28, the Deffuant and
@@ -881,7 +903,8 @@ mod tests {
     #[test]
     fn effective_stubbornness_floors_at_the_base_and_rises_with_temperament() {
         let base = Fixed::from_ratio(1, 4);
-        // A placid mind: theta equals the base (no epistemic lift).
+        let half = Fixed::from_ratio(1, 2); // a labelled fixture split weight, not an owner value
+                                            // A placid mind: theta equals the base (no epistemic lift), for any split weight.
         let placid = EpistemicStance::new(
             [(EVIDENCE, Fixed::ONE)],
             Fixed::ZERO,
@@ -889,7 +912,8 @@ mod tests {
             Fixed::ZERO,
             Fixed::ZERO,
         );
-        assert_eq!(placid.effective_stubbornness(base), base);
+        assert_eq!(placid.effective_stubbornness(base, half), base);
+        assert_eq!(placid.effective_stubbornness(base, Fixed::ZERO), base);
         // A dogmatic, freezing mind: theta is lifted above the base but stays in range.
         let rigid = EpistemicStance::new(
             [(TRADITION, Fixed::ONE)],
@@ -898,11 +922,73 @@ mod tests {
             Fixed::ONE,
             Fixed::ZERO,
         );
-        let theta = rigid.effective_stubbornness(base);
+        let theta = rigid.effective_stubbornness(base, half);
         assert!(theta > base, "temperament lifts the anchor");
         assert!(theta <= Fixed::ONE);
         // A positive base keeps theta strictly above zero (no DeGroot consensus collapse).
-        assert!(placid.effective_stubbornness(Fixed::from_ratio(1, 10)) > Fixed::ZERO);
+        assert!(placid.effective_stubbornness(Fixed::from_ratio(1, 10), half) > Fixed::ZERO);
+    }
+
+    #[test]
+    fn the_dogmatism_freezing_split_weight_shifts_the_temperament_pull() {
+        // Defect 2: the split weight is the reserved `axiom.stubbornness_dogmatism_weight`, no longer a
+        // hardcoded half. A mind dogmatic but not freezing lifts more at a dogmatism-heavy weight; a
+        // mind freezing but not dogmatic lifts more at a freezing-heavy weight; at one half the two
+        // are symmetric, reproducing the former mean.
+        let base = Fixed::ZERO; // no floor, so theta reads the temperament pull directly
+        let dogmatic = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ONE,  // dogmatism
+            Fixed::ZERO, // seizing
+            Fixed::ZERO, // freezing
+            Fixed::ZERO,
+        );
+        let freezing = EpistemicStance::new(
+            [(EVIDENCE, Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ONE, // freezing
+            Fixed::ZERO,
+        );
+        let quarter = Fixed::from_ratio(1, 4);
+        let three_quarters = Fixed::from_ratio(3, 4);
+        // A dogmatism-heavy weight lifts the dogmatic mind more than a dogmatism-light one.
+        assert!(
+            dogmatic.effective_stubbornness(base, three_quarters)
+                > dogmatic.effective_stubbornness(base, quarter),
+            "a dogmatism-heavy split weights the dogmatic mind more"
+        );
+        // The freezing mind is the mirror image.
+        assert!(
+            freezing.effective_stubbornness(base, quarter)
+                > freezing.effective_stubbornness(base, three_quarters),
+            "a freezing-heavy split weights the freezing mind more"
+        );
+        // At one half the pure-dogmatism and pure-freezing minds are symmetric (the former mean).
+        let half = Fixed::from_ratio(1, 2);
+        assert_eq!(
+            dogmatic.effective_stubbornness(base, half),
+            freezing.effective_stubbornness(base, half),
+            "one half reproduces the symmetric plain mean"
+        );
+    }
+
+    #[test]
+    fn stubbornness_dogmatism_weight_reads_fail_loud_while_reserved() {
+        // Defect 2: the split weight is surfaced as a reserved manifest value, fail-loud until set,
+        // never a fabricated half.
+        let reserved = "[[reserved]]\nid = \"axiom.stubbornness_dogmatism_weight\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"weight\"\nsource = \"Part 28\"\n";
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert_eq!(
+            stubbornness_dogmatism_weight(&m).unwrap_err(),
+            CalibrationError::Reserved("axiom.stubbornness_dogmatism_weight".to_string())
+        );
+        let set = "[[reserved]]\nid = \"axiom.stubbornness_dogmatism_weight\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.5\"\nunit = \"weight\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"Part 28\"\n";
+        let m2 = CalibrationManifest::from_toml_str(set).unwrap();
+        assert_eq!(
+            stubbornness_dogmatism_weight(&m2).unwrap(),
+            Fixed::from_ratio(1, 2)
+        );
     }
 
     #[test]
@@ -1110,14 +1196,15 @@ mod tests {
             Fixed::ONE,
             Fixed::ZERO,
         );
-        // The pull is exactly one minus the effective stubbornness across a base sweep, for
-        // either temperament: the same (1 - theta) coefficient enculturate applies.
+        let half = Fixed::from_ratio(1, 2); // a labelled fixture split weight
+                                            // The pull is exactly one minus the effective stubbornness across a base sweep, for
+                                            // either temperament: the same (1 - theta) coefficient enculturate applies.
         for &(num, den) in &[(0, 1), (1, 10), (1, 4), (1, 2), (3, 4), (1, 1)] {
             let base = Fixed::from_ratio(num, den);
             for stance in [&placid, &rigid] {
                 assert_eq!(
-                    enculturation_pull_rate(stance, base),
-                    Fixed::ONE - stance.effective_stubbornness(base),
+                    enculturation_pull_rate(stance, base, half),
+                    Fixed::ONE - stance.effective_stubbornness(base, half),
                     "pull is the FJ complement"
                 );
             }
@@ -1126,17 +1213,17 @@ mod tests {
         // (a full move to the mean); base one pins theta at one whatever the temperament, so
         // pull zero (no move).
         assert_eq!(
-            enculturation_pull_rate(&placid, Fixed::ZERO),
+            enculturation_pull_rate(&placid, Fixed::ZERO, half),
             Fixed::ONE,
             "no anchor pulls fully to the mean"
         );
         assert_eq!(
-            enculturation_pull_rate(&rigid, Fixed::ONE),
+            enculturation_pull_rate(&rigid, Fixed::ONE, half),
             Fixed::ZERO,
             "a fully stubborn anchor does not move"
         );
         assert_eq!(
-            enculturation_pull_rate(&placid, Fixed::ONE),
+            enculturation_pull_rate(&placid, Fixed::ONE, half),
             Fixed::ZERO,
             "base one pins the pull at zero for any temperament"
         );

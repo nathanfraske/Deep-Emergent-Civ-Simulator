@@ -169,19 +169,23 @@ impl PrevailingBelief {
         Fixed::from_bits((self.mass / self.count as i128) as i64)
     }
 
-    /// Advance diffusion one step: raise the level toward saturation (a fully-held belief at
-    /// one) and carry the extensive mass with it. The increment per member is
-    /// `rate * distance * (1 - level)`, so a belief far from saturation gains fastest and one
-    /// already held by everyone barely moves. Because every member gains the same increment,
-    /// the mass gains `increment_bits * count`, which keeps `mass / count` equal to the raised
-    /// level exactly.
+    /// Advance diffusion one step under the SI (susceptible-infected) logistic contagion law: raise
+    /// the level toward saturation (a fully-held belief at one) and carry the extensive mass with it.
+    /// The increment per member is `rate * distance * level * (1 - level)`, the standard mean-field
+    /// contagion term: growth is proportional both to how many already hold the belief (`level`, the
+    /// infected who can transmit) and to how much headroom remains (`1 - level`, the susceptible),
+    /// so a belief spreads slowly from a small seed, fastest near the half-adopted inflection, and
+    /// tapers to saturation. A belief at level zero has no carrier and does not spread (an SI process
+    /// needs a nonzero seed). Because every member gains the same increment, the mass gains
+    /// `increment_bits * count`, which keeps `mass / count` equal to the raised level exactly.
     ///
     /// Content-blind (Principle 9): the `rate` is identical for every belief, read once from
-    /// the reserved `evidence.aggregate_diffusion_rate`; the only per-belief difference is
-    /// `distance`, the normalized diffusion coupling in `[0, 1]` the caller derives from the
-    /// spatial or social distance the idea has to travel (a nearer, better-connected site
-    /// passes a value closer to one). Nothing here reads the belief's key, so two beliefs
-    /// differing only in their [`BeliefKey`] diffuse identically.
+    /// the reserved `evidence.aggregate_diffusion_rate` (a per-contact transmission PROBABILITY the
+    /// logistic maps the gossip log-odds to, not a raw log-odds used as a hazard); the only per-belief
+    /// difference is `distance`, the normalized diffusion coupling in `[0, 1]` the caller derives from
+    /// the spatial or social distance the idea has to travel (a nearer, better-connected site passes a
+    /// value closer to one). Nothing here reads the belief's key, so two beliefs differing only in
+    /// their [`BeliefKey`] diffuse identically.
     pub fn advance_diffusion(&mut self, rate: Fixed, distance: Fixed) {
         if self.count == 0 {
             return;
@@ -189,7 +193,7 @@ impl PrevailingBelief {
         let level = self.knowledge_level();
         let headroom = Fixed::ONE - level;
         let coupling = distance.clamp(Fixed::ZERO, Fixed::ONE);
-        let increment = rate.mul(coupling).mul(headroom);
+        let increment = rate.mul(coupling).mul(level).mul(headroom);
         let inc_bits = increment.to_bits() as i128;
         self.mass += inc_bits * self.count as i128;
     }
@@ -614,9 +618,23 @@ source = "Part 9.5"
         let m = CalibrationManifest::from_toml_str(toml).unwrap();
         let p = BeliefParams::from_manifest(&m).unwrap();
         assert_eq!(p.dispersion, Fixed::from_ratio(1, 10));
-        // The aggregate diffusion rate DERIVES from the gossip parameters at unit contact density:
-        // told_weight * trust_baseline = 0.5 * 0.5 = 0.25, not an independent authored scalar.
-        assert_eq!(p.diffusion_rate, Fixed::from_ratio(1, 4));
+        // The aggregate diffusion rate DERIVES from the gossip parameters at unit contact density: the
+        // per-contact log-odds told_weight * trust_baseline = 0.5 * 0.5 = 0.25 nats mapped through the
+        // sigmoid to a probability (about 0.562), not the raw product used as a hazard. Checked against
+        // the derive function so the two stay one source of truth, plus its sane-probability range.
+        assert_eq!(
+            p.diffusion_rate,
+            evidence::derive_aggregate_diffusion_rate(
+                Fixed::from_ratio(1, 2),
+                Fixed::from_ratio(1, 2),
+                Fixed::ONE
+            )
+        );
+        assert!(
+            p.diffusion_rate > Fixed::from_ratio(1, 2) && p.diffusion_rate < Fixed::ONE,
+            "sigmoid of a positive log-odds is a probability in (0.5, 1) ({:?})",
+            p.diffusion_rate
+        );
         assert_eq!(p.level_to_strength.eval(Fixed::ONE), Fixed::ONE);
     }
 

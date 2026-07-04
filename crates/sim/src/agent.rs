@@ -394,7 +394,9 @@ impl RetentionLaw {
         // base_window * scale * 2^32, and the arithmetic shift right by the fractional bits is the
         // exact floor to whole ticks.
         let product = (base_window as i128) * scale_bits;
-        let ticks = (product >> Fixed::FRAC_BITS) as u64;
+        // Saturate at u64::MAX rather than truncating a product past it (the same clamp
+        // absence::scale_u64_by_fixed uses), then floor at one tick.
+        let ticks = (product >> Fixed::FRAC_BITS).min(u64::MAX as i128).max(0) as u64;
         ticks.max(1)
     }
 }
@@ -641,6 +643,17 @@ mod tests {
             law.window_ticks_for(Fixed::ZERO, 0),
             1,
             "a window is at least one tick"
+        );
+
+        // Defect 8 (saturation): a base window and scale whose product exceeds u64::MAX saturates at
+        // u64::MAX rather than truncating `(product >> 32) as u64`, which wrapped 2^64 to zero and then
+        // floored to a one-tick window (a forgetful mind, the opposite of the intended huge window).
+        // At memory one `law` doubles, so a 2^63 base window drives the product to exactly 2^96, whose
+        // shift-right-by-32 is 2^64, one past u64::MAX.
+        assert_eq!(
+            law.window_ticks_for(Fixed::ONE, 1u64 << 63),
+            u64::MAX,
+            "a product past u64::MAX saturates rather than wrapping to a one-tick window"
         );
     }
 }

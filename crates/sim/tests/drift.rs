@@ -259,3 +259,38 @@ fn two_lineages_of_races_with_different_maturity_drift_on_different_cadences() {
         "a lineage whose race is unregistered does not drift on a fabricated cadence"
     );
 }
+
+#[test]
+fn the_state_hash_folds_each_lineage_race_maturity_and_lifespan() {
+    // Defect 7: the per-lineage maturity_years drives the drift cadence and lifespan_years the
+    // mortality age normalization, so two worlds whose lineages age or drift on different schedules
+    // are different worlds. Both fold into state_hash alongside the global life cadence, so a change
+    // to a race's maturity or lifespan surfaces in the fingerprint at once, before any drift or
+    // mortality has run to diverge the observable state. No ticks run here, so the ONLY difference
+    // between two builds is the folded race data.
+    let build = |maturity: u32, lifespan: u32| -> u128 {
+        let mut w = World::new(params(), params(), AccessWeights::from_pairs([])).with_seed(0xF01D);
+        w.set_life_cadence(LIFE_CADENCE);
+        let mut races = BTreeMap::new();
+        let mut race = race_with_maturity(1, maturity);
+        race.lifespan_years = lifespan;
+        races.insert(RaceId(1), race);
+        w.set_races(races);
+        let (_s, forms) =
+            ArticulationSubstrate::syllabic(["ka", "lo", "mi", "tu"].map(String::from), 2, 3);
+        w.add_language(Language::new(LangId(1), RaceId(1), forms));
+        w.state_hash()
+    };
+    let base = build(2, 40);
+    assert_eq!(base, build(2, 40), "identical race data hashes the same");
+    assert_ne!(
+        base,
+        build(3, 40),
+        "a divergent maturity surfaces in the fingerprint at once"
+    );
+    assert_ne!(
+        base,
+        build(2, 50),
+        "a divergent lifespan surfaces in the fingerprint at once"
+    );
+}

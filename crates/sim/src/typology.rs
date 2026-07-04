@@ -742,20 +742,16 @@ pub fn information_weights(
         let Some(counts) = prior.counts(param.id) else {
             continue;
         };
-        let mut n: u128 = 0;
-        let mut sum_sq: u128 = 0;
-        for &(_value, c) in counts {
-            let c = c as u128;
-            n += c;
-            sum_sq += c * c;
-        }
-        if sum_sq == 0 {
+        if counts.iter().all(|&(_, c)| c == 0) {
             // No evidence on this parameter (every count zero): no weight, never a fabricated one.
             continue;
         }
-        // Order-2 diversity N^2 / sum(c_i^2), read as Q32.32 bits: (N^2 << 32) / sum_sq.
-        let bits = ((n * n) << 32) / sum_sq;
-        weights.insert(param.id, Fixed::from_bits(bits as i64));
+        // Order-2 diversity N^2 / sum(c_i^2), through the shared saturating helper so an unvalidated
+        // prior (a count past the representability bound, or too many values) saturates rather than
+        // wrapping `(N^2 << 32) / sum_sq as i64` to a NEGATIVE Fixed weight. For a validated prior the
+        // result is identical to the in-range formula.
+        let div = crate::langdist::order2_diversity(counts.iter().map(|&(_, c)| c as u64));
+        weights.insert(param.id, div);
     }
     weights
 }
@@ -2062,6 +2058,48 @@ source = "test"
             typology_distance(&a, &b, &weights, &metrics),
             Fixed::from_int(2),
             "the derived weights are a drop-in for the distance's weights arg"
+        );
+    }
+
+    #[test]
+    fn information_weights_never_wrap_negative_on_a_pathological_unvalidated_prior() {
+        // Hardening (the raw `((N*N) << 32) / sum_sq as i64` bug): an unvalidated prior (more values
+        // than MAX_VALUES_PER_PARAM, each at the u32 count ceiling) drove the widened numerator past
+        // u128 and its narrowing cast past i64::MAX, wrapping to a NEGATIVE Fixed weight. The shared
+        // saturating helper the derivation now calls guards the shift value and clamps to i64::MAX, so
+        // the weight stays a non-negative Fixed however pathological the prior. `information_weights`
+        // reads `prior.counts`, so a single registered parameter with a large count vector exercises
+        // the path without the loader's value-coverage validation.
+        let mut reg = TypologyRegistry::new();
+        reg.add_param(TypologyParamDef {
+            id: TypologyParamId(0),
+            gloss: "p".into(),
+            values: vec![TypologyValueDef {
+                id: TypologyValueId(0),
+                gloss: "v".into(),
+            }],
+            sample_priority: 0,
+            source: "test fixture".into(),
+        });
+        // Summed counts exceed 2^48, so the old `(N*N) << 32` overflows u128: seventy thousand values
+        // each at the u32 ceiling, a prior the loader would have rejected.
+        let counts: Vec<(TypologyValueId, u32)> = (0..70_000u32)
+            .map(|v| (TypologyValueId(v), u32::MAX))
+            .collect();
+        let mut prior = TypologyPrior::new();
+        prior.set(
+            TypologyParamId(0),
+            counts,
+            "pathological unvalidated fixture",
+        );
+        let w = information_weights(&reg, &prior)[&TypologyParamId(0)];
+        assert!(
+            w >= Fixed::ZERO,
+            "the weight never wraps to a negative Fixed ({w:?})"
+        );
+        assert!(
+            w > Fixed::ZERO,
+            "an even, high-count prior still carries positive diversity"
         );
     }
 }

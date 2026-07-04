@@ -66,6 +66,7 @@ fn stance_of(w: &World, id: StableId) -> Fixed {
 #[test]
 fn members_move_toward_the_mean_but_stay_anchored() {
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let a = w.spawn(Fixed::ONE);
     let b = w.spawn(Fixed::ONE);
     // A at the negative pole, B at the positive, each anchored to its own seed there.
@@ -88,6 +89,7 @@ fn members_move_toward_the_mean_but_stay_anchored() {
 #[test]
 fn a_population_with_distinct_seeds_never_collapses_to_one_point() {
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let a = w.spawn(Fixed::ONE);
     let b = w.spawn(Fixed::ONE);
     w.set_intrinsic(a, beliefs(Fixed::ZERO, Fixed::ZERO));
@@ -109,6 +111,7 @@ fn an_aligned_band_does_not_drift() {
     // All members already share the stance and seed: the mean equals their stance, so the
     // anchored average leaves them where they are.
     let mut w = World::new(params(), params(), AccessWeights::default());
+    w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
     let a = w.spawn(Fixed::ONE);
     let b = w.spawn(Fixed::ONE);
     let s = Fixed::from_ratio(1, 2);
@@ -123,6 +126,7 @@ fn an_aligned_band_does_not_drift() {
 fn enculturation_replays_deterministically() {
     let round = || {
         let mut w = World::new(params(), params(), AccessWeights::default());
+        w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
         let a = w.spawn(Fixed::ONE);
         let b = w.spawn(Fixed::ONE);
         let c = w.spawn(Fixed::ONE);
