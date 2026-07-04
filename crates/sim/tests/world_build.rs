@@ -21,19 +21,22 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, GaussApprox};
+use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
+use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     build_dawn_runner, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
     BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
-    DominanceKind, DominanceMode, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId,
-    GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
-    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
-    TraitDef, ValueAxisId, ValueProfile,
+    DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
+    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
+    SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -166,6 +169,7 @@ fn peoples() -> DawnPeoples {
         personality,
         mortality_hazard: None,
         language: None,
+        embodiment: None,
     }
 }
 
@@ -257,6 +261,7 @@ fn peoples_with_language() -> DawnPeoples {
         personality,
         mortality_hazard: None,
         language: Some(a_genesis()),
+        embodiment: None,
     }
 }
 
@@ -620,6 +625,7 @@ fn sexed_peoples() -> DawnPeoples {
         personality: PersonalityRegistry::new(),
         mortality_hazard: None,
         language: None,
+        embodiment: None,
     }
 }
 
@@ -724,6 +730,170 @@ fn the_dawn_runner_reproduces_and_drifts_under_the_census_ne_across_generations(
         assert_eq!(
             trace, wtrace,
             "the dawn trace diverged at {workers} workers: a beat leaked the thread schedule"
+        );
+    }
+}
+
+/// A mobile development body plan (the thermal-coupling fixture), so a founder's walker has an anatomy
+/// to derive its physiology and thermoregulate from. Labelled fixture, not owner data.
+fn mobile_body() -> BodyPlan {
+    BodyPlan {
+        body_mass: Fixed::from_ratio(1, 2),
+        encephalization: Fixed::from_ratio(1, 2),
+        diet_breadth: Fixed::from_ratio(1, 2),
+        weapons: vec![],
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
+        senses: vec![],
+        locomotion: vec![1],
+        organs: vec![],
+        temperament: Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(3, 4),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        },
+    }
+}
+
+/// A dawn of one sex-determined race that carries a body plan, and an embodiment genesis, so the
+/// world-build embodies each founder as a located body sharing its mind's id.
+fn embodied_peoples() -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), a_sexed_race(0).with_body_plan(mobile_body()));
+    let bands = vec![BandSpec {
+        race: RaceId(0),
+        place: 10,
+        members: 12,
+    }];
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands,
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            controller_hidden: 0,
+            medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn the_dawn_runner_embodies_each_founder_as_a_mind_and_a_body() {
+    // Real-world unification step 3: with an embodiment genesis, build_dawn_runner returns one runner
+    // carrying both minds and bodies, and every founder is at once a cognition mind and a located,
+    // thermoregulating body sharing one id. The composite replays bit for bit and the scheduled order
+    // matches the pinned order with the embodiment coupled.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    let peoples = embodied_peoples();
+    let runner = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples,
+        0x0B0D1,
+    )
+    .expect("an embodied dawn assembles");
+    assert!(
+        runner.embodiment().is_some(),
+        "the embodied dawn returns a runner carrying bodies"
+    );
+    let ids = runner.world().unwrap().being_ids();
+    assert_eq!(ids.len(), 12, "twelve founders seeded");
+    for &id in &ids {
+        assert!(
+            runner.body_temp(id).is_some(),
+            "founder {id:?} is at once a mind and a located body"
+        );
+    }
+
+    // Tick: the composite advances (cognition world plus the body-thermal coupling), and the founders
+    // remain located bodies.
+    let build = |seed: u64| {
+        let mut r = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &peoples,
+            seed,
+        )
+        .unwrap();
+        for _ in 0..30 {
+            r.step();
+        }
+        r
+    };
+    let ran = build(0x0B0D1);
+    assert_eq!(ran.clock(), 30, "the embodied runner advanced thirty ticks");
+    assert_eq!(
+        ran.world().unwrap().clock(),
+        30,
+        "the composed cognition world ticked every step"
+    );
+    for &id in &ids {
+        assert!(
+            ran.body_temp(id).is_some(),
+            "founder {id:?} remains a body after ticking"
+        );
+    }
+
+    // Bit-for-bit replay and seed sensitivity.
+    assert_eq!(
+        build(0x0B0D1).state_hash(),
+        build(0x0B0D1).state_hash(),
+        "the embodied dawn replays bit for bit"
+    );
+    assert_ne!(
+        build(0x0B0D1).state_hash(),
+        build(0x0B0D2).state_hash(),
+        "a different seed builds a different embodied world"
+    );
+
+    // The scheduled order matches the pinned order with the embodiment coupled (the RES_BEING edge).
+    let mut pinned = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples,
+        0x0B0D1,
+    )
+    .unwrap();
+    let mut scheduled = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples,
+        0x0B0D1,
+    )
+    .unwrap();
+    for _ in 0..20 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the scheduled order stays bit-identical with the embodiment coupled"
         );
     }
 }

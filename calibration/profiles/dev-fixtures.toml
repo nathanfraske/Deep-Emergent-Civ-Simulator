@@ -248,6 +248,66 @@ value = "1"
 unit = "gas_transfer_coefficient"
 source = "dev fixture for R-MEDIUM respiration; crates/sim/src/runner.rs EmbodiedPhysiology"
 
+# --- the dawn embodiment metabolic anchors and thermal band (real-world unification step 3;
+# EmbodiedPhysiology::from_manifest via MetabolicAnchors, and the BeingThermal comfort band). All
+# FIXTURE placeholders mirroring MetabolicAnchors::dev_fixture, not owner canon. ---
+
+[[reserved]]
+id = "metabolism.kleiber_coefficient"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Kleiber basal-rate coefficient so the dawn embodiment physiology resolves on the dev-fixtures profile"
+status = "set"
+value = "0.01"
+unit = "kleiber_coefficient"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.body_mass_kg_scale"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the kilograms at normalized body_mass one (the R-UNITS-PIN size anchor), a dev value so the physiology resolves"
+status = "set"
+value = "100"
+unit = "kilograms_at_body_mass_one"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.medium_convective_coefficient"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the medium convective heat-transfer coefficient h a dev body couples to its cell through"
+status = "set"
+value = "10"
+unit = "convective_coefficient"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.surface_emissivity"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the body-surface emissivity of the radiant heat-loss law"
+status = "set"
+value = "0.95"
+unit = "emissivity"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.stefan_boltzmann"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Stefan-Boltzmann constant of the radiant heat-loss law (the physical CODATA value)"
+status = "set"
+value = "0.0000000567"
+unit = "stefan_boltzmann"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "physiology.thermal_setpoint"
+basis = "FIXTURE placeholder, not the owner's value; the comfort-band set point a dawn founder thermoregulates toward (thirty-seven, the mammalian dev anchor the thermal-coupling tests use), so BeingThermal resolves on the dev-fixtures profile"
+status = "set"
+value = "37"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "physiology.thermal_half_band"
+basis = "FIXTURE placeholder, not the owner's value; the half-width of the survivable comfort band around the set point (eight, the dev anchor the thermal-coupling tests use)"
+status = "set"
+value = "8"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
 # --- the dawn evidence ring (Part 28 axiom model, RingCapacityLaw::from_manifest) ---
 
 [[reserved]]

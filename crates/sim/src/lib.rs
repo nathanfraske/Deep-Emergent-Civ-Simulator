@@ -236,4 +236,6 @@ pub use world::{
     build_etic_substrate, GossipParams, PlaceId, ReproductionParams, Stimulus, TickInput, Trace,
     World,
 };
-pub use worldbuild::{arm_dawn_languages, build_dawn_runner, DawnPeoples, LanguageGenesis};
+pub use worldbuild::{
+    arm_dawn_languages, build_dawn_runner, DawnPeoples, EmbodimentGenesis, LanguageGenesis,
+};
