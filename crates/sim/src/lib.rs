@@ -184,7 +184,7 @@ pub use langdist::{
 };
 pub use langmod::{
     acquisition_split, articulated_geometry, capability_gate, capability_halves, phoneme_priors,
-    CapabilityGate,
+    producible_values, CapabilityGate,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,

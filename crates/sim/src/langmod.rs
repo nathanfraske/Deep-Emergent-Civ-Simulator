@@ -22,11 +22,12 @@
 //! to a characteristic-frequency (formant) vector; the frequency-squared absorption law
 //! ([`civsim_physics::laws::acoustic_absorption`]) over a typical path (through the existing
 //! [`civsim_physics::laws::optical_depth`]) says how much the medium blurs a contrast; and the
-//! being's own per-channel resolution (its [`crate::sensorium::Sensorium`] acuity, read as the
-//! just-noticeable frequency difference) says how fine a contrast it can hold. Two media, or two
-//! vocal geometries, diverge in their confusability geometry from the physics alone, with no
-//! `RaceId` and no authored confusability table (Principle 9): the per-race differentiation is the
-//! race's own resonator lengths and its own sensorium resolution, which are data, not a table.
+//! being's own per-channel resolution (its [`crate::sensorium::Sensorium`] resolution, the
+//! just-noticeable frequency difference, distinct from the `[0, ONE]` acuity gate after the
+//! R-SENSORIUM split) says how fine a contrast it can hold. Two media, or two vocal geometries,
+//! diverge in their confusability geometry from the physics alone, with no `RaceId` and no authored
+//! confusability table (Principle 9): the per-race differentiation is the race's own resonator
+//! lengths and its own sensorium resolution, which are data, not a table.
 //!
 //! Everything here is integer fixed-point and draws no randomness (Principle 3): the formant vectors,
 //! the pairwise distances, the absorption blur, and the distinguishable-step budget are pure
@@ -448,6 +449,31 @@ pub fn phoneme_priors(geo: &PerceptualGeometry, gate: &[Fixed]) -> Vec<(FeatureV
     out
 }
 
+/// Select the producible feature values from a set of phoneme priors and a producibility threshold
+/// (design Part 33.3): a value enters the producible inventory only if its dispersion-and-capability
+/// prior reaches the threshold, so a value the race cannot reliably produce or perceive is left out.
+/// A gate-masked value (zero prior) is below any positive threshold, and a low-dispersion value
+/// (highly confusable with the rest of the inventory) may also fall below it. The result is in
+/// ascending [`FeatureValueId`] order (canonical) and deduplicated, so the selection is deterministic
+/// regardless of the order the priors arrive in (Principle 3), and it reads no race id (Principle 9):
+/// two races select different inventories only because their priors differ. The threshold is reserved
+/// owner data (`articulation.producibility_threshold`), never fabricated.
+pub fn producible_values(
+    priors: &[(FeatureValueId, Fixed)],
+    threshold: Fixed,
+) -> Vec<FeatureValueId> {
+    let mut out: Vec<FeatureValueId> = priors
+        .iter()
+        // A gate-masked value (zero prior) never enters, even at a zero threshold: it cannot be
+        // produced or perceived at all, so it is not a candidate regardless of the threshold.
+        .filter(|(_, prior)| *prior > Fixed::ZERO && *prior >= threshold)
+        .map(|(id, _)| *id)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -824,6 +850,34 @@ mod tests {
         );
         // Deterministic replay.
         assert_eq!(phoneme_priors(&air, &full_gate), pa);
+    }
+
+    #[test]
+    fn producible_values_select_above_the_threshold_in_canonical_order() {
+        // The producibility gate (Part 33.3): only values whose prior reaches the threshold enter the
+        // inventory, folded in ascending FeatureValueId order so the selection is deterministic
+        // regardless of input order. A gate-masked (zero-prior) value never enters, even at a zero
+        // threshold.
+        let priors = vec![
+            (FeatureValueId(2), Fixed::from_ratio(3, 4)),  // above
+            (FeatureValueId(0), Fixed::from_ratio(1, 10)), // below
+            (FeatureValueId(1), Fixed::from_ratio(1, 2)),  // above
+            (FeatureValueId(3), Fixed::ZERO),              // masked
+        ];
+        let threshold = Fixed::from_ratio(1, 4);
+        assert_eq!(
+            producible_values(&priors, threshold),
+            vec![FeatureValueId(1), FeatureValueId(2)],
+            "the above-threshold values, in ascending id order, masked and below-threshold left out"
+        );
+        // A masked (zero-prior) value stays out even when the threshold is zero.
+        assert_eq!(
+            producible_values(&priors, Fixed::ZERO),
+            vec![FeatureValueId(0), FeatureValueId(1), FeatureValueId(2)],
+            "at a zero threshold every positive-prior value enters, but the masked one does not"
+        );
+        // A threshold above every prior yields an empty inventory (the fail-loud-on-empty case 2d guards).
+        assert!(producible_values(&priors, Fixed::from_int(2)).is_empty());
     }
 }
 

@@ -418,6 +418,14 @@ unit = "hertz"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 
 [[reserved]]
+id = "articulation.producibility_threshold"
+basis = "the phoneme-prior level below which a candidate feature value is not reliably producible or perceivable and so does not enter a race's sound inventory (read by langmod::producible_values, crates/sim/src/langmod.rs, which selects the values whose dispersion-and-capability prior reaches this level, folded in canonical FeatureValueId order). A gate-masked value (zero prior, the race cannot produce or perceive it) is always excluded regardless of this value; this threshold gates the low-dispersion tail, the values so confusable with the rest of the inventory that they carry too little contrast to support a stable phoneme. Strictly positive. Set from the minimum reliable-production prior, the point where marginal contrast no longer sustains a distinct sound; a higher threshold yields a smaller, sharper inventory and a lower one a larger, more crowded one"
+status = "reserved"
+value = ""
+unit = "prior"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs producible_values"
+
+[[reserved]]
 id = "lang.drift_operator_rates"
 basis = "the per-generation rates of the drift operators other than sound change (its own dial, language.sound_change_rate): lexical replacement (0.01, Swadesh-core replacement scaled toward whole-lexicon turnover), grammaticalisation (0.005), splitting (0.002), borrowing (0.01); a data map, read by require_map, whose membership grows with the world"
 status = "set"
