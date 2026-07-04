@@ -40,6 +40,7 @@ use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
 use crate::clock::Steppable;
 use crate::epoch::{run, EpochParams, EpochReport, Radiation};
+use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
 
@@ -282,7 +283,16 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
                 &registry,
                 params.profile,
             );
-            let report = run(seed, &mut biosphere, &region, &params.epoch);
+            // The pre-dawn biosphere declares no Dobzhansky-Muller incompatibilities yet, so the
+            // speciation gate reads an empty table and falls back to the frequency-distance rule; a
+            // world that declares a table is a data addition (design 25.7, WP1).
+            let report = run(
+                seed,
+                &mut biosphere,
+                &region,
+                &params.epoch,
+                &IncompatibilityTable::new(),
+            );
 
             // The dawn: promote a representative surviving organism of each species onto a
             // tile in the region, so the located-identity join carries the living world.
@@ -381,7 +391,13 @@ impl WorldGenesis {
                     &registry,
                     params.profile,
                 );
-                let radiation = Radiation::new(seed, biosphere, region, params.epoch);
+                let radiation = Radiation::new(
+                    seed,
+                    biosphere,
+                    region,
+                    params.epoch,
+                    IncompatibilityTable::new(),
+                );
                 regions.push(StagedRegion {
                     coord: (rx, ry),
                     region_id,

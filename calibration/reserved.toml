@@ -1076,6 +1076,22 @@ unit = "joint_probability"
 source = "Part 25.7; crates/sim/src/genome.rs"
 
 [[reserved]]
+id = "speciation.distance_threshold"
+basis = "the allele-frequency distance past which a pre-dawn founder-fork counts as reproductively isolated from its parent and is recorded as a daughter species (design 25.7, the declared speciation rule; the frequency half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation, crates/sim/src/epoch.rs). It gates the pre-dawn radiation: a higher threshold makes speciation rarer, requiring a stronger founder bottleneck or more drift before a fork is a species, a lower one lets a modest bottleneck radiate. Set from the frequency divergence at which two populations no longer freely interbreed; distinct from the discrete incompatibility firewall (speciation.incompatibility_threshold), which isolates even close pools when a complementary allele pair is fixed"
+status = "reserved"
+value = ""
+unit = "frequency_distance"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
+
+[[reserved]]
+id = "speciation.incompatibility_threshold"
+basis = "the count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively isolated regardless of frequency distance (the discrete genetic firewall, design 25.7; the count half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation). A single complementary allele pair fixed across two lineages can raise the firewall between otherwise close pools, so this is a small integer (one for the strict rule that any active incompatibility isolates). Set from how many independent incompatibilities the world treats as a hard breeding barrier"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
+
+[[reserved]]
 id = "time.base_tick_seconds"
 basis = "the base tick as the finest canonical timestep, short enough in world-time that people and animals move smoothly rather than jittering (design.md line 3058) and matching R-VIEW-ELAB's near-one-second view target; one in-world second per tick, so playback speed 1.0 plays one in-world second per real second"
 status = "set"
