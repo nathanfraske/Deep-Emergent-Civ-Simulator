@@ -5,6 +5,30 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-04 (continued): the language substrate 2a-2e built (derived phonetics emerge at the founder step), on `claude/world-wiring-handoff-t0u76v`
+
+Built the whole language-substrate arc (world-wiring increment 2, decomposed into 2a-2e), so a world's sounds now emerge from per-race articulation physics with no authored lexicon. Six commits (section 4 plus 2a-2e), all pushed. Whole workspace green throughout.
+
+**2a (WP5 Sensorium split).** `Sensorium` split into a per-channel acuity map (perceive gate + `capability_halves`) and a sibling resolution/JND map (`perceptual_geometry`), fixing the conflation where a valid acuity of one read as an implausible one-hertz JND. `reads()`/acuity unchanged, no golden-hash refresh. Commit 61d3475.
+
+**2b (per-race articulation data home).** `race::Articulation { vocal_tract_scale, hearing_resolution }` as an `Option` on `Race` (`with_articulation`); `langmod::articulated_geometry` scales the shared base lengths by the race's vocal tract and reads its hearing resolution as the sensorium JND; `ArticulationSubstrate::phonetic` carries real base resonator lengths (replacing the syllabic zero). Vocal-tract scale flagged derivable-later (R-ORGAN-FLUX). Commit 23fb351.
+
+**2c (producibility threshold).** `langmod::producible_values` selects values whose prior clears the reserved `articulation.producibility_threshold` in canonical `FeatureValueId` order; a masked (zero-prior) value never enters. Commit 9d8694e.
+
+**2d (the bridge).** `langmod::form_system_from_values`, the previously-missing bridge from thresholded producible values to `FormSegment`s to a coinable `FormSystem`, fail-loud (`FormSystemError::EmptyInventory`). Commit 45f7168.
+
+**2e (arm at the founder step).** `worldbuild::LanguageGenesis` and `arm_dawn_languages` derive each articulating race's form system through the 2b-2d pipeline (cached per race) and install a per-band lineage, wired into `build_dawn_runner` via the optional `DawnPeoples.language`; `World::being_ids()` added. Commit a4a7a76.
+
+**Reserved (surfaced, never fabricated).** `articulation.base_resonator_lengths`, `.vocal_tract_scale`, `.hearing_resolution`, `.producibility_threshold`, `.word_min_len`, `.word_max_len`, each with basis in `calibration/reserved.toml`.
+
+**Proof.** `crates/sim/tests/world_build.rs` and the langmod/language/sensorium/race unit tests: a sharper ear yields a strictly richer producible inventory (full vs fail-loud empty); bands coin and converge words from their derived inventory while separated bands and the two races diverge; a genesis-less build stays inert; the language-armed build replays bit for bit. No `RaceId` branch anywhere (Principle 9); the divergence is the per-race `Articulation` data through one pipeline.
+
+**HONEST LIMITS.** `LanguageGenesis` is a caller-supplied bundle: its medium acoustics need the medium's bulk modulus (a reserved axis not yet on the medium profile), so a full `from_manifest` for it is a follow-on; the capability gate is a channel-wide scalar broadcast per value (a per-value producibility model is a follow-on); the vocal-tract scale and word-length range are interim levers flagged for their derivations.
+
+**NEXT.** Per the owner's directive, continue through the rest of the world-wiring list (increments 3, 4, 5, 6, 7, 8, 9, 10), then a fully-blind audit per the spec (AGENTIC_ADDENDUM section 7), then merge. Increment 3 (WP1, speciation from genetic incompatibility) is next.
+
+---
+
 ## 2026-07-04: world-wiring section 4 built (the production scenario-to-Runner assembly), increment 2 decomposed, on `claude/world-wiring-handoff-t0u76v`
 
 Picked up the world-wiring arc at its immediate prerequisite (WORLD_WIRING_HANDOFF section 4) and built it: the top-level production world-build path that had no caller. Also confirmed and decomposed increment 2 (the language substrate) after a source audit found it much larger than the handoff sized it.
