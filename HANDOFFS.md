@@ -5,6 +5,32 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-04 (continued): world-wiring increments 3 through 10A built; arc complete bar the physiology tier, on `claude/world-wiring-handoff-t0u76v`
+
+Carried the world-wiring arc through the rest of the increment list. Each increment wires one dormant substrate into the `World` tick as an independently-tested, determinism-guarded, Principle-9-clean beat; each is its own pushed commit; the whole `civsim-sim` suite (35 test binaries, 560-plus tests) plus `civsim-core` and `civsim-world` stayed green throughout.
+
+**Increment 3 (WP1, speciation from genetic incompatibility).** The fair-coin speciation roll in `epoch.rs` replaced by `IncompatibilityTable::active_between` gated on `GenePool::reproductively_isolated`, so a daughter species forks only where joint-Hardy-Weinberg divergence crosses threshold; `step_generation`/`run`/`Radiation` thread the table. Reserved `speciation.distance_threshold`, `speciation.incompatibility_threshold`. Honest limit: the current world declares an empty incompatibility table, so the DMI count rises only where a world supplies one (shown in test). Commit 13e36de.
+
+**Increment 4 (belief diffusion).** A `diffuse_beliefs` beat after gossip drives `PrevailingBelief::advance_diffusion` (SI-logistic) over per-band `BeliefPool`s; belief pools fold into `state_hash`. Commit 5d5e808.
+
+**Increment 5 (reproduction, the keystone).** A `reproduce()` half in the life cadence: `choose_mate` pairing plus `birth()` (genome, mind, intrinsic, mate-pref inherited), life-fraction `apply_mortality_by_race`, reproductive census with Ne. Population grows as well as shrinks; short- and long-lived races cull on their own timescales from one curve, no race branch. Census folds into `state_hash`. Commit ea9a2b0.
+
+**Increment 6 (enculturation).** A cadence-gated `enculturate()` beat applying the Friedkin-Johnsen anchored average per band per axiom axis: within-band variance falls but never collapses, isolated bands diverge. Commit 86c7001.
+
+**Increment 7 (technique transmission).** A `transmit_step` beat after `diffuse_beliefs`: two-pass gather-then-apply, each learner copies each lacked design from the best local demonstrator through the counter-keyed `transmit` kernel, then per-band `erode_and_cull` (loss is per co-located band, so one band loses a technique while another keeps it and a re-contact rediscovers it). Fidelity/drift derive from the learner's own expressed memory and acuity, never a per-race table. Knowledge folds into `state_hash`, pruned in `remove_being`. `tick_timed` fixed to run the cadence beats untimed (a latent inc-4/inc-6 gap). Commit 357bd6f.
+
+**Increment 8 (WP3, memory-scaled retention).** `RetentionLaw::window_ticks_for` wired into the per-band loss pass: a band's effective loss rate is `ONE / window(mean_memory)`, so a sharper-memoried band holds a technique longer; opt-in via `set_retention`, else the raw rate. Commit bf9b1d5.
+
+**Increment 9 (WP4, personality shapes behaviour).** The decision layer's `Consideration` widened from a drive-only read to the shared `InputId` registry; `decide()` builds a per-being readings map of drive levels plus `bind_trait_input`-bound trait values, so two beings under identical drive pressure diverge in chosen action from their traits, no age or race branch. Commit e05ca09.
+
+**Increment 10 Part A (post-dawn genome drift).** A `drift_pools` beat (opt-in via `arm_generational_drift`) drifts each race's pool under the effective size its own reproductive census implies (per-race `ReproductiveMoments`), retiring audit deviation 23 for the post-dawn tier; race pools fold into `state_hash`. Commit b36f8fc. **Part B (physiology into the embodiment step) is DEFERRED**: it needs the larger scaffolding the handoff names (a per-being body-plan registry, metabolic anchors, a medium field, a LivingWorld step); the producers exist and are unit-tested, so this is the next branch's arc.
+
+**GPU side quest.** `crates/gpu` could not build here (its `tracel-llvm-bundler` build dep needs a `tracel-ai/tracel-llvm` GitHub release the session's egress denies with a 403). A handoff directive was placed on the branch (`docs/working/GPU_TRACEL_LLVM_TEST_HANDOFF.md`); a GPU-access session verified it on an RTX 5090: builds clean, host tests 25/25, all device tests pass including the R-GPU-CANON-PIN oracle gate (CUDA #[cube] Q32.32 kernels match the `civsim_core::Fixed` oracle bit for bit). No defect; crate unchanged.
+
+**NEXT.** A fully-blind audit of the new beats is in progress (packet in the session scratchpad, per AGENTIC_ADDENDUM section 7). On a clean audit: open the PR and merge. Increment 10 Part B (the physiology-into-embodiment tier) is the next arc.
+
+---
+
 ## 2026-07-04 (continued): the language substrate 2a-2e built (derived phonetics emerge at the founder step), on `claude/world-wiring-handoff-t0u76v`
 
 Built the whole language-substrate arc (world-wiring increment 2, decomposed into 2a-2e), so a world's sounds now emerge from per-race articulation physics with no authored lexicon. Six commits (section 4 plus 2a-2e), all pushed. Whole workspace green throughout.
