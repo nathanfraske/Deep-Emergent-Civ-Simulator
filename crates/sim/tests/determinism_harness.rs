@@ -44,16 +44,21 @@
 //! a vacuous pass the guard now refuses.
 
 use civsim_core::{Fixed, StableId};
+use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::controller::Controller;
 use civsim_sim::decision::Behaviour;
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
 };
+use civsim_sim::edibility::Physiology;
 use civsim_sim::evidence::{AttrKindId, InferenceParams, ValueId};
+use civsim_sim::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
+use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::lod::TwoTierWorld;
 use civsim_sim::primes::nsm_concept_ids;
-use civsim_sim::runner::{Field, FieldCalib, Runner};
+use civsim_sim::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
 use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_world::Coord3;
@@ -472,6 +477,207 @@ fn composed_runner_tick_is_bit_identical_across_worker_counts() {
             "the composed dialogue-move count is not width-invariant at {workers} workers"
         );
     }
+}
+
+// --- Real-world unification, step 2: the shared-id runner (world minds AND embodiment bodies) ---
+
+/// A mobile development body plan (the thermal-coupling fixture), so a founder's walker has a body to
+/// thermoregulate. Labelled fixture, not owner data.
+fn mobile_body() -> BodyPlan {
+    BodyPlan {
+        body_mass: Fixed::from_ratio(1, 2),
+        encephalization: Fixed::from_ratio(1, 2),
+        diet_breadth: Fixed::from_ratio(1, 2),
+        weapons: vec![],
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
+        senses: vec![],
+        locomotion: vec![1],
+        organs: vec![],
+        temperament: Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(3, 4),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        },
+    }
+}
+
+/// A viable thermal band fixture around a set point of thirty-seven, the spawn temperature the same.
+fn thermal_band() -> BeingThermal {
+    BeingThermal {
+        setpoint: Fixed::from_int(37),
+        half_band: Fixed::from_int(8),
+        initial_temp: Fixed::from_int(37),
+    }
+}
+
+/// An embodiment whose walkers REUSE the world's founder ids (a shared id space), the crux of the
+/// unification: one `StableId` owns both a `World` mind and an `Embodiment` walker. Blank controllers
+/// (the being still thermoregulates through the field-thermal coupling), the temperature-only
+/// development physiology.
+fn shared_embodiment(ids: &[StableId], seed: u64) -> Embodiment {
+    let mut emb = Embodiment::new(
+        HomeostaticRegistry::dev_thermal(),
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        seed,
+    );
+    let blank = Controller::zeros(emb.layout());
+    for (k, &id) in ids.iter().enumerate() {
+        let coord = Coord3::ground((k as i32) % 8, (k as i32) % 6);
+        let walker = Walker::new(
+            id,
+            coord,
+            mobile_body(),
+            Homeostasis::from_mass(&HomeostaticRegistry::dev_thermal(), Fixed::from_ratio(1, 2)),
+            Physiology::dev_for_registry(&HomeostaticRegistry::dev_thermal()),
+            blank.clone(),
+        );
+        emb.add(walker, thermal_band());
+    }
+    emb
+}
+
+/// Run the UNIFIED tick: a runner carrying both a dawn world and an embodiment whose walkers share the
+/// world's ids. Returns the composite (runner state hash, world event-log hash) trace and the move
+/// count, so the shared-being sweep exercises the same non-empty dialogue barrier the disjoint sweep
+/// does.
+fn unified_trace(
+    beings: usize,
+    bands: usize,
+    seed: u64,
+    ticks: u64,
+    workers: usize,
+) -> (Vec<(u128, u128)>, usize) {
+    let (mut world, ids) = dawn_world(beings, bands, seed);
+    world.set_workers(workers);
+    let emb = shared_embodiment(&ids, seed ^ 0x00B0_D1E5);
+    let mut runner = Runner::with_world_and_embodiment(field_fixture(), field_calib(), world, emb);
+    let mut trace = Vec::with_capacity(ticks as usize);
+    for t in 0..ticks {
+        runner.step_with_world_inputs(&seed_observations(&ids, t));
+        let w = runner.world().expect("the unified runner owns a world");
+        // Post-tick the two clocks agree (each advances once per tick), even though the embodiment and
+        // cognition draws key on clocks that differ by one within a tick.
+        assert_eq!(runner.clock(), w.clock(), "runner and world clocks drifted");
+        trace.push((runner.state_hash(), w.event_log_hash()));
+    }
+    let moves = runner
+        .world()
+        .expect("the unified runner owns a world")
+        .events()
+        .len();
+    (trace, moves)
+}
+
+#[test]
+fn the_unified_runner_carries_minds_and_bodies_under_one_id_and_replays() {
+    // The crux: one StableId owns both a World mind and an Embodiment walker in one runner. Every dawn
+    // being is at once a cognition mind (a world being) and a located body (a body_temp entry and a
+    // walker at the same id), the composite replays bit for bit, and it is seed-sensitive.
+    let (world, ids) = dawn_world(20, 3, 0x0DD1DEA5);
+    let emb = shared_embodiment(&ids, 0x00B0_D1E5);
+    let runner = Runner::with_world_and_embodiment(field_fixture(), field_calib(), world, emb);
+    assert!(
+        runner.world().is_some() && runner.embodiment().is_some(),
+        "the unified runner carries both halves"
+    );
+    let walker_ids: Vec<StableId> = runner
+        .embodiment()
+        .unwrap()
+        .walkers()
+        .iter()
+        .map(|w| w.id)
+        .collect();
+    let mind_ids = runner.world().unwrap().being_ids();
+    for &id in &ids {
+        assert!(mind_ids.contains(&id), "founder {id:?} is a cognition mind");
+        assert!(
+            walker_ids.contains(&id),
+            "founder {id:?} is a located walker"
+        );
+        assert!(
+            runner.body_temp(id).is_some(),
+            "founder {id:?} carries a body temperature (a body)"
+        );
+    }
+
+    let (a, _) = unified_trace(20, 3, 0x5EED1, 60, 1);
+    let (b, _) = unified_trace(20, 3, 0x5EED1, 60, 1);
+    assert_eq!(a.len(), 60);
+    assert_eq!(a, b, "the unified shared-id tick replays bit for bit");
+    let (c, _) = unified_trace(20, 3, 0x5EED2, 60, 1);
+    assert_ne!(a, c, "a different seed drives a different unified run");
+}
+
+#[test]
+fn the_unified_runner_is_bit_identical_across_worker_counts() {
+    // The first nontrivial exercise of the shared-id path under the parallel scheduler: with a being in
+    // both the world and the embodiment, the composite must stay bit-identical at every World worker
+    // width. The RES_BEING edge serializes the embodiment and cognition systems in the pinned order,
+    // and the world's own command barrier keeps its parallel phases width-invariant.
+    let (serial, serial_moves) = unified_trace(40, 5, 0xBEA57, 80, 1);
+    assert!(
+        serial_moves >= MIN_EXPECTED_MOVES,
+        "the unified converse phase produced only {serial_moves} dialogue moves (expected at least \
+         {MIN_EXPECTED_MOVES}): the sweep would prove an empty command set identical"
+    );
+    for workers in [2usize, 3, 8] {
+        let (parallel, parallel_moves) = unified_trace(40, 5, 0xBEA57, 80, workers);
+        assert_eq!(
+            serial, parallel,
+            "the unified tick diverged at {workers} workers: a beat leaked the thread schedule"
+        );
+        assert_eq!(
+            serial_moves, parallel_moves,
+            "the unified dialogue-move count is not width-invariant at {workers} workers"
+        );
+    }
+}
+
+#[test]
+fn the_unified_runner_step_matches_step_scheduled() {
+    // With a shared being present, the deterministic scheduler must reproduce the pinned step order bit
+    // for bit: the RES_BEING write both the embodiment and the world declare serializes the two systems
+    // in canonical order (SYS_EMBODIMENT before SYS_WORLD), the pinned step_inner order, so the composite
+    // is identical whether stepped by hand or through the scheduler.
+    let build = || {
+        let (world, ids) = dawn_world(24, 4, 0x5C4ED);
+        let emb = shared_embodiment(&ids, 0x00B0_D1E5);
+        let runner = Runner::with_world_and_embodiment(field_fixture(), field_calib(), world, emb);
+        (runner, ids)
+    };
+    let (mut pinned, ids) = build();
+    let (mut scheduled, _) = build();
+    for t in 0..40u64 {
+        pinned.step_with_world_inputs(&seed_observations(&ids, t));
+        scheduled.step_scheduled(&seed_observations(&ids, t));
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the scheduled order diverged from the pinned order at tick {t} with a shared being"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "authored decision repertoire")]
+fn the_unified_runner_refuses_an_authored_behaviour_repertoire() {
+    // The Principle 9 steering boundary survives into the unified constructor: a world carrying an
+    // authored decision repertoire is refused on the with_world_and_embodiment path too.
+    let (mut world, ids) = dawn_world(4, 2, 0x5EED);
+    world.set_behaviour(Behaviour {
+        drives: vec![],
+        curves: vec![],
+        actions: vec![],
+    });
+    let emb = shared_embodiment(&ids, 0x1);
+    let _ = Runner::with_world_and_embodiment(field_fixture(), field_calib(), world, emb);
 }
 
 #[test]

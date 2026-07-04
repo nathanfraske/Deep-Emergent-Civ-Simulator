@@ -110,6 +110,12 @@ const RES_FIELD: ResourceId = ResourceId(0);
 const RES_BODY: ResourceId = ResourceId(1);
 const RES_INDEX: ResourceId = ResourceId(2);
 const RES_WORLD: ResourceId = ResourceId(3);
+// The union population a being that is at once an Embodiment walker and a World mind belongs to
+// (real-world unification, step 2). Declared as a write of BOTH the embodiment coupling and the
+// cognition world, so once a shared StableId carries a body and a mind the scheduler serializes the
+// two systems (in canonical SystemId order, matching the pinned step_inner order) rather than
+// co-batching them as it safely does while world and embodiment share no being.
+const RES_BEING: ResourceId = ResourceId(4);
 const SYS_FIELD: SystemId = SystemId(0);
 const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
@@ -839,6 +845,80 @@ impl Runner {
         }
     }
 
+    /// The unified real world (real-world unification, step 2): one runner carrying BOTH a cognition
+    /// [`World`] of minds and an [`Embodiment`] of located, metabolizing bodies, so a founder whose
+    /// [`StableId`] owns an entry in both is at once a culture-forming mind and a thermoregulating body
+    /// on the field. This is the first constructor to break the mutual exclusion the two run paths held
+    /// (`with_world` forced `embodiment = None`, `with_embodiment` forced `world = None`); it composes
+    /// them under one shared id space, which the caller (`build_dawn_runner`) guarantees by minting
+    /// every id from the world's one [`crate::world::Registry`] and reusing those ids for the walkers,
+    /// never a second registry.
+    ///
+    /// The canonical steering boundary survives verbatim: the world must carry no authored decision
+    /// repertoire (Principle 9, Part 8.4), the same fail-loud assert `with_world` makes, so the unified
+    /// path cannot smuggle the authored deliberative tier onto the emergent spine. The embodiment side
+    /// seeds exactly as `with_embodiment` does (the body-temperature map, the located index, and each
+    /// being's derived body-to-medium exchange rate), so a shared being is seeded on both halves.
+    ///
+    /// Determinism: the two systems now share the [`RES_BEING`] resource so the scheduler serializes
+    /// them in the pinned order (see [`Runner::tick_systems`]); `state_hash` already folds both halves
+    /// (the body-temperature map id-sorted, the world hash, and each walker id-sorted), and a shared
+    /// being appears in all three deterministically. The two clocks differ by one within a tick: the
+    /// embodiment (locomotion) draws key on the runner clock pre-increment (tick K) while the world
+    /// draws key on the world clock, incremented at the start of `World::tick` (K+1). This offset is
+    /// harmless because a being's body draws (`Phase::EXPLORE`) and its mind draws (LANGUAGE,
+    /// MATE_CHOICE, CONVERSE, and the rest) are discriminated by their `Phase`, so the two streams never
+    /// collide at either clock, and both clocks are deterministic functions of the tick count, so replay
+    /// and worker-count independence hold. Post-tick the two clocks agree (each advances once per tick).
+    pub fn with_world_and_embodiment(
+        field: Field,
+        calib: FieldCalib,
+        world: World,
+        embodiment: Embodiment,
+    ) -> Runner {
+        assert!(
+            !world.has_behaviour(),
+            "the canonical runner refuses a world carrying an authored decision repertoire: that is \
+             the sentient deliberative tier (Part 8.1), steering at the level of behaviour (Part 8.4), \
+             and the canonical-emergent behaviour source is the evolved controller, not an authored \
+             policy"
+        );
+        // Seed the embodiment side exactly as with_embodiment does, so a shared being is seeded on both
+        // halves: the body-temperature map, the located index, and each being's derived exchange rate.
+        let mut body_temp = BTreeMap::new();
+        let mut index = LocationIndex::new();
+        let mut body_exchange_rate = BTreeMap::new();
+        for w in &embodiment.walkers {
+            let init = embodiment
+                .thermal
+                .get(&w.id)
+                .map(|b| b.initial_temp)
+                .unwrap_or(Fixed::ZERO);
+            body_temp.insert(w.id, init);
+            index.place(OccupantId::being(w.id), w.coord());
+            if let Some(phys) = &embodiment.physiology {
+                let rate = derive_body_exchange_rate(
+                    &w.body,
+                    &phys.organs,
+                    phys.anchors.medium_h,
+                    phys.tick_seconds,
+                    &phys.anchors,
+                );
+                body_exchange_rate.insert(w.id, rate);
+            }
+        }
+        Runner {
+            clock: 0,
+            field,
+            calib,
+            index,
+            body_temp,
+            body_exchange_rate,
+            world: Some(world),
+            embodiment: Some(embodiment),
+        }
+    }
+
     /// Place a being on the map at a coordinate with an initial body temperature.
     pub fn place_being(&mut self, id: StableId, coord: Coord3, body_temp: Fixed) {
         self.index.place(OccupantId::being(id), coord);
@@ -949,18 +1029,34 @@ impl Runner {
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
     /// touch (design Part 57): the field step writes the field; the body-thermal exchange reads the
     /// field and the located index and writes the body temperatures; the embodiment coupling reads the
-    /// field and writes the body temperatures and the index; the cognition world reads and writes only
-    /// the world. Only the phases this runner actually runs are declared, so a field-only runner
-    /// declares two systems and a fully composed one declares four.
+    /// field and writes the body temperatures, the index, and the union being population; the cognition
+    /// world reads and writes the world and the union being population. Only the phases this runner
+    /// actually runs are declared, so a field-only runner declares two systems and a fully composed one
+    /// declares four.
+    ///
+    /// The embodiment coupling and the cognition world both write [`RES_BEING`] (real-world
+    /// unification, step 2): while world and embodiment share no being (a world-only or
+    /// embodiment-only runner) that write is uncontended and changes no batching, so those paths
+    /// schedule exactly as before. Once a shared [`StableId`] carries a body and a mind, the write-write
+    /// conflict on [`RES_BEING`] forces the scheduler to serialize the two systems in canonical
+    /// [`SystemId`] order (`SYS_EMBODIMENT` before `SYS_WORLD`), which is the pinned `step_inner` order,
+    /// so the two beats that both touch a shared being cannot be reordered and the composite stays
+    /// bit-identical.
     pub fn tick_systems(&self) -> BTreeMap<SystemId, Access> {
         let mut sys = BTreeMap::new();
         sys.insert(SYS_FIELD, access(&[], &[RES_FIELD]));
         sys.insert(SYS_BODY, access(&[RES_FIELD, RES_INDEX], &[RES_BODY]));
         if self.embodiment.is_some() {
-            sys.insert(SYS_EMBODIMENT, access(&[RES_FIELD], &[RES_BODY, RES_INDEX]));
+            sys.insert(
+                SYS_EMBODIMENT,
+                access(&[RES_FIELD], &[RES_BODY, RES_INDEX, RES_BEING]),
+            );
         }
         if self.world.is_some() {
-            sys.insert(SYS_WORLD, access(&[RES_WORLD], &[RES_WORLD]));
+            sys.insert(
+                SYS_WORLD,
+                access(&[RES_WORLD, RES_BEING], &[RES_WORLD, RES_BEING]),
+            );
         }
         sys
     }
@@ -982,12 +1078,15 @@ impl Runner {
 
     /// One tick run through the deterministic scheduler (design Part 57): the phases are declared as
     /// systems over their resources, the scheduler derives conflict-free batches from the
-    /// declarations, and the flattened schedule runs them. The scheduler discovers that the cognition
-    /// world shares no resource with the field phases, so it places the world tick in the first batch
-    /// alongside the field step (a parallelisable pair), yet the result is bit-identical to the
-    /// pinned-order [`step`](Self::step): the reordered phases do not conflict, and the counter RNG is
-    /// draw-keyed rather than sequential (R-RNG-COORD), so the reorder cannot change any draw. This is
-    /// the runner as the scheduler's first real tick, proven equivalent to the hand-pinned order.
+    /// declarations, and the flattened schedule runs them. When no being is shared, the cognition
+    /// world shares no resource with the field phases, so the scheduler places the world tick in the
+    /// first batch alongside the field step (a parallelisable pair); when a being is shared, the
+    /// [`RES_BEING`] write the world and the embodiment coupling both declare serializes those two
+    /// systems in the pinned order (real-world unification, step 2). Either way the result is
+    /// bit-identical to the pinned-order [`step`](Self::step): the reordered or serialized phases do
+    /// not conflict on any resource, and the counter RNG is draw-keyed rather than sequential
+    /// (R-RNG-COORD), so the reorder cannot change any draw. This is the runner as the scheduler's
+    /// first real tick, proven equivalent to the hand-pinned order.
     pub fn step_scheduled(&mut self, world_inputs: &[TickInput]) {
         let sch = schedule(&self.tick_systems());
         run_serial(&sch, |sid| self.run_phase(sid, world_inputs));
