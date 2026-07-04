@@ -166,16 +166,23 @@ pub fn whole_body_surface(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
 }
 
 /// A being's whole-body muscle work force (design Part 35, real-world unification step 5): the
-/// development-weighted sum over its organs of their `mat.fracture_strength` composition, the physical
-/// force its muscle tissue can exert, mirroring the individual-tier [`crate::body::Body::strength`]
-/// (muscle mass times material strength) at the body-plan tier. This replaces the raw `body_mass` proxy
-/// the exertion coupling read: a body's exertion drain now follows its actual muscle endowment, so two
-/// bodies of equal mass but different muscle composition exert different force. It reads the composition
-/// axis, never a specific tissue-material id or a race label (Principle 9): a body whose tissue declares
-/// no strength reads ZERO (the absence convention its siblings use), not a mass-sized default, so the
-/// exertion coupling falls to its no-force branch rather than a hidden proxy. The sum is the
-/// order-independent [`Fixed::saturating_add`], so it is invariant to organ order.
-pub fn whole_body_muscle_force(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
+/// development-weighted sum over its organs of their `mat.fracture_strength` composition, times the
+/// body's mass in kilograms, mirroring the individual-tier [`crate::body::Body::strength`] (muscle mass
+/// times material strength) at the body-plan tier so the two tiers stay dimensionally consistent (owner
+/// ruling 2026-07-04). This replaces the raw `body_mass` proxy the exertion coupling read: a body's
+/// exertion drain now follows its actual muscle endowment scaled by its size, so two bodies of equal mass
+/// but different muscle composition exert different force, and two bodies of equal muscle composition but
+/// different mass exert different force too (the mass scaling the raw proxy carried is kept, not dropped).
+/// It reads the composition axis, never a specific tissue-material id or a race label (Principle 9): a
+/// body whose tissue declares no strength reads ZERO (the absence convention its siblings use), not a
+/// mass-sized default, so the exertion coupling falls to its no-force branch rather than a hidden proxy.
+/// The sum is the order-independent [`Fixed::saturating_add`], so it is invariant to organ order, and the
+/// mass bridge is the reserved kilogram scale the metabolic derivations already read.
+pub fn whole_body_muscle_force(
+    plan: &BodyPlan,
+    organs: &BodyPlanRegistry,
+    anchors: &MetabolicAnchors,
+) -> Fixed {
     let mut sum = Fixed::ZERO;
     for organ in &plan.organs {
         let strength = organs
@@ -188,7 +195,8 @@ pub fn whole_body_muscle_force(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fi
             .unwrap_or(Fixed::ZERO);
         sum = sum.saturating_add(force);
     }
-    sum
+    sum.checked_mul(body_mass_kg(plan, anchors))
+        .unwrap_or(Fixed::ZERO)
 }
 
 /// A being's whole-body specific heat (J/(kg*K)): the development-weighted average over its organs of
@@ -475,11 +483,14 @@ mod tests {
     }
 
     #[test]
-    fn whole_body_muscle_force_follows_the_strength_tissue_and_is_zero_without_it() {
-        // Real-world unification step 5: the work force a body exerts follows its muscle anatomy, not a
-        // mass proxy. A muscle-bearing tissue provides force to the extent of its development; a body
-        // with none exerts zero (the absence convention), and two equal-mass bodies with different
-        // muscle endowment exert different force.
+    fn whole_body_muscle_force_follows_the_strength_tissue_and_mass_and_is_zero_without_it() {
+        // Real-world unification step 5: the work force a body exerts is its development-weighted muscle
+        // strength times its mass, mirroring the individual-tier Body::strength (muscle mass times
+        // material strength). A muscle-bearing tissue provides force to the extent of its development; a
+        // body with none exerts zero (the absence convention); two equal-mass bodies with different
+        // muscle endowment exert different force; and two bodies of equal muscle but different mass exert
+        // different force (the mass scaling the earlier raw proxy carried, kept by the ruling).
+        let anchors = MetabolicAnchors::dev_fixture(); // body_mass_kg_scale = 100
         let mut reg = BodyPlanRegistry::dev_default();
         let muscle = reg.organs.len() as u16;
         reg.organs.push(OrganKindDef {
@@ -495,26 +506,40 @@ mod tests {
             fantasy: false,
             composition: TissueComposition::from_pairs(&[(ENERGY_DENSITY, Fixed::ONE)]),
         });
-        let big = whole_body_muscle_force(&body((1, 2), vec![organ(muscle, (1, 1))]), &reg);
-        let small = whole_body_muscle_force(&body((1, 2), vec![organ(muscle, (1, 4))]), &reg);
+        let big =
+            whole_body_muscle_force(&body((1, 2), vec![organ(muscle, (1, 1))]), &reg, &anchors);
+        let small =
+            whole_body_muscle_force(&body((1, 2), vec![organ(muscle, (1, 4))]), &reg, &anchors);
         assert!(big > small, "more muscle development, more work force");
         assert_eq!(
             big,
-            Fixed::from_int(4),
-            "full muscle (dev 1 * strength 4) = 4"
+            Fixed::from_int(200),
+            "full muscle (dev 1 * strength 4) times mass (0.5 * 100 kg) = 200"
         );
         assert_eq!(
-            whole_body_muscle_force(&body((1, 2), vec![organ(energy, (1, 1))]), &reg),
+            whole_body_muscle_force(&body((1, 2), vec![organ(energy, (1, 1))]), &reg, &anchors),
             Fixed::ZERO,
             "no strength tissue, no work force (not a mass-sized default)"
         );
         // Two bodies of equal normalized mass but different muscle endowment exert different force,
         // which the earlier body-mass proxy could not distinguish.
-        let strong = whole_body_muscle_force(&body((3, 4), vec![organ(muscle, (1, 1))]), &reg);
-        let weak = whole_body_muscle_force(&body((3, 4), vec![organ(muscle, (1, 8))]), &reg);
+        let strong =
+            whole_body_muscle_force(&body((3, 4), vec![organ(muscle, (1, 1))]), &reg, &anchors);
+        let weak =
+            whole_body_muscle_force(&body((3, 4), vec![organ(muscle, (1, 8))]), &reg, &anchors);
         assert!(
             strong > weak,
             "equal mass, different muscle, different force"
+        );
+        // Two bodies of equal muscle endowment but different mass exert different force: the mass scaling
+        // the ruling keeps, that the earlier composition-only sum had dropped.
+        let heavy =
+            whole_body_muscle_force(&body((1, 1), vec![organ(muscle, (1, 1))]), &reg, &anchors);
+        let light =
+            whole_body_muscle_force(&body((1, 4), vec![organ(muscle, (1, 1))]), &reg, &anchors);
+        assert!(
+            heavy > light,
+            "equal muscle, more mass, more force (the mass factor is present)"
         );
     }
 

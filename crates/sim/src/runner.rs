@@ -646,7 +646,7 @@ fn being_derived_drains(
                 &phys.anchors,
             );
             let velocity = locomotion::locomotion_speed(&w.body, Fixed::ONE, &emb.params);
-            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs);
+            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
             let exertion = derive_exertion_coupling(
                 &w.body,
                 &phys.organs,
