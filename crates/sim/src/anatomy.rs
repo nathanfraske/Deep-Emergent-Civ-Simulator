@@ -228,6 +228,15 @@ impl BodyPlanRegistry {
                         ("bio.water_fraction", Fixed::from_ratio(1, 2)),
                     ][..],
                 ),
+                // Muscle (Part 35, real-world unification step 5): a strength-bearing tissue whose
+                // mat.fracture_strength composition the whole-body work force integrates over, so a body
+                // that lists a muscle organ exerts force from its anatomy rather than a raw mass proxy. A
+                // labelled dev fixture value (the FLESH 3 MPa the individual-tier Body::strength uses).
+                (
+                    "muscle",
+                    false,
+                    &[("mat.fracture_strength", Fixed::from_int(3))][..],
+                ),
                 // Magical (Part 34): a mana-storing tissue, a fixture stand-in until an arcane floor
                 // grounds its composition.
                 (

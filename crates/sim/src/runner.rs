@@ -568,9 +568,11 @@ impl EmbodiedPhysiology {
 /// (water lost slower, an oxygen demand, or the zero-drain derived axes temperature and integrity), so
 /// only the energy metabolism derives and the rest stay the owner's per-axis calibration. Pure
 /// fixed-point, no RNG, and no identity read: two beings diverge from their body plans alone (Principle
-/// 9). The exertion inputs are the being's full-exertion ground speed (a body-plan-derived velocity) at
-/// its normalized mass as the characteristic locomotion work-force proxy; the honest limit is the Part
-/// 35 work-force datum that replaces the mass proxy.
+/// 9). The exertion inputs are the being's full-exertion ground speed (a body-plan-derived velocity)
+/// and its whole-body muscle work force ([`physiology::whole_body_muscle_force`], the Part 35 datum
+/// that retires the earlier normalized-mass proxy): the force a body exerts follows its muscle anatomy,
+/// so two bodies of equal mass but different muscle endowment now drain differently under exertion, and
+/// a body with no muscle tissue exerts no force (the absence convention, not a mass-sized default).
 fn being_derived_drains(
     emb: &Embodiment,
     phys: &EmbodiedPhysiology,
@@ -593,7 +595,7 @@ fn being_derived_drains(
                 &phys.anchors,
             );
             let velocity = locomotion::locomotion_speed(&w.body, Fixed::ONE, &emb.params);
-            let force = w.body.body_mass;
+            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs);
             let exertion = derive_exertion_coupling(
                 &w.body,
                 &phys.organs,
