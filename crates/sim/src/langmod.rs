@@ -50,7 +50,9 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 use crate::body::{Body, FunctionId};
-use crate::language::FeatureValueId;
+use crate::language::{
+    FeatureDimId, FeatureValueId, FormSegment, FormSystem, ProductionModalityId,
+};
 use crate::race::Articulation;
 use crate::sensorium::{SenseChannelId, Sensorium};
 
@@ -474,6 +476,40 @@ pub fn producible_values(
     out
 }
 
+/// The reason a phonetic form system could not be derived, kept distinct from a silent empty system
+/// so the build fails loud (Principle 11) rather than coining empty words.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FormSystemError {
+    /// No feature value was producible: the race is blind to the channel (no perceptual geometry) or
+    /// the producibility threshold excluded every candidate. A form system with an empty inventory
+    /// would coin only empty words, so the build refuses rather than fabricating a silent language.
+    EmptyInventory,
+}
+
+/// Bridge a set of producible feature values to a [`FormSystem`] (design Part 33.3, the seam that was
+/// missing between [`phoneme_priors`] and a coinable inventory): each producible value becomes a
+/// one-feature [`FormSegment`] on its dimension, and the segments become the coining inventory of a
+/// form system in the given modality with the given word-length range. Fails loud on an empty
+/// inventory rather than building a form system that coins only empty words. Deterministic: the values
+/// are taken in the order given (the canonical [`FeatureValueId`] order [`producible_values`]
+/// produces), so the inventory is a pure function of the selection.
+pub fn form_system_from_values(
+    modality: ProductionModalityId,
+    dim: FeatureDimId,
+    values: &[FeatureValueId],
+    min_len: u32,
+    max_len: u32,
+) -> Result<FormSystem, FormSystemError> {
+    if values.is_empty() {
+        return Err(FormSystemError::EmptyInventory);
+    }
+    let inventory: Vec<FormSegment> = values
+        .iter()
+        .map(|&v| FormSegment::new([(dim, v)]))
+        .collect();
+    Ok(FormSystem::new(modality, inventory, min_len, max_len))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,6 +914,81 @@ mod tests {
         );
         // A threshold above every prior yields an empty inventory (the fail-loud-on-empty case 2d guards).
         assert!(producible_values(&priors, Fixed::from_int(2)).is_empty());
+    }
+
+    #[test]
+    fn form_system_from_values_bridges_an_inventory_and_fails_loud_on_empty() {
+        use crate::language::{FeatureDimId, ProductionModalityId};
+        // The bridge: producible values become one-feature form segments, and the segments become a
+        // coinable form system. An empty inventory fails loud rather than coining empty words.
+        let fs = form_system_from_values(
+            ProductionModalityId(0),
+            FeatureDimId(0),
+            &[FeatureValueId(0), FeatureValueId(2)],
+            1,
+            2,
+        )
+        .expect("a non-empty inventory builds a form system");
+        assert_eq!(fs.inventory().len(), 2, "one segment per producible value");
+        assert!(!fs.is_empty());
+        assert!(
+            matches!(
+                form_system_from_values(ProductionModalityId(0), FeatureDimId(0), &[], 1, 2),
+                Err(FormSystemError::EmptyInventory)
+            ),
+            "an empty inventory fails loud, never coins empty words"
+        );
+    }
+
+    #[test]
+    fn the_full_phonetic_pipeline_composes_and_a_sharper_ear_yields_a_richer_inventory() {
+        use crate::language::{FeatureDimId, ProductionModalityId};
+        use crate::race::Articulation;
+        // The whole 2b-2c-2d pipeline composes: base geometry -> articulated_geometry -> phoneme
+        // priors (broadcast capability gate) -> producible_values (threshold) -> form_system_from_values.
+        // A sharper ear (smaller just-noticeable difference) discriminates more sounds, so more values
+        // clear the threshold and its inventory is at least as rich, all from the articulation data
+        // through one pipeline with no race id.
+        let base: Vec<Fixed> = (10..=16).map(|cm| ratio(cm, 100)).collect(); // seven candidate sounds
+        let c = air_speed();
+        let beta = ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        // A threshold between the two ears' prior ranges: a sharp ear's priors all clear it, a dull
+        // ear's all fall below it (a labelled fixture, tuned to the physics so the divergence shows).
+        let threshold = Fixed::from_ratio(57, 10);
+
+        let inventory_size = |hearing_resolution: Fixed| -> Result<usize, FormSystemError> {
+            let art = Articulation {
+                vocal_tract_scale: Fixed::ONE,
+                hearing_resolution,
+            };
+            let geo = articulated_geometry(&base, c, beta, path, &art, HEARING, params()).unwrap();
+            let gate = vec![Fixed::ONE; base.len()]; // full channel capability, broadcast per value
+            let priors = phoneme_priors(&geo, &gate);
+            let values = producible_values(&priors, threshold);
+            form_system_from_values(ProductionModalityId(0), FeatureDimId(0), &values, 1, 3)
+                .map(|fs| fs.inventory().len())
+        };
+
+        // The sharp ear discriminates every candidate, so all seven clear the threshold and build a
+        // full inventory; the dull ear confuses them, so none clear it and the build fails loud rather
+        // than coining empty words. The richer inventory falls out of the hearing resolution alone.
+        let sharp = inventory_size(Fixed::from_int(15)).expect("a sharp ear builds an inventory");
+        assert_eq!(
+            sharp,
+            base.len(),
+            "the sharp ear produces every candidate sound"
+        );
+        let dull = inventory_size(Fixed::from_int(120));
+        assert!(
+            matches!(dull, Err(FormSystemError::EmptyInventory)),
+            "the dull ear clears nothing and fails loud: {dull:?}"
+        );
+        let dull_size = dull.unwrap_or(0);
+        assert!(
+            sharp > dull_size,
+            "a sharper ear yields a strictly richer producible inventory: {sharp} > {dull_size}"
+        );
     }
 }
 

@@ -183,8 +183,8 @@ pub use langdist::{
     ComponentWeights,
 };
 pub use langmod::{
-    acquisition_split, articulated_geometry, capability_gate, capability_halves, phoneme_priors,
-    producible_values, CapabilityGate,
+    acquisition_split, articulated_geometry, capability_gate, capability_halves,
+    form_system_from_values, phoneme_priors, producible_values, CapabilityGate, FormSystemError,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,

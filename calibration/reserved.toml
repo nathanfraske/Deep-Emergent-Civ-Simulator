@@ -426,6 +426,22 @@ unit = "prior"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs producible_values"
 
 [[reserved]]
+id = "articulation.word_min_len"
+basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
+
+[[reserved]]
+id = "articulation.word_max_len"
+basis = "the maximum number of producible sounds a word carries, the high end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). At least the minimum; set from the longest word the modality admits before the parse cost outweighs the contrast gained. AUTHORED NOW, DERIVABLE LATER, on the same contrast-budget-from-inventory-size derivation as articulation.word_min_len: a small inventory needs longer words to carry enough distinct forms for the concept set, so the high end reads off the inventory rather than a fabricated constant"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
+
+[[reserved]]
 id = "lang.drift_operator_rates"
 basis = "the per-generation rates of the drift operators other than sound change (its own dial, language.sound_change_rate): lexical replacement (0.01, Swadesh-core replacement scaled toward whole-lexicon turnover), grammaticalisation (0.005), splitting (0.002), borrowing (0.01); a data map, read by require_map, whose membership grows with the world"
 status = "set"
