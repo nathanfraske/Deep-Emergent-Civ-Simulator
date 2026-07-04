@@ -38,6 +38,7 @@
 //! (covering), and respiration laws whose kernels the physics floor already carries, each a data entry
 //! plus its reserved references, never a new authored branch.
 
+use crate::interval::sat_sub;
 use civsim_core::Fixed;
 use civsim_physics::{laws, AxisRange, Dimension, PhysicsRegistry, QuantityAxis};
 use std::collections::BTreeMap;
@@ -62,6 +63,23 @@ pub enum CapabilityKernel {
     /// depth are reserved. A blunt point (large area, low pressure) or a soft one (low hardness, capped
     /// pressure) does not clear the target hardness and reads zero: not a weapon, by physics not by tag.
     Pierce,
+    /// LOCOMOTE, the limb read (retires `F_LOCOMOTION` and the `MorphCategory::Locomotion` gate). A limb
+    /// bears a reference propulsive load without structural failure: the bending stress the load raises
+    /// over the limb's section modulus and length ([`laws::bend_stress`]) stays below the material's yield,
+    /// so the limb can push off rather than buckle. The capability is one minus the bending utilization (a
+    /// limb far from yield is a strong locomotor, a slender or weak one near yield reads low). Reads
+    /// `mech.section_modulus`, `mech.arm_length`, and `mat.yield_strength`; the reference locomotor load is
+    /// reserved. A part carrying no section modulus (an organ, a hide) bears no load and reads zero: not a
+    /// limb, by physics not by tag.
+    Locomote,
+    /// REFRACT, the optical-sense read (retires `F_SIGHT` and the `MorphCategory::Sense` gate for the
+    /// visual channel). A light-transducing tissue focuses light when its refractive index exceeds the
+    /// medium's ([`laws::refractive_contrast`]), so a contrast above the medium is an eye. The capability
+    /// is the refractive contrast over the reference. Reads `opt.refractive_index`; the medium index and
+    /// the reference contrast are reserved. A tissue matching the medium (no contrast) does not focus and
+    /// reads zero. The honest limit: this is the optical channel only; the acoustic, chemical, and field
+    /// senses are their own kernels (a documented follow-on), so a non-optical sense reads zero here.
+    Refract,
 }
 
 impl CapabilityKernel {
@@ -71,6 +89,8 @@ impl CapabilityKernel {
     pub fn geometry_axes(self) -> &'static [&'static str] {
         match self {
             CapabilityKernel::Pierce => &["mech.contact_area"],
+            CapabilityKernel::Locomote => &["mech.section_modulus", "mech.arm_length"],
+            CapabilityKernel::Refract => &[],
         }
     }
 
@@ -78,6 +98,8 @@ impl CapabilityKernel {
     pub fn material_axes(self) -> &'static [&'static str] {
         match self {
             CapabilityKernel::Pierce => &["mat.indentation_hardness"],
+            CapabilityKernel::Locomote => &["mat.yield_strength"],
+            CapabilityKernel::Refract => &["opt.refractive_index"],
         }
     }
 
@@ -93,8 +115,58 @@ impl CapabilityKernel {
     ) -> Fixed {
         match self {
             CapabilityKernel::Pierce => pierce(geo, mat, refs, caps),
+            CapabilityKernel::Locomote => locomote(geo, mat, refs, caps),
+            CapabilityKernel::Refract => refract(mat, refs),
         }
     }
+}
+
+/// The LOCOMOTE read: is the part a load-bearing limb, and how strong a one, from its geometry and material.
+fn locomote(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> Fixed {
+    let section_modulus = geo("mech.section_modulus");
+    let arm_length = geo("mech.arm_length");
+    let yield_strength = mat("mat.yield_strength");
+    if section_modulus <= Fixed::ZERO || yield_strength <= Fixed::ZERO {
+        return Fixed::ZERO; // no section to bear a load, or no strength: not a limb
+    }
+    // The bending stress the reference propulsive load raises over the limb's section and length, and the
+    // margin to yield. A limb whose stress stays well below yield bears the load and can push off; one
+    // near or past yield buckles. The capability is one minus the bending utilization (the safety fraction).
+    let (sigma, _margin) = laws::bend_stress(
+        refs.reference_locomotor_load,
+        section_modulus,
+        arm_length,
+        yield_strength,
+        caps.pressure,
+    );
+    // Utilization sigma/yield, capability = 1 - utilization clamped to [0, 1]. A stress at or past yield
+    // reads zero (the limb fails), a stress far below reads near one (a strong locomotor).
+    match sigma.checked_div(yield_strength) {
+        Some(util) => sat_sub(Fixed::ONE, util).clamp(Fixed::ZERO, Fixed::ONE),
+        None => Fixed::ZERO,
+    }
+}
+
+/// The REFRACT read: is the tissue an optical transducer (an eye), from its refractive index against the
+/// medium. Material-only (a lens is a material property); no geometry axis is read.
+fn refract(mat: &dyn Fn(&str) -> Fixed, refs: &CapabilityRefs) -> Fixed {
+    let n2 = mat("opt.refractive_index");
+    if n2 <= Fixed::ZERO {
+        return Fixed::ZERO; // no optical tissue: not an eye
+    }
+    let (contrast, _tir) =
+        laws::refractive_contrast(refs.medium_refractive_index, n2, refs.optical_contrast_cap);
+    // A contrast at or below one (matching or thinner than the medium) does not focus; the capability is
+    // the contrast above the medium, over the reference contrast that reads as a fully capable eye.
+    normalize(
+        sat_sub(contrast, Fixed::ONE),
+        refs.reference_optical_contrast,
+    )
 }
 
 /// The PIERCE read: is the part a weapon, and how good a one, from its own geometry and material.
@@ -170,6 +242,21 @@ pub struct CapabilityRefs {
     /// Basis: a wound depth that incapacitates the reference target, a fraction of its characteristic
     /// dimension; the capability is the achieved depth over this reference, clamped to one.
     pub reference_penetration_depth: Fixed,
+    /// The reference propulsive load a limb bears in locomotion (`capability.locomotor_load`, N). Basis:
+    /// the ground-reaction force a limb carries in a stride at the body-mass scale (a multiple of body
+    /// weight); larger reads fewer limbs as strong locomotors, smaller more.
+    pub reference_locomotor_load: Fixed,
+    /// The refractive index of the medium an optical sense focuses against (`capability.medium_index`,
+    /// dimensionless). Basis: the medium's `opt.refractive_index` (near one for air or vacuum, ~1.33 for
+    /// water), the index a lens tissue must exceed to bend light.
+    pub medium_refractive_index: Fixed,
+    /// The refractive-contrast saturation ceiling the optical law caps at (`capability.optical_contrast_cap`,
+    /// dimensionless). Basis: the largest `opt.refractive_index` ratio the floor represents.
+    pub optical_contrast_cap: Fixed,
+    /// The refractive contrast above the medium that counts as a fully capable eye
+    /// (`capability.reference_optical_contrast`, dimensionless). Basis: the lens-to-medium index step a
+    /// focusing eye needs; the capability is the achieved contrast above one, over this reference.
+    pub reference_optical_contrast: Fixed,
 }
 
 impl CapabilityRefs {
@@ -185,6 +272,10 @@ impl CapabilityRefs {
             target_specific_cut_energy: dec("2"), // MJ/m^3, soft-tissue cutting energy
             reference_delivered_energy: dec("1"), // J, a strike's kinetic energy
             reference_penetration_depth: dec("0.01"), // m, a one-centimetre incapacitating wound
+            reference_locomotor_load: dec("50"), // N, a stride ground-reaction load
+            medium_refractive_index: dec("1"),  // air/vacuum, the medium a lens focuses against
+            optical_contrast_cap: dec("10"),    // the refractive-contrast ceiling
+            reference_optical_contrast: dec("0.3"), // a lens-to-air index step that focuses (n~1.3)
         }
     }
 }
@@ -247,6 +338,10 @@ pub struct FunctionLawRegistry {
 impl FunctionLawRegistry {
     /// The stable id of the PIERCE law in [`Self::dev_seed`].
     pub const ID_PIERCE: FunctionLawId = FunctionLawId(0);
+    /// The stable id of the LOCOMOTE law in [`Self::dev_seed`].
+    pub const ID_LOCOMOTE: FunctionLawId = FunctionLawId(1);
+    /// The stable id of the REFRACT law in [`Self::dev_seed`].
+    pub const ID_REFRACT: FunctionLawId = FunctionLawId(2);
 
     /// An empty registry.
     pub fn new() -> Self {
@@ -280,15 +375,26 @@ impl FunctionLawRegistry {
         self.defs.is_empty()
     }
 
-    /// A labelled DEV SEED wiring the one step-one law (PIERCE). Not owner-authored production content: a
-    /// stand-in so the derive-from-physics read can be exercised. The membership grows as the owner adds
-    /// the resonance, refraction, aerodynamic, insulation, and respiration laws.
+    /// A labelled DEV SEED wiring the step-one function laws (PIERCE the weapon read, LOCOMOTE the limb
+    /// read, REFRACT the optical-sense read). Not owner-authored production content: a stand-in so the
+    /// derive-from-physics read can be exercised. The membership grows as the owner adds the acoustic,
+    /// aerodynamic, insulation, chemoreception, and respiration laws.
     pub fn dev_seed() -> Self {
         let mut reg = FunctionLawRegistry::new();
         reg.insert(FunctionLawDef {
             id: FunctionLawRegistry::ID_PIERCE,
             name: "pierce".to_string(),
             kernel: CapabilityKernel::Pierce,
+        });
+        reg.insert(FunctionLawDef {
+            id: FunctionLawRegistry::ID_LOCOMOTE,
+            name: "locomote".to_string(),
+            kernel: CapabilityKernel::Locomote,
+        });
+        reg.insert(FunctionLawDef {
+            id: FunctionLawRegistry::ID_REFRACT,
+            name: "refract".to_string(),
+            kernel: CapabilityKernel::Refract,
         });
         reg
     }
@@ -433,5 +539,65 @@ mod tests {
         let m = mat_of([("mat.indentation_hardness", "500")].into_iter().collect());
         let v = derive_capabilities(&fns, &g, &m, &refs, &caps);
         assert_eq!(v.score(FunctionLawRegistry::ID_PIERCE), Fixed::ZERO);
+    }
+
+    #[test]
+    fn a_stout_limb_reads_as_a_locomotor_and_a_bodiless_organ_does_not() {
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = test_caps();
+
+        // A stout limb: a real section modulus and a bony yield strength, so the stride load stays far
+        // below yield and the limb bears it.
+        let limb_geo = geo_of(
+            [
+                ("mech.section_modulus", "0.0001"),
+                ("mech.arm_length", "0.3"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let limb_mat = mat_of([("mat.yield_strength", "150")].into_iter().collect());
+        let limb = derive_capabilities(&fns, &limb_geo, &limb_mat, &refs, &caps);
+        let limb_move = limb.score(FunctionLawRegistry::ID_LOCOMOTE);
+        assert!(
+            limb_move > Fixed::ZERO,
+            "a stout limb bears its propulsive load and is a locomotor: {limb_move:?}"
+        );
+
+        // An organ carrying no section modulus bears no load: not a limb, by physics.
+        let organ_geo = geo_of(BTreeMap::new());
+        let organ_mat = mat_of([("mat.yield_strength", "3")].into_iter().collect());
+        let organ = derive_capabilities(&fns, &organ_geo, &organ_mat, &refs, &caps);
+        assert_eq!(
+            organ.score(FunctionLawRegistry::ID_LOCOMOTE),
+            Fixed::ZERO,
+            "an organ with no section modulus is no limb"
+        );
+    }
+
+    #[test]
+    fn an_optical_lens_reads_as_an_eye_and_a_medium_matched_tissue_does_not() {
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = test_caps();
+        let no_geo = geo_of(BTreeMap::new());
+
+        // A lens tissue: refractive index well above the medium (air ~1), so it focuses light.
+        let lens = mat_of([("opt.refractive_index", "1.4")].into_iter().collect());
+        let eye = derive_capabilities(&fns, &no_geo, &lens, &refs, &caps);
+        assert!(
+            eye.score(FunctionLawRegistry::ID_REFRACT) > Fixed::ZERO,
+            "a lens denser than the medium focuses light and is an eye"
+        );
+
+        // A tissue matching the medium index (no contrast) does not focus: not an eye.
+        let clear = mat_of([("opt.refractive_index", "1")].into_iter().collect());
+        let blind = derive_capabilities(&fns, &no_geo, &clear, &refs, &caps);
+        assert_eq!(
+            blind.score(FunctionLawRegistry::ID_REFRACT),
+            Fixed::ZERO,
+            "a tissue matching the medium reads no optical contrast: not an eye"
+        );
     }
 }
