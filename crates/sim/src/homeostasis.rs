@@ -46,7 +46,11 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
+use civsim_compose::{
+    derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawId, FunctionLawRegistry,
+};
+
+use crate::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
 use crate::stocks::Stock;
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
@@ -492,22 +496,6 @@ pub fn birth_viable(reg: &HomeostaticRegistry, plan: &BodyPlan, organs: &BodyPla
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct AffordanceId(pub u16);
 
-/// The anatomy category a morphological requirement reads. These are the authored physical body-
-/// plan groups of Part 25.14 and Part 35 (a body has weapons, coverings, senses, and locomotion
-/// organs), fixed physics rather than world content, so a small discriminator here references the
-/// body plan's own shape; the affordance set that references it is open data.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MorphCategory {
-    /// No organ required: an operation any body performs (taking matter in).
-    Any,
-    /// A locomotion organ that is not merely the rooted mark (the walking-tree rule).
-    Locomotion,
-    /// A natural weapon.
-    Weapon,
-    /// A sense organ.
-    Sense,
-}
-
 /// The shape of the parameter a physical operation takes, a structural property of the operation
 /// itself (a move is aimed somewhere, an ingestion is not), not a behaviour. It sets how many
 /// controller outputs the operation reads (R-BEHAVIOR-EVOLVE, [`crate::controller`]): a directional
@@ -521,20 +509,24 @@ pub enum AffordanceParam {
     Directional,
 }
 
-/// One affordance as data: a physical operation, the morphological requirement that gates it, and
-/// the shape of its parameter. The set and the gates are data (Principle 11); the categories the
-/// gates read are the authored anatomy (Part 25.14). Membership is what makes a body able to walk
-/// or to strike, never a rule about when it should.
+/// One affordance as data: a physical operation, the physics CAPABILITY that gates it, and the shape of
+/// its parameter. The set and the gates are data (Principle 11); the gate is now a DERIVED capability
+/// (emergent-anatomy step one), not an authored anatomy category: a body can walk because a part of it
+/// reads the LOCOMOTE capability, strike because a part reads PIERCE, read from the parts' own geometry
+/// and material through the function-law dispatch, never a `MorphCategory` label. Membership is what
+/// makes a body able to walk or to strike, never a rule about when it should.
 #[derive(Clone, Debug)]
 pub struct AffordanceDef {
     /// The affordance id.
     pub id: AffordanceId,
     /// A legibility handle.
     pub name: String,
-    /// The anatomy category the body must bear (above `min_development`) to perform this operation.
-    pub requires: MorphCategory,
-    /// The minimum development the required organ must have, in `[0, ONE]`. Ignored for `Any`.
-    pub min_development: Fixed,
+    /// The physics capability the body must bear a part reading (at or above `min_capability`) to perform
+    /// this operation, or `None` for an operation any body performs (taking matter in). Retires the
+    /// authored `MorphCategory`: the gate is a derived capability, not an anatomy category.
+    pub requires: Option<FunctionLawId>,
+    /// The minimum capability a part must read to afford the operation, in `[0, ONE]`. Ignored for `None`.
+    pub min_capability: Fixed,
     /// The shape of the operation's parameter (how many controller outputs it reads).
     pub param: AffordanceParam,
 }
@@ -554,23 +546,23 @@ impl AffordanceRegistry {
                 AffordanceDef {
                     id: MOVE,
                     name: "move".to_string(),
-                    requires: MorphCategory::Locomotion,
-                    min_development: Fixed::ZERO,
+                    requires: Some(FunctionLawRegistry::ID_LOCOMOTE),
+                    min_capability: Fixed::ZERO,
                     param: AffordanceParam::Directional,
                 },
                 AffordanceDef {
                     id: INGEST,
                     name: "ingest".to_string(),
-                    requires: MorphCategory::Any,
-                    min_development: Fixed::ZERO,
+                    requires: None,
+                    min_capability: Fixed::ZERO,
                     param: AffordanceParam::Scalar,
                 },
             ],
         }
     }
 
-    /// A DEVELOPMENT FIXTURE for a combat-capable world: move, ingest, and strike (gated on a natural
-    /// weapon). Kept distinct from [`AffordanceRegistry::dev_default`] so the foraging behaviour tests
+    /// A DEVELOPMENT FIXTURE for a combat-capable world: move, ingest, and strike (gated on the PIERCE
+    /// capability). Kept distinct from [`AffordanceRegistry::dev_default`] so the foraging behaviour tests
     /// keep their two-affordance layout; a predator's controller layout carries the extra strike
     /// output and can evolve to use it, closing predator-prey (R-BEHAVIOR-EVOLVE).
     pub fn dev_predator() -> AffordanceRegistry {
@@ -578,29 +570,43 @@ impl AffordanceRegistry {
         reg.affordances.push(AffordanceDef {
             id: STRIKE,
             name: "strike".to_string(),
-            requires: MorphCategory::Weapon,
-            min_development: Fixed::ZERO,
+            requires: Some(FunctionLawRegistry::ID_PIERCE),
+            min_capability: Fixed::ZERO,
             param: AffordanceParam::Directional,
         });
         reg
     }
 
-    /// The affordances a given body can perform, in canonical id order, reading its morphology. A
-    /// rooted body cannot move; a body bearing a locomotion organ can, whatever its kingdom.
-    pub fn afforded(&self, body: &BodyPlan) -> Vec<AffordanceId> {
+    /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
+    /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
+    /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
+    pub fn afforded(
+        &self,
+        body: &BodyPlan,
+        organs: &BodyPlanRegistry,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> Vec<AffordanceId> {
         self.affordances
             .iter()
-            .filter(|a| affords(body, a))
+            .filter(|a| affords(body, a, organs, refs, caps))
             .map(|a| a.id)
             .collect()
     }
 
-    /// Whether a body affords a specific operation.
-    pub fn affords_id(&self, body: &BodyPlan, id: AffordanceId) -> bool {
+    /// Whether a body affords a specific operation, derived from its parts' capabilities.
+    pub fn affords_id(
+        &self,
+        body: &BodyPlan,
+        id: AffordanceId,
+        organs: &BodyPlanRegistry,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> bool {
         self.affordances
             .iter()
             .find(|a| a.id == id)
-            .map(|a| affords(body, a))
+            .map(|a| affords(body, a, organs, refs, caps))
             .unwrap_or(false)
     }
 }
@@ -612,30 +618,63 @@ pub const INGEST: AffordanceId = AffordanceId(1);
 /// The strike affordance (a natural-weapon attack), in the combat fixture only.
 pub const STRIKE: AffordanceId = AffordanceId(2);
 
-/// The rooted locomotion mark: a locomotion list holding only this is not a mobile organ (the
-/// walking-tree rule, matching `crate::locomotion`).
-const ROOTED_MODE: u16 = 0;
-
-/// Whether a body meets an affordance's morphological requirement.
-fn affords(body: &BodyPlan, a: &AffordanceDef) -> bool {
-    match a.requires {
-        MorphCategory::Any => true,
-        MorphCategory::Locomotion => {
-            // A mobile organ is any non-rooted locomotion mode; development is not tracked per
-            // locomotion mode in the current body plan, so the min-development gate is vacuous here
-            // until it is (the honest limit, noted in the design pass).
-            body.locomotion.iter().any(|&m| m != ROOTED_MODE)
+/// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
+/// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
+/// id. A body affords an operation when one of its parts reads the required capability, so a weapon body
+/// strikes and a limbed one moves, by physics not by an authored anatomy category.
+fn body_capability(
+    body: &BodyPlan,
+    organs: &BodyPlanRegistry,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+    law: FunctionLawId,
+) -> Fixed {
+    let fns = FunctionLawRegistry::dev_seed();
+    let cap_of = |k: &KindDef| -> Fixed {
+        let geo = |axis: &str| k.geo(axis);
+        let mat = |axis: &str| k.mat(axis);
+        derive_capabilities(&fns, &geo, &mat, refs, caps).score(law)
+    };
+    let mut best = Fixed::ZERO;
+    for p in &body.weapons {
+        if let Some(k) = organs.weapons.iter().find(|k| k.id == p.kind) {
+            best = best.max(cap_of(k));
         }
-        MorphCategory::Weapon => body
-            .weapons
-            .iter()
-            .any(|p| p.development >= a.min_development),
-        MorphCategory::Sense => body
-            .senses
-            .iter()
-            .any(|p| p.development >= a.min_development),
+    }
+    for p in &body.senses {
+        if let Some(k) = organs.senses.iter().find(|k| k.id == p.kind) {
+            best = best.max(cap_of(k));
+        }
+    }
+    for &m in &body.locomotion {
+        if let Some(k) = organs.locomotion.iter().find(|k| k.id == m) {
+            best = best.max(cap_of(k));
+        }
+    }
+    best
+}
+
+/// Whether a body affords an operation, DERIVED from its parts' capabilities: an unconditional operation
+/// (no required capability) any body performs; a gated one needs a part reading the required capability at
+/// or above the threshold.
+fn affords(
+    body: &BodyPlan,
+    a: &AffordanceDef,
+    organs: &BodyPlanRegistry,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> bool {
+    match a.requires {
+        None => true,
+        Some(law) => {
+            body_capability(body, organs, refs, caps, law) >= a.min_capability.max(MIN_CAP)
+        }
     }
 }
+
+/// The floor a derived capability must clear to count (a zero-capability part does not afford), so an
+/// affordance with a zero `min_capability` still requires a positive reading, not merely a present part.
+const MIN_CAP: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 20)); // ~1e-6
 
 #[cfg(test)]
 mod tests {
@@ -666,6 +705,20 @@ mod tests {
                 aggression: Fixed::from_ratio(1, 4),
             },
         }
+    }
+
+    /// The labelled capability context an affordance derive reads in these tests: the dev organ registry
+    /// (the part kinds a body's ids index), the dev references, and the mechanical floor's own physics
+    /// ceilings (pressure 150000 MPa, length 100 m), matching the compose crate's derive.
+    fn cap_ctx() -> (BodyPlanRegistry, CapabilityRefs, CapabilityCaps) {
+        (
+            BodyPlanRegistry::dev_default(),
+            CapabilityRefs::dev_refs(),
+            CapabilityCaps {
+                pressure: Fixed::from_int(150_000),
+                depth: Fixed::from_int(100),
+            },
+        )
     }
 
     #[test]
@@ -791,26 +844,51 @@ mod tests {
     #[test]
     fn a_rooted_body_cannot_move_but_can_ingest() {
         let reg = AffordanceRegistry::dev_default();
-        let rooted = body((1, 2), vec![ROOTED_MODE]);
-        let afforded = reg.afforded(&rooted);
+        let (organs, refs, caps) = cap_ctx();
+        // The rooted mark (kind id 0) bears no limb geometry, so it reads no LOCOMOTE capability.
+        let rooted = body((1, 2), vec![0]);
+        let afforded = reg.afforded(&rooted, &organs, &refs, &caps);
         assert!(
             !afforded.contains(&MOVE),
             "a rooted body affords no movement"
         );
         assert!(afforded.contains(&INGEST), "but it still takes matter in");
-        assert!(!reg.affords_id(&rooted, MOVE));
+        assert!(!reg.affords_id(&rooted, MOVE, &organs, &refs, &caps));
     }
 
     #[test]
     fn a_mobile_body_affords_movement_whatever_its_kingdom() {
         let reg = AffordanceRegistry::dev_default();
-        let walking_tree = body((1, 2), vec![3]); // an autotroph body with a mobile organ
-        let afforded = reg.afforded(&walking_tree);
+        let (organs, refs, caps) = cap_ctx();
+        let walking_tree = body((1, 2), vec![3]); // an autotroph body with a load-bearing limb (climb)
+        let afforded = reg.afforded(&walking_tree, &organs, &refs, &caps);
         assert!(
             afforded.contains(&MOVE),
-            "a body with a locomotion organ can move"
+            "a body with a load-bearing limb can move"
         );
         assert!(afforded.contains(&INGEST));
+    }
+
+    #[test]
+    fn the_capability_move_gate_reproduces_the_retired_rooted_mark_gate() {
+        // Hash-neutrality of the MorphCategory retirement: the derived-capability MOVE gate must return
+        // the identical verdict the retired `m != rooted-mark` proxy did for EVERY registry locomotion
+        // mode, so a run over these modes decides movement identically and its canonical state hash is
+        // unchanged (this slice retires the anatomy category, not the run's behaviour). Every non-rooted
+        // mode bears a limb that reads a LOCOMOTE capability, so it affords MOVE; the rooted mark (kind
+        // id 0) bears none, so it does not, by physics rather than by a mode id.
+        let reg = AffordanceRegistry::dev_default();
+        let (organs, refs, caps) = cap_ctx();
+        for k in &organs.locomotion {
+            let b = body((1, 2), vec![k.id]);
+            let capability_gate = reg.afforded(&b, &organs, &refs, &caps).contains(&MOVE);
+            let retired_rooted_mark_gate = k.id != 0;
+            assert_eq!(
+                capability_gate, retired_rooted_mark_gate,
+                "mode {} ({}): the capability MOVE gate must match the retired rooted-mark gate",
+                k.id, k.name
+            );
+        }
     }
 
     #[test]
@@ -843,9 +921,9 @@ mod tests {
     }
 
     /// A body carrying a given organ set. Body mass is set independently and large on purpose, so the
-    /// tests can show reserves do NOT track mass. Locomotion is the rooted mark (irrelevant here).
+    /// tests can show reserves do NOT track mass. Locomotion is the rooted mark, kind id 0 (irrelevant here).
     fn organ_body(mass: (i64, i64), organs: Vec<Part>) -> BodyPlan {
-        let mut b = body(mass, vec![ROOTED_MODE]);
+        let mut b = body(mass, vec![0]);
         b.organs = organs;
         b
     }

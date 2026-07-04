@@ -65,7 +65,9 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_world::Coord3;
 
-use crate::anatomy::BodyPlan;
+use civsim_compose::{CapabilityCaps, CapabilityRefs};
+
+use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
@@ -125,6 +127,16 @@ pub struct LocomotionParams {
     /// `physiology.condition_recovery` once the locomotion parameters read the manifest, a labelled dev
     /// fixture until then.
     pub condition_recovery: Fixed,
+    /// The reserved-with-basis reference levels the LOCOMOTE function law measures a limb against
+    /// (emergent-anatomy step one), so the movement physics reads a body's mobility from its grown limb
+    /// physics rather than a mode-id proxy. RESERVED at their `capability.*` manifest homes (see
+    /// [`civsim_compose::CapabilityRefs`]); the dev harness stands up a labelled fixture. Shared with the
+    /// affordance derive so the MOVE gate and the ground speed read the same capability.
+    pub capability_refs: CapabilityRefs,
+    /// The physics saturation ceilings the LOCOMOTE law clamps to, derived from the mechanical floor's own
+    /// axis ranges (the same derive-from-floor-range discipline [`civsim_compose::CapabilityCaps::derive`]
+    /// uses); a labelled dev fixture until the parameters read the floor registry.
+    pub capability_caps: CapabilityCaps,
 }
 
 impl LocomotionParams {
@@ -146,6 +158,16 @@ impl LocomotionParams {
             // A labelled fixture: the CONDITION reserve heals a quarter per tick, fast enough that a
             // heritable halophile outpaces a salt flat's harm while a naive lineage is worn through.
             condition_recovery: Fixed::from_ratio(1, 4),
+            // The labelled LOCOMOTE references and floor ceilings the affordance MOVE gate reads
+            // (emergent-anatomy step one); a canonical run reads the reserved capability references and
+            // derives the caps from the floor registry. The ceilings are the mechanical floor's own
+            // pressure and length range hi (150000 MPa, 100 m), matching the compose crate's derive so a
+            // limb reads the same capability in the affordance path as in the individual-tier body path.
+            capability_refs: CapabilityRefs::dev_refs(),
+            capability_caps: CapabilityCaps {
+                pressure: Fixed::from_int(150_000),
+                depth: Fixed::from_int(100),
+            },
         }
     }
 }
@@ -372,13 +394,6 @@ impl Walker {
         Coord3::ground(floor_i32(self.x), floor_i32(self.y))
     }
 
-    /// Whether this body can walk at all: a body with no locomotion organ is rooted (a fixed tree)
-    /// and never moves however its controller reads, whatever its kingdom; a body that bears one
-    /// moves, even an autotroph, so a walking tree walks. Mobility is the body, never the kingdom.
-    pub fn is_mobile(&self) -> bool {
-        !self.body.locomotion.is_empty() && self.body.locomotion.iter().any(|&m| m != ROOTED_MODE)
-    }
-
     /// Record that this being now knows of a source of `axis` at `coord`.
     pub fn learn(&mut self, axis: HomeostaticAxisId, coord: Coord3) {
         self.known.entry(axis).or_default().insert(coord);
@@ -398,7 +413,8 @@ impl Walker {
 
 /// One-half, the tile centre offset.
 const HALF: Fixed = Fixed::from_bits(1i64 << 31);
-/// The registry id of the rooted (non-)locomotion mode: a body carrying only this does not walk.
+/// The registry id of the rooted (non-)locomotion mode: a body carrying only this bears no limb (the
+/// kind carries no geometry), so it reads no LOCOMOTE capability and does not walk.
 const ROOTED_MODE: u16 = 0;
 /// The smallest squared heading magnitude that counts as a directional signal; below it the being
 /// has no gradient to follow and explores instead.
@@ -415,6 +431,12 @@ fn floor_i32(v: Fixed) -> i32 {
 /// activity axis between the reserved floor and one, and is divided down by terrain cost above open
 /// ground. A body with no locomotion organ does not move. Whether the being has the reserves to move
 /// is the metabolism's concern, not this pure physical speed.
+///
+/// The `sqrt(body_mass)` allometric size proxy is the next authored proxy the emergent-anatomy arc
+/// retires: the ground speed will scale with the grown limb length (a stride derived from the LOCOMOTE
+/// limb's `mech.arm_length`) rather than a mass power law, the same physics read the affordance gate now
+/// uses. That slice re-baselines the run-path state hash and re-tunes the R-BEHAVIOR-EVOLVE scoring
+/// harness, so it is split from this affordance-gate retirement (which is hash-neutral).
 pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionParams) -> Fixed {
     let mobile = !body.locomotion.is_empty() && body.locomotion.iter().any(|&m| m != ROOTED_MODE);
     if !mobile {
@@ -509,13 +531,17 @@ pub fn step<T: Terrain>(
     // path (the evolve proxy, the movement tests), whose resource field is a re-seeded fixture, not a
     // living stock. It grazes a throwaway copy so the ingest deposit is measured identically while the
     // caller's field is left intact; the live run path drives the depleting `step_with_field_dirs`
-    // directly with a `&mut ResourceField` (base-level liveliness step 3).
+    // directly with a `&mut ResourceField` (base-level liveliness step 3). Being the labelled-fixture
+    // entry, it supplies the labelled-fixture organ registry the affordance and speed derives read; the
+    // live run path passes the world's own registry from the runner (emergent-anatomy step one).
     let mut scratch = resources.clone();
+    let organs = BodyPlanRegistry::dev_default();
     step_with_field_dirs(
         walkers,
         homeo,
         layout,
         afford,
+        &organs,
         terrain,
         &mut scratch,
         p,
@@ -555,6 +581,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     homeo: &HomeostaticRegistry,
     layout: &ControllerLayout,
     afford: &AffordanceRegistry,
+    organs: &BodyPlanRegistry,
     terrain: &T,
     resources: &mut ResourceField,
     p: &LocomotionParams,
@@ -615,7 +642,7 @@ pub fn step_with_field_dirs<T: Terrain>(
         let input = layout.build_input(&w.homeostasis, &here_axes, &dirs, signed);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
-        let afforded = afford.afforded(&w.body);
+        let afforded = afford.afforded(&w.body, organs, &p.capability_refs, &p.capability_caps);
         let decision = layout.decide(&out, &afforded);
 
         let mut exertion = Fixed::ZERO;
@@ -910,7 +937,8 @@ mod tests {
         }
     }
 
-    /// A rooted body carries only the rooted mark, so it cannot walk, whatever its kingdom.
+    /// A rooted body carries only the rooted mark (kind id 0, which bears no limb geometry, so it reads
+    /// no LOCOMOTE capability), so it cannot walk, whatever its kingdom.
     fn rooted_body() -> BodyPlan {
         let mut b = mobile_body();
         b.locomotion = vec![ROOTED_MODE];
@@ -1471,6 +1499,7 @@ mod tests {
             &reg,
             &l,
             &afford,
+            &BodyPlanRegistry::dev_default(),
             &OpenGround,
             &mut field,
             &LocomotionParams::dev_default(),
@@ -1586,6 +1615,7 @@ mod tests {
                     &reg,
                     &l,
                     &afford,
+                    &BodyPlanRegistry::dev_default(),
                     &OpenGround,
                     &mut field,
                     &p,

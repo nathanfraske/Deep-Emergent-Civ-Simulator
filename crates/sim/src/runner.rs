@@ -772,6 +772,12 @@ pub struct Embodiment {
     thermal: BTreeMap<StableId, BeingThermal>,
     homeo: HomeostaticRegistry,
     afford: AffordanceRegistry,
+    /// The organ registry a being's part kinds are looked up in, so an affordance and the ground speed are
+    /// DERIVED from each part's grown geometry and material through the function-law dispatch, blind to any
+    /// kind or race id (emergent-anatomy step one). A labelled dev fixture by default ([`Embodiment::new`]);
+    /// the world-build installs the world's own registry ([`Embodiment::set_organs`]), the same one the
+    /// physiology reads, so the two agree.
+    organs: BodyPlanRegistry,
     layout: ControllerLayout,
     params: LocomotionParams,
     resources: ResourceField,
@@ -825,6 +831,7 @@ impl Embodiment {
             thermal: BTreeMap::new(),
             homeo,
             afford,
+            organs: BodyPlanRegistry::dev_default(),
             layout,
             params,
             resources: ResourceField::new(),
@@ -840,6 +847,15 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
+    /// step one). Set before the embodiment is handed to the runner, to the same [`BodyPlanRegistry`] the
+    /// physiology is built from, so the affordance derive, the speed derive, and the metabolic producers
+    /// all read one registry. Without it the embodiment keeps the labelled dev-fixture registry from
+    /// [`Embodiment::new`].
+    pub fn set_organs(&mut self, organs: BodyPlanRegistry) {
+        self.organs = organs;
     }
 
     /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
@@ -1681,6 +1697,7 @@ impl Runner {
             &emb.homeo,
             &emb.layout,
             &emb.afford,
+            &emb.organs,
             &terrain,
             &mut emb.resources,
             &emb.params,

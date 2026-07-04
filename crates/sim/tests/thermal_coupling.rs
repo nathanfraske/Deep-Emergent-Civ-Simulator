@@ -40,7 +40,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
@@ -48,6 +48,7 @@ use civsim_sim::homeostasis::{
 };
 use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::runner::{comfort_fraction, BeingThermal, Embodiment, Field, FieldCalib, Runner};
+use civsim_sim::{CapabilityCaps, CapabilityRefs};
 use civsim_world::Coord3;
 
 const SETPOINT: i32 = 37;
@@ -213,7 +214,16 @@ fn the_thermotaxis_controller_authors_no_heading() {
     dirs.insert(TEMPERATURE, (Fixed::ONE, Fixed::ZERO)); // a direction is on offer...
     let input = l.build_input(&homeo, &here, &dirs, &BTreeMap::new());
     let (out, _) = c.evaluate(&input, &[]);
-    let afforded = AffordanceRegistry::dev_default().afforded(&mobile_body());
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+    let afforded = AffordanceRegistry::dev_default().afforded(
+        &mobile_body(),
+        &BodyPlanRegistry::dev_default(),
+        &CapabilityRefs::dev_refs(),
+        &caps,
+    );
     let d = l
         .decide(&out, &afforded)
         .expect("the body affords movement");

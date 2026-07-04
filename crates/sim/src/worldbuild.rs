@@ -538,6 +538,9 @@ fn assemble_dawn_embodiment(
     // Arm the tolerance registry on the embodiment so the lifecycle pairing expresses a newborn's
     // heritable tolerance from its own genome the same way (base-level liveliness step 4).
     emb.set_tolerances(genesis.tolerances.clone());
+    // Install the world's organ registry so an affordance and the ground speed are derived against the
+    // same kinds the physiology reads (emergent-anatomy step one), not the labelled dev fixture.
+    emb.set_organs(genesis.organs.clone());
     emb.set_physiology(EmbodiedPhysiology::from_manifest(
         manifest,
         genesis.organs.clone(),

@@ -36,9 +36,12 @@ use civsim_sim::anatomy::{
 use civsim_sim::biosphere::{grounded, Niche, SourceRef, Species};
 use civsim_sim::body::{Body, BodyParams, BLOOD};
 use civsim_sim::genome::{GenePool, SchemeId};
-use civsim_sim::homeostasis::{birth_viable, Homeostasis, HomeostaticRegistry, ENERGY};
+use civsim_sim::homeostasis::{
+    birth_viable, AffordanceRegistry, Homeostasis, HomeostaticRegistry, ENERGY, MOVE,
+};
 use civsim_sim::lineage::SpeciesId;
 use civsim_sim::stocks::Stock;
+use civsim_sim::{CapabilityCaps, CapabilityRefs};
 
 // Dev-registry organ kind ids (crate::anatomy BodyPlanRegistry::dev_default): 0 fat-body (energy
 // dense), 1 glycogen-store, 2 water-store (zero energy density, the reserveless case).
@@ -387,5 +390,56 @@ fn locomotion_and_sight_are_pure_physics_reads_with_no_layer_or_race_key() {
             &params
         ),
         "a head bearing a lens (refractive index above the medium) sees, by physics"
+    );
+}
+
+#[test]
+fn the_run_path_move_affordance_is_a_pure_physics_read_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one on the RUN path (the aggregate/embodiment tier the dawn ticks, not the
+    // promoted-individual `Body`): a body's MOVE affordance is DERIVED from its locomotion parts'
+    // LOCOMOTE capability against the organ registry, retiring the authored `MorphCategory::Locomotion`
+    // gate. The read keys on the mode's own physics, never the body's mass, armor, organs, or a race id,
+    // so two wildly different bodies sharing one walking limb afford MOVE identically and a rooted body
+    // affords none, by physics not by an anatomy category.
+    let afford = AffordanceRegistry::dev_default();
+    let organs = BodyPlanRegistry::dev_default();
+    let refs = CapabilityRefs::dev_refs();
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+
+    // Two bodies sharing the walk mode (id 1) but differing in mass, armor, and organs.
+    let light = body((1, 50), (0, 1), vec![], vec![part(FAT_BODY, (1, 8))]);
+    let heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    let light_moves = afford
+        .afforded(&light, &organs, &refs, &caps)
+        .contains(&MOVE);
+    let heavy_moves = afford
+        .afforded(&heavy, &organs, &refs, &caps)
+        .contains(&MOVE);
+    assert!(
+        light_moves,
+        "a body bearing a walking limb affords MOVE by physics"
+    );
+    assert_eq!(
+        light_moves, heavy_moves,
+        "the same locomotion mode reads the same MOVE affordance whatever the body, mass, armor, or layer"
+    );
+
+    // A rooted-only body (the rooted mark, kind id 0, bears no limb geometry) affords no MOVE, by physics
+    // not by a missing tag.
+    let mut sessile = body((1, 4), (0, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    sessile.locomotion = vec![0];
+    assert!(
+        !afford
+            .afforded(&sessile, &organs, &refs, &caps)
+            .contains(&MOVE),
+        "a rooted body affords no movement: the MOVE gate is a derived capability, not an anatomy category"
     );
 }

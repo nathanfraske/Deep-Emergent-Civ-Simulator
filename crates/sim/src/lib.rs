@@ -172,7 +172,14 @@ pub use genome::{
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
-    HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, MorphCategory,
+    HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry,
+};
+// The function-law dispatch types the affordance and body APIs read, re-exported so an external caller
+// can name the capability context an [`AffordanceRegistry::afforded`] or a [`body::BodyParams`] needs
+// (emergent-anatomy step one; the mechanism lives in `civsim_compose`).
+pub use civsim_compose::{
+    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
+    FunctionLawDef, FunctionLawId, FunctionLawRegistry,
 };
 pub use institution::{
     crystallization_order, crystallize, emit_undertaking, institution_distance, norm_fires,
