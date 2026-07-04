@@ -177,7 +177,14 @@ pub fn whole_body_surface(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
 /// body whose tissue declares no strength reads ZERO (the absence convention its siblings use), not a
 /// mass-sized default, so the exertion coupling falls to its no-force branch rather than a hidden proxy.
 /// The sum is the order-independent [`Fixed::saturating_add`], so it is invariant to organ order, and the
-/// mass bridge is the reserved kilogram scale the metabolic derivations already read.
+/// mass bridge is the reserved kilogram scale the metabolic derivations already read. HONEST LIMIT (the
+/// shared Q32.32 convention, surfaced by the blind audit): the final mass multiply routes an overflow to
+/// ZERO (`checked_mul(..).unwrap_or(ZERO)`), the same degenerate-input convention [`body_mass_kg`] and the
+/// individual-tier [`crate::body::Body::strength`] use, so a body whose Pa-scale muscle strength times a
+/// giant body mass exceeds the representable range reads zero force rather than saturating. This never
+/// binds at the dev-fixture magnitudes; when the owner sets real fracture strengths it is a calibration
+/// concern to keep the product in range, and any move to a saturating convention must change both tiers
+/// together (the ruling's tier-consistency), not this one alone.
 pub fn whole_body_muscle_force(
     plan: &BodyPlan,
     organs: &BodyPlanRegistry,
