@@ -240,6 +240,14 @@ value = "0.1"
 unit = "ratio_per_tick"
 source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
 
+[[reserved]]
+id = "metabolism.respiration_transfer_coefficient"
+basis = "FIXTURE placeholder, not the owner's value; a unit Fick membrane gas-transfer coefficient k so the embodiment respiration coupling (medium::respire, EmbodiedPhysiology::from_manifest) resolves on the dev-fixtures profile. A real per-membrane permeability is the owner's to set (calibration/reserved.toml)"
+status = "set"
+value = "1"
+unit = "gas_transfer_coefficient"
+source = "dev fixture for R-MEDIUM respiration; crates/sim/src/runner.rs EmbodiedPhysiology"
+
 # --- the dawn evidence ring (Part 28 axiom model, RingCapacityLaw::from_manifest) ---
 
 [[reserved]]

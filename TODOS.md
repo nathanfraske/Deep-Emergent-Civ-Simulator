@@ -1,7 +1,7 @@
 # TODOS.md: Live Backlog Mirror
 
-> # ⛔ NEXT AGENT: FINISH WORLD-WIRING INCREMENT 10 PART B FIRST ⛔
-> The world-wiring arc (increments 1 through 10 Part A) is merged. Increment 10 **Part A** (post-dawn census-driven gene-pool drift) is done; **Part B (the physiology tier) is the one remaining piece and is NOT done.** Before any other work, wire the physiology producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration in `crates/sim/src/physiology.rs`) into the Runner embodiment step (`step_inner`, `crates/sim/src/runner.rs`), with the body-plan registry, metabolic anchors, medium field, and `LivingWorld` step it needs. Scope: `docs/working/WORLD_WIRING_HANDOFF.md` increment 10, and the top entry of `HANDOFFS.md`. Finish Part B, then continue.
+> # World-wiring arc COMPLETE (increments 1 through 10, Parts A and B). No forced pickup.
+> Increment 10 **Part B (the physiology tier) is DONE** (2026-07-04): the anatomy-derived producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration) are LIVE in the Runner embodiment step (`crates/sim/src/runner.rs` `EmbodiedPhysiology` + `step_embodiment`, `crates/sim/src/locomotion.rs`), so a being's survival diverges from its body plan alone with no race label, proven in `crates/sim/tests/physiology_embodiment.rs`. See the top entry of `HANDOFFS.md`. The largest remaining unblock is the owner's reserved-value calibration (below); then the further emergence work.
 
 The working view of the research backlog (audit Section 3) and the reserved-values queue. Updated every session: resolved items move to the resolved list, new flags are added, order is adjusted. Each open item is one bullet, identifier first, then the one-line question, then readiness and couplings, so the backlog tool reads it deterministically. The owner sets the order; the readiness tags are guidance.
 

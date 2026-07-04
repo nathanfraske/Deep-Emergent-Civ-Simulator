@@ -1431,6 +1431,14 @@ value = ""
 unit = "watt_per_m2_kelvin4"
 source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
 
+[[reserved]]
+id = "metabolism.respiration_transfer_coefficient"
+basis = "the Fick membrane gas-transfer coefficient k the respiration coupling reads (law.membrane_gas_flux, flux = k*A*(c_medium - c_internal)), a per-membrane permeability datum, not a body property: it sets how fast a respiratory surface exchanges the respirable species with its medium per unit area and concentration gap (a permeable gill or lung membrane exchanges faster than a thick, low-diffusivity integument). Set per the membrane's gas permeability against the medium (Fick diffusion coefficient over membrane thickness); read on the canonical embodiment path by EmbodiedPhysiology::from_manifest, a labelled dev fixture (Fixed::ONE) in tests. The flux representability cap is an engine-mechanics bound in code (RESPIRATION_FLUX_MAX), not an owner value"
+status = "reserved"
+value = ""
+unit = "gas_transfer_coefficient"
+source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/src/medium.rs respire, crates/sim/src/runner.rs EmbodiedPhysiology"
+
 # --- Scenario direction siblings (docs/working/TEST_WORLDS.md) ---
 #
 # A test-world scenario pushes each change-and-extremes dial in a direction (real, high, low),
