@@ -342,17 +342,18 @@ fn the_offset_preserves_the_mean_and_is_an_odd_reflection() {
 // hash exactly. The golden constant is captured with this same fixture, seed, and band; a zero
 // spread makes the offset exactly zero, so the seeded world must fold to the identical canonical
 // hash. The golden is refreshed whenever World::state_hash folds more canonical state: first the
-// life-cadence period and mortality-hazard curve (an earlier defect), and now each being's age and
-// personality trait trajectory and each lineage's race maturity and lifespan (blind-audit defect 7).
-// The zero-variance backward-compat property (a zero spread reproduces the no-offset dawn) is
-// unchanged; only the folded field set grew.
+// life-cadence period and mortality-hazard curve (an earlier defect), then each being's age and
+// personality trait trajectory and each lineage's race maturity and lifespan (blind-audit defect 7),
+// and now the aggregate belief pools (the belief-diffusion beat, world-wiring increment 4), which
+// fold an empty (length-zero) pool set here. The zero-variance backward-compat property (a zero
+// spread reproduces the no-offset dawn) is unchanged; only the folded field set grew.
 #[test]
 fn zero_variance_reproduces_the_pre_offset_state_hash() {
     let (w, ids) = seed_cohort(0xDE0D_0007, race(0, Fixed::from_int(4), Fixed::ZERO), 7, 12);
     assert_eq!(ids.len(), 12);
     assert_eq!(
         w.state_hash(),
-        0x1ca223707f535c2e4550b68268d11603u128,
+        0x81014dee8e948eb5d032135f243231a3u128,
         "a zero developmental variance reproduces the pre-offset dawn bit for bit"
     );
 }

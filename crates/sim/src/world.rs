@@ -46,6 +46,7 @@ use civsim_world::OrbitalElements;
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::agent::{AccessObs, Mind, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
+use crate::belief::{BeliefKey, BeliefPool};
 use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::census::ReproductiveCensus;
@@ -463,6 +464,15 @@ pub struct World {
     languages: BTreeMap<LangId, Language>,
     /// Which lineage each mind speaks. A mind with no entry speaks the default lineage.
     lang_of: BTreeMap<StableId, LangId>,
+    /// The per-band aggregate belief pools (design Part 54), keyed by place: each holds the
+    /// prevailing beliefs of the members at that place, their intensive knowledge level and extensive
+    /// mass. The belief-diffusion beat raises them toward saturation. Empty until a producer or a test
+    /// seeds one ([`World::seed_belief`]); the dawn seeds each being's own intrinsic beliefs, not
+    /// aggregate pools, so a world that seeds none runs the diffusion beat as a no-op.
+    belief_pools: BTreeMap<PlaceId, BeliefPool>,
+    /// The aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from the
+    /// gossip parameters). None until set; the belief-diffusion beat is then a no-op.
+    belief_diffusion_rate: Option<Fixed>,
     /// The drift calibration. None until set; regular form change is then a no-op.
     drift: Option<DriftParams>,
     /// The language calibration. None until set; the naming game is then a no-op.
@@ -551,6 +561,8 @@ impl World {
             concepts: Vec::new(),
             languages: BTreeMap::new(),
             lang_of: BTreeMap::new(),
+            belief_pools: BTreeMap::new(),
+            belief_diffusion_rate: None,
             drift: None,
             language: None,
             events: EventLog::new(),
@@ -921,6 +933,39 @@ impl World {
     /// Install the drift calibration. Until set, regular form change is a no-op.
     pub fn set_drift(&mut self, params: DriftParams) {
         self.drift = Some(params);
+    }
+
+    /// Install the aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from
+    /// the gossip parameters through [`crate::belief::BeliefParams`]). Until set, the belief-diffusion
+    /// beat is a no-op, so a world that installs no rate runs exactly as before.
+    pub fn set_belief_diffusion_rate(&mut self, rate: Fixed) {
+        self.belief_diffusion_rate = Some(rate);
+    }
+
+    /// Seed a band's prevailing belief at a place (the aggregate-tier belief substrate, design Part
+    /// 54): the members at `place` hold the belief `key` at knowledge level `level`, with `count`
+    /// holders. The belief-diffusion beat then raises the level toward saturation on the SI logistic.
+    /// A producer or a test seeds; the dawn seeds each being's own intrinsic beliefs rather than these
+    /// aggregate pools, so a world that seeds none diffuses nothing.
+    pub fn seed_belief(&mut self, place: PlaceId, key: BeliefKey, level: Fixed, count: u32) {
+        self.belief_pools
+            .entry(place)
+            .or_default()
+            .seed(key, level, count);
+    }
+
+    /// A band's belief pool, if any has been seeded at the place (for inspection and tools).
+    pub fn belief_pool(&self, place: PlaceId) -> Option<&BeliefPool> {
+        self.belief_pools.get(&place)
+    }
+
+    /// A band's knowledge level for a belief, if the place holds a pool carrying that belief (a read
+    /// of canon, for tests and the view).
+    pub fn belief_level(&self, place: PlaceId, key: &BeliefKey) -> Option<Fixed> {
+        self.belief_pools
+            .get(&place)?
+            .get(key)
+            .map(|b| b.knowledge_level())
     }
 
     /// A language lineage by id, for inspecting its parent and change log.
@@ -1967,6 +2012,7 @@ impl World {
         self.decide();
         self.converse();
         self.gossip();
+        self.diffuse_beliefs();
         self.converse_language();
         self.drift_step();
         self.life_cadence();
@@ -2077,6 +2123,31 @@ impl World {
                 .entry(listener)
                 .or_default()
                 .adopt(concept, word);
+        }
+    }
+
+    /// The belief-diffusion beat (design Part 54, the aggregate-tier contagion of the resolved
+    /// R-EVIDENCE belief substrate): each band's prevailing beliefs advance one SI-logistic diffusion
+    /// step toward saturation, raising the knowledge level from its seed toward one and carrying the
+    /// extensive mass with it. Content-blind and RNG-free (Principles 9, 3): the rate is the reserved
+    /// aggregate diffusion rate, identical for every belief; the within-band coupling is full (distance
+    /// one); and the pools and their beliefs are walked in canonical place then [`BeliefKey`] order, so
+    /// the beat replays bit for bit and is worker-count independent. Inert until the diffusion rate is
+    /// installed. Spreading a band's belief to a neighbouring band on a distance lag waits on a place
+    /// adjacency the abstract-place world does not yet carry (a named follow-on); this beat is the
+    /// within-band climb.
+    fn diffuse_beliefs(&mut self) {
+        let rate = match self.belief_diffusion_rate {
+            Some(r) => r,
+            None => return,
+        };
+        // Walk pools in canonical place order, then each pool's beliefs in canonical key order.
+        for pool in self.belief_pools.values_mut() {
+            for key in pool.keys_in_order() {
+                if let Some(belief) = pool.get_mut(&key) {
+                    belief.advance_diffusion(rate, Fixed::ONE);
+                }
+            }
         }
     }
 
@@ -3055,6 +3126,15 @@ impl World {
                 }
             }
         }
+        // The aggregate belief pools, by place then belief key (canonical walk, R-CANON-WALK): the
+        // belief-diffusion trajectory is canonical state, so two worlds whose beliefs diffuse to
+        // different levels are different worlds. The place is length-agnostic here (the map is already
+        // ordered), and each pool folds its own length-prefixed key-ordered contents.
+        h.write_u64(self.belief_pools.len() as u64);
+        for (place, pool) in &self.belief_pools {
+            h.write_u32(*place);
+            pool.hash_into(&mut h);
+        }
         h.finish()
     }
 
@@ -3172,6 +3252,76 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(w.population(), 2);
         assert!(w.mind(a).is_some());
+    }
+
+    #[test]
+    fn a_seeded_belief_climbs_an_s_curve_to_saturation_and_replays() {
+        // The belief-diffusion beat (design Part 54): a band's seeded belief climbs the SI logistic
+        // toward saturation, monotone and without a one-step jump, and the trajectory is bit-for-bit
+        // deterministic (no RNG). The extensive mass grows with the level, and the level reads back
+        // exactly (mass over count).
+        let key = BeliefKey {
+            subject: StableId(1),
+            attr: AttrKindId(0),
+            value: 7,
+        };
+        let seed_level = Fixed::from_ratio(1, 20); // 0.05
+        let run = || {
+            let mut w = world().with_seed(0xBE11E);
+            w.seed_belief(10, key, seed_level, 8);
+            w.set_belief_diffusion_rate(Fixed::from_ratio(4, 10)); // a fixture rate
+            let mut levels = Vec::new();
+            for _ in 0..300 {
+                w.tick(&[]);
+                levels.push(w.belief_level(10, &key).unwrap());
+            }
+            (levels, w.state_hash())
+        };
+        let (levels, hash) = run();
+        // Monotone climb with no one-step jump.
+        let mut prev = seed_level;
+        let mut max_step = Fixed::ZERO;
+        for &lvl in &levels {
+            assert!(
+                lvl >= prev,
+                "the level climbs monotonically: {lvl:?} < {prev:?}"
+            );
+            let step = lvl - prev;
+            if step > max_step {
+                max_step = step;
+            }
+            prev = lvl;
+        }
+        assert!(
+            *levels.last().unwrap() > Fixed::from_ratio(9, 10),
+            "climbs past 0.9 to saturation: {:?}",
+            levels.last().unwrap()
+        );
+        assert!(
+            max_step < Fixed::from_ratio(1, 2),
+            "no one-step jump: max step {max_step:?}"
+        );
+        // Bit-for-bit replay, including the belief pool's contribution to the state hash.
+        let (levels2, hash2) = run();
+        assert_eq!(
+            levels, levels2,
+            "the diffusion trajectory replays bit for bit"
+        );
+        assert_eq!(
+            hash, hash2,
+            "the belief pool folds into a bit-identical state hash"
+        );
+        // Inert without a rate: the belief does not move.
+        let mut inert = world().with_seed(0xBE11E);
+        inert.seed_belief(10, key, seed_level, 8);
+        for _ in 0..50 {
+            inert.tick(&[]);
+        }
+        assert_eq!(
+            inert.belief_level(10, &key),
+            Some(seed_level),
+            "without a diffusion rate the beat is inert"
+        );
     }
 
     #[test]
