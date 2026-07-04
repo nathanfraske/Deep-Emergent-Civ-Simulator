@@ -194,3 +194,5 @@ The whole celestial model today is two scalars, orbital_period_seconds and rotat
 
 Sequence, once the unification lands: (1) celestial-mechanics layer, (2) insolation, (3) moon/phases/eclipses/tides, (4) star field with emergent constellations and navigation, (5) comets and meteor showers, (6) the emergent calendar/astrology/omen cultural layer. Owner call when scheduled: whether the first real runs want a living sky or a static climate.
 
+
+The base-level liveliness arc is now fully scoped with an ordered, feasibility-grounded build plan in `docs/working/BASE_LIVELINESS_HANDOFF.md` (the five steps, the promotion policy, the observability additions, and the gates). The first runs proved its case: the world is dead for three concrete reasons (blank dawn controllers so no movement, no energy/water axis or depletable food so no carrying capacity, conversation half-wired and decoupled from movement). Recommended first step: field-coupled movement (pure data, no Rust change), the keystone the rest rides on.
