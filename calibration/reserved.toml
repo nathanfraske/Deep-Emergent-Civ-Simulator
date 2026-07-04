@@ -1207,6 +1207,29 @@ set_date = "2026-07-01"
 unit = "hidden_units"
 source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
+# --- base-level liveliness step 1: the founding thermotaxis reaction norm the dawn controller gene block
+# seeds (crates/sim/src/controller.rs taxis_move_weights, crates/sim/src/genome.rs
+# append_controller_block). These are the taxis weight MAGNITUDES a canonical race genesis reads to seed a
+# founder that moves along the temperature gradient; the dev-fixture run harness stands them up inline
+# (Fixed::ONE). The mechanism (which controller weight each is) is fixed Rust; only the magnitudes are
+# reserved (Principle 11), the same for every race (Principle 9). ---
+
+[[reserved]]
+id = "controller.taxis.move_bias"
+basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.heading_gain"
+basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
+
 # behavior.controller_init_spread, controller_mutation_rate, and controller_mutation_step RETIRED
 # (controller-scaling derivation built, 2026-07-03; worksheet §13a): the three controller scalings no
 # longer stand as free numbers. They DERIVE through EvolveParams::from_layout (crates/sim/src/evolve.rs)

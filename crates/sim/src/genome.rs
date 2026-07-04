@@ -365,6 +365,56 @@ impl GeneSet {
     }
 }
 
+/// Append a full founding controller gene block to a gene set and its parallel pool spine (base-level
+/// liveliness, step 1). This adds one unit-effect additive gene for EVERY one of the controller's
+/// `weight_count` heritable weights (so a founder carries the whole controller substrate and mutation
+/// can later turn any weight on, matching `crate::evolve::controller_gene_set`), each feeding its
+/// `Channel::Controller(ControllerParamId(k))` at a fresh locus. The pool spine is seeded from the
+/// `seeds` the caller derived from a taxis pattern (`crate::controller::taxis_move_weights`): a seeded
+/// weight's locus gets frequency `ONE` (the founder is homozygous, so the locus carries no additive
+/// variance and the dawn expression is deterministic) and additive effect `target / ploidy` (a
+/// `ploidy`-fold founder expresses `ploidy * (target / ploidy) = target`); an unseeded weight gets a
+/// balanced frequency and zero effect, so it expresses to zero until mutation moves it. The existing
+/// genes and their spine are untouched, so the cognition and sex loci keep their expression, and the
+/// `genes`, `freqs`, and `effects` vectors stay parallel and index-aligned (locus = gene index), the
+/// invariant [`GeneSet::express`] and [`GenePool`] read them by.
+///
+/// The seed magnitudes are the caller's reserved values (Principle 11); the `ONE` frequency, the
+/// balanced default, and the `target / ploidy` effect are mechanism (the deterministic-homozygote and
+/// dosage-normalising conventions), not fabricated content. Reads no race id (Principle 9).
+pub fn append_controller_block(
+    genes: &mut Vec<GeneDef>,
+    freqs: &mut Vec<Fixed>,
+    effects: &mut Vec<Fixed>,
+    ploidy: usize,
+    weight_count: usize,
+    seeds: &[(ControllerParamId, Fixed)],
+) {
+    let ploidy_fx = Fixed::from_int(ploidy.max(1) as i32);
+    let seed_of: std::collections::BTreeMap<u32, Fixed> =
+        seeds.iter().map(|&(p, t)| (p.0, t)).collect();
+    for k in 0..weight_count {
+        genes.push(GeneDef {
+            id: GeneId(genes.len() as u32),
+            effects: vec![GeneEffect {
+                channel: Channel::Controller(ControllerParamId(k as u32)),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        });
+        match seed_of.get(&(k as u32)) {
+            Some(&target) => {
+                freqs.push(Fixed::ONE);
+                effects.push(target.checked_div(ploidy_fx).unwrap_or(Fixed::ZERO));
+            }
+            None => {
+                freqs.push(Fixed::from_ratio(1, 2));
+                effects.push(Fixed::ZERO);
+            }
+        }
+    }
+}
+
 /// The weight with which a gene feeds a channel, summing across its effects so a gene that
 /// feeds one channel through several effects accumulates them. `None` if the gene does not
 /// feed the channel at all.

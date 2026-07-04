@@ -289,6 +289,42 @@ pub fn weight_count(n_in: usize, n_out: usize, hidden: usize) -> usize {
     }
 }
 
+/// The nonzero founding-taxis weights for a MOVE-directional reaction-norm controller over one target
+/// axis (base-level liveliness, step 1): each entry names the [`ControllerParamId`] of one nonzero
+/// weight and the target value a founder should express for it. The pattern is the reaction-norm form
+/// of the tested taxis controller: the MOVE activation follows the bias input (so the being wants to
+/// move, `move_bias`), and the MOVE heading follows the target axis's source-direction percept (so it
+/// steers along that axis's gradient, `heading_gain`). Nothing here is a magnitude of its own: the two
+/// gains are the caller's reserved values (Principle 11), and this function is fixed mechanism that maps
+/// each nonzero weight to its heritable channel with no race branch (Principle 9).
+///
+/// The layout must give MOVE a directional output at `move_output` (its activation, then its two
+/// heading components at the next two output indices) and the target axis an input block starting at
+/// `axis_input_base` (its level, here-flag, two source-direction components, then its signed slot). For
+/// a reaction norm the weight feeding output `o` from input `i` is [`ControllerParamId`] `o * n_in + i`.
+/// A caller seeds each returned weight by adding a unit-effect gene on that channel and a pool locus at
+/// frequency one whose additive effect is `target / ploidy`, so a homozygous founder expresses exactly
+/// the target (the locus carries no additive variance at frequency one, so the dawn expression is
+/// deterministic and mutation is what later gives selection a gradient to act on).
+pub fn taxis_move_weights(
+    layout: &ControllerLayout,
+    move_output: usize,
+    axis_input_base: usize,
+    move_bias: Fixed,
+    heading_gain: Fixed,
+) -> Vec<(ControllerParamId, Fixed)> {
+    let n_in = layout.n_in();
+    let param = |output: usize, input: usize| ControllerParamId((output * n_in + input) as u32);
+    let bias = n_in - 1;
+    vec![
+        // MOVE activation from the bias input: the being wants to move.
+        (param(move_output, bias), move_bias),
+        // MOVE heading from the axis's source-direction percept: it steers along the gradient.
+        (param(move_output + 1, axis_input_base + 2), heading_gain),
+        (param(move_output + 2, axis_input_base + 3), heading_gain),
+    ]
+}
+
 /// What the controller decided this tick: which affordance to issue, how strongly, and, for a
 /// directional affordance, in what heading (the raw two-component output, to be normalised by the
 /// caller against the movement physics).
@@ -459,6 +495,39 @@ mod tests {
             &AffordanceRegistry::dev_default(),
             hidden,
         )
+    }
+
+    #[test]
+    fn taxis_move_weights_land_on_the_move_activation_and_heading_slots() {
+        // Base-level liveliness step 1: the founding taxis weights target the MOVE activation from the
+        // bias input and the two MOVE heading components from the target axis's source-direction slots,
+        // at the reaction-norm indices output * n_in + input, carrying the caller's two gains.
+        let l = layout(0);
+        let n_in = l.n_in();
+        let mo = MOVE.0 as usize;
+        let w = taxis_move_weights(&l, mo, 0, Fixed::from_int(3), Fixed::from_int(5));
+        assert_eq!(w.len(), 3, "move activation and the two heading components");
+        assert!(
+            w.contains(&(
+                ControllerParamId((mo * n_in + (n_in - 1)) as u32),
+                Fixed::from_int(3)
+            )),
+            "move activation from the bias carries the move bias"
+        );
+        assert!(
+            w.contains(&(
+                ControllerParamId(((mo + 1) * n_in + 2) as u32),
+                Fixed::from_int(5)
+            )),
+            "move heading dx from the axis source-direction x carries the heading gain"
+        );
+        assert!(
+            w.contains(&(
+                ControllerParamId(((mo + 2) * n_in + 3) as u32),
+                Fixed::from_int(5)
+            )),
+            "move heading dy from the axis source-direction y carries the heading gain"
+        );
     }
 
     #[test]

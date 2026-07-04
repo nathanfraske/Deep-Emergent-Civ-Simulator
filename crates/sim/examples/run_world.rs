@@ -52,12 +52,13 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    build_dawn_runner, nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
-    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
-    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
-    LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
+    append_controller_block, build_dawn_runner, nsm_gloss, taxis_move_weights, Articulation, Axiom,
+    AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel,
+    CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId,
+    GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
+    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
+    TraitDef, ValueAxisId, ValueProfile, World,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -77,6 +78,55 @@ const MEMBERS_PER_BAND: usize = 6;
 
 /// The voice reception channel the founding races hear speech on (labelled fixture).
 const VOICE: SenseChannelId = SenseChannelId(1);
+
+// --- base-level liveliness step 1: the founding thermotaxis reaction norm and the selection dials.
+// Labelled DEV FIXTURES (the harness convention). Their reserved-with-basis home for a canonical race
+// genesis is `controller.taxis.*`, `genome.mutation_rate`, `genome.additive_mutation_step`, and the
+// per-race `environment_variance` in the manifest; here they are stood up as dev values so the run
+// moves. ---
+
+/// The MOVE affordance's activation output index in the dev-default affordance layout (MOVE is the
+/// lowest affordance id, so its activation is output 0, its heading components outputs 1 and 2).
+const MOVE_OUTPUT: usize = 0;
+/// The TEMPERATURE axis's input block base in the dev-thermal registry (its only axis, so index 0): its
+/// level, here-flag, two source-direction components, then its signed slot.
+const TEMPERATURE_INPUT_BASE: usize = 0;
+/// DEV FIXTURE: the founding move-activation bias, set decisively to one so the clamped MOVE activation
+/// saturates and a founder wants to move (basis: the activation magnitude at which MOVE beats a resting
+/// zero and the being leaves its cell; reserved for a canonical genesis).
+const TAXIS_MOVE_BIAS: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding heading gain on the temperature source-direction percept, set to one so
+/// the MOVE heading follows the unit gradient direction (basis: the heading-follow strength; reserved).
+const TAXIS_HEADING_GAIN: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the per-locus per-generation structural mutation rate, opened off zero so the founding
+/// controller weights drift and the movement-dependent fitness a later step gives them has a heritable
+/// gradient to select on (basis: the reserved `genome.mutation_rates` baseline; small so it explores
+/// without swamping selection).
+fn mutation_rate() -> Fixed {
+    Fixed::from_ratio(1, 100)
+}
+/// DEV FIXTURE: the additive mutation step, opened off zero so a controller weight can drift its
+/// magnitude across generations (basis: the reserved additive-step end; small).
+fn mutation_step() -> Fixed {
+    Fixed::from_ratio(1, 20)
+}
+/// DEV FIXTURE: the per-being developmental-environment variance half-width, opened off zero so
+/// littermates vary developmentally (basis: the reserved per-race `environment_variance`; small).
+fn env_variance() -> Fixed {
+    Fixed::from_ratio(1, 20)
+}
+
+/// The controller layout the founding thermotaxis block is sized against: the same registries the
+/// embodiment genesis installs (the dev-thermal homeostatic axes and the dev-default affordances, a
+/// reaction norm at hidden width zero), so `weight_count` and the taxis weight indices match the
+/// controller a founder expresses.
+fn dawn_layout() -> ControllerLayout {
+    ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    )
+}
 
 /// The concepts the language reader samples, the first few NSM semantic primes (the anchor meanings a
 /// band coordinates words for first). Kept short so a snapshot line stays legible.
@@ -196,49 +246,75 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     let i = index as i64;
     let step = cfg.diversity_step;
 
-    let genes = GeneSet {
-        genes: vec![
-            GeneDef {
-                id: GeneId(0),
-                effects: vec![GeneEffect {
-                    channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode::additive(),
+    let mut genes = vec![
+        GeneDef {
+            id: GeneId(0),
+            effects: vec![GeneEffect {
+                channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        },
+        GeneDef {
+            id: GeneId(1),
+            effects: vec![GeneEffect {
+                channel: Channel::Cognition(CognitionChannel::MemoryCapacity),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        },
+        GeneDef {
+            id: GeneId(2),
+            effects: vec![GeneEffect {
+                channel: Channel::SexDetermination,
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode {
+                a: Fixed::ZERO,
+                d: Fixed::ONE,
+                kind: DominanceKind::Complete,
             },
-            GeneDef {
-                id: GeneId(1),
-                effects: vec![GeneEffect {
-                    channel: Channel::Cognition(CognitionChannel::MemoryCapacity),
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode::additive(),
-            },
-            GeneDef {
-                id: GeneId(2),
-                effects: vec![GeneEffect {
-                    channel: Channel::SexDetermination,
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode {
-                    a: Fixed::ZERO,
-                    d: Fixed::ONE,
-                    kind: DominanceKind::Complete,
-                },
-            },
-        ],
-    };
+        },
+    ];
 
     // The two cognition loci start at index-shifted allele frequencies (races begin genetically
     // apart), while the sex locus stays balanced so both sexes appear and pairs can breed. The
-    // frequencies are clamped to a sane interior band.
+    // frequencies are clamped to a sane interior band. The cognition and sex loci carry a flat additive
+    // spine (effect zero); the controller block below adds its own.
     let freq0 = clamp_tenths(5 + i * step);
     let freq1 = clamp_tenths(5 - i * step);
-    let pool = GenePool::new(
-        SchemeId(0),
-        cfg.pool_ne,
-        vec![freq0, freq1, Fixed::from_ratio(1, 2)],
+    let mut freqs = vec![freq0, freq1, Fixed::from_ratio(1, 2)];
+    let mut effects = vec![Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
+
+    // Base-level liveliness step 1: append the founding controller gene block seeding a temperature
+    // thermotaxis reaction norm, so a founder MOVES along the temperature gradient the runner senses
+    // (the dev-thermal registry's only axis, dev-default's MOVE the directional output 0). The full
+    // controller substrate is seeded (a gene per weight, matching `evolve::controller_gene_set`), with
+    // the taxis magnitudes carried in the pool additive spine; every other weight starts at zero and can
+    // mutate on. Reads no race id: the seeds are the same for every race (Principle 9).
+    let layout = dawn_layout();
+    let seeds = taxis_move_weights(
+        &layout,
+        MOVE_OUTPUT,
+        TEMPERATURE_INPUT_BASE,
+        TAXIS_MOVE_BIAS,
+        TAXIS_HEADING_GAIN,
     );
+    // SexualDiploid (below), so ploidy two.
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    // The stamped integer-Gaussian approximation the additive spine draws through (the labelled
+    // SumOfUniforms{k=12} default of design 25.10; a canonical build reads genome.gauss_approx). The
+    // seeded loci sit at frequency one, so their within-locus deviation is zero and the draw is scaled
+    // out, but promote still draws it, so the stamp must be a real one, not the unset sentinel.
+    let pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
 
     // The innate belief stance walks off the baseline by index, so lineages of different races start
     // from different convictions and their per-band means diverge.
@@ -265,13 +341,17 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         ),
     };
 
+    // Base-level liveliness step 1: open the selection dials off zero (they were both zero, so a weight
+    // could not drift even if a locus existed), so the seeded controller weights mutate and the
+    // movement-dependent fitness a later step gives them has a heritable gradient to select on. Mutation
+    // uses the counter-keyed genome draw, so the run stays deterministic.
     let scheme = GeneticScheme {
         id: SchemeId(0),
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
-        mutation_rate: Fixed::ZERO,
-        additive_mutation_step: Fixed::ZERO,
-        gauss: GaussApprox::default(),
+        mutation_rate: mutation_rate(),
+        additive_mutation_step: mutation_step(),
+        gauss: GaussApprox::SumOfUniforms { k: 12 },
     };
 
     // The vocal tract is scaled off the shared base geometry by index, so each race derives a
@@ -281,12 +361,12 @@ fn full_race(index: usize, cfg: &Config) -> Race {
 
     Race::new(
         RaceId(index as u32),
-        genes,
+        GeneSet { genes },
         pool,
         scheme,
         intrinsic,
         Fixed::from_int(2),
-        Fixed::ZERO,
+        env_variance(),
         80,
         18,
     )
@@ -595,6 +675,52 @@ fn mean_knowledge(w: &World) -> f64 {
     total as f64 / ids.len() as f64
 }
 
+/// The migration and dispersal reader (base-level liveliness step 1): how far the located population has
+/// spread from its dawn cells. Reports the distinct occupied cells now (it starts at one per band and
+/// grows as founders disperse along the temperature gradient), the count of beings standing off every
+/// dawn cell, and the greatest Chebyshev displacement of any being from the nearest dawn cell. Reads the
+/// runner's located walkers (a pure read of hashed state, so it never perturbs the run). `None` if the
+/// runner carries no embodied population.
+fn migration(runner: &Runner, dawn_cells: &BTreeSet<(i32, i32)>) -> Option<(usize, usize, i32)> {
+    let emb = runner.embodiment()?;
+    let mut occupied: BTreeSet<(i32, i32)> = BTreeSet::new();
+    let mut off_dawn = 0usize;
+    let mut max_disp = 0i32;
+    for w in emb.walkers() {
+        let c = w.coord();
+        let cell = (c.x, c.y);
+        occupied.insert(cell);
+        if !dawn_cells.contains(&cell) {
+            off_dawn += 1;
+        }
+        let nearest = dawn_cells
+            .iter()
+            .map(|&(dx, dy)| (c.x - dx).abs().max((c.y - dy).abs()))
+            .min()
+            .unwrap_or(0);
+        max_disp = max_disp.max(nearest);
+    }
+    Some((occupied.len(), off_dawn, max_disp))
+}
+
+/// The distinct cells the embodied population stands on at the dawn, before any tick: one per founding
+/// band (each band spawns its members on its band cell), the baseline the migration reader measures
+/// dispersal against.
+fn dawn_cells(runner: &Runner) -> BTreeSet<(i32, i32)> {
+    runner
+        .embodiment()
+        .map(|emb| {
+            emb.walkers()
+                .iter()
+                .map(|w| {
+                    let c = w.coord();
+                    (c.x, c.y)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
 /// `None` if no being carries a body temperature.
 fn mean_body_temp(runner: &Runner) -> Option<f64> {
@@ -618,6 +744,7 @@ fn snapshot(
     runner: &Runner,
     cfg: &Config,
     prev: &BTreeSet<StableId>,
+    dawn: &BTreeSet<(i32, i32)>,
 ) -> BTreeSet<StableId> {
     let w = runner.world().expect("the unified runner carries a world");
     let bands = bands_by_place(w);
@@ -694,6 +821,16 @@ fn snapshot(
             "  physiology: mean body_temp {t:.3}  |  births {births}  deaths {deaths} (this window)"
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
+    }
+
+    // The migration signal (step 1): dispersal of the located population from its dawn cells.
+    match migration(runner, dawn) {
+        Some((cells, off, disp)) => println!(
+            "  migration: {cells} distinct cells occupied (from {} dawn cells)  |  {off} beings off \
+             their dawn cell  |  max displacement {disp}",
+            dawn.len()
+        ),
+        None => println!("  migration: no located population"),
     }
 
     println!("  state_hash: {:032x}", runner.state_hash());
@@ -863,6 +1000,8 @@ fn main() {
     }
 
     let founders: BTreeSet<StableId> = runner.world().unwrap().being_ids().into_iter().collect();
+    // The dawn cells the migration reader measures dispersal against (one per founding band).
+    let dawn = dawn_cells(&runner);
     println!("  dawn seeded {} founders\n", founders.len());
 
     let total_ticks = cfg.generations * GEN_TICKS;
@@ -877,13 +1016,13 @@ fn main() {
         // Snapshot at every tenth of the run; the final generation is reported once, by the FINAL
         // block below, so it is not double-printed here.
         if gen % snapshot_every == 0 && gen != cfg.generations {
-            prev = snapshot(&format!("SNAPSHOT gen {gen}"), &runner, &cfg, &prev);
+            prev = snapshot(&format!("SNAPSHOT gen {gen}"), &runner, &cfg, &prev, &dawn);
             println!();
         }
     }
     let elapsed = start.elapsed();
 
-    let _ = snapshot("FINAL", &runner, &cfg, &prev);
+    let _ = snapshot("FINAL", &runner, &cfg, &prev, &dawn);
     println!();
     println!(
         "  ticked {} generations x {} = {} ticks in {:.2}s ({:.1} ms/generation)",
