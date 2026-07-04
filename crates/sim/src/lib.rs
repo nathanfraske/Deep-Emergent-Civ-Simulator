@@ -233,4 +233,4 @@ pub use value::{
     ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use world::{build_etic_substrate, GossipParams, PlaceId, Stimulus, TickInput, Trace, World};
-pub use worldbuild::{build_dawn_runner, DawnPeoples};
+pub use worldbuild::{arm_dawn_languages, build_dawn_runner, DawnPeoples, LanguageGenesis};

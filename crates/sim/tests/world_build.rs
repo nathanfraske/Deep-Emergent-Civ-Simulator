@@ -22,14 +22,18 @@ use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, GaussApprox};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::langmod::PerceptualParams;
+use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
 use civsim_sim::scenario::Scenario;
+use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    build_dawn_runner, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
-    BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples, DominanceMode,
-    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
-    IntrinsicBeliefs, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
+    build_dawn_runner, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
+    DominanceMode, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet,
+    GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile, PersonalityRegistry,
+    Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId,
+    ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -161,6 +165,7 @@ fn peoples() -> DawnPeoples {
         breeding,
         personality,
         mortality_hazard: None,
+        language: None,
     }
 }
 
@@ -176,6 +181,218 @@ fn a_scenario(medium: Option<&str>) -> Scenario {
         None => "[scenario]\nid = \"w\"\nname = \"W\"\n".to_string(),
     };
     Scenario::from_toml_str(&toml).unwrap()
+}
+
+/// A labelled voice channel the founding races hear speech on.
+const VOICE: SenseChannelId = SenseChannelId(1);
+
+/// An articulating race: a race that declares a vocal-tract scale (bending the shared base geometry)
+/// and a hearing resolution, so the founder step can derive its phonetic form system. Labelled
+/// fixtures, not owner data.
+fn articulated_race(id: u32, vocal_tract_scale: Fixed) -> Race {
+    a_race(id).with_articulation(Articulation {
+        vocal_tract_scale,
+        hearing_resolution: Fixed::from_int(20),
+    })
+}
+
+/// A labelled language genesis: five candidate sounds (shared base geometry), air acoustics, a low
+/// producibility threshold so both races produce a full inventory, and short words. Not owner data.
+fn a_genesis() -> LanguageGenesis {
+    LanguageGenesis {
+        base_lengths: (12..=16).map(|cm| Fixed::from_ratio(cm, 100)).collect(),
+        modality: ProductionModalityId(0),
+        dim: FeatureDimId(0),
+        sound_speed: Fixed::from_int(340),
+        absorption_reference: Fixed::from_ratio(1, 100000000),
+        path: Fixed::from_int(10),
+        perceptual: PerceptualParams {
+            modes: 3,
+            freq_max: Fixed::from_int(100000),
+            alpha_max: Fixed::from_int(10),
+            tau_max: Fixed::from_int(100),
+            confusability_cap: Fixed::from_int(1000),
+        },
+        capability: Fixed::ONE,
+        producibility_threshold: Fixed::from_ratio(1, 2),
+        word_min_len: 1,
+        word_max_len: 2,
+        hearing_channel: VOICE,
+    }
+}
+
+/// Two articulating races (different vocal tracts) on three bands: race 0 at two separate places (so
+/// its two bands diverge), race 1 at a third. A language genesis so the founder step arms derived
+/// languages.
+fn peoples_with_language() -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), articulated_race(0, Fixed::ONE));
+    races.insert(RaceId(1), articulated_race(1, Fixed::from_ratio(3, 4)));
+    let bands = vec![
+        BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 4,
+        },
+        BandSpec {
+            race: RaceId(0),
+            place: 20,
+            members: 4,
+        },
+        BandSpec {
+            race: RaceId(1),
+            place: 30,
+            members: 4,
+        },
+    ];
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    let mut personality = PersonalityRegistry::new();
+    personality.set(RaceId(0), a_personality());
+    personality.set(RaceId(1), a_personality());
+    DawnPeoples {
+        races,
+        bands,
+        breeding,
+        personality,
+        mortality_hazard: None,
+        language: Some(a_genesis()),
+    }
+}
+
+#[test]
+fn the_founder_step_arms_derived_languages_that_run_live_and_bands_converge_and_diverge() {
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    let mut runner = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples_with_language(),
+        0x2E,
+    )
+    .expect("a language-armed dawn assembles");
+
+    // Run the naming game long enough for the co-located bands to coordinate their words.
+    for _ in 0..800 {
+        runner.step();
+    }
+    let w = runner.world().unwrap();
+    let ids = w.being_ids();
+    let band_at = |place: u32| -> Vec<_> {
+        ids.iter()
+            .copied()
+            .filter(|&id| w.place_of(id) == Some(place))
+            .collect()
+    };
+    let band0 = band_at(10); // race 0
+    let band1 = band_at(20); // race 0, a separate place
+    let band2 = band_at(30); // race 1
+    assert_eq!(band0.len(), 4);
+    assert_eq!(band2.len(), 4);
+
+    // The naming game ran live on the derived form system: the band coined words for the primes.
+    let concepts: Vec<ConceptId> = (1..=65).map(ConceptId).collect();
+    let has_words = concepts
+        .iter()
+        .filter(|&&c| w.word_for(band0[0], c).is_some())
+        .count();
+    assert!(
+        has_words > 0,
+        "the founder step armed a live language: the band coined words"
+    );
+
+    // Co-located members share far more words than members at separate places: the band coordinates
+    // (co-location), while separated bands and the two races diverge.
+    let shared = |a, b| {
+        concepts
+            .iter()
+            .filter(|&&c| {
+                let wa = w.word_for(a, c);
+                wa.is_some() && wa == w.word_for(b, c)
+            })
+            .count()
+    };
+    let within_band0 = shared(band0[0], band0[1]);
+    let across_places = shared(band0[0], band1[0]); // same race, separate places
+    let across_races = shared(band0[0], band2[0]);
+    assert!(
+        within_band0 > 0,
+        "co-located members converge on shared words"
+    );
+    assert!(
+        within_band0 > across_places,
+        "separated bands of one race diverge: within {within_band0} > across {across_places}"
+    );
+    assert!(
+        within_band0 > across_races,
+        "the two races speak different languages: within {within_band0} > across {across_races}"
+    );
+}
+
+#[test]
+fn without_a_language_genesis_the_naming_game_stays_inert() {
+    // The genesis is what makes the naming game live: the same assembly with no LanguageGenesis coins
+    // no word, because no lineage carries a form system.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    let mut runner = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples(), // no language genesis
+        0x2E,
+    )
+    .unwrap();
+    for _ in 0..200 {
+        runner.step();
+    }
+    let w = runner.world().unwrap();
+    assert!(
+        w.being_ids()
+            .iter()
+            .all(|&id| w.word_for(id, ConceptId(1)).is_none()),
+        "without a genesis no lineage carries a form system, so no word is coined"
+    );
+}
+
+#[test]
+fn the_language_armed_build_replays_bit_for_bit() {
+    let run = |seed: u64| {
+        let manifest = manifest();
+        let resolution = a_scenario(None).resolve(&manifest).unwrap();
+        let map = a_map(0xB0);
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &peoples_with_language(),
+            seed,
+        )
+        .unwrap();
+        for _ in 0..120 {
+            runner.step();
+        }
+        runner.state_hash()
+    };
+    assert_eq!(
+        run(0x2E),
+        run(0x2E),
+        "the language-armed dawn replays bit for bit"
+    );
+    assert_ne!(
+        run(0x2E),
+        run(0x2F),
+        "a different seed coins a different language"
+    );
 }
 
 #[test]

@@ -961,6 +961,13 @@ impl World {
         self.minds.len()
     }
 
+    /// The ids of every being the world holds, in canonical id order (a read of canon, for tools and
+    /// tests that walk the population). The order is the `BTreeMap` id order, so it is deterministic
+    /// and independent of insertion order.
+    pub fn being_ids(&self) -> Vec<StableId> {
+        self.minds.keys().copied().collect()
+    }
+
     /// The event log, for inspection (nothing emits into it until perception and the
     /// decision loop land in later phases).
     pub fn events(&self) -> &EventLog {
