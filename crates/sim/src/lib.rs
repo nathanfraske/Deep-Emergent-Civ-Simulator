@@ -74,6 +74,7 @@ pub mod decision;
 pub mod demography;
 pub mod dialogue;
 pub mod edibility;
+pub mod environ;
 pub mod epoch;
 pub mod evidence;
 pub mod evolve;

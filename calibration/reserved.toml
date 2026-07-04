@@ -1819,3 +1819,131 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "count"
 source = "Part 25.7; the low end per docs/working/TEST_WORLDS.md (Tempest)"
+
+# --- base-level liveliness step 2: the environmental field stack (hydrology and primary productivity;
+# docs/working/BASE_LIVELINESS_HANDOFF.md; crates/sim/src/environ.rs). Every forcing constant is
+# reserved fail-loud (Principle 11): the saturation-curve affine tangent, the precipitation and
+# evaporation coefficients, the downhill routing fraction, and the productivity per-factor requirements
+# and soil baseline. The stencils are fixed Rust and the biome-to-water and productivity rules key off
+# the physical fields, never a biome or race label (Principles 8, 9); only these magnitudes are the
+# owner's. The dev-fixtures profile stands up labelled values so the harness runs. ---
+
+[[reserved]]
+id = "hydrology.saturation_slope"
+basis = "the affine slope of the saturation vapour pressure over temperature, the Clausius-Clapeyron tangent over the simulated band (laws::saturation_vapor_pressure): it sets how much less water cold air holds, so a cold humid cell crosses saturation and precipitates. Set from the physical Clausius-Clapeyron slope at the world's reference temperature over its temperature-axis scale"
+status = "reserved"
+value = ""
+unit = "mpa_per_temperature"
+source = "base-level liveliness step 2 (Part 15, Part 18); crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_t_ref"
+basis = "the reference temperature the saturation affine tangent is taken at (the midpoint of the world's habitable temperature band, so the tangent is accurate where most weather happens)"
+status = "reserved"
+value = ""
+unit = "temperature"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_e_ref"
+basis = "the saturation vapour pressure at the reference temperature, the physical saturation pressure of the world's condensing species at that temperature"
+status = "reserved"
+value = ""
+unit = "mpa"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_cap"
+basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate"
+status = "reserved"
+value = ""
+unit = "mpa"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.precipitation_rate"
+basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_still"
+basis = "the still-air Dalton evaporation transfer coefficient a in E = (a + b|u|)(e_s - e_a) (laws::evaporation_rate), the base evaporation rate per unit vapour-pressure deficit with no wind. Set from the world's still-air mass-transfer coefficient"
+status = "reserved"
+value = ""
+unit = "evaporation_coefficient"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.evaporation_wind"
+basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives"
+status = "reserved"
+value = ""
+unit = "evaporation_coefficient"
+source = "base-level liveliness step 2 (wind in step 4); crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.evaporation_cap"
+basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning"
+status = "reserved"
+value = ""
+unit = "evaporation_flux"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.routing_rate"
+basis = "the fraction of a cell's standing water that flows to its lowest neighbour per tick, the downhill advection rate: it sets how fast water drains off slopes and pools in basins. Set from the drainage timescale of the world's terrain against the base tick and cell size; below the stencil stability bound the advection is unconditionally stable"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.water_requirement"
+basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.light_requirement"
+basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs"
+status = "reserved"
+value = ""
+unit = "light"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.temperature_requirement"
+basis = "the temperature a cell needs for full producer productivity, the Liebig denominator for the temperature factor: warmth supports growth up to saturation. Set from the growth-temperature scale of the world's producers (a too-hot penalty is a later refinement)"
+status = "reserved"
+value = ""
+unit = "temperature"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.soil_requirement"
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side"
+status = "reserved"
+value = ""
+unit = "soil_nutrient"
+source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.soil_baseline"
+basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands"
+status = "reserved"
+value = ""
+unit = "soil_nutrient"
+source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.max_water_depth"
+basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"

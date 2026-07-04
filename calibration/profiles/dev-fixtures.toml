@@ -341,3 +341,127 @@ status = "set"
 value = "0.02"
 unit = "disposition_units_half_width"
 source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs ReproductionParams::from_manifest; real-world unification step 1"
+
+# --- base-level liveliness step 2: the environmental field stack (hydrology + primary productivity).
+# FIXTURE placeholders mirroring EnvironCalib::dev_fixture (crates/sim/src/environ.rs), not owner canon.
+# The reserved fail-loud entries live in calibration/reserved.toml. ---
+
+[[reserved]]
+id = "hydrology.saturation_slope"
+basis = "FIXTURE placeholder; the affine slope of saturation vapour pressure over temperature (laws::saturation_vapor_pressure), so cold cells saturate at a lower vapour pressure and rain"
+status = "set"
+value = "0.5"
+unit = "mpa_per_temperature"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.saturation_t_ref"
+basis = "FIXTURE placeholder; the reference temperature of the saturation affine tangent"
+status = "set"
+value = "0.5"
+unit = "temperature"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.saturation_e_ref"
+basis = "FIXTURE placeholder; the reference saturation vapour pressure at the reference temperature"
+status = "set"
+value = "0.5"
+unit = "mpa"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.saturation_cap"
+basis = "FIXTURE placeholder; the representability cap on saturation vapour pressure"
+status = "set"
+value = "2"
+unit = "mpa"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.precipitation_rate"
+basis = "FIXTURE placeholder; the fraction of the moisture-over-saturation excess that condenses to standing water per tick"
+status = "set"
+value = "0.2"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_still"
+basis = "FIXTURE placeholder; the still-air Dalton evaporation coefficient a (laws::evaporation_rate)"
+status = "set"
+value = "0.1"
+unit = "evaporation_coefficient"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_wind"
+basis = "FIXTURE placeholder; the wind Dalton evaporation coefficient b (zero this step, the wind field is step 4)"
+status = "set"
+value = "0"
+unit = "evaporation_coefficient"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_cap"
+basis = "FIXTURE placeholder; the representability cap on the evaporation flux"
+status = "set"
+value = "1"
+unit = "evaporation_flux"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.routing_rate"
+basis = "FIXTURE placeholder; the fraction of a cell's water that flows to its lowest neighbour per tick, the downhill advection rate that pools water in basins"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.water_requirement"
+basis = "FIXTURE placeholder; the water supply a cell needs for full producer productivity (the Liebig satisfaction denominator for the water factor)"
+status = "set"
+value = "0.5"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.light_requirement"
+basis = "FIXTURE placeholder; the latitude-light supply a cell needs for full producer productivity"
+status = "set"
+value = "0.5"
+unit = "light"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.temperature_requirement"
+basis = "FIXTURE placeholder; the temperature a cell needs for full producer productivity (warmth supports growth up to saturation)"
+status = "set"
+value = "0.5"
+unit = "temperature"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.soil_requirement"
+basis = "FIXTURE placeholder; the soil-nutrient supply a cell needs for full producer productivity (the step-4 soil field refines it)"
+status = "set"
+value = "0.5"
+unit = "soil_nutrient"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.soil_baseline"
+basis = "FIXTURE placeholder; the uniform soil-nutrient supply until the step-4 soil field lands"
+status = "set"
+value = "1"
+unit = "soil_nutrient"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.max_water_depth"
+basis = "FIXTURE placeholder; the basin holding capacity, the maximum standing water a cell retains so a basin fills to a lake rather than growing without bound"
+status = "set"
+value = "4"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"

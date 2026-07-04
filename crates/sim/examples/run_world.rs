@@ -721,6 +721,35 @@ fn dawn_cells(runner: &Runner) -> BTreeSet<(i32, i32)> {
         .unwrap_or_default()
 }
 
+/// The per-cell field-state reader (base-level liveliness step 2): samples the environmental field
+/// stack, reporting the fraction of cells holding standing water, the mean and peak water depth, and the
+/// mean producer biomass (the food supply the productivity derives). A pure read of hashed state.
+/// `None` if the runner carries no environmental stack.
+fn field_state(runner: &Runner) -> Option<(f64, f64, f64, f64)> {
+    let env = runner.environ()?;
+    let (w, h) = env.dims();
+    let n = (w as f64) * (h as f64);
+    if n <= 0.0 {
+        return None;
+    }
+    let mut wet = 0.0;
+    let mut water_sum = 0.0;
+    let mut water_max = 0.0f64;
+    let mut biomass_sum = 0.0;
+    for y in 0..h {
+        for x in 0..w {
+            let water = env.water_at(x, y).to_f64_lossy();
+            if water > 0.0 {
+                wet += 1.0;
+            }
+            water_sum += water;
+            water_max = water_max.max(water);
+            biomass_sum += env.biomass_at(x, y).to_f64_lossy();
+        }
+    }
+    Some((wet / n, water_sum / n, water_max, biomass_sum / n))
+}
+
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
 /// `None` if no being carries a body temperature.
 fn mean_body_temp(runner: &Runner) -> Option<f64> {
@@ -821,6 +850,16 @@ fn snapshot(
             "  physiology: mean body_temp {t:.3}  |  births {births}  deaths {deaths} (this window)"
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
+    }
+
+    // The field-state signal (step 2): the environmental stack's water and productivity.
+    match field_state(runner) {
+        Some((wet, mean_water, max_water, mean_biomass)) => println!(
+            "  field: {:.0}% cells wet  |  mean water {mean_water:.3} (peak {max_water:.3})  |  \
+             mean productivity {mean_biomass:.3}",
+            wet * 100.0
+        ),
+        None => println!("  field: no environmental stack"),
     }
 
     // The migration signal (step 1): dispersal of the located population from its dawn cells.

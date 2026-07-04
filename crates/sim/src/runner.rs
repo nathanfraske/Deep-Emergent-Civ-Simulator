@@ -86,6 +86,7 @@ use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::Physiology;
+use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
     RESPIRATION, TEMPERATURE,
@@ -745,6 +746,13 @@ impl Embodiment {
         self.physiology = Some(physiology);
     }
 
+    /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
+    /// step 2): the environmental stack writes the standing producer-biomass supply into it each tick
+    /// before the embodiment step reads it. Crate-internal; the runner owns the write path.
+    pub(crate) fn resources_mut(&mut self) -> &mut ResourceField {
+        &mut self.resources
+    }
+
     /// The controller layout derived from this embodiment's registries, against which a caller builds
     /// or expresses its beings' controllers (their dimensions must match).
     pub fn layout(&self) -> &ControllerLayout {
@@ -831,6 +839,12 @@ pub struct Runner {
     /// [`Runner::arm_lifecycle`] is called), so a world-only, embodiment-only, or unarmed runner never
     /// embodies a newborn and the reconciliation beat is a no-op.
     lifecycle: Option<LifecycleKit>,
+    /// The environmental field stack (base-level liveliness step 2), armed on the run path so hydrology
+    /// and primary productivity advance each tick after the temperature field and write the standing
+    /// producer biomass into the embodiment's resource field. `None` on a runner without it, so the
+    /// temperature-only paths are unchanged. Stepped inside [`Runner::step_field`], folded into
+    /// `state_hash`.
+    environ: Option<(EnvironFields, EnvironCalib)>,
 }
 
 impl Runner {
@@ -847,6 +861,7 @@ impl Runner {
             world: None,
             embodiment: None,
             lifecycle: None,
+            environ: None,
         }
     }
 
@@ -880,6 +895,7 @@ impl Runner {
             world: Some(world),
             embodiment: None,
             lifecycle: None,
+            environ: None,
         }
     }
 
@@ -932,6 +948,7 @@ impl Runner {
             world: None,
             embodiment: Some(embodiment),
             lifecycle: None,
+            environ: None,
         }
     }
 
@@ -1007,6 +1024,7 @@ impl Runner {
             world: Some(world),
             embodiment: Some(embodiment),
             lifecycle: None,
+            environ: None,
         }
     }
 
@@ -1017,6 +1035,19 @@ impl Runner {
     /// embodies a newborn (the pre-3c behaviour), so arming is opt-in and additive.
     pub fn arm_lifecycle(&mut self, kit: LifecycleKit) {
         self.lifecycle = Some(kit);
+    }
+
+    /// Arm the environmental field stack (base-level liveliness step 2): hydrology and primary
+    /// productivity advance each tick after the temperature field, and the standing producer biomass is
+    /// written into the embodiment's resource field so the grazers have supply. Folded into `state_hash`.
+    /// Without it a runner is temperature-only, exactly as before.
+    pub fn set_environ(&mut self, fields: EnvironFields, calib: EnvironCalib) {
+        self.environ = Some((fields, calib));
+    }
+
+    /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
+    pub fn environ(&self) -> Option<&EnvironFields> {
+        self.environ.as_ref().map(|(f, _)| f)
     }
 
     /// Place a being on the map at a coordinate with an initial body temperature.
@@ -1083,8 +1114,27 @@ impl Runner {
     /// embodiment coupling, then tick the composed cognition world with `world_inputs` as
     /// the fixed final sub-phase. Kept private so the empty-batch and driven-batch entry
     /// points cannot diverge.
-    fn step_inner(&mut self, world_inputs: &[TickInput]) {
+    /// Step the temperature field and, when an environmental stack is armed, advance it against the
+    /// same-tick field and write the standing producer biomass into the embodiment's resource field
+    /// (base-level liveliness step 2). Shared by the pinned order ([`Runner::step_inner`]) and the
+    /// scheduled order (the `SYS_FIELD` phase), so both advance the field and its environment identically
+    /// before the body and embodiment phases read them. The environment step is a pure deterministic fold
+    /// (Principle 3); the supply write keys off the physical productivity, no label (Principles 8, 9).
+    fn step_field(&mut self) {
         self.field.step(&self.calib);
+        if let Some((env, calib)) = self.environ.as_mut() {
+            let calib = *calib;
+            env.step(&self.field, &calib);
+        }
+        if let Some((env, _)) = self.environ.as_ref() {
+            if let Some(emb) = self.embodiment.as_mut() {
+                env.write_resource_supply(emb.resources_mut());
+            }
+        }
+    }
+
+    fn step_inner(&mut self, world_inputs: &[TickInput]) {
+        self.step_field();
         self.phase_body_exchange();
         if self.embodiment.is_some() {
             self.step_embodiment();
@@ -1165,7 +1215,7 @@ impl Runner {
     /// Run one tick phase by its [`SystemId`], the dispatch the scheduled executor drives.
     fn run_phase(&mut self, sid: SystemId, world_inputs: &[TickInput]) {
         if sid == SYS_FIELD {
-            self.field.step(&self.calib);
+            self.step_field();
         } else if sid == SYS_BODY {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
@@ -1510,6 +1560,12 @@ impl Runner {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
         self.field.hash(&mut h);
+        // The environmental field stack (base-level liveliness step 2), folded in canonical field order
+        // after the temperature field. A field left out here would pass replay while hiding divergence,
+        // so the dynamic environmental fields fold with the temperature field.
+        if let Some((env, _)) = &self.environ {
+            env.hash_into(&mut h);
+        }
         for (id, t) in &self.body_temp {
             h.write_stable(*id);
             h.write_fixed(*t);

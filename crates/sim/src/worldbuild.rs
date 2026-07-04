@@ -43,6 +43,7 @@ use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::controller::Controller;
 use crate::decision::Curve;
 use crate::edibility::Physiology;
+use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use crate::langmod::{
     articulated_geometry, form_system_from_values, phoneme_priors, producible_values,
@@ -358,7 +359,7 @@ pub fn build_dawn_runner(
     // an embodiment genesis, assemble a located body sharing each founder's mind id and return one
     // runner carrying both minds and bodies (real-world unification step 3); without, a world-only
     // runner exactly as before.
-    match &peoples.embodiment {
+    let mut runner = match &peoples.embodiment {
         Some(genesis) => {
             let (embodiment, kit) =
                 assemble_dawn_embodiment(&world, map, peoples, &founders, genesis, manifest, seed)?;
@@ -368,10 +369,22 @@ pub fn build_dawn_runner(
             // bodies in lockstep. Without arming, the runner ticks minds and bodies but never embodies
             // a newborn (the pre-3c behaviour).
             runner.arm_lifecycle(kit);
-            Ok(runner)
+            runner
         }
-        None => Ok(Runner::with_world(field, calib, world)),
-    }
+        None => Runner::with_world(field, calib, world),
+    };
+
+    // Arm the environmental field stack (base-level liveliness step 2): hydrology and primary
+    // productivity advance each tick after the temperature field, and the standing producer biomass is
+    // written into the embodiment's resource field so the grazers have supply. Biosphere-ready: the
+    // productivity is the default abstract source of the per-cell producer biomass, which the
+    // living-biosphere addendum replaces with real producer occupants. Fail-loud on a reserved forcing
+    // constant (Principle 11).
+    runner.set_environ(
+        EnvironFields::from_map(map),
+        EnvironCalib::from_manifest(manifest)?,
+    );
+    Ok(runner)
 }
 
 /// Group the returned founders by their band, in band order, skipping any band whose race was not
