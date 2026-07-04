@@ -529,3 +529,35 @@ status = "set"
 value = "0.4"
 unit = "ratio_per_tick"
 source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "hazard.dose_threshold"
+basis = "FIXTURE placeholder; the salinity dose above which a being registers a cell as a lethal hazard and forms the salt-flat belief"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for base-level liveliness §4/step 5; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "hazard.weight"
+basis = "FIXTURE placeholder; the signed evidence weight a first-hand hazard encounter carries into the belief pipeline (a strong first-hand percept)"
+status = "set"
+value = "1"
+unit = "log_odds"
+source = "dev fixture for base-level liveliness §4/step 5; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "promotion.stress_threshold"
+basis = "FIXTURE placeholder; the survival-margin level below which a being is in an arc and promoted to the individual dialogue tier (half a reserve, the generous default)"
+status = "set"
+value = "0.5"
+unit = "reserve_level"
+source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "promotion.budget"
+basis = "FIXTURE placeholder; the maximum beings promoted to the individual dialogue tier at once, a performance bound defaulting high so the aggregate tier absorbs the rest"
+status = "set"
+value = "64"
+unit = "count"
+source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"

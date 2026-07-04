@@ -379,14 +379,21 @@ impl EnvironFields {
     /// The salinity DOSE at a cell (base-level liveliness step 4): the concentration `salt / (water +
     /// reference)` scaled by `salinity.dose_scale`, the dose the harm law reads on the `bio.salinity`
     /// class. High where a basin has evaporated its water and left salt (a salt flat), near zero where
-    /// fresh water dilutes it. Pure fixed-point, guarded against a zero denominator by the reference.
+    /// fresh water dilutes it. Pure fixed-point. The `reference_water` keeps the denominator positive for
+    /// every set (positive) calibration; should it ever be zero AND the cell bone-dry, the concentration
+    /// of a salt-bearing cell is unbounded, so the fallback is the MAXIMAL dose (the deadliest reading),
+    /// never a false zero that would report the driest, most salt-saturated cell as safe. The harm law
+    /// saturates a maximal dose to its harm cap, so a maximal dose is bounded downstream.
     pub fn salinity_dose(&self, x: i32, y: i32, calib: &EnvironCalib) -> Fixed {
         let salt = self.salt.at(x, y);
         if salt <= Fixed::ZERO {
             return Fixed::ZERO;
         }
         let denom = self.water.at(x, y).saturating_add(calib.reference_water);
-        let concentration = salt.checked_div(denom).unwrap_or(Fixed::ZERO);
+        // A zero denominator (a bone-dry cell under a zero reference) means an unbounded concentration:
+        // fall back to the maximum, the deadliest reading, matching the mechanism's own invariant that a
+        // dry salt flat reads a HIGH concentration (never a false zero).
+        let concentration = salt.checked_div(denom).unwrap_or(Fixed::MAX);
         concentration
             .checked_mul(calib.salinity_scale)
             .unwrap_or(concentration)
@@ -783,6 +790,31 @@ mod tests {
         assert!(
             centre > corner,
             "salt concentrates in the endorheic basin, not on the well-drained rim: {centre:?} > {corner:?}"
+        );
+    }
+
+    #[test]
+    fn a_bone_dry_salt_flat_never_reads_as_safe_even_with_a_zero_reference() {
+        // Regression: salinity_dose must never report the driest, most salt-saturated cell as safe. With
+        // the dilution reference defeated (reference_water zero) and a bone-dry salted cell, the salt
+        // concentration is unbounded, so the dose is the MAXIMAL reading, not a false zero that would tell
+        // a being the deadliest salt flat in the world is harmless.
+        let mut s = stack_of(1, 1, &[5], Fixed::ZERO); // water is uniform zero (a bone-dry cell)
+        s.salt.cells[0] = Fixed::from_int(2); // salt present on the dry cell
+        let mut calib = EnvironCalib::dev_fixture();
+        calib.reference_water = Fixed::ZERO; // defeat the dilution guard
+        let dry = s.salinity_dose(0, 0, &calib);
+        assert!(
+            dry > Fixed::ZERO,
+            "a dry salt flat is never read as safe (a false zero would omit the toxin entirely): {dry:?}"
+        );
+        // With a positive reference the same cell reads a finite, smaller dose: dilution is monotone, and
+        // the zero-reference fallback is the deadlier limit, not a lesser one.
+        calib.reference_water = Fixed::from_int(1);
+        let diluted = s.salinity_dose(0, 0, &calib);
+        assert!(
+            dry > diluted,
+            "the zero-reference fallback reads deadlier than a positive dilution: {dry:?} > {diluted:?}"
         );
     }
 

@@ -57,7 +57,8 @@ use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
 use crate::runner::{
-    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, Runner,
+    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, LivelinessCalib,
+    Runner,
 };
 use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
@@ -414,6 +415,10 @@ pub fn build_dawn_runner(
         EnvironFields::from_map(map),
         EnvironCalib::from_manifest(manifest)?,
     );
+    // Arm the base-level liveliness surfacing policy (the hazard-belief and arc-promotion magnitudes),
+    // fail-loud from the manifest (Principle 11): the values that gate and weight the run-path story hooks
+    // are reserved-with-basis, not hardcoded inline constants.
+    runner.set_liveliness(LivelinessCalib::from_manifest(manifest)?);
     Ok(runner)
 }
 

@@ -145,12 +145,6 @@ pub const HAZARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 1);
 pub const HAZARD_PRESENT: ValueId = 1;
 /// The value id meaning "no hazard" (the competing hypothesis).
 pub const HAZARD_ABSENT: ValueId = 0;
-/// The signed evidence weight a first-hand encounter with the salt-flat hazard carries into the belief
-/// (a labelled dev value; a first-hand percept is strong evidence).
-const HAZARD_WEIGHT: Fixed = Fixed::ONE;
-/// The salinity dose above which a being registers the cell as a hazard and forms the belief (a labelled
-/// dev value: a dose this high is a lethal salt flat, worth remembering and warning others of).
-const HAZARD_DOSE_THRESHOLD: Fixed = Fixed::ONE;
 /// The tick-input ordinal the env-sourced hazard observation carries, high so it orders after any
 /// external input to the same mind (determinism: the tick sorts inputs by mind then ordinal).
 const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
@@ -165,16 +159,60 @@ const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
 // the being's own state, never a scripted hero), deterministic (a canonical-order threshold and a
 // stable ranking, no RNG), and cheap (promote/restrict is exact and conserved, design Part 54).
 
-/// The reserve level below which a being is in a SURVIVAL ARC (a labelled dev value; its reserved home
-/// is `promotion.stress_threshold`): a metabolic reserve or its condition this low means the being is
-/// struggling to survive, the emergent arc promotion turns up the resolution on. Half a reserve, so a
-/// being that has burnt or been worn through half its margin is promoted, the generous default.
-const PROMOTION_STRESS_THRESHOLD: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)); // 1/2
-/// The maximum number of beings promoted to the individual tier at once (a labelled dev value; its
-/// reserved home is `promotion.budget`). It DEFAULTS HIGH (liveliness over frugality, the owner ruling):
-/// the aggregate tier absorbs the masses and promote/restrict is exact, so generous promotion costs
-/// compute, never fidelity. When more beings are in an arc than the budget, the most-stressed cells win.
-const PROMOTION_BUDGET: usize = 64;
+/// The reserved calibrations of the base-level liveliness surfacing policy (§4 and step 5): the numbers
+/// that gate and weight the two run-path story hooks, the environment-sourced hazard belief and the
+/// arc-scoped promotion. Each value gates or weights world content (a belief that propagates, which
+/// beings converse), so none is a hardcoded inline constant: the mechanism is fixed Rust, the magnitudes
+/// are reserved-with-basis in the manifest (Principle 11), read fail-loud by [`Self::from_manifest`]. The
+/// labelled dev fixture [`Self::dev_default`] stands the same numbers up for the test and harness paths
+/// that construct a runner without a manifest, so those paths are unchanged.
+#[derive(Clone, Copy, Debug)]
+pub struct LivelinessCalib {
+    /// The salinity dose above which a being registers the cell as a lethal hazard and forms the belief.
+    /// Manifest home `hazard.dose_threshold`; basis: the dose at which the salt-flat harm on a naive
+    /// lineage overtakes its condition recovery, the lethality boundary the physics floor already defines.
+    pub hazard_dose_threshold: Fixed,
+    /// The signed evidence weight a first-hand encounter with the hazard carries into the belief pipeline.
+    /// Manifest home `hazard.weight`; basis: a first-hand percept is strong evidence, set from the belief
+    /// subsystem's first-hand witness access weight for consistency.
+    pub hazard_weight: Fixed,
+    /// The survival-margin level below which a being is in an arc and is promoted to the individual tier.
+    /// Manifest home `promotion.stress_threshold`; basis: the fraction of a reserve at which a being is
+    /// meaningfully struggling, the generous default half a reserve.
+    pub promotion_stress_threshold: Fixed,
+    /// The maximum beings promoted to the individual tier at once, a performance bound. Manifest home
+    /// `promotion.budget`; basis: the per-tick individual-dialogue cost the frame budget allows,
+    /// defaulting high (liveliness over frugality, the owner ruling) so the aggregate tier absorbs the rest.
+    pub promotion_budget: usize,
+}
+
+impl LivelinessCalib {
+    /// Read the four surfacing-policy values fail-loud from the manifest (Principle 11): a reserved value
+    /// left unset refuses to build rather than running on a fabricated default. The budget is stored as a
+    /// fixed-point count and truncated to its integer part.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<LivelinessCalib, CalibrationError> {
+        let budget = m.require_fixed("promotion.budget")?;
+        Ok(LivelinessCalib {
+            hazard_dose_threshold: m.require_fixed("hazard.dose_threshold")?,
+            hazard_weight: m.require_fixed("hazard.weight")?,
+            promotion_stress_threshold: m.require_fixed("promotion.stress_threshold")?,
+            promotion_budget: (budget.to_bits() >> Fixed::FRAC_BITS).max(0) as usize,
+        })
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE standing up the same magnitudes the manifest would carry, for the
+    /// test and harness paths that build a runner without a manifest. Half a reserve is the generous
+    /// stress default, unit weight the strong first-hand percept, a dose of one the lethal-flat boundary,
+    /// and a budget of 64 the high default the aggregate tier makes affordable.
+    pub fn dev_default() -> LivelinessCalib {
+        LivelinessCalib {
+            hazard_dose_threshold: Fixed::ONE,
+            hazard_weight: Fixed::ONE,
+            promotion_stress_threshold: Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)), // 1/2
+            promotion_budget: 64,
+        }
+    }
+}
 
 /// A declared access from resource-id slices (a small local convenience over [`Access::new`]).
 fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
@@ -925,6 +963,11 @@ pub struct Runner {
     /// `state_hash`: it is a derived function of the reserves and cells the hash already covers, and the
     /// promotions themselves live in the world's own canonical state.
     arc_promoted: BTreeSet<StableId>,
+    /// The reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
+    /// arc-promotion magnitudes). Initialized to the labelled dev fixture in every constructor so the
+    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
+    /// overrides it fail-loud from the manifest through [`Runner::set_liveliness`].
+    liveliness: LivelinessCalib,
 }
 
 impl Runner {
@@ -943,6 +986,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -978,6 +1022,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -1032,6 +1077,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -1109,6 +1155,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -1127,6 +1174,14 @@ impl Runner {
     /// Without it a runner is temperature-only, exactly as before.
     pub fn set_environ(&mut self, fields: EnvironFields, calib: EnvironCalib) {
         self.environ = Some((fields, calib));
+    }
+
+    /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
+    /// arc-promotion magnitudes), overriding the labelled dev fixture the constructors install. The dawn
+    /// build reads these fail-loud from the manifest (Principle 11); a runner left unarmed keeps the dev
+    /// fixture, so the test and harness paths are unchanged.
+    pub fn set_liveliness(&mut self, calib: LivelinessCalib) {
+        self.liveliness = calib;
     }
 
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
@@ -1245,13 +1300,16 @@ impl Runner {
     /// [`PlaceId`] (`CELL_PLACE_BASE + y*width + x`, a stable function of the coordinate), so gossip and
     /// converse cluster by where a being stands now rather than its frozen dawn band, and builds a
     /// first-order hazard OBSERVATION for every being standing on a salt flat (a cell whose salinity dose
-    /// exceeds [`HAZARD_DOSE_THRESHOLD`]), so a fact discovered in the world enters `Mind.beliefs` and
-    /// rides gossip. Returns the caller's `world_inputs` merged with the env observations (the env ones
+    /// exceeds the reserved `hazard.dose_threshold`), so a fact discovered in the world enters
+    /// `Mind.beliefs` and rides gossip. Returns the caller's `world_inputs` merged with the env observations (the env ones
     /// last, at a high ordinal, so the tick's canonical mind-then-ordinal sort is deterministic). Reads
     /// the embodiment and environ (immutably) before the mutable world publish, and draws no randomness,
     /// so it replays and is worker-count invariant. A runner with no embodiment publishes nothing and
     /// returns the inputs unchanged.
     fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
+        // The reserved surfacing-policy magnitudes (Copy), read once so the borrow of the embodiment and
+        // environ below does not conflict with the read.
+        let live = self.liveliness;
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
         // Per-being stress (the lower of its energy and condition margins) and its cell, for the
@@ -1280,7 +1338,7 @@ impl Runner {
                 let margin = axis_margin(ENERGY).min(axis_margin(CONDITION));
                 stress.insert(w.id, margin);
                 if let Some((env, calib)) = environ {
-                    if env.salinity_dose(c.x, c.y, calib) > HAZARD_DOSE_THRESHOLD {
+                    if env.salinity_dose(c.x, c.y, calib) > live.hazard_dose_threshold {
                         env_inputs.push(TickInput {
                             mind: w.id,
                             ordinal: ENV_HAZARD_ORDINAL,
@@ -1289,7 +1347,7 @@ impl Runner {
                                 attr: HAZARD_ATTR,
                                 hyps: vec![HAZARD_PRESENT, HAZARD_ABSENT],
                                 toward: HAZARD_PRESENT,
-                                weight: HAZARD_WEIGHT,
+                                weight: live.hazard_weight,
                                 from: w.id,
                             },
                         });
@@ -1303,10 +1361,18 @@ impl Runner {
         let promote_set = self.arc_promotion_set(&cells, &stress);
         if let Some(world) = self.world.as_mut() {
             world.set_conversational_cells(cells);
+            // The beings already promoted before this policy touches anything, minus the set the policy
+            // itself held last tick, are the ones promoted by some OTHER path (a test harness, a scripted
+            // scene). The policy must never claim ownership of those, so it never restricts them.
+            let externally_owned: BTreeSet<StableId> = world
+                .promoted_ids()
+                .into_iter()
+                .filter(|id| !self.arc_promoted.contains(id))
+                .collect();
             // Apply the arc-scoped promotion, touching only the set this policy owns. Promote the new arc
             // set, then restrict every being the policy promoted last tick that has left the arc (its arc
-            // resolved). A promotion set by any other path (a test harness, a scripted scene) is never in
-            // `arc_promoted`, so it is left untouched, and a being still in the arc is not restricted.
+            // resolved). A being promoted by another path is never in `arc_promoted`, so it is left
+            // untouched, and a being still in the arc is not restricted.
             for &id in &promote_set {
                 world.promote(id);
             }
@@ -1315,8 +1381,14 @@ impl Runner {
                     world.restrict(id);
                 }
             }
+            // The policy now owns exactly the arc set it chose, minus any being another path already held
+            // promoted (which stays that path's to restrict), so it can never later clobber an external
+            // promotion that happened to coincide with a survival arc.
+            self.arc_promoted = promote_set.difference(&externally_owned).copied().collect();
+        } else {
+            // No world to promote into: the policy owns nothing this tick.
+            self.arc_promoted = BTreeSet::new();
         }
-        self.arc_promoted = promote_set;
         if env_inputs.is_empty() {
             world_inputs.to_vec()
         } else {
@@ -1352,7 +1424,7 @@ impl Runner {
                     .map(|id| stress.get(id).copied().unwrap_or(Fixed::ONE))
                     .min()
                     .unwrap_or(Fixed::ONE);
-                (lowest < PROMOTION_STRESS_THRESHOLD).then_some((lowest, cell, ids))
+                (lowest < self.liveliness.promotion_stress_threshold).then_some((lowest, cell, ids))
             })
             .collect();
         // Most-stressed cell first (lowest margin), ties broken by cell id, so the budget selection is
@@ -1360,7 +1432,7 @@ impl Runner {
         arc_cells.sort_by(|a, b| a.0.to_bits().cmp(&b.0.to_bits()).then(a.1.cmp(&b.1)));
         let mut promoted = BTreeSet::new();
         for (_, _, ids) in arc_cells {
-            if promoted.len() >= PROMOTION_BUDGET {
+            if promoted.len() >= self.liveliness.promotion_budget {
                 break;
             }
             for id in ids {

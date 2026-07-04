@@ -2051,3 +2051,43 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"
+
+# --- base-level liveliness §4 and step 5: the surfacing-policy magnitudes read fail-loud by
+# LivelinessCalib::from_manifest (crates/sim/src/runner.rs) and armed in build_dawn_runner. Two hooks gate
+# and weight run-path world content: the environment-sourced hazard belief (does a salt flat register as a
+# hazard worth a belief, and how strong is that first-hand evidence), and the arc-scoped promotion (which
+# struggling beings are lifted to the individual dialogue tier, and how many at once). Each is a magnitude
+# feeding a belief or deciding who converses, so it is reserved-with-basis, never a hardcoded inline
+# constant (Principle 11). ---
+
+[[reserved]]
+id = "hazard.dose_threshold"
+basis = "the salinity dose above which a being standing on a cell registers it as a lethal hazard and forms the salt-flat belief (Runner::couple_conversation). Set at the lethality boundary the physics floor already defines: the dose at which net_harm on a naive lineage overtakes its condition recovery (physiology.condition_recovery), so a cell a being can survive raises no false alarm and a cell that kills it does. Larger makes fewer cells register as hazards, smaller makes the belief form on milder flats"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; civsim_physics::laws::net_harm"
+
+[[reserved]]
+id = "hazard.weight"
+basis = "the signed evidence weight a first-hand encounter with the salt-flat hazard carries into the belief pipeline (the Observe stimulus weight in Runner::couple_conversation). A first-hand percept is strong evidence, so set it from the belief subsystem's first-hand witness access weight (the WITNESSED channel) for consistency, so a directly-felt hazard commits a belief as firmly as any first-hand witness. Larger commits the hazard belief on fewer encounters, smaller needs more"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; crates/sim/src/evidence.rs"
+
+[[reserved]]
+id = "promotion.stress_threshold"
+basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
+status = "reserved"
+value = ""
+unit = "reserve_level"
+source = "base-level liveliness §4; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "promotion.budget"
+basis = "the maximum beings promoted to the individual dialogue tier at once (Runner::arc_promotion_set), a performance bound: the per-tick individual-dialogue cost the frame budget allows. It defaults HIGH (liveliness over frugality, the owner ruling), the aggregate tier absorbing the rest with promote/restrict exact and conserved, so a generous budget costs compute, never fidelity. When more beings are in an arc than the budget, the most-stressed cells win. Set as an integer count from the per-tick dialogue cost the target frame budget affords"
+status = "reserved"
+value = ""
+unit = "count"
+source = "base-level liveliness §4; crates/sim/src/runner.rs"
