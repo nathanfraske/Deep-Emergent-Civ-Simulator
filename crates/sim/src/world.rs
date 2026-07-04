@@ -2195,6 +2195,7 @@ impl World {
         }
         self.perceive();
         self.decide();
+        self.enculturate();
         self.converse();
         self.gossip();
         self.diffuse_beliefs();
@@ -2308,6 +2309,38 @@ impl World {
                 .entry(listener)
                 .or_default()
                 .adopt(concept, word);
+        }
+    }
+
+    /// The enculturation beat (design Part 28, the value-and-belief convergence of the resolved
+    /// R-VALUE work): once per generation, each band's members move their stance on every axiom axis
+    /// toward the band's confidence-weighted mean, anchored to their own innate seed by their effective
+    /// stubbornness (the Friedkin-Johnsen rule, [`World::enculturate_band`]). Within-band axiom
+    /// variance falls but never collapses (stubbornness holds a lasting spread), and separated bands
+    /// converge toward their own means, so isolated bands diverge. Pure fixed-point with a synchronous
+    /// snapshot mean and no RNG (Principles 3, 9); the bands are walked in canonical place then id
+    /// order and the axes in ascending id order. Cadence-gated (enculturation is a per-generation
+    /// social process, so it fires on the life-cadence period) and inert until the reserved stubbornness
+    /// split is installed, so a world that declares no enculturation runs unchanged.
+    fn enculturate(&mut self) {
+        if self.stubbornness_split.is_none() {
+            return;
+        }
+        if self.clock == 0 || !self.clock.is_multiple_of(self.life_cadence_ticks) {
+            return;
+        }
+        // The axiom axes present across the population, ascending id order (canonical).
+        let axes: std::collections::BTreeSet<AxiomAxisId> = self
+            .intrinsic
+            .values()
+            .flat_map(|b| b.axioms.iter().map(|a| a.axis))
+            .collect();
+        // The bands, by place in canonical (PlaceId, StableId) order.
+        let by_place = self.colocated_index();
+        for members in by_place.values() {
+            for &axis in &axes {
+                self.enculturate_band(members, axis);
+            }
         }
     }
 
