@@ -31,6 +31,7 @@
 
 use civsim_core::Fixed;
 
+use crate::anatomy::BodyPlan;
 use crate::axiom::IntrinsicBeliefs;
 use crate::breeding::BreedingSystemId;
 use crate::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
@@ -100,6 +101,14 @@ pub struct Race {
     /// [`Race::with_articulation`] sets it. Two races diverge in their phonetics from this data alone
     /// through one kernel, never a `RaceId` branch (Principle 9).
     pub articulation: Option<Articulation>,
+    /// The race's body plan (design Part 35, real-world unification step 3): the anatomy every dawn
+    /// member is embodied with, the sibling of [`Race::articulation`] for the physical body. `None`
+    /// until declared, so a race with no body plan founds minds without bodies (the
+    /// fail-quiet-until-declared convention, and the owner-noted disembodied-mind case);
+    /// [`Race::with_body_plan`] sets it. Two races diverge in their derived physiology (surface,
+    /// thermal mass, metabolism, muscle force) from this plan alone through one kernel, never a
+    /// `RaceId` branch (Principle 9).
+    pub body: Option<BodyPlan>,
 }
 
 /// A race's articulation and hearing parameters (design Part 33.3): the two per-race scalars the
@@ -149,6 +158,7 @@ impl Race {
             maturity_years,
             breeding: BreedingSystemId(0),
             articulation: None,
+            body: None,
         }
     }
 
@@ -158,6 +168,16 @@ impl Race {
     /// 11), reserved fail-loud with basis.
     pub fn with_articulation(mut self, articulation: Articulation) -> Self {
         self.articulation = Some(articulation);
+        self
+    }
+
+    /// Set the race's body plan (a builder over [`Race::new`], design Part 35, real-world unification
+    /// step 3). Until set, the race founds minds without bodies (the fail-quiet-until-declared
+    /// convention). The mechanism that derives a member's physiology from the plan is fixed Rust; the
+    /// plan is per-race data (Principle 11), and two races diverge in their bodies from the plan alone,
+    /// never a `RaceId` branch (Principle 9).
+    pub fn with_body_plan(mut self, body: BodyPlan) -> Self {
+        self.body = Some(body);
         self
     }
 
