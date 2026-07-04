@@ -3413,49 +3413,65 @@ impl World {
             for &speaker in &ids {
                 // A promoted speaker runs the move-by-move dialogue step instead, so the
                 // one-pass fallback must not also transmit for it (no double-counting).
-                if self.promoted.contains(&speaker) {
-                    continue;
-                }
                 let place = match self.conversational_place(speaker) {
                     Some(p) => p,
                     None => continue,
                 };
-                let listeners: Vec<StableId> = by_place
+                // Fan-out (base-level liveliness step 5 follow-on, the multi-party overhearing; owner
+                // ruling 2026-07-04): a speaker's committed beliefs reach EVERY co-located listener this
+                // tick, a canonical id-ordered fold rather than one sampled listener. Cultural
+                // transmission then reaches whoever is present (a newborn co-located with its bearer
+                // acquires by presence, through the same conversation as any adult, never by an authored
+                // teaching path and never by reading kinship), and persists only while a holder shares the
+                // cell, so an idea can still die out where no holder stands (the falsifiability guard).
+                // A promoted speaker's move-by-move converse already informs its PROMOTED co-located peers,
+                // so gossip carries a promoted speaker's beliefs only to its NON-promoted co-located
+                // listeners (the aggregate tier, including newborns): this reaches the young without
+                // double-counting the promoted peers. Committed_beliefs, not first_committed, so the
+                // max-keyed hazard belief is not masked once other beliefs form (parity with converse).
+                let speaker_promoted = self.promoted.contains(&speaker);
+                let mut listeners: Vec<StableId> = by_place
                     .get(&place)
-                    .map(|v| v.iter().copied().filter(|&l| l != speaker).collect())
+                    .map(|v| {
+                        v.iter()
+                            .copied()
+                            .filter(|&l| {
+                                l != speaker && !(speaker_promoted && self.promoted.contains(&l))
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default();
                 if listeners.is_empty() {
                     continue;
                 }
-                let shared = match self
-                    .minds
-                    .get(&speaker)
-                    .and_then(|m| m.first_committed(&self.belief_params))
-                {
-                    Some(s) => s,
+                listeners.sort_unstable();
+                let shared_beliefs = match self.minds.get(&speaker) {
+                    Some(m) => m.committed_beliefs(&self.belief_params),
                     None => continue,
                 };
-                let idx = DrawKey::entity(speaker.0, self.clock, Phase::GOSSIP)
-                    .rng(self.seed)
-                    .range_u32(0, listeners.len() as u32) as usize;
-                let listener = listeners[idx];
-                let deception = self
-                    .minds
-                    .get(&listener)
-                    .map(|m| m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params))
-                    .unwrap_or(false);
-                let trust = self
-                    .trust
-                    .get(&(listener, speaker))
-                    .copied()
-                    .unwrap_or(gp.trust_baseline);
-                out.push(GossipAction {
-                    listener,
-                    speaker,
-                    shared,
-                    deception,
-                    trust,
-                });
+                for shared in shared_beliefs {
+                    for &listener in &listeners {
+                        let deception = self
+                            .minds
+                            .get(&listener)
+                            .map(|m| {
+                                m.detects_lie(speaker, shared.attr, shared.value, &self.meta_params)
+                            })
+                            .unwrap_or(false);
+                        let trust = self
+                            .trust
+                            .get(&(listener, speaker))
+                            .copied()
+                            .unwrap_or(gp.trust_baseline);
+                        out.push(GossipAction {
+                            listener,
+                            speaker,
+                            shared: shared.clone(),
+                            deception,
+                            trust,
+                        });
+                    }
+                }
             }
             out
         };
@@ -5049,10 +5065,12 @@ name = "said"
     }
 
     #[test]
-    fn gossip_skips_a_promoted_speaker() {
-        // A promoted speaker with no promoted partner present must not fall back to the
-        // one-pass gossip transmission (the dialogue step handles it, and it needs a
-        // promoted partner). So a lone promoted speaker neither gossips nor logs a move.
+    fn a_promoted_speaker_reaches_a_nonpromoted_listener_by_gossip() {
+        // A promoted speaker's move-by-move converse informs only its PROMOTED co-located peers, so a
+        // promoted holder reaches its NON-promoted co-located listeners (the aggregate tier, including
+        // newborns) through the one-pass gossip fan-out instead: belief flows across the promotion
+        // boundary so a learned idea is not trapped among the promoted, without double-counting the
+        // promoted peers (base-level liveliness step 5 follow-on, owner ruling 2026-07-04).
         let mut w = dialogue_world();
         let speaker = w.spawn(Fixed::ONE);
         let listener = w.spawn(Fixed::ONE); // not promoted
@@ -5065,13 +5083,15 @@ name = "said"
             w.mind(listener)
                 .unwrap()
                 .belief(StableId(99), AttrKindId(0), &bp),
-            None,
-            "a promoted speaker does not also gossip"
+            Some(10),
+            "a promoted speaker's belief reaches a non-promoted co-located listener by gossip fan-out"
         );
+        // No move-by-move dialogue is logged: converse needs a promoted partner (there is none), and the
+        // one-pass gossip fan-out logs no conversation move.
         assert_eq!(
             w.events().len(),
             0,
-            "no move logged without a promoted partner"
+            "the gossip fan-out logs no dialogue move"
         );
     }
 
