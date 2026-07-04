@@ -50,6 +50,7 @@ use civsim_physics::laws;
 
 use crate::body::{Body, FunctionId};
 use crate::language::FeatureValueId;
+use crate::race::Articulation;
 use crate::sensorium::{SenseChannelId, Sensorium};
 
 /// Caller-supplied caps and the structural mode count for a perceptual-geometry read-out. These are
@@ -253,6 +254,43 @@ fn abs_diff(a: Fixed, b: Fixed) -> Fixed {
     } else {
         sat_sub(b, a)
     }
+}
+
+/// Derive a race's perceptual geometry from the SHARED base sound geometry and its OWN articulation
+/// data (design Part 33.3, the per-race application of [`perceptual_geometry`]). It scales the base
+/// resonator lengths by the race's vocal-tract scale (a larger tract lengthens the resonators and
+/// lowers the formants, through the tube-resonance law) and reads its hearing resolution as the
+/// sensorium's just-noticeable difference, then runs the shared kernel over that per-race geometry.
+///
+/// Two races diverge from their articulation data alone (Principle 9): the kernel reads no `RaceId`
+/// and no per-race table, only the two scalars an [`Articulation`] carries, so a big-tracted race and
+/// a small-tracted one, or a sharp-eared and a dull-eared one, fall out of the same code on different
+/// data. Pure fixed-point and deterministic (Principle 3): one multiply per base length and the
+/// shared kernel, no float and no RNG. Returns `None` on the shared kernel's terms (an empty base
+/// geometry, or a non-positive resolution).
+pub fn articulated_geometry(
+    base_lengths: &[Fixed],
+    sound_speed: Fixed,
+    absorption_reference: Fixed,
+    path: Fixed,
+    articulation: &Articulation,
+    channel: SenseChannelId,
+    params: PerceptualParams,
+) -> Option<PerceptualGeometry> {
+    let scaled: Vec<Fixed> = base_lengths
+        .iter()
+        .map(|&l| l.mul(articulation.vocal_tract_scale))
+        .collect();
+    let sensorium = Sensorium::with_resolution([(channel, articulation.hearing_resolution)]);
+    perceptual_geometry(
+        &scaled,
+        sound_speed,
+        absorption_reference,
+        path,
+        &sensorium,
+        channel,
+        params,
+    )
 }
 
 /// The two Liebig halves of a being's capability on one communication channel, each in `[0, ONE]`.
@@ -492,6 +530,64 @@ mod tests {
             )
         };
         assert_eq!(run(), run(), "the same inputs replay bit for bit");
+    }
+
+    #[test]
+    fn two_races_diverge_in_perceptual_geometry_from_their_articulation_alone_no_raceid() {
+        use crate::race::Articulation;
+        // Per-race phonetics from data (Part 33.3, Principle 9): two races share the base sound
+        // geometry and the medium, differing only in their Articulation. articulated_geometry reads
+        // the two scalars an Articulation carries, no RaceId and no per-race table, so the divergence
+        // falls out of the same kernel on different data.
+        let base = lengths();
+        let c = air_speed();
+        let beta = ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        let geo = |a: &Articulation| {
+            articulated_geometry(&base, c, beta, path, a, HEARING, params()).unwrap()
+        };
+
+        // A longer vocal tract lengthens the resonators and lowers the formants (tube resonance,
+        // frequency proportional to speed over length): a full-scale tract's F1 is below a
+        // half-scale tract's, holding the ear equal.
+        let jnd = Fixed::from_int(50);
+        let long_tract = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: jnd,
+        };
+        let short_tract = Articulation {
+            vocal_tract_scale: Fixed::from_ratio(1, 2),
+            hearing_resolution: jnd,
+        };
+        let f1 = |g: &PerceptualGeometry| g.formant_vector(0).unwrap()[0];
+        assert!(
+            f1(&geo(&long_tract)) < f1(&geo(&short_tract)),
+            "a longer tract lowers the formants: {:?} < {:?}",
+            f1(&geo(&long_tract)),
+            f1(&geo(&short_tract))
+        );
+
+        // A sharper ear (a smaller just-noticeable difference) discriminates more, widening the
+        // contrast budget, holding the vocal tract equal.
+        let sharp_ear = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: Fixed::from_int(20),
+        };
+        let dull_ear = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: Fixed::from_int(80),
+        };
+        assert!(
+            geo(&sharp_ear).contrast_budget() > geo(&dull_ear).contrast_budget(),
+            "a sharper ear widens the contrast budget"
+        );
+
+        // No RaceId, and deterministic: identical articulation data reads bit-identically.
+        assert_eq!(
+            geo(&long_tract),
+            geo(&long_tract),
+            "identical articulation data replays bit for bit"
+        );
     }
 
     #[test]

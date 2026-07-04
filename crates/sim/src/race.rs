@@ -93,6 +93,34 @@ pub struct Race {
     /// system) in [`Race::new`]; set another with [`Race::with_breeding`]. An id the registry does
     /// not hold falls back to a single class, so a world with no registered system authors no ratio.
     pub breeding: BreedingSystemId,
+    /// The race's articulation and hearing parameters (design Part 33.3, R-SENSORIUM): the per-race
+    /// data the phonetic pipeline reads to bend the shared base sound geometry to this race's own body
+    /// ([`crate::langmod::articulated_geometry`]). `None` until declared, so a race with no
+    /// articulation derives no phonetic form system (the fail-quiet-until-declared convention);
+    /// [`Race::with_articulation`] sets it. Two races diverge in their phonetics from this data alone
+    /// through one kernel, never a `RaceId` branch (Principle 9).
+    pub articulation: Option<Articulation>,
+}
+
+/// A race's articulation and hearing parameters (design Part 33.3): the two per-race scalars the
+/// phonetic pipeline reads. The base sound geometry (the resonator length of each candidate feature
+/// value) is shared universal physics; these two scalars bend it to the race's own body, so two races
+/// diverge in the sounds they produce and discriminate from this data alone through one kernel, never
+/// a `RaceId` branch (Principle 9). The mechanism is fixed Rust; these values are data (Principle 11),
+/// reserved fail-loud with basis, never fabricated.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Articulation {
+    /// The vocal-tract scale: a multiplier on the base resonator lengths, so a larger tract gives
+    /// longer resonators and lower formants (the tube-resonance law, frequency proportional to the
+    /// sound speed over the length). RESERVED with basis (the race's resonating-cavity size relative
+    /// to the base geometry). AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the
+    /// race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an
+    /// interim per-race lever rather than a permanent one.
+    pub vocal_tract_scale: Fixed,
+    /// The hearing resolution: the just-noticeable frequency difference the race discriminates voice
+    /// at, the sensorium resolution the perceptual geometry reads (a SMALLER value is a sharper ear).
+    /// RESERVED with basis (the race's auditory frequency-discrimination threshold).
+    pub hearing_resolution: Fixed,
 }
 
 impl Race {
@@ -120,7 +148,17 @@ impl Race {
             lifespan_years,
             maturity_years,
             breeding: BreedingSystemId(0),
+            articulation: None,
         }
+    }
+
+    /// Set the race's articulation and hearing parameters (a builder over [`Race::new`]). Until set,
+    /// the race derives no phonetic form system (the fail-quiet-until-declared convention). The
+    /// mechanism is fixed; the vocal-tract scale and hearing resolution are per-race data (Principle
+    /// 11), reserved fail-loud with basis.
+    pub fn with_articulation(mut self, articulation: Articulation) -> Self {
+        self.articulation = Some(articulation);
+        self
     }
 
     /// Set the race's breeding system by id (a builder over [`Race::new`]). The mechanism is fixed;

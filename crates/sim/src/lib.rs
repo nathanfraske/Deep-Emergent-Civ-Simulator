@@ -183,7 +183,8 @@ pub use langdist::{
     ComponentWeights,
 };
 pub use langmod::{
-    acquisition_split, capability_gate, capability_halves, phoneme_priors, CapabilityGate,
+    acquisition_split, articulated_geometry, capability_gate, capability_halves, phoneme_priors,
+    CapabilityGate,
 };
 pub use language::{
     ArticulationSubstrate, ConceptId, FeatureDimDef, FeatureDimId, FeatureValueDef, FeatureValueId,
@@ -198,7 +199,7 @@ pub use personality::{
     TraitInstance,
 };
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
-pub use race::{BandSpec, Race};
+pub use race::{Articulation, BandSpec, Race};
 pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
 pub use semantics::{
     concept_thresholds, substrate_quantization, Concept, ConceptThresholds, SemanticSubstrate,
