@@ -465,3 +465,19 @@ status = "set"
 value = "4"
 unit = "water_depth"
 source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.regen_rate"
+basis = "FIXTURE placeholder; the logistic regrowth rate the standing food stock regrows toward the productivity capacity each tick (with the trophic efficiency and the drain, it fixes the carrying capacity)"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+
+[[reserved]]
+id = "productivity.colonization"
+basis = "FIXTURE placeholder; the colonization propagule floor a viable-but-empty cell establishes so logistic regrowth can bootstrap from nothing (a dry-start world greens as water arrives)"
+status = "set"
+value = "0.05"
+unit = "producer_biomass"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs"

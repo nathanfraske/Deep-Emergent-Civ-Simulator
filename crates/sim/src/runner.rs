@@ -774,6 +774,12 @@ impl Embodiment {
     pub fn walkers(&self) -> &[Walker] {
         &self.walkers
     }
+
+    /// The standing resource field the grazers deplete and the environment regrows (a pure read, for the
+    /// carrying-capacity reader; base-level liveliness step 3).
+    pub fn resources(&self) -> &ResourceField {
+        &self.resources
+    }
 }
 
 /// The data the unified runner needs to embody a newborn mind at the lifecycle-pairing beat (real-world
@@ -1126,9 +1132,14 @@ impl Runner {
             let calib = *calib;
             env.step(&self.field, &calib);
         }
-        if let Some((env, _)) = self.environ.as_ref() {
+        // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
+        // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
+        // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
+        // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
+        // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
+        if let Some((env, calib)) = self.environ.as_ref() {
             if let Some(emb) = self.embodiment.as_mut() {
-                env.write_resource_supply(emb.resources_mut());
+                env.regrow_supply(emb.resources_mut(), calib);
             }
         }
     }
@@ -1381,7 +1392,7 @@ impl Runner {
             &emb.layout,
             &emb.afford,
             &terrain,
-            &emb.resources,
+            &mut emb.resources,
             &emb.params,
             emb.seed,
             self.clock,
@@ -1576,6 +1587,10 @@ impl Runner {
             h.write_u64(wh as u64);
         }
         if let Some(emb) = &self.embodiment {
+            // The standing food-and-water stock the grazers deplete and the environment regrows (base-
+            // level liveliness step 3): dynamic state that must fold, or a divergence in the regrow-and-
+            // graze loop would pass replay while hiding. Walks canonical (coordinate, class) order.
+            emb.resources.hash_into(&mut h);
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {

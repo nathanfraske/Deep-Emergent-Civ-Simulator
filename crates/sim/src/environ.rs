@@ -47,8 +47,9 @@ use civsim_world::{Coord3, TileMap};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
-use crate::physiology::ENERGY_DENSITY;
+use crate::physiology::{ENERGY_DENSITY, WATER_FRACTION};
 use crate::runner::Field;
+use crate::stocks::Stock;
 
 /// A scalar field on the flat bounded map, Q32.32, row-major (`idx = y * width + x`), the shape the
 /// temperature [`Field`] and the GPU field kernel use. The membership of the environmental stack is
@@ -130,6 +131,16 @@ pub struct EnvironCalib {
     pub soil_req: Fixed,
     /// The uniform soil-nutrient supply (a baseline until the step-4 soil field lands).
     pub soil_baseline: Fixed,
+    /// The producer-biomass regrowth rate (base-level liveliness step 3): the logistic regeneration
+    /// coefficient the standing food stock regrows toward the productivity capacity at each tick
+    /// ([`crate::stocks::Stock`]). Larger regrows a grazed patch faster and raises the carrying
+    /// capacity; smaller makes food scarcer.
+    pub regen_rate: Fixed,
+    /// The colonization propagule floor (base-level liveliness step 3): the small standing biomass a
+    /// viable-but-empty cell establishes so logistic regrowth can bootstrap from nothing (a dry-start
+    /// world greens as water arrives, and a grazed-out patch slowly recovers rather than dying forever).
+    /// Small relative to a cell's capacity, the seed-rain a viable cell receives.
+    pub colonization: Fixed,
 }
 
 impl EnvironCalib {
@@ -152,6 +163,8 @@ impl EnvironCalib {
             temp_req: m.require_fixed("productivity.temperature_requirement")?,
             soil_req: m.require_fixed("productivity.soil_requirement")?,
             soil_baseline: m.require_fixed("productivity.soil_baseline")?,
+            regen_rate: m.require_fixed("productivity.regen_rate")?,
+            colonization: m.require_fixed("productivity.colonization")?,
         })
     }
 
@@ -175,6 +188,8 @@ impl EnvironCalib {
             temp_req: Fixed::from_ratio(1, 2),
             soil_req: Fixed::from_ratio(1, 2),
             soil_baseline: Fixed::from_int(1),
+            regen_rate: Fixed::from_ratio(1, 4),
+            colonization: Fixed::from_ratio(1, 20),
         }
     }
 }
@@ -190,10 +205,12 @@ pub struct EnvironFields {
     height: i32,
     /// The dynamic water depth per cell (the hydrology field).
     water: ScalarField,
-    /// The standing producer biomass per cell, the food supply written into the resource field. In this
-    /// step it sits at the productivity (the abstract producer at its carrying capacity); step 3 makes
-    /// it a regrowing, grazable stock.
-    biomass: ScalarField,
+    /// The producer-biomass CAPACITY per cell: the primary productivity (the Liebig ceiling the standing
+    /// food stock regrows toward), derived each tick from the water-light-temperature-soil product. The
+    /// standing stock that feeds a grazer lives in the [`ResourceField`], persisting and
+    /// depleting there; this field is the moving target it regrows toward (base-level liveliness step 3).
+    /// Biosphere-ready: the addendum replaces this abstract Liebig capacity with real producer biomass.
+    capacity: ScalarField,
     /// Static per-cell worldgen inputs (row-major): the moisture the precipitation reads and the
     /// latitude light the productivity reads. The frozen elevation feeds the precomputed `downhill`
     /// target and is not stored past construction.
@@ -232,7 +249,7 @@ impl EnvironFields {
             width: w,
             height: h,
             water: ScalarField::uniform(w, h, Fixed::ZERO),
-            biomass: ScalarField::uniform(w, h, Fixed::ZERO),
+            capacity: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture,
             light,
             downhill,
@@ -249,9 +266,11 @@ impl EnvironFields {
         self.water.at(x, y)
     }
 
-    /// The standing producer biomass (the food supply) at a cell.
-    pub fn biomass_at(&self, x: i32, y: i32) -> Fixed {
-        self.biomass.at(x, y)
+    /// The producer-biomass CAPACITY (the primary productivity, the ceiling the standing food stock
+    /// regrows toward) at a cell. The standing supply that feeds a grazer lives in the
+    /// [`ResourceField`] this writes into; this is the productivity potential, for the field reader.
+    pub fn capacity_at(&self, x: i32, y: i32) -> Fixed {
+        self.capacity.at(x, y)
     }
 
     /// The field extent.
@@ -261,10 +280,12 @@ impl EnvironFields {
 
     /// One canonical step of the environmental stack (base-level liveliness step 2): advance the
     /// hydrology (precipitation, evaporation, downhill routing) against the same-tick diffused
-    /// temperature, then set the standing producer biomass to the derived productivity. Pinned integer
-    /// folds in canonical row-major order, double-buffered, so the step is bit-identical across threads
-    /// and replays (Principle 3). The temperature is the runner's diffused [`Field`], sized to the same
-    /// grid.
+    /// temperature, then derive the primary-productivity CAPACITY (the ceiling the standing food stock
+    /// regrows toward; base-level liveliness step 3 moved the standing stock into the [`ResourceField`]
+    /// and this field to the capacity). Pinned integer folds in canonical row-major order, double-
+    /// buffered, so the step is bit-identical across threads and replays (Principle 3). The temperature
+    /// is the runner's diffused [`Field`], sized to the same grid. The standing stock itself is regrown
+    /// and grazed through [`Self::regrow_supply`] against this capacity, not here.
     pub fn step(&mut self, temp: &Field, calib: &EnvironCalib) {
         self.step_hydrology(temp, calib);
         self.step_productivity(temp, calib);
@@ -336,16 +357,17 @@ impl EnvironFields {
         self.water.cells = next;
     }
 
-    /// The productivity derivation: set each cell's standing producer biomass to the Liebig minimum over
-    /// water, light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere
-    /// addendum replaces with real producers). The limiting factor sets the continuous productivity, no
-    /// dead-zone cutoff (Principle 8).
+    /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
+    /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
+    /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
+    /// cutoff (Principle 8). This is the ceiling; [`Self::regrow_supply`] regrows the standing stock
+    /// toward it and grazing depletes it (base-level liveliness step 3).
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
-                self.biomass.cells[i] = biomass_from(
+                self.capacity.cells[i] = biomass_from(
                     self.water.cells[i],
                     self.light[i],
                     temp.at(x, y),
@@ -356,22 +378,57 @@ impl EnvironFields {
         }
     }
 
-    /// Write the standing producer biomass into the resource field as the `bio.energy_density` supply
-    /// the grazers read (base-level liveliness step 2). Each in-bounds cell gets a [`Composition`] whose
-    /// energy-class supply is its biomass, so a productive cell feeds and a barren one does not, all
-    /// through the existing edibility path (no new gate). The addendum's real producers write the same
-    /// supply from their own per-cell biomass.
-    pub fn write_resource_supply(&self, resource: &mut ResourceField) {
+    /// Regrow the standing food stock and refresh the drinkable water supply in the resource field the
+    /// grazers read (base-level liveliness step 3). This is the living resource loop, run each tick after
+    /// the productivity capacity is derived and before the grazers act:
+    ///
+    /// FOOD is a PERSISTENT, GRAZABLE stock. Each cell's standing `bio.energy_density` supply carries
+    /// over between ticks (grazing depleted it last tick); this reads it back, regrows it toward the
+    /// cell's productivity capacity as a Part-15 logistic [`Stock`] (regen and over-harvest collapse for
+    /// free), and writes the regrown amount. A colonization propagule floor seeds a viable-but-empty
+    /// cell so logistic regrowth can bootstrap from nothing (a dry-start world greens as water arrives,
+    /// and a grazed-out patch recovers rather than dying forever). So the standing amount, not the
+    /// capacity, is what a grazer eats and depletes: a half-grazed patch feeds half through the same
+    /// Liebig math (Principle 8), and the population settles where its draw meets what the land regrows.
+    ///
+    /// WATER is a DRINKABLE MIRROR of the standing water depth, refreshed (overwritten) each tick, so a
+    /// being drinks where the hydrology has pooled water but drinking does not measurably drain a
+    /// standing body of water at this scale (the honest limit: the hydrology field is not a drinking
+    /// sink). Both supplies key off the biology-floor class strings (`bio.energy_density`,
+    /// `bio.water_fraction`), never a biome or race id (Principle 9): the SOURCE binding (which physical
+    /// field feeds which consumable class) is the one concrete seam, and a world's alien fluid enters
+    /// the same way as data. Walks canonical row-major order; a pure deterministic fold (Principle 3).
+    pub fn regrow_supply(&self, resource: &mut ResourceField, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         for y in 0..h {
             for x in 0..w {
-                let biomass = self.biomass.at(x, y);
+                let coord = Coord3::ground(x, y);
+                let cap = self.capacity.at(x, y);
+                // The persistent standing food stock (post-graze), regrown toward the capacity.
+                let standing = resource.supply(coord, ENERGY_DENSITY);
+                let mut stock = Stock::new(standing, cap, calib.regen_rate);
+                if cap > Fixed::ZERO {
+                    // Colonization: a viable-but-empty cell gets a propagule floor so logistic regrowth
+                    // (zero from an empty stock) can begin; the floor never exceeds the cell's capacity.
+                    let floor = calib.colonization.min(cap);
+                    if stock.amount() < floor {
+                        stock.deposit(floor - stock.amount());
+                    }
+                }
+                stock.step(Fixed::ZERO); // logistic regrow toward capacity (grazing already applied)
+                let food = stock.amount();
+                // The drinkable water supply is the standing depth, clamped to a bounded [0, ONE] supply
+                // the satisfaction measure consumes; refreshed each tick, so drinking does not deplete it.
+                let water = self.water.at(x, y).min(Fixed::ONE);
                 resource.set(
-                    Coord3::ground(x, y),
+                    coord,
                     Composition {
-                        nutrients: [(ENERGY_DENSITY.to_string(), biomass)]
-                            .into_iter()
-                            .collect(),
+                        nutrients: [
+                            (ENERGY_DENSITY.to_string(), food),
+                            (WATER_FRACTION.to_string(), water),
+                        ]
+                        .into_iter()
+                        .collect(),
                         toxins: Default::default(),
                     },
                 );
@@ -379,13 +436,14 @@ impl EnvironFields {
         }
     }
 
-    /// Fold the dynamic environmental fields into a hash in canonical field order (water then biomass),
-    /// the stack's contribution to the runner's `state_hash`. A field omitted here would pass replay
-    /// while hiding divergence, so both dynamic fields fold; the static inputs are a pure function of the
-    /// map and need not fold.
+    /// Fold the dynamic environmental fields into a hash in canonical field order (water then
+    /// productivity capacity), the stack's contribution to the runner's `state_hash`. A field omitted
+    /// here would pass replay while hiding divergence, so both dynamic fields fold; the static inputs are
+    /// a pure function of the map and need not fold. The standing food stock lives in the
+    /// [`ResourceField`] and is folded there (base-level liveliness step 3).
     pub fn hash_into(&self, h: &mut StateHasher) {
         self.water.hash_into(h);
-        self.biomass.hash_into(h);
+        self.capacity.hash_into(h);
     }
 }
 
@@ -473,7 +531,7 @@ mod tests {
             width: w,
             height: h,
             water: ScalarField::uniform(w, h, Fixed::ZERO),
-            biomass: ScalarField::uniform(w, h, Fixed::ZERO),
+            capacity: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture: vec![moisture; elev_tenths.len()],
             light: vec![Fixed::ONE; elev_tenths.len()],
             downhill,
@@ -617,51 +675,96 @@ mod tests {
     }
 
     #[test]
-    fn stepping_a_wet_world_produces_water_and_a_productivity_supply() {
+    fn stepping_a_wet_world_produces_water_and_a_productivity_capacity() {
         // Over a generated map with real moisture and temperature, stepping the stack accumulates water
-        // where the climate condenses it and grows a producer biomass, which writes into the resource
-        // field as an energy supply the grazers read.
+        // where the climate condenses it and derives a producer-biomass capacity, then the resource loop
+        // grows a standing food supply the grazers read toward that capacity.
         let map = a_map(0x5EED);
         let mut e = EnvironFields::from_map(&map);
         let temp = Field::from_map(&map);
         let calib = EnvironCalib::dev_fixture();
+        let mut resource = ResourceField::new();
         for _ in 0..40 {
             e.step(&temp, &calib);
+            e.regrow_supply(&mut resource, &calib);
         }
         let (w, h) = e.dims();
         let total_water: Fixed = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
             .map(|(x, y)| e.water_at(x, y))
             .fold(Fixed::ZERO, |a, b| a + b);
-        let total_biomass: Fixed = (0..h)
+        let total_capacity: Fixed = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .map(|(x, y)| e.biomass_at(x, y))
+            .map(|(x, y)| e.capacity_at(x, y))
             .fold(Fixed::ZERO, |a, b| a + b);
         assert!(
             total_water > Fixed::ZERO,
             "the climate condensed some standing water"
         );
         assert!(
-            total_biomass > Fixed::ZERO,
-            "some cells grew a producer biomass"
+            total_capacity > Fixed::ZERO,
+            "some cells carry a producer-biomass capacity"
+        );
+        // The resource loop grew a standing food supply toward the capacity (colonization plus logistic
+        // regrowth bootstrapped it from an empty field as the water arrived).
+        assert!(
+            resource.total_supply(ENERGY_DENSITY) > Fixed::ZERO,
+            "the resource loop grew a standing food supply the grazers read"
         );
 
-        let mut resource = ResourceField::new();
-        e.write_resource_supply(&mut resource);
-        // A cell with biomass carries an energy-density supply the edibility path reads.
+        // A cell with a capacity carries a standing energy-density supply the edibility path reads.
         let productive = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .find(|&(x, y)| e.biomass_at(x, y) > Fixed::ZERO);
+            .find(|&(x, y)| e.capacity_at(x, y) > Fixed::ZERO);
         if let Some((x, y)) = productive {
-            let comp = resource.composition(Coord3::ground(x, y)).unwrap();
             assert!(
-                comp.nutrients
-                    .get(ENERGY_DENSITY)
-                    .copied()
-                    .unwrap_or(Fixed::ZERO)
-                    > Fixed::ZERO,
+                resource.supply(Coord3::ground(x, y), ENERGY_DENSITY) > Fixed::ZERO,
                 "the productive cell supplies energy the grazers read"
             );
         }
+    }
+
+    #[test]
+    fn the_food_stock_regrows_toward_capacity_and_over_harvest_collapses_it() {
+        // Base-level liveliness step 3: the standing food supply is a persistent, grazable, logistically
+        // regrowing stock. From an empty field over a wet map it bootstraps (colonization + regrowth) and
+        // climbs toward the productivity capacity; a sustained heavy graze each tick drives it to collapse
+        // (the Part-15 over-harvest feedback), while a light graze settles below capacity without collapse.
+        let map = a_map(0xF00D);
+        let mut e = EnvironFields::from_map(&map);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+
+        // Warm the hydrology and food up: no grazing, so the stock climbs toward its capacity.
+        let mut ungrazed = ResourceField::new();
+        for _ in 0..60 {
+            e.step(&temp, &calib);
+            e.regrow_supply(&mut ungrazed, &calib);
+        }
+        let settled = ungrazed.total_supply(ENERGY_DENSITY);
+        assert!(settled > Fixed::ZERO, "the ungrazed food stock grew");
+
+        // Replay the same environment, but graze every cell hard each tick (take most of the supply).
+        // The stock cannot keep up, so the standing total falls far below the ungrazed settle point.
+        let mut e2 = EnvironFields::from_map(&map);
+        let mut grazed = ResourceField::new();
+        let (w, h) = e2.dims();
+        for _ in 0..60 {
+            e2.step(&temp, &calib);
+            e2.regrow_supply(&mut grazed, &calib);
+            for y in 0..h {
+                for x in 0..w {
+                    let coord = Coord3::ground(x, y);
+                    let here = grazed.supply(coord, ENERGY_DENSITY);
+                    // A heavy per-tick draw, above regrowth near the ceiling.
+                    grazed.take(coord, ENERGY_DENSITY, here);
+                }
+            }
+        }
+        let after_heavy = grazed.total_supply(ENERGY_DENSITY);
+        assert!(
+            after_heavy < settled,
+            "sustained over-harvest holds the food far below the ungrazed level: {after_heavy:?} < {settled:?}"
+        );
     }
 }

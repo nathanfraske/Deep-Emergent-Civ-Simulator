@@ -61,7 +61,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use civsim_core::{DrawKey, Fixed, Phase, StableId};
+use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_world::Coord3;
 
@@ -99,6 +99,17 @@ pub struct LocomotionParams {
     /// a direction rather than jittering in place. RESERVED. Basis: the persistence of a real
     /// search path before it turns.
     pub explore_persistence: u64,
+    /// The trophic ingest efficiency: the fraction of the biomass a bite removes from a tile's standing
+    /// stock that becomes the being's reserve, the rest lost to handling and respiration (the
+    /// [`crate::stocks::flow`] transfer efficiency; base-level liveliness step 3). A being's reserve
+    /// gain is conservation-honest against the tile's loss: the tile loses the gross bite, the being
+    /// gains that times this efficiency. RESERVED. Basis: the ecological trophic transfer efficiency of
+    /// a bite becoming consumer tissue (the Lindeman ~10 percent figure, or the fraction the owner sets
+    /// for the world's producers); it sets how hard grazing depletes the food relative to the reserve
+    /// gained, so it, the regrowth rate, and the metabolic drain together fix the carrying capacity.
+    /// Its manifest home is `locomotion.ingest_efficiency` once the locomotion parameters read fail-loud
+    /// from the manifest; the dev harness stands up a labelled fixture through [`Self::dev_default`].
+    pub ingest_efficiency: Fixed,
 }
 
 impl LocomotionParams {
@@ -110,6 +121,10 @@ impl LocomotionParams {
             activity_floor: Fixed::from_ratio(1, 4),
             sense_range: 4,
             explore_persistence: 6,
+            // A labelled fixture (not owner canon): a half-efficient bite, so grazing depletes the food
+            // at twice the reserve gained, giving carrying capacity teeth while a lineage can still
+            // subsist. A canonical run reads the reserved trophic efficiency.
+            ingest_efficiency: Fixed::from_ratio(1, 2),
         }
     }
 }
@@ -211,6 +226,65 @@ impl ResourceField {
             })
             .map(|def| def.id)
             .collect()
+    }
+
+    /// The standing supply of one nutrient class on a tile (base-level liveliness step 3): the amount a
+    /// grazer reads before it bites. An absent tile or class reads as zero (the substrate absence
+    /// convention). Keyed off the class string alone, never a race or kind id (Principle 9).
+    pub fn supply(&self, coord: Coord3, class: &str) -> Fixed {
+        self.matter
+            .get(&coord)
+            .map(|c| c.nutrient(class))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Remove up to `want` of one nutrient class from a tile's standing supply, returning what was
+    /// removed (never more than is present, never negative), the grazing draw the ingest arm
+    /// makes on the living resource loop (base-level liveliness step 3). A depleted tile feeds the next
+    /// being less, so competition is the id-sorted walk's sequential draw with no new randomness, and a
+    /// grazed-out tile empties and beings move on. Reads and writes only the class string's supply, no
+    /// identity (Principle 9); a tile or class with no supply is a no-op returning zero.
+    pub fn take(&mut self, coord: Coord3, class: &str, want: Fixed) -> Fixed {
+        let Some(comp) = self.matter.get_mut(&coord) else {
+            return Fixed::ZERO;
+        };
+        let Some(supply) = comp.nutrients.get_mut(class) else {
+            return Fixed::ZERO;
+        };
+        let taken = want.clamp(Fixed::ZERO, *supply);
+        *supply -= taken;
+        taken
+    }
+
+    /// The total standing supply of one nutrient class over every tile (base-level liveliness step 3):
+    /// the whole map's grazable stock of that class, for the carrying-capacity reader. A pure read of
+    /// hashed state.
+    pub fn total_supply(&self, class: &str) -> Fixed {
+        Fixed::saturating_sum(self.matter.values().map(|c| c.nutrient(class)))
+    }
+
+    /// Fold the standing resource supplies into a hash in canonical (coordinate, class) order (base-
+    /// level liveliness step 3): the grazable stock is dynamic state the runner's `state_hash` must
+    /// carry, or a divergence in the regrow-and-graze loop would pass replay while hiding. The
+    /// `BTreeMap`s walk in canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (coord, comp) in &self.matter {
+            h.write_i64(coord.x as i64);
+            h.write_i64(coord.y as i64);
+            h.write_i64(coord.z as i64);
+            for (class, supply) in &comp.nutrients {
+                for b in class.as_bytes() {
+                    h.write_u32(*b as u32);
+                }
+                h.write_fixed(*supply);
+            }
+            for (class, dose) in &comp.toxins {
+                for b in class.as_bytes() {
+                    h.write_u32(*b as u32);
+                }
+                h.write_fixed(*dose);
+            }
+        }
     }
 }
 
@@ -410,13 +484,19 @@ pub fn step<T: Terrain>(
     seed: u64,
     tick: u64,
 ) -> usize {
+    // The field-less entry does NOT deplete the caller's resource field: it is the scoring and fixture
+    // path (the evolve proxy, the movement tests), whose resource field is a re-seeded fixture, not a
+    // living stock. It grazes a throwaway copy so the ingest deposit is measured identically while the
+    // caller's field is left intact; the live run path drives the depleting `step_with_field_dirs`
+    // directly with a `&mut ResourceField` (base-level liveliness step 3).
+    let mut scratch = resources.clone();
     step_with_field_dirs(
         walkers,
         homeo,
         layout,
         afford,
         terrain,
-        resources,
+        &mut scratch,
         p,
         seed,
         tick,
@@ -455,7 +535,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     layout: &ControllerLayout,
     afford: &AffordanceRegistry,
     terrain: &T,
-    resources: &ResourceField,
+    resources: &mut ResourceField,
     p: &LocomotionParams,
     seed: u64,
     tick: u64,
@@ -516,38 +596,57 @@ pub fn step_with_field_dirs<T: Terrain>(
                         }
                     }
                     INGEST => {
-                        // Take in the matter underfoot, its worth MEASURED not authored: for each
-                        // homeostatic axis backed by a biology-floor class, read the tile's supply of
-                        // that class and put it through the resolved edibility floor's satisfaction
-                        // measure (`laws::satisfaction`) against this being's own physiology (its
-                        // per-class assimilation and requirement), then deposit that fraction of the
-                        // reserve's capacity. The deposit reads only `homeo.axes`, the backing-class
-                        // strings, the tile composition, and the being's own physiology: no race,
-                        // species, or kind identifier enters (Principle 9), so the same tile restores
-                        // two differently-built beings by different amounts, purely from their bodies.
-                        if let Some(comp) = resources.composition(here) {
-                            for axis in &homeo.axes {
-                                let Some(class) = axis.backing_component.as_deref() else {
-                                    continue;
-                                };
-                                let supply = comp.nutrient(class);
-                                if supply <= Fixed::ZERO {
-                                    continue; // the tile is no source of this axis
-                                }
-                                let frac = laws::satisfaction(
-                                    supply,
-                                    w.physiology.assimilation(class),
-                                    w.physiology.requirement(class),
-                                );
-                                let cap = w.homeostasis.capacity(axis.id);
-                                let amount = frac.checked_mul(cap).unwrap_or(cap);
-                                w.homeostasis.ingest(axis.id, amount);
+                        // Take in the matter underfoot, its worth MEASURED not authored AND its stock
+                        // DEPLETED (base-level liveliness step 3): for each homeostatic axis backed by a
+                        // biology-floor class, read the tile's standing supply of that class and put it
+                        // through the resolved edibility floor's satisfaction measure (`laws::satisfaction`)
+                        // against this being's own physiology (per-class assimilation and requirement).
+                        // The satisfaction-measured net gain is bounded by the room left in the reserve (a
+                        // full reserve draws nothing), grossed up by the reserved trophic efficiency to the
+                        // biomass the bite removes, taken from the standing stock (capped at what is there),
+                        // and the assimilated part deposited. So the tile loses the gross bite while the
+                        // being gains that times the efficiency (conservation-honest, the `stocks::flow`
+                        // trophic step), a grazed-out tile feeds the next id-ordered being less, and a
+                        // half-grazed patch yields half through the same Liebig math (Principle 8, no
+                        // stock-empty gate). Reads only `homeo.axes`, the backing-class strings, the tile
+                        // supply, and the being's own physiology: no race, species, or kind id (Principle 9).
+                        for axis in &homeo.axes {
+                            let Some(class) = axis.backing_component.as_deref() else {
+                                continue;
+                            };
+                            let supply = resources.supply(here, class);
+                            if supply <= Fixed::ZERO {
+                                continue; // the tile is no source of this axis
                             }
-                            // Toxin classes in the composition are read but NOT applied to a reserve
-                            // here: there is no harm sink at the mass-only Walker tier. Wiring
-                            // `laws::net_harm` to a condition or integrity reserve is the named
-                            // follow-on (R-WOUND, the promoted Part 35 body tier).
+                            let frac = laws::satisfaction(
+                                supply,
+                                w.physiology.assimilation(class),
+                                w.physiology.requirement(class),
+                            );
+                            let cap = w.homeostasis.capacity(axis.id);
+                            let room = cap - w.homeostasis.amount(axis.id);
+                            // The net gain sought this bite, bounded by the room the reserve can hold.
+                            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
+                            if target_gain <= Fixed::ZERO {
+                                continue; // the reserve is full: draw nothing, deplete nothing
+                            }
+                            // Gross the target up by the trophic efficiency to the biomass the bite removes.
+                            let eta = p.ingest_efficiency;
+                            let gross = if eta > Fixed::ZERO {
+                                target_gain.checked_div(eta).unwrap_or(target_gain)
+                            } else {
+                                target_gain
+                            };
+                            let taken = resources.take(here, class, gross);
+                            // The assimilated part reaches the reserve (tile loses `taken`, being gains
+                            // `taken * eta`), so the pair conserves biomass as `stocks::flow` does.
+                            let gain = taken.checked_mul(eta).unwrap_or(taken);
+                            w.homeostasis.ingest(axis.id, gain);
                         }
+                        // Toxin classes in the composition are read but NOT applied to a reserve here:
+                        // there is no harm sink at the mass-only Walker tier. Wiring `laws::net_harm` to a
+                        // condition or integrity reserve is the named follow-on (R-WOUND, the promoted
+                        // Part 35 body tier, and base-level liveliness step 4).
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle
                 }
@@ -1212,20 +1311,26 @@ mod tests {
         // physiology (their per-class requirement over the tile's supply through laws::satisfaction),
         // never from any race, species, or kind identifier: the ingest arm reads only homeo.axes, the
         // backing-class strings, the tile composition, and each being's own physiology (Principle 9).
+        // The tile is deliberately RICH relative to a small being's appetite (step-3 depletion): the
+        // physiology difference (the grossed-up satisfaction) shows only when the tile can supply more
+        // than the being's bite, otherwise both strip a scarce tile to the same floor (still identity-
+        // free). A small-appetite grazer on a rich tile is the non-limiting per-bite regime.
         let reg = water_reg();
         let afford = AffordanceRegistry::dev_default();
         let l = layout_for(&reg);
         let c = taxis_controller(&l, 0);
         let tile = Coord3::ground(0, 0);
-        // A modest supply so the requirement difference shows and neither reserve saturates in a tick.
+        // A supply that out-supplies a small being's grossed-up bite, so the requirement difference (not
+        // the tile) is the binding constraint and neither reserve saturates in a tick.
         let mut field = ResourceField::new();
         field.set(tile, water_matter(Fixed::from_ratio(1, 4)));
 
         // Two consumers differing ONLY in their water requirement: an efficient one (low requirement,
         // high satisfaction) and a demanding one (high requirement, low satisfaction). Assimilation is
-        // the labelled unit dev fixture in both.
+        // the labelled unit dev fixture in both. Their reserves are small (a fifth of unit mass), so the
+        // rich tile out-supplies their bite and the physiology, not the tile, sets the intake.
         let mk = |req: Fixed| {
-            let mut homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            let mut homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 5));
             for _ in 0..200 {
                 homeo.metabolize(&reg, Fixed::ZERO); // grow thirsty enough to drink, not die
             }
@@ -1272,6 +1377,72 @@ mod tests {
         assert!(
             e > d,
             "the efficient consumer (lower requirement) restores more from the identical tile than the demanding one, purely from its own physiology: {e:?} vs {d:?}"
+        );
+    }
+
+    #[test]
+    fn grazing_depletes_the_tile_and_competition_is_the_id_sorted_walk() {
+        // Base-level liveliness step 3: the run-path ingest (step_with_field_dirs with a &mut resource
+        // field) DEPLETES the standing supply, so grazing draws the stock down and the id-sorted walk
+        // makes it deterministic competition with no new randomness. Two thirsty beings on one modest
+        // water tile eat in id order; the first draws the tile down (here to empty), the second finds
+        // less (here none), so the first ends with the larger reserve and the tile's supply has fallen.
+        let reg = water_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let l = layout_for(&reg);
+        let c = taxis_controller(&l, 0);
+        let tile = Coord3::ground(0, 0);
+        let start_supply = Fixed::from_ratio(1, 4);
+        let mut field = ResourceField::new();
+        field.set(tile, water_matter(start_supply));
+
+        let mk = |id: u64| {
+            let mut homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..200 {
+                homeo.metabolize(&reg, Fixed::ZERO); // thirsty enough to drink, not dead
+            }
+            let phys = Physiology::dev_for_registry(&reg);
+            let mut wk = Walker::new(StableId(id), tile, mobile_body(), homeo, phys, c.clone());
+            wk.learn(WATER, tile);
+            wk
+        };
+        // Supplied out of id order on purpose: the step sorts by id, so being 1 eats before being 2.
+        let mut ws = vec![mk(2), mk(1)];
+        let empty_dirs = BTreeMap::new();
+        let empty_signed = BTreeMap::new();
+        let empty_drains = BTreeMap::new();
+        step_with_field_dirs(
+            &mut ws,
+            &reg,
+            &l,
+            &afford,
+            &OpenGround,
+            &mut field,
+            &LocomotionParams::dev_default(),
+            SEED,
+            0,
+            &empty_dirs,
+            &empty_signed,
+            &empty_drains,
+        );
+
+        let after = field.supply(tile, WATER_CLASS);
+        assert!(
+            after < start_supply,
+            "grazing depleted the tile's standing supply: {after:?} < {start_supply:?}"
+        );
+        let level_of = |id: u64| {
+            ws.iter()
+                .find(|w| w.id == StableId(id))
+                .unwrap()
+                .homeostasis
+                .level(WATER)
+        };
+        assert!(
+            level_of(1) > level_of(2),
+            "the first-id being ate before the second saw the depleted tile: {:?} > {:?}",
+            level_of(1),
+            level_of(2)
         );
     }
 }

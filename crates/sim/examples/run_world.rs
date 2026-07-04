@@ -43,24 +43,27 @@ use std::time::Instant;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
-use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
+use civsim_sim::homeostasis::{
+    AffordanceRegistry, HomeostaticRegistry, ENERGY, TEMPERATURE, WATER,
+};
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::locomotion::LocomotionParams;
+use civsim_sim::physiology::ENERGY_DENSITY;
 use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, build_dawn_runner, nsm_gloss, taxis_move_weights, Articulation, Axiom,
-    AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel,
-    CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
-    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId,
-    GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
-    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
-    TraitDef, ValueAxisId, ValueProfile, World,
+    append_controller_block, build_dawn_runner, forage_taxis_weights, nsm_gloss, Articulation,
+    Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry,
+    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
+    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
+    SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
 };
-use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
 // --- dev-harness scaffolding (documented departures from the pure world-build path) ---
 
@@ -88,16 +91,24 @@ const VOICE: SenseChannelId = SenseChannelId(1);
 /// The MOVE affordance's activation output index in the dev-default affordance layout (MOVE is the
 /// lowest affordance id, so its activation is output 0, its heading components outputs 1 and 2).
 const MOVE_OUTPUT: usize = 0;
-/// The TEMPERATURE axis's input block base in the dev-thermal registry (its only axis, so index 0): its
-/// level, here-flag, two source-direction components, then its signed slot.
-const TEMPERATURE_INPUT_BASE: usize = 0;
+/// The INGEST affordance's activation output index in the dev-default affordance layout (INGEST is the
+/// next affordance id after MOVE's three outputs, so its scalar activation is output 3).
+const INGEST_OUTPUT: usize = 3;
 /// DEV FIXTURE: the founding move-activation bias, set decisively to one so the clamped MOVE activation
 /// saturates and a founder wants to move (basis: the activation magnitude at which MOVE beats a resting
-/// zero and the being leaves its cell; reserved for a canonical genesis).
+/// zero and the being leaves its cell; reserved as `controller.taxis.move_bias`).
 const TAXIS_MOVE_BIAS: Fixed = Fixed::ONE;
-/// DEV FIXTURE: the founding heading gain on the temperature source-direction percept, set to one so
-/// the MOVE heading follows the unit gradient direction (basis: the heading-follow strength; reserved).
+/// DEV FIXTURE: the founding heading gain on a source-direction and gradient percept, set to one so the
+/// MOVE heading follows the unit direction (basis: the heading-follow strength; reserved as
+/// `controller.taxis.heading_gain`).
 const TAXIS_HEADING_GAIN: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding suppression of MOVE when a forage source is underfoot, set to one so a
+/// being stops on food rather than wandering off it (basis: the here-flag suppression strength; reserved
+/// as `controller.taxis.here_suppress`).
+const TAXIS_HERE_SUPPRESS: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding INGEST drive from a forage source underfoot, set to one so a being eats
+/// what it stands on (basis: the ingest-activation strength; reserved as `controller.taxis.ingest_drive`).
+const TAXIS_INGEST_DRIVE: Fixed = Fixed::ONE;
 /// DEV FIXTURE: the per-locus per-generation structural mutation rate, opened off zero so the founding
 /// controller weights drift and the movement-dependent fitness a later step gives them has a heritable
 /// gradient to select on (basis: the reserved `genome.mutation_rates` baseline; small so it explores
@@ -116,13 +127,13 @@ fn env_variance() -> Fixed {
     Fixed::from_ratio(1, 20)
 }
 
-/// The controller layout the founding thermotaxis block is sized against: the same registries the
-/// embodiment genesis installs (the dev-thermal homeostatic axes and the dev-default affordances, a
-/// reaction norm at hidden width zero), so `weight_count` and the taxis weight indices match the
-/// controller a founder expresses.
+/// The controller layout the founding forage-taxis block is sized against: the same registries the
+/// embodiment genesis installs (the dev-grazer homeostatic axes, energy and water and temperature, and
+/// the dev-default affordances, a reaction norm at hidden width zero), so `weight_count` and the taxis
+/// weight indices match the controller a founder expresses.
 fn dawn_layout() -> ControllerLayout {
     ControllerLayout::new(
-        &HomeostaticRegistry::dev_thermal(),
+        &HomeostaticRegistry::dev_grazer(),
         &AffordanceRegistry::dev_default(),
         0,
     )
@@ -286,19 +297,36 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     let mut freqs = vec![freq0, freq1, Fixed::from_ratio(1, 2)];
     let mut effects = vec![Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
 
-    // Base-level liveliness step 1: append the founding controller gene block seeding a temperature
-    // thermotaxis reaction norm, so a founder MOVES along the temperature gradient the runner senses
-    // (the dev-thermal registry's only axis, dev-default's MOVE the directional output 0). The full
-    // controller substrate is seeded (a gene per weight, matching `evolve::controller_gene_set`), with
-    // the taxis magnitudes carried in the pool additive spine; every other weight starts at zero and can
-    // mutate on. Reads no race id: the seeds are the same for every race (Principle 9).
+    // Base-level liveliness step 3: append the founding controller gene block seeding a FORAGE reaction
+    // norm over the dev-grazer registry, so a founder walks toward known food and water, stops on a source
+    // to ingest it, and steers along the temperature comfort gradient the runner senses (energy and water
+    // are the forage axes, temperature the steer axis; dev-default's MOVE is directional output 0, INGEST
+    // scalar output 3). The axis input bases come from the layout, so they follow the registry's data, not
+    // a magic constant. The full controller substrate is seeded (a gene per weight), with the taxis
+    // magnitudes carried in the pool additive spine; every other weight starts at zero and can mutate on.
+    // Reads no race id: the seeds are the same for every race (Principle 9).
     let layout = dawn_layout();
-    let seeds = taxis_move_weights(
+    let energy_base = layout
+        .axis_input_base(ENERGY)
+        .expect("the dev-grazer layout carries an energy axis");
+    let water_base = layout
+        .axis_input_base(WATER)
+        .expect("the dev-grazer layout carries a water axis");
+    let temp_base = layout
+        .axis_input_base(TEMPERATURE)
+        .expect("the dev-grazer layout carries a temperature axis");
+    let seeds = forage_taxis_weights(
         &layout,
         MOVE_OUTPUT,
-        TEMPERATURE_INPUT_BASE,
-        TAXIS_MOVE_BIAS,
-        TAXIS_HEADING_GAIN,
+        INGEST_OUTPUT,
+        &[energy_base, water_base],
+        &[temp_base],
+        ForageGains {
+            move_bias: TAXIS_MOVE_BIAS,
+            here_suppress: TAXIS_HERE_SUPPRESS,
+            heading_gain: TAXIS_HEADING_GAIN,
+            ingest_drive: TAXIS_INGEST_DRIVE,
+        },
     );
     // SexualDiploid (below), so ploidy two.
     append_controller_block(
@@ -385,8 +413,11 @@ fn clamp_tenths(tenths: i64) -> Fixed {
     Fixed::from_ratio(tenths.clamp(3, 9), 10)
 }
 
-/// A mobile development body plan (the thermal-coupling fixture), so a founder's walker has an anatomy
-/// to derive its physiology and thermoregulate from. Labelled fixture, not owner data.
+/// A mobile development body plan (the grazer fixture), so a founder's walker has an anatomy to derive
+/// its physiology and thermoregulate from, and organs that BACK its metabolic reserves: a fat-body (kind
+/// 0, energy-dense) and a water-store (kind 2, water-rich) from the dev organ registry, so its energy and
+/// water reserve capacities are non-zero (`Homeostasis::new` derives them from organ composition, so an
+/// organ-less body would carry no reserves and starve at birth). Labelled fixture, not owner data.
 fn mobile_body() -> BodyPlan {
     BodyPlan {
         body_mass: Fixed::from_ratio(1, 2),
@@ -399,7 +430,16 @@ fn mobile_body() -> BodyPlan {
         },
         senses: vec![],
         locomotion: vec![1],
-        organs: vec![],
+        organs: vec![
+            Part {
+                kind: 0, // fat-body: backs the energy reserve
+                development: Fixed::from_ratio(1, 2),
+            },
+            Part {
+                kind: 2, // water-store: backs the water reserve
+                development: Fixed::from_ratio(1, 2),
+            },
+        ],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -450,7 +490,7 @@ fn language_genesis() -> LanguageGenesis {
 /// fixture (mirrors the world-build test genesis).
 fn embodiment_genesis() -> EmbodimentGenesis {
     EmbodimentGenesis {
-        homeostatic: HomeostaticRegistry::dev_thermal(),
+        homeostatic: HomeostaticRegistry::dev_grazer(),
         affordances: AffordanceRegistry::dev_default(),
         locomotion: LocomotionParams::dev_default(),
         organs: BodyPlanRegistry::dev_default(),
@@ -661,7 +701,7 @@ fn band_belief(w: &World, members: &[StableId]) -> Option<(f64, f64)> {
 
 /// The mean designs-known per being (the knowledge-depth signal). NOT-YET-OBSERVABLE as nonzero:
 /// `knowledge_of` is a live reader, but the world-build path arms no design origination (Part 41), so
-/// no design ever enters a being's knowledge and this reads zero every snapshot. Reported honestly as
+/// no design ever enters a being's knowledge and this reads zero every snapshot. Reported plainly as
 /// the live-but-inert reader it is, rather than substituting a fabricated number.
 fn mean_knowledge(w: &World) -> f64 {
     let ids = w.being_ids();
@@ -723,7 +763,7 @@ fn dawn_cells(runner: &Runner) -> BTreeSet<(i32, i32)> {
 
 /// The per-cell field-state reader (base-level liveliness step 2): samples the environmental field
 /// stack, reporting the fraction of cells holding standing water, the mean and peak water depth, and the
-/// mean producer biomass (the food supply the productivity derives). A pure read of hashed state.
+/// mean productivity capacity (the ceiling the food supply regrows toward). A pure read of hashed state.
 /// `None` if the runner carries no environmental stack.
 fn field_state(runner: &Runner) -> Option<(f64, f64, f64, f64)> {
     let env = runner.environ()?;
@@ -735,7 +775,7 @@ fn field_state(runner: &Runner) -> Option<(f64, f64, f64, f64)> {
     let mut wet = 0.0;
     let mut water_sum = 0.0;
     let mut water_max = 0.0f64;
-    let mut biomass_sum = 0.0;
+    let mut capacity_sum = 0.0;
     for y in 0..h {
         for x in 0..w {
             let water = env.water_at(x, y).to_f64_lossy();
@@ -744,10 +784,59 @@ fn field_state(runner: &Runner) -> Option<(f64, f64, f64, f64)> {
             }
             water_sum += water;
             water_max = water_max.max(water);
-            biomass_sum += env.biomass_at(x, y).to_f64_lossy();
+            capacity_sum += env.capacity_at(x, y).to_f64_lossy();
         }
     }
-    Some((wet / n, water_sum / n, water_max, biomass_sum / n))
+    Some((wet / n, water_sum / n, water_max, capacity_sum / n))
+}
+
+/// The carrying-capacity pressure reader (base-level liveliness step 3): the scarcity that bounds each
+/// lineage. Reports the GLOBAL standing food (the grazable `bio.energy_density` stock over the whole
+/// map), its occupancy against the productivity capacity, the population the standing food supports per
+/// unit, and, crucially, the LOCAL occupancy at the cells beings stand on. The global number is
+/// diluted by the empty wilderness (a clustered population grazes only a few of hundreds of cells), so
+/// the local occupancy is where the carrying capacity truly bites: it falls as beings graze their own
+/// cells down, the scarcity signal that bounds each lineage with no authored cap. A pure read of hashed
+/// state; `None` if the runner carries no located resource loop.
+fn carrying_capacity(runner: &Runner) -> Option<(f64, f64, f64)> {
+    let env = runner.environ()?;
+    let emb = runner.embodiment()?;
+    let resources = emb.resources();
+    let standing = resources.total_supply(ENERGY_DENSITY).to_f64_lossy();
+    let (w, h) = env.dims();
+    let capacity: f64 = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| env.capacity_at(x, y).to_f64_lossy())
+        .sum();
+    let occupancy = if capacity > 0.0 {
+        standing / capacity
+    } else {
+        0.0
+    };
+    // The local pressure: sum the standing food and the capacity over the distinct cells a being stands
+    // on. This is where grazing happens, so it shows the scarcity the global average hides.
+    let occupied: BTreeSet<(i32, i32)> = emb
+        .walkers()
+        .iter()
+        .map(|wk| {
+            let c = wk.coord();
+            (c.x, c.y)
+        })
+        .collect();
+    let mut local_standing = 0.0;
+    let mut local_capacity = 0.0;
+    for &(x, y) in &occupied {
+        local_standing += resources
+            .supply(Coord3::ground(x, y), ENERGY_DENSITY)
+            .to_f64_lossy();
+        local_capacity += env.capacity_at(x, y).to_f64_lossy();
+    }
+    let local_occupancy = if local_capacity > 0.0 {
+        local_standing / local_capacity
+    } else {
+        1.0
+    };
+    Some((standing, occupancy, local_occupancy))
 }
 
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
@@ -854,12 +943,31 @@ fn snapshot(
 
     // The field-state signal (step 2): the environmental stack's water and productivity.
     match field_state(runner) {
-        Some((wet, mean_water, max_water, mean_biomass)) => println!(
+        Some((wet, mean_water, max_water, mean_capacity)) => println!(
             "  field: {:.0}% cells wet  |  mean water {mean_water:.3} (peak {max_water:.3})  |  \
-             mean productivity {mean_biomass:.3}",
+             mean productivity {mean_capacity:.3}",
             wet * 100.0
         ),
         None => println!("  field: no environmental stack"),
+    }
+
+    // The carrying-capacity pressure signal (step 3): the standing food, the productivity ceiling it
+    // regrows toward, the occupancy (standing over capacity, so a low value is grazing scarcity), and the
+    // population the standing food currently feeds. This is the number that shows the population settling
+    // where its metabolic draw meets what the land regrows, with no authored cap.
+    match carrying_capacity(runner) {
+        Some((standing, occupancy, local_occupancy)) => {
+            let pop = w.population().max(1);
+            println!(
+                "  carrying capacity: standing food {standing:.1} (global occupancy {:.0}%)  |  \
+                 LOCAL occupancy {:.0}% (grazing pressure {:.0}% where beings graze)  |  {:.2} food/being",
+                occupancy * 100.0,
+                local_occupancy * 100.0,
+                (1.0 - local_occupancy) * 100.0,
+                standing / pop as f64,
+            );
+        }
+        None => println!("  carrying capacity: no located resource loop"),
     }
 
     // The migration signal (step 1): dispersal of the located population from its dawn cells.

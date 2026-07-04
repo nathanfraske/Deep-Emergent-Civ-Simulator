@@ -146,6 +146,28 @@ impl HomeostaticRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a located, foraging grazer (base-level liveliness step 3): the two
+    /// metabolic reserves (energy and water, backed by tissue and drained by metabolism) plus the
+    /// temperature axis the field-coupled runner requires (non-draining, set each tick from the body
+    /// core temperature through the comfort-band map). This is the minimum a being that walks, thermo-
+    /// regulates, and eats needs: the temperature axis lets it couple to the field, and the energy and
+    /// water axes give it hunger and thirst, so a depletable resource loop can bound its lineage. The
+    /// axis set is data, so an alien creature with an arcane charge or a thermovore reserve adds another
+    /// backed axis without touching the mechanism (Principle 11). Not owner values.
+    pub fn dev_grazer() -> HomeostaticRegistry {
+        let mut reg = HomeostaticRegistry::dev_default(); // energy and water, both organ-backed
+        reg.axes.push(HomeostaticAxisDef {
+            id: TEMPERATURE,
+            name: "temperature".to_string(),
+            backing_component: None,
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+        });
+        reg
+    }
+
     /// A DEVELOPMENT FIXTURE for the thermal coupling: a single temperature axis whose reserve is a
     /// two-sided comfort band. Like integrity, it does not self-drain (its base and exertion draws are
     /// zero); its level is set each tick from the located body core temperature through the comfort-band

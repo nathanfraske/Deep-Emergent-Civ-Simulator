@@ -143,7 +143,8 @@ pub use census::{
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{
-    taxis_move_weights, weight_count, Controller, ControllerDecision, ControllerLayout,
+    forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
+    ControllerLayout, ForageGains,
 };
 pub use decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,

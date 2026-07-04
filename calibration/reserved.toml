@@ -1228,7 +1228,23 @@ basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOV
 status = "reserved"
 value = ""
 unit = "controller_weight"
-source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
+source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights forage_taxis_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.here_suppress"
+basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.ingest_drive"
+basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
 
 # behavior.controller_init_spread, controller_mutation_rate, and controller_mutation_step RETIRED
 # (controller-scaling derivation built, 2026-07-03; worksheet §13a): the three controller scalings no
@@ -1947,3 +1963,27 @@ status = "reserved"
 value = ""
 unit = "water_depth"
 source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 3: the living resource loop (the standing food stock a grazer depletes
+# and the environment regrows toward the step-2 productivity capacity). The regrowth constants are read
+# fail-loud by EnvironCalib::from_manifest (crates/sim/src/environ.rs); the bite-to-reserve trophic
+# efficiency is the locomotion parameter locomotion.ingest_efficiency, reserved-with-basis in the
+# LocomotionParams struct until the locomotion parameters read from the manifest. Together the regrowth
+# rate, the colonization floor, and the trophic efficiency (with the metabolic drain) fix the carrying
+# capacity with no authored cap (Principle 8). ---
+
+[[reserved]]
+id = "productivity.regen_rate"
+basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+
+[[reserved]]
+id = "productivity.colonization"
+basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at"
+status = "reserved"
+value = ""
+unit = "producer_biomass"
+source = "base-level liveliness step 3; crates/sim/src/environ.rs"
