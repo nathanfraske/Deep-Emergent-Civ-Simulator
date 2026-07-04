@@ -67,10 +67,10 @@ use civsim_world::Coord3;
 
 use crate::anatomy::BodyPlan;
 use crate::controller::{Controller, ControllerLayout};
-use crate::edibility::{Composition, Physiology};
+use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
-    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, INGEST,
-    MOVE,
+    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
+    CONDITION, INGEST, MOVE,
 };
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
@@ -110,6 +110,21 @@ pub struct LocomotionParams {
     /// Its manifest home is `locomotion.ingest_efficiency` once the locomotion parameters read fail-loud
     /// from the manifest; the dev harness stands up a labelled fixture through [`Self::dev_default`].
     pub ingest_efficiency: Fixed,
+    /// The floor caps the environmental-harm sink reads (base-level liveliness step 4): the per-class and
+    /// aggregate harm ceilings the dose-response ([`civsim_physics::laws::net_harm`]) clamps to. RESERVED
+    /// (their home is [`crate::edibility::FloorCaps`], the floor's reserved harm caps); the dev harness
+    /// stands up a labelled fixture. A being with no toxin tolerance takes no harm regardless of the caps,
+    /// so this is inert until a physiology carries a tolerance.
+    pub harm_caps: FloorCaps,
+    /// The condition recovery rate (base-level liveliness step 4): the fraction of the CONDITION reserve
+    /// a being heals per tick, so environmental harm is a race between damage and healing. A being whose
+    /// per-tick harm is below this heals faster than it is worn (it lives on the gradient); one whose harm
+    /// is above it declines to death. This is what makes a salt flat livable to a heritable halophile and
+    /// lethal to a naive lineage, and lets a being that leaves a toxic cell recover. RESERVED. Basis: the
+    /// physiological repair rate of the condition reserve; its manifest home is
+    /// `physiology.condition_recovery` once the locomotion parameters read the manifest, a labelled dev
+    /// fixture until then.
+    pub condition_recovery: Fixed,
 }
 
 impl LocomotionParams {
@@ -125,6 +140,12 @@ impl LocomotionParams {
             // at twice the reserve gained, giving carrying capacity teeth while a lineage can still
             // subsist. A canonical run reads the reserved trophic efficiency.
             ingest_efficiency: Fixed::from_ratio(1, 2),
+            // The labelled floor harm caps (base-level liveliness step 4); a canonical run reads the
+            // reserved FloorCaps.
+            harm_caps: FloorCaps::dev_default(),
+            // A labelled fixture: the CONDITION reserve heals a quarter per tick, fast enough that a
+            // heritable halophile outpaces a salt flat's harm while a naive lineage is worn through.
+            condition_recovery: Fixed::from_ratio(1, 4),
         }
     }
 }
@@ -552,6 +573,30 @@ pub fn step_with_field_dirs<T: Terrain>(
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
         perceive(w, resources, homeo, p.sense_range);
         let here = w.coord();
+        // Environmental harm (base-level liveliness step 4): the toxin dose of the cell the being stands
+        // on this tick, measured against its OWN heritable tolerances through the dose-response harm law.
+        // Captured now (before any movement) as a scalar, applied to the CONDITION reserve below. A being
+        // with no tolerance for a class takes no harm from it (the class does not apply); a low-tolerance
+        // being on a salt flat accrues harm and dies, a high-tolerance one shrugs it off, so a lineage
+        // adapts to the gradient by selection rather than a fixed-dose gate (Principles 8, 9). Reads only
+        // the tile toxins and the being's own physiology, no race or kind id.
+        let harm = match resources.composition(here) {
+            Some(comp) if !comp.toxins.is_empty() => {
+                let classes: Vec<(Fixed, Option<Fixed>, u8)> = comp
+                    .toxins
+                    .iter()
+                    .map(|(class, &dose)| {
+                        (
+                            dose,
+                            w.physiology.tolerance(class),
+                            w.physiology.hill_exp(class),
+                        )
+                    })
+                    .collect();
+                laws::net_harm(&classes, p.harm_caps.harm_cap, p.harm_caps.total_harm_cap)
+            }
+            _ => Fixed::ZERO,
+        };
         let here_axes: BTreeSet<HomeostaticAxisId> =
             resources.axes_here(here, homeo).into_iter().collect();
         let mut dirs = source_dirs(w);
@@ -643,16 +688,26 @@ pub fn step_with_field_dirs<T: Terrain>(
                             let gain = taken.checked_mul(eta).unwrap_or(taken);
                             w.homeostasis.ingest(axis.id, gain);
                         }
-                        // Toxin classes in the composition are read but NOT applied to a reserve here:
-                        // there is no harm sink at the mass-only Walker tier. Wiring `laws::net_harm` to a
-                        // condition or integrity reserve is the named follow-on (R-WOUND, the promoted
-                        // Part 35 body tier, and base-level liveliness step 4).
+                        // The tile's toxin classes are NOT a factor in this ingest arm (they neither feed
+                        // nor deny a reserve here); they are the environmental-harm sink's concern, applied
+                        // once per tick to the CONDITION reserve above (base-level liveliness step 4),
+                        // whether or not the being ingests, so exposure harms a being that only passes
+                        // through a toxic cell.
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle
                 }
             }
         }
 
+        // The CONDITION reserve nets this tick's healing against its harm (base-level liveliness step 4),
+        // before the metabolism death-check below, so a body worn through its condition floor by exposure
+        // dies in the same tick (the emergent reserve-through-floor cull). Healing (a recovery toward
+        // full) races the harm: a tolerant being on a salt flat (harm below the recovery) heals faster
+        // than it is worn and lives on the gradient, a naive one (harm above the recovery) declines to
+        // death, and a being that leaves a toxic cell recovers. The `adjust` clamps to [0, capacity] and
+        // is a no-op for a being whose registry carries no CONDITION axis (the thermal-only fixtures), so
+        // the sink is inert wherever it does not apply.
+        w.homeostasis.adjust(CONDITION, p.condition_recovery - harm);
         // Metabolism drains the reserves every tick (basal, plus the tick's exertion); a being whose
         // reserve falls through its floor dies. When the caller supplies a per-being DERIVED drain
         // (R-METABOLIZE, the anatomy-derived physiology), the drain follows the body's physics through
@@ -1443,6 +1498,124 @@ mod tests {
             "the first-id being ate before the second saw the depleted tile: {:?} > {:?}",
             level_of(1),
             level_of(2)
+        );
+    }
+
+    /// A registry carrying only the CONDITION reserve (base-level liveliness step 4), so the salt-harm
+    /// sink is exercised without a metabolic-starvation confound: the only way to die is the environmental
+    /// harm wearing CONDITION through its floor.
+    fn condition_reg() -> HomeostaticRegistry {
+        HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: CONDITION,
+                name: "condition".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        }
+    }
+
+    /// A physiology carrying a salinity tolerance of the given magnitude (Hill exponent two), and no
+    /// nutrient requirements, so it neither eats nor starves in the harm test.
+    fn salt_physiology(tolerance: Fixed) -> Physiology {
+        Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: [(crate::physiology::SALINITY.to_string(), tolerance)]
+                .into_iter()
+                .collect(),
+            hill: [(crate::physiology::SALINITY.to_string(), 2u8)]
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// A cell composition carrying only a salinity toxin dose.
+    fn salt_cell(dose: Fixed) -> Composition {
+        Composition {
+            nutrients: BTreeMap::new(),
+            toxins: [(crate::physiology::SALINITY.to_string(), dose)]
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_salt_flat_is_lethal_to_a_naive_lineage_and_livable_to_a_halophile() {
+        // Base-level liveliness step 4, THE MILESTONE PROOF: two beings stand on one identical salt flat
+        // (a cell dosing bio.salinity), differing ONLY in their heritable salt tolerance. The naive one
+        // (low tolerance) accrues harm faster than it heals and is worn through its CONDITION floor to
+        // death; the halophile (high tolerance) heals faster than it is harmed and lives on indefinitely.
+        // Death is the emergent reserve-through-floor cull, never a fixed-dose exclusion gate (Principle
+        // 8), and it keys off each being's own tolerance, never a race or kind id (Principle 9).
+        let reg = condition_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let l = layout_for(&reg);
+        let c = Controller::zeros(&l); // idle: it does not move, so it stays on the flat
+        let tile = Coord3::ground(0, 0);
+        let dose = Fixed::from_int(2); // a fully-evaporated salt flat's dose
+        let mut field = ResourceField::new();
+        field.set(tile, salt_cell(dose));
+        let p = LocomotionParams::dev_default();
+        let empty_dirs: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
+            BTreeMap::new();
+        let empty_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> = BTreeMap::new();
+        let empty_drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
+            BTreeMap::new();
+
+        let mk = |tolerance: Fixed| {
+            let homeo = Homeostasis::from_mass(&reg, Fixed::ONE); // CONDITION starts full
+            Walker::new(
+                StableId(1),
+                tile,
+                mobile_body(),
+                homeo,
+                salt_physiology(tolerance),
+                c.clone(),
+            )
+        };
+        let mut run = |tolerance: Fixed| -> u32 {
+            let mut ws = vec![mk(tolerance)];
+            let mut survived = 0u32;
+            for t in 0..80u32 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    SEED,
+                    t as u64,
+                    &empty_dirs,
+                    &empty_signed,
+                    &empty_drains,
+                );
+                if !ws[0].alive {
+                    break;
+                }
+                survived = t + 1;
+            }
+            survived
+        };
+
+        let naive = run(Fixed::from_ratio(1, 5)); // tolerance 0.2, well below the dose
+        let halophile = run(Fixed::from_int(5)); // tolerance 5, well above the dose
+        assert!(
+            naive < 80,
+            "the naive lineage is worn through its condition and dies on the salt flat (survived {naive} ticks)"
+        );
+        assert_eq!(
+            halophile, 80,
+            "the halophile lives on the salt flat the whole run: its heritable tolerance outpaces the harm"
+        );
+        assert!(
+            halophile > naive,
+            "the salt flat is lethal to the naive lineage and livable to the halophile: {halophile} > {naive}"
         );
     }
 }

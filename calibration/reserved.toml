@@ -1987,3 +1987,45 @@ status = "reserved"
 value = ""
 unit = "producer_biomass"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 4: the salinity field (a per-cell salt mass advected downhill with the
+# water routing and weathered into every cell, capped, whose concentration is the bio.salinity toxin dose
+# a being's heritable tolerance is read against). The four salinity constants are read fail-loud by
+# EnvironCalib::from_manifest (crates/sim/src/environ.rs). The condition recovery and the founding
+# salinity-tolerance baseline are the LocomotionParams / race-genesis reserved-with-basis dev fixtures
+# (physiology.condition_recovery, tolerance.salinity_baseline), reserved in their struct docs until the
+# locomotion parameters and a canonical race genesis read the manifest. Together the salt forcing, the
+# tolerance baseline, the Hill exponent, and the recovery fix whether a salt flat is lethal to a naive
+# lineage and livable to a halophile that selects in (Principle 8: a graded dose, death the emergent cull). ---
+
+[[reserved]]
+id = "salinity.weathering_rate"
+basis = "the salt mass a cell gains per tick as salt leaches from rock and soil, the salinity field's source. Over many ticks it accumulates in endorheic basins (which route salt nowhere) while throughflow washes it from well-drained cells, so salt flats emerge where water evaporates faster than it drains. Set from the geochemical weathering rate of the world's terrain per base tick; larger raises the equilibrium salinity everywhere, smaller keeps salt flats rarer"
+status = "reserved"
+value = ""
+unit = "salt_mass_per_tick"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.salt_cap"
+basis = "the maximum salt mass a cell retains, so an endorheic basin's salt saturates rather than accumulating without bound (the coarse stand-in for a salt bed's finite solubility and burial). Bounds the salinity concentration a fully-evaporated basin reaches. Set from the salt a cell of the world's terrain holds at saturation"
+status = "reserved"
+value = ""
+unit = "salt_mass"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.dose_scale"
+basis = "the multiplier from a cell's salt concentration (salt over standing water plus the reference water) to the bio.salinity toxin dose the harm law reads against a being's heritable tolerance. Sets how lethal a given concentration is; set with the tolerance baseline and the Hill exponent so a dry salt flat's dose exceeds a naive tolerance yet a halophile's tolerance resists it"
+status = "reserved"
+value = ""
+unit = "dose_per_concentration"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs; civsim_physics::laws::harm_class"
+
+[[reserved]]
+id = "salinity.reference_water"
+basis = "the water added to a cell's standing depth when forming the salinity concentration salt/(water + reference), so a bone-dry salt flat reads a high but finite concentration and a well-watered cell dilutes its salt. It sets the water scale at which salt is diluted to harmlessness, so a genome-reachable tolerance can resist a dry flat; larger dilutes salt faster (a gentler gradient), smaller makes a dry flat more lethal. Set from the soil-water a dry cell holds at the world's scale"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"

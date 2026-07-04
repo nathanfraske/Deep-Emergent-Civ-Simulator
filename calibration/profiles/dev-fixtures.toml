@@ -481,3 +481,35 @@ status = "set"
 value = "0.05"
 unit = "producer_biomass"
 source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.weathering_rate"
+basis = "FIXTURE placeholder; the salt mass a cell gains per tick as salt leaches from rock, the salinity field source that accumulates in endorheic basins"
+status = "set"
+value = "0.002"
+unit = "salt_mass_per_tick"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.salt_cap"
+basis = "FIXTURE placeholder; the maximum salt mass a cell retains, so an endorheic basin saturates rather than accumulating without bound"
+status = "set"
+value = "2"
+unit = "salt_mass"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.dose_scale"
+basis = "FIXTURE placeholder; the multiplier from salt concentration to the bio.salinity toxin dose the harm law reads"
+status = "set"
+value = "1"
+unit = "dose_per_concentration"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.reference_water"
+basis = "FIXTURE placeholder; the water added when forming the salinity concentration salt/(water + reference), the dilution scale so a genome-reachable tolerance can resist a dry flat"
+status = "set"
+value = "1"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"

@@ -173,7 +173,23 @@ pub enum Channel {
     /// other channel. Sex is therefore read through [`GeneSet::express`] like any other
     /// phenotype, with no bespoke sex-determination phase and no reserved ratio.
     SexDetermination,
+    /// A heritable toxin-tolerance coordinate, by tolerance-axis id (base-level liveliness step 4,
+    /// R-WOUND). The expressed value is a being's per-toxin-class tolerance the dose-response
+    /// [`civsim_physics::laws::harm_class`] reads (a higher tolerance suffers less harm from a given
+    /// dose), so a lineage adapts to an environmental gradient (a salt flat, a dust haze) by selection
+    /// on this channel rather than being excluded at a fixed dose (Principle 8: a graded dose, never a
+    /// gate). The variant is the fixed engine interface; which toxin classes exist and which genes reach
+    /// them is data (a [`ToleranceRegistry`](crate::edibility::ToleranceRegistry) sibling to the
+    /// controller and composition registries, keyed off the floor toxin-class id, never a `RaceId`).
+    Tolerance(ToleranceAxisId),
 }
+
+/// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
+/// being's physiology carries a heritable tolerance for). A numeric id keeps [`Channel`] `Copy` and
+/// `Ord`; the class-name-to-id mapping is data in the [`ToleranceRegistry`](crate::edibility::ToleranceRegistry),
+/// sibling to the composition-axis and controller-parameter registries (base-level liveliness step 4).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ToleranceAxisId(pub u16);
 
 /// A controller-parameter id, an index into a being's behaviour controller's flat weight vector
 /// ([`crate::controller`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count

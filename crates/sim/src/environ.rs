@@ -47,7 +47,7 @@ use civsim_world::{Coord3, TileMap};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
-use crate::physiology::{ENERGY_DENSITY, WATER_FRACTION};
+use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
 use crate::stocks::Stock;
 
@@ -141,6 +141,26 @@ pub struct EnvironCalib {
     /// world greens as water arrives, and a grazed-out patch slowly recovers rather than dying forever).
     /// Small relative to a cell's capacity, the seed-rain a viable cell receives.
     pub colonization: Fixed,
+    /// The salt weathering source (base-level liveliness step 4): the salt mass a cell gains per tick as
+    /// salt leaches from rock and soil. Small; over many ticks it accumulates in endorheic basins (which
+    /// route salt nowhere) while throughflow washes it from well-drained cells, so salt flats emerge
+    /// where water evaporates faster than it drains.
+    pub salt_weathering: Fixed,
+    /// The salt holding cap (base-level liveliness step 4): the maximum salt mass a cell retains, so an
+    /// endorheic basin's salt saturates rather than accumulating without bound. Bounds the salinity
+    /// concentration a fully-evaporated basin reaches.
+    pub salt_cap: Fixed,
+    /// The salinity dose scale (base-level liveliness step 4): the multiplier from a cell's salt
+    /// concentration (salt over standing water plus the reference water) to the toxin dose the harm law
+    /// reads on the `bio.salinity` class. Sets how lethal a given concentration is against a being's
+    /// heritable tolerance.
+    pub salinity_scale: Fixed,
+    /// The salinity reference water (base-level liveliness step 4): the water added to a cell's standing
+    /// depth when forming the salinity concentration `salt / (water + reference)`, so a bone-dry salt
+    /// flat reads a high but finite concentration and a well-watered cell dilutes its salt. It sets the
+    /// water scale at which salt is diluted to harmlessness, so a genome-reachable tolerance can resist a
+    /// dry flat; larger dilutes salt faster (a gentler gradient), smaller makes a dry flat more lethal.
+    pub reference_water: Fixed,
 }
 
 impl EnvironCalib {
@@ -165,6 +185,10 @@ impl EnvironCalib {
             soil_baseline: m.require_fixed("productivity.soil_baseline")?,
             regen_rate: m.require_fixed("productivity.regen_rate")?,
             colonization: m.require_fixed("productivity.colonization")?,
+            salt_weathering: m.require_fixed("salinity.weathering_rate")?,
+            salt_cap: m.require_fixed("salinity.salt_cap")?,
+            salinity_scale: m.require_fixed("salinity.dose_scale")?,
+            reference_water: m.require_fixed("salinity.reference_water")?,
         })
     }
 
@@ -190,6 +214,10 @@ impl EnvironCalib {
             soil_baseline: Fixed::from_int(1),
             regen_rate: Fixed::from_ratio(1, 4),
             colonization: Fixed::from_ratio(1, 20),
+            salt_weathering: Fixed::from_ratio(1, 100),
+            salt_cap: Fixed::from_int(2),
+            salinity_scale: Fixed::from_int(1),
+            reference_water: Fixed::from_int(1),
         }
     }
 }
@@ -211,6 +239,12 @@ pub struct EnvironFields {
     /// depleting there; this field is the moving target it regrows toward (base-level liveliness step 3).
     /// Biosphere-ready: the addendum replaces this abstract Liebig capacity with real producer biomass.
     capacity: ScalarField,
+    /// The standing SALT mass per cell (base-level liveliness step 4): sourced by weathering, advected
+    /// downhill with the water routing, and capped, so salt accumulates in endorheic basins and washes
+    /// from well-drained cells. The salinity DOSE a being suffers is the concentration `salt / (water +
+    /// floor)` scaled, high where a basin has evaporated its water and left salt (a salt flat) and low
+    /// where fresh water flows through, written as the `bio.salinity` toxin class.
+    salt: ScalarField,
     /// Static per-cell worldgen inputs (row-major): the moisture the precipitation reads and the
     /// latitude light the productivity reads. The frozen elevation feeds the precomputed `downhill`
     /// target and is not stored past construction.
@@ -250,6 +284,7 @@ impl EnvironFields {
             height: h,
             water: ScalarField::uniform(w, h, Fixed::ZERO),
             capacity: ScalarField::uniform(w, h, Fixed::ZERO),
+            salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture,
             light,
             downhill,
@@ -288,7 +323,73 @@ impl EnvironFields {
     /// and grazed through [`Self::regrow_supply`] against this capacity, not here.
     pub fn step(&mut self, temp: &Field, calib: &EnvironCalib) {
         self.step_hydrology(temp, calib);
+        self.step_salinity(calib);
         self.step_productivity(temp, calib);
+    }
+
+    /// The salinity stencil (base-level liveliness step 4): weather salt into every cell, then advect it
+    /// downhill with the water routing (the same precomputed lowest-neighbour targets the hydrology uses),
+    /// double-buffered and conservative except at map-edge outflow, then cap. Salt accumulates in
+    /// endorheic basins (which route to themselves, so they retain all their salt) and washes from
+    /// well-drained cells, so a basin whose water evaporates concentrates its salt into a salt flat. The
+    /// concentration a being suffers is derived in [`Self::salinity_at`] from this salt and the standing
+    /// water; salinity does not limit productivity here (it is an animal toxin, the halophile-selection
+    /// gradient, not a plant factor). Pinned integer folds in canonical order, so it replays (Principle 3).
+    fn step_salinity(&mut self, calib: &EnvironCalib) {
+        let (w, h) = (self.width, self.height);
+        let n = (w as usize) * (h as usize);
+        // (1) Weathering source, pointwise.
+        let mut sourced = vec![Fixed::ZERO; n];
+        for (dst, &cur) in sourced.iter_mut().zip(self.salt.cells.iter()) {
+            *dst = cur.saturating_add(calib.salt_weathering);
+        }
+        // (2) Downhill advection with the water routing, double-buffered (each cell keeps its retained
+        // salt and receives the outflow of every higher neighbour that routes to it). A basin (downhill
+        // to self) sends nothing and retains everything.
+        let mut next = vec![Fixed::ZERO; n];
+        for i in 0..n {
+            let out = if self.downhill[i] != i {
+                calib.routing_rate.mul(sourced[i])
+            } else {
+                Fixed::ZERO
+            };
+            next[i] = next[i].saturating_add(sourced[i] - out);
+            if out > Fixed::ZERO {
+                let j = self.downhill[i];
+                next[j] = next[j].saturating_add(out);
+            }
+        }
+        // (3) Cap each cell's salt at the holding capacity, so a basin saturates rather than growing
+        // without bound.
+        for c in next.iter_mut() {
+            *c = (*c).min(calib.salt_cap);
+        }
+        self.salt.cells = next;
+    }
+
+    /// The standing SALT mass at a cell (base-level liveliness step 4): high in endorheic basins that
+    /// retain their salt, low on well-drained slopes that wash it away. A pure per-cell field read for
+    /// the field reader. The toxin DOSE a being suffers is derived in [`Self::salinity_dose`] from this
+    /// salt and the standing water (the concentration), so a wet basin dilutes its salt and a dry one
+    /// concentrates it.
+    pub fn salt_at(&self, x: i32, y: i32) -> Fixed {
+        self.salt.at(x, y)
+    }
+
+    /// The salinity DOSE at a cell (base-level liveliness step 4): the concentration `salt / (water +
+    /// reference)` scaled by `salinity.dose_scale`, the dose the harm law reads on the `bio.salinity`
+    /// class. High where a basin has evaporated its water and left salt (a salt flat), near zero where
+    /// fresh water dilutes it. Pure fixed-point, guarded against a zero denominator by the reference.
+    pub fn salinity_dose(&self, x: i32, y: i32, calib: &EnvironCalib) -> Fixed {
+        let salt = self.salt.at(x, y);
+        if salt <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let denom = self.water.at(x, y).saturating_add(calib.reference_water);
+        let concentration = salt.checked_div(denom).unwrap_or(Fixed::ZERO);
+        concentration
+            .checked_mul(calib.salinity_scale)
+            .unwrap_or(concentration)
     }
 
     /// The hydrology stencil: for each cell compute its sourced water (old + precipitation - evaporation,
@@ -420,6 +521,14 @@ impl EnvironFields {
                 // The drinkable water supply is the standing depth, clamped to a bounded [0, ONE] supply
                 // the satisfaction measure consumes; refreshed each tick, so drinking does not deplete it.
                 let water = self.water.at(x, y).min(Fixed::ONE);
+                // The salinity DOSE (base-level liveliness step 4): the concentration scaled, written as
+                // the bio.salinity toxin the harm sink reads against a being's heritable tolerance. A
+                // present dose on a dosed cell, absent on a fresh one (the substrate absence convention).
+                let salinity = self.salinity_dose(x, y, calib);
+                let mut toxins = std::collections::BTreeMap::new();
+                if salinity > Fixed::ZERO {
+                    toxins.insert(SALINITY.to_string(), salinity);
+                }
                 resource.set(
                     coord,
                     Composition {
@@ -429,21 +538,22 @@ impl EnvironFields {
                         ]
                         .into_iter()
                         .collect(),
-                        toxins: Default::default(),
+                        toxins,
                     },
                 );
             }
         }
     }
 
-    /// Fold the dynamic environmental fields into a hash in canonical field order (water then
-    /// productivity capacity), the stack's contribution to the runner's `state_hash`. A field omitted
-    /// here would pass replay while hiding divergence, so both dynamic fields fold; the static inputs are
-    /// a pure function of the map and need not fold. The standing food stock lives in the
-    /// [`ResourceField`] and is folded there (base-level liveliness step 3).
+    /// Fold the dynamic environmental fields into a hash in canonical field order (water, productivity
+    /// capacity, then salt), the stack's contribution to the runner's `state_hash`. A field omitted here
+    /// would pass replay while hiding divergence, so every dynamic field folds; the static inputs are a
+    /// pure function of the map and need not fold. The standing food stock lives in the [`ResourceField`]
+    /// and is folded there (base-level liveliness step 3).
     pub fn hash_into(&self, h: &mut StateHasher) {
         self.water.hash_into(h);
         self.capacity.hash_into(h);
+        self.salt.hash_into(h);
     }
 }
 
@@ -532,6 +642,7 @@ mod tests {
             height: h,
             water: ScalarField::uniform(w, h, Fixed::ZERO),
             capacity: ScalarField::uniform(w, h, Fixed::ZERO),
+            salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture: vec![moisture; elev_tenths.len()],
             light: vec![Fixed::ONE; elev_tenths.len()],
             downhill,
@@ -652,6 +763,26 @@ mod tests {
             s.water.cells[4] > Fixed::ZERO,
             "water flowed downhill into the basin centre: {:?}",
             s.water.cells[4]
+        );
+    }
+
+    #[test]
+    fn salt_concentrates_in_an_endorheic_basin() {
+        // Base-level liveliness step 4: a 3x3 bowl whose centre is an endorheic basin (routes to itself)
+        // and whose rim routes downhill toward it. Weathering salts every cell; the basin retains all its
+        // salt and receives the rim's outflow while the rim washes salt toward the centre, so after
+        // stepping the basin centre holds far more salt than a well-drained corner, the salt flat.
+        let mut s = stack_of(3, 3, &[5, 4, 5, 4, 1, 4, 5, 4, 5], Fixed::ZERO);
+        let calib = EnvironCalib::dev_fixture();
+        for _ in 0..80 {
+            s.step_salinity(&calib);
+        }
+        let centre = s.salt_at(1, 1);
+        let corner = s.salt_at(0, 0);
+        assert!(centre > Fixed::ZERO, "the basin accumulated salt");
+        assert!(
+            centre > corner,
+            "salt concentrates in the endorheic basin, not on the well-drained rim: {centre:?} > {corner:?}"
         );
     }
 

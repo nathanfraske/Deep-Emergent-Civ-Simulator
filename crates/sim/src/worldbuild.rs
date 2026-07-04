@@ -42,7 +42,7 @@ use crate::breeding::BreedingSystemRegistry;
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::controller::Controller;
 use crate::decision::Curve;
-use crate::edibility::Physiology;
+use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use crate::langmod::{
@@ -123,6 +123,12 @@ pub struct EmbodimentGenesis {
     /// The organ registry a body plan's tissue composition (surface, specific heat, energy density,
     /// respiratory surface) is scored against, the same registry the physiology derivation reads.
     pub organs: BodyPlanRegistry,
+    /// The toxin-tolerance registry a founder's (and its descendants') heritable per-toxin-class
+    /// tolerance is expressed from the genome through (base-level liveliness step 4): which toxin classes
+    /// the world runs (`bio.salinity` and the like), and which gene channel and Hill each carries. Empty
+    /// leaves every being with no tolerance (the harm sink stays inert), so a world with no environmental
+    /// toxin runs exactly as before.
+    pub tolerances: ToleranceRegistry,
     /// The controller hidden width (zero is the reaction-norm controller; a positive width is the
     /// recurrent graduation).
     pub controller_hidden: usize,
@@ -482,14 +488,27 @@ fn assemble_dawn_embodiment(
                 Some(genome) => Controller::express(&race.genes, genome, &layout),
                 None => Controller::zeros(&layout),
             };
-            // The edibility physiology is the temperature-only development fixture for this arc; a
-            // canonical dawn edibility derivation is a follow-on (an honest limit, like the language
-            // genesis being a caller-supplied bundle).
-            let physiology = Physiology::dev_for_registry(&genesis.homeostatic);
+            // The consumer physiology: the nutrient requirements from the registry (the dev fixture)
+            // PLUS the heritable per-toxin-class tolerance expressed from the founder's genome through the
+            // tolerance registry (base-level liveliness step 4), so a founder carries its own salt (or
+            // dust) resistance and a lineage adapts to a gradient by selection. A founder with no genome
+            // falls back to the tolerance-free dev fixture.
+            let physiology = match world.genome_of(id) {
+                Some(genome) => Physiology::express(
+                    &genesis.homeostatic,
+                    &genesis.tolerances,
+                    &race.genes,
+                    genome,
+                ),
+                None => Physiology::dev_for_registry(&genesis.homeostatic),
+            };
             let walker = Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
             emb.add(walker, thermal);
         }
     }
+    // Arm the tolerance registry on the embodiment so the lifecycle pairing expresses a newborn's
+    // heritable tolerance from its own genome the same way (base-level liveliness step 4).
+    emb.set_tolerances(genesis.tolerances.clone());
     emb.set_physiology(EmbodiedPhysiology::from_manifest(
         manifest,
         genesis.organs.clone(),

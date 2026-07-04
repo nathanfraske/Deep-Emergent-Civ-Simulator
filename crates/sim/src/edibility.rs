@@ -38,7 +38,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_core::{DrawKey, Fixed, Phase};
 use civsim_physics::laws::{self, Edibility};
 
+use crate::genome::{Channel, GeneSet, Genome, ToleranceAxisId};
 use crate::homeostasis::HomeostaticRegistry;
+use crate::physiology::SALINITY;
 
 /// The caps the floor laws need, reserved with their basis in the floor (the per-class and
 /// aggregate harm ceilings and the margin cap). Passed in rather than baked so the mechanism
@@ -194,6 +196,76 @@ impl Physiology {
             assimilation,
             tolerances: BTreeMap::new(),
             hill: BTreeMap::new(),
+        }
+    }
+
+    /// Express a consumer physiology from a genome (base-level liveliness step 4): the nutrient
+    /// requirement and assimilation over the homeostatic registry's backed classes exactly as
+    /// [`Physiology::dev_for_registry`] builds them (the labelled unit dev fixtures), PLUS a heritable
+    /// per-toxin-class TOLERANCE expressed from the genome through the [`ToleranceRegistry`], so a
+    /// being's resistance to a salt flat or a dust haze is its inheritance the way its size and its
+    /// behaviour are. Selection on the tolerance channel is what lets a lineage adapt to an
+    /// environmental gradient rather than being excluded at a fixed dose (Principle 8: a graded dose;
+    /// Principle 9: keyed off the floor class id and the genome, never a `RaceId`). Each class's
+    /// tolerance is PRESENT (so the toxin applies; a low value is sensitive, a high value resistant, and
+    /// the harm law reads a present zero as maximal sensitivity), clamped non-negative. The Hill exponent
+    /// is the class's data constant (the dose-response shape), not the heritable selection target.
+    pub fn express(
+        reg: &HomeostaticRegistry,
+        tolerances_reg: &ToleranceRegistry,
+        genes: &GeneSet,
+        genome: &Genome,
+    ) -> Physiology {
+        let mut phys = Physiology::dev_for_registry(reg);
+        for tc in &tolerances_reg.classes {
+            let value = genes
+                .express(genome, Channel::Tolerance(tc.axis), Fixed::ZERO)
+                .clamp(Fixed::ZERO, Fixed::MAX);
+            phys.tolerances.insert(tc.class.clone(), value);
+            phys.hill.insert(tc.class.clone(), tc.hill);
+        }
+        phys
+    }
+}
+
+/// One toxin-tolerance class as data (base-level liveliness step 4): the floor toxin-class id, the gene
+/// channel a being's heritable tolerance for it is expressed through, and the integer-Hill exponent (the
+/// dose-response steepness). The magnitude is heritable and selected; the Hill exponent is the class's
+/// data-constant curve shape.
+#[derive(Clone, Debug)]
+pub struct ToleranceClass {
+    /// The floor toxin-class id (for example `bio.salinity`), the key a cell composition doses and the
+    /// harm law reads.
+    pub class: String,
+    /// The gene channel this class's heritable tolerance is expressed through.
+    pub axis: ToleranceAxisId,
+    /// The integer-Hill exponent, the dose-response steepness for this class.
+    pub hill: u8,
+}
+
+/// The world's toxin-tolerance registry (base-level liveliness step 4): a data-defined map from a floor
+/// toxin-class id to the gene channel a being's heritable tolerance for it is expressed through, plus
+/// the per-class Hill exponent. Sibling to the controller-parameter and composition-axis registries: the
+/// mechanism (express a tolerance per class from the genome) is fixed Rust, the membership (which toxin
+/// classes a world runs, and which gene channel and Hill each carries) is data (Principle 11), so a salt
+/// flat, a dust haze, or an alien toxin is a data edit, keyed off the floor class id, never a `RaceId`
+/// (Principle 9).
+#[derive(Clone, Debug, Default)]
+pub struct ToleranceRegistry {
+    pub classes: Vec<ToleranceClass>,
+}
+
+impl ToleranceRegistry {
+    /// A labelled DEVELOPMENT FIXTURE: a single salinity tolerance class keyed off `bio.salinity`,
+    /// expressed through tolerance axis 0 with a Hill exponent of two (a moderately steep dose response),
+    /// so a founding grazer carries a heritable salt tolerance and a lineage can adapt to a salt flat.
+    pub fn dev_salinity() -> ToleranceRegistry {
+        ToleranceRegistry {
+            classes: vec![ToleranceClass {
+                class: SALINITY.to_string(),
+                axis: ToleranceAxisId(0),
+                hill: 2,
+            }],
         }
     }
 }

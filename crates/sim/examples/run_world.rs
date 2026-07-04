@@ -43,13 +43,14 @@ use std::time::Instant;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticRegistry, ENERGY, TEMPERATURE, WATER,
 };
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::physiology::ENERGY_DENSITY;
+use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
@@ -61,7 +62,7 @@ use civsim_sim::{
     DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
     GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
     PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
-    SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
+    SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
 };
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
@@ -109,6 +110,11 @@ const TAXIS_HERE_SUPPRESS: Fixed = Fixed::ONE;
 /// DEV FIXTURE: the founding INGEST drive from a forage source underfoot, set to one so a being eats
 /// what it stands on (basis: the ingest-activation strength; reserved as `controller.taxis.ingest_drive`).
 const TAXIS_INGEST_DRIVE: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding salinity-tolerance additive effect on the tolerance locus (base-level
+/// liveliness step 4), seeded so the pool expresses a moderate salt tolerance with standing spread (basis:
+/// the salt tolerance a naive-to-halophile founding pool spans; reserved as `tolerance.salinity_baseline`).
+/// Selection near a salt flat and mutation carry the heritable adaptation from here.
+const TOLERANCE_SEED_EFFECT: Fixed = Fixed::ONE;
 /// DEV FIXTURE: the per-locus per-generation structural mutation rate, opened off zero so the founding
 /// controller weights drift and the movement-dependent fitness a later step gives them has a heritable
 /// gradient to select on (basis: the reserved `genome.mutation_rates` baseline; small so it explores
@@ -296,6 +302,22 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     let freq1 = clamp_tenths(5 - i * step);
     let mut freqs = vec![freq0, freq1, Fixed::from_ratio(1, 2)];
     let mut effects = vec![Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
+
+    // Base-level liveliness step 4: a heritable salinity-tolerance gene (locus 3, Channel::Tolerance axis
+    // 0), so a founder expresses its own salt resistance and the pool carries standing variation for
+    // selection to act on near a salt flat. Seeded at a balanced frequency with a moderate additive
+    // effect, so founders range from naive (they die on a salt flat) to halophile (they live on it) and
+    // mutation opens the tail; the expressed magnitude is clamped non-negative in `Physiology::express`.
+    genes.push(GeneDef {
+        id: GeneId(genes.len() as u32),
+        effects: vec![GeneEffect {
+            channel: Channel::Tolerance(ToleranceAxisId(0)),
+            weight: Fixed::ONE,
+        }],
+        dominance: DominanceMode::additive(),
+    });
+    freqs.push(Fixed::from_ratio(1, 2));
+    effects.push(TOLERANCE_SEED_EFFECT);
 
     // Base-level liveliness step 3: append the founding controller gene block seeding a FORAGE reaction
     // norm over the dev-grazer registry, so a founder walks toward known food and water, stops on a source
@@ -494,6 +516,9 @@ fn embodiment_genesis() -> EmbodimentGenesis {
         affordances: AffordanceRegistry::dev_default(),
         locomotion: LocomotionParams::dev_default(),
         organs: BodyPlanRegistry::dev_default(),
+        // The heritable salinity-tolerance class (base-level liveliness step 4), so a founder carries a
+        // salt resistance expressed from its genome and a lineage near a salt flat adapts by selection.
+        tolerances: ToleranceRegistry::dev_salinity(),
         controller_hidden: 0,
         submerged_medium_id: "medium.water".to_string(),
         emergent_medium_id: "medium.air".to_string(),
@@ -839,6 +864,45 @@ fn carrying_capacity(runner: &Runner) -> Option<(f64, f64, f64)> {
     Some((standing, occupancy, local_occupancy))
 }
 
+/// The salinity-and-adaptation reader (base-level liveliness step 4): the environmental salt gradient and
+/// the population's heritable answer to it. Reports the fraction of cells carrying meaningful salt (the
+/// salt flats emerging in endorheic basins), the peak salt mass, and the mean expressed salinity
+/// TOLERANCE over the living embodied population (the halophile signal: it rises over generations where a
+/// lineage lives near salt, the measured proof that the gradient selects an adaptation rather than
+/// excluding a lineage at a fixed dose). A pure read of hashed state; `None` if the runner carries no
+/// located population.
+fn salinity_state(runner: &Runner) -> Option<(f64, f64, f64)> {
+    let env = runner.environ()?;
+    let emb = runner.embodiment()?;
+    let (w, h) = env.dims();
+    let n = (w as f64) * (h as f64);
+    if n <= 0.0 {
+        return None;
+    }
+    let mut salty_cells = 0.0;
+    let mut salt_max = 0.0f64;
+    for y in 0..h {
+        for x in 0..w {
+            let salt = env.salt_at(x, y).to_f64_lossy();
+            if salt > 0.1 {
+                salty_cells += 1.0;
+            }
+            salt_max = salt_max.max(salt);
+        }
+    }
+    let tolerances: Vec<f64> = emb
+        .walkers()
+        .iter()
+        .filter_map(|wk| wk.physiology.tolerance(SALINITY).map(|t| t.to_f64_lossy()))
+        .collect();
+    let mean_tolerance = if tolerances.is_empty() {
+        0.0
+    } else {
+        tolerances.iter().sum::<f64>() / tolerances.len() as f64
+    };
+    Some((salty_cells / n, salt_max, mean_tolerance))
+}
+
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
 /// `None` if no being carries a body temperature.
 fn mean_body_temp(runner: &Runner) -> Option<f64> {
@@ -968,6 +1032,17 @@ fn snapshot(
             );
         }
         None => println!("  carrying capacity: no located resource loop"),
+    }
+
+    // The salinity-and-adaptation signal (step 4): the salt gradient and the population's mean heritable
+    // salt tolerance (the halophile answer, which rises over generations where a lineage lives near salt).
+    match salinity_state(runner) {
+        Some((salty, salt_max, mean_tol)) => println!(
+            "  salinity: {:.0}% cells salty (peak salt {salt_max:.2})  |  mean salt tolerance {mean_tol:.3} \
+             (heritable, selects up near salt)",
+            salty * 100.0
+        ),
+        None => println!("  salinity: no located population"),
     }
 
     // The migration signal (step 1): dispersal of the located population from its dawn cells.

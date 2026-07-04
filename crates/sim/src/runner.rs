@@ -85,7 +85,7 @@
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
-use crate::edibility::Physiology;
+use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
@@ -690,6 +690,11 @@ pub struct Embodiment {
     /// respiration); `None` keeps the labelled scalar metabolize (the evolve harness and the existing
     /// thermal fixtures), so installing the physiology is opt-in and disturbs no existing caller.
     physiology: Option<EmbodiedPhysiology>,
+    /// The toxin-tolerance registry a newborn's heritable tolerance is expressed from at the lifecycle
+    /// pairing beat (base-level liveliness step 4). Empty by default (no tolerance, the harm sink inert),
+    /// set by the world-build ([`Embodiment::set_tolerances`]) so a child inherits its parents' salt (or
+    /// dust) resistance through its own genome, the same way the founder step expresses it.
+    tolerances: ToleranceRegistry,
 }
 
 impl Embodiment {
@@ -734,7 +739,16 @@ impl Embodiment {
             resources: ResourceField::new(),
             seed,
             physiology: None,
+            tolerances: ToleranceRegistry::default(),
         }
+    }
+
+    /// Install the toxin-tolerance registry (base-level liveliness step 4), so the lifecycle pairing
+    /// expresses a newborn's heritable per-toxin-class tolerance from its own genome exactly as the
+    /// founder step does. Set before the embodiment is handed to the runner; without it a newborn carries
+    /// no tolerance (the harm sink stays inert for it).
+    pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
+        self.tolerances = tolerances;
     }
 
     /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
@@ -1537,7 +1551,16 @@ impl Runner {
                         Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
                         None => Controller::zeros(&emb.layout),
                     };
-                    let physiology = Physiology::dev_for_registry(&emb.homeo);
+                    // The newborn's consumer physiology, its heritable per-toxin-class tolerance expressed
+                    // from its OWN genome through the embodiment's tolerance registry (base-level liveliness
+                    // step 4), so salt (or dust) resistance is inherited and selection carries across
+                    // generations. A newborn with no genome falls back to the tolerance-free dev fixture.
+                    let physiology = match world.genome_of(id) {
+                        Some(genome) => {
+                            Physiology::express(&emb.homeo, &emb.tolerances, &race.genes, genome)
+                        }
+                        None => Physiology::dev_for_registry(&emb.homeo),
+                    };
                     let exchange_rate = derive_body_exchange_rate(
                         &plan,
                         &phys.organs,

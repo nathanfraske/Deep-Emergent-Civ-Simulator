@@ -168,7 +168,7 @@ pub use genome::{
     CompositionAxisId, ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect,
     GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel,
     Incompatibility, IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup,
-    ReproductionMode, SchemeId, TraitId,
+    ReproductionMode, SchemeId, ToleranceAxisId, TraitId,
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
