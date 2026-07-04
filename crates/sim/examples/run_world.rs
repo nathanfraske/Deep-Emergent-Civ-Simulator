@@ -930,6 +930,18 @@ fn hazard_belief_spread(runner: &Runner) -> Option<(usize, usize)> {
     Some((holders, ids.len()))
 }
 
+/// The promoted-set-and-arcs reader (base-level liveliness §4, the generous arc-scoped promotion policy):
+/// how many beings are lifted to the individual move-by-move dialogue tier because they are living a
+/// narrative arc (a survival struggle, their energy or condition worn low), the rest running the
+/// aggregate gossip tier. Reports the promoted count and the population, so the named individuals living
+/// their arcs are legible: the count rises when the land presses the population (a lean generation
+/// promotes many strugglers) and falls when it is fed. A pure read of hashed state; `None` if the runner
+/// carries no cognition world.
+fn promoted_arcs(runner: &Runner) -> Option<(usize, usize)> {
+    let w = runner.world()?;
+    Some((w.promoted_ids().len(), w.population()))
+}
+
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
 /// `None` if no being carries a body temperature.
 fn mean_body_temp(runner: &Runner) -> Option<f64> {
@@ -1082,6 +1094,16 @@ fn snapshot(
             100.0 * holders as f64 / total as f64
         ),
         _ => println!("  belief spread: no cognition world"),
+    }
+
+    // The promotion signal (§4): the beings lifted to the individual dialogue tier because they are
+    // living a survival arc, the resolution knob on the story turned up on what is already happening.
+    match promoted_arcs(runner) {
+        Some((promoted, pop)) if pop > 0 => println!(
+            "  arcs: {promoted}/{pop} beings promoted to the individual tier (living a survival arc; the \
+             aggregate tier carries the rest, generous by default)"
+        ),
+        _ => println!("  arcs: no cognition world"),
     }
 
     // The migration signal (step 1): dispersal of the located population from its dawn cells.

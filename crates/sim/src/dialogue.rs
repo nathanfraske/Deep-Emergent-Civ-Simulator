@@ -305,6 +305,70 @@ pub struct MoveRegistry {
     pub moves: Vec<MoveKindDef>,
 }
 
+/// A labelled DEVELOPMENT FIXTURE modelled-dialogue substrate (base-level liveliness promotion policy):
+/// the minimal assertion / acceptance / refusal move set over a three-primitive force floor
+/// (tell-evidence, register-uptake positive, register-uptake negative), with no felicity conditions, so a
+/// promoted mind can assert a committed belief and a promoted partner can accept or refuse it. Not owner
+/// canon (a canonical dialogue substrate is data, design Part 9.5); this lets the promotion policy run
+/// end to end in the dev harness so a promoted being converses rather than being silenced (skipped by
+/// gossip with no dialogue substrate to converse through). Passes the content gate.
+pub fn dev_substrate() -> (ForceFloor, MoveRegistry) {
+    let floor = ForceFloor {
+        effects: vec![
+            ForceEffectDef {
+                id: ForceEffectId(1),
+                kind: ForceKind::TellEvidence,
+                sign: EffectSign::Neutral,
+                name: "assert".to_string(),
+            },
+            ForceEffectDef {
+                id: ForceEffectId(2),
+                kind: ForceKind::RegisterUptake,
+                sign: EffectSign::Positive,
+                name: "accept".to_string(),
+            },
+            ForceEffectDef {
+                id: ForceEffectId(3),
+                kind: ForceKind::RegisterUptake,
+                sign: EffectSign::Negative,
+                name: "refuse".to_string(),
+            },
+        ],
+    };
+    let registry = MoveRegistry {
+        moves: vec![
+            MoveKindDef {
+                id: MoveKindId(1),
+                name: "assertion".to_string(),
+                force: vec![ForceEffectId(1)],
+                expects: vec![MoveKindId(2), MoveKindId(3)],
+                sincerity_judged: true,
+                felicity: vec![],
+                gloss: "tells".to_string(),
+            },
+            MoveKindDef {
+                id: MoveKindId(2),
+                name: "acceptance".to_string(),
+                force: vec![ForceEffectId(2)],
+                expects: vec![],
+                sincerity_judged: false,
+                felicity: vec![],
+                gloss: "agrees".to_string(),
+            },
+            MoveKindDef {
+                id: MoveKindId(3),
+                name: "refusal".to_string(),
+                force: vec![ForceEffectId(3)],
+                expects: vec![],
+                sincerity_judged: false,
+                felicity: vec![],
+                gloss: "doubts".to_string(),
+            },
+        ],
+    };
+    (floor, registry)
+}
+
 /// What the content gate refused, naming the offending entry so a bad data load fails
 /// loud rather than running on a malformed substrate.
 #[derive(Clone, PartialEq, Eq, Debug)]

@@ -975,6 +975,22 @@ impl World {
         self.promoted.insert(mind);
     }
 
+    /// Restrict a mind back to the aggregate gossip tier (base-level liveliness promotion policy): the
+    /// counterpart to [`World::promote`], called when a being's narrative arc resolves so its resolution
+    /// drops back to the aggregate and it rejoins the one-pass gossip fallback. Idempotent (a no-op for a
+    /// mind that is not promoted). The promotion machinery is exact and conserved (design Part 54), so a
+    /// restricted being loses no belief state; only its dialogue resolution changes.
+    pub fn restrict(&mut self, mind: StableId) {
+        self.promoted.remove(&mind);
+    }
+
+    /// The set of minds promoted to move-by-move dialogue, in canonical id order (a pure read, for the
+    /// promoted-set reader). Every being here runs the individual dialogue tier this tick rather than the
+    /// aggregate gossip fallback.
+    pub fn promoted_ids(&self) -> Vec<StableId> {
+        self.promoted.iter().copied().collect()
+    }
+
     /// Whether a mind is promoted to move-by-move dialogue.
     pub fn is_promoted(&self, mind: StableId) -> bool {
         self.promoted.contains(&mind)

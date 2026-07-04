@@ -90,7 +90,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    RESPIRATION, TEMPERATURE,
+    CONDITION, ENERGY, RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -154,6 +154,27 @@ const HAZARD_DOSE_THRESHOLD: Fixed = Fixed::ONE;
 /// The tick-input ordinal the env-sourced hazard observation carries, high so it orders after any
 /// external input to the same mind (determinism: the tick sorts inputs by mind then ordinal).
 const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
+
+// The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
+// RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
+// survival is at stake (a metabolic reserve or its condition worn low) is in a narrative arc (a struggle
+// to eat, a battle with a lethal salt flat), and the runner promotes it, and every being sharing its
+// live cell (the talk-hole guard: a promoted being needs promoted partners or it neither gossips nor
+// converses), to the individual move-by-move dialogue tier for the duration of that arc, restricting it
+// back to the aggregate when its arc resolves (its reserves recover). Emergent (Principle 9: the arc is
+// the being's own state, never a scripted hero), deterministic (a canonical-order threshold and a
+// stable ranking, no RNG), and cheap (promote/restrict is exact and conserved, design Part 54).
+
+/// The reserve level below which a being is in a SURVIVAL ARC (a labelled dev value; its reserved home
+/// is `promotion.stress_threshold`): a metabolic reserve or its condition this low means the being is
+/// struggling to survive, the emergent arc promotion turns up the resolution on. Half a reserve, so a
+/// being that has burnt or been worn through half its margin is promoted, the generous default.
+const PROMOTION_STRESS_THRESHOLD: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)); // 1/2
+/// The maximum number of beings promoted to the individual tier at once (a labelled dev value; its
+/// reserved home is `promotion.budget`). It DEFAULTS HIGH (liveliness over frugality, the owner ruling):
+/// the aggregate tier absorbs the masses and promote/restrict is exact, so generous promotion costs
+/// compute, never fidelity. When more beings are in an arc than the budget, the most-stressed cells win.
+const PROMOTION_BUDGET: usize = 64;
 
 /// A declared access from resource-id slices (a small local convenience over [`Access::new`]).
 fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
@@ -897,6 +918,13 @@ pub struct Runner {
     /// temperature-only paths are unchanged. Stepped inside [`Runner::step_field`], folded into
     /// `state_hash`.
     environ: Option<(EnvironFields, EnvironCalib)>,
+    /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
+    /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
+    /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
+    /// by any other path (a test harness, a scripted scene) is never clobbered. Not folded into
+    /// `state_hash`: it is a derived function of the reserves and cells the hash already covers, and the
+    /// promotions themselves live in the world's own canonical state.
+    arc_promoted: BTreeSet<StableId>,
 }
 
 impl Runner {
@@ -914,6 +942,7 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            arc_promoted: BTreeSet::new(),
         }
     }
 
@@ -948,6 +977,7 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            arc_promoted: BTreeSet::new(),
         }
     }
 
@@ -1001,6 +1031,7 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            arc_promoted: BTreeSet::new(),
         }
     }
 
@@ -1077,6 +1108,7 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            arc_promoted: BTreeSet::new(),
         }
     }
 
@@ -1222,6 +1254,9 @@ impl Runner {
     fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
+        // Per-being stress (the lower of its energy and condition margins) and its cell, for the
+        // arc-scoped promotion policy: a being whose stress is high is in a survival arc.
+        let mut stress: BTreeMap<StableId, Fixed> = BTreeMap::new();
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             let environ = self.environ.as_ref();
@@ -1229,6 +1264,21 @@ impl Runner {
                 let c = w.coord();
                 let cell = CELL_PLACE_BASE.wrapping_add((c.y.max(0) * width + c.x.max(0)) as u32);
                 cells.insert(w.id, cell);
+                // The survival margin: the lower of the energy and condition reserve levels, counting an
+                // axis only when the being carries that reserve (its capacity is positive), so a
+                // being whose registry lacks the axis reads a full margin rather than a false zero. A being
+                // whose margin is below the stress threshold is in a narrative arc (starving, or worn by a
+                // hazard); a thermal-only fixture carries neither axis, so it yields a full margin and
+                // promotes no one.
+                let axis_margin = |axis| {
+                    if w.homeostasis.capacity(axis) > Fixed::ZERO {
+                        w.homeostasis.level(axis)
+                    } else {
+                        Fixed::ONE
+                    }
+                };
+                let margin = axis_margin(ENERGY).min(axis_margin(CONDITION));
+                stress.insert(w.id, margin);
                 if let Some((env, calib)) = environ {
                     if env.salinity_dose(c.x, c.y, calib) > HAZARD_DOSE_THRESHOLD {
                         env_inputs.push(TickInput {
@@ -1247,9 +1297,26 @@ impl Runner {
                 }
             }
         }
+        // The promoted set: every being sharing a cell that holds a being in a survival arc (the
+        // talk-hole guard promotes whole co-located groups), capped at the generous budget by keeping the
+        // most-stressed cells. A pure deterministic function of the reserves and the cells (no RNG).
+        let promote_set = self.arc_promotion_set(&cells, &stress);
         if let Some(world) = self.world.as_mut() {
             world.set_conversational_cells(cells);
+            // Apply the arc-scoped promotion, touching only the set this policy owns. Promote the new arc
+            // set, then restrict every being the policy promoted last tick that has left the arc (its arc
+            // resolved). A promotion set by any other path (a test harness, a scripted scene) is never in
+            // `arc_promoted`, so it is left untouched, and a being still in the arc is not restricted.
+            for &id in &promote_set {
+                world.promote(id);
+            }
+            for &id in &self.arc_promoted {
+                if !promote_set.contains(&id) {
+                    world.restrict(id);
+                }
+            }
         }
+        self.arc_promoted = promote_set;
         if env_inputs.is_empty() {
             world_inputs.to_vec()
         } else {
@@ -1257,6 +1324,50 @@ impl Runner {
             merged.extend(env_inputs);
             merged
         }
+    }
+
+    /// The arc-scoped promotion set (base-level liveliness §4): the beings to promote to the individual
+    /// dialogue tier this tick, from the per-being survival stress and the live conversational cells. A
+    /// cell is "in an arc" when any being in it is below the stress threshold; the whole cell is promoted
+    /// together (the talk-hole guard, so a promoted being has promoted partners to converse with). When
+    /// more beings sit in arc-cells than the generous budget allows, the most-stressed cells win (a stable
+    /// ranking by the cell's lowest margin, then its id), so the choice is deterministic and camera-free
+    /// (Principle 10). Returns the promoted ids as a canonical set.
+    fn arc_promotion_set(
+        &self,
+        cells: &BTreeMap<StableId, PlaceId>,
+        stress: &BTreeMap<StableId, Fixed>,
+    ) -> BTreeSet<StableId> {
+        // Group beings by cell, and find each cell's lowest margin (its stress). Canonical (cell, id).
+        let mut by_cell: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for (&id, &cell) in cells {
+            by_cell.entry(cell).or_default().push(id);
+        }
+        // Cells that hold at least one being in a survival arc, with the cell's lowest margin.
+        let mut arc_cells: Vec<(Fixed, PlaceId, Vec<StableId>)> = by_cell
+            .into_iter()
+            .filter_map(|(cell, ids)| {
+                let lowest = ids
+                    .iter()
+                    .map(|id| stress.get(id).copied().unwrap_or(Fixed::ONE))
+                    .min()
+                    .unwrap_or(Fixed::ONE);
+                (lowest < PROMOTION_STRESS_THRESHOLD).then_some((lowest, cell, ids))
+            })
+            .collect();
+        // Most-stressed cell first (lowest margin), ties broken by cell id, so the budget selection is
+        // a deterministic, stable order.
+        arc_cells.sort_by(|a, b| a.0.to_bits().cmp(&b.0.to_bits()).then(a.1.cmp(&b.1)));
+        let mut promoted = BTreeSet::new();
+        for (_, _, ids) in arc_cells {
+            if promoted.len() >= PROMOTION_BUDGET {
+                break;
+            }
+            for id in ids {
+                promoted.insert(id);
+            }
+        }
+        promoted
     }
 
     /// The body-thermal exchange phase: every located being pulls its core temperature toward its

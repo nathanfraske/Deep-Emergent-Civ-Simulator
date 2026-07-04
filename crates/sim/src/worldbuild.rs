@@ -338,6 +338,20 @@ pub fn build_dawn_runner(
     world.set_stubbornness_split(manifest.require_fixed("belief.enculturation_stubbornness")?);
     world.set_belief_diffusion_rate(manifest.require_fixed("belief.diffusion_rate")?);
 
+    // Install the modelled-dialogue substrate (base-level liveliness promotion policy), so a being the
+    // runner promotes into a narrative arc converses move-by-move rather than being silenced (a promoted
+    // being is skipped by the aggregate gossip fallback, so without a dialogue substrate it would neither
+    // gossip nor converse). The substrate is the labelled dev fixture (design Part 9.5; a canonical
+    // substrate is owner data); its content gate fails loud on a malformed load. Without a promoted set
+    // the dialogue step stays a no-op, so this is inert until the runner's promotion policy lifts a being.
+    let (force_floor, move_registry) = crate::dialogue::dev_substrate();
+    world
+        .set_dialogue(move_registry, force_floor)
+        .map_err(|e| CalibrationError::BadValue {
+            id: "dialogue.substrate".to_string(),
+            detail: format!("the dev dialogue substrate failed its content gate: {e:?}"),
+        })?;
+
     // Arm the derived per-race languages at the founder step (increment 2e), if a language genesis is
     // supplied: derive each articulating race's phonetic form system from the base geometry and its
     // own articulation, install a per-band lineage, and assign the band's founders, so the naming game
