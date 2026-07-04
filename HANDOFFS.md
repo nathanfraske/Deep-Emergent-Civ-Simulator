@@ -5,6 +5,22 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-04: world-wiring section 4 built (the production scenario-to-Runner assembly), increment 2 decomposed, on `claude/world-wiring-handoff-t0u76v`
+
+Picked up the world-wiring arc at its immediate prerequisite (WORLD_WIRING_HANDOFF section 4) and built it: the top-level production world-build path that had no caller. Also confirmed and decomposed increment 2 (the language substrate) after a source audit found it much larger than the handoff sized it.
+
+**Section 4, the production assembly (BUILT).** `crates/sim/src/worldbuild.rs`: `DawnPeoples` (a world's declared races, founding bands, breeding registry, personality registry, optional mortality hazard) and `build_dawn_runner(manifest, channels, profile, resolution, map, peoples, seed) -> Result<Runner, CalibrationError>`. It builds the `World` from the manifest (life cadence derived from the orbit), installs the breeding and personality registries before seeding, seeds the dawn through `seed_dawn_populations` (evidence rings from `RingCapacityLaw::from_manifest`), arms the language and drift calibrations (concepts from the NSM primes, `LanguageParams`/`DriftParams` from the manifest), optionally arms a mortality hazard, derives the field from the resolved medium through `FieldCalib::from_resolution` (the increment-1 seam, now with its first top-level caller), and composes through `Runner::with_world`. This closes the section-4 gap: `from_resolution` and `seed_dawn_populations` now have a production caller, and the running world exists that increments 5 and 6 hang their beats on.
+
+**dev-fixtures extended.** `calibration/profiles/dev-fixtures.toml` gained the world-build path's fixtures (`medium.air`, `medium.water`, `field.cell_size`, `field.relaxation`, `field.body_exchange`, `axiom.evidence_ring_curve`, `axiom.evidence_ring_hard_cap`), each a labelled placeholder with basis; the reserved fail-loud entries stay in `reserved.toml`. So the dev-fixtures profile can now assemble a whole Runner. The `field.cell_size` fixture is 1 cm (the map-scale underflow limit stands, handoff section 7).
+
+**Proof.** `crates/sim/tests/world_build.rs` (4 tests): the assembly seeds a genome-real dawn (7 founders across 2 bands), replays bit for bit and is seed-sensitive, advances its composed cognition world every step (the open question the composite closes: a `Runner` wrapping a dawn world DOES tick the inner naming-game and drift beats), derives the field from the medium end to end (air vs water: bit-identical dawn, diverging fields), and keeps the scheduled order bit-identical to the pinned order. Whole workspace green (fmt/clippy/verify.sh clean; all 47 sim/physics/core test binaries pass; examples build).
+
+**Increment 2 decomposed (an L, not S-to-M).** A source audit (and the other agent's notes) confirmed: `phoneme_priors` returns dispersion weights with no `FormSystem` bridge; `Race` carries no acoustic/articulation/sensorium data; the WP5 `Sensorium` acuity-vs-JND conflation is load-bearing. Ordered sub-increments recorded in both the roadmap and WORLD_WIRING_HANDOFF: 2a (WP5 Sensorium split), 2b (per-race articulation data home: `FeatureValueDef.resonator_length` real geometry + a per-race vocal-tract scale on `Race` + a per-race sensorium resolution seed, vocal-tract scale flagged derivable-later from R-ORGAN-FLUX), 2c (reserved producibility threshold), 2d (phoneme_priors to FormSystem bridge), 2e (arm at the founder step). Tasks tracked.
+
+**NEXT.** The owner's call on sequencing after the foundation (the AskUserQuestion tool dropped its permission stream, so this was not answered): either 2a-2e (the derived language substrate, so bands diverge into sister tongues), or jump to the keystone increment 5 (reproduction: birth + mate choice + census Ne) so the world grows rather than only shrinks. Recommendation was foundation-then-language-substrate. Section 4 unblocks both.
+
+---
+
 ## 2026-07-03 (continued): the derive column closed and twice blind-audited, world-wiring begun, merged to main, on `claude/reserved-values-consolidation`
 
 The largest single arc of the project. Cleared the eight owner walls, built the remaining substrates, closed the entire derive column, blind-audited it twice, and wired the first dormant derivation into the running world. All on `claude/reserved-values-consolidation`, merged to `main` at the end. Whole workspace green throughout (fmt/clippy/verify.sh clean, ~920 sim+physics+core tests).
