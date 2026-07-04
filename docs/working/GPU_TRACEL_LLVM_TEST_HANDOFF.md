@@ -69,3 +69,20 @@ and any version skew (cubecl `0.10` versus the pinned `tracel-llvm 20.1.4-7`).
 This is a test-and-verify handoff only. No code change to `civsim-gpu` is implied; the
 crate is unchanged on this branch. If the build surfaces a real defect, fix it on this
 branch and note it here.
+
+
+---
+
+## Test results (2026-07-04, on the RTX 5090 box with GPU access)
+
+Verified by the session that holds GPU access. The build is not blocked in this environment: the `tracel-llvm-20.1.4-7` bundle is already installed at `~/.local/share/tracel/` from a prior GPU session, and GitHub egress reaches the release asset (HTTP 302 to the asset, not the 403 the world-wiring session hit), so `tracel-llvm-bundler` skipped the fetch and reused the installed bundle.
+
+Run with `CUDA_PATH=$HOME/.local/cuda` and `LD_LIBRARY_PATH=$HOME/.local/cuda/lib:/usr/lib/wsl/lib`:
+
+1. `cargo build -p civsim-gpu`: BUILDS clean in 5s (cubecl 0.10 and civsim-gpu compile; the bundler found the installed bundle and did not re-fetch).
+2. `cargo test -p civsim-gpu` (host-side, device tests self-skip): 25 of 25 pass, 0 failed.
+3. `CIVSIM_GPU=1 cargo test -p civsim-gpu` on the RTX 5090 (Blackwell sm_120, driver 595.97, NVRTC 12.9): ALL pass, 0 failed, exit 0. The R-GPU-CANON-PIN oracle gate `stage0_arithmetic_agrees_across_cuda_and_cpu_backends` passes: the CUDA `#[cube]` Q32.32 limb multiply and restoring divide match the `civsim_core::Fixed` oracle bit for bit on the device, and the field-stencil and worldgen-noise device tests pass (9 tests in 7.3s of real NVRTC compile plus device execution).
+
+No version skew: cubecl 0.10 pulls tracel-llvm 20.1.4-7 (the LLVM-backed `cpu` backend) and the CUDA path builds and runs against driver 595.97 on the 5090 without incident. No defect surfaced in `civsim-gpu`; the crate is unchanged.
+
+One note for the blocked-environment problem, not a defect: the `cpu` backend is load-bearing here, since the oracle gate `stage0_arithmetic_agrees_across_cuda_and_cpu_backends` compares the CUDA and CPU (LLVM) backends for cross-backend bit identity, so dropping the `cpu` feature would remove a comparison target of the R-GPU-CANON-PIN gate rather than being a free trim. The `tracel-llvm` dependency is therefore intentional, and the right unblock for a session without egress is the handoff's own fix paths (add_repo for `tracel-ai/tracel-llvm`, or vendoring the bundle). The `vulkan` feature has no test exercising it in this crate today, so if a lighter build is wanted it is the more defensible feature to drop, but it does not pull `tracel-llvm` and so does not affect the block.
