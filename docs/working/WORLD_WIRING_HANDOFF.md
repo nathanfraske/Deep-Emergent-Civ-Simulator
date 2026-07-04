@@ -1,5 +1,8 @@
 # World-Wiring Handoff: drive the built substrate through World::tick
 
+> # ⛔ PICKUP: FINISH INCREMENT 10 PART B (the physiology tier) ⛔
+> Increments 1 through 10 Part A are built, audited, and merged to `main`. The **one remaining piece of this arc is increment 10 Part B**: wire the physiology producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration in `crates/sim/src/physiology.rs`, already built and unit-tested) into the Runner embodiment step (`step_inner`, `crates/sim/src/runner.rs`), with the per-being body-plan registry, metabolic anchors, medium field, and `LivingWorld` step it needs (increment 10 below). Do this before any other queued work.
+
 This is a self-contained brief for an agent picking up the world-wiring arc. Read `CLAUDE.md` first for the project customs, then this file. You do not need the prior chat. Everything you need to execute is here: the current state, the tick spine, the ordered increment plan, the exact wiring points, the determinism and Principle-9 guards, and the workflow. Work on the branch this file lives on (`claude/reserved-values-consolidation`, now merged to `main`), or a fresh branch off `main`.
 
 ---

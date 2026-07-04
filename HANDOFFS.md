@@ -1,5 +1,14 @@
 # HANDOFFS.md: Rolling Session Log
 
+> # ⛔ NEXT AGENT: READ THIS BEFORE ANYTHING ELSE ⛔
+> **Your first task is to pick up and FINISH world-wiring increment 10 Part B (the physiology tier). Do it before you continue to any other work.**
+>
+> The world-wiring arc (increments 1 through 10 Part A) is merged to `main`. Increment 10 **Part A** (post-dawn census-driven gene-pool drift) is done. Increment 10 **Part B is NOT done and is the one remaining piece of the arc.**
+>
+> **Part B:** wire the physiology producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration; all in `crates/sim/src/physiology.rs`, built and unit-tested) into the Runner embodiment step (`step_inner` in `crates/sim/src/runner.rs`), so anatomy-driven survival divergence (Kleiber mass, thermoregulation, medium respiration) falls out with no race label. This needs the larger scaffolding the plan names: a per-being body-plan registry, metabolic anchors, a medium field, and a `LivingWorld` step. Scope and grounding: `docs/working/WORLD_WIRING_HANDOFF.md` increment 10, and the top dated entry below.
+>
+> Finish Part B first. Only then continue to whatever else is queued.
+
 Reverse-chronological. Each session appends one entry at the top: what was done, what changed in the documents, where it stopped, and what is queued next. Read the top entry first to recover state. Never rewrite past entries; append. Full detail for earlier sessions lives in the session transcripts.
 
 
