@@ -20,9 +20,11 @@
 //! step of Part 25), applies selection through a piecewise-linear environment-to-coefficient
 //! kernel (a species that fits its region better is pushed toward fixing its adaptive
 //! alleles, the coefficient clamped to a divide-safe interval), forks founders on a cadence
-//! (the founder effect, [`crate::genome::GenePool::found`], each daughter a declared species
-//! in the parent-pointer lineage tree with an Orr-snowball incompatibility accumulation on
-//! `Phase::SPECIATE`), and drives to extinction any pool whose region suitability leaves it
+//! (the founder effect, [`crate::genome::GenePool::found`]), records a fork as a daughter species
+//! only where it is reproductively isolated from its parent (by frequency distance or the count of
+//! active Dobzhansky-Muller incompatibilities), accumulates the Orr snowball as the real joint
+//! Hardy-Weinberg cross count between the pools (no RNG, the former fair coin retired), and drives to
+//! extinction any pool whose region suitability leaves it
 //! below the carrying-capacity floor (the collapse marked as an append-only payload state,
 //! never a deletion).
 //!
@@ -33,9 +35,10 @@
 //! reserved with its basis in [`EpochParams`] and defaulted only by a labelled development
 //! fixture.
 
-use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_core::Fixed;
 
 use crate::biosphere::{Biosphere, Region};
+use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
 use crate::stocks::Stock;
 
@@ -69,6 +72,19 @@ pub struct EpochParams {
     /// The suitability floor below which a species' carrying capacity is treated as collapse
     /// and the species goes extinct.
     pub extinction_floor: Fixed,
+    /// The frequency-distance threshold past which a founder-fork counts as reproductively isolated
+    /// from its parent (design 25.7, the declared speciation rule): a daughter species is recorded
+    /// only where the fork's allele frequencies have diverged by at least this, so speciation tracks
+    /// real genetic divergence rather than firing on every cadence. RESERVED
+    /// (`speciation.distance_threshold`), fed to [`GenePool::reproductively_isolated`].
+    pub speciation_dist_threshold: Fixed,
+    /// The count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively
+    /// isolated regardless of distance (the discrete genetic firewall a complementary allele pair
+    /// raises). RESERVED (`speciation.incompatibility_threshold`).
+    pub incompatibility_threshold: usize,
+    /// The joint Hardy-Weinberg cross probability at which a Dobzhansky-Muller pair counts as active
+    /// ([`IncompatibilityTable::active_between`]). RESERVED (`genome.allele_presence_threshold`).
+    pub allele_presence: Fixed,
 }
 
 impl EpochParams {
@@ -87,6 +103,11 @@ impl EpochParams {
             pop_capacity: Fixed::ONE,
             pop_regen: Fixed::from_ratio(3, 10),
             extinction_floor: Fixed::from_ratio(12, 100),
+            // A low distance threshold so a founder-fork's bottleneck divergence still radiates
+            // daughters in a development run; the owner's speciation threshold is reserved.
+            speciation_dist_threshold: Fixed::from_ratio(1, 100),
+            incompatibility_threshold: 1,
+            allele_presence: Fixed::from_ratio(9, 10),
         }
     }
 }
@@ -155,6 +176,7 @@ fn count_alive(bio: &Biosphere) -> u32 {
 /// be run either as a batch ([`run`]) or one generation at a time for a live, watchable radiation
 /// ([`Radiation`]). It keys every draw on the world seed with `g` in the tick coordinate, so a
 /// generation reproduces bit for bit however it is driven.
+#[allow(clippy::too_many_arguments)]
 pub fn step_generation(
     seed: u64,
     bio: &mut Biosphere,
@@ -163,6 +185,7 @@ pub fn step_generation(
     pops: &mut std::collections::BTreeMap<SpeciesId, Stock>,
     report: &mut EpochReport,
     g: u64,
+    table: &IncompatibilityTable,
 ) {
     // Selection and drift over every live pool, in canonical id order.
     let ids: Vec<SpeciesId> = bio.species.ids().collect();
@@ -216,6 +239,23 @@ pub fn step_generation(
                 parent
                     .pool
                     .found(seed, id.0 as u64, g, p.founder_size, p.recovery_size);
+            // Gate on real genetic divergence (design 25.7, WP1): a founder-fork becomes a daughter
+            // species only where it is reproductively isolated from its parent, by frequency distance
+            // or by the count of active Dobzhansky-Muller incompatibilities crossing the reserved
+            // thresholds, so daughters appear at real divergence rather than on every cadence tick.
+            // The former fair-coin snowball is retired: the incompatibility count is now the real
+            // joint-Hardy-Weinberg cross count between the two pools, keyed off the frequencies alone
+            // (no RNG), zero where no incompatibility is declared and rising with allele divergence.
+            if !parent.pool.reproductively_isolated(
+                &daughter_pool,
+                p.speciation_dist_threshold,
+                table,
+                p.incompatibility_threshold,
+                p.allele_presence,
+            ) {
+                continue;
+            }
+            let active = table.active_between(&parent.pool, &daughter_pool, p.allele_presence);
             let daughter = crate::biosphere::Species {
                 layer: parent.layer,
                 niche: parent.niche.clone(),
@@ -228,6 +268,7 @@ pub fn step_generation(
             };
             if let Some(child) = bio.species.speciate(*id, daughter) {
                 report.daughters += 1;
+                report.incompatibilities += active as u32;
                 let cap = {
                     let s = bio
                         .species
@@ -238,12 +279,6 @@ pub fn step_generation(
                     p.pop_capacity.checked_mul(s).unwrap_or(Fixed::ZERO)
                 };
                 pops.insert(child, Stock::new(cap, cap, p.pop_regen));
-                // Orr-snowball: a deterministic incompatibility roll keyed on the ordered
-                // pair and the generation, so the count accumulates per sweep.
-                let rng = DrawKey::pair(id.0 as u64, child.0 as u64, g, Phase::SPECIATE).rng(seed);
-                if rng.flip(0) {
-                    report.incompatibilities += 1;
-                }
             }
         }
     }
@@ -253,14 +288,20 @@ pub fn step_generation(
 /// and returning a summary. Deterministic: every draw keys on the world seed with the
 /// generation in the tick coordinate. This is the batch form; [`Radiation`] is the one-generation
 /// stepper that produces the identical result when stepped to completion.
-pub fn run(seed: u64, bio: &mut Biosphere, region: &Region, p: &EpochParams) -> EpochReport {
+pub fn run(
+    seed: u64,
+    bio: &mut Biosphere,
+    region: &Region,
+    p: &EpochParams,
+    table: &IncompatibilityTable,
+) -> EpochReport {
     let mut report = EpochReport {
         generations: p.generations,
         ..EpochReport::default()
     };
     let mut pops = init_pops(bio, region, p);
     for g in 0..p.generations {
-        step_generation(seed, bio, region, p, &mut pops, &mut report, g);
+        step_generation(seed, bio, region, p, &mut pops, &mut report, g, table);
     }
     report.alive = count_alive(bio);
     report
@@ -278,6 +319,9 @@ pub struct Radiation {
     seed: u64,
     region: Region,
     params: EpochParams,
+    /// The declared Dobzhansky-Muller incompatibility table the speciation gate reads (design 25.7);
+    /// empty in a world that declares none, so speciation falls back to the frequency-distance rule.
+    table: IncompatibilityTable,
     bio: Biosphere,
     pops: std::collections::BTreeMap<SpeciesId, Stock>,
     gen: u64,
@@ -288,7 +332,13 @@ impl Radiation {
     /// Begin a radiation over a region's freshly generated biosphere. The report is initialised
     /// exactly as the batch [`run`] initialises it (its `generations` field is the planned total),
     /// so a fully stepped radiation's report equals the batch result.
-    pub fn new(seed: u64, bio: Biosphere, region: Region, params: EpochParams) -> Radiation {
+    pub fn new(
+        seed: u64,
+        bio: Biosphere,
+        region: Region,
+        params: EpochParams,
+        table: IncompatibilityTable,
+    ) -> Radiation {
         let pops = init_pops(&bio, &region, &params);
         let report = EpochReport {
             generations: params.generations,
@@ -299,6 +349,7 @@ impl Radiation {
             seed,
             region,
             params,
+            table,
             bio,
             pops,
             gen: 0,
@@ -320,6 +371,7 @@ impl Radiation {
             &mut self.pops,
             &mut self.report,
             self.gen,
+            &self.table,
         );
         self.gen += 1;
         self.report.alive = count_alive(&self.bio);
@@ -429,7 +481,13 @@ mod tests {
                 crate::anatomy::WorldProfile::grounded(),
             );
             let founders = bio.len();
-            let report = run(0xB105, &mut bio, &region(4), &ep);
+            let report = run(
+                0xB105,
+                &mut bio,
+                &region(4),
+                &ep,
+                &IncompatibilityTable::new(),
+            );
             (founders, bio.len(), report)
         };
         let (founders_a, total_a, report_a) = run_once();
@@ -442,6 +500,62 @@ mod tests {
         assert!(report_a.daughters > 0, "the epoch radiates daughters");
         assert!(total_a > founders_a, "the lineage grows past the founders");
         assert_eq!(report_a.generations, ep.generations);
+    }
+
+    #[test]
+    fn speciation_is_gated_by_reproductive_isolation_and_the_count_is_the_real_table_not_a_coin() {
+        // WP1: a founder-fork becomes a daughter species only where it is reproductively isolated
+        // from its parent, and the Orr-snowball count is the real Dobzhansky-Muller cross count, not a
+        // fair coin. Reads no RNG: both the gate and the count are pure functions of the pool
+        // frequencies (Principle 3, Principle 9).
+        let gp = GeneratorParams::dev_default();
+        let gen = || {
+            generate(
+                0xB105,
+                &region(4),
+                7,
+                &gp,
+                &crate::anatomy::BodyPlanRegistry::dev_default(),
+                crate::anatomy::WorldProfile::grounded(),
+            )
+        };
+
+        // A low distance threshold: founder-forks diverge past it, so daughters radiate.
+        let mut low = EpochParams::dev_default();
+        low.speciation_dist_threshold = Fixed::from_ratio(1, 100);
+        let mut bio_low = gen();
+        let r_low = run(
+            0xB105,
+            &mut bio_low,
+            &region(4),
+            &low,
+            &IncompatibilityTable::new(),
+        );
+        assert!(r_low.daughters > 0, "a low threshold radiates daughters");
+        // The count is the real table, not a coin: with no declared incompatibility it is zero even
+        // where daughters radiate (the fair-coin snowball is retired).
+        assert_eq!(
+            r_low.incompatibilities, 0,
+            "no declared incompatibility means a zero count, never a coin toss"
+        );
+
+        // A frequency distance above one can never be reached (the distance is in [0, 1]), so with no
+        // declared incompatibility no fork is ever isolated and speciation is gated off entirely: the
+        // gate is real, not a formality.
+        let mut high = EpochParams::dev_default();
+        high.speciation_dist_threshold = Fixed::from_int(2);
+        let mut bio_high = gen();
+        let r_high = run(
+            0xB105,
+            &mut bio_high,
+            &region(4),
+            &high,
+            &IncompatibilityTable::new(),
+        );
+        assert_eq!(
+            r_high.daughters, 0,
+            "an unreachable distance threshold with no incompatibility gates speciation off"
+        );
     }
 
     #[test]
@@ -458,7 +572,13 @@ mod tests {
             &crate::anatomy::BodyPlanRegistry::dev_default(),
             crate::anatomy::WorldProfile::grounded(),
         );
-        let report = run(0xB105, &mut bio, &region(10), &ep);
+        let report = run(
+            0xB105,
+            &mut bio,
+            &region(10),
+            &ep,
+            &IncompatibilityTable::new(),
+        );
         assert!(
             report.extinctions > 0,
             "a hostile region kills poorly-fit species"
@@ -483,7 +603,13 @@ mod tests {
         ep.max_species = founders + 12;
         ep.generations = 300;
         ep.speciation_cadence = 5;
-        run(0xB105, &mut bio, &region(4), &ep);
+        run(
+            0xB105,
+            &mut bio,
+            &region(4),
+            &ep,
+            &IncompatibilityTable::new(),
+        );
         assert!(
             bio.len() <= ep.max_species,
             "the cap bounds the lineage size"
@@ -540,9 +666,21 @@ mod tests {
             crate::anatomy::WorldProfile::grounded(),
         );
 
-        let report_batch = run(0xB105, &mut bio_batch, &reg, &ep);
+        let report_batch = run(
+            0xB105,
+            &mut bio_batch,
+            &reg,
+            &ep,
+            &IncompatibilityTable::new(),
+        );
 
-        let mut rad = Radiation::new(0xB105, bio_step, reg.clone(), ep);
+        let mut rad = Radiation::new(
+            0xB105,
+            bio_step,
+            reg.clone(),
+            ep,
+            IncompatibilityTable::new(),
+        );
         let mut steps = 0u64;
         while rad.step_once() {
             steps += 1;
@@ -578,7 +716,7 @@ mod tests {
             &bpr,
             crate::anatomy::WorldProfile::grounded(),
         );
-        let mut rad = Radiation::new(0xB105, bio, reg, ep);
+        let mut rad = Radiation::new(0xB105, bio, reg, ep, IncompatibilityTable::new());
         assert_eq!(rad.generation(), 0);
         assert_eq!(rad.generations_planned(), ep.generations);
         // A few steps advance the generation counter and keep the alive count current.

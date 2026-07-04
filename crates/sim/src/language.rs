@@ -91,14 +91,17 @@ pub struct FeatureValueDef {
     pub id: FeatureValueId,
     /// The surface token this value renders as.
     pub gloss: String,
-    /// The articulator geometry that produces this value: a resonator length (a vocal-tract or
+    /// The BASE articulator geometry that produces this value: a resonator length (a vocal-tract or
     /// stopped-pipe length) that [`crate::langmod::perceptual_geometry`] maps, through the medium's
-    /// sound speed, to the value's formant vector (design Part 33.3). Per-value, per-race data
-    /// (Principle 11): a race's producible-sound set is its own resonator geometry, not an authored
-    /// inventory, so [`crate::langmod::phoneme_priors`] reads a race's own confusability rather than
-    /// a human phoneme table. Reserved owner data with a labelled dev-fixture default: the
+    /// sound speed, to the value's formant vector (design Part 33.3). This is the SHARED, universal
+    /// physics of the sound (reserved owner data, `articulation.base_resonator_lengths`): the same
+    /// base row for every race. A race's divergence is not a separate per-value table but the single
+    /// per-race vocal-tract scale on [`crate::race::Articulation`] that
+    /// [`crate::langmod::articulated_geometry`] multiplies these lengths by, so two races produce
+    /// different sounds from this one base through one kernel with no per-race inventory and no race id
+    /// (Principle 9, Principle 11). Two labelled dev-fixture constructors set it: the
     /// [`ArticulationSubstrate::syllabic`] convenience carries no acoustics and sets it to
-    /// [`Fixed::ZERO`].
+    /// [`Fixed::ZERO`], while [`ArticulationSubstrate::phonetic`] carries real base lengths.
     pub resonator_length: Fixed,
 }
 
@@ -371,6 +374,63 @@ impl ArticulationSubstrate {
         });
         let forms = FormSystem::new(modality, inventory, min_len, max_len);
         (substrate, forms)
+    }
+
+    /// A phonetic substrate: like [`ArticulationSubstrate::syllabic`], one production modality over one
+    /// feature dimension carrying a value per candidate sound, but each value carries a REAL base
+    /// resonator length (the universal physics of that sound, design Part 33.3) rather than the
+    /// degenerate zero the syllabic convenience uses. The base lengths are shared owner data (reserved
+    /// with basis, the tube-resonance length producing each sound's formant target); a race's own
+    /// vocal-tract scale bends them per race in [`crate::langmod::articulated_geometry`], so two races
+    /// diverge in their sounds from that scale alone with no per-race table. Returns the substrate and
+    /// a form system whose inventory is every value (the "all candidate sounds" baseline; the per-race
+    /// producible subset is the phoneme-prior selection, a follow-on). The values are indexed
+    /// `FeatureValueId(0..n)` in input order, matching the order [`ArticulationSubstrate::resonator_lengths`],
+    /// the perceptual-geometry read-out, and the phoneme priors all key on.
+    pub fn phonetic(
+        values: impl IntoIterator<Item = (String, Fixed)>,
+        min_len: u32,
+        max_len: u32,
+    ) -> (Self, FormSystem) {
+        let modality = ProductionModalityId(0);
+        let dim = FeatureDimId(0);
+        let values: Vec<FeatureValueDef> = values
+            .into_iter()
+            .enumerate()
+            .map(|(i, (gloss, resonator_length))| FeatureValueDef {
+                id: FeatureValueId(i as u32),
+                gloss,
+                resonator_length,
+            })
+            .collect();
+        let inventory: Vec<FormSegment> = values
+            .iter()
+            .map(|v| FormSegment::new([(dim, v.id)]))
+            .collect();
+        let mut substrate = ArticulationSubstrate::new();
+        substrate.add_dim(FeatureDimDef {
+            id: dim,
+            values,
+            obligatory: true,
+        });
+        substrate.add_modality(ProductionModalityDef {
+            id: modality,
+            dims: vec![dim],
+            linearization: Linearization::default(),
+        });
+        let forms = FormSystem::new(modality, inventory, min_len, max_len);
+        (substrate, forms)
+    }
+
+    /// The base resonator lengths of a dimension's values, in ascending value-id order (the order
+    /// `FeatureValueId(i)` indexes, matching the perceptual-geometry read-out and the phoneme priors).
+    /// Empty if the dimension is not registered. This is the shared base geometry a race's vocal-tract
+    /// scale bends; it reads no race, so it is the common input two races diverge from.
+    pub fn resonator_lengths(&self, dim: FeatureDimId) -> Vec<Fixed> {
+        self.dims
+            .get(&dim)
+            .map(|d| d.values.iter().map(|v| v.resonator_length).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -779,6 +839,34 @@ mod tests {
             (FeatureDimId(0), FeatureValueId(9)),
         ]);
         assert_eq!(c.features(), &[(FeatureDimId(0), FeatureValueId(1))]);
+    }
+
+    #[test]
+    fn a_phonetic_substrate_carries_real_base_lengths_and_reads_them_back_in_order() {
+        // The phonetic substrate replaces the degenerate zero of the syllabic convenience with real
+        // base resonator lengths (Part 33.3), and reads them back in value-id order, the order the
+        // perceptual geometry and phoneme priors key on. Two vowels, two lengths.
+        let a = Fixed::from_ratio(17, 100);
+        let i = Fixed::from_ratio(13, 100);
+        let (substrate, forms) =
+            ArticulationSubstrate::phonetic([("a".to_string(), a), ("i".to_string(), i)], 1, 2);
+        assert!(
+            !forms.is_empty(),
+            "the baseline form system carries every value"
+        );
+        assert_eq!(
+            substrate.resonator_lengths(FeatureDimId(0)),
+            vec![a, i],
+            "the base lengths are real and in value-id order, not the degenerate zero"
+        );
+        // A dimension the substrate does not carry reads back empty.
+        assert!(substrate.resonator_lengths(FeatureDimId(9)).is_empty());
+        // Rendering still works: a word coined from it renders as its values' glosses.
+        let word = forms.coin(Rng::for_coords(1, &[1]));
+        assert!(
+            !substrate.render(&word).is_empty(),
+            "the word renders to a surface string"
+        );
     }
 
     #[test]

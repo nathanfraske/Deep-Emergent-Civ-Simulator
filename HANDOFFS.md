@@ -1,7 +1,82 @@
 # HANDOFFS.md: Rolling Session Log
 
+> # ⛔ NEXT AGENT: READ THIS BEFORE ANYTHING ELSE ⛔
+> **Your first task is to pick up and FINISH world-wiring increment 10 Part B (the physiology tier). Do it before you continue to any other work.**
+>
+> The world-wiring arc (increments 1 through 10 Part A) is merged to `main`. Increment 10 **Part A** (post-dawn census-driven gene-pool drift) is done. Increment 10 **Part B is NOT done and is the one remaining piece of the arc.**
+>
+> **Part B:** wire the physiology producers (`derive_base_drain`, `derive_exertion_coupling`, `derive_body_exchange_rate`, `metabolize_derived`, respiration; all in `crates/sim/src/physiology.rs`, built and unit-tested) into the Runner embodiment step (`step_inner` in `crates/sim/src/runner.rs`), so anatomy-driven survival divergence (Kleiber mass, thermoregulation, medium respiration) falls out with no race label. This needs the larger scaffolding the plan names: a per-being body-plan registry, metabolic anchors, a medium field, and a `LivingWorld` step. Scope and grounding: `docs/working/WORLD_WIRING_HANDOFF.md` increment 10, and the top dated entry below.
+>
+> Finish Part B first. Only then continue to whatever else is queued.
+
 Reverse-chronological. Each session appends one entry at the top: what was done, what changed in the documents, where it stopped, and what is queued next. Read the top entry first to recover state. Never rewrite past entries; append. Full detail for earlier sessions lives in the session transcripts.
 
+
+---
+
+## 2026-07-04 (continued): world-wiring increments 3 through 10A built; arc complete bar the physiology tier, on `claude/world-wiring-handoff-t0u76v`
+
+Carried the world-wiring arc through the rest of the increment list. Each increment wires one dormant substrate into the `World` tick as an independently-tested, determinism-guarded, Principle-9-clean beat; each is its own pushed commit; the whole `civsim-sim` suite (35 test binaries, 560-plus tests) plus `civsim-core` and `civsim-world` stayed green throughout.
+
+**Increment 3 (WP1, speciation from genetic incompatibility).** The fair-coin speciation roll in `epoch.rs` replaced by `IncompatibilityTable::active_between` gated on `GenePool::reproductively_isolated`, so a daughter species forks only where joint-Hardy-Weinberg divergence crosses threshold; `step_generation`/`run`/`Radiation` thread the table. Reserved `speciation.distance_threshold`, `speciation.incompatibility_threshold`. Honest limit: the current world declares an empty incompatibility table, so the DMI count rises only where a world supplies one (shown in test). Commit 13e36de.
+
+**Increment 4 (belief diffusion).** A `diffuse_beliefs` beat after gossip drives `PrevailingBelief::advance_diffusion` (SI-logistic) over per-band `BeliefPool`s; belief pools fold into `state_hash`. Commit 5d5e808.
+
+**Increment 5 (reproduction, the keystone).** A `reproduce()` half in the life cadence: `choose_mate` pairing plus `birth()` (genome, mind, intrinsic, mate-pref inherited), life-fraction `apply_mortality_by_race`, reproductive census with Ne. Population grows as well as shrinks; short- and long-lived races cull on their own timescales from one curve, no race branch. Census folds into `state_hash`. Commit ea9a2b0.
+
+**Increment 6 (enculturation).** A cadence-gated `enculturate()` beat applying the Friedkin-Johnsen anchored average per band per axiom axis: within-band variance falls but never collapses, isolated bands diverge. Commit 86c7001.
+
+**Increment 7 (technique transmission).** A `transmit_step` beat after `diffuse_beliefs`: two-pass gather-then-apply, each learner copies each lacked design from the best local demonstrator through the counter-keyed `transmit` kernel, then per-band `erode_and_cull` (loss is per co-located band, so one band loses a technique while another keeps it and a re-contact rediscovers it). Fidelity/drift derive from the learner's own expressed memory and acuity, never a per-race table. Knowledge folds into `state_hash`, pruned in `remove_being`. `tick_timed` fixed to run the cadence beats untimed (a latent inc-4/inc-6 gap). Commit 357bd6f.
+
+**Increment 8 (WP3, memory-scaled retention).** `RetentionLaw::window_ticks_for` wired into the per-band loss pass: a band's effective loss rate is `ONE / window(mean_memory)`, so a sharper-memoried band holds a technique longer; opt-in via `set_retention`, else the raw rate. Commit bf9b1d5.
+
+**Increment 9 (WP4, personality shapes behaviour).** The decision layer's `Consideration` widened from a drive-only read to the shared `InputId` registry; `decide()` builds a per-being readings map of drive levels plus `bind_trait_input`-bound trait values, so two beings under identical drive pressure diverge in chosen action from their traits, no age or race branch. Commit e05ca09.
+
+**Increment 10 Part A (post-dawn genome drift).** A `drift_pools` beat (opt-in via `arm_generational_drift`) drifts each race's pool under the effective size its own reproductive census implies (per-race `ReproductiveMoments`), retiring audit deviation 23 for the post-dawn tier; race pools fold into `state_hash`. Commit b36f8fc. **Part B (physiology into the embodiment step) is DEFERRED**: it needs the larger scaffolding the handoff names (a per-being body-plan registry, metabolic anchors, a medium field, a LivingWorld step); the producers exist and are unit-tested, so this is the next branch's arc.
+
+**GPU side quest.** `crates/gpu` could not build here (its `tracel-llvm-bundler` build dep needs a `tracel-ai/tracel-llvm` GitHub release the session's egress denies with a 403). A handoff directive was placed on the branch (`docs/working/GPU_TRACEL_LLVM_TEST_HANDOFF.md`); a GPU-access session verified it on an RTX 5090: builds clean, host tests 25/25, all device tests pass including the R-GPU-CANON-PIN oracle gate (CUDA #[cube] Q32.32 kernels match the `civsim_core::Fixed` oracle bit for bit). No defect; crate unchanged.
+
+**NEXT.** A fully-blind audit of the new beats is in progress (packet in the session scratchpad, per AGENTIC_ADDENDUM section 7). On a clean audit: open the PR and merge. Increment 10 Part B (the physiology-into-embodiment tier) is the next arc.
+
+---
+
+## 2026-07-04 (continued): the language substrate 2a-2e built (derived phonetics emerge at the founder step), on `claude/world-wiring-handoff-t0u76v`
+
+Built the whole language-substrate arc (world-wiring increment 2, decomposed into 2a-2e), so a world's sounds now emerge from per-race articulation physics with no authored lexicon. Six commits (section 4 plus 2a-2e), all pushed. Whole workspace green throughout.
+
+**2a (WP5 Sensorium split).** `Sensorium` split into a per-channel acuity map (perceive gate + `capability_halves`) and a sibling resolution/JND map (`perceptual_geometry`), fixing the conflation where a valid acuity of one read as an implausible one-hertz JND. `reads()`/acuity unchanged, no golden-hash refresh. Commit 61d3475.
+
+**2b (per-race articulation data home).** `race::Articulation { vocal_tract_scale, hearing_resolution }` as an `Option` on `Race` (`with_articulation`); `langmod::articulated_geometry` scales the shared base lengths by the race's vocal tract and reads its hearing resolution as the sensorium JND; `ArticulationSubstrate::phonetic` carries real base resonator lengths (replacing the syllabic zero). Vocal-tract scale flagged derivable-later (R-ORGAN-FLUX). Commit 23fb351.
+
+**2c (producibility threshold).** `langmod::producible_values` selects values whose prior clears the reserved `articulation.producibility_threshold` in canonical `FeatureValueId` order; a masked (zero-prior) value never enters. Commit 9d8694e.
+
+**2d (the bridge).** `langmod::form_system_from_values`, the previously-missing bridge from thresholded producible values to `FormSegment`s to a coinable `FormSystem`, fail-loud (`FormSystemError::EmptyInventory`). Commit 45f7168.
+
+**2e (arm at the founder step).** `worldbuild::LanguageGenesis` and `arm_dawn_languages` derive each articulating race's form system through the 2b-2d pipeline (cached per race) and install a per-band lineage, wired into `build_dawn_runner` via the optional `DawnPeoples.language`; `World::being_ids()` added. Commit a4a7a76.
+
+**Reserved (surfaced, never fabricated).** `articulation.base_resonator_lengths`, `.vocal_tract_scale`, `.hearing_resolution`, `.producibility_threshold`, `.word_min_len`, `.word_max_len`, each with basis in `calibration/reserved.toml`.
+
+**Proof.** `crates/sim/tests/world_build.rs` and the langmod/language/sensorium/race unit tests: a sharper ear yields a strictly richer producible inventory (full vs fail-loud empty); bands coin and converge words from their derived inventory while separated bands and the two races diverge; a genesis-less build stays inert; the language-armed build replays bit for bit. No `RaceId` branch anywhere (Principle 9); the divergence is the per-race `Articulation` data through one pipeline.
+
+**HONEST LIMITS.** `LanguageGenesis` is a caller-supplied bundle: its medium acoustics need the medium's bulk modulus (a reserved axis not yet on the medium profile), so a full `from_manifest` for it is a follow-on; the capability gate is a channel-wide scalar broadcast per value (a per-value producibility model is a follow-on); the vocal-tract scale and word-length range are interim levers flagged for their derivations.
+
+**NEXT.** Per the owner's directive, continue through the rest of the world-wiring list (increments 3, 4, 5, 6, 7, 8, 9, 10), then a fully-blind audit per the spec (AGENTIC_ADDENDUM section 7), then merge. Increment 3 (WP1, speciation from genetic incompatibility) is next.
+
+---
+
+## 2026-07-04: world-wiring section 4 built (the production scenario-to-Runner assembly), increment 2 decomposed, on `claude/world-wiring-handoff-t0u76v`
+
+Picked up the world-wiring arc at its immediate prerequisite (WORLD_WIRING_HANDOFF section 4) and built it: the top-level production world-build path that had no caller. Also confirmed and decomposed increment 2 (the language substrate) after a source audit found it much larger than the handoff sized it.
+
+**Section 4, the production assembly (BUILT).** `crates/sim/src/worldbuild.rs`: `DawnPeoples` (a world's declared races, founding bands, breeding registry, personality registry, optional mortality hazard) and `build_dawn_runner(manifest, channels, profile, resolution, map, peoples, seed) -> Result<Runner, CalibrationError>`. It builds the `World` from the manifest (life cadence derived from the orbit), installs the breeding and personality registries before seeding, seeds the dawn through `seed_dawn_populations` (evidence rings from `RingCapacityLaw::from_manifest`), arms the language and drift calibrations (concepts from the NSM primes, `LanguageParams`/`DriftParams` from the manifest), optionally arms a mortality hazard, derives the field from the resolved medium through `FieldCalib::from_resolution` (the increment-1 seam, now with its first top-level caller), and composes through `Runner::with_world`. This closes the section-4 gap: `from_resolution` and `seed_dawn_populations` now have a production caller, and the running world exists that increments 5 and 6 hang their beats on.
+
+**dev-fixtures extended.** `calibration/profiles/dev-fixtures.toml` gained the world-build path's fixtures (`medium.air`, `medium.water`, `field.cell_size`, `field.relaxation`, `field.body_exchange`, `axiom.evidence_ring_curve`, `axiom.evidence_ring_hard_cap`), each a labelled placeholder with basis; the reserved fail-loud entries stay in `reserved.toml`. So the dev-fixtures profile can now assemble a whole Runner. The `field.cell_size` fixture is 1 cm (the map-scale underflow limit stands, handoff section 7).
+
+**Proof.** `crates/sim/tests/world_build.rs` (4 tests): the assembly seeds a genome-real dawn (7 founders across 2 bands), replays bit for bit and is seed-sensitive, advances its composed cognition world every step (the open question the composite closes: a `Runner` wrapping a dawn world DOES tick the inner naming-game and drift beats), derives the field from the medium end to end (air vs water: bit-identical dawn, diverging fields), and keeps the scheduled order bit-identical to the pinned order. Whole workspace green (fmt/clippy/verify.sh clean; all 47 sim/physics/core test binaries pass; examples build).
+
+**Increment 2 decomposed (an L, not S-to-M).** A source audit (and the other agent's notes) confirmed: `phoneme_priors` returns dispersion weights with no `FormSystem` bridge; `Race` carries no acoustic/articulation/sensorium data; the WP5 `Sensorium` acuity-vs-JND conflation is load-bearing. Ordered sub-increments recorded in both the roadmap and WORLD_WIRING_HANDOFF: 2a (WP5 Sensorium split), 2b (per-race articulation data home: `FeatureValueDef.resonator_length` real geometry + a per-race vocal-tract scale on `Race` + a per-race sensorium resolution seed, vocal-tract scale flagged derivable-later from R-ORGAN-FLUX), 2c (reserved producibility threshold), 2d (phoneme_priors to FormSystem bridge), 2e (arm at the founder step). Tasks tracked.
+
+**NEXT.** The owner's call on sequencing after the foundation (the AskUserQuestion tool dropped its permission stream, so this was not answered): either 2a-2e (the derived language substrate, so bands diverge into sister tongues), or jump to the keystone increment 5 (reproduction: birth + mate choice + census Ne) so the world grows rather than only shrinks. Recommendation was foundation-then-language-substrate. Section 4 unblocks both.
 
 ---
 

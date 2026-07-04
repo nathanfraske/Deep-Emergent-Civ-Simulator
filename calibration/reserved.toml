@@ -394,6 +394,54 @@ unit = "prior"
 source = "Part 33 language system; record 62.7; audit section 1g; Part 33.3 record 62.13"
 
 [[reserved]]
+id = "articulation.base_resonator_lengths"
+basis = "the SHARED, universal base geometry the per-race phonetic pipeline bends: a require_map of each candidate sound's base resonator length in metres (gloss = length), the tube-resonance length that produces that sound's formant target through langmod::perceptual_geometry (a schwa near 0.17 m in air, and so on). Universal physics of each sound, read into ArticulationSubstrate::phonetic as FeatureValueDef.resonator_length (crates/sim/src/language.rs), NOT per-race and NOT an authored inventory: the per-race divergence is the vocal_tract_scale below, so this is the common row two races start from. Set the (sound, base length) points from the vocal-tract acoustics of the candidate sound set; membership grows with the world through require_map"
+status = "reserved"
+value = ""
+unit = "metres_per_sound"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/language.rs phonetic; crates/sim/src/langmod.rs perceptual_geometry"
+
+[[reserved]]
+id = "articulation.vocal_tract_scale"
+basis = "a per-race multiplier on the base resonator lengths (Race.articulation.vocal_tract_scale, crates/sim/src/race.rs), so a race with a larger resonating cavity gets longer resonators and lower formants and a smaller one higher formants, the divergence read through langmod::articulated_geometry with no race branch (Principle 9); an identity scale of one reproduces the base geometry. AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an interim per-race lever set to the race's vocal-tract size relative to the base geometry, not a permanent constant; flagged for the future derivation rather than a fabricated default"
+status = "reserved"
+value = ""
+unit = "scale"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/langmod.rs articulated_geometry; couples R-ORGAN-FLUX"
+
+[[reserved]]
+id = "articulation.hearing_resolution"
+basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value"
+status = "reserved"
+value = ""
+unit = "hertz"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
+
+[[reserved]]
+id = "articulation.producibility_threshold"
+basis = "the phoneme-prior level below which a candidate feature value is not reliably producible or perceivable and so does not enter a race's sound inventory (read by langmod::producible_values, crates/sim/src/langmod.rs, which selects the values whose dispersion-and-capability prior reaches this level, folded in canonical FeatureValueId order). A gate-masked value (zero prior, the race cannot produce or perceive it) is always excluded regardless of this value; this threshold gates the low-dispersion tail, the values so confusable with the rest of the inventory that they carry too little contrast to support a stable phoneme. Strictly positive. Set from the minimum reliable-production prior, the point where marginal contrast no longer sustains a distinct sound; a higher threshold yields a smaller, sharper inventory and a lower one a larger, more crowded one"
+status = "reserved"
+value = ""
+unit = "prior"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs producible_values"
+
+[[reserved]]
+id = "articulation.word_min_len"
+basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
+
+[[reserved]]
+id = "articulation.word_max_len"
+basis = "the maximum number of producible sounds a word carries, the high end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). At least the minimum; set from the longest word the modality admits before the parse cost outweighs the contrast gained. AUTHORED NOW, DERIVABLE LATER, on the same contrast-budget-from-inventory-size derivation as articulation.word_min_len: a small inventory needs longer words to carry enough distinct forms for the concept set, so the high end reads off the inventory rather than a fabricated constant"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
+
+[[reserved]]
 id = "lang.drift_operator_rates"
 basis = "the per-generation rates of the drift operators other than sound change (its own dial, language.sound_change_rate): lexical replacement (0.01, Swadesh-core replacement scaled toward whole-lexicon turnover), grammaticalisation (0.005), splitting (0.002), borrowing (0.01); a data map, read by require_map, whose membership grows with the world"
 status = "set"
@@ -1026,6 +1074,22 @@ status = "reserved"
 value = ""
 unit = "joint_probability"
 source = "Part 25.7; crates/sim/src/genome.rs"
+
+[[reserved]]
+id = "speciation.distance_threshold"
+basis = "the allele-frequency distance past which a pre-dawn founder-fork counts as reproductively isolated from its parent and is recorded as a daughter species (design 25.7, the declared speciation rule; the frequency half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation, crates/sim/src/epoch.rs). It gates the pre-dawn radiation: a higher threshold makes speciation rarer, requiring a stronger founder bottleneck or more drift before a fork is a species, a lower one lets a modest bottleneck radiate. Set from the frequency divergence at which two populations no longer freely interbreed; distinct from the discrete incompatibility firewall (speciation.incompatibility_threshold), which isolates even close pools when a complementary allele pair is fixed"
+status = "reserved"
+value = ""
+unit = "frequency_distance"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
+
+[[reserved]]
+id = "speciation.incompatibility_threshold"
+basis = "the count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively isolated regardless of frequency distance (the discrete genetic firewall, design 25.7; the count half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation). A single complementary allele pair fixed across two lineages can raise the firewall between otherwise close pools, so this is a small integer (one for the strict rule that any active incompatibility isolates). Set from how many independent incompatibilities the world treats as a hard breeding barrier"
+status = "reserved"
+value = ""
+unit = "count"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
 
 [[reserved]]
 id = "time.base_tick_seconds"

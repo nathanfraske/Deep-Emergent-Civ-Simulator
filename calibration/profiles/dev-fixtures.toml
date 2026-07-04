@@ -193,3 +193,67 @@ status = "set"
 value = "86400"
 unit = "seconds_per_rotation"
 source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
+
+# --- the world-build path (the production dawn->Runner assembly, worldbuild::build_dawn_runner) ---
+# These let a development world assemble a whole Runner from a resolved scenario: the field
+# calibration derives from the selected medium's k/(rho*c) (FieldCalib::from_resolution), and the
+# dawn evidence rings size from expressed memory (RingCapacityLaw::from_manifest). FIXTURE
+# placeholders, not owner canon; the reserved fail-loud entries live in calibration/reserved.toml.
+
+[[reserved]]
+id = "medium.air"
+basis = "FIXTURE placeholder, not the owner's value; the temperate-air medium profile, a require_map bundle of the medium Substance axes. Density, respirable content, toxicity, and in-medium exchange follow the reserved.toml recommended set; the thermal axes (conductivity 0.0262 W/m/K, specific_heat 1005 J/kg/K, density 1.2 kg/m^3) are Incropera and DeWitt dry air near 300 K, so field.diffusion derives from a real k/(rho*c) rather than a fabricated scalar"
+status = "set"
+value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005"
+unit = "medium_profile"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+
+[[reserved]]
+id = "medium.water"
+basis = "FIXTURE placeholder, not the owner's value; the liquid-water medium profile (Europa selects it). The dissolved-gas, toxicity, and immersion-coupling axes follow the reserved.toml recommended set; the thermal axes (conductivity 0.606 W/m/K, specific_heat 4186 J/kg/K, density 1000 kg/m^3) are Incropera and DeWitt liquid water near 300 K, so a water world's field.diffusion derives from water's real k/(rho*c) and conducts slower than air"
+status = "set"
+value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186"
+unit = "medium_profile"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+
+[[reserved]]
+id = "field.cell_size"
+basis = "FIXTURE placeholder, not the owner's value; a one-centimetre cell, chosen with the one-second base tick so the medium-derived diffusion coefficient stays representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. A real map-scale cell underflows the coefficient at a one-second tick (the reserved field.cell_size and a coarser sub-step are where a map-scale diffusion rate comes from); this small cell exercises the derivation, not a map scale"
+status = "set"
+value = "0.01"
+unit = "metres_per_cell"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+
+[[reserved]]
+id = "field.relaxation"
+basis = "FIXTURE placeholder, not the owner's value; the per-tick rate a cell relaxes toward its solar-and-biome baseline, a slow forcing"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "field.body_exchange"
+basis = "FIXTURE placeholder, not the owner's value; the fixture-fallback body-to-environment convective coupling per tick for a being placed without a body (a canonical run derives the per-being rate through physiology::derive_body_exchange_rate)"
+status = "set"
+value = "0.1"
+unit = "ratio_per_tick"
+source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
+
+# --- the dawn evidence ring (Part 28 axiom model, RingCapacityLaw::from_manifest) ---
+
+[[reserved]]
+id = "axiom.evidence_ring_curve"
+basis = "FIXTURE placeholder, not the owner's value; a linear memory-phenotype-to-ring-slots map (memory 0 -> 0 slots, memory 8 -> 16 slots), so a mindful founder carries a larger evidence ring than a forgetful one of the same race, keyed off expressed memory with no race branch. Parsed by require_curve as x=y points"
+status = "set"
+value = "0=0,8=16"
+unit = "curve"
+source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"
+
+[[reserved]]
+id = "axiom.evidence_ring_hard_cap"
+basis = "FIXTURE placeholder, not the owner's value; the state-hash and replay ceiling on the largest evidence ring any mind may carry, past which the curve is clamped regardless of expressed memory"
+status = "set"
+value = "32"
+unit = "count"
+source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"

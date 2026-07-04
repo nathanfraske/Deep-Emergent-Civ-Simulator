@@ -22,11 +22,12 @@
 //! to a characteristic-frequency (formant) vector; the frequency-squared absorption law
 //! ([`civsim_physics::laws::acoustic_absorption`]) over a typical path (through the existing
 //! [`civsim_physics::laws::optical_depth`]) says how much the medium blurs a contrast; and the
-//! being's own per-channel resolution (its [`crate::sensorium::Sensorium`] acuity, read as the
-//! just-noticeable frequency difference) says how fine a contrast it can hold. Two media, or two
-//! vocal geometries, diverge in their confusability geometry from the physics alone, with no
-//! `RaceId` and no authored confusability table (Principle 9): the per-race differentiation is the
-//! race's own resonator lengths and its own sensorium resolution, which are data, not a table.
+//! being's own per-channel resolution (its [`crate::sensorium::Sensorium`] resolution, the
+//! just-noticeable frequency difference, distinct from the `[0, ONE]` acuity gate after the
+//! R-SENSORIUM split) says how fine a contrast it can hold. Two media, or two vocal geometries,
+//! diverge in their confusability geometry from the physics alone, with no `RaceId` and no authored
+//! confusability table (Principle 9): the per-race differentiation is the race's own resonator
+//! lengths and its own sensorium resolution, which are data, not a table.
 //!
 //! Everything here is integer fixed-point and draws no randomness (Principle 3): the formant vectors,
 //! the pairwise distances, the absorption blur, and the distinguishable-step budget are pure
@@ -49,7 +50,10 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 use crate::body::{Body, FunctionId};
-use crate::language::FeatureValueId;
+use crate::language::{
+    FeatureDimId, FeatureValueId, FormSegment, FormSystem, ProductionModalityId,
+};
+use crate::race::Articulation;
 use crate::sensorium::{SenseChannelId, Sensorium};
 
 /// Caller-supplied caps and the structural mode count for a perceptual-geometry read-out. These are
@@ -138,9 +142,10 @@ impl PerceptualGeometry {
 /// absorption reference beta; `path` is a typical propagation path; and the being's per-channel
 /// resolution is read from its `sensorium` on `channel` as the just-noticeable frequency difference.
 ///
-/// Returns `None` when the sensorium cannot read the channel (a being blind to the channel has no
-/// perceptual geometry on it, the sensorium's channel gate) or reads it with a non-positive
-/// resolution.
+/// Returns `None` when the sensorium has no resolution set for the channel (a being that cannot
+/// discriminate on the channel has no perceptual geometry on it, the sensorium's resolution gate) or
+/// carries a non-positive resolution. The resolution is the discrimination side of the sensorium,
+/// distinct from the `[0, ONE]` acuity gate the perception beat reads (the R-SENSORIUM split).
 pub fn perceptual_geometry(
     lengths: &[Fixed],
     sound_speed: Fixed,
@@ -151,8 +156,10 @@ pub fn perceptual_geometry(
     params: PerceptualParams,
 ) -> Option<PerceptualGeometry> {
     // The per-channel resolution, read as the just-noticeable frequency difference: a sharper channel
-    // carries a smaller value. A channel the sensorium does not read gates perception off entirely.
-    let jnd = sensorium.reads(channel)?;
+    // carries a smaller value. Read from the sensorium's RESOLUTION map, distinct from the `[0, ONE]`
+    // acuity gate the perception beat and capability_halves read (the R-SENSORIUM acuity/resolution
+    // split): a channel with no resolution set gates the geometry off entirely.
+    let jnd = sensorium.resolution(channel)?;
     if jnd <= Fixed::ZERO {
         return None;
     }
@@ -250,6 +257,43 @@ fn abs_diff(a: Fixed, b: Fixed) -> Fixed {
     } else {
         sat_sub(b, a)
     }
+}
+
+/// Derive a race's perceptual geometry from the SHARED base sound geometry and its OWN articulation
+/// data (design Part 33.3, the per-race application of [`perceptual_geometry`]). It scales the base
+/// resonator lengths by the race's vocal-tract scale (a larger tract lengthens the resonators and
+/// lowers the formants, through the tube-resonance law) and reads its hearing resolution as the
+/// sensorium's just-noticeable difference, then runs the shared kernel over that per-race geometry.
+///
+/// Two races diverge from their articulation data alone (Principle 9): the kernel reads no `RaceId`
+/// and no per-race table, only the two scalars an [`Articulation`] carries, so a big-tracted race and
+/// a small-tracted one, or a sharp-eared and a dull-eared one, fall out of the same code on different
+/// data. Pure fixed-point and deterministic (Principle 3): one multiply per base length and the
+/// shared kernel, no float and no RNG. Returns `None` on the shared kernel's terms (an empty base
+/// geometry, or a non-positive resolution).
+pub fn articulated_geometry(
+    base_lengths: &[Fixed],
+    sound_speed: Fixed,
+    absorption_reference: Fixed,
+    path: Fixed,
+    articulation: &Articulation,
+    channel: SenseChannelId,
+    params: PerceptualParams,
+) -> Option<PerceptualGeometry> {
+    let scaled: Vec<Fixed> = base_lengths
+        .iter()
+        .map(|&l| l.mul(articulation.vocal_tract_scale))
+        .collect();
+    let sensorium = Sensorium::with_resolution([(channel, articulation.hearing_resolution)]);
+    perceptual_geometry(
+        &scaled,
+        sound_speed,
+        absorption_reference,
+        path,
+        &sensorium,
+        channel,
+        params,
+    )
 }
 
 /// The two Liebig halves of a being's capability on one communication channel, each in `[0, ONE]`.
@@ -407,6 +451,65 @@ pub fn phoneme_priors(geo: &PerceptualGeometry, gate: &[Fixed]) -> Vec<(FeatureV
     out
 }
 
+/// Select the producible feature values from a set of phoneme priors and a producibility threshold
+/// (design Part 33.3): a value enters the producible inventory only if its dispersion-and-capability
+/// prior reaches the threshold, so a value the race cannot reliably produce or perceive is left out.
+/// A gate-masked value (zero prior) is below any positive threshold, and a low-dispersion value
+/// (highly confusable with the rest of the inventory) may also fall below it. The result is in
+/// ascending [`FeatureValueId`] order (canonical) and deduplicated, so the selection is deterministic
+/// regardless of the order the priors arrive in (Principle 3), and it reads no race id (Principle 9):
+/// two races select different inventories only because their priors differ. The threshold is reserved
+/// owner data (`articulation.producibility_threshold`), never fabricated.
+pub fn producible_values(
+    priors: &[(FeatureValueId, Fixed)],
+    threshold: Fixed,
+) -> Vec<FeatureValueId> {
+    let mut out: Vec<FeatureValueId> = priors
+        .iter()
+        // A gate-masked value (zero prior) never enters, even at a zero threshold: it cannot be
+        // produced or perceived at all, so it is not a candidate regardless of the threshold.
+        .filter(|(_, prior)| *prior > Fixed::ZERO && *prior >= threshold)
+        .map(|(id, _)| *id)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The reason a phonetic form system could not be derived, kept distinct from a silent empty system
+/// so the build fails loud (Principle 11) rather than coining empty words.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FormSystemError {
+    /// No feature value was producible: the race is blind to the channel (no perceptual geometry) or
+    /// the producibility threshold excluded every candidate. A form system with an empty inventory
+    /// would coin only empty words, so the build refuses rather than fabricating a silent language.
+    EmptyInventory,
+}
+
+/// Bridge a set of producible feature values to a [`FormSystem`] (design Part 33.3, the seam that was
+/// missing between [`phoneme_priors`] and a coinable inventory): each producible value becomes a
+/// one-feature [`FormSegment`] on its dimension, and the segments become the coining inventory of a
+/// form system in the given modality with the given word-length range. Fails loud on an empty
+/// inventory rather than building a form system that coins only empty words. Deterministic: the values
+/// are taken in the order given (the canonical [`FeatureValueId`] order [`producible_values`]
+/// produces), so the inventory is a pure function of the selection.
+pub fn form_system_from_values(
+    modality: ProductionModalityId,
+    dim: FeatureDimId,
+    values: &[FeatureValueId],
+    min_len: u32,
+    max_len: u32,
+) -> Result<FormSystem, FormSystemError> {
+    if values.is_empty() {
+        return Err(FormSystemError::EmptyInventory);
+    }
+    let inventory: Vec<FormSegment> = values
+        .iter()
+        .map(|&v| FormSegment::new([(dim, v)]))
+        .collect();
+    Ok(FormSystem::new(modality, inventory, min_len, max_len))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,9 +529,10 @@ mod tests {
     }
 
     /// A hearing sensorium whose per-channel resolution (the just-noticeable frequency difference) is
-    /// `jnd`.
+    /// `jnd`. The value is a RESOLUTION, not an acuity, so it is set on the resolution map that
+    /// perceptual_geometry reads (the R-SENSORIUM split).
     fn ear(jnd: Fixed) -> Sensorium {
-        Sensorium::with([(HEARING, jnd)])
+        Sensorium::with_resolution([(HEARING, jnd)])
     }
 
     fn ratio(n: i64, d: i64) -> Fixed {
@@ -488,6 +592,64 @@ mod tests {
             )
         };
         assert_eq!(run(), run(), "the same inputs replay bit for bit");
+    }
+
+    #[test]
+    fn two_races_diverge_in_perceptual_geometry_from_their_articulation_alone_no_raceid() {
+        use crate::race::Articulation;
+        // Per-race phonetics from data (Part 33.3, Principle 9): two races share the base sound
+        // geometry and the medium, differing only in their Articulation. articulated_geometry reads
+        // the two scalars an Articulation carries, no RaceId and no per-race table, so the divergence
+        // falls out of the same kernel on different data.
+        let base = lengths();
+        let c = air_speed();
+        let beta = ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        let geo = |a: &Articulation| {
+            articulated_geometry(&base, c, beta, path, a, HEARING, params()).unwrap()
+        };
+
+        // A longer vocal tract lengthens the resonators and lowers the formants (tube resonance,
+        // frequency proportional to speed over length): a full-scale tract's F1 is below a
+        // half-scale tract's, holding the ear equal.
+        let jnd = Fixed::from_int(50);
+        let long_tract = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: jnd,
+        };
+        let short_tract = Articulation {
+            vocal_tract_scale: Fixed::from_ratio(1, 2),
+            hearing_resolution: jnd,
+        };
+        let f1 = |g: &PerceptualGeometry| g.formant_vector(0).unwrap()[0];
+        assert!(
+            f1(&geo(&long_tract)) < f1(&geo(&short_tract)),
+            "a longer tract lowers the formants: {:?} < {:?}",
+            f1(&geo(&long_tract)),
+            f1(&geo(&short_tract))
+        );
+
+        // A sharper ear (a smaller just-noticeable difference) discriminates more, widening the
+        // contrast budget, holding the vocal tract equal.
+        let sharp_ear = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: Fixed::from_int(20),
+        };
+        let dull_ear = Articulation {
+            vocal_tract_scale: Fixed::ONE,
+            hearing_resolution: Fixed::from_int(80),
+        };
+        assert!(
+            geo(&sharp_ear).contrast_budget() > geo(&dull_ear).contrast_budget(),
+            "a sharper ear widens the contrast budget"
+        );
+
+        // No RaceId, and deterministic: identical articulation data reads bit-identically.
+        assert_eq!(
+            geo(&long_tract),
+            geo(&long_tract),
+            "identical articulation data replays bit for bit"
+        );
     }
 
     #[test]
@@ -725,6 +887,109 @@ mod tests {
         // Deterministic replay.
         assert_eq!(phoneme_priors(&air, &full_gate), pa);
     }
+
+    #[test]
+    fn producible_values_select_above_the_threshold_in_canonical_order() {
+        // The producibility gate (Part 33.3): only values whose prior reaches the threshold enter the
+        // inventory, folded in ascending FeatureValueId order so the selection is deterministic
+        // regardless of input order. A gate-masked (zero-prior) value never enters, even at a zero
+        // threshold.
+        let priors = vec![
+            (FeatureValueId(2), Fixed::from_ratio(3, 4)),  // above
+            (FeatureValueId(0), Fixed::from_ratio(1, 10)), // below
+            (FeatureValueId(1), Fixed::from_ratio(1, 2)),  // above
+            (FeatureValueId(3), Fixed::ZERO),              // masked
+        ];
+        let threshold = Fixed::from_ratio(1, 4);
+        assert_eq!(
+            producible_values(&priors, threshold),
+            vec![FeatureValueId(1), FeatureValueId(2)],
+            "the above-threshold values, in ascending id order, masked and below-threshold left out"
+        );
+        // A masked (zero-prior) value stays out even when the threshold is zero.
+        assert_eq!(
+            producible_values(&priors, Fixed::ZERO),
+            vec![FeatureValueId(0), FeatureValueId(1), FeatureValueId(2)],
+            "at a zero threshold every positive-prior value enters, but the masked one does not"
+        );
+        // A threshold above every prior yields an empty inventory (the fail-loud-on-empty case 2d guards).
+        assert!(producible_values(&priors, Fixed::from_int(2)).is_empty());
+    }
+
+    #[test]
+    fn form_system_from_values_bridges_an_inventory_and_fails_loud_on_empty() {
+        use crate::language::{FeatureDimId, ProductionModalityId};
+        // The bridge: producible values become one-feature form segments, and the segments become a
+        // coinable form system. An empty inventory fails loud rather than coining empty words.
+        let fs = form_system_from_values(
+            ProductionModalityId(0),
+            FeatureDimId(0),
+            &[FeatureValueId(0), FeatureValueId(2)],
+            1,
+            2,
+        )
+        .expect("a non-empty inventory builds a form system");
+        assert_eq!(fs.inventory().len(), 2, "one segment per producible value");
+        assert!(!fs.is_empty());
+        assert!(
+            matches!(
+                form_system_from_values(ProductionModalityId(0), FeatureDimId(0), &[], 1, 2),
+                Err(FormSystemError::EmptyInventory)
+            ),
+            "an empty inventory fails loud, never coins empty words"
+        );
+    }
+
+    #[test]
+    fn the_full_phonetic_pipeline_composes_and_a_sharper_ear_yields_a_richer_inventory() {
+        use crate::language::{FeatureDimId, ProductionModalityId};
+        use crate::race::Articulation;
+        // The whole 2b-2c-2d pipeline composes: base geometry -> articulated_geometry -> phoneme
+        // priors (broadcast capability gate) -> producible_values (threshold) -> form_system_from_values.
+        // A sharper ear (smaller just-noticeable difference) discriminates more sounds, so more values
+        // clear the threshold and its inventory is at least as rich, all from the articulation data
+        // through one pipeline with no race id.
+        let base: Vec<Fixed> = (10..=16).map(|cm| ratio(cm, 100)).collect(); // seven candidate sounds
+        let c = air_speed();
+        let beta = ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        // A threshold between the two ears' prior ranges: a sharp ear's priors all clear it, a dull
+        // ear's all fall below it (a labelled fixture, tuned to the physics so the divergence shows).
+        let threshold = Fixed::from_ratio(57, 10);
+
+        let inventory_size = |hearing_resolution: Fixed| -> Result<usize, FormSystemError> {
+            let art = Articulation {
+                vocal_tract_scale: Fixed::ONE,
+                hearing_resolution,
+            };
+            let geo = articulated_geometry(&base, c, beta, path, &art, HEARING, params()).unwrap();
+            let gate = vec![Fixed::ONE; base.len()]; // full channel capability, broadcast per value
+            let priors = phoneme_priors(&geo, &gate);
+            let values = producible_values(&priors, threshold);
+            form_system_from_values(ProductionModalityId(0), FeatureDimId(0), &values, 1, 3)
+                .map(|fs| fs.inventory().len())
+        };
+
+        // The sharp ear discriminates every candidate, so all seven clear the threshold and build a
+        // full inventory; the dull ear confuses them, so none clear it and the build fails loud rather
+        // than coining empty words. The richer inventory falls out of the hearing resolution alone.
+        let sharp = inventory_size(Fixed::from_int(15)).expect("a sharp ear builds an inventory");
+        assert_eq!(
+            sharp,
+            base.len(),
+            "the sharp ear produces every candidate sound"
+        );
+        let dull = inventory_size(Fixed::from_int(120));
+        assert!(
+            matches!(dull, Err(FormSystemError::EmptyInventory)),
+            "the dull ear clears nothing and fails loud: {dull:?}"
+        );
+        let dull_size = dull.unwrap_or(0);
+        assert!(
+            sharp > dull_size,
+            "a sharper ear yields a strictly richer producible inventory: {sharp} > {dull_size}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -793,6 +1058,58 @@ mod capability_gate_tests {
             ga,
             Fixed::from_ratio(3, 4),
             "here perception limits: an intact voice, a keen-but-imperfect ear"
+        );
+    }
+
+    #[test]
+    fn one_sensorium_feeds_acuity_to_the_gate_and_resolution_to_the_geometry() {
+        // The R-SENSORIUM acuity/resolution split (WP5) end to end: a single sensorium carries a full
+        // acuity gate AND a Hz-scale just-noticeable difference on the same voice channel.
+        // capability_halves reads the acuity, perceptual_geometry reads the resolution, and neither
+        // reads the other's quantity, so the value that is a valid acuity (one) does not corrupt the
+        // geometry as an implausible one-hertz JND, and the 50 Hz resolution does not clamp the gate.
+        let jnd = Fixed::from_int(50); // 50 Hz: a plausible JND, an implausible acuity
+        let sens = Sensorium::with([(VOICE, Fixed::ONE)]).and_resolution([(VOICE, jnd)]);
+
+        // The production-perception half reads the acuity gate (one), not the 50 Hz resolution.
+        let halves = capability_halves(&body(), F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            halves.perception,
+            Fixed::ONE,
+            "capability reads the acuity gate, not the JND"
+        );
+
+        // The perceptual geometry reads the resolution (50 Hz), and gates on the resolution field: an
+        // acuity-only sensorium (no resolution) yields no geometry, proving the geometry does not read
+        // the acuity map.
+        let lengths = [
+            Fixed::from_ratio(17, 100),
+            Fixed::from_ratio(15, 100),
+            Fixed::from_ratio(13, 100),
+        ];
+        let sound_speed = laws::speed_of_sound(
+            Fixed::from_ratio(142, 1000),
+            Fixed::from_ratio(1225, 1000),
+            Fixed::from_int(100000),
+        );
+        let params = PerceptualParams {
+            modes: 3,
+            freq_max: Fixed::from_int(100000),
+            alpha_max: Fixed::from_int(10),
+            tau_max: Fixed::from_int(100),
+            confusability_cap: Fixed::from_int(1000),
+        };
+        let beta = Fixed::from_ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        assert!(
+            perceptual_geometry(&lengths, sound_speed, beta, path, &sens, VOICE, params).is_some(),
+            "the resolution feeds a perceptual geometry"
+        );
+        let acuity_only = Sensorium::with([(VOICE, Fixed::ONE)]);
+        assert!(
+            perceptual_geometry(&lengths, sound_speed, beta, path, &acuity_only, VOICE, params)
+                .is_none(),
+            "an acuity gate with no resolution yields no geometry: the geometry reads the resolution"
         );
     }
 

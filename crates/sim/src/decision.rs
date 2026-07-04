@@ -102,13 +102,17 @@ impl Curve {
     }
 }
 
-/// A consideration: read a drive's current level through a curve. (Trait, value-axis,
-/// and world-fact inputs join this list in later phases; the first agents reason over
-/// their drives.)
+/// A consideration: read one named input's current value through a curve. The input is an
+/// [`InputId`] drawn from the shared decision-input registry, so a consideration reads a drive
+/// level, a personality-trait value, or any world fact the world projects into that registry
+/// through one uniform path (Principle 11), rather than a closed per-source field. The scorer reads
+/// the value from a [`BTreeMap<InputId, Fixed>`] readings map; an input the readings do not carry
+/// reads as zero.
 #[derive(Clone, Debug)]
 pub struct Consideration {
-    /// The drive whose level is the input.
-    pub drive: DriveId,
+    /// The registry input whose value is read through the curve (a drive level, a trait value, a
+    /// world fact). Keyed off the open [`InputId`] registry the world projects its readings into.
+    pub input: InputId,
     /// The index of the response curve in [`Behaviour::curves`].
     pub curve: usize,
 }
@@ -151,14 +155,15 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    /// Score one action against a set of drive levels: the base weight times the product
+    /// Score one action against a set of input readings: the base weight times the product
     /// of its considerations, each read through its curve. A consideration whose curve
     /// index is out of range contributes zero, collapsing the score, so a malformed
-    /// definition cannot inflate a choice.
-    pub fn score(&self, action: &ActionDef, levels: &BTreeMap<DriveId, Fixed>) -> Fixed {
+    /// definition cannot inflate a choice. The readings are keyed by [`InputId`], so an action
+    /// scores over drive levels and trait values through one map.
+    pub fn score(&self, action: &ActionDef, readings: &BTreeMap<InputId, Fixed>) -> Fixed {
         let mut s = action.weight;
         for c in &action.considerations {
-            let x = levels.get(&c.drive).copied().unwrap_or(Fixed::ZERO);
+            let x = readings.get(&c.input).copied().unwrap_or(Fixed::ZERO);
             let y = match self.curves.get(c.curve) {
                 Some(curve) => curve.eval(x),
                 None => Fixed::ZERO,
@@ -170,12 +175,12 @@ impl Behaviour {
 
     /// Choose the highest-scoring action, breaking ties by the lowest action id so the
     /// choice is deterministic. Returns `None` only when there are no actions.
-    pub fn choose(&self, levels: &BTreeMap<DriveId, Fixed>) -> Option<ActionId> {
+    pub fn choose(&self, readings: &BTreeMap<InputId, Fixed>) -> Option<ActionId> {
         let mut ordered: Vec<&ActionDef> = self.actions.iter().collect();
         ordered.sort_by_key(|a| a.id);
         let mut best: Option<(ActionId, Fixed)> = None;
         for a in ordered {
-            let s = self.score(a, levels);
+            let s = self.score(a, readings);
             match best {
                 Some((_, bs)) if s <= bs => {}
                 _ => best = Some((a.id, s)),
@@ -211,9 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn the_more_urgent_drive_wins() {
-        let hunger = DriveId(0);
-        let fatigue = DriveId(1);
+    fn the_more_urgent_input_wins() {
+        // The two inputs happen to be drive levels here (a drive reads at the input of its own id),
+        // but the scorer sees only the InputId readings map: an action wins on whichever input the
+        // curve turns into the higher urgency.
+        let hunger = InputId(0);
+        let fatigue = InputId(1);
         let forage = ActionId(0);
         let rest = ActionId(1);
         let b = Behaviour {
@@ -224,35 +232,39 @@ mod tests {
                     id: forage,
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: hunger,
+                        input: hunger,
                         curve: 0,
                     }],
-                    satisfies: vec![hunger],
+                    satisfies: vec![DriveId(hunger.0)],
                 },
                 ActionDef {
                     id: rest,
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: fatigue,
+                        input: fatigue,
                         curve: 0,
                     }],
-                    satisfies: vec![fatigue],
+                    satisfies: vec![DriveId(fatigue.0)],
                 },
             ],
         };
-        let mut levels = BTreeMap::new();
-        levels.insert(hunger, Fixed::from_ratio(3, 4));
-        levels.insert(fatigue, Fixed::from_ratio(1, 4));
-        assert_eq!(b.choose(&levels), Some(forage), "the hungry agent forages");
+        let mut readings = BTreeMap::new();
+        readings.insert(hunger, Fixed::from_ratio(3, 4));
+        readings.insert(fatigue, Fixed::from_ratio(1, 4));
+        assert_eq!(
+            b.choose(&readings),
+            Some(forage),
+            "the hungry agent forages"
+        );
         // Flip the urgencies and the choice flips.
-        levels.insert(hunger, Fixed::from_ratio(1, 4));
-        levels.insert(fatigue, Fixed::from_ratio(3, 4));
-        assert_eq!(b.choose(&levels), Some(rest));
+        readings.insert(hunger, Fixed::from_ratio(1, 4));
+        readings.insert(fatigue, Fixed::from_ratio(3, 4));
+        assert_eq!(b.choose(&readings), Some(rest));
     }
 
     #[test]
     fn a_tie_breaks_to_the_lowest_action_id() {
-        let d = DriveId(0);
+        let i = InputId(0);
         let b = Behaviour {
             drives: vec![],
             curves: vec![unit_ramp()],
@@ -260,19 +272,19 @@ mod tests {
                 ActionDef {
                     id: ActionId(5),
                     weight: Fixed::ONE,
-                    considerations: vec![Consideration { drive: d, curve: 0 }],
+                    considerations: vec![Consideration { input: i, curve: 0 }],
                     satisfies: vec![],
                 },
                 ActionDef {
                     id: ActionId(2),
                     weight: Fixed::ONE,
-                    considerations: vec![Consideration { drive: d, curve: 0 }],
+                    considerations: vec![Consideration { input: i, curve: 0 }],
                     satisfies: vec![],
                 },
             ],
         };
-        let mut levels = BTreeMap::new();
-        levels.insert(d, Fixed::from_ratio(1, 2));
-        assert_eq!(b.choose(&levels), Some(ActionId(2)));
+        let mut readings = BTreeMap::new();
+        readings.insert(i, Fixed::from_ratio(1, 2));
+        assert_eq!(b.choose(&readings), Some(ActionId(2)));
     }
 }

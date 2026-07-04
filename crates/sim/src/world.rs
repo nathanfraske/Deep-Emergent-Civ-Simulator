@@ -44,18 +44,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_world::OrbitalElements;
 
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
-use crate::agent::{AccessObs, Mind, SharedBelief};
+use crate::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
+use crate::belief::{BeliefKey, BeliefPool};
 use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
-use crate::census::ReproductiveCensus;
+use crate::census::{ReproductiveCensus, ReproductiveMoments};
 use crate::clock::LIFE_CADENCE_TICKS;
-use crate::decision::{ActionId, Behaviour, Curve, DriveId};
+use crate::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::genome::{Channel, Genome, ReproductionMode};
+use crate::genome::{Channel, GenePool, Genome, ReproductionMode};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
@@ -64,6 +65,10 @@ use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, Trai
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
+use crate::transmission::{
+    copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
+    Knowledge, TransmissionParams,
+};
 use crate::value::{
     EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
 };
@@ -369,6 +374,25 @@ enum MoveEffect {
     },
 }
 
+/// The reserved calibrations the reproduction beat needs beyond what each race derives for itself
+/// (design Parts 25, 28, R-REPRO). The narrow-sense heritability is derived per race from its own pool
+/// (`GenePool::narrow_sense_heritability`), so it is not carried here; what remains is the belief
+/// inheritance mutation spread (the bounded deviation a child's inherited disposition and mate
+/// preference draw around the midparent) and the evidence-ring law a child's ring is sized through.
+/// The mechanism is fixed Rust; these are data (Principle 11). Fecundity is NOT here: a mature,
+/// compatible pair produces one offspring per reproductive cadence, so lifetime fecundity falls out of
+/// maturity, lifespan, and the cadence, never an authored rate.
+#[derive(Clone, Debug)]
+pub struct ReproductionParams {
+    /// The bounded mutation spread the belief and mate-preference inheritance draw around the
+    /// midparent (reserved; the same spread the belief inheritance already uses). A child's inherited
+    /// disposition is the parent's plus a mean-zero deviation of this half-width.
+    pub mutation_spread: Fixed,
+    /// The evidence-ring capacity law a child's axiom rings are sized through, from its own recombined
+    /// memory phenotype (`RingCapacityLaw`, reserved through the manifest).
+    pub ring_law: RingCapacityLaw,
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
@@ -436,6 +460,15 @@ pub struct World {
     traces: Vec<Trace>,
     /// The data-driven decision definitions (drives, curves, actions). None until set.
     behaviour: Option<Behaviour>,
+    /// The trait-input registry (design Part 20, world-wiring increment 9): which decision
+    /// [`InputId`] reads which personality [`TraitAxisId`]. The decision step projects each bound
+    /// trait's per-being value into the readings map under its input id, so a [`Consideration`] can
+    /// score on a trait through the same registry a drive reads through. Empty until a world binds a
+    /// trait input, so a drive-only behaviour is unchanged. The world author picks input ids that do
+    /// not collide with the drive ids (a drive reads at the input of its own id).
+    ///
+    /// [`Consideration`]: crate::decision::Consideration
+    trait_inputs: BTreeMap<InputId, TraitAxisId>,
     /// Per-mind drive levels, in the unit interval.
     drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
     /// The action each mind chose on the last tick, for inspection.
@@ -463,6 +496,41 @@ pub struct World {
     languages: BTreeMap<LangId, Language>,
     /// Which lineage each mind speaks. A mind with no entry speaks the default lineage.
     lang_of: BTreeMap<StableId, LangId>,
+    /// The per-band aggregate belief pools (design Part 54), keyed by place: each holds the
+    /// prevailing beliefs of the members at that place, their intensive knowledge level and extensive
+    /// mass. The belief-diffusion beat raises them toward saturation. Empty until a producer or a test
+    /// seeds one ([`World::seed_belief`]); the dawn seeds each being's own intrinsic beliefs, not
+    /// aggregate pools, so a world that seeds none runs the diffusion beat as a no-op.
+    belief_pools: BTreeMap<PlaceId, BeliefPool>,
+    /// The aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from the
+    /// gossip parameters). None until set; the belief-diffusion beat is then a no-op.
+    belief_diffusion_rate: Option<Fixed>,
+    /// Per-being technique knowledge (design Parts 20, 23, 25, 41, R-DEEPTECH): the content-addressed
+    /// designs each being holds and its proficiency at each. Empty until a design is originated
+    /// ([`World::originate_design`]); the transmission beat then spreads and erodes it. A design is an
+    /// opaque [`DesignId`], never a technique enum (Principle 4).
+    knowledge: BTreeMap<StableId, Knowledge>,
+    /// The transmission calibrations (`transmission.*`, derived and reserved). None until set; the
+    /// transmission beat is then a no-op, so a world that holds no techniques runs unchanged.
+    transmission: Option<TransmissionParams>,
+    /// The retention law scaling a band's technique-loss window by its memory (design Part 25.6,
+    /// [`RetentionLaw`]). None until set; the transmission beat then erodes at the raw
+    /// `transmission.loss_rate`, memory-independent. When set, a band's effective loss rate derives
+    /// from its mean memory through this curve, so a sharper-memoried band holds a technique longer.
+    retention: Option<RetentionLaw>,
+    /// The reproduction calibrations (design Parts 25, 28, R-REPRO). None until set; the reproduce
+    /// half of the life cadence is then a no-op, so a world that installs none only ages and dies.
+    reproduction: Option<ReproductionParams>,
+    /// Whether the post-dawn generational drift beat is armed (design Part 25.10, R-REPRO, audit
+    /// deviation 23, world-wiring increment 10). False by default, so a world runs exactly as before;
+    /// when armed, each generation each race's gene pool drifts under the effective size its own
+    /// reproductive census implies rather than the authored founder pool size.
+    generational_drift_armed: bool,
+    /// The life-fraction mortality hazard (a curve on `age / race lifespan`, design Part 20, R-AGING):
+    /// when set, the life cadence culls through [`World::apply_mortality_by_race`], so short- and
+    /// long-lived races die on their own timescales from one curve. Distinct from the raw-age
+    /// [`World::mortality_hazard`]: a world may install either, and the by-race path takes precedence.
+    mortality_hazard_by_race: Option<Curve>,
     /// The drift calibration. None until set; regular form change is then a no-op.
     drift: Option<DriftParams>,
     /// The language calibration. None until set; the naming game is then a no-op.
@@ -540,6 +608,7 @@ impl World {
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
+            trait_inputs: BTreeMap::new(),
             drive_levels: BTreeMap::new(),
             last_action: BTreeMap::new(),
             channels: AccessChannelRegistry::default(),
@@ -551,6 +620,14 @@ impl World {
             concepts: Vec::new(),
             languages: BTreeMap::new(),
             lang_of: BTreeMap::new(),
+            belief_pools: BTreeMap::new(),
+            belief_diffusion_rate: None,
+            knowledge: BTreeMap::new(),
+            transmission: None,
+            retention: None,
+            reproduction: None,
+            generational_drift_armed: false,
+            mortality_hazard_by_race: None,
             drift: None,
             language: None,
             events: EventLog::new(),
@@ -634,6 +711,73 @@ impl World {
     /// (the failure boundary of senescence the age data implies). Aging still beats without it.
     pub fn set_mortality_hazard(&mut self, hazard: Curve) {
         self.mortality_hazard = Some(hazard);
+    }
+
+    /// Install the life-fraction mortality hazard (design Part 20, R-AGING): a curve on
+    /// `age / race lifespan` in `[0, 1]`, so one curve culls short- and long-lived races each on its
+    /// own timescale ([`World::apply_mortality_by_race`]). When set it takes precedence over the
+    /// raw-age [`World::set_mortality_hazard`] in the life cadence. Until either is set the mortality
+    /// beat is a no-op. The curve's shape is reserved with its basis (the senescence failure boundary).
+    pub fn set_mortality_hazard_by_race(&mut self, hazard: Curve) {
+        self.mortality_hazard_by_race = Some(hazard);
+    }
+
+    /// Install the reproduction calibrations (design Parts 25, 28, R-REPRO). Until set, the reproduce
+    /// half of the life cadence is a no-op, so a world that installs none only ages and dies.
+    pub fn set_reproduction(&mut self, params: ReproductionParams) {
+        self.reproduction = Some(params);
+    }
+
+    /// Arm the post-dawn generational drift beat (design Part 25.10, R-REPRO, audit deviation 23,
+    /// world-wiring increment 10). Off by default, so a world runs exactly as before; once armed, each
+    /// generation each race's gene pool drifts under the effective size its own reproductive census
+    /// implies (the k-class breeding-sex-ratio and reproductive-variance Ne of [`ReproductiveMoments`])
+    /// rather than the authored founder pool size, so post-dawn allele frequencies drift and fix under
+    /// the real breeder structure. The drift keys on the census, never a race label (Principle 9).
+    pub fn arm_generational_drift(&mut self) {
+        self.generational_drift_armed = true;
+    }
+
+    /// A race's gene pool, if the race is registered (for inspection: the post-dawn drift beat mutates
+    /// its allele frequencies and its census-derived effective size).
+    pub fn gene_pool(&self, race: RaceId) -> Option<&GenePool> {
+        self.races.get(&race).map(|r| &r.pool)
+    }
+
+    /// Install the transmission calibrations (design Parts 23, 41, R-DEEPTECH). Until set, the
+    /// transmission beat is a no-op, so a world that holds no techniques runs unchanged.
+    pub fn set_transmission(&mut self, params: TransmissionParams) {
+        self.transmission = Some(params);
+    }
+
+    /// Install the memory-scaled retention law (design Part 25.6, [`RetentionLaw`], world-wiring
+    /// increment 8). Until set, the transmission beat erodes an under-practised technique at the raw
+    /// `transmission.loss_rate`, memory-independent. When set, a band's effective loss rate derives
+    /// from its mean memory through this curve, so a sharper-memoried band holds a technique over a
+    /// longer window and a forgetful one over a shorter, from one race-blind rule (Principle 9).
+    pub fn set_retention(&mut self, law: RetentionLaw) {
+        self.retention = Some(law);
+    }
+
+    /// Originate a design in a being's knowledge at a starting proficiency (design Part 41): the being
+    /// invents or first holds a content-addressed technique the transmission beat then spreads. The
+    /// content address (which content owns which [`DesignId`]) is the composition evaluator's job; this
+    /// is the seam a producer or a test seeds a design through.
+    pub fn originate_design(&mut self, being: StableId, design: DesignId, proficiency: Fixed) {
+        self.knowledge
+            .entry(being)
+            .or_default()
+            .originate(design, proficiency);
+    }
+
+    /// A being's technique knowledge, if any (for inspection and tools).
+    pub fn knowledge_of(&self, being: StableId) -> Option<&Knowledge> {
+        self.knowledge.get(&being)
+    }
+
+    /// How many beings hold a design (its practitioner count, a read of canon for tests and the view).
+    pub fn holders_of(&self, design: DesignId) -> u32 {
+        self.knowledge.values().filter(|k| k.holds(design)).count() as u32
     }
 
     /// Stamp the world's integer-Gaussian approximation (design 25.10, `genome.gauss_approx`), the
@@ -923,6 +1067,39 @@ impl World {
         self.drift = Some(params);
     }
 
+    /// Install the aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from
+    /// the gossip parameters through [`crate::belief::BeliefParams`]). Until set, the belief-diffusion
+    /// beat is a no-op, so a world that installs no rate runs exactly as before.
+    pub fn set_belief_diffusion_rate(&mut self, rate: Fixed) {
+        self.belief_diffusion_rate = Some(rate);
+    }
+
+    /// Seed a band's prevailing belief at a place (the aggregate-tier belief substrate, design Part
+    /// 54): the members at `place` hold the belief `key` at knowledge level `level`, with `count`
+    /// holders. The belief-diffusion beat then raises the level toward saturation on the SI logistic.
+    /// A producer or a test seeds; the dawn seeds each being's own intrinsic beliefs rather than these
+    /// aggregate pools, so a world that seeds none diffuses nothing.
+    pub fn seed_belief(&mut self, place: PlaceId, key: BeliefKey, level: Fixed, count: u32) {
+        self.belief_pools
+            .entry(place)
+            .or_default()
+            .seed(key, level, count);
+    }
+
+    /// A band's belief pool, if any has been seeded at the place (for inspection and tools).
+    pub fn belief_pool(&self, place: PlaceId) -> Option<&BeliefPool> {
+        self.belief_pools.get(&place)
+    }
+
+    /// A band's knowledge level for a belief, if the place holds a pool carrying that belief (a read
+    /// of canon, for tests and the view).
+    pub fn belief_level(&self, place: PlaceId, key: &BeliefKey) -> Option<Fixed> {
+        self.belief_pools
+            .get(&place)?
+            .get(key)
+            .map(|b| b.knowledge_level())
+    }
+
     /// A language lineage by id, for inspecting its parent and change log.
     pub fn lineage(&self, id: LangId) -> Option<&Language> {
         self.languages.get(&id)
@@ -959,6 +1136,13 @@ impl World {
     /// How many minds the world holds.
     pub fn population(&self) -> usize {
         self.minds.len()
+    }
+
+    /// The ids of every being the world holds, in canonical id order (a read of canon, for tools and
+    /// tests that walk the population). The order is the `BTreeMap` id order, so it is deterministic
+    /// and independent of insertion order.
+    pub fn being_ids(&self) -> Vec<StableId> {
+        self.minds.keys().copied().collect()
     }
 
     /// The event log, for inspection (nothing emits into it until perception and the
@@ -1763,8 +1947,200 @@ impl World {
         }
         self.age_step();
         self.drift_personalities();
-        if let Some(hazard) = self.mortality_hazard.clone() {
+        self.reproduce();
+        self.drift_pools();
+        // Mortality: the life-fraction by-race curve takes precedence (short- and long-lived races
+        // cull on their own timescales); else the raw-age curve; else no cull. The by-race pass reads
+        // the race registry, so it is moved out and back around the mutable cull (a cheap pointer swap
+        // that cannot change state). A by-race pass that meets an unraceable being refuses rather than
+        // partially culling, so the population is left intact on a config error.
+        if let Some(hazard) = self.mortality_hazard_by_race.clone() {
+            let races = std::mem::take(&mut self.races);
+            let _ = self.apply_mortality_by_race(&races, &hazard);
+            self.races = races;
+        } else if let Some(hazard) = self.mortality_hazard.clone() {
             self.apply_mortality(&hazard);
+        }
+    }
+
+    /// The post-dawn generational drift beat (design Part 25.10, R-REPRO, audit deviation 23,
+    /// world-wiring increment 10). Once per generation (it runs inside the cadence-gated life beat,
+    /// after reproduce so the census reflects the generation's breeders), each race's gene pool drifts
+    /// under the effective size its own reproductive census implies rather than the authored founder
+    /// pool size: the per-race Ne is the k-class breeding-sex-ratio and reproductive-success-variance
+    /// reduction of [`ReproductiveMoments`] over that race's breeders, so a race that breeds through a
+    /// skewed sex ratio or a high reproductive variance drifts harder, all from the census data with no
+    /// race label (Principle 9). This retires audit deviation 23 for the post-dawn tier: the pre-dawn
+    /// aggregate tier still lacks a reproductive census (only a carrying-capacity stock), so its drift
+    /// keeps the authored pool size, the honest limit noted at the epoch drift site.
+    ///
+    /// Inert until [`World::arm_generational_drift`] is called, so a world runs exactly as before by
+    /// default. The Ne is the census's current window (the caller manages the window through
+    /// [`World::reset_census_window`], the existing convention); a race with no breeders this window
+    /// does not drift rather than drifting on a fabricated Ne. Deterministic: each pool drifts through
+    /// [`GenePool::drift`], keyed on the race id, the locus, the generation, and [`Phase::EVOLVE`], and
+    /// the races are walked in canonical id order.
+    fn drift_pools(&mut self) {
+        if !self.generational_drift_armed || self.life_cadence_ticks == 0 {
+            return;
+        }
+        let generation = self.clock / self.life_cadence_ticks;
+        let race_ids: Vec<RaceId> = self.races.keys().copied().collect();
+        for rid in race_ids {
+            // Build this race's reproductive moments from the census, over its own breeders (a being
+            // credited at least one offspring this window whose race is `rid`), walked in canonical id
+            // order so the reduction is worker-count independent.
+            let mut moments = ReproductiveMoments::new();
+            for (&being, &being_race) in &self.race_of {
+                if being_race != rid {
+                    continue;
+                }
+                let k = self.census.offspring_of(being);
+                if k == 0 {
+                    continue;
+                }
+                let sex = self.census.sex_of(being).unwrap_or_default();
+                moments.record_parent(sex, k);
+            }
+            let ne = moments.effective_size();
+            if ne == 0 {
+                continue;
+            }
+            if let Some(race) = self.races.get_mut(&rid) {
+                race.pool.effective_size = ne;
+                race.pool.drift(self.seed, rid.0 as u64, generation);
+            }
+        }
+    }
+
+    /// Whether two beings of a race can mate: both express a sex class through the race's breeding
+    /// system and the two classes are compatible (design Part 25, R-REPRO). A race with no registered
+    /// breeding system, or a being with no genome, cannot pair (fail-quiet), so reproduction requires a
+    /// declared breeding system. Reads the gene-fed sex phenotype, never a race branch (Principle 9).
+    fn sexes_compatible(&self, race: &Race, a: StableId, b: StableId) -> bool {
+        let system = match self.breeding_systems.get(race.breeding) {
+            Some(s) => s,
+            None => return false,
+        };
+        let ga = match self.genomes.get(&a) {
+            Some(g) => g,
+            None => return false,
+        };
+        let gb = match self.genomes.get(&b) {
+            Some(g) => g,
+            None => return false,
+        };
+        match (self.express_sex(race, ga), self.express_sex(race, gb)) {
+            (Some(sa), Some(sb)) => system.compatible(sa, sb),
+            _ => false,
+        }
+    }
+
+    /// The reproduce half of the life cadence (design Parts 25, 28, R-REPRO, the keystone that makes a
+    /// run grow as well as shrink). Within each band, mature compatible beings pair under their own
+    /// heritable mate preference, and each pair bears one child that inherits both halves of its being
+    /// (genome recombined under the race's scheme, mind expressed from it, intrinsic beliefs and mate
+    /// preference inherited from the parents and the band), so lexicons, axioms, and mate preferences
+    /// carry across generations and lineages persist and diverge. Fecundity falls out of the structure,
+    /// not an authored rate: a mature, compatible pair bears one child per cadence, so lifetime
+    /// fecundity is set by maturity, lifespan, and the cadence.
+    ///
+    /// Two passes so it is worker-count independent and free of within-pass order effects (Principle
+    /// 3): pass one is a pure read walk that pairs the mature beings of each band in canonical
+    /// `(PlaceId, StableId)` order, each being paired at most once with the lower-id partner initiating
+    /// under its own preference; pass two bears and places the children. Every draw the birth makes
+    /// keys through [`civsim_core::Phase::REPRODUCE`] and [`civsim_core::Phase::MATE_CHOICE`] on the
+    /// parents and the generation, never a sequential index, so replay is bit-exact and observer
+    /// independent. Inert until [`World::set_reproduction`] installs the calibrations. Reads no race
+    /// branch: the pairing keys off the gene-fed sex phenotype and the heritable preference alone.
+    fn reproduce(&mut self) {
+        let params = match &self.reproduction {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        if self.life_cadence_ticks == 0 {
+            return;
+        }
+        let generation = self.clock / self.life_cadence_ticks;
+
+        // Group the mature beings by band (place), in canonical id order.
+        let mut by_place: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for id in self.minds.keys().copied().collect::<Vec<_>>() {
+            let (Some(place), Some(race_id)) = (
+                self.place_of.get(&id).copied(),
+                self.race_of.get(&id).copied(),
+            ) else {
+                continue;
+            };
+            let Some(race) = self.races.get(&race_id) else {
+                continue;
+            };
+            let age = self.ages.get(&id).copied().unwrap_or(0);
+            if race.is_mature(age) {
+                by_place.entry(place).or_default().push(id);
+            }
+        }
+
+        // Pass one (pure read): pair mature, compatible beings within each band. The lower-id being
+        // initiates and picks its mate under its own preference; each being pairs at most once.
+        let mut pairs: Vec<(RaceId, PlaceId, StableId, StableId)> = Vec::new();
+        for (place, members) in &by_place {
+            let mut paired: std::collections::BTreeSet<StableId> =
+                std::collections::BTreeSet::new();
+            for &chooser in members {
+                if paired.contains(&chooser) {
+                    continue;
+                }
+                let Some(race_id) = self.race_of.get(&chooser).copied() else {
+                    continue;
+                };
+                let Some(race) = self.races.get(&race_id) else {
+                    continue;
+                };
+                let candidates: Vec<StableId> = members
+                    .iter()
+                    .copied()
+                    .filter(|&c| {
+                        c != chooser
+                            && !paired.contains(&c)
+                            && self.race_of.get(&c) == Some(&race_id)
+                            && self.sexes_compatible(race, chooser, c)
+                    })
+                    .collect();
+                if candidates.is_empty() {
+                    continue;
+                }
+                if let Some(mate) = self.choose_mate(chooser, &candidates) {
+                    paired.insert(chooser);
+                    paired.insert(mate);
+                    pairs.push((race_id, *place, chooser, mate));
+                }
+            }
+        }
+
+        // Pass two (the write walk): each pair bears one child, placed into its band. The race is
+        // cloned out so the mutable birth borrow does not conflict with the race registry; heritability
+        // derives from the race's own pool (V_A over V_A+V_E), never authored.
+        for (race_id, place, a, b) in pairs {
+            let Some(race) = self.races.get(&race_id).cloned() else {
+                continue;
+            };
+            let band: Vec<StableId> = by_place.get(&place).cloned().unwrap_or_default();
+            let heritability = race
+                .pool
+                .narrow_sense_heritability(race.environment_variance);
+            if let Some(child) = self.birth(
+                &race,
+                a,
+                b,
+                &band,
+                heritability,
+                params.mutation_spread,
+                generation,
+                &params.ring_law,
+            ) {
+                self.place_of.insert(child, place);
+            }
         }
     }
 
@@ -1799,9 +2175,9 @@ impl World {
     /// Remove a being from the world, pruning every per-being map it appears in (the death and
     /// out-migration primitive of design Part 20). Minds, placement, genome, intrinsic beliefs,
     /// affect, age, sensorium, drives, the last action, lexicon, language assignment, the
-    /// promoted set, and every trust edge naming the being are all dropped, so no dangling
-    /// reference to a departed being survives (referential integrity, design Part 58). Idempotent:
-    /// removing an unknown being is a no-op.
+    /// promoted set, technique knowledge, and every trust edge naming the being are all dropped, so
+    /// no dangling reference to a departed being survives (referential integrity, design Part 58).
+    /// Idempotent: removing an unknown being is a no-op.
     pub fn remove_being(&mut self, id: StableId) {
         self.minds.remove(&id);
         self.place_of.remove(&id);
@@ -1818,6 +2194,7 @@ impl World {
         self.lexicons.remove(&id);
         self.lang_of.remove(&id);
         self.promoted.remove(&id);
+        self.knowledge.remove(&id);
         self.trust
             .retain(|(listener, speaker), _| *listener != id && *speaker != id);
     }
@@ -1880,6 +2257,16 @@ impl World {
     /// is a no-op and minds only perceive and reason; with it, minds choose actions.
     pub fn set_behaviour(&mut self, behaviour: Behaviour) {
         self.behaviour = Some(behaviour);
+    }
+
+    /// Bind a decision input to a personality trait axis (design Part 20, world-wiring increment 9):
+    /// the decide phase then projects each being's value on `axis` into its readings map under
+    /// `input`, so a [`crate::decision::Consideration`] reading `input` scores on the being's trait.
+    /// A being carrying no personality instance contributes no reading for the bound input (it reads
+    /// as zero in the scorer), never a fabricated value. Pick an `input` id distinct from the drive
+    /// ids, since a drive reads at the input of its own id.
+    pub fn bind_trait_input(&mut self, input: InputId, axis: TraitAxisId) {
+        self.trait_inputs.insert(input, axis);
     }
 
     /// Whether an authored decision repertoire (drives, curves, actions) is installed. This is the
@@ -1958,8 +2345,11 @@ impl World {
         }
         self.perceive();
         self.decide();
+        self.enculturate();
         self.converse();
         self.gossip();
+        self.diffuse_beliefs();
+        self.transmit_step();
         self.converse_language();
         self.drift_step();
         self.life_cadence();
@@ -1969,11 +2359,12 @@ impl World {
     /// wall-clock nanoseconds spent in each of the six cognition phases (perceive, decide, converse,
     /// gossip, converse_language, drift_languages), so a benchmark can see where a tick's time goes.
     /// It produces exactly the state `tick(&[])` would, since it runs the same phases in the same
-    /// order with an empty input batch, including the coarse life-cadence beat (run after the six,
-    /// untimed because it fires only on the cadence period); the `Instant` it reads is non-canonical
-    /// and never enters state, so the resulting hash is unchanged (Principle 3). This exists to
-    /// answer "profile before optimizing" (Part 13), and it is compiled into the library only as a
-    /// measurement tool.
+    /// order with an empty input batch; the coarse per-cadence beats (enculturate, diffuse_beliefs,
+    /// transmit_step) and the life-cadence beat run at their `tick` positions but untimed, because
+    /// each fires only on its cadence period and is not one of the profiled six. The `Instant` it
+    /// reads is non-canonical and never enters state, so the resulting hash is unchanged (Principle
+    /// 3). This exists to answer "profile before optimizing" (Part 13), and it is compiled into the
+    /// library only as a measurement tool.
     pub fn tick_timed(&mut self) -> [u128; 6] {
         use std::time::Instant;
         self.clock += 1;
@@ -1984,20 +2375,26 @@ impl World {
         let s = Instant::now();
         self.decide();
         ns[1] = s.elapsed().as_nanos();
+        // The cadence-gated enculturation beat, at its tick position, untimed.
+        self.enculturate();
         let s = Instant::now();
         self.converse();
         ns[2] = s.elapsed().as_nanos();
         let s = Instant::now();
         self.gossip();
         ns[3] = s.elapsed().as_nanos();
+        // The aggregate belief-diffusion and technique-transmission beats, at their tick positions,
+        // untimed (each fires on its own cadence and is not one of the profiled six).
+        self.diffuse_beliefs();
+        self.transmit_step();
         let s = Instant::now();
         self.converse_language();
         ns[4] = s.elapsed().as_nanos();
         let s = Instant::now();
         self.drift_step();
         ns[5] = s.elapsed().as_nanos();
-        // The coarse life beat runs after the six cognition phases so tick_timed produces the same
-        // state tick would; it is not one of the profiled six (it fires only on the cadence period).
+        // The coarse life beat runs after the cognition phases so tick_timed produces the same state
+        // tick would; it is not one of the profiled six (it fires only on the cadence period).
         self.life_cadence();
         ns
     }
@@ -2071,6 +2468,250 @@ impl World {
                 .or_default()
                 .adopt(concept, word);
         }
+    }
+
+    /// The enculturation beat (design Part 28, the value-and-belief convergence of the resolved
+    /// R-VALUE work): once per generation, each band's members move their stance on every axiom axis
+    /// toward the band's confidence-weighted mean, anchored to their own innate seed by their effective
+    /// stubbornness (the Friedkin-Johnsen rule, [`World::enculturate_band`]). Within-band axiom
+    /// variance falls but never collapses (stubbornness holds a lasting spread), and separated bands
+    /// converge toward their own means, so isolated bands diverge. Pure fixed-point with a synchronous
+    /// snapshot mean and no RNG (Principles 3, 9); the bands are walked in canonical place then id
+    /// order and the axes in ascending id order. Cadence-gated (enculturation is a per-generation
+    /// social process, so it fires on the life-cadence period) and inert until the reserved stubbornness
+    /// split is installed, so a world that declares no enculturation runs unchanged.
+    fn enculturate(&mut self) {
+        if self.stubbornness_split.is_none() {
+            return;
+        }
+        if self.clock == 0 || !self.clock.is_multiple_of(self.life_cadence_ticks) {
+            return;
+        }
+        // The axiom axes present across the population, ascending id order (canonical).
+        let axes: std::collections::BTreeSet<AxiomAxisId> = self
+            .intrinsic
+            .values()
+            .flat_map(|b| b.axioms.iter().map(|a| a.axis))
+            .collect();
+        // The bands, by place in canonical (PlaceId, StableId) order.
+        let by_place = self.colocated_index();
+        for members in by_place.values() {
+            for &axis in &axes {
+                self.enculturate_band(members, axis);
+            }
+        }
+    }
+
+    /// The belief-diffusion beat (design Part 54, the aggregate-tier contagion of the resolved
+    /// R-EVIDENCE belief substrate): each band's prevailing beliefs advance one SI-logistic diffusion
+    /// step toward saturation, raising the knowledge level from its seed toward one and carrying the
+    /// extensive mass with it. Content-blind and RNG-free (Principles 9, 3): the rate is the reserved
+    /// aggregate diffusion rate, identical for every belief; the within-band coupling is full (distance
+    /// one); and the pools and their beliefs are walked in canonical place then [`BeliefKey`] order, so
+    /// the beat replays bit for bit and is worker-count independent. Inert until the diffusion rate is
+    /// installed. Spreading a band's belief to a neighbouring band on a distance lag waits on a place
+    /// adjacency the abstract-place world does not yet carry (a named follow-on); this beat is the
+    /// within-band climb.
+    fn diffuse_beliefs(&mut self) {
+        let rate = match self.belief_diffusion_rate {
+            Some(r) => r,
+            None => return,
+        };
+        // Walk pools in canonical place order, then each pool's beliefs in canonical key order.
+        for pool in self.belief_pools.values_mut() {
+            for key in pool.keys_in_order() {
+                if let Some(belief) = pool.get_mut(&key) {
+                    belief.advance_diffusion(rate, Fixed::ONE);
+                }
+            }
+        }
+    }
+
+    /// A being's copy cognition, the (memory, perception) pair the transmission fidelity and drift are
+    /// derived from (design Parts 20, 25, [`crate::transmission::copy_fidelity`]). Memory is the being's
+    /// expressed memory capacity (retention: how well a copied technique is held) and perception is its
+    /// expressed reasoning acuity (resolution: how sharply the demonstration is read), both read off the
+    /// being's own [`Mind`], itself expressed from the genome. A being with no mind reads neutral (no
+    /// modulation, [`Fixed::ONE`] each), matching how an uninstalled sensorium reads at full acuity, so a
+    /// world of default cognition copies at full fidelity. This reads per-being data and never branches
+    /// on race identity (Principle 9): two races differ here only through their expressed cognition.
+    fn copy_cognition(&self, being: StableId) -> (Fixed, Fixed) {
+        match self.minds.get(&being) {
+            Some(m) => (m.memory, m.acuity),
+            None => (Fixed::ONE, Fixed::ONE),
+        }
+    }
+
+    /// The transmission beat (design Parts 20, 23, 25, 41, R-DEEPTECH): each tick, within each band, a
+    /// learner copies from a co-located holder every design the learner lacks, at a fidelity and drift
+    /// derived from the learner's own expressed memory and perception (never a per-race table,
+    /// Principle 9, [`World::copy_cognition`]); then a design held by fewer than the reserved
+    /// practitioner floor erodes and, past the structural floor, is lost (a dark age), while a culture
+    /// that still holds it can re-transmit it for free later (rediscovery, the content address is
+    /// stable). A high-fidelity culture ratchets designs in and deepens; a low-fidelity one loses them
+    /// and stays shallow, so the two diverge from their per-being cognition alone.
+    ///
+    /// Two-pass gather-then-apply (the gossip and reproduce shape): pass one is a pure read over the
+    /// pre-tick knowledge, gathering for each learner, for each design it lacks, the best local
+    /// demonstrator (highest proficiency, ties to lowest holder id) so a learner copies each new
+    /// technique at most once per tick from the strongest source; pass two applies the gathered copies
+    /// in canonical (place, learner, design) order through the counter-keyed [`transmit`] kernel, then
+    /// erodes and culls the whole population. Reading the frozen snapshot means a copy implanted this
+    /// tick neither seeds another copy nor changes another design's fate this tick, so the beat is
+    /// order-independent and replays bit for bit. Inert until the transmission calibrations are set and
+    /// some design is originated, so a world that holds no techniques runs unchanged.
+    fn transmit_step(&mut self) {
+        let params = match self.transmission {
+            Some(p) => p,
+            None => return,
+        };
+        if self.knowledge.is_empty() {
+            return;
+        }
+        let by_place = self.colocated_index();
+        // Pass one (pure read): for each learner, the best local demonstrator of each design it lacks.
+        // Gathered against the pre-tick snapshot, walked in canonical place, learner-id, then (via the
+        // BTreeMap) design-address order, so the copy list is fully canonical.
+        let mut copies: Vec<(StableId, StableId, DesignId, Fixed, Fixed, Fixed)> = Vec::new();
+        for members in by_place.values() {
+            for &learner in members {
+                let (memory, perception) = self.copy_cognition(learner);
+                let fidelity = copy_fidelity(memory, perception);
+                let drift = copy_drift(params.drift_rate, memory, perception);
+                let learner_known: Option<&BTreeSet<DesignId>> =
+                    self.knowledge.get(&learner).map(|k| &k.known);
+                // Best local holder per lacked design: highest proficiency, ties to the lowest holder
+                // id (holders are walked in id order, so an equal-proficiency later holder never wins).
+                let mut best: BTreeMap<DesignId, (StableId, Fixed)> = BTreeMap::new();
+                for &holder in members {
+                    if holder == learner {
+                        continue;
+                    }
+                    let Some(hk) = self.knowledge.get(&holder) else {
+                        continue;
+                    };
+                    for &design in &hk.known {
+                        if learner_known.is_some_and(|k| k.contains(&design)) {
+                            continue;
+                        }
+                        let hp = hk.proficiency_of(design);
+                        let take = match best.get(&design) {
+                            Some(&(_, bp)) => hp > bp,
+                            None => true,
+                        };
+                        if take {
+                            best.insert(design, (holder, hp));
+                        }
+                    }
+                }
+                for (design, (holder, hp)) in best {
+                    copies.push((learner, holder, design, hp, fidelity, drift));
+                }
+            }
+        }
+        // Pass two (the write walk): each gathered copy through the counter-keyed transmit kernel, then
+        // the per-band erosion and loss pass (below).
+        for (learner, holder, design, hp, fidelity, drift) in copies {
+            let draw = transmit_draw(learner, holder, design, self.clock, self.seed);
+            let mut lk = self.knowledge.remove(&learner).unwrap_or_default();
+            transmit(&mut lk, design, hp, fidelity, drift, draw);
+            self.knowledge.insert(learner, lk);
+        }
+        self.erode_knowledge_by_band(&params);
+    }
+
+    /// Erode and cull knowledge per co-located band (design Parts 23, 41, [`erode_and_cull`]): a
+    /// technique dies out in a band too small to sustain it (held by fewer than the reserved
+    /// practitioner floor there) while a larger band keeps it, so a later re-contact re-transmits it
+    /// for free (rediscovery, the content address is stable). Loss operates on the same locality
+    /// transmission does (the co-located band), so the two are consistent, and the practitioner floor
+    /// is the band's own count rather than a world-wide tally that would let a distant civilization
+    /// prop up a technique no local culture still practises. Bands are walked in canonical place order,
+    /// each band's members through the counter-keyed [`erode_and_cull`] (whose forgetting roll is keyed
+    /// on the design and tick, so a design erodes in lockstep wherever it is below floor); a
+    /// knowledge-holder with no place erodes as its own singleton band, since it shares no locality
+    /// with any other holder. The final knowledge is independent of the order the bands are processed
+    /// in (the rolls key off design and tick, not the band), so replay is bit-identical.
+    ///
+    /// When a [`RetentionLaw`] is armed (world-wiring increment 8), a band's effective loss rate
+    /// derives from its own mean memory ([`World::band_loss_rate`]): a sharper-memoried band forgets an
+    /// under-practised technique over a longer window (a slower rate), a forgetful one over a shorter,
+    /// from one race-blind rule. With no retention law armed, every band erodes at the raw reserved
+    /// `transmission.loss_rate`, the memory-independent case.
+    fn erode_knowledge_by_band(&mut self, params: &TransmissionParams) {
+        // Partition the knowledge-holders by place (canonical); a placeless holder is its own singleton.
+        let mut bands: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        let mut singletons: Vec<StableId> = Vec::new();
+        for id in self.knowledge.keys().copied().collect::<Vec<_>>() {
+            match self.place_of.get(&id) {
+                Some(&place) => bands.entry(place).or_default().push(id),
+                None => singletons.push(id),
+            }
+        }
+        // The retention law is cloned out (a small curve) so the per-band memory read below does not
+        // borrow-conflict with the knowledge mutation.
+        let retention = self.retention.clone();
+        let groups = bands
+            .into_values()
+            .chain(singletons.into_iter().map(|id| vec![id]));
+        for ids in groups {
+            // The band's effective loss rate: memory-scaled when a retention law is armed, else raw.
+            let band_params = match &retention {
+                Some(law) => TransmissionParams {
+                    loss_rate: self.band_loss_rate(law, params, &ids),
+                    ..*params
+                },
+                None => *params,
+            };
+            let mut band: BTreeMap<StableId, Knowledge> = BTreeMap::new();
+            for id in ids {
+                if let Some(k) = self.knowledge.remove(&id) {
+                    band.insert(id, k);
+                }
+            }
+            erode_and_cull(&mut band, &band_params, self.clock, self.seed);
+            for (id, k) in band {
+                self.knowledge.insert(id, k);
+            }
+        }
+    }
+
+    /// A band's memory-scaled technique-loss rate (design Part 25.6, [`RetentionLaw`], world-wiring
+    /// increment 8). The neutral loss timescale is the number of ticks a neutral-memory band forgets an
+    /// under-practised technique over, the [`stability_span`] of the reserved raw `loss_rate` (the
+    /// ticks erosion at that rate consumes a full unit of proficiency). The retention law scales that
+    /// base window by the band's mean memory ([`World::band_mean_memory`]): a sharper-memoried band
+    /// gets a longer window and so a slower effective rate (`ONE / window`), a forgetful one a shorter
+    /// window and a faster rate. The rate keys on the memory scalar, never a race id (Principle 9), so
+    /// two bands of different composition forget at different rates from one rule. A band with no
+    /// representative memory (no member holds a mind) falls back to the raw rate rather than a
+    /// fabricated one. The window floors at one tick in [`RetentionLaw::window_ticks_for`], so the
+    /// divide is never by zero; a window past the fixed-point integer range clamps, giving a
+    /// vanishingly small rate (a technique a supremely-memoried band effectively never forgets).
+    fn band_loss_rate(
+        &self,
+        law: &RetentionLaw,
+        params: &TransmissionParams,
+        ids: &[StableId],
+    ) -> Fixed {
+        let memory = match self.band_mean_memory(ids) {
+            Some(m) => m,
+            None => return params.loss_rate,
+        };
+        let base_window = stability_span(params.loss_rate);
+        let window = law.window_ticks_for(memory, base_window);
+        // Scale the raw loss rate by the ratio of the neutral loss window to the memory-adjusted
+        // window: `loss_rate * base_window / window`. At the memory where the retention curve reads
+        // one the window equals the base window, so the effective rate reproduces the raw reserved
+        // `loss_rate` exactly; a longer window (a sharper memory) slows it proportionally. This
+        // preserves the raw rate's precision rather than snapping it to the `1 / window` grid, which
+        // would (through the ceil in `stability_span` and the floor in `window_ticks_for`) quantize a
+        // non-reciprocal rate the moment a retention law was armed. The divisor `window` is floored at
+        // one tick in [`RetentionLaw::window_ticks_for`], so it is never zero; both tick counts clamp
+        // to the fixed-point integer range before the divide.
+        let base = Fixed::from_int(base_window.min(i32::MAX as u64) as i32);
+        let win = Fixed::from_int(window.min(i32::MAX as u64) as i32);
+        params.loss_rate.mul(base).div(win)
     }
 
     /// The tick's drift beat: run [`World::drift_languages`] against the world's own race registry.
@@ -2739,23 +3380,48 @@ impl World {
         }
     }
 
-    /// The decision step (design Part 8): each mind's drives rise, then it scores its
-    /// actions and takes the highest, which reduces the drives that action satisfies. A
-    /// no-op until a [`Behaviour`] is installed. Minds are walked in id order, and the
-    /// choice is a deterministic argmax (lowest action id breaks ties), so it is
-    /// bit-identical on replay. The behaviour is moved out for the pass so the per-mind
-    /// drive maps can be borrowed mutably without conflict, then restored.
+    /// The decision step (design Part 8): each mind's drives rise, then it scores its actions over a
+    /// readings map and takes the highest, which reduces the drives that action satisfies. A no-op
+    /// until a [`Behaviour`] is installed. Minds are walked in id order, and the choice is a
+    /// deterministic argmax (lowest action id breaks ties), so it is bit-identical on replay. The
+    /// behaviour is moved out for the pass so the per-mind drive maps can be borrowed mutably without
+    /// conflict, then restored.
+    ///
+    /// The readings a [`crate::decision::Consideration`] scores over are keyed by
+    /// [`InputId`] (world-wiring increment 9): each drive contributes its level at the input of its
+    /// own id, and each trait bound through [`World::bind_trait_input`] contributes the being's own
+    /// value on that axis. So two beings under identical drive pressure but differing personality
+    /// trajectories score the same actions differently and diverge in what they choose, with no age or
+    /// race branch (Principle 9): the divergence is the per-being trait value read through one curve.
+    /// A world that binds no trait input reads exactly the drive levels, so a drive-only behaviour is
+    /// unchanged.
     fn decide(&mut self) {
         let behaviour = std::mem::take(&mut self.behaviour);
         if let Some(b) = &behaviour {
+            // The trait-input bindings are read-only across the pass; snapshot them so the per-mind
+            // trait reads do not borrow-conflict with the drive-level mutation.
+            let trait_inputs: Vec<(InputId, TraitAxisId)> =
+                self.trait_inputs.iter().map(|(&i, &a)| (i, a)).collect();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             for id in ids {
-                let levels = self.drive_levels.entry(id).or_default();
-                for d in &b.drives {
-                    let lvl = levels.entry(d.id).or_insert(Fixed::ZERO);
-                    *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
+                // Rise this mind's drives, then snapshot its levels as readings at their own input ids.
+                let drive_readings: Vec<(InputId, Fixed)> = {
+                    let levels = self.drive_levels.entry(id).or_default();
+                    for d in &b.drives {
+                        let lvl = levels.entry(d.id).or_insert(Fixed::ZERO);
+                        *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
+                    }
+                    levels.iter().map(|(d, lvl)| (InputId(d.0), *lvl)).collect()
+                };
+                // The readings map: drive levels, then each bound trait's per-being value (a being
+                // carrying no instance contributes none, so the input reads as zero in the scorer).
+                let mut readings: BTreeMap<InputId, Fixed> = drive_readings.into_iter().collect();
+                for &(input, axis) in &trait_inputs {
+                    if let Some(inst) = self.traits.get(&id) {
+                        readings.insert(input, inst.value(axis));
+                    }
                 }
-                if let Some(chosen) = b.choose(levels) {
+                if let Some(chosen) = b.choose(&readings) {
                     self.last_action.insert(id, chosen);
                     if let Some(act) = b.action(chosen) {
                         for satisfied in &act.satisfies {
@@ -2765,7 +3431,11 @@ impl World {
                                 .find(|d| d.id == *satisfied)
                                 .map(|d| d.satisfy_amount)
                                 .unwrap_or(Fixed::ZERO);
-                            if let Some(lvl) = levels.get_mut(satisfied) {
+                            if let Some(lvl) = self
+                                .drive_levels
+                                .get_mut(&id)
+                                .and_then(|m| m.get_mut(satisfied))
+                            {
                                 *lvl = (*lvl - amount).clamp(Fixed::ZERO, Fixed::ONE);
                             }
                         }
@@ -3037,16 +3707,57 @@ impl World {
         // would silently diverge replay. The curve folds as its length then its ascending-x points;
         // an absent hazard folds as a sentinel length distinct from any real curve.
         h.write_u64(self.life_cadence_ticks);
-        match &self.mortality_hazard {
-            None => h.write_u64(u64::MAX),
-            Some(curve) => {
-                let pts = curve.points();
-                h.write_u64(pts.len() as u64);
-                for (x, y) in pts {
-                    h.write_fixed(*x);
-                    h.write_fixed(*y);
+        for hazard in [&self.mortality_hazard, &self.mortality_hazard_by_race] {
+            match hazard {
+                None => h.write_u64(u64::MAX),
+                Some(curve) => {
+                    let pts = curve.points();
+                    h.write_u64(pts.len() as u64);
+                    for (x, y) in pts {
+                        h.write_fixed(*x);
+                        h.write_fixed(*y);
+                    }
                 }
             }
+        }
+        // The reproductive census (design Part 25, R-REPRO): the per-parent offspring tallies and the
+        // gene-fed sex classes are canonical state, so two worlds whose reproduction diverged fold to
+        // different hashes. Walked in canonical id order inside census::hash_into.
+        self.census.hash_into(&mut h);
+        // The aggregate belief pools, by place then belief key (canonical walk, R-CANON-WALK): the
+        // belief-diffusion trajectory is canonical state, so two worlds whose beliefs diffuse to
+        // different levels are different worlds. The place is length-agnostic here (the map is already
+        // ordered), and each pool folds its own length-prefixed key-ordered contents.
+        h.write_u64(self.belief_pools.len() as u64);
+        for (place, pool) in &self.belief_pools {
+            h.write_u32(*place);
+            pool.hash_into(&mut h);
+        }
+        // Per-being technique knowledge (design Parts 20, 23, 25, 41, R-DEEPTECH): the transmission
+        // beat's spread, drift, and loss are canonical state, so two worlds whose cultures diverged in
+        // what techniques they hold and how well fold to different hashes. Walked by being id (the
+        // BTreeMap is ordered), each holder's designs in address order with its proficiency, each run
+        // length-prefixed so an empty or absent holder is unambiguous. Knowledge carries no hash_into
+        // of its own, so it folds here directly.
+        h.write_u64(self.knowledge.len() as u64);
+        for (being, k) in &self.knowledge {
+            h.write_stable(*being);
+            h.write_u64(k.known.len() as u64);
+            for design in &k.known {
+                h.write_u64(*design);
+                h.write_fixed(k.proficiency_of(*design));
+            }
+        }
+        // Per-race gene pools (design Part 25.10, R-REPRO, world-wiring increment 10): the post-dawn
+        // drift beat mutates each race's allele frequencies and its census-derived effective size, so
+        // the drifted pool is canonical world identity (two worlds whose lineages drifted differently
+        // are different worlds). Walked in canonical RaceId order (the BTreeMap is ordered), each pool
+        // folding its own scheme, effective size, frequencies, effects, and Gaussian approximation
+        // through [`GenePool::hash_into`]. Length-prefixed so a raceless world is unambiguous.
+        h.write_u64(self.races.len() as u64);
+        for (rid, race) in &self.races {
+            h.write_u32(rid.0);
+            race.pool.hash_into(&mut h);
         }
         h.finish()
     }
@@ -3165,6 +3876,76 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(w.population(), 2);
         assert!(w.mind(a).is_some());
+    }
+
+    #[test]
+    fn a_seeded_belief_climbs_an_s_curve_to_saturation_and_replays() {
+        // The belief-diffusion beat (design Part 54): a band's seeded belief climbs the SI logistic
+        // toward saturation, monotone and without a one-step jump, and the trajectory is bit-for-bit
+        // deterministic (no RNG). The extensive mass grows with the level, and the level reads back
+        // exactly (mass over count).
+        let key = BeliefKey {
+            subject: StableId(1),
+            attr: AttrKindId(0),
+            value: 7,
+        };
+        let seed_level = Fixed::from_ratio(1, 20); // 0.05
+        let run = || {
+            let mut w = world().with_seed(0xBE11E);
+            w.seed_belief(10, key, seed_level, 8);
+            w.set_belief_diffusion_rate(Fixed::from_ratio(4, 10)); // a fixture rate
+            let mut levels = Vec::new();
+            for _ in 0..300 {
+                w.tick(&[]);
+                levels.push(w.belief_level(10, &key).unwrap());
+            }
+            (levels, w.state_hash())
+        };
+        let (levels, hash) = run();
+        // Monotone climb with no one-step jump.
+        let mut prev = seed_level;
+        let mut max_step = Fixed::ZERO;
+        for &lvl in &levels {
+            assert!(
+                lvl >= prev,
+                "the level climbs monotonically: {lvl:?} < {prev:?}"
+            );
+            let step = lvl - prev;
+            if step > max_step {
+                max_step = step;
+            }
+            prev = lvl;
+        }
+        assert!(
+            *levels.last().unwrap() > Fixed::from_ratio(9, 10),
+            "climbs past 0.9 to saturation: {:?}",
+            levels.last().unwrap()
+        );
+        assert!(
+            max_step < Fixed::from_ratio(1, 2),
+            "no one-step jump: max step {max_step:?}"
+        );
+        // Bit-for-bit replay, including the belief pool's contribution to the state hash.
+        let (levels2, hash2) = run();
+        assert_eq!(
+            levels, levels2,
+            "the diffusion trajectory replays bit for bit"
+        );
+        assert_eq!(
+            hash, hash2,
+            "the belief pool folds into a bit-identical state hash"
+        );
+        // Inert without a rate: the belief does not move.
+        let mut inert = world().with_seed(0xBE11E);
+        inert.seed_belief(10, key, seed_level, 8);
+        for _ in 0..50 {
+            inert.tick(&[]);
+        }
+        assert_eq!(
+            inert.belief_level(10, &key),
+            Some(seed_level),
+            "without a diffusion rate the beat is inert"
+        );
     }
 
     #[test]
@@ -3600,6 +4381,9 @@ margin_steps = -1
         use crate::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
         let hunger = DriveId(0);
         let fatigue = DriveId(1);
+        // A drive reads at the input of its own id.
+        let hunger_in = InputId(hunger.0);
+        let fatigue_in = InputId(fatigue.0);
         let ramp = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
         Behaviour {
             drives: vec![
@@ -3620,7 +4404,7 @@ margin_steps = -1
                     id: ActionId(0), // forage
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: hunger,
+                        input: hunger_in,
                         curve: 0,
                     }],
                     satisfies: vec![hunger],
@@ -3629,7 +4413,7 @@ margin_steps = -1
                     id: ActionId(1), // rest
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: fatigue,
+                        input: fatigue_in,
                         curve: 0,
                     }],
                     satisfies: vec![fatigue],
@@ -3663,6 +4447,120 @@ margin_steps = -1
             w.state_hash()
         };
         assert_eq!(build(), build(), "the decision loop is reproducible");
+    }
+
+    #[test]
+    fn personality_shapes_the_chosen_action_under_identical_drive_pressure() {
+        // World-wiring increment 9 (WP4): a Consideration reads a personality trait through the shared
+        // InputId readings map, so two beings under identical drive pressure but differing trait values
+        // diverge in the action they choose. The decide path carries no age or race branch; the
+        // divergence is the per-being trait value read through one curve (Principle 9).
+        use crate::decision::{ActionDef, Behaviour, Consideration, DriveDef};
+        use crate::personality::{TraitAxisId, TraitInstance};
+
+        const BOLDNESS: TraitAxisId = TraitAxisId(0);
+        // A drive both beings share (identical drive pressure), and a trait input bound to boldness.
+        let hunger = DriveId(0);
+        let hunger_in = InputId(hunger.0);
+        let bold_in = InputId(100); // distinct from the drive id
+        let ramp = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
+        let inverse = Curve::new([(Fixed::ZERO, Fixed::ONE), (Fixed::ONE, Fixed::ZERO)]);
+        // Two actions, both gated equally by hunger, split by boldness: the bold action rises with the
+        // trait (curve 0), the cautious action falls with it (curve 1). Under equal hunger the trait
+        // decides.
+        let bold_act = ActionId(0);
+        let cautious_act = ActionId(1);
+        let behaviour = || Behaviour {
+            drives: vec![DriveDef {
+                id: hunger,
+                rise_per_tick: Fixed::from_ratio(1, 2),
+                satisfy_amount: Fixed::ZERO,
+            }],
+            curves: vec![ramp.clone(), inverse.clone()],
+            actions: vec![
+                ActionDef {
+                    id: bold_act,
+                    weight: Fixed::ONE,
+                    considerations: vec![
+                        Consideration {
+                            input: hunger_in,
+                            curve: 0,
+                        },
+                        Consideration {
+                            input: bold_in,
+                            curve: 0,
+                        },
+                    ],
+                    satisfies: vec![],
+                },
+                ActionDef {
+                    id: cautious_act,
+                    weight: Fixed::ONE,
+                    considerations: vec![
+                        Consideration {
+                            input: hunger_in,
+                            curve: 0,
+                        },
+                        Consideration {
+                            input: bold_in,
+                            curve: 1,
+                        },
+                    ],
+                    satisfies: vec![],
+                },
+            ],
+        };
+
+        // A bold being and a timid one, identical in every other way (same drive, same rise).
+        let build = |bind: bool| {
+            let mut w = world().with_seed(0xB01D);
+            w.set_behaviour(behaviour());
+            if bind {
+                w.bind_trait_input(bold_in, BOLDNESS);
+            }
+            let bold = w.spawn(Fixed::ONE);
+            let timid = w.spawn(Fixed::ONE);
+            w.install_personality(
+                bold,
+                TraitInstance::from_values([(BOLDNESS, Fixed::from_ratio(9, 10))]),
+            );
+            w.install_personality(
+                timid,
+                TraitInstance::from_values([(BOLDNESS, Fixed::from_ratio(1, 10))]),
+            );
+            w.tick(&[]);
+            (w, bold, timid)
+        };
+
+        let (w, bold, timid) = build(true);
+        assert_eq!(
+            w.last_action(bold),
+            Some(bold_act),
+            "the bold being chose the bold action"
+        );
+        assert_eq!(
+            w.last_action(timid),
+            Some(cautious_act),
+            "the timid being chose the cautious action under the same drive pressure"
+        );
+
+        // Control: with no trait input bound, the trait reads as zero for both, so both score the
+        // actions identically and choose the same one. The divergence is the trait binding, not the
+        // per-being personality by itself.
+        let (w_off, bold_off, timid_off) = build(false);
+        assert_eq!(
+            w_off.last_action(bold_off),
+            w_off.last_action(timid_off),
+            "with the trait channel off the two beings do not diverge"
+        );
+
+        // Bit-for-bit replay.
+        let (w2, _, _) = build(true);
+        assert_eq!(
+            w.state_hash(),
+            w2.state_hash(),
+            "the trait-shaped decision replays bit for bit"
+        );
     }
 
     const WITNESSED: crate::tom::AccessChannelId = crate::tom::AccessChannelId(1);
@@ -4630,6 +5528,98 @@ name = "said"
         assert_eq!(flat.rate_for(dull_mem), flat.rate_for(keen_mem));
         // An empty band has no representative memory, never a fabricated one.
         assert_eq!(w.band_mean_memory(&[]), None);
+    }
+
+    #[test]
+    fn a_sharp_memoried_band_holds_a_technique_longer_than_a_forgetful_one() {
+        // World-wiring increment 8: with a retention law armed, a band's technique-loss window scales
+        // with its mean memory. Two isolated bands, each holding one below-floor design (two holders,
+        // under the floor of three) so it erodes, differ only in per-being memory; the sharp-memoried
+        // band forgets the design strictly later than the forgetful one, and the run replays bit for
+        // bit. The divergence falls out of memory through one race-blind rule (Principle 9).
+        const DESIGN: DesignId = 0x5;
+        // An increasing memory-scale curve: a forgetful mind gets under the base window, a sharp mind
+        // several times it. Labelled fixture, never an owner value.
+        let law = || RetentionLaw {
+            scale_by_memory: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_int(5)),
+            ]),
+        };
+        let build = || {
+            let mut w = world().with_seed(0x_8E_31);
+            // A forgetful band at place 1 and a sharp band at place 2, two holders each.
+            let dull: Vec<StableId> = (0..2).map(|_| w.spawn(Fixed::ONE)).collect();
+            for &id in &dull {
+                w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(1, 10);
+                w.set_place(id, 1);
+                w.originate_design(id, DESIGN, Fixed::ONE);
+            }
+            let keen: Vec<StableId> = (0..2).map(|_| w.spawn(Fixed::ONE)).collect();
+            for &id in &keen {
+                w.minds.get_mut(&id).unwrap().memory = Fixed::ONE;
+                w.set_place(id, 2);
+                w.originate_design(id, DESIGN, Fixed::ONE);
+            }
+            w.set_transmission(TransmissionParams {
+                drift_rate: Fixed::from_ratio(1, 100),
+                loss_practitioner_floor: 3,
+                loss_rate: Fixed::from_ratio(1, 4),
+            });
+            w.set_retention(law());
+            (w, dull, keen)
+        };
+        // Run both bands (isolated at separate places, so neither sustains the other) and return the
+        // tick each first loses the design entirely.
+        let held = |w: &World, band: &[StableId]| -> bool {
+            band.iter()
+                .any(|&id| w.knowledge_of(id).map(|k| k.holds(DESIGN)).unwrap_or(false))
+        };
+        let run_to_culls =
+            |w: &mut World, dull: &[StableId], keen: &[StableId]| -> (Option<u64>, Option<u64>) {
+                let (mut dull_cull, mut keen_cull) = (None, None);
+                for t in 1..=200u64 {
+                    w.tick(&[]);
+                    if dull_cull.is_none() && !held(w, dull) {
+                        dull_cull = Some(t);
+                    }
+                    if keen_cull.is_none() && !held(w, keen) {
+                        keen_cull = Some(t);
+                    }
+                    if dull_cull.is_some() && keen_cull.is_some() {
+                        break;
+                    }
+                }
+                (dull_cull, keen_cull)
+            };
+
+        let (mut w, dull, keen) = build();
+        let (dull_cull, keen_cull) = run_to_culls(&mut w, &dull, &keen);
+        let dull_cull = dull_cull.expect("the forgetful band eventually loses the design");
+        let keen_cull = keen_cull.expect("the sharp band eventually loses the design");
+        assert!(
+            keen_cull > dull_cull,
+            "the sharp-memoried band held the technique longer: keen lost at {keen_cull}, dull at {dull_cull}"
+        );
+
+        // Control: the same setup with the retention law removed. The memory channel is off, so both
+        // bands (same floor, same raw loss rate) forget on the same tick despite their different
+        // memory. The divergence above is due to the retention law, not the band composition.
+        let (mut off, dull_o, keen_o) = build();
+        off.retention = None;
+        let (dull_off, keen_off) = run_to_culls(&mut off, &dull_o, &keen_o);
+        assert_eq!(
+            dull_off, keen_off,
+            "with retention off the two bands forget on the same tick (the memory channel is off)"
+        );
+
+        // Bit-for-bit replay of the memory-scaled run.
+        let (mut w2, dull2, keen2) = build();
+        assert_eq!(
+            run_to_culls(&mut w2, &dull2, &keen2),
+            (Some(dull_cull), Some(keen_cull)),
+            "the memory-scaled retention run replays bit for bit"
+        );
     }
 
     #[test]

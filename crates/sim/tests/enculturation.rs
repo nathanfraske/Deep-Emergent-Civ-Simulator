@@ -140,3 +140,74 @@ fn enculturation_replays_deterministically() {
     };
     assert_eq!(round(), round(), "the same band enculturates bit for bit");
 }
+
+#[test]
+fn the_tick_beat_narrows_a_band_without_collapsing_it_and_isolated_bands_diverge() {
+    // World-wiring increment 6: the enculturation beat runs inside World::tick (cadence-gated), so a
+    // band converges over ticks without an explicit enculturate_band call, two isolated bands (at
+    // separate places) converge toward their own means, and it replays bit for bit.
+    let build = |seed: u64| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_life_cadence(1); // the beat fires each tick
+        w.set_stubbornness_split(Fixed::from_ratio(1, 2)); // labelled fixture split weight
+                                                           // Band one at place 1: a spread around one half.
+        let band1: Vec<StableId> = [0, 1, 2, 3, 4]
+            .iter()
+            .map(|&k| {
+                let id = w.spawn(Fixed::ONE);
+                w.set_place(id, 1);
+                let s = Fixed::from_ratio(k, 4);
+                w.set_intrinsic(id, beliefs(s, s));
+                id
+            })
+            .collect();
+        // Band two at place 2 (isolated): a cluster near nine tenths.
+        let band2: Vec<StableId> = [8, 9, 10]
+            .iter()
+            .map(|&k| {
+                let id = w.spawn(Fixed::ONE);
+                w.set_place(id, 2);
+                let s = Fixed::from_ratio(k, 10);
+                w.set_intrinsic(id, beliefs(s, s));
+                id
+            })
+            .collect();
+        (w, band1, band2)
+    };
+    let mean = |w: &World, band: &[StableId]| -> Fixed {
+        band.iter()
+            .fold(Fixed::ZERO, |a, &id| a + stance_of(w, id))
+            .div(Fixed::from_int(band.len() as i32))
+    };
+
+    let (mut w, band1, band2) = build(0xE7C0);
+    let var_before = w.axiom_variance(&band1, AXIS).unwrap();
+    for _ in 0..60 {
+        w.tick(&[]);
+    }
+    let var_after = w.axiom_variance(&band1, AXIS).unwrap();
+    assert!(
+        var_after < var_before,
+        "the beat narrowed the band: {var_after:?} < {var_before:?}"
+    );
+    assert!(
+        var_after > Fixed::ZERO,
+        "but did not collapse: stubbornness holds a lasting spread"
+    );
+    assert!(
+        mean(&w, &band1) < mean(&w, &band2),
+        "the two isolated bands stayed apart: {:?} vs {:?}",
+        mean(&w, &band1),
+        mean(&w, &band2)
+    );
+
+    let (mut w2, _, _) = build(0xE7C0);
+    for _ in 0..60 {
+        w2.tick(&[]);
+    }
+    assert_eq!(
+        w.state_hash(),
+        w2.state_hash(),
+        "the tick-driven enculturation beat replays bit for bit"
+    );
+}
