@@ -55,7 +55,7 @@ use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
 use crate::tom::AccessChannelRegistry;
 use crate::value::RaceId;
-use crate::world::World;
+use crate::world::{ReproductionParams, World};
 
 /// The declared peoples of a world at the dawn of sentience (design Part 28): the race records, the
 /// founding band placements, and the two registries the dawn seeding reads (the breeding systems a
@@ -266,6 +266,16 @@ pub fn build_dawn_runner(
     world.set_concepts(nsm_concept_ids());
     world.set_language(LanguageParams::from_manifest(manifest)?);
     world.set_drift(DriftParams::from_manifest(manifest)?);
+
+    // Arm reproduction and post-dawn generational drift (real-world unification, step 1): a mature,
+    // compatible pair bears one child per reproductive cadence, and each generation each race's pool
+    // drifts under the effective size its own reproductive census implies (census-derived Ne, retiring
+    // audit deviation 23 for the post-dawn tier). The mutation spread is the surfaced reserved value,
+    // never fabricated inline; the ring law is already built above. Both are inert until the first
+    // life cadence fires (the founders are seeded at age zero, so no pair is mature at the dawn), so a
+    // short run behaves exactly as before while a multi-generation run grows and drifts.
+    world.set_reproduction(ReproductionParams::from_manifest(manifest)?);
+    world.arm_generational_drift();
 
     // Arm the derived per-race languages at the founder step (increment 2e), if a language genesis is
     // supplied: derive each articulating race's phonetic form system from the base geometry and its

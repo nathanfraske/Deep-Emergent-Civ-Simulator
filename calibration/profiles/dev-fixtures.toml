@@ -265,3 +265,11 @@ status = "set"
 value = "32"
 unit = "count"
 source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"
+
+[[reserved]]
+id = "reproduction.mutation_spread"
+basis = "FIXTURE placeholder, not the owner's value; the bounded half-width both the belief-seed and the mate-preference inheritance draw around the midparent at birth (a single lever, world.rs inherited_beliefs). Two hundredths of a disposition unit, small enough that a child resembles its parents yet a lineage drifts, matching the reproduction unit test's labelled fixture"
+status = "set"
+value = "0.02"
+unit = "disposition_units_half_width"
+source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs ReproductionParams::from_manifest; real-world unification step 1"

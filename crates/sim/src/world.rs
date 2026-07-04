@@ -393,6 +393,21 @@ pub struct ReproductionParams {
     pub ring_law: RingCapacityLaw,
 }
 
+impl ReproductionParams {
+    /// Read the reproduction calibrations from the manifest, failing loud while reserved (design Parts
+    /// 25, 28, R-REPRO). The mutation spread is `reproduction.mutation_spread`: the one bounded
+    /// mean-zero deviation both the belief-seed inheritance ([`World::inherited_beliefs`]) and the
+    /// mate-preference midparent draw take, a single lever rather than two, so the production dawn arms
+    /// reproduction from a surfaced reserved value rather than a fabricated inline number. The ring law
+    /// is the same [`RingCapacityLaw`] the dawn seeding sizes founder evidence rings through.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<Self, CalibrationError> {
+        Ok(ReproductionParams {
+            mutation_spread: m.require_fixed("reproduction.mutation_spread")?,
+            ring_law: RingCapacityLaw::from_manifest(m)?,
+        })
+    }
+}
+
 /// A world of minds advanced by a serial deterministic tick.
 pub struct World {
     clock: u64,
@@ -1949,6 +1964,16 @@ impl World {
         self.drift_personalities();
         self.reproduce();
         self.drift_pools();
+        // Close the reproductive census window for the generation drift just consumed (world-wiring
+        // real-world unification, step 1), so the next cohort's Ne reads only its own breeders rather
+        // than the cumulative tally. Gated on the same arming as drift_pools: a world that does not run
+        // post-dawn drift keeps its accumulating census (the pre-unification behaviour), so nothing
+        // that reads the census across generations changes unless generational drift is armed. The
+        // reset draws no RNG and clears an id-keyed map, so it is deterministic and worker-count
+        // independent, and it lands inside the single cadence-gated life beat.
+        if self.generational_drift_armed {
+            self.reset_census_window();
+        }
         // Mortality: the life-fraction by-race curve takes precedence (short- and long-lived races
         // cull on their own timescales); else the raw-age curve; else no cull. The by-race pass reads
         // the race registry, so it is moved out and back around the mutable cull (a cheap pointer swap

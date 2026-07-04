@@ -865,6 +865,14 @@ impl Runner {
         self.world.as_ref()
     }
 
+    /// The composed cognition world for mutation (a calibration override applied after assembly, for
+    /// example a life-cadence override so a multi-generation run fits a test budget). This is not part
+    /// of the tick path; the deterministic scheduler reads the world when it steps, so a calibration
+    /// set here before stepping is reproducible.
+    pub fn world_mut(&mut self) -> Option<&mut World> {
+        self.world.as_mut()
+    }
+
     /// The coupled embodied-being population, if any (a pure read, for tests and rendering).
     pub fn embodiment(&self) -> Option<&Embodiment> {
         self.embodiment.as_ref()

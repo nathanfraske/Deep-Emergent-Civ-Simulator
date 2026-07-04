@@ -30,10 +30,10 @@ use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     build_dawn_runner, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
     BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
-    DominanceMode, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet,
-    GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile, PersonalityRegistry,
-    Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId,
-    ValueProfile,
+    DominanceKind, DominanceMode, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId,
+    GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
+    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
+    TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -510,6 +510,222 @@ fn the_field_derives_from_the_medium_through_the_whole_assembly() {
         water.state_hash(),
         "air and water fields diverge through the assembled runner"
     );
+}
+
+/// A sex-determined test race: `a_race`'s cognition genes plus a sex-determination gene whose
+/// heterozygote is the heterogametic sex, a three-locus biallelic pool at one half, and the binary
+/// anisogamous breeding system, so mature founders express two sexes and compatible pairs can breed.
+/// Labelled fixtures, not owner data.
+fn a_sexed_race(id: u32) -> Race {
+    let genes = GeneSet {
+        genes: vec![
+            GeneDef {
+                id: GeneId(0),
+                effects: vec![GeneEffect {
+                    channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
+                    weight: Fixed::ONE,
+                }],
+                dominance: DominanceMode::additive(),
+            },
+            GeneDef {
+                id: GeneId(1),
+                effects: vec![GeneEffect {
+                    channel: Channel::Cognition(CognitionChannel::MemoryCapacity),
+                    weight: Fixed::ONE,
+                }],
+                dominance: DominanceMode::additive(),
+            },
+            GeneDef {
+                id: GeneId(2),
+                effects: vec![GeneEffect {
+                    channel: Channel::SexDetermination,
+                    weight: Fixed::ONE,
+                }],
+                dominance: DominanceMode {
+                    a: Fixed::ZERO,
+                    d: Fixed::ONE,
+                    kind: DominanceKind::Complete,
+                },
+            },
+        ],
+    };
+    let pool = GenePool::new(
+        SchemeId(0),
+        20,
+        vec![
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 2),
+        ],
+    );
+    let intrinsic = IntrinsicBeliefs {
+        values: ValueProfile::with([(ValueAxisId(0), 3)]),
+        axioms: vec![Axiom {
+            axis: AxiomAxisId(0),
+            stance: Fixed::from_ratio(1, 2),
+            strength: Fixed::from_ratio(1, 2),
+            confidence: Fixed::from_ratio(1, 2),
+            entrenchment: 5,
+            salience: Fixed::from_ratio(1, 2),
+            stubbornness: Fixed::from_ratio(1, 4),
+            innate_seed: Fixed::from_ratio(1, 2),
+            evidence: EvidenceRing::new(4),
+        }],
+        epistemic: EpistemicStance::new(
+            [(SourceModeId(1), Fixed::ONE)],
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+        ),
+    };
+    let scheme = GeneticScheme {
+        id: SchemeId(0),
+        reproduction: ReproductionMode::SexualDiploid,
+        linkage_groups: Vec::new(),
+        mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: GaussApprox::default(),
+    };
+    Race::new(
+        RaceId(id),
+        genes,
+        pool,
+        scheme,
+        intrinsic,
+        Fixed::from_int(2),
+        Fixed::ZERO,
+        80,
+        18,
+    )
+    .with_breeding(BreedingSystemId(0))
+}
+
+/// A dawn of one sex-determined race on one band of a dozen founders, no mortality hazard, so a
+/// multi-generation run grows.
+fn sexed_peoples() -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), a_sexed_race(0));
+    let bands = vec![BandSpec {
+        race: RaceId(0),
+        place: 10,
+        members: 12,
+    }];
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands,
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+    }
+}
+
+#[test]
+fn the_dawn_runner_reproduces_and_drifts_under_the_census_ne_across_generations() {
+    // Real-world unification step 1: build_dawn_runner arms reproduction and post-dawn generational
+    // drift, and the life-cadence reset windows the census per generation. Over several generations the
+    // population grows, each race's pool effective size becomes the census-derived Ne (not the authored
+    // founder size, retiring deviation 23), the run replays bit for bit, the scheduled order matches
+    // the pinned order, and the whole trace is bit-identical across worker widths.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+    // Build, then override the life cadence to a small value and age the founders past maturity so a
+    // multi-generation run fits a test budget (the manifest cadence is one Earth year in ticks).
+    let build = |seed: u64, workers: usize| {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &sexed_peoples(),
+            seed,
+        )
+        .expect("a sex-determined dawn assembles");
+        {
+            let w = runner.world_mut().unwrap();
+            w.set_life_cadence(4);
+            w.set_workers(workers);
+            let ids = w.being_ids();
+            for id in ids {
+                w.set_age(id, 20);
+            }
+        }
+        runner
+    };
+
+    // Run one seed serially, tracing the state hash each tick.
+    let mut runner = build(0x5EED_0A11, 1);
+    let before = runner.world().unwrap().population();
+    let founder_ne = runner
+        .world()
+        .unwrap()
+        .gene_pool(RaceId(0))
+        .unwrap()
+        .effective_size;
+    assert_eq!(founder_ne, 20, "the founder pool carries its authored size");
+    let mut trace = Vec::new();
+    for _ in 0..40 {
+        runner.step();
+        trace.push(runner.state_hash());
+    }
+    let w = runner.world().unwrap();
+    assert!(
+        w.population() > before,
+        "the population grew across generations: {before} -> {}",
+        w.population()
+    );
+    // The pool's effective size is now the census-derived Ne (set inside drift_pools before the
+    // per-generation reset clears the window), not the authored founder size: deviation 23 retired for
+    // the post-dawn tier. A positive Ne means the census tracked real breeders this generation.
+    let drifted_ne = w.gene_pool(RaceId(0)).unwrap().effective_size;
+    assert!(
+        drifted_ne != 20 && drifted_ne > 0,
+        "the census-derived Ne replaced the authored founder size (deviation 23): {drifted_ne}"
+    );
+
+    // Bit-for-bit replay.
+    let mut replay = build(0x5EED_0A11, 1);
+    let mut trace2 = Vec::new();
+    for _ in 0..40 {
+        replay.step();
+        trace2.push(replay.state_hash());
+    }
+    assert_eq!(
+        trace, trace2,
+        "the multi-generation dawn replays bit for bit"
+    );
+
+    // The scheduled order matches the pinned order through the reproduction and drift beats.
+    let mut pinned = build(0x5EED_0A11, 1);
+    let mut scheduled = build(0x5EED_0A11, 1);
+    for _ in 0..40 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the scheduled order stays bit-identical with reproduction and drift armed"
+        );
+    }
+
+    // Worker-width invariance: the whole trace is bit-identical at widths 2, 3, 8.
+    for workers in [2usize, 3, 8] {
+        let mut wide = build(0x5EED_0A11, workers);
+        let mut wtrace = Vec::new();
+        for _ in 0..40 {
+            wide.step();
+            wtrace.push(wide.state_hash());
+        }
+        assert_eq!(
+            trace, wtrace,
+            "the dawn trace diverged at {workers} workers: a beat leaked the thread schedule"
+        );
+    }
 }
 
 #[test]

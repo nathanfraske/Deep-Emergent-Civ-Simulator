@@ -1000,6 +1000,13 @@ unit = "individuals"
 source = "Part 25.7-25.8; R-REPRO census tier (crates/sim/src/census.rs); pre-dawn founder seed / world-dialing lever, worksheet §13a/§14"
 
 [[reserved]]
+id = "reproduction.mutation_spread"
+basis = "the half-width of the bounded mean-zero deviation a child's inherited disposition draws around the midparent at birth: the belief innate-seed inheritance (crates/sim/src/world.rs inherited_beliefs, drawn under Phase::AXIOM_INHERIT per axis) and the mate-preference midparent inheritance (drawn under Phase::MATE_CHOICE) both take this ONE spread, so it is a single lever not two, and no second value is introduced (world.rs 1685). Basis for deciding it: the inheritance-deviation scale that keeps a lineage's disposition recognizably heritable across a generation while still admitting drift, set to the standing dispersion of the innate axiom seed the population already carries so a child resembles its parents to the same degree the axiom seeds vary within a band; explicitly not an independent fabricated magnitude. The production dawn (build_dawn_runner) arms reproduction from this surfaced value through ReproductionParams::from_manifest rather than a hardcoded inline number; a Dev run tolerates the dev-fixtures placeholder."
+status = "reserved"
+unit = "disposition_units_half_width"
+source = "Part 25, Part 28, R-REPRO; crates/sim/src/world.rs ReproductionParams / inherited_beliefs; real-world unification step 1"
+
+[[reserved]]
 id = "genome.speciation_distance"
 basis = "the genetic distance at which two diverged pools are declared distinct species; set against the chosen distance measure so a cross stays fertile below it and fails above it (declared rather than scripted speciation; Coyne and Orr)"
 status = "set"
