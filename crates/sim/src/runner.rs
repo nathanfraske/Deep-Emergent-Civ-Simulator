@@ -82,12 +82,19 @@
 //! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
 //! deliberative tier is properly built on the evolved substrate.
 
-use crate::anatomy::BodyPlan;
+use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::ControllerLayout;
-use crate::homeostasis::{AffordanceRegistry, HomeostaticAxisId, HomeostaticRegistry, TEMPERATURE};
+use crate::homeostasis::{
+    AffordanceRegistry, DerivedDrain, HomeostaticAxisId, HomeostaticRegistry, RESPIRATION,
+    TEMPERATURE,
+};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::medium;
+use crate::physiology::{
+    self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
+};
 use crate::scenario::ScenarioResolution;
 use crate::world::{TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
@@ -461,6 +468,147 @@ impl Terrain for BoundedPlane {
     }
 }
 
+/// A representability cap on the respiration Fick flux (a normalised-concentration bound), the
+/// engine-mechanics exemption the physiology and medium kernels take (matching
+/// [`crate::physiology`]'s `FLUX_MAX`), not an owner value: it exists so a degenerate input saturates
+/// rather than overflowing, and it never binds on a physical medium.
+const RESPIRATION_FLUX_MAX: Fixed = Fixed::from_int(1_000_000_000);
+
+/// The per-embodiment physiology configuration that makes the anatomy-derived metabolism LIVE
+/// (R-METABOLIZE, design Part 15, Part 20, Part 35, Part 41; Principles 9, 11). Installed on an
+/// [`Embodiment`] through [`Embodiment::set_physiology`], it switches the embodiment's beings from the
+/// labelled scalar `metabolize` to the physics-derived producers: the per-being resting drain
+/// ([`derive_base_drain`], the Kleiber basal rate plus the thermoregulatory replacement), the exertion
+/// coupling ([`derive_exertion_coupling`]), the body-to-medium exchange rate ([`derive_body_exchange_rate`]),
+/// and, where the physiology registry carries a [`RESPIRATION`] axis, medium respiration
+/// ([`crate::medium::respire`]). So two beings with different body plans diverge in survival from their
+/// anatomy alone, with no race or label branch (Principle 9). The mechanism is fixed Rust; the organ
+/// registry, the anchors, and the medium are data (Principle 11).
+///
+/// The medium is a single uniform value this increment (the resolved medium's respirable content and
+/// convective coefficient everywhere); a spatially-varying per-cell [`crate::medium::MediumField`] that
+/// a being reads at its coordinate is the named later refinement, the respiratory sibling of the
+/// per-cell temperature field.
+#[derive(Clone, Debug)]
+pub struct EmbodiedPhysiology {
+    /// The organ registry a being's tissue composition (convective surface, specific heat, energy
+    /// density, respiratory surface) is read against, the same registry [`crate::homeostasis::Homeostasis::new`]
+    /// sizes the reserves from.
+    organs: BodyPlanRegistry,
+    /// The reserved owner metabolic anchors (Kleiber coefficient, kilogram bridge, medium convective
+    /// coefficient, emissivity, Stefan-Boltzmann), read fail-loud from the manifest or a labelled
+    /// dev fixture.
+    anchors: MetabolicAnchors,
+    /// The uniform respirable content of the ambient medium, the `c_medium` the Fick respiration law
+    /// reads (the resolved medium's `respirable_content` axis). Uniform this increment.
+    medium_respirable: Fixed,
+    /// The reserved Fick membrane transfer coefficient `k` the respiration law reads. RESERVED owner
+    /// value (`metabolism.respiration_transfer_coefficient`), a labelled fixture in tests.
+    respiration_transfer_k: Fixed,
+    /// The base tick length in seconds the drain derivation integrates over (`time.base_tick_seconds`).
+    tick_seconds: Fixed,
+}
+
+impl EmbodiedPhysiology {
+    /// The physiology configuration read from the calibration manifest, fail-loud if any input is still
+    /// reserved (Principle 11): the metabolic anchors ([`MetabolicAnchors::from_manifest`]), the uniform
+    /// respirable content from the resolved medium profile (`medium.{name}`'s `respirable_content`
+    /// axis), the reserved respiration transfer coefficient, and the base tick length. This is the
+    /// sanctioned canonical sourcing; a test may instead build a labelled fixture with
+    /// [`EmbodiedPhysiology::dev_fixture`].
+    pub fn from_manifest(
+        manifest: &CalibrationManifest,
+        organs: BodyPlanRegistry,
+        medium_id: &str,
+    ) -> Result<EmbodiedPhysiology, CalibrationError> {
+        let anchors = MetabolicAnchors::from_manifest(manifest)?;
+        let profile = manifest.require_map(medium_id)?;
+        let medium_respirable = profile.get("respirable_content").copied().ok_or_else(|| {
+            CalibrationError::BadValue {
+                id: medium_id.to_string(),
+                detail: "medium profile is missing the 'respirable_content' axis".to_string(),
+            }
+        })?;
+        Ok(EmbodiedPhysiology {
+            organs,
+            anchors,
+            medium_respirable,
+            respiration_transfer_k: manifest
+                .require_fixed("metabolism.respiration_transfer_coefficient")?,
+            tick_seconds: manifest.require_fixed("time.base_tick_seconds")?,
+        })
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE physiology (dev-fixture anchors, a caller-supplied uniform
+    /// respirable content, a unit transfer coefficient, a one-second base tick), for tests and examples
+    /// only; a canonical run reads [`EmbodiedPhysiology::from_manifest`]. Not owner canon.
+    pub fn dev_fixture(organs: BodyPlanRegistry, medium_respirable: Fixed) -> EmbodiedPhysiology {
+        EmbodiedPhysiology {
+            organs,
+            anchors: MetabolicAnchors::dev_fixture(),
+            medium_respirable,
+            respiration_transfer_k: Fixed::ONE,
+            tick_seconds: Fixed::ONE,
+        }
+    }
+}
+
+/// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
+/// physiology. The metabolic axis (the one backed by the `bio.energy_density` floor axis, keyed off the
+/// floor id rather than a hardcoded axis constant, so the choice is data not a special case) drains at
+/// the Kleiber basal rate plus the thermoregulatory replacement ([`derive_base_drain`], read against the
+/// live `ambient` and the being's `setpoint`) with a work-derived exertion coupling
+/// ([`derive_exertion_coupling`]); every other axis keeps its authored per-axis rate from the registry
+/// (water lost slower, an oxygen demand, or the zero-drain derived axes temperature and integrity), so
+/// only the energy metabolism derives and the rest stay the owner's per-axis calibration. Pure
+/// fixed-point, no RNG, and no identity read: two beings diverge from their body plans alone (Principle
+/// 9). The exertion inputs are the being's full-exertion ground speed (a body-plan-derived velocity) at
+/// its normalized mass as the characteristic locomotion work-force proxy; the honest limit is the Part
+/// 35 work-force datum that replaces the mass proxy.
+fn being_derived_drains(
+    emb: &Embodiment,
+    phys: &EmbodiedPhysiology,
+    w: &Walker,
+    ambient: Fixed,
+    setpoint: Fixed,
+) -> BTreeMap<HomeostaticAxisId, DerivedDrain> {
+    let mut map = BTreeMap::new();
+    for axis in &emb.homeo.axes {
+        let drain = if axis.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY) {
+            let cap = w.homeostasis.capacity(axis.id);
+            let base = derive_base_drain(
+                &w.body,
+                &phys.organs,
+                cap,
+                ambient,
+                setpoint,
+                phys.anchors.medium_h,
+                phys.tick_seconds,
+                &phys.anchors,
+            );
+            let velocity = locomotion::locomotion_speed(&w.body, Fixed::ONE, &emb.params);
+            let force = w.body.body_mass;
+            let exertion = derive_exertion_coupling(
+                &w.body,
+                &phys.organs,
+                cap,
+                force,
+                velocity,
+                phys.tick_seconds,
+                &phys.anchors,
+            );
+            DerivedDrain { base, exertion }
+        } else {
+            DerivedDrain {
+                base: axis.base_drain,
+                exertion: axis.exertion_drain,
+            }
+        };
+        map.insert(axis.id, drain);
+    }
+    map
+}
+
 /// The embodied-being population coupled to the field on the evolved-controller substrate (Part 8.4,
 /// R-BEHAVIOR-EVOLVE). It owns the located beings ([`Walker`], each with its evolved controller), the
 /// data-defined physiology and affordance registries and the controller layout derived from them, the
@@ -477,6 +625,11 @@ pub struct Embodiment {
     params: LocomotionParams,
     resources: ResourceField,
     seed: u64,
+    /// The anatomy-derived physiology, when installed ([`Embodiment::set_physiology`]). `Some` switches
+    /// the embodiment's beings onto the R-METABOLIZE producers (derived drain, body-medium exchange,
+    /// respiration); `None` keeps the labelled scalar metabolize (the evolve harness and the existing
+    /// thermal fixtures), so installing the physiology is opt-in and disturbs no existing caller.
+    physiology: Option<EmbodiedPhysiology>,
 }
 
 impl Embodiment {
@@ -520,7 +673,17 @@ impl Embodiment {
             params,
             resources: ResourceField::new(),
             seed,
+            physiology: None,
         }
+    }
+
+    /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
+    /// couple to the medium thermally, and (where a [`RESPIRATION`] axis is present) respire from their
+    /// body plan and tissue against the physics rather than the labelled scalar drains. Set before the
+    /// embodiment is handed to [`Runner::with_embodiment`], which reads it to seed each being's derived
+    /// body-to-medium exchange rate. Opt-in: an embodiment without it keeps the scalar path unchanged.
+    pub fn set_physiology(&mut self, physiology: EmbodiedPhysiology) {
+        self.physiology = Some(physiology);
     }
 
     /// The controller layout derived from this embodiment's registries, against which a caller builds
@@ -639,6 +802,7 @@ impl Runner {
     pub fn with_embodiment(field: Field, calib: FieldCalib, embodiment: Embodiment) -> Runner {
         let mut body_temp = BTreeMap::new();
         let mut index = LocationIndex::new();
+        let mut body_exchange_rate = BTreeMap::new();
         for w in &embodiment.walkers {
             let init = embodiment
                 .thermal
@@ -647,6 +811,21 @@ impl Runner {
                 .unwrap_or(Fixed::ZERO);
             body_temp.insert(w.id, init);
             index.place(OccupantId::being(w.id), w.coord());
+            // Seed the being's DERIVED body-to-medium exchange rate h*A/(m*c) once, when an
+            // anatomy-derived physiology is installed. It is static (a pure function of the body plan
+            // and the medium coefficient), so it is set here rather than recomputed each tick, and
+            // phase_body_exchange then couples the being at its own surface-and-thermal-mass rate rather
+            // than the labelled FieldCalib.exchange scalar (Principle 9: divergence from anatomy).
+            if let Some(phys) = &embodiment.physiology {
+                let rate = derive_body_exchange_rate(
+                    &w.body,
+                    &phys.organs,
+                    phys.anchors.medium_h,
+                    phys.tick_seconds,
+                    &phys.anchors,
+                );
+                body_exchange_rate.insert(w.id, rate);
+            }
         }
         Runner {
             clock: 0,
@@ -654,7 +833,7 @@ impl Runner {
             calib,
             index,
             body_temp,
-            body_exchange_rate: BTreeMap::new(),
+            body_exchange_rate,
             world: None,
             embodiment: Some(embodiment),
         }
@@ -858,6 +1037,38 @@ impl Runner {
                     .collect(),
                 None => return,
             };
+        // (0c) Physics to physiology, the anatomy-derived metabolism (R-METABOLIZE): when a physiology
+        // is installed, build each being's per-axis DERIVED drain so its survival follows its body plan,
+        // mass, tissue, medium, and temperature rather than the axis defs' authored scalars. The
+        // metabolic (energy-density-backed) axis drains at the Kleiber basal rate plus the
+        // thermoregulatory replacement, read against the being's LIVE post-exchange core temperature as
+        // the effective ambient and its own comfort set point (so the base drain tracks the medium each
+        // tick, unlike the static exchange rate), plus a work-derived exertion coupling; every other
+        // axis keeps its authored per-axis rate. Keyed off the floor axis id, no race branch (Principle
+        // 11). An empty map (no physiology) leaves locomotion on the scalar metabolize. Read before the
+        // mutable borrow, drawing no RNG.
+        let drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
+            match self.embodiment.as_ref() {
+                Some(emb) => match &emb.physiology {
+                    Some(phys) => emb
+                        .walkers
+                        .iter()
+                        .map(|w| {
+                            let ambient = self.body_temp.get(&w.id).copied();
+                            let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
+                            let (ambient, setpoint) = match (ambient, setpoint) {
+                                (Some(a), Some(s)) => (a, s),
+                                (Some(a), None) => (a, a),
+                                (None, Some(s)) => (s, s),
+                                (None, None) => (Fixed::ZERO, Fixed::ZERO),
+                            };
+                            (w.id, being_derived_drains(emb, phys, w, ambient, setpoint))
+                        })
+                        .collect(),
+                    None => BTreeMap::new(),
+                },
+                None => return,
+            };
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
@@ -869,11 +1080,34 @@ impl Runner {
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
             }
         }
+        // (1b) Physics to physiology, medium respiration (R-MEDIUM): when a physiology is installed and
+        // the registry carries a RESPIRATION axis, each being exchanges its respirable-gas reserve with
+        // the ambient medium through the Fick membrane law over its respiratory exchange area, in
+        // canonical id order (the walkers are id-sorted on the prior locomotion step). Breathe in before
+        // this tick's metabolic draw (matching the medium coupling's tested order), so the death check
+        // inside locomotion accounts for the tick's uptake. A body with no respiratory surface takes up
+        // nothing and suffocates on its buffer, whatever the medium (Principle 9). Uniform medium content
+        // this increment; a per-cell medium field is the named refinement.
+        if let Some(phys) = emb.physiology.as_ref() {
+            if emb.homeo.axis(RESPIRATION).is_some() {
+                for w in emb.walkers.iter_mut() {
+                    let area = medium::exchange_area(&w.body, &phys.organs);
+                    medium::respire(
+                        &mut w.homeostasis,
+                        area,
+                        phys.respiration_transfer_k,
+                        phys.medium_respirable,
+                        RESPIRATION_FLUX_MAX,
+                    );
+                }
+            }
+        }
         // (2) Physiology and percept to behaviour: the evolved controllers drive one locomotion step
         // over the being slice, reading the temperature gradient in the TEMPERATURE direction slot and
         // the signed thermoreceptor in its signed slot. A controller that has evolved to gate its
         // gradient-following on the signed bit climbs toward comfort from either side; one that has not
-        // explores or, wired for one side only, walks into danger on the other.
+        // explores or, wired for one side only, walks into danger on the other. The per-being derived
+        // drain (when a physiology is installed) is applied through metabolize_derived inside the step.
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -886,6 +1120,7 @@ impl Runner {
             self.clock,
             &field_dirs,
             &field_signed,
+            &drains,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.

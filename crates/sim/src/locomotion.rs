@@ -69,7 +69,8 @@ use crate::anatomy::BodyPlan;
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, Physiology};
 use crate::homeostasis::{
-    AffordanceRegistry, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, INGEST, MOVE,
+    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry, INGEST,
+    MOVE,
 };
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
@@ -421,6 +422,7 @@ pub fn step<T: Terrain>(
         tick,
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
     )
 }
 
@@ -436,6 +438,16 @@ pub fn step<T: Terrain>(
 /// overrides the known-source direction for that axis, since the field percept is the live signal for
 /// a diffuse quantity that has no discrete source tile; the signed percept has no known-source
 /// counterpart and is simply supplied.
+///
+/// The `drains` map is the per-being anatomy-derived metabolism (R-METABOLIZE): for a being with an
+/// entry the tick's drain is applied through [`Homeostasis::metabolize_derived`] over its per-axis
+/// [`DerivedDrain`] (the Kleiber basal rate plus the thermoregulatory replacement for the metabolic
+/// axis, the authored per-axis rates for the others), so its survival follows its body plan, mass,
+/// tissue, medium, and temperature rather than a hardcoded per-axis fraction. A being with no entry
+/// (the labelled-fixture path used by the evolve harness and the field-only [`step`]) keeps the scalar
+/// [`Homeostasis::metabolize`] over the axis defs' authored drains, so the derived path is retired only
+/// where a caller supplies a derived drain. The exertion signal each being computes this tick scales
+/// its exertion coupling in both paths, so the reconciliation with locomotion is exact.
 #[allow(clippy::too_many_arguments)]
 pub fn step_with_field_dirs<T: Terrain>(
     walkers: &mut [Walker],
@@ -449,6 +461,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     tick: u64,
     field_dirs: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>>,
     field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
+    drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -542,8 +555,14 @@ pub fn step_with_field_dirs<T: Terrain>(
         }
 
         // Metabolism drains the reserves every tick (basal, plus the tick's exertion); a being whose
-        // reserve falls through its floor dies.
-        if !w.homeostasis.metabolize(homeo, exertion) {
+        // reserve falls through its floor dies. When the caller supplies a per-being DERIVED drain
+        // (R-METABOLIZE, the anatomy-derived physiology), the drain follows the body's physics through
+        // metabolize_derived; otherwise the labelled scalar path over the axis defs' authored drains.
+        let alive = match drains.get(&w.id) {
+            Some(d) => w.homeostasis.metabolize_derived(homeo, d, exertion),
+            None => w.homeostasis.metabolize(homeo, exertion),
+        };
+        if !alive {
             w.alive = false;
         }
     }
