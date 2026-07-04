@@ -418,7 +418,8 @@ pub fn project_to_etic(profile: &ValueProfile, race: &RaceProjection) -> EticPro
 /// incommensurability of this one profile under this one race's projections, zero when every
 /// carried axis translates and the squared magnitude of each untranslatable stance otherwise.
 /// A caller folds this loss into its sum-of-squares before a single root, so a cross-race
-/// distance rises by exactly the untranslated magnitude rather than a flat constant. This
+/// distance rises by the untranslated magnitude, folded in under the shared root, so exactly `|s|`
+/// from a zero base and sub-additively above it, rather than a flat constant. This
 /// measurement is the reusable primitive the cross-race value distance and the later
 /// language-distance incommensurability ceiling both read. A pure deterministic function of the
 /// profile and the race projection: it reads only whether each carried axis has an etic image,
@@ -473,7 +474,8 @@ fn etic_sq_distance(a: &EticProfile, b: &EticProfile) -> Fixed {
 /// closed form is the same flagged seam, so this returns `None`. The incommensurability is
 /// measured per race-pair from [`project_to_etic_with_loss`], not a flat reserved floor: full
 /// projections add nothing, and one extra untranslatable axis of stance `s` raises the distance
-/// by exactly `|s|`. A pure function, symmetric under swapping the two sides; it never branches
+/// by `|s|` from a zero base and sub-additively above it, the loss folding in under the shared
+/// root. A pure function, symmetric under swapping the two sides; it never branches
 /// on a race identifier.
 pub fn cross_race_distance(
     a: &ValueProfile,

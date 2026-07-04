@@ -295,8 +295,13 @@ pub fn capability_halves(
 ) -> CapabilityGate {
     let production = body.function_integrity(produce_function, function_loss_threshold);
     // The being reads the channel with this acuity, or not at all (a channel it cannot perceive
-    // gates the capability to zero regardless of production).
-    let perception = sensorium.reads(channel).unwrap_or(Fixed::ZERO);
+    // gates the capability to zero regardless of production). The acuity is a [0, ONE] capability,
+    // so it is clamped to that range: the Liebig gate and the acquisition split both assume it, and
+    // an out-of-range sensorium datum must not push the split past its documented bound.
+    let perception = sensorium
+        .reads(channel)
+        .unwrap_or(Fixed::ZERO)
+        .clamp(Fixed::ZERO, Fixed::ONE);
     CapabilityGate {
         perception,
         production,
@@ -372,7 +377,10 @@ pub fn acquisition_split(
 /// values, each paired with [`FeatureValueId`] carrying that index; a caller with arbitrary value
 /// ids zips the returned priors with its own value list, which the geometry was built in step with.
 /// `gate` shorter than the value count masks the missing tail to zero (an unrated value is not
-/// producible). Pure fixed-point over a canonical walk, so it replays bit for bit.
+/// producible). The per-value gate vector is the caller's per-value producibility, built at wire
+/// time from the race's producible feature set; [`capability_gate`] itself resolves one channel-wide
+/// capability, so the caller broadcasts or refines it per value. Pure fixed-point over a canonical
+/// walk, so it replays bit for bit.
 pub fn phoneme_priors(geo: &PerceptualGeometry, gate: &[Fixed]) -> Vec<(FeatureValueId, Fixed)> {
     let n = geo.formants().len();
     let mut out = Vec::with_capacity(n);
