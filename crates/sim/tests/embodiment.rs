@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::Fixed;
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::body::{
     apply_insult, Body, BodyParams, DamageModeRegistry, FluidRegistry, Insult, TissueRegistry,
     BLOOD, CUT,
@@ -72,7 +72,12 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
     let params = BodyParams::dev_default();
     let fluids = FluidRegistry::dev_default();
 
-    let mut body = Body::from_body_plan(&plan((3, 4), 4, 0), BLOOD, &params);
+    let mut body = Body::from_body_plan(
+        &plan((3, 4), 4, 0),
+        BLOOD,
+        &params,
+        &BodyPlanRegistry::dev_default(),
+    );
     let mut homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(3, 4));
 
     // Refresh integrity from the body (the derived mirror, design Part 35).

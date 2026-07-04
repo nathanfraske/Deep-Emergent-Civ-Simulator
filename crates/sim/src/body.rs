@@ -37,7 +37,11 @@
 //! development fixture; the tissue properties, the damage caps, and the fluid criticals are the
 //! owner's to set, never fabricated (Principle 11).
 
+use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawRegistry};
 use civsim_core::Fixed;
+use std::collections::BTreeMap;
+
+use crate::anatomy::BodyPlanRegistry;
 use civsim_physics::laws;
 
 use crate::anatomy::BodyPlan;
@@ -248,10 +252,11 @@ impl DamageModeRegistry {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FunctionId(pub u16);
 
-/// The dev-fixture functions.
+/// The dev-fixture functions. `F_STRIKE` retired in emergent-anatomy step one: a part's weapon function
+/// is derived from its geometry and material ([`Body::can_strike`]), not tagged. `F_SIGHT`, `F_LOCOMOTION`,
+/// and `F_VITAL_CORE` retire into physics predicates in the later increments.
 pub const F_LOCOMOTION: FunctionId = FunctionId(0);
 pub const F_SIGHT: FunctionId = FunctionId(1);
-pub const F_STRIKE: FunctionId = FunctionId(2);
 pub const F_VITAL_CORE: FunctionId = FunctionId(3);
 
 // ============================================================================================
@@ -372,14 +377,33 @@ pub struct BodyPart {
     pub mass: Fixed,
     /// Destruction is lethal (the torso, the head).
     pub vital: bool,
-    /// The functions this part provides (lost with it).
+    /// The functions this part provides (lost with it). A shrinking legacy vocabulary: a part's WEAPON
+    /// function is no longer tagged here but DERIVED from its geometry and material (emergent-anatomy step
+    /// one, [`Body::can_strike`]); the remaining tags (sight, locomotion, vital-core) retire into physics
+    /// predicates in the later increments.
     pub functions: Vec<FunctionId>,
     pub condition: PartCondition,
     /// The fluid vessel this part carries, breached by a deep wound.
     pub carries_fluid: Option<FluidKindId>,
+    /// The part's crude GEOMETRY (form-axis values, `mech.*`), carried so its function is a physics read
+    /// (emergent-anatomy step one). Populated from the kind's registry entry at build; absent axis reads
+    /// zero. A part with no geometry (an organ, a bare limb) reads no mechanical capability.
+    pub geometry: BTreeMap<String, Fixed>,
+    /// The part's crude MATERIAL (mechanical-floor axis values, `mat.*`), carried alongside the geometry.
+    pub material: BTreeMap<String, Fixed>,
 }
 
 impl BodyPart {
+    /// The part's value on a geometry axis, or zero if it carries none (the substrate absence convention).
+    pub fn geo(&self, axis: &str) -> Fixed {
+        self.geometry.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The part's value on a material axis, or zero if it carries none.
+    pub fn mat(&self, axis: &str) -> Fixed {
+        self.material.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
     /// The total tissue depth of the part (the sum of its layer thicknesses), the depth a cut must
     /// reach to sever it.
     pub fn depth(&self) -> Fixed {
@@ -436,6 +460,13 @@ pub struct BodyParams {
     /// The base tissue thickness of the torso at unit body mass. RESERVED. Basis: real tissue depths
     /// scaled allometrically.
     pub base_thickness: Fixed,
+    /// The reserved-with-basis capability references the function-law kernels read (the reference strike
+    /// and the reference target), RESERVED at their `capability.*` manifest homes (see [`CapabilityRefs`]),
+    /// a labelled dev fixture here until the body params read the manifest (emergent-anatomy step one).
+    pub capability_refs: CapabilityRefs,
+    /// The penetration-depth ceiling the PIERCE kernel saturates at. RESERVED. Basis: the floor's length
+    /// axis maximum (the same derive-from-floor-range discipline [`CapabilityCaps::derive`] uses).
+    pub capability_depth_max: Fixed,
 }
 
 impl BodyParams {
@@ -450,6 +481,8 @@ impl BodyParams {
             breach_bleed: Fixed::from_ratio(1, 20),
             torso_mass_fraction: Fixed::from_ratio(1, 2),
             base_thickness: Fixed::from_ratio(1, 20),
+            capability_refs: CapabilityRefs::dev_refs(),
+            capability_depth_max: Fixed::from_int(100),
         }
     }
 }
@@ -461,7 +494,12 @@ impl Body {
     /// and a mass share of the body. Deterministic, a pure function of the plan (Principle 1: the
     /// aggregate anatomy expands to this only when the individual is promoted). The tissue thicknesses
     /// and mass shares are reserved-with-basis; the covering's development thickens the outer layer.
-    pub fn from_body_plan(plan: &BodyPlan, fluid: FluidKindId, params: &BodyParams) -> Body {
+    pub fn from_body_plan(
+        plan: &BodyPlan,
+        fluid: FluidKindId,
+        params: &BodyParams,
+        registry: &BodyPlanRegistry,
+    ) -> Body {
         let mass = plan.body_mass.clamp(Fixed::ZERO, Fixed::ONE);
         // Tissue thickness scales with body mass; the covering thickens the outer hide layer.
         let base = params
@@ -538,6 +576,8 @@ impl Body {
             functions: vec![F_VITAL_CORE],
             condition: PartCondition::default(),
             carries_fluid: Some(fluid),
+            geometry: BTreeMap::new(),
+            material: BTreeMap::new(),
         });
         parts.push(BodyPart {
             kind: 1,
@@ -548,6 +588,8 @@ impl Body {
             functions: plan.senses.iter().map(|_| F_SIGHT).take(1).collect(),
             condition: PartCondition::default(),
             carries_fluid: Some(fluid),
+            geometry: BTreeMap::new(),
+            material: BTreeMap::new(),
         });
         for (i, &m) in plan.locomotion.iter().enumerate() {
             if m == 0 {
@@ -562,9 +604,17 @@ impl Body {
                 functions: vec![F_LOCOMOTION],
                 condition: PartCondition::default(),
                 carries_fluid: None,
+                geometry: BTreeMap::new(),
+                material: BTreeMap::new(),
             });
         }
         for (i, w) in plan.weapons.iter().enumerate() {
+            // The weapon carries its kind's crude geometry and material (a claw's small-area hard point),
+            // so its WEAPON function is DERIVED from physics ([`Body::can_strike`]) rather than tagged. A
+            // kind absent from the registry contributes no geometry, so it reads no weapon capability.
+            let kdef = registry.weapons.iter().find(|k| k.id == w.kind);
+            let geometry = kdef.map(|k| k.geometry.clone()).unwrap_or_default();
+            let material = kdef.map(|k| k.material.clone()).unwrap_or_default();
             parts.push(BodyPart {
                 kind: 20 + i as u16,
                 name: format!("weapon{i}"),
@@ -574,9 +624,11 @@ impl Body {
                 }],
                 mass: each.mul(Fixed::from_ratio(1, 4)),
                 vital: false,
-                functions: vec![F_STRIKE],
+                functions: vec![], // the weapon function is derived from the geometry+material below
                 condition: PartCondition::default(),
                 carries_fluid: None,
+                geometry,
+                material,
             });
         }
 
@@ -658,6 +710,29 @@ impl Body {
                                        // The wound seals a little each tick.
                 pool.bleed_rate = sub_floor(pool.bleed_rate, clot);
             }
+        }
+    }
+
+    /// Whether a part can STRIKE, DERIVED from its own geometry and material through the function-law
+    /// dispatch (emergent-anatomy step one), not read from an authored `F_STRIKE` tag. A hard point at
+    /// small contact area clears the reference target's hardness and reads a weapon; a blunt or soft part
+    /// does not. A pure physics read, blind to the part's kind, name, and the body's race (the Principle-9
+    /// steering guarantee): weapon-ness is a fact of the part's shape and stuff, not a label. Returns false
+    /// for an absent or destroyed part.
+    pub fn can_strike(&self, part_index: usize, params: &BodyParams) -> bool {
+        match self.parts.get(part_index) {
+            Some(p) if !p.destroyed() => {
+                let fns = FunctionLawRegistry::dev_seed();
+                let caps = CapabilityCaps {
+                    pressure: params.pressure_max,
+                    depth: params.capability_depth_max,
+                };
+                let geo = |axis: &str| p.geo(axis);
+                let mat = |axis: &str| p.mat(axis);
+                let v = derive_capabilities(&fns, &geo, &mat, &params.capability_refs, &caps);
+                v.score(FunctionLawRegistry::ID_PIERCE) > Fixed::ZERO
+            }
+            _ => false,
         }
     }
 
@@ -947,10 +1022,13 @@ pub fn strike(
     tissues: &TissueRegistry,
     params: &BodyParams,
 ) -> WoundRecord {
+    // The weapon gate is DERIVED from the part's physics (its PIERCE capability), not an authored tag
+    // (emergent-anatomy step one): a part contributes its striking mass only if its own geometry and
+    // material make it a weapon.
     let weapon_mass = attacker
         .parts
         .get(weapon_index)
-        .filter(|p| p.functions.contains(&F_STRIKE) && !p.destroyed())
+        .filter(|_| attacker.can_strike(weapon_index, params))
         .map(|p| p.mass)
         .unwrap_or(Fixed::ZERO);
     if weapon_mass <= Fixed::ZERO {
@@ -1035,7 +1113,12 @@ mod tests {
     }
 
     fn body() -> Body {
-        Body::from_body_plan(&plan((3, 4), 4, 1), BLOOD, &BodyParams::dev_default())
+        Body::from_body_plan(
+            &plan((3, 4), 4, 1),
+            BLOOD,
+            &BodyParams::dev_default(),
+            &BodyPlanRegistry::dev_default(),
+        )
     }
 
     #[test]
@@ -1075,8 +1158,18 @@ mod tests {
         // more-limbed body reaches and strikes harder; losing a limb weakens it.
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
-        let small = Body::from_body_plan(&plan((1, 8), 2, 0), BLOOD, &params);
-        let big = Body::from_body_plan(&plan((1, 1), 6, 0), BLOOD, &params);
+        let small = Body::from_body_plan(
+            &plan((1, 8), 2, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
+        let big = Body::from_body_plan(
+            &plan((1, 1), 6, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         assert!(
             big.reach() > small.reach(),
             "the bigger, more-limbed body reaches farther"
@@ -1086,7 +1179,12 @@ mod tests {
             "and is stronger"
         );
         // Amputation weakens the body (derived, not stored).
-        let mut b = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
+        let mut b = Body::from_body_plan(
+            &plan((1, 1), 4, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         let before = b.strength(&tissues);
         let limb = b
             .parts
@@ -1103,8 +1201,18 @@ mod tests {
     #[test]
     fn a_bigger_body_has_deeper_tissue() {
         let params = BodyParams::dev_default();
-        let small = Body::from_body_plan(&plan((1, 8), 4, 0), BLOOD, &params);
-        let big = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
+        let small = Body::from_body_plan(
+            &plan((1, 8), 4, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
+        let big = Body::from_body_plan(
+            &plan((1, 1), 4, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         let sd = small.parts[0].depth();
         let bd = big.parts[0].depth();
         assert!(
@@ -1334,13 +1442,23 @@ mod tests {
         let modes = DamageModeRegistry::dev_default();
         let tissues = TissueRegistry::dev_default();
         let params = BodyParams::dev_default();
-        let predator = Body::from_body_plan(&plan((1, 1), 4, 1), BLOOD, &params);
+        let predator = Body::from_body_plan(
+            &plan((1, 1), 4, 1),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         let weapon = predator
             .parts
             .iter()
             .position(|p| p.name.starts_with("weapon"))
             .unwrap();
-        let mut prey = Body::from_body_plan(&plan((1, 2), 4, 0), BLOOD, &params);
+        let mut prey = Body::from_body_plan(
+            &plan((1, 2), 4, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         let torso = prey.parts.iter().position(|p| p.name == "torso").unwrap();
         let rec = strike(
             &predator,
@@ -1365,7 +1483,12 @@ mod tests {
         );
 
         // A weaponless body strikes nothing.
-        let unarmed = Body::from_body_plan(&plan((1, 1), 4, 0), BLOOD, &params);
+        let unarmed = Body::from_body_plan(
+            &plan((1, 1), 4, 0),
+            BLOOD,
+            &params,
+            &BodyPlanRegistry::dev_default(),
+        );
         let rec2 = strike(
             &unarmed,
             0,
@@ -1383,6 +1506,33 @@ mod tests {
             rec2.severity,
             Fixed::ZERO,
             "a body with no weapon part strikes for nothing"
+        );
+    }
+
+    #[test]
+    fn can_strike_is_derived_from_the_parts_physics_not_a_tag() {
+        // Emergent-anatomy step one: weapon-ness is a physics read, not an authored F_STRIKE tag. A body
+        // built with one weapon part reads can_strike TRUE on the weapon (its hard sharp geometry clears
+        // the reference target) and FALSE on the torso and a limb (no weapon geometry). No F_STRIKE tag
+        // is involved; the verdict is a pure read of each part's geometry and material.
+        let params = BodyParams::dev_default();
+        let reg = BodyPlanRegistry::dev_default();
+        let body = Body::from_body_plan(&plan((3, 4), 4, 1), BLOOD, &params, &reg);
+        // Parts in build order: torso 0, head 1, limbs 2..6, weapon 6 (four legs, one weapon).
+        let weapon_index = body.parts.len() - 1;
+        assert_eq!(body.parts[weapon_index].name, "weapon0");
+        assert!(
+            body.can_strike(weapon_index, &params),
+            "the weapon part is a weapon by its physics"
+        );
+        assert!(
+            !body.can_strike(0, &params),
+            "the torso is no weapon (it carries no weapon geometry)"
+        );
+        assert!(!body.can_strike(2, &params), "a bare limb is no weapon");
+        assert!(
+            !body.can_strike(999, &params),
+            "an absent part is no weapon"
         );
     }
 

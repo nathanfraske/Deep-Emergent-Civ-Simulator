@@ -34,6 +34,7 @@ use civsim_sim::anatomy::{
     sample_body_plan, BodyPlan, BodyPlanRegistry, Part, Temperament, WorldProfile,
 };
 use civsim_sim::biosphere::{grounded, Niche, SourceRef, Species};
+use civsim_sim::body::{Body, BodyParams, BLOOD};
 use civsim_sim::genome::{GenePool, SchemeId};
 use civsim_sim::homeostasis::{birth_viable, Homeostasis, HomeostaticRegistry, ENERGY};
 use civsim_sim::lineage::SpeciesId;
@@ -274,4 +275,55 @@ fn culling_the_reserveless_selects_no_body_mass_class() {
         viable > 0 && nonviable > 0,
         "the cull is non-trivial and non-total: {viable} viable, {nonviable} nonviable"
     );
+}
+
+#[test]
+fn a_parts_weapon_function_is_a_pure_physics_read_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one, the derive-not-tag steering guarantee extended to CAPABILITY: a part's
+    // weapon function is DERIVED from its own geometry and material (Body::can_strike over the compose
+    // function-law dispatch), never from an authored F_STRIKE tag, and the read keys on no layer, kingdom,
+    // niche, or race. The proof: the SAME weapon (a claws part, kind 0) reads the identical can_strike
+    // whatever the body around it, because the derive reads only the weapon part's physics.
+    let params = BodyParams::dev_default();
+    let reg = BodyPlanRegistry::dev_default();
+
+    // Two bodies sharing one weapon (claws, kind 0) but differing wildly in every other trait: a light
+    // bare producer-shaped body and a heavy armored one with extra organs. can_strike on the weapon must
+    // be identical, because the surrounding body, its mass, its armor, and its notional layer do not enter
+    // the read.
+    let light = body(
+        (1, 50),
+        (0, 1),
+        vec![part(0, (1, 2))],
+        vec![part(FAT_BODY, (1, 8))],
+    );
+    let heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![part(0, (1, 2))],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    let bl = Body::from_body_plan(&light, BLOOD, &params, &reg);
+    let bh = Body::from_body_plan(&heavy, BLOOD, &params, &reg);
+    let wl = bl.parts.len() - 1;
+    let wh = bh.parts.len() - 1;
+    assert!(
+        bl.can_strike(wl, &params),
+        "the claws part is a weapon by its physics"
+    );
+    assert_eq!(
+        bl.can_strike(wl, &params),
+        bh.can_strike(wh, &params),
+        "the same weapon reads the same can_strike whatever the body, mass, armor, or layer around it"
+    );
+
+    // A body carrying no weapon reads no strike, again by physics (no weapon geometry), not a missing tag.
+    let unarmed = body((1, 1), (1, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    let bu = Body::from_body_plan(&unarmed, BLOOD, &params, &reg);
+    for i in 0..bu.parts.len() {
+        assert!(
+            !bu.can_strike(i, &params),
+            "no part of a weaponless body strikes: weapon-ness is a physics read, not a tag"
+        );
+    }
 }

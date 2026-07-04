@@ -995,7 +995,7 @@ mod tests {
 #[cfg(test)]
 mod capability_gate_tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, Part, Temperament};
+    use crate::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
     use crate::body::{BodyParams, BLOOD, F_LOCOMOTION, F_VITAL_CORE};
 
     // FIXTURE values, never read from the manifest.
@@ -1030,7 +1030,12 @@ mod capability_gate_tests {
     }
 
     fn body() -> Body {
-        Body::from_body_plan(&plan((3, 4), 4), BLOOD, &BodyParams::dev_default())
+        Body::from_body_plan(
+            &plan((3, 4), 4),
+            BLOOD,
+            &BodyParams::dev_default(),
+            &BodyPlanRegistry::dev_default(),
+        )
     }
 
     #[test]
