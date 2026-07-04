@@ -327,3 +327,65 @@ fn a_parts_weapon_function_is_a_pure_physics_read_with_no_layer_or_race_key() {
         );
     }
 }
+
+#[test]
+fn locomotion_and_sight_are_pure_physics_reads_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one, the derive-not-tag steering guarantee for the limb and optical-sense
+    // reads: a part's LOCOMOTION function (Body::can_move, the LOCOMOTE law) and its SIGHT function
+    // (Body::can_sense, the REFRACT law) are DERIVED from its own geometry and material, never an
+    // F_LOCOMOTION or F_SIGHT tag, and the read keys on no layer, kingdom, niche, or race.
+    let params = BodyParams::dev_default();
+    let reg = BodyPlanRegistry::dev_default();
+
+    // Two bodies sharing one walking limb (locomotion mode 1) but differing wildly in mass, armor, and
+    // organs. can_move on the limb must be identical: the read is the limb's own physics, not the body.
+    let mut light = body((1, 50), (0, 1), vec![], vec![part(FAT_BODY, (1, 8))]);
+    light.locomotion = vec![1];
+    let mut heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    heavy.locomotion = vec![1];
+    let bl = Body::from_body_plan(&light, BLOOD, &params, &reg);
+    let bh = Body::from_body_plan(&heavy, BLOOD, &params, &reg);
+    let ll = bl.parts.iter().position(|p| p.name == "limb0").unwrap();
+    let lh = bh.parts.iter().position(|p| p.name == "limb0").unwrap();
+    assert!(
+        bl.can_move(ll, &params),
+        "a walking limb is a locomotor by its physics"
+    );
+    assert_eq!(
+        bl.can_move(ll, &params),
+        bh.can_move(lh, &params),
+        "the same limb reads the same can_move whatever the body, mass, armor, or layer around it"
+    );
+    // The torso is no limb (no section modulus): can_move false, by physics.
+    let torso = bl.parts.iter().position(|p| p.name == "torso").unwrap();
+    assert!(
+        !bl.can_move(torso, &params),
+        "the torso bears no load-bearing limb geometry"
+    );
+
+    // A rooted-only body grows no limb, so no part reads a locomotor: not by a missing tag, by physics.
+    let mut sessile = body((1, 4), (0, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    sessile.locomotion = vec![0]; // the rooted mark
+    let bs = Body::from_body_plan(&sessile, BLOOD, &params, &reg);
+    for i in 0..bs.parts.len() {
+        assert!(
+            !bs.can_move(i, &params),
+            "a rooted body has no locomotor part"
+        );
+    }
+
+    // Sight: the head carries the first sense's optical material, so a vision head (kind 0, index 1.4)
+    // reads an eye; the read is the head's own physics, invariant to the body around it.
+    assert!(
+        bl.can_sense(
+            bl.parts.iter().position(|p| p.name == "head").unwrap(),
+            &params
+        ),
+        "a head bearing a lens (refractive index above the medium) sees, by physics"
+    );
+}

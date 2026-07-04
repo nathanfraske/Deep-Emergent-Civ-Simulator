@@ -340,30 +340,129 @@ impl BodyPlanRegistry {
                 ("stone-skin", true),
                 ("phase-hide", true),
             ]),
-            senses: defs(&[
-                ("vision", false),
-                ("smell", false),
-                ("hearing", false),
-                ("vibration", false),
-                ("echolocation", false),
-                ("electroreception", false),
+            // Senses carry crude optical material (a refractive index) so an optical sense's SIGHT function
+            // is derived from physics (a lens denser than the medium focuses). The optical channel is the
+            // one wired in step one; the acoustic, chemical, and field senses read no optical contrast and
+            // are their own kernels (a documented follow-on), so they carry a placeholder index for now.
+            senses: kinds(&[
+                ("vision", false, &[], &[("opt.refractive_index", "1.4")]),
+                ("smell", false, &[], &[("opt.refractive_index", "1.05")]),
+                ("hearing", false, &[], &[("opt.refractive_index", "1.05")]),
+                ("vibration", false, &[], &[("opt.refractive_index", "1.05")]),
+                (
+                    "echolocation",
+                    false,
+                    &[],
+                    &[("opt.refractive_index", "1.05")],
+                ),
+                (
+                    "electroreception",
+                    false,
+                    &[],
+                    &[("opt.refractive_index", "1.05")],
+                ),
                 // Magical.
-                ("mana-sight", true),
-                ("aura-sense", true),
+                ("mana-sight", true, &[], &[("opt.refractive_index", "1.3")]),
+                ("aura-sense", true, &[], &[("opt.refractive_index", "1.05")]),
             ]),
-            locomotion: defs(&[
-                ("rooted", false), // sessile: the mark of a plant, not a locomotion mode as such
-                ("walk", false),
-                ("run", false),
-                ("climb", false),
-                ("swim", false),
-                ("fly", false),
-                ("glide", false),
-                ("burrow", false),
-                ("slither", false),
+            // Locomotion modes carry crude LIMB geometry (a section modulus and length) and material (a
+            // bony yield strength), so a mode's LOCOMOTION function is derived from physics (a limb that
+            // bears its propulsive load can push off). The rooted mark carries none (not a limb), so it
+            // reads no locomotor capability. Labelled fixtures inside the floor axis ranges (cortical bone
+            // ~150 MPa yield).
+            locomotion: kinds(&[
+                ("rooted", false, &[], &[]), // sessile: the mark of a plant, no limb
+                (
+                    "walk",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.0001"),
+                        ("mech.arm_length", "0.3"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "run",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00012"),
+                        ("mech.arm_length", "0.35"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "climb",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00008"),
+                        ("mech.arm_length", "0.25"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "swim",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00006"),
+                        ("mech.arm_length", "0.4"),
+                    ],
+                    &[("mat.yield_strength", "80")],
+                ),
+                (
+                    "fly",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "glide",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "burrow",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.0001"),
+                        ("mech.arm_length", "0.15"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "slither",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00005"),
+                        ("mech.arm_length", "0.6"),
+                    ],
+                    &[("mat.yield_strength", "40")],
+                ),
                 // Magical.
-                ("levitate", true),
-                ("blink", true),
+                (
+                    "levitate",
+                    true,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "blink",
+                    true,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
             ]),
             organs: organ_defs(&[
                 // (name, fantasy, &[(biology-floor axis id, value)]). Function is derived from the

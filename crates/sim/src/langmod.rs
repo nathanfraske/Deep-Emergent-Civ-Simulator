@@ -996,7 +996,7 @@ mod tests {
 mod capability_gate_tests {
     use super::*;
     use crate::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
-    use crate::body::{BodyParams, BLOOD, F_LOCOMOTION, F_VITAL_CORE};
+    use crate::body::{BodyParams, BLOOD, F_VITAL_CORE};
 
     // FIXTURE values, never read from the manifest.
     const VOICE: SenseChannelId = SenseChannelId(1); // the reception channel a voice fills (hearing)
@@ -1171,19 +1171,27 @@ mod capability_gate_tests {
 
     #[test]
     fn a_manual_channel_degrades_gracefully_as_limbs_are_lost() {
-        // A signed channel produced through the locomotion limbs: losing one of four weakens the
-        // channel (the mean of bearers) without erasing it, and perception can still be the limiter.
+        // A signed channel produced through the DERIVED limbs (emergent-anatomy step one): a limb is a
+        // limb by its physics, so losing one of four weakens the manual production (the mean of the limb
+        // bearers) without erasing it, and perception can still be the limiter. The manual channel's gate
+        // is the Liebig minimum of perception and the derived limb integrity.
         let mut b = body();
         let sens = Sensorium::with([(VOICE, Fixed::ONE)]);
-        let intact = capability_gate(&b, F_LOCOMOTION, &sens, VOICE, LOSS_THRESHOLD);
-        assert_eq!(intact, Fixed::ONE, "four intact limbs sign at full");
+        let gate = |body: &Body| {
+            CapabilityGate {
+                perception: sens.reads(VOICE).unwrap_or(Fixed::ZERO),
+                production: body.locomotor_integrity(LOSS_THRESHOLD),
+            }
+            .gate()
+        };
+        assert_eq!(gate(&b), Fixed::ONE, "four intact limbs sign at full");
         let limb = b
             .parts
             .iter()
             .position(|p| p.name.starts_with("limb"))
             .unwrap();
         b.parts[limb].condition.severed = true;
-        let degraded = capability_gate(&b, F_LOCOMOTION, &sens, VOICE, LOSS_THRESHOLD);
+        let degraded = gate(&b);
         assert!(
             degraded > Fixed::ZERO && degraded < Fixed::ONE,
             "losing one limb weakens the manual channel without silencing it ({degraded:?})"
@@ -1202,24 +1210,24 @@ mod capability_gate_tests {
 
     #[test]
     fn the_acquisition_split_is_perceive_minus_produce_and_mirrors_on_swap_no_raceid() {
-        // A being strong in perception, weak in production: a full ear, a manual channel weakened by
-        // a lost limb (production degraded below full, perception intact). The split is the perceive
-        // minus produce gap, positive: the receptive-bilingual asymmetry falls out of the gap, not
-        // an authored bias. The function reads no race id.
+        // A being strong in perception, weak in production: a full ear, a voice weakened by a wound to
+        // the vital-core articulator (production degraded below full, perception intact). The split is the
+        // perceive minus produce gap, positive: the receptive-bilingual asymmetry falls out of the gap,
+        // not an authored bias. The function reads no race id.
         let mut perceptive = body();
-        let limb = perceptive
+        let torso = perceptive
             .parts
             .iter()
-            .position(|p| p.name.starts_with("limb"))
+            .position(|p| p.name == "torso")
             .unwrap();
-        perceptive.parts[limb].condition.severed = true;
+        perceptive.parts[torso].condition.integrity = Fixed::from_ratio(3, 4);
         let full_ear = Sensorium::with([(VOICE, Fixed::ONE)]);
-        let halves = capability_halves(&perceptive, F_LOCOMOTION, &full_ear, VOICE, LOSS_THRESHOLD);
+        let halves = capability_halves(&perceptive, F_VITAL_CORE, &full_ear, VOICE, LOSS_THRESHOLD);
         assert!(
             halves.perception > halves.production,
             "a keen ear, a weakened voice"
         );
-        let split = acquisition_split(&perceptive, F_LOCOMOTION, &full_ear, VOICE, LOSS_THRESHOLD);
+        let split = acquisition_split(&perceptive, F_VITAL_CORE, &full_ear, VOICE, LOSS_THRESHOLD);
         assert!(
             split > Fixed::ZERO,
             "the receptive learner: perceive outstrips produce"
@@ -1231,7 +1239,7 @@ mod capability_gate_tests {
         let prod = halves.production;
         let intact = body();
         let tuned_ear = Sensorium::with([(VOICE, prod)]);
-        let mirror = acquisition_split(&intact, F_LOCOMOTION, &tuned_ear, VOICE, LOSS_THRESHOLD);
+        let mirror = acquisition_split(&intact, F_VITAL_CORE, &tuned_ear, VOICE, LOSS_THRESHOLD);
         assert_eq!(
             mirror.to_bits(),
             -split.to_bits(),
@@ -1241,12 +1249,12 @@ mod capability_gate_tests {
         // Equal halves split to zero: a full voice and a full ear.
         let full = body();
         let matched = Sensorium::with([(VOICE, Fixed::ONE)]);
-        let zero = acquisition_split(&full, F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
+        let zero = acquisition_split(&full, F_VITAL_CORE, &matched, VOICE, LOSS_THRESHOLD);
         assert_eq!(zero, Fixed::ZERO, "equal halves split zero");
 
         // Two races with identical body and sensorium data split identically: no race id enters.
-        let a = acquisition_split(&body(), F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
-        let b = acquisition_split(&body(), F_LOCOMOTION, &matched, VOICE, LOSS_THRESHOLD);
+        let a = acquisition_split(&body(), F_VITAL_CORE, &matched, VOICE, LOSS_THRESHOLD);
+        let b = acquisition_split(&body(), F_VITAL_CORE, &matched, VOICE, LOSS_THRESHOLD);
         assert_eq!(a, b, "identical data splits to identical bits");
     }
 }

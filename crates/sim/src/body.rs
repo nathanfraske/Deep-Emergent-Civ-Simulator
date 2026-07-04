@@ -37,7 +37,9 @@
 //! development fixture; the tissue properties, the damage caps, and the fluid criticals are the
 //! owner's to set, never fabricated (Principle 11).
 
-use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawRegistry};
+use civsim_compose::{
+    derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawId, FunctionLawRegistry,
+};
 use civsim_core::Fixed;
 use std::collections::BTreeMap;
 
@@ -252,11 +254,11 @@ impl DamageModeRegistry {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FunctionId(pub u16);
 
-/// The dev-fixture functions. `F_STRIKE` retired in emergent-anatomy step one: a part's weapon function
-/// is derived from its geometry and material ([`Body::can_strike`]), not tagged. `F_SIGHT`, `F_LOCOMOTION`,
-/// and `F_VITAL_CORE` retire into physics predicates in the later increments.
-pub const F_LOCOMOTION: FunctionId = FunctionId(0);
-pub const F_SIGHT: FunctionId = FunctionId(1);
+/// The dev-fixture functions. `F_STRIKE` (weapon), `F_LOCOMOTION` (limb), and `F_SIGHT` (optical sense)
+/// are all RETIRED in emergent-anatomy step one: a part's weapon, locomotion, and sight functions are
+/// derived from its geometry and material ([`Body::can_strike`], [`Body::can_move`], [`Body::can_sense`]),
+/// never tagged. `F_VITAL_CORE` remains as the structural host role (the torso hosts the vital organs),
+/// not a physics capability; it retires when the organ-hosting read is derived.
 pub const F_VITAL_CORE: FunctionId = FunctionId(3);
 
 // ============================================================================================
@@ -585,27 +587,41 @@ impl Body {
             tissues: head_layers,
             mass: each,
             vital: true,
-            functions: plan.senses.iter().map(|_| F_SIGHT).take(1).collect(),
+            functions: vec![], // the sense function is derived from the head's optical material below
             condition: PartCondition::default(),
             carries_fluid: Some(fluid),
             geometry: BTreeMap::new(),
-            material: BTreeMap::new(),
+            // The head carries its first sense kind's optical material, so its SIGHT function is derived
+            // from physics ([`Body::can_sense`]) rather than an F_SIGHT tag.
+            material: plan
+                .senses
+                .first()
+                .and_then(|s| registry.senses.iter().find(|k| k.id == s.kind))
+                .map(|k| k.material.clone())
+                .unwrap_or_default(),
         });
         for (i, &m) in plan.locomotion.iter().enumerate() {
             if m == 0 {
                 continue; // the rooted mark is not a limb
             }
+            // The limb carries its mode's crude geometry and material (a section modulus, a length, a bony
+            // yield), so its LOCOMOTION function is DERIVED from physics ([`Body::can_move`], [`Body::reach`])
+            // rather than tagged. A mode absent from the registry contributes no geometry, so it reads no
+            // locomotor capability.
+            let ldef = registry.locomotion.iter().find(|k| k.id == m);
+            let geometry = ldef.map(|k| k.geometry.clone()).unwrap_or_default();
+            let material = ldef.map(|k| k.material.clone()).unwrap_or_default();
             parts.push(BodyPart {
                 kind: 10 + i as u16,
                 name: format!("limb{i}"),
                 tissues: limb_layers.clone(),
                 mass: each,
                 vital: false,
-                functions: vec![F_LOCOMOTION],
+                functions: vec![], // the locomotion function is derived from the geometry+material below
                 condition: PartCondition::default(),
                 carries_fluid: None,
-                geometry: BTreeMap::new(),
-                material: BTreeMap::new(),
+                geometry,
+                material,
             });
         }
         for (i, w) in plan.weapons.iter().enumerate() {
@@ -720,6 +736,14 @@ impl Body {
     /// steering guarantee): weapon-ness is a fact of the part's shape and stuff, not a label. Returns false
     /// for an absent or destroyed part.
     pub fn can_strike(&self, part_index: usize, params: &BodyParams) -> bool {
+        self.part_capability(part_index, FunctionLawRegistry::ID_PIERCE, params) > Fixed::ZERO
+    }
+
+    /// The `[0, 1]` capability a part reads on one function law, DERIVED from its geometry and material
+    /// through the function-law dispatch (emergent-anatomy step one), zero for an absent or destroyed part.
+    /// The general derive-not-tag read the per-function predicates ([`Self::can_strike`], [`Self::can_move`],
+    /// [`Self::can_sense`]) threshold over.
+    fn part_capability(&self, part_index: usize, law: FunctionLawId, params: &BodyParams) -> Fixed {
         match self.parts.get(part_index) {
             Some(p) if !p.destroyed() => {
                 let fns = FunctionLawRegistry::dev_seed();
@@ -729,22 +753,36 @@ impl Body {
                 };
                 let geo = |axis: &str| p.geo(axis);
                 let mat = |axis: &str| p.mat(axis);
-                let v = derive_capabilities(&fns, &geo, &mat, &params.capability_refs, &caps);
-                v.score(FunctionLawRegistry::ID_PIERCE) > Fixed::ZERO
+                derive_capabilities(&fns, &geo, &mat, &params.capability_refs, &caps).score(law)
             }
-            _ => false,
+            _ => Fixed::ZERO,
         }
     }
 
+    /// Whether a part can MOVE (is a load-bearing limb), DERIVED from its geometry and material through the
+    /// LOCOMOTE law, not an authored `F_LOCOMOTION` tag. A limb that bears its propulsive load reads a
+    /// locomotor; an organ or a bare hide (no section modulus) does not. A pure physics read, blind to the
+    /// part's kind and the body's race.
+    pub fn can_move(&self, part_index: usize, params: &BodyParams) -> bool {
+        self.part_capability(part_index, FunctionLawRegistry::ID_LOCOMOTE, params) > Fixed::ZERO
+    }
+
+    /// Whether a part can SENSE (is an optical transducer), DERIVED from its refractive index through the
+    /// REFRACT law, not an authored `F_SIGHT` tag. A lens denser than the medium focuses light and reads a
+    /// sense; a medium-matched tissue does not. The optical channel only (the honest limit the REFRACT law
+    /// notes); the other sense channels are their own laws.
+    pub fn can_sense(&self, part_index: usize, params: &BodyParams) -> bool {
+        self.part_capability(part_index, FunctionLawRegistry::ID_REFRACT, params) > Fixed::ZERO
+    }
+
     /// The physics-derived reach of the body: the summed limb-segment lengths through the resolved
-    /// `reach` law (R-BUILD-PHYS: a mechanical stat measured from the body, not an authored one). The
-    /// limb tissue depth stands in for the segment length here.
-    pub fn reach(&self) -> Fixed {
-        let segments: Vec<Fixed> = self
-            .parts
-            .iter()
-            .filter(|p| p.functions.contains(&F_LOCOMOTION) && !p.destroyed())
-            .map(|p| p.depth())
+    /// `reach` law (R-BUILD-PHYS: a mechanical stat measured from the body, not an authored one). A limb is
+    /// DERIVED from its physics ([`Self::can_move`], the LOCOMOTE law) rather than an `F_LOCOMOTION` tag;
+    /// the limb tissue depth stands in for the segment length.
+    pub fn reach(&self, params: &BodyParams) -> Fixed {
+        let segments: Vec<Fixed> = (0..self.parts.len())
+            .filter(|&i| self.can_move(i, params))
+            .map(|i| self.parts[i].depth())
             .collect();
         laws::reach(&segments)
     }
@@ -805,6 +843,33 @@ impl Body {
         }
         if count == 0 {
             return Fixed::ZERO; // the body bears no such function: no production
+        }
+        let mean = sum.div(Fixed::from_int(count));
+        loss_knee(mean, function_loss_threshold)
+    }
+
+    /// The manual-articulator integrity: the kneed mean intact-integrity of the body's DERIVED limbs, the
+    /// production half a signed or gestural language channel reads (emergent-anatomy step one). A limb is
+    /// identified by its own physics (it carries the load-bearing `mech.section_modulus` geometry the
+    /// LOCOMOTE law reads) rather than an `F_LOCOMOTION` tag; a destroyed limb counts as a zero-integrity
+    /// bearer, so losing one of several weakens the channel without silencing it, exactly as
+    /// [`Self::function_integrity`]'s redundancy semantics did for the retired tag.
+    pub fn locomotor_integrity(&self, function_loss_threshold: Fixed) -> Fixed {
+        let mut sum = Fixed::ZERO;
+        let mut count = 0i32;
+        for p in &self.parts {
+            if p.geo("mech.section_modulus") > Fixed::ZERO {
+                let eff = if p.destroyed() {
+                    Fixed::ZERO
+                } else {
+                    p.condition.integrity
+                };
+                sum = sum.saturating_add(eff);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Fixed::ZERO; // no limb: no manual production
         }
         let mean = sum.div(Fixed::from_int(count));
         loss_knee(mean, function_loss_threshold)
@@ -1171,7 +1236,7 @@ mod tests {
             &BodyPlanRegistry::dev_default(),
         );
         assert!(
-            big.reach() > small.reach(),
+            big.reach(&params) > small.reach(&params),
             "the bigger, more-limbed body reaches farther"
         );
         assert!(
@@ -1576,18 +1641,21 @@ mod tests {
             Fixed::ZERO,
             "a function the body does not bear produces nothing"
         );
-        // Redundant bearers degrade gracefully: destroy one of the four locomotion limbs and the
-        // mean stays above the threshold, so the manual function is weakened, not lost.
+        // Redundant limbs degrade gracefully, now through the DERIVED locomotion read (emergent-anatomy
+        // step one): a limb is a limb by its physics, so severing one of the four drops it out of the
+        // derived reach (its capability is gone), weakening the locomotion function without erasing it.
+        let params = BodyParams::dev_default();
+        let full_reach = b.reach(&params);
         let limb = b
             .parts
             .iter()
             .position(|p| p.name.starts_with("limb"))
             .unwrap();
         b.parts[limb].condition.severed = true;
-        let degraded = b.function_integrity(F_LOCOMOTION, thr);
+        let degraded = b.reach(&params);
         assert!(
-            degraded > Fixed::ZERO && degraded < Fixed::ONE,
-            "losing one of several limbs weakens but does not erase the function ({degraded:?})"
+            degraded > Fixed::ZERO && degraded < full_reach,
+            "losing one of several limbs weakens but does not erase the derived reach ({degraded:?})"
         );
         // Wound the single vital-core bearer below the threshold: the function is lost, floored.
         let torso = b.parts.iter().position(|p| p.name == "torso").unwrap();
