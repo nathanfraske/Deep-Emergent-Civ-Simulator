@@ -11,6 +11,16 @@
 
 Reverse-chronological. Each session appends one entry at the top: what was done, what changed in the documents, where it stopped, and what is queued next. Read the top entry first to recover state. Never rewrite past entries; append. Full detail for earlier sessions lives in the session transcripts.
 
+---
+
+## 2026-07-04: the world-wiring arc merged to main (PR #86), verified green on CPU and the 5090 GPU
+
+The agent-built world-wiring arc (branch `claude/world-wiring-handoff-t0u76v`) merged to `main` as PR #86 (merge `b6e723f`). It lands the production scenario-to-Runner assembly (`crates/sim/src/worldbuild.rs`, `build_dawn_runner`), increment 2 in full (2a the Sensorium acuity/resolution split (WP5), 2b the per-race articulation data home, 2c the producibility threshold, 2d the phoneme_priors-to-FormSystem bridge, 2e the founder arming), and increments 3 through 10 Part A: speciation from genetic incompatibility (WP1), the belief-diffusion beat, reproduction (the keystone, so a run grows rather than only shrinks), the enculturation beat, technique transmission, memory-scaled retention (WP3), personality shaping the chosen action (WP4), and post-dawn generational drift from the census (10A). Increment 2 followed the notes surfaced when the "S to M" estimate proved wrong: the phonology bridge is a substrate build, not a thin arming.
+
+Verified on merged main by the GPU-access session: the workspace builds; `civsim-sim`/`civsim-physics`/`civsim-core` pass with no failures; `cargo fmt --all --check`, `cargo clippy --workspace --exclude civsim-gpu`, and `scripts/verify.sh` are clean; the manifest and every canonical scenario resolve. The GPU oracle gate passes on the RTX 5090 (`CIVSIM_GPU=1`): both cross-vendor bit-identity tests (`stage0_arithmetic_agrees_across_cuda_and_cpu_backends` and `stage0_arithmetic_agrees_on_wgpu_spirv_backend`) and the field-stencil and worldgen device tests, so the merged tick-loop changes did not disturb the pinned Q32.32 kernels' bit-identity with the `civsim_core::Fixed` oracle.
+
+NEXT: world-wiring increment 10 Part B (the physiology producers into the Runner embodiment step), per the pickup banner at the top of this file and `WORLD_WIRING_HANDOFF.md` increment 10. Then the remaining emergence work.
+
 
 ---
 
