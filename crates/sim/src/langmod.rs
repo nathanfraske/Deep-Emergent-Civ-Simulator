@@ -138,9 +138,10 @@ impl PerceptualGeometry {
 /// absorption reference beta; `path` is a typical propagation path; and the being's per-channel
 /// resolution is read from its `sensorium` on `channel` as the just-noticeable frequency difference.
 ///
-/// Returns `None` when the sensorium cannot read the channel (a being blind to the channel has no
-/// perceptual geometry on it, the sensorium's channel gate) or reads it with a non-positive
-/// resolution.
+/// Returns `None` when the sensorium has no resolution set for the channel (a being that cannot
+/// discriminate on the channel has no perceptual geometry on it, the sensorium's resolution gate) or
+/// carries a non-positive resolution. The resolution is the discrimination side of the sensorium,
+/// distinct from the `[0, ONE]` acuity gate the perception beat reads (the R-SENSORIUM split).
 pub fn perceptual_geometry(
     lengths: &[Fixed],
     sound_speed: Fixed,
@@ -151,8 +152,10 @@ pub fn perceptual_geometry(
     params: PerceptualParams,
 ) -> Option<PerceptualGeometry> {
     // The per-channel resolution, read as the just-noticeable frequency difference: a sharper channel
-    // carries a smaller value. A channel the sensorium does not read gates perception off entirely.
-    let jnd = sensorium.reads(channel)?;
+    // carries a smaller value. Read from the sensorium's RESOLUTION map, distinct from the `[0, ONE]`
+    // acuity gate the perception beat and capability_halves read (the R-SENSORIUM acuity/resolution
+    // split): a channel with no resolution set gates the geometry off entirely.
+    let jnd = sensorium.resolution(channel)?;
     if jnd <= Fixed::ZERO {
         return None;
     }
@@ -426,9 +429,10 @@ mod tests {
     }
 
     /// A hearing sensorium whose per-channel resolution (the just-noticeable frequency difference) is
-    /// `jnd`.
+    /// `jnd`. The value is a RESOLUTION, not an acuity, so it is set on the resolution map that
+    /// perceptual_geometry reads (the R-SENSORIUM split).
     fn ear(jnd: Fixed) -> Sensorium {
-        Sensorium::with([(HEARING, jnd)])
+        Sensorium::with_resolution([(HEARING, jnd)])
     }
 
     fn ratio(n: i64, d: i64) -> Fixed {
@@ -793,6 +797,58 @@ mod capability_gate_tests {
             ga,
             Fixed::from_ratio(3, 4),
             "here perception limits: an intact voice, a keen-but-imperfect ear"
+        );
+    }
+
+    #[test]
+    fn one_sensorium_feeds_acuity_to_the_gate_and_resolution_to_the_geometry() {
+        // The R-SENSORIUM acuity/resolution split (WP5) end to end: a single sensorium carries a full
+        // acuity gate AND a Hz-scale just-noticeable difference on the same voice channel.
+        // capability_halves reads the acuity, perceptual_geometry reads the resolution, and neither
+        // reads the other's quantity, so the value that is a valid acuity (one) does not corrupt the
+        // geometry as an implausible one-hertz JND, and the 50 Hz resolution does not clamp the gate.
+        let jnd = Fixed::from_int(50); // 50 Hz: a plausible JND, an implausible acuity
+        let sens = Sensorium::with([(VOICE, Fixed::ONE)]).and_resolution([(VOICE, jnd)]);
+
+        // The production-perception half reads the acuity gate (one), not the 50 Hz resolution.
+        let halves = capability_halves(&body(), F_VITAL_CORE, &sens, VOICE, LOSS_THRESHOLD);
+        assert_eq!(
+            halves.perception,
+            Fixed::ONE,
+            "capability reads the acuity gate, not the JND"
+        );
+
+        // The perceptual geometry reads the resolution (50 Hz), and gates on the resolution field: an
+        // acuity-only sensorium (no resolution) yields no geometry, proving the geometry does not read
+        // the acuity map.
+        let lengths = [
+            Fixed::from_ratio(17, 100),
+            Fixed::from_ratio(15, 100),
+            Fixed::from_ratio(13, 100),
+        ];
+        let sound_speed = laws::speed_of_sound(
+            Fixed::from_ratio(142, 1000),
+            Fixed::from_ratio(1225, 1000),
+            Fixed::from_int(100000),
+        );
+        let params = PerceptualParams {
+            modes: 3,
+            freq_max: Fixed::from_int(100000),
+            alpha_max: Fixed::from_int(10),
+            tau_max: Fixed::from_int(100),
+            confusability_cap: Fixed::from_int(1000),
+        };
+        let beta = Fixed::from_ratio(1, 100000000);
+        let path = Fixed::from_int(10);
+        assert!(
+            perceptual_geometry(&lengths, sound_speed, beta, path, &sens, VOICE, params).is_some(),
+            "the resolution feeds a perceptual geometry"
+        );
+        let acuity_only = Sensorium::with([(VOICE, Fixed::ONE)]);
+        assert!(
+            perceptual_geometry(&lengths, sound_speed, beta, path, &acuity_only, VOICE, params)
+                .is_none(),
+            "an acuity gate with no resolution yields no geometry: the geometry reads the resolution"
         );
     }
 
