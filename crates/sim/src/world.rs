@@ -49,14 +49,14 @@ use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, Rin
 use crate::belief::{BeliefKey, BeliefPool};
 use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
-use crate::census::ReproductiveCensus;
+use crate::census::{ReproductiveCensus, ReproductiveMoments};
 use crate::clock::LIFE_CADENCE_TICKS;
 use crate::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
 use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::genome::{Channel, Genome, ReproductionMode};
+use crate::genome::{Channel, GenePool, Genome, ReproductionMode};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
@@ -521,6 +521,11 @@ pub struct World {
     /// The reproduction calibrations (design Parts 25, 28, R-REPRO). None until set; the reproduce
     /// half of the life cadence is then a no-op, so a world that installs none only ages and dies.
     reproduction: Option<ReproductionParams>,
+    /// Whether the post-dawn generational drift beat is armed (design Part 25.10, R-REPRO, audit
+    /// deviation 23, world-wiring increment 10). False by default, so a world runs exactly as before;
+    /// when armed, each generation each race's gene pool drifts under the effective size its own
+    /// reproductive census implies rather than the authored founder pool size.
+    generational_drift_armed: bool,
     /// The life-fraction mortality hazard (a curve on `age / race lifespan`, design Part 20, R-AGING):
     /// when set, the life cadence culls through [`World::apply_mortality_by_race`], so short- and
     /// long-lived races die on their own timescales from one curve. Distinct from the raw-age
@@ -621,6 +626,7 @@ impl World {
             transmission: None,
             retention: None,
             reproduction: None,
+            generational_drift_armed: false,
             mortality_hazard_by_race: None,
             drift: None,
             language: None,
@@ -720,6 +726,22 @@ impl World {
     /// half of the life cadence is a no-op, so a world that installs none only ages and dies.
     pub fn set_reproduction(&mut self, params: ReproductionParams) {
         self.reproduction = Some(params);
+    }
+
+    /// Arm the post-dawn generational drift beat (design Part 25.10, R-REPRO, audit deviation 23,
+    /// world-wiring increment 10). Off by default, so a world runs exactly as before; once armed, each
+    /// generation each race's gene pool drifts under the effective size its own reproductive census
+    /// implies (the k-class breeding-sex-ratio and reproductive-variance Ne of [`ReproductiveMoments`])
+    /// rather than the authored founder pool size, so post-dawn allele frequencies drift and fix under
+    /// the real breeder structure. The drift keys on the census, never a race label (Principle 9).
+    pub fn arm_generational_drift(&mut self) {
+        self.generational_drift_armed = true;
+    }
+
+    /// A race's gene pool, if the race is registered (for inspection: the post-dawn drift beat mutates
+    /// its allele frequencies and its census-derived effective size).
+    pub fn gene_pool(&self, race: RaceId) -> Option<&GenePool> {
+        self.races.get(&race).map(|r| &r.pool)
     }
 
     /// Install the transmission calibrations (design Parts 23, 41, R-DEEPTECH). Until set, the
@@ -1926,6 +1948,7 @@ impl World {
         self.age_step();
         self.drift_personalities();
         self.reproduce();
+        self.drift_pools();
         // Mortality: the life-fraction by-race curve takes precedence (short- and long-lived races
         // cull on their own timescales); else the raw-age curve; else no cull. The by-race pass reads
         // the race registry, so it is moved out and back around the mutable cull (a cheap pointer swap
@@ -1937,6 +1960,56 @@ impl World {
             self.races = races;
         } else if let Some(hazard) = self.mortality_hazard.clone() {
             self.apply_mortality(&hazard);
+        }
+    }
+
+    /// The post-dawn generational drift beat (design Part 25.10, R-REPRO, audit deviation 23,
+    /// world-wiring increment 10). Once per generation (it runs inside the cadence-gated life beat,
+    /// after reproduce so the census reflects the generation's breeders), each race's gene pool drifts
+    /// under the effective size its own reproductive census implies rather than the authored founder
+    /// pool size: the per-race Ne is the k-class breeding-sex-ratio and reproductive-success-variance
+    /// reduction of [`ReproductiveMoments`] over that race's breeders, so a race that breeds through a
+    /// skewed sex ratio or a high reproductive variance drifts harder, all from the census data with no
+    /// race label (Principle 9). This retires audit deviation 23 for the post-dawn tier: the pre-dawn
+    /// aggregate tier still lacks a reproductive census (only a carrying-capacity stock), so its drift
+    /// keeps the authored pool size, the honest limit noted at the epoch drift site.
+    ///
+    /// Inert until [`World::arm_generational_drift`] is called, so a world runs exactly as before by
+    /// default. The Ne is the census's current window (the caller manages the window through
+    /// [`World::reset_census_window`], the existing convention); a race with no breeders this window
+    /// does not drift rather than drifting on a fabricated Ne. Deterministic: each pool drifts through
+    /// [`GenePool::drift`], keyed on the race id, the locus, the generation, and [`Phase::EVOLVE`], and
+    /// the races are walked in canonical id order.
+    fn drift_pools(&mut self) {
+        if !self.generational_drift_armed || self.life_cadence_ticks == 0 {
+            return;
+        }
+        let generation = self.clock / self.life_cadence_ticks;
+        let race_ids: Vec<RaceId> = self.races.keys().copied().collect();
+        for rid in race_ids {
+            // Build this race's reproductive moments from the census, over its own breeders (a being
+            // credited at least one offspring this window whose race is `rid`), walked in canonical id
+            // order so the reduction is worker-count independent.
+            let mut moments = ReproductiveMoments::new();
+            for (&being, &being_race) in &self.race_of {
+                if being_race != rid {
+                    continue;
+                }
+                let k = self.census.offspring_of(being);
+                if k == 0 {
+                    continue;
+                }
+                let sex = self.census.sex_of(being).unwrap_or_default();
+                moments.record_parent(sex, k);
+            }
+            let ne = moments.effective_size();
+            if ne == 0 {
+                continue;
+            }
+            if let Some(race) = self.races.get_mut(&rid) {
+                race.pool.effective_size = ne;
+                race.pool.drift(self.seed, rid.0 as u64, generation);
+            }
         }
     }
 
@@ -3663,6 +3736,17 @@ impl World {
                 h.write_u64(*design);
                 h.write_fixed(k.proficiency_of(*design));
             }
+        }
+        // Per-race gene pools (design Part 25.10, R-REPRO, world-wiring increment 10): the post-dawn
+        // drift beat mutates each race's allele frequencies and its census-derived effective size, so
+        // the drifted pool is canonical world identity (two worlds whose lineages drifted differently
+        // are different worlds). Walked in canonical RaceId order (the BTreeMap is ordered), each pool
+        // folding its own scheme, effective size, frequencies, effects, and Gaussian approximation
+        // through [`GenePool::hash_into`]. Length-prefixed so a raceless world is unambiguous.
+        h.write_u64(self.races.len() as u64);
+        for (rid, race) in &self.races {
+            h.write_u32(rid.0);
+            race.pool.hash_into(&mut h);
         }
         h.finish()
     }

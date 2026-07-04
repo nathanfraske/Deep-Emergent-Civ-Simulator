@@ -347,7 +347,9 @@ fn the_offset_preserves_the_mean_and_is_an_odd_reflection() {
 // the aggregate belief pools (the belief-diffusion beat, world-wiring increment 4, an empty
 // length-zero pool set here), the reproductive census with the life-fraction mortality hazard
 // (the reproduction beat, world-wiring increment 5), and the per-being technique knowledge (the
-// transmission beat, world-wiring increment 7, an empty length-zero holder set here). The
+// transmission beat, world-wiring increment 7, an empty length-zero holder set here), and the
+// per-race gene pools (the post-dawn drift beat, world-wiring increment 10: the seeded race's pool
+// folds its scheme, effective size, frequencies, effects, and Gaussian approximation here). The
 // zero-variance backward-compat property (a zero spread reproduces the no-offset dawn) is unchanged;
 // only the folded field set grew.
 #[test]
@@ -356,7 +358,7 @@ fn zero_variance_reproduces_the_pre_offset_state_hash() {
     assert_eq!(ids.len(), 12);
     assert_eq!(
         w.state_hash(),
-        0x702f475c6f5082fba8f4e9817a50f9ebu128,
+        0x65bc469eb342e614e0d7b79f0c8b2c57u128,
         "a zero developmental variance reproduces the pre-offset dawn bit for bit"
     );
 }

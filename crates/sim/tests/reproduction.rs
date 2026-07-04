@@ -286,3 +286,101 @@ fn short_and_long_lived_races_cull_on_their_own_timescales() {
         "the short-lived race culls harder at the same raw age: {short_dead} vs {long_dead}"
     );
 }
+
+#[test]
+fn post_dawn_drift_moves_allele_frequencies_under_the_census_effective_size() {
+    // World-wiring increment 10 (the post-dawn genome tier, audit deviation 23): with the generational
+    // drift beat armed, each race's gene pool drifts each generation under the effective size its own
+    // reproductive census implies, not the authored founder pool size. The pool drifts off its founder
+    // frequencies, its effective size becomes the census-derived Ne, the run replays bit for bit, and
+    // an unarmed world's pool is untouched (the beat is opt-in). Labelled fixtures throughout.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), sex_determined_race(0, 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 12,
+    }];
+    let build = |seed: u64, armed: bool| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_breeding_systems(registry());
+        let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+        for &id in &founders {
+            w.set_age(id, 20);
+        }
+        w.set_life_cadence(4);
+        w.set_reproduction(reproduction());
+        if armed {
+            w.arm_generational_drift();
+        }
+        w
+    };
+    let freqs = |w: &World| -> Vec<Fixed> {
+        let p = w.gene_pool(RaceId(0)).unwrap();
+        (0..p.loci()).map(|l| p.freq(l).unwrap()).collect()
+    };
+
+    // The founder pool: three loci at frequency one half, the authored founder effective size thirty.
+    let founder = build(0x5EED_0010, true);
+    let founder_freqs = freqs(&founder);
+    assert!(
+        founder_freqs.iter().all(|&f| f == Fixed::from_ratio(1, 2)),
+        "the founder pool starts at frequency one half"
+    );
+    assert_eq!(founder.gene_pool(RaceId(0)).unwrap().effective_size, 30);
+
+    // Armed: over several generations the pool drifts off its founder frequencies, and its effective
+    // size is now the census-derived Ne rather than the authored thirty (deviation 23 retired for the
+    // post-dawn tier).
+    let mut w = build(0x5EED_0010, true);
+    for _ in 0..24 {
+        w.tick(&[]);
+    }
+    assert_ne!(
+        freqs(&w),
+        founder_freqs,
+        "the pool drifted off its founder frequencies post-dawn"
+    );
+    let ne = w.gene_pool(RaceId(0)).unwrap().effective_size;
+    assert!(
+        ne != 30 && ne > 0,
+        "the census-derived Ne replaced the authored founder pool size: {ne}"
+    );
+
+    // Unarmed: the same run leaves the pool exactly at its founder state (the beat is opt-in, so an
+    // existing world is unchanged).
+    let mut off = build(0x5EED_0010, false);
+    for _ in 0..24 {
+        off.tick(&[]);
+    }
+    assert_eq!(
+        freqs(&off),
+        founder_freqs,
+        "unarmed, the pool does not drift"
+    );
+    assert_eq!(
+        off.gene_pool(RaceId(0)).unwrap().effective_size,
+        30,
+        "unarmed, the authored pool size stands"
+    );
+
+    // Bit-for-bit replay, and seed sensitivity.
+    let mut w2 = build(0x5EED_0010, true);
+    for _ in 0..24 {
+        w2.tick(&[]);
+    }
+    assert_eq!(
+        w.state_hash(),
+        w2.state_hash(),
+        "the post-dawn drift trajectory replays bit for bit"
+    );
+    let mut w3 = build(0x5EED_0011, true);
+    for _ in 0..24 {
+        w3.tick(&[]);
+    }
+    assert_ne!(
+        w.state_hash(),
+        w3.state_hash(),
+        "a different seed drifts a different lineage"
+    );
+}
