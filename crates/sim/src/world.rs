@@ -51,7 +51,7 @@ use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::census::ReproductiveCensus;
 use crate::clock::LIFE_CADENCE_TICKS;
-use crate::decision::{ActionId, Behaviour, Curve, DriveId};
+use crate::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
@@ -460,6 +460,15 @@ pub struct World {
     traces: Vec<Trace>,
     /// The data-driven decision definitions (drives, curves, actions). None until set.
     behaviour: Option<Behaviour>,
+    /// The trait-input registry (design Part 20, world-wiring increment 9): which decision
+    /// [`InputId`] reads which personality [`TraitAxisId`]. The decision step projects each bound
+    /// trait's per-being value into the readings map under its input id, so a [`Consideration`] can
+    /// score on a trait through the same registry a drive reads through. Empty until a world binds a
+    /// trait input, so a drive-only behaviour is unchanged. The world author picks input ids that do
+    /// not collide with the drive ids (a drive reads at the input of its own id).
+    ///
+    /// [`Consideration`]: crate::decision::Consideration
+    trait_inputs: BTreeMap<InputId, TraitAxisId>,
     /// Per-mind drive levels, in the unit interval.
     drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
     /// The action each mind chose on the last tick, for inspection.
@@ -594,6 +603,7 @@ impl World {
             sensorium: BTreeMap::new(),
             traces: Vec::new(),
             behaviour: None,
+            trait_inputs: BTreeMap::new(),
             drive_levels: BTreeMap::new(),
             last_action: BTreeMap::new(),
             channels: AccessChannelRegistry::default(),
@@ -2176,6 +2186,16 @@ impl World {
         self.behaviour = Some(behaviour);
     }
 
+    /// Bind a decision input to a personality trait axis (design Part 20, world-wiring increment 9):
+    /// the decide phase then projects each being's value on `axis` into its readings map under
+    /// `input`, so a [`crate::decision::Consideration`] reading `input` scores on the being's trait.
+    /// A being carrying no personality instance contributes no reading for the bound input (it reads
+    /// as zero in the scorer), never a fabricated value. Pick an `input` id distinct from the drive
+    /// ids, since a drive reads at the input of its own id.
+    pub fn bind_trait_input(&mut self, input: InputId, axis: TraitAxisId) {
+        self.trait_inputs.insert(input, axis);
+    }
+
     /// Whether an authored decision repertoire (drives, curves, actions) is installed. This is the
     /// sentient deliberative tier of design Part 8.1, an AUTHORED action-and-drive policy that Part
     /// 8.4 marks as steering at the level of behaviour, distinct from the emergent evolved controller.
@@ -3276,23 +3296,48 @@ impl World {
         }
     }
 
-    /// The decision step (design Part 8): each mind's drives rise, then it scores its
-    /// actions and takes the highest, which reduces the drives that action satisfies. A
-    /// no-op until a [`Behaviour`] is installed. Minds are walked in id order, and the
-    /// choice is a deterministic argmax (lowest action id breaks ties), so it is
-    /// bit-identical on replay. The behaviour is moved out for the pass so the per-mind
-    /// drive maps can be borrowed mutably without conflict, then restored.
+    /// The decision step (design Part 8): each mind's drives rise, then it scores its actions over a
+    /// readings map and takes the highest, which reduces the drives that action satisfies. A no-op
+    /// until a [`Behaviour`] is installed. Minds are walked in id order, and the choice is a
+    /// deterministic argmax (lowest action id breaks ties), so it is bit-identical on replay. The
+    /// behaviour is moved out for the pass so the per-mind drive maps can be borrowed mutably without
+    /// conflict, then restored.
+    ///
+    /// The readings a [`crate::decision::Consideration`] scores over are keyed by
+    /// [`InputId`] (world-wiring increment 9): each drive contributes its level at the input of its
+    /// own id, and each trait bound through [`World::bind_trait_input`] contributes the being's own
+    /// value on that axis. So two beings under identical drive pressure but differing personality
+    /// trajectories score the same actions differently and diverge in what they choose, with no age or
+    /// race branch (Principle 9): the divergence is the per-being trait value read through one curve.
+    /// A world that binds no trait input reads exactly the drive levels, so a drive-only behaviour is
+    /// unchanged.
     fn decide(&mut self) {
         let behaviour = std::mem::take(&mut self.behaviour);
         if let Some(b) = &behaviour {
+            // The trait-input bindings are read-only across the pass; snapshot them so the per-mind
+            // trait reads do not borrow-conflict with the drive-level mutation.
+            let trait_inputs: Vec<(InputId, TraitAxisId)> =
+                self.trait_inputs.iter().map(|(&i, &a)| (i, a)).collect();
             let ids: Vec<StableId> = self.minds.keys().copied().collect();
             for id in ids {
-                let levels = self.drive_levels.entry(id).or_default();
-                for d in &b.drives {
-                    let lvl = levels.entry(d.id).or_insert(Fixed::ZERO);
-                    *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
+                // Rise this mind's drives, then snapshot its levels as readings at their own input ids.
+                let drive_readings: Vec<(InputId, Fixed)> = {
+                    let levels = self.drive_levels.entry(id).or_default();
+                    for d in &b.drives {
+                        let lvl = levels.entry(d.id).or_insert(Fixed::ZERO);
+                        *lvl = (*lvl + d.rise_per_tick).clamp(Fixed::ZERO, Fixed::ONE);
+                    }
+                    levels.iter().map(|(d, lvl)| (InputId(d.0), *lvl)).collect()
+                };
+                // The readings map: drive levels, then each bound trait's per-being value (a being
+                // carrying no instance contributes none, so the input reads as zero in the scorer).
+                let mut readings: BTreeMap<InputId, Fixed> = drive_readings.into_iter().collect();
+                for &(input, axis) in &trait_inputs {
+                    if let Some(inst) = self.traits.get(&id) {
+                        readings.insert(input, inst.value(axis));
+                    }
                 }
-                if let Some(chosen) = b.choose(levels) {
+                if let Some(chosen) = b.choose(&readings) {
                     self.last_action.insert(id, chosen);
                     if let Some(act) = b.action(chosen) {
                         for satisfied in &act.satisfies {
@@ -3302,7 +3347,11 @@ impl World {
                                 .find(|d| d.id == *satisfied)
                                 .map(|d| d.satisfy_amount)
                                 .unwrap_or(Fixed::ZERO);
-                            if let Some(lvl) = levels.get_mut(satisfied) {
+                            if let Some(lvl) = self
+                                .drive_levels
+                                .get_mut(&id)
+                                .and_then(|m| m.get_mut(satisfied))
+                            {
                                 *lvl = (*lvl - amount).clamp(Fixed::ZERO, Fixed::ONE);
                             }
                         }
@@ -4237,6 +4286,9 @@ margin_steps = -1
         use crate::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
         let hunger = DriveId(0);
         let fatigue = DriveId(1);
+        // A drive reads at the input of its own id.
+        let hunger_in = InputId(hunger.0);
+        let fatigue_in = InputId(fatigue.0);
         let ramp = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
         Behaviour {
             drives: vec![
@@ -4257,7 +4309,7 @@ margin_steps = -1
                     id: ActionId(0), // forage
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: hunger,
+                        input: hunger_in,
                         curve: 0,
                     }],
                     satisfies: vec![hunger],
@@ -4266,7 +4318,7 @@ margin_steps = -1
                     id: ActionId(1), // rest
                     weight: Fixed::ONE,
                     considerations: vec![Consideration {
-                        drive: fatigue,
+                        input: fatigue_in,
                         curve: 0,
                     }],
                     satisfies: vec![fatigue],
@@ -4300,6 +4352,120 @@ margin_steps = -1
             w.state_hash()
         };
         assert_eq!(build(), build(), "the decision loop is reproducible");
+    }
+
+    #[test]
+    fn personality_shapes_the_chosen_action_under_identical_drive_pressure() {
+        // World-wiring increment 9 (WP4): a Consideration reads a personality trait through the shared
+        // InputId readings map, so two beings under identical drive pressure but differing trait values
+        // diverge in the action they choose. The decide path carries no age or race branch; the
+        // divergence is the per-being trait value read through one curve (Principle 9).
+        use crate::decision::{ActionDef, Behaviour, Consideration, DriveDef};
+        use crate::personality::{TraitAxisId, TraitInstance};
+
+        const BOLDNESS: TraitAxisId = TraitAxisId(0);
+        // A drive both beings share (identical drive pressure), and a trait input bound to boldness.
+        let hunger = DriveId(0);
+        let hunger_in = InputId(hunger.0);
+        let bold_in = InputId(100); // distinct from the drive id
+        let ramp = Curve::new([(Fixed::ZERO, Fixed::ZERO), (Fixed::ONE, Fixed::ONE)]);
+        let inverse = Curve::new([(Fixed::ZERO, Fixed::ONE), (Fixed::ONE, Fixed::ZERO)]);
+        // Two actions, both gated equally by hunger, split by boldness: the bold action rises with the
+        // trait (curve 0), the cautious action falls with it (curve 1). Under equal hunger the trait
+        // decides.
+        let bold_act = ActionId(0);
+        let cautious_act = ActionId(1);
+        let behaviour = || Behaviour {
+            drives: vec![DriveDef {
+                id: hunger,
+                rise_per_tick: Fixed::from_ratio(1, 2),
+                satisfy_amount: Fixed::ZERO,
+            }],
+            curves: vec![ramp.clone(), inverse.clone()],
+            actions: vec![
+                ActionDef {
+                    id: bold_act,
+                    weight: Fixed::ONE,
+                    considerations: vec![
+                        Consideration {
+                            input: hunger_in,
+                            curve: 0,
+                        },
+                        Consideration {
+                            input: bold_in,
+                            curve: 0,
+                        },
+                    ],
+                    satisfies: vec![],
+                },
+                ActionDef {
+                    id: cautious_act,
+                    weight: Fixed::ONE,
+                    considerations: vec![
+                        Consideration {
+                            input: hunger_in,
+                            curve: 0,
+                        },
+                        Consideration {
+                            input: bold_in,
+                            curve: 1,
+                        },
+                    ],
+                    satisfies: vec![],
+                },
+            ],
+        };
+
+        // A bold being and a timid one, identical in every other way (same drive, same rise).
+        let build = |bind: bool| {
+            let mut w = world().with_seed(0xB01D);
+            w.set_behaviour(behaviour());
+            if bind {
+                w.bind_trait_input(bold_in, BOLDNESS);
+            }
+            let bold = w.spawn(Fixed::ONE);
+            let timid = w.spawn(Fixed::ONE);
+            w.install_personality(
+                bold,
+                TraitInstance::from_values([(BOLDNESS, Fixed::from_ratio(9, 10))]),
+            );
+            w.install_personality(
+                timid,
+                TraitInstance::from_values([(BOLDNESS, Fixed::from_ratio(1, 10))]),
+            );
+            w.tick(&[]);
+            (w, bold, timid)
+        };
+
+        let (w, bold, timid) = build(true);
+        assert_eq!(
+            w.last_action(bold),
+            Some(bold_act),
+            "the bold being chose the bold action"
+        );
+        assert_eq!(
+            w.last_action(timid),
+            Some(cautious_act),
+            "the timid being chose the cautious action under the same drive pressure"
+        );
+
+        // Control: with no trait input bound, the trait reads as zero for both, so both score the
+        // actions identically and choose the same one. The divergence is the trait binding, not the
+        // per-being personality by itself.
+        let (w_off, bold_off, timid_off) = build(false);
+        assert_eq!(
+            w_off.last_action(bold_off),
+            w_off.last_action(timid_off),
+            "with the trait channel off the two beings do not diverge"
+        );
+
+        // Bit-for-bit replay.
+        let (w2, _, _) = build(true);
+        assert_eq!(
+            w.state_hash(),
+            w2.state_hash(),
+            "the trait-shaped decision replays bit for bit"
+        );
     }
 
     const WITNESSED: crate::tom::AccessChannelId = crate::tom::AccessChannelId(1);

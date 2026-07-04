@@ -29,7 +29,7 @@
 use civsim_core::{Fixed, StableId};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::decision::{
-    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId,
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
 };
 use civsim_sim::evidence::AttrKindId;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, DriftParams, LangId, LanguageParams};
@@ -75,7 +75,7 @@ fn behaviour() -> Behaviour {
                 id: ActionId(0),
                 weight: Fixed::ONE,
                 considerations: vec![Consideration {
-                    drive: hunger,
+                    input: InputId(hunger.0),
                     curve: 0,
                 }],
                 satisfies: vec![hunger],
