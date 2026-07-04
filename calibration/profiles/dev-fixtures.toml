@@ -217,6 +217,14 @@ unit = "medium_profile"
 source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
 
 [[reserved]]
+id = "medium.submersion_elevation"
+basis = "FIXTURE placeholder, not the owner's value; the waterline set at the dev biome set's ocean-band top (0.40), so a cell below it is submerged (holds medium.water) and one at or above it is emergent (holds medium.air), making the submerged cells exactly the dev classifier's ocean cells. The owner sets a world's real sea level (calibration/reserved.toml); this dev value exercises the per-cell medium fold on the dev map"
+status = "set"
+value = "0.40"
+unit = "normalised_elevation"
+source = "dev fixture for R-MEDIUM per-cell medium; crates/sim/src/medium.rs MediumField::from_map, crates/world/src/terrain.rs ocean band"
+
+[[reserved]]
 id = "field.cell_size"
 basis = "FIXTURE placeholder, not the owner's value; a one-centimetre cell, chosen with the one-second base tick so the medium-derived diffusion coefficient stays representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. A real map-scale cell underflows the coefficient at a one-second tick (the reserved field.cell_size and a coarser sub-step are where a map-scale diffusion rate comes from); this small cell exercises the derivation, not a map scale"
 status = "set"
@@ -248,6 +256,66 @@ value = "1"
 unit = "gas_transfer_coefficient"
 source = "dev fixture for R-MEDIUM respiration; crates/sim/src/runner.rs EmbodiedPhysiology"
 
+# --- the dawn embodiment metabolic anchors and thermal band (real-world unification step 3;
+# EmbodiedPhysiology::from_manifest via MetabolicAnchors, and the BeingThermal comfort band). All
+# FIXTURE placeholders mirroring MetabolicAnchors::dev_fixture, not owner canon. ---
+
+[[reserved]]
+id = "metabolism.kleiber_coefficient"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Kleiber basal-rate coefficient so the dawn embodiment physiology resolves on the dev-fixtures profile"
+status = "set"
+value = "0.01"
+unit = "kleiber_coefficient"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.body_mass_kg_scale"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the kilograms at normalized body_mass one (the R-UNITS-PIN size anchor), a dev value so the physiology resolves"
+status = "set"
+value = "100"
+unit = "kilograms_at_body_mass_one"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.medium_convective_coefficient"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the medium convective heat-transfer coefficient h a dev body couples to its cell through"
+status = "set"
+value = "10"
+unit = "convective_coefficient"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.surface_emissivity"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the body-surface emissivity of the radiant heat-loss law"
+status = "set"
+value = "0.95"
+unit = "emissivity"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "metabolism.stefan_boltzmann"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Stefan-Boltzmann constant of the radiant heat-loss law (the physical CODATA value)"
+status = "set"
+value = "0.0000000567"
+unit = "stefan_boltzmann"
+source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+
+[[reserved]]
+id = "physiology.thermal_setpoint"
+basis = "FIXTURE placeholder, not the owner's value; the comfort-band set point a dawn founder thermoregulates toward (thirty-seven, the mammalian dev anchor the thermal-coupling tests use), so BeingThermal resolves on the dev-fixtures profile"
+status = "set"
+value = "37"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "physiology.thermal_half_band"
+basis = "FIXTURE placeholder, not the owner's value; the half-width of the survivable comfort band around the set point (eight, the dev anchor the thermal-coupling tests use)"
+status = "set"
+value = "8"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
 # --- the dawn evidence ring (Part 28 axiom model, RingCapacityLaw::from_manifest) ---
 
 [[reserved]]
@@ -265,3 +333,11 @@ status = "set"
 value = "32"
 unit = "count"
 source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"
+
+[[reserved]]
+id = "reproduction.mutation_spread"
+basis = "FIXTURE placeholder, not the owner's value; the bounded half-width both the belief-seed and the mate-preference inheritance draw around the midparent at birth (a single lever, world.rs inherited_beliefs). Two hundredths of a disposition unit, small enough that a child resembles its parents yet a lineage drifts, matching the reproduction unit test's labelled fixture"
+status = "set"
+value = "0.02"
+unit = "disposition_units_half_width"
+source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs ReproductionParams::from_manifest; real-world unification step 1"

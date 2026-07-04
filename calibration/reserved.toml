@@ -1000,6 +1000,13 @@ unit = "individuals"
 source = "Part 25.7-25.8; R-REPRO census tier (crates/sim/src/census.rs); pre-dawn founder seed / world-dialing lever, worksheet §13a/§14"
 
 [[reserved]]
+id = "reproduction.mutation_spread"
+basis = "the half-width of the bounded mean-zero deviation a child's inherited disposition draws around the midparent at birth: the belief innate-seed inheritance (crates/sim/src/world.rs inherited_beliefs, drawn under Phase::AXIOM_INHERIT per axis) and the mate-preference midparent inheritance (drawn under Phase::MATE_CHOICE) both take this ONE spread, so it is a single lever not two, and no second value is introduced (world.rs 1685). Basis for deciding it: the inheritance-deviation scale that keeps a lineage's disposition recognizably heritable across a generation while still admitting drift, set to the standing dispersion of the innate axiom seed the population already carries so a child resembles its parents to the same degree the axiom seeds vary within a band; explicitly not an independent fabricated magnitude. The production dawn (build_dawn_runner) arms reproduction from this surfaced value through ReproductionParams::from_manifest rather than a hardcoded inline number; a Dev run tolerates the dev-fixtures placeholder."
+status = "reserved"
+unit = "disposition_units_half_width"
+source = "Part 25, Part 28, R-REPRO; crates/sim/src/world.rs ReproductionParams / inherited_beliefs; real-world unification step 1"
+
+[[reserved]]
 id = "genome.speciation_distance"
 basis = "the genetic distance at which two diverged pools are declared distinct species; set against the chosen distance measure so a cross stays fertile below it and fails above it (declared rather than scripted speciation; Coyne and Orr)"
 status = "set"
@@ -1438,6 +1445,14 @@ status = "reserved"
 value = ""
 unit = "gas_transfer_coefficient"
 source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/src/medium.rs respire, crates/sim/src/runner.rs EmbodiedPhysiology"
+
+[[reserved]]
+id = "medium.submersion_elevation"
+basis = "the waterline: the normalised [0, ONE) elevation below which a map cell is submerged and holds the submerged medium (medium.water), and at or above which it holds the emergent medium (medium.air). Set on the same normalised elevation field the biome classifier reads (crates/world/src/terrain.rs classifies ocean and coast by elevation band), so the basis is where the sea meets the land on that scale: the dev biome set's ocean band is [0, 0.40) and its coast band [0.40, 0.45), so a threshold at the ocean-band top (about 0.40) makes the submerged cells exactly the ocean cells, and a higher threshold floods the coast. The owner sets where the waterline sits for a given world's sea level; read on the canonical embodiment path by MediumField::from_map through medium_field_from_manifest, a labelled dev fixture in tests. A single-medium world (the submerged and emergent ids equal) folds to a uniform field whatever this threshold, so it binds only where two media meet"
+status = "reserved"
+value = ""
+unit = "normalised_elevation"
+source = "R-MEDIUM (Part 62 medium substrate); owner ruling 2026-07-04 (docs/working/REAL_WORLD_UNIFICATION_HANDOFF.md §7); crates/sim/src/medium.rs MediumField::from_map, crates/sim/src/runner.rs medium_field_from_manifest; crates/world/src/terrain.rs biome elevation bands"
 
 # --- Scenario direction siblings (docs/working/TEST_WORLDS.md) ---
 #

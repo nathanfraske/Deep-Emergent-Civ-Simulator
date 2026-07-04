@@ -36,7 +36,7 @@
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
-use civsim_world::Coord3;
+use civsim_world::{Coord3, TileMap};
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::homeostasis::{Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, RESPIRATION};
@@ -114,6 +114,20 @@ pub fn dev_respiration() -> HomeostaticRegistry {
     }
 }
 
+/// The content of one medium class, the two axes a [`MediumField`] cell carries that a body reads
+/// against its own anatomy: the respirable content (the `c_medium` the Fick respiration law reads) and
+/// the density (the `rho_medium` the buoyancy law reads). A sample is data, not a label: `medium.water`
+/// and `medium.air` are the same pair over different axis values (Principle 9), so the folding rule that
+/// assigns a sample to a cell keys off physics, never a medium name. The medium's own temperature is not
+/// carried here: a cell's temperature is the map tile's worldgen temperature (see [`MediumField::from_map`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MediumSample {
+    /// The respirable content of the medium (the `c_medium` term of the Fick respiration law).
+    pub respirable: Fixed,
+    /// The density of the medium (the `rho_medium` term of the buoyancy law).
+    pub density: Fixed,
+}
+
 /// A per-cell ambient-medium field: the medium each map cell holds, as its respirable content and its
 /// density, in the row-major layout the temperature field uses ([`crate::runner::Field`]). A being reads
 /// the medium of the cell it stands in, so respiration (and, a later increment, buoyancy) is located:
@@ -170,6 +184,53 @@ impl MediumField {
             vec![density; n],
             vec![temperature; n],
         )
+    }
+
+    /// A per-cell field folded from a generated world's tiles (real-world unification step 4; owner
+    /// ruling 2026-07-04): each cell holds the `submerged` medium below the reserved `submersion_elevation`
+    /// and the `emergent` medium at or above it. The rule keys off the same normalised `[0, ONE)` elevation
+    /// field the biome classifier reads (`crates/world/src/terrain.rs`), so a waterline is a physical
+    /// threshold rather than an `if biome == Ocean` label branch (Principle 9), and the membership stays
+    /// data: a world whose two media are the same [`MediumSample`] regresses to a uniform field, and a
+    /// world of exotic media is the same fold over different axis values. Pure integer fixed-point over the
+    /// deterministic worldgen map, no floating point and no randomness (Principle 3), walked in the field's
+    /// row-major (y then x) order, so the same map and threshold fold identically on any machine and thread
+    /// count.
+    ///
+    /// The per-cell temperature is the tile's own worldgen temperature, the same source
+    /// [`crate::runner::Field::from_map`] seeds its baseline from. It is carried for the deferred in-medium
+    /// thermal exchange and is unread on the running tick this increment: the canonical diffused
+    /// [`crate::runner::Field`] is authoritative for a being's ambient temperature, and only respiration
+    /// (which reads [`Self::respirable_at`] alone) is wired to the medium field here, so the field's
+    /// temperature vector and the canonical field cannot desync in observed state.
+    pub fn from_map(
+        map: &TileMap,
+        submersion_elevation: Fixed,
+        submerged: MediumSample,
+        emergent: MediumSample,
+    ) -> MediumField {
+        let topo = map.topo();
+        let (w, h) = (topo.width, topo.height);
+        let n = (w.max(0) as usize) * (h.max(0) as usize);
+        let mut respirable = Vec::with_capacity(n);
+        let mut density = Vec::with_capacity(n);
+        let mut temperature = Vec::with_capacity(n);
+        for y in 0..h {
+            for x in 0..w {
+                let tile = map
+                    .tile(Coord3::new(x, y, 0))
+                    .expect("every in-bounds cell has a tile");
+                let sample = if tile.elevation < submersion_elevation {
+                    submerged
+                } else {
+                    emergent
+                };
+                respirable.push(sample.respirable);
+                density.push(sample.density);
+                temperature.push(tile.temperature);
+            }
+        }
+        MediumField::new(w, h, respirable, density, temperature)
     }
 
     fn idx(&self, x: i32, y: i32) -> Option<usize> {
@@ -627,6 +688,124 @@ mod tests {
             run(),
             "the same body, field, and cell replay bit for bit"
         );
+    }
+
+    // Per-cell medium from a generated map (real-world unification step 4): the folding rule keys off the
+    // physical elevation the biome classifier reads, water below the submersion threshold and air above,
+    // with no biome-label branch.
+
+    use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+
+    fn generated_map(seed: u64) -> TileMap {
+        let topo = FlatBounded::new(12, 9, 1);
+        TileMap::generate(
+            seed,
+            topo,
+            &BiomeSet::dev_default(),
+            &WorldgenParams::dev_default(),
+        )
+    }
+
+    fn water() -> MediumSample {
+        MediumSample {
+            respirable: Fixed::from_ratio(3, 10),
+            density: Fixed::from_int(1000),
+        }
+    }
+
+    fn air() -> MediumSample {
+        MediumSample {
+            respirable: Fixed::from_int(9),
+            density: Fixed::from_ratio(12, 10),
+        }
+    }
+
+    #[test]
+    fn from_map_assigns_the_submerged_medium_below_the_threshold_and_the_emergent_above() {
+        // Every cell reads back the medium its physical elevation earns: below the submersion elevation
+        // the submerged (water) sample, at or above it the emergent (air) sample. The rule is the
+        // elevation field alone, the same field the biome classifier reads, never a biome label. The
+        // threshold is the midpoint of this map's own elevation range, so both classes are non-empty
+        // whatever the seed generates (the split is real, not an artefact of a fixed cut).
+        let map = generated_map(0xB10E);
+        let topo = map.topo();
+        let (mut lo, mut hi) = (Fixed::from_int(2), Fixed::ZERO - Fixed::from_int(2));
+        for y in 0..topo.height {
+            for x in 0..topo.width {
+                let e = map.tile(Coord3::new(x, y, 0)).unwrap().elevation;
+                lo = lo.min(e);
+                hi = hi.max(e);
+            }
+        }
+        assert!(
+            hi > lo,
+            "the fractal map has a spread of elevations to split"
+        );
+        let submersion = (lo + hi).checked_div(Fixed::from_int(2)).unwrap();
+        let field = MediumField::from_map(&map, submersion, water(), air());
+        let mut saw_water = false;
+        let mut saw_air = false;
+        for y in 0..topo.height {
+            for x in 0..topo.width {
+                let elev = map.tile(Coord3::new(x, y, 0)).unwrap().elevation;
+                let (expect_respirable, expect_density) = if elev < submersion {
+                    saw_water = true;
+                    (water().respirable, water().density)
+                } else {
+                    saw_air = true;
+                    (air().respirable, air().density)
+                };
+                assert_eq!(field.respirable_at(x, y), expect_respirable);
+                assert_eq!(field.density_at(x, y), expect_density);
+                assert_eq!(
+                    field.temperature_at(x, y),
+                    map.tile(Coord3::new(x, y, 0)).unwrap().temperature,
+                    "the cell's temperature is the map tile's worldgen temperature"
+                );
+            }
+        }
+        assert!(
+            saw_water && saw_air,
+            "the midpoint threshold splits the map into both submerged and emergent cells"
+        );
+    }
+
+    #[test]
+    fn a_single_medium_world_folds_to_a_uniform_field() {
+        // The regression the owner ruling names: when the two media are the same sample, every cell reads
+        // that one medium whatever its elevation, so a single-medium world is a uniform field.
+        let map = generated_map(0x5EA);
+        let only = water();
+        let field = MediumField::from_map(&map, Fixed::from_ratio(40, 100), only, only);
+        let topo = map.topo();
+        for y in 0..topo.height {
+            for x in 0..topo.width {
+                assert_eq!(field.respirable_at(x, y), only.respirable);
+                assert_eq!(field.density_at(x, y), only.density);
+            }
+        }
+    }
+
+    #[test]
+    fn from_map_is_deterministic() {
+        let run = || {
+            MediumField::from_map(
+                &generated_map(0x11),
+                Fixed::from_ratio(40, 100),
+                water(),
+                air(),
+            )
+        };
+        let a = run();
+        let b = run();
+        let topo = generated_map(0x11).topo();
+        for y in 0..topo.height {
+            for x in 0..topo.width {
+                assert_eq!(a.respirable_at(x, y), b.respirable_at(x, y));
+                assert_eq!(a.density_at(x, y), b.density_at(x, y));
+                assert_eq!(a.temperature_at(x, y), b.temperature_at(x, y));
+            }
+        }
     }
 
     /// A registry with a light organ (density 900, a gas-filled float sac) and a dense organ

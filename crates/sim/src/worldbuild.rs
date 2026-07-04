@@ -34,12 +34,16 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId};
-use civsim_world::TileMap;
+use civsim_world::{Coord3, TileMap};
 
+use crate::anatomy::BodyPlanRegistry;
 use crate::axiom::RingCapacityLaw;
 use crate::breeding::BreedingSystemRegistry;
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
+use crate::controller::Controller;
 use crate::decision::Curve;
+use crate::edibility::Physiology;
+use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use crate::langmod::{
     articulated_geometry, form_system_from_values, phoneme_priors, producible_values,
     PerceptualParams,
@@ -47,15 +51,18 @@ use crate::langmod::{
 use crate::language::{
     DriftParams, FeatureDimId, FormSystem, LangId, Language, LanguageParams, ProductionModalityId,
 };
+use crate::locomotion::{LocomotionParams, Walker};
 use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
-use crate::runner::{Field, FieldCalib, Runner};
+use crate::runner::{
+    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, Runner,
+};
 use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
 use crate::tom::AccessChannelRegistry;
 use crate::value::RaceId;
-use crate::world::World;
+use crate::world::{PlaceId, ReproductionParams, World};
 
 /// The declared peoples of a world at the dawn of sentience (design Part 28): the race records, the
 /// founding band placements, and the two registries the dawn seeding reads (the breeding systems a
@@ -88,6 +95,43 @@ pub struct DawnPeoples {
     /// armed but inert (no lineage carries a form system), so a world without it seeds and ticks
     /// exactly as before.
     pub language: Option<LanguageGenesis>,
+    /// The optional embodiment genesis (real-world unification step 3): when present, the founder step
+    /// gives each founder whose race carries a [`crate::race::Race::body`] a located, metabolizing body
+    /// sharing its mind's [`StableId`], and the world-build returns one runner carrying both minds and
+    /// bodies ([`crate::runner::Runner::with_world_and_embodiment`]). When absent, the world-build
+    /// returns a world-only runner exactly as before.
+    pub embodiment: Option<EmbodimentGenesis>,
+}
+
+/// The inputs the founder step embodies the dawn population from (real-world unification step 3): the
+/// data-defined registries a body's reserves, affordances, and movement read against, the organ
+/// registry a body plan's tissue composition is scored on, the controller hidden width, and the
+/// submerged and emergent medium ids the per-cell medium field folds the map into. A founder's own
+/// body diverges through its race's
+/// [`crate::race::Race::body`] plan and its genome-expressed controller, never a `RaceId` branch
+/// (Principle 9); these registries are the shared substrate the divergence is read against. The
+/// physiology and thermal-band reserved values are read fail-loud from the manifest at assembly.
+#[derive(Clone, Debug)]
+pub struct EmbodimentGenesis {
+    /// The homeostatic axis registry a body's reserves are sized against (carrying TEMPERATURE).
+    pub homeostatic: HomeostaticRegistry,
+    /// The morphological affordance registry the body's actions read.
+    pub affordances: AffordanceRegistry,
+    /// The locomotion parameters the located movement reads.
+    pub locomotion: LocomotionParams,
+    /// The organ registry a body plan's tissue composition (surface, specific heat, energy density,
+    /// respiratory surface) is scored against, the same registry the physiology derivation reads.
+    pub organs: BodyPlanRegistry,
+    /// The controller hidden width (zero is the reaction-norm controller; a positive width is the
+    /// recurrent graduation).
+    pub controller_hidden: usize,
+    /// The submerged medium id a cell below the reserved submersion elevation holds (for example
+    /// `"medium.water"`), the manifest profile the per-cell medium field folds into a water cell.
+    pub submerged_medium_id: String,
+    /// The emergent medium id a cell at or above the submersion elevation holds (for example
+    /// `"medium.air"`), the manifest profile the per-cell medium field folds into a land cell. A
+    /// single-medium world passes the same id for both, folding to a uniform field.
+    pub emergent_medium_id: String,
 }
 
 /// The inputs the founder step derives each race's phonetic form system from (increment 2e): the
@@ -267,6 +311,16 @@ pub fn build_dawn_runner(
     world.set_language(LanguageParams::from_manifest(manifest)?);
     world.set_drift(DriftParams::from_manifest(manifest)?);
 
+    // Arm reproduction and post-dawn generational drift (real-world unification, step 1): a mature,
+    // compatible pair bears one child per reproductive cadence, and each generation each race's pool
+    // drifts under the effective size its own reproductive census implies (census-derived Ne, retiring
+    // audit deviation 23 for the post-dawn tier). The mutation spread is the surfaced reserved value,
+    // never fabricated inline; the ring law is already built above. Both are inert until the first
+    // life cadence fires (the founders are seeded at age zero, so no pair is mature at the dawn), so a
+    // short run behaves exactly as before while a multi-generation run grows and drifts.
+    world.set_reproduction(ReproductionParams::from_manifest(manifest)?);
+    world.arm_generational_drift();
+
     // Arm the derived per-race languages at the founder step (increment 2e), if a language genesis is
     // supplied: derive each articulating race's phonetic form system from the base geometry and its
     // own articulation, install a per-band lineage, and assign the band's founders, so the naming game
@@ -274,16 +328,7 @@ pub fn build_dawn_runner(
     // founders are returned in band order, skipping any band whose race is not registered, so the
     // per-band grouping mirrors that skip.
     if let Some(genesis) = &peoples.language {
-        let mut founders_by_band: Vec<(RaceId, Vec<StableId>)> = Vec::new();
-        let mut cursor = 0usize;
-        for band in &peoples.bands {
-            if !peoples.races.contains_key(&band.race) {
-                continue; // seed_dawn_populations skipped this band, so no ids were minted for it
-            }
-            let end = (cursor + band.members).min(founders.len());
-            founders_by_band.push((band.race, founders[cursor..end].to_vec()));
-            cursor = end;
-        }
+        let founders_by_band = group_founders_by_band(&founders, &peoples.bands, &peoples.races);
         arm_dawn_languages(&mut world, &founders_by_band, &peoples.races, genesis).map_err(
             |e| CalibrationError::BadValue {
                 id: "articulation.producibility_threshold".to_string(),
@@ -308,7 +353,136 @@ pub fn build_dawn_runner(
     let field = Field::from_map(map);
     let calib = FieldCalib::from_resolution(manifest, resolution)?;
 
-    // Compose the armed world onto the field runner. with_world refuses a world carrying an authored
-    // decision repertoire (Principle 9); this path installs none, so the boundary holds.
-    Ok(Runner::with_world(field, calib, world))
+    // Compose the armed world onto the field runner. Both constructors refuse a world carrying an
+    // authored decision repertoire (Principle 9); this path installs none, so the boundary holds. With
+    // an embodiment genesis, assemble a located body sharing each founder's mind id and return one
+    // runner carrying both minds and bodies (real-world unification step 3); without, a world-only
+    // runner exactly as before.
+    match &peoples.embodiment {
+        Some(genesis) => {
+            let (embodiment, kit) =
+                assemble_dawn_embodiment(&world, map, peoples, &founders, genesis, manifest, seed)?;
+            let mut runner = Runner::with_world_and_embodiment(field, calib, world, embodiment);
+            // Arm the lifecycle pairing (real-world unification, step 3c): a World birth now mints a
+            // paired body and a death retires it, so a multi-generation embodied run keeps minds and
+            // bodies in lockstep. Without arming, the runner ticks minds and bodies but never embodies
+            // a newborn (the pre-3c behaviour).
+            runner.arm_lifecycle(kit);
+            Ok(runner)
+        }
+        None => Ok(Runner::with_world(field, calib, world)),
+    }
+}
+
+/// Group the returned founders by their band, in band order, skipping any band whose race was not
+/// registered (so no ids were minted for it): the founders are a band-order concatenation, so this
+/// re-splits them exactly as the seeding minted them (design Part 28). Shared by the language founder
+/// step and the embodiment founder step.
+fn group_founders_by_band(
+    founders: &[StableId],
+    bands: &[BandSpec],
+    races: &BTreeMap<RaceId, Race>,
+) -> Vec<(RaceId, Vec<StableId>)> {
+    let mut grouped = Vec::new();
+    let mut cursor = 0usize;
+    for band in bands {
+        if !races.contains_key(&band.race) {
+            continue;
+        }
+        let end = (cursor + band.members).min(founders.len());
+        grouped.push((band.race, founders[cursor..end].to_vec()));
+        cursor = end;
+    }
+    grouped
+}
+
+/// Assemble the dawn embodiment (real-world unification step 3): give each founder whose race carries a
+/// body plan a located, metabolizing body that reuses the founder's mind [`StableId`] (never a second
+/// registry mint), so the being is at once a `World` mind and an `Embodiment` walker. A race with no
+/// body plan founds minds without bodies (the disembodied case). The body's homeostatic reserves derive
+/// from its race's plan and the shared organ registry, its controller from its own genome (else a blank
+/// reaction norm), and its comfort band from the reserved thermal set point and half-band, so two races
+/// diverge in their bodies from their plan and genome alone, never a `RaceId` branch (Principle 9). The
+/// bodies respire the per-cell medium field folded from the worldgen map (`medium.water` below the
+/// reserved submersion elevation, `medium.air` above), and the physiology anchors are the fail-loud
+/// manifest reads.
+#[allow(clippy::too_many_arguments)]
+fn assemble_dawn_embodiment(
+    world: &World,
+    map: &TileMap,
+    peoples: &DawnPeoples,
+    founders: &[StableId],
+    genesis: &EmbodimentGenesis,
+    manifest: &CalibrationManifest,
+    seed: u64,
+) -> Result<(Embodiment, LifecycleKit), CalibrationError> {
+    // The reserved comfort band every founder's thermoregulation reads (fail-loud while reserved). The
+    // spawn temperature is the set point (a founder is born at its comfort centre; physical state, not
+    // a reserved value). The same band is the lifecycle kit's template, so a newborn is born into it too.
+    let setpoint = manifest.require_fixed("physiology.thermal_setpoint")?;
+    let half_band = manifest.require_fixed("physiology.thermal_half_band")?;
+    let thermal = BeingThermal {
+        setpoint,
+        half_band,
+        initial_temp: setpoint,
+    };
+    // The map extent a band's spawn coordinate is placed within. Coord3 is authoritative and each
+    // being's PlaceId stays frozen at its dawn band; a habitability-filtered placement rides step 4's
+    // reserved submersion threshold (a documented coupling), so this arc places each band at a
+    // deterministic in-bounds cell.
+    let topo = map.topo();
+    let (mw, mh) = (topo.width.max(1), topo.height.max(1));
+    let mut emb = Embodiment::new(
+        genesis.homeostatic.clone(),
+        genesis.affordances.clone(),
+        genesis.locomotion,
+        genesis.controller_hidden,
+        seed,
+    );
+    let layout = emb.layout().clone();
+    // The per-band spawn map the lifecycle pairing reads to place a newborn at its band's frozen dawn
+    // site (real-world unification, step 3c). The grouping filters bands whose race is registered in the
+    // same order as this filtered band list, so the two align by index.
+    let grouped = group_founders_by_band(founders, &peoples.bands, &peoples.races);
+    let filtered_bands: Vec<&BandSpec> = peoples
+        .bands
+        .iter()
+        .filter(|b| peoples.races.contains_key(&b.race))
+        .collect();
+    let mut spawn_by_place: BTreeMap<PlaceId, Coord3> = BTreeMap::new();
+    for (band_index, (race_id, ids)) in grouped.iter().enumerate() {
+        let Some(race) = peoples.races.get(race_id) else {
+            continue;
+        };
+        let Some(plan) = &race.body else {
+            continue; // a race with no body plan founds minds without bodies
+        };
+        let coord = Coord3::ground((band_index as i32 * 5) % mw, (band_index as i32 * 3) % mh);
+        // Record this band's spawn coordinate under its PlaceId, so a newborn of the band (whose place
+        // it inherits from its parents) spawns at the same site.
+        if let Some(band) = filtered_bands.get(band_index) {
+            spawn_by_place.insert(band.place, coord);
+        }
+        for &id in ids {
+            let homeostasis = Homeostasis::new(&genesis.homeostatic, plan, &genesis.organs);
+            let controller = match world.genome_of(id) {
+                Some(genome) => Controller::express(&race.genes, genome, &layout),
+                None => Controller::zeros(&layout),
+            };
+            // The edibility physiology is the temperature-only development fixture for this arc; a
+            // canonical dawn edibility derivation is a follow-on (an honest limit, like the language
+            // genesis being a caller-supplied bundle).
+            let physiology = Physiology::dev_for_registry(&genesis.homeostatic);
+            let walker = Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
+            emb.add(walker, thermal);
+        }
+    }
+    emb.set_physiology(EmbodiedPhysiology::from_manifest(
+        manifest,
+        genesis.organs.clone(),
+        map,
+        &genesis.submerged_medium_id,
+        &genesis.emergent_medium_id,
+    )?);
+    Ok((emb, LifecycleKit::new(thermal, spawn_by_place)))
 }

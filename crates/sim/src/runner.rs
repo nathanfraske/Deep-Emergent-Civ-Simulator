@@ -84,10 +84,11 @@
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::controller::ControllerLayout;
+use crate::controller::{Controller, ControllerLayout};
+use crate::edibility::Physiology;
 use crate::homeostasis::{
-    AffordanceRegistry, DerivedDrain, HomeostaticAxisId, HomeostaticRegistry, RESPIRATION,
-    TEMPERATURE,
+    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
+    RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -96,7 +97,7 @@ use crate::physiology::{
     self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
-use crate::world::{TickInput, World};
+use crate::world::{PlaceId, TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -110,6 +111,12 @@ const RES_FIELD: ResourceId = ResourceId(0);
 const RES_BODY: ResourceId = ResourceId(1);
 const RES_INDEX: ResourceId = ResourceId(2);
 const RES_WORLD: ResourceId = ResourceId(3);
+// The union population a being that is at once an Embodiment walker and a World mind belongs to
+// (real-world unification, step 2). Declared as a write of BOTH the embodiment coupling and the
+// cognition world, so once a shared StableId carries a body and a mind the scheduler serializes the
+// two systems (in canonical SystemId order, matching the pinned step_inner order) rather than
+// co-batching them as it safely does while world and embodiment share no being.
+const RES_BEING: ResourceId = ResourceId(4);
 const SYS_FIELD: SystemId = SystemId(0);
 const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
@@ -481,14 +488,15 @@ const RESPIRATION_FLUX_MAX: Fixed = Fixed::from_int(1_000_000_000);
 /// ([`derive_base_drain`], the Kleiber basal rate plus the thermoregulatory replacement), the exertion
 /// coupling ([`derive_exertion_coupling`]), the body-to-medium exchange rate ([`derive_body_exchange_rate`]),
 /// and, where the physiology registry carries a [`RESPIRATION`] axis, medium respiration
-/// ([`crate::medium::respire`]). So two beings with different body plans diverge in survival from their
+/// ([`crate::medium::respire_at`]). So two beings with different body plans diverge in survival from their
 /// anatomy alone, with no race or label branch (Principle 9). The mechanism is fixed Rust; the organ
 /// registry, the anchors, and the medium are data (Principle 11).
 ///
-/// The medium is a single uniform value this increment (the resolved medium's respirable content and
-/// convective coefficient everywhere); a spatially-varying per-cell [`crate::medium::MediumField`] that
-/// a being reads at its coordinate is the named later refinement, the respiratory sibling of the
-/// per-cell temperature field.
+/// The medium is a spatially-varying per-cell [`crate::medium::MediumField`] (real-world unification step
+/// 4): a being reads the medium of the cell it stands in, so a body in a water cell respires that cell's
+/// content and one in an air cell that cell's, from the same coupling over different axis values. A
+/// single-medium world folds to a uniform field (the regression), so the earlier uniform behaviour is the
+/// one-sample case of this one.
 #[derive(Clone, Debug)]
 pub struct EmbodiedPhysiology {
     /// The organ registry a being's tissue composition (convective surface, specific heat, energy
@@ -499,9 +507,10 @@ pub struct EmbodiedPhysiology {
     /// coefficient, emissivity, Stefan-Boltzmann), read fail-loud from the manifest or a labelled
     /// dev fixture.
     anchors: MetabolicAnchors,
-    /// The uniform respirable content of the ambient medium, the `c_medium` the Fick respiration law
-    /// reads (the resolved medium's `respirable_content` axis). Uniform this increment.
-    medium_respirable: Fixed,
+    /// The per-cell ambient-medium field, the `c_medium` the Fick respiration law reads at a being's
+    /// coordinate ([`crate::medium::respire_at`]). Folded from the worldgen map (`medium.water` below the
+    /// reserved submersion elevation, `medium.air` above) or a labelled uniform dev fixture.
+    medium: medium::MediumField,
     /// The reserved Fick membrane transfer coefficient `k` the respiration law reads. RESERVED owner
     /// value (`metabolism.respiration_transfer_coefficient`), a labelled fixture in tests.
     respiration_transfer_k: Fixed,
@@ -511,46 +520,94 @@ pub struct EmbodiedPhysiology {
 
 impl EmbodiedPhysiology {
     /// The physiology configuration read from the calibration manifest, fail-loud if any input is still
-    /// reserved (Principle 11): the metabolic anchors ([`MetabolicAnchors::from_manifest`]), the uniform
-    /// respirable content from the resolved medium profile (`medium.{name}`'s `respirable_content`
-    /// axis), the reserved respiration transfer coefficient, and the base tick length. This is the
-    /// sanctioned canonical sourcing; a test may instead build a labelled fixture with
-    /// [`EmbodiedPhysiology::dev_fixture`].
+    /// reserved (Principle 11): the metabolic anchors ([`MetabolicAnchors::from_manifest`]), the per-cell
+    /// medium field folded from the worldgen map ([`medium_field_from_manifest`], reading the two medium
+    /// profiles' `respirable_content` and `density` axes and the reserved submersion elevation), the
+    /// reserved respiration transfer coefficient, and the base tick length. The submerged and emergent
+    /// medium ids are the caller's (the scenario resolves them: a grounded world holds `medium.water`
+    /// below the waterline and `medium.air` above; a single-medium world passes the same id for both and
+    /// folds to a uniform field). This is the sanctioned canonical sourcing; a test may instead build a
+    /// labelled fixture with [`EmbodiedPhysiology::dev_fixture`].
     pub fn from_manifest(
         manifest: &CalibrationManifest,
         organs: BodyPlanRegistry,
-        medium_id: &str,
+        map: &TileMap,
+        submerged_medium_id: &str,
+        emergent_medium_id: &str,
     ) -> Result<EmbodiedPhysiology, CalibrationError> {
         let anchors = MetabolicAnchors::from_manifest(manifest)?;
-        let profile = manifest.require_map(medium_id)?;
-        let medium_respirable = profile.get("respirable_content").copied().ok_or_else(|| {
-            CalibrationError::BadValue {
-                id: medium_id.to_string(),
-                detail: "medium profile is missing the 'respirable_content' axis".to_string(),
-            }
-        })?;
+        let medium =
+            medium_field_from_manifest(manifest, map, submerged_medium_id, emergent_medium_id)?;
         Ok(EmbodiedPhysiology {
             organs,
             anchors,
-            medium_respirable,
+            medium,
             respiration_transfer_k: manifest
                 .require_fixed("metabolism.respiration_transfer_coefficient")?,
             tick_seconds: manifest.require_fixed("time.base_tick_seconds")?,
         })
     }
 
-    /// A labelled DEVELOPMENT FIXTURE physiology (dev-fixture anchors, a caller-supplied uniform
-    /// respirable content, a unit transfer coefficient, a one-second base tick), for tests and examples
-    /// only; a canonical run reads [`EmbodiedPhysiology::from_manifest`]. Not owner canon.
-    pub fn dev_fixture(organs: BodyPlanRegistry, medium_respirable: Fixed) -> EmbodiedPhysiology {
+    /// A labelled DEVELOPMENT FIXTURE physiology (dev-fixture anchors, a caller-supplied medium field, a
+    /// unit transfer coefficient, a one-second base tick), for tests and examples only; a canonical run
+    /// reads [`EmbodiedPhysiology::from_manifest`]. Not owner canon. The caller builds the medium field
+    /// (a [`crate::medium::MediumField::uniform`] for a one-medium fixture) sized to cover the beings'
+    /// coordinates, since a being off the field finds no medium and cannot breathe.
+    pub fn dev_fixture(
+        organs: BodyPlanRegistry,
+        medium: medium::MediumField,
+    ) -> EmbodiedPhysiology {
         EmbodiedPhysiology {
             organs,
             anchors: MetabolicAnchors::dev_fixture(),
-            medium_respirable,
+            medium,
             respiration_transfer_k: Fixed::ONE,
             tick_seconds: Fixed::ONE,
         }
     }
+}
+
+/// Fold the per-cell medium field from the worldgen map and the manifest (real-world unification step 4;
+/// owner ruling 2026-07-04), fail-loud if the submersion elevation or either medium profile is still
+/// reserved (Principle 11). Reads the reserved submersion elevation and each medium profile's
+/// `respirable_content` and `density` axes, then assigns each cell its medium by physical elevation alone
+/// ([`crate::medium::MediumField::from_map`]): the submerged medium below the threshold, the emergent
+/// above, no biome-label branch (Principle 9). The submerged and emergent ids may be the same, folding to
+/// a uniform field.
+fn medium_field_from_manifest(
+    manifest: &CalibrationManifest,
+    map: &TileMap,
+    submerged_medium_id: &str,
+    emergent_medium_id: &str,
+) -> Result<medium::MediumField, CalibrationError> {
+    let submersion = manifest.require_fixed("medium.submersion_elevation")?;
+    let submerged = medium_sample(manifest, submerged_medium_id)?;
+    let emergent = medium_sample(manifest, emergent_medium_id)?;
+    Ok(medium::MediumField::from_map(
+        map, submersion, submerged, emergent,
+    ))
+}
+
+/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content` and `density`
+/// axes) from the manifest, fail-loud if the profile is reserved or missing either axis.
+fn medium_sample(
+    manifest: &CalibrationManifest,
+    medium_id: &str,
+) -> Result<medium::MediumSample, CalibrationError> {
+    let profile = manifest.require_map(medium_id)?;
+    let axis = |name: &str| -> Result<Fixed, CalibrationError> {
+        profile
+            .get(name)
+            .copied()
+            .ok_or_else(|| CalibrationError::BadValue {
+                id: medium_id.to_string(),
+                detail: format!("medium profile is missing the '{name}' axis"),
+            })
+    };
+    Ok(medium::MediumSample {
+        respirable: axis("respirable_content")?,
+        density: axis("density")?,
+    })
 }
 
 /// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
@@ -562,9 +619,11 @@ impl EmbodiedPhysiology {
 /// (water lost slower, an oxygen demand, or the zero-drain derived axes temperature and integrity), so
 /// only the energy metabolism derives and the rest stay the owner's per-axis calibration. Pure
 /// fixed-point, no RNG, and no identity read: two beings diverge from their body plans alone (Principle
-/// 9). The exertion inputs are the being's full-exertion ground speed (a body-plan-derived velocity) at
-/// its normalized mass as the characteristic locomotion work-force proxy; the honest limit is the Part
-/// 35 work-force datum that replaces the mass proxy.
+/// 9). The exertion inputs are the being's full-exertion ground speed (a body-plan-derived velocity)
+/// and its whole-body muscle work force ([`physiology::whole_body_muscle_force`], the Part 35 datum
+/// that retires the earlier normalized-mass proxy): the force a body exerts follows its muscle anatomy,
+/// so two bodies of equal mass but different muscle endowment now drain differently under exertion, and
+/// a body with no muscle tissue exerts no force (the absence convention, not a mass-sized default).
 fn being_derived_drains(
     emb: &Embodiment,
     phys: &EmbodiedPhysiology,
@@ -587,7 +646,7 @@ fn being_derived_drains(
                 &phys.anchors,
             );
             let velocity = locomotion::locomotion_speed(&w.body, Fixed::ONE, &emb.params);
-            let force = w.body.body_mass;
+            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
             let exertion = derive_exertion_coupling(
                 &w.body,
                 &phys.organs,
@@ -709,6 +768,35 @@ impl Embodiment {
     }
 }
 
+/// The data the unified runner needs to embody a newborn mind at the lifecycle-pairing beat (real-world
+/// unification, step 3c): the reserved comfort band a newborn thermoregulates within, and the spawn
+/// coordinate each dawn band's [`PlaceId`] maps to. Everything else a newborn body needs (its body plan
+/// and genes, its genome) is read from the [`World`] at the birth, and the organ and homeostatic
+/// registries from the installed [`Embodiment`], so this kit carries only the two dawn-assembly inputs
+/// that live on neither side. Armed by the world-build ([`Runner::arm_lifecycle`]); without it a newborn
+/// stays a bodiless mind (a run that never armed the kit does not embody births).
+#[derive(Clone, Debug)]
+pub struct LifecycleKit {
+    /// The comfort band a newborn is born into (the reserved set point and half-band, born at the set
+    /// point). Uniform across the dawn founders this arc, so a newborn inherits the same band.
+    thermal: BeingThermal,
+    /// The spawn coordinate each dawn band's [`PlaceId`] maps to (`PlaceId` stays frozen at the dawn
+    /// band, owner ruling 2026-07-04), so a newborn spawns at its band's site. A newborn whose place is
+    /// not in this map is not embodied (a defensive skip, never a fabricated coordinate).
+    spawn_by_place: BTreeMap<PlaceId, Coord3>,
+}
+
+impl LifecycleKit {
+    /// The lifecycle kit from its comfort band and per-band spawn map. The world-build builds this from
+    /// the same reserved thermal band and band placement the dawn assembly reads.
+    pub fn new(thermal: BeingThermal, spawn_by_place: BTreeMap<PlaceId, Coord3>) -> LifecycleKit {
+        LifecycleKit {
+            thermal,
+            spawn_by_place,
+        }
+    }
+}
+
 /// The canonical runner: the temperature field, the located population, and their deterministic
 /// coupling. Constructed with an explicit [`FieldCalib`] (no authored default).
 pub struct Runner {
@@ -738,6 +826,11 @@ pub struct Runner {
     /// runner's `body_temp` and `index` (they are the located population), and the coupling reads the
     /// field only through the comfort-band map, writing back only the beings' coordinates.
     embodiment: Option<Embodiment>,
+    /// The lifecycle-pairing kit (real-world unification, step 3c), armed on the unified path so a
+    /// [`World`] birth mints a paired body and a death retires it. `None` on every other path (and until
+    /// [`Runner::arm_lifecycle`] is called), so a world-only, embodiment-only, or unarmed runner never
+    /// embodies a newborn and the reconciliation beat is a no-op.
+    lifecycle: Option<LifecycleKit>,
 }
 
 impl Runner {
@@ -753,6 +846,7 @@ impl Runner {
             body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
+            lifecycle: None,
         }
     }
 
@@ -785,6 +879,7 @@ impl Runner {
             body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
+            lifecycle: None,
         }
     }
 
@@ -836,7 +931,92 @@ impl Runner {
             body_exchange_rate,
             world: None,
             embodiment: Some(embodiment),
+            lifecycle: None,
         }
+    }
+
+    /// The unified real world (real-world unification, step 2): one runner carrying BOTH a cognition
+    /// [`World`] of minds and an [`Embodiment`] of located, metabolizing bodies, so a founder whose
+    /// [`StableId`] owns an entry in both is at once a culture-forming mind and a thermoregulating body
+    /// on the field. This is the first constructor to break the mutual exclusion the two run paths held
+    /// (`with_world` forced `embodiment = None`, `with_embodiment` forced `world = None`); it composes
+    /// them under one shared id space, which the caller (`build_dawn_runner`) guarantees by minting
+    /// every id from the world's one [`crate::world::Registry`] and reusing those ids for the walkers,
+    /// never a second registry.
+    ///
+    /// The canonical steering boundary survives verbatim: the world must carry no authored decision
+    /// repertoire (Principle 9, Part 8.4), the same fail-loud assert `with_world` makes, so the unified
+    /// path cannot smuggle the authored deliberative tier onto the emergent spine. The embodiment side
+    /// seeds exactly as `with_embodiment` does (the body-temperature map, the located index, and each
+    /// being's derived body-to-medium exchange rate), so a shared being is seeded on both halves.
+    ///
+    /// Determinism: the two systems now share the [`RES_BEING`] resource so the scheduler serializes
+    /// them in the pinned order (see [`Runner::tick_systems`]); `state_hash` already folds both halves
+    /// (the body-temperature map id-sorted, the world hash, and each walker id-sorted), and a shared
+    /// being appears in all three deterministically. The two clocks differ by one within a tick: the
+    /// embodiment (locomotion) draws key on the runner clock pre-increment (tick K) while the world
+    /// draws key on the world clock, incremented at the start of `World::tick` (K+1). This offset is
+    /// harmless because a being's body draws (`Phase::EXPLORE`) and its mind draws (LANGUAGE,
+    /// MATE_CHOICE, CONVERSE, and the rest) are discriminated by their `Phase`, so the two streams never
+    /// collide at either clock, and both clocks are deterministic functions of the tick count, so replay
+    /// and worker-count independence hold. Post-tick the two clocks agree (each advances once per tick).
+    pub fn with_world_and_embodiment(
+        field: Field,
+        calib: FieldCalib,
+        world: World,
+        embodiment: Embodiment,
+    ) -> Runner {
+        assert!(
+            !world.has_behaviour(),
+            "the canonical runner refuses a world carrying an authored decision repertoire: that is \
+             the sentient deliberative tier (Part 8.1), steering at the level of behaviour (Part 8.4), \
+             and the canonical-emergent behaviour source is the evolved controller, not an authored \
+             policy"
+        );
+        // Seed the embodiment side exactly as with_embodiment does, so a shared being is seeded on both
+        // halves: the body-temperature map, the located index, and each being's derived exchange rate.
+        let mut body_temp = BTreeMap::new();
+        let mut index = LocationIndex::new();
+        let mut body_exchange_rate = BTreeMap::new();
+        for w in &embodiment.walkers {
+            let init = embodiment
+                .thermal
+                .get(&w.id)
+                .map(|b| b.initial_temp)
+                .unwrap_or(Fixed::ZERO);
+            body_temp.insert(w.id, init);
+            index.place(OccupantId::being(w.id), w.coord());
+            if let Some(phys) = &embodiment.physiology {
+                let rate = derive_body_exchange_rate(
+                    &w.body,
+                    &phys.organs,
+                    phys.anchors.medium_h,
+                    phys.tick_seconds,
+                    &phys.anchors,
+                );
+                body_exchange_rate.insert(w.id, rate);
+            }
+        }
+        Runner {
+            clock: 0,
+            field,
+            calib,
+            index,
+            body_temp,
+            body_exchange_rate,
+            world: Some(world),
+            embodiment: Some(embodiment),
+            lifecycle: None,
+        }
+    }
+
+    /// Arm the lifecycle-pairing kit (real-world unification, step 3c), so a [`World`] birth mints a
+    /// paired body and a death retires it at the reconciliation beat. The world-build calls this after
+    /// [`Runner::with_world_and_embodiment`] with the reserved comfort band and the per-band spawn map
+    /// the dawn assembly already built. Without it the unified runner ticks minds and bodies but never
+    /// embodies a newborn (the pre-3c behaviour), so arming is opt-in and additive.
+    pub fn arm_lifecycle(&mut self, kit: LifecycleKit) {
+        self.lifecycle = Some(kit);
     }
 
     /// Place a being on the map at a coordinate with an initial body temperature.
@@ -863,6 +1043,14 @@ impl Runner {
     /// The composed cognition world, if any (a pure read, for tests and rendering).
     pub fn world(&self) -> Option<&World> {
         self.world.as_ref()
+    }
+
+    /// The composed cognition world for mutation (a calibration override applied after assembly, for
+    /// example a life-cadence override so a multi-generation run fits a test budget). This is not part
+    /// of the tick path; the deterministic scheduler reads the world when it steps, so a calibration
+    /// set here before stepping is reproducible.
+    pub fn world_mut(&mut self) -> Option<&mut World> {
+        self.world.as_mut()
     }
 
     /// The coupled embodied-being population, if any (a pure read, for tests and rendering).
@@ -904,6 +1092,7 @@ impl Runner {
         if let Some(world) = self.world.as_mut() {
             world.tick(world_inputs);
         }
+        self.reconcile_lifecycle();
         self.clock += 1;
     }
 
@@ -941,18 +1130,34 @@ impl Runner {
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
     /// touch (design Part 57): the field step writes the field; the body-thermal exchange reads the
     /// field and the located index and writes the body temperatures; the embodiment coupling reads the
-    /// field and writes the body temperatures and the index; the cognition world reads and writes only
-    /// the world. Only the phases this runner actually runs are declared, so a field-only runner
-    /// declares two systems and a fully composed one declares four.
+    /// field and writes the body temperatures, the index, and the union being population; the cognition
+    /// world reads and writes the world and the union being population. Only the phases this runner
+    /// actually runs are declared, so a field-only runner declares two systems and a fully composed one
+    /// declares four.
+    ///
+    /// The embodiment coupling and the cognition world both write [`RES_BEING`] (real-world
+    /// unification, step 2): while world and embodiment share no being (a world-only or
+    /// embodiment-only runner) that write is uncontended and changes no batching, so those paths
+    /// schedule exactly as before. Once a shared [`StableId`] carries a body and a mind, the write-write
+    /// conflict on [`RES_BEING`] forces the scheduler to serialize the two systems in canonical
+    /// [`SystemId`] order (`SYS_EMBODIMENT` before `SYS_WORLD`), which is the pinned `step_inner` order,
+    /// so the two beats that both touch a shared being cannot be reordered and the composite stays
+    /// bit-identical.
     pub fn tick_systems(&self) -> BTreeMap<SystemId, Access> {
         let mut sys = BTreeMap::new();
         sys.insert(SYS_FIELD, access(&[], &[RES_FIELD]));
         sys.insert(SYS_BODY, access(&[RES_FIELD, RES_INDEX], &[RES_BODY]));
         if self.embodiment.is_some() {
-            sys.insert(SYS_EMBODIMENT, access(&[RES_FIELD], &[RES_BODY, RES_INDEX]));
+            sys.insert(
+                SYS_EMBODIMENT,
+                access(&[RES_FIELD], &[RES_BODY, RES_INDEX, RES_BEING]),
+            );
         }
         if self.world.is_some() {
-            sys.insert(SYS_WORLD, access(&[RES_WORLD], &[RES_WORLD]));
+            sys.insert(
+                SYS_WORLD,
+                access(&[RES_WORLD, RES_BEING], &[RES_WORLD, RES_BEING]),
+            );
         }
         sys
     }
@@ -974,15 +1179,23 @@ impl Runner {
 
     /// One tick run through the deterministic scheduler (design Part 57): the phases are declared as
     /// systems over their resources, the scheduler derives conflict-free batches from the
-    /// declarations, and the flattened schedule runs them. The scheduler discovers that the cognition
-    /// world shares no resource with the field phases, so it places the world tick in the first batch
-    /// alongside the field step (a parallelisable pair), yet the result is bit-identical to the
-    /// pinned-order [`step`](Self::step): the reordered phases do not conflict, and the counter RNG is
-    /// draw-keyed rather than sequential (R-RNG-COORD), so the reorder cannot change any draw. This is
-    /// the runner as the scheduler's first real tick, proven equivalent to the hand-pinned order.
+    /// declarations, and the flattened schedule runs them. When no being is shared, the cognition
+    /// world shares no resource with the field phases, so the scheduler places the world tick in the
+    /// first batch alongside the field step (a parallelisable pair); when a being is shared, the
+    /// [`RES_BEING`] write the world and the embodiment coupling both declare serializes those two
+    /// systems in the pinned order (real-world unification, step 2). Either way the result is
+    /// bit-identical to the pinned-order [`step`](Self::step): the reordered or serialized phases do
+    /// not conflict on any resource, and the counter RNG is draw-keyed rather than sequential
+    /// (R-RNG-COORD), so the reorder cannot change any draw. This is the runner as the scheduler's
+    /// first real tick, proven equivalent to the hand-pinned order.
     pub fn step_scheduled(&mut self, world_inputs: &[TickInput]) {
         let sch = schedule(&self.tick_systems());
         run_serial(&sch, |sid| self.run_phase(sid, world_inputs));
+        // The lifecycle pairing runs after the scheduled phases exactly as it does after the pinned
+        // order in step_inner: it is a pure deterministic function of the post-tick world and embodiment
+        // state (worker-count independent), so both tick entry points reconcile identically and stay
+        // bit-identical (real-world unification, step 3c).
+        self.reconcile_lifecycle();
         self.clock += 1;
     }
 
@@ -1082,21 +1295,25 @@ impl Runner {
         }
         // (1b) Physics to physiology, medium respiration (R-MEDIUM): when a physiology is installed and
         // the registry carries a RESPIRATION axis, each being exchanges its respirable-gas reserve with
-        // the ambient medium through the Fick membrane law over its respiratory exchange area, in
-        // canonical id order (the walkers are id-sorted on the prior locomotion step). Breathe in before
-        // this tick's metabolic draw (matching the medium coupling's tested order), so the death check
-        // inside locomotion accounts for the tick's uptake. A body with no respiratory surface takes up
-        // nothing and suffocates on its buffer, whatever the medium (Principle 9). Uniform medium content
-        // this increment; a per-cell medium field is the named refinement.
+        // the medium of the cell it stands in, through the Fick membrane law over its respiratory exchange
+        // area, in canonical id order (the walkers are id-sorted on the prior locomotion step). Breathe in
+        // before this tick's metabolic draw (matching the medium coupling's tested order), so the death
+        // check inside locomotion accounts for the tick's uptake. A body with no respiratory surface takes
+        // up nothing and suffocates on its buffer, whatever the medium (Principle 9), and a being off the
+        // field finds no medium and suffocates on its buffer likewise. The medium is now per-cell
+        // ([`medium::respire_at`] reading the being's coordinate), so a body in a water cell respires that
+        // cell's content and one in an air cell that cell's; a single-medium world folds to a uniform field.
         if let Some(phys) = emb.physiology.as_ref() {
             if emb.homeo.axis(RESPIRATION).is_some() {
                 for w in emb.walkers.iter_mut() {
-                    let area = medium::exchange_area(&w.body, &phys.organs);
-                    medium::respire(
+                    let coord = w.coord();
+                    medium::respire_at(
                         &mut w.homeostasis,
-                        area,
+                        &w.body,
+                        &phys.organs,
+                        &phys.medium,
+                        coord,
                         phys.respiration_transfer_k,
-                        phys.medium_respirable,
                         RESPIRATION_FLUX_MAX,
                     );
                 }
@@ -1127,6 +1344,160 @@ impl Runner {
         for w in emb.walkers.iter() {
             self.index.place(OccupantId::being(w.id), w.coord());
         }
+    }
+
+    /// Reconcile the embodied population against the cognition world after a tick (real-world
+    /// unification, step 3c: lifecycle pairing). Births in [`crate::world::World`] reproduction and
+    /// deaths in world mortality and in locomotion each happen on their own half; this beat re-pairs the
+    /// two so a shared being's body and mind stay in lockstep before [`Runner::state_hash`] folds, so no
+    /// dead being's body keeps metabolizing and a child of embodied parents is itself embodied. It is a
+    /// pure deterministic function of the post-tick world and embodiment state (no RNG: a newborn's body
+    /// plan, genome-expressed controller, and comfort band are all deterministic), walked in canonical
+    /// id order, so it replays bit for bit and is independent of the field-worker width. It runs only on
+    /// the unified path (both world and embodiment present) and identically after the pinned
+    /// ([`Runner::step`]) and scheduled ([`Runner::step_scheduled`]) orders.
+    ///
+    /// The reconciliations, in order: (1) a body that died in locomotion (`alive = false`) propagates
+    /// its death to the world, so a starved or suffocated body ends the whole being; (2) every body
+    /// whose mind is gone from the world (world mortality culled it, or step 1 just did) is retired;
+    /// (3) every newborn mind whose race carries a body plan and has no body yet is embodied, its body
+    /// expressed from its race and genome as the dawn assembly expresses a founder. A mind whose race
+    /// carries no body plan stays a bodiless mind (owner ruling 2026-07-04), so the pairing is optional.
+    fn reconcile_lifecycle(&mut self) {
+        if self.world.is_none() || self.embodiment.is_none() {
+            return;
+        }
+        // (1) Locomotion deaths propagate to the world.
+        let dead_bodies: Vec<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .filter(|w| !w.alive)
+            .map(|w| w.id)
+            .collect();
+        if !dead_bodies.is_empty() {
+            let world = self.world.as_mut().unwrap();
+            for id in &dead_bodies {
+                world.remove_being(*id);
+            }
+        }
+        // (2) Retire every body whose mind is gone from the world, in canonical id order.
+        let live_minds: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .unwrap()
+            .being_ids()
+            .into_iter()
+            .collect();
+        let retire: Vec<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .map(|w| w.id)
+            .filter(|id| !live_minds.contains(id))
+            .collect();
+        for id in retire {
+            self.retire_body(id);
+        }
+        // (3) Embody every newborn (a world mind whose race carries a body plan and has no body yet), in
+        // canonical id order. Requires the lifecycle kit; without it a newborn stays a bodiless mind.
+        if self.lifecycle.is_none() {
+            return;
+        }
+        let embodied: BTreeSet<StableId> = self
+            .embodiment
+            .as_ref()
+            .unwrap()
+            .walkers
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        let newborns: Vec<StableId> = {
+            let world = self.world.as_ref().unwrap();
+            world
+                .being_ids()
+                .into_iter()
+                .filter(|id| !embodied.contains(id))
+                .filter(|&id| {
+                    world
+                        .race_of(id)
+                        .and_then(|rid| world.race(rid))
+                        .map(|race| race.body.is_some())
+                        .unwrap_or(false)
+                })
+                .collect()
+        };
+        for id in newborns {
+            self.embody_newborn(id);
+        }
+    }
+
+    /// Retire a body from the embodiment and every runner-side map it appears in: its walker, comfort
+    /// band, body temperature, derived exchange rate, and located-index entry, so a dead being leaves no
+    /// half behind (referential integrity, design Part 58). Preserves the relative order of the
+    /// surviving walkers, which does not affect [`Runner::state_hash`] (it sorts walkers by id) but keeps
+    /// the walk deterministic.
+    fn retire_body(&mut self, id: StableId) {
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.walkers.retain(|w| w.id != id);
+            emb.thermal.remove(&id);
+        }
+        self.body_temp.remove(&id);
+        self.body_exchange_rate.remove(&id);
+        self.index.remove(OccupantId::being(id));
+    }
+
+    /// Embody a newborn mind: mint a paired body reusing the mind id (never a second registry), its body
+    /// plan and genes its race's and its genome its own, expressed exactly as the dawn assembly expresses
+    /// a founder, then seed its runner-side state (comfort band, body temperature, located index, derived
+    /// exchange rate) as [`Runner::with_world_and_embodiment`] seeds a founder. Everything is gathered
+    /// under shared borrows and released before the mutation. A newborn whose place is not in the spawn
+    /// map, or a run with no installed physiology, is skipped rather than embodied on a fabricated input.
+    fn embody_newborn(&mut self, id: StableId) {
+        let gathered = {
+            let world = self.world.as_ref().unwrap();
+            let emb = self.embodiment.as_ref().unwrap();
+            let kit = self.lifecycle.as_ref().unwrap();
+            let expressed = world
+                .race_of(id)
+                .and_then(|rid| world.race(rid))
+                .and_then(|race| race.body.clone().map(|plan| (race, plan)));
+            let place_coord = world
+                .place_of(id)
+                .and_then(|place| kit.spawn_by_place.get(&place).copied());
+            match (expressed, place_coord, emb.physiology.as_ref()) {
+                (Some((race, plan)), Some(coord), Some(phys)) => {
+                    let homeostasis = Homeostasis::new(&emb.homeo, &plan, &phys.organs);
+                    let controller = match world.genome_of(id) {
+                        Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
+                        None => Controller::zeros(&emb.layout),
+                    };
+                    let physiology = Physiology::dev_for_registry(&emb.homeo);
+                    let exchange_rate = derive_body_exchange_rate(
+                        &plan,
+                        &phys.organs,
+                        phys.anchors.medium_h,
+                        phys.tick_seconds,
+                        &phys.anchors,
+                    );
+                    let walker = Walker::new(id, coord, plan, homeostasis, physiology, controller);
+                    Some((walker, kit.thermal, coord, exchange_rate))
+                }
+                _ => None,
+            }
+        };
+        let Some((walker, thermal, coord, exchange_rate)) = gathered else {
+            return;
+        };
+        let emb = self.embodiment.as_mut().unwrap();
+        emb.add(walker, thermal);
+        self.body_temp.insert(id, thermal.initial_temp);
+        self.index.place(OccupantId::being(id), coord);
+        self.body_exchange_rate.insert(id, exchange_rate);
     }
 
     /// The canonical state hash: the clock, the field, and every located being's temperature in id
