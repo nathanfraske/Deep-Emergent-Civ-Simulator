@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_world::OrbitalElements;
 
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
-use crate::agent::{AccessObs, Mind, SharedBelief};
+use crate::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
 use crate::belief::{BeliefKey, BeliefPool};
 use crate::breeding::{BreedingSystemRegistry, SexClass};
@@ -66,8 +66,8 @@ use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use crate::transmission::{
-    copy_drift, copy_fidelity, erode_and_cull, transmit, transmit_draw, DesignId, Knowledge,
-    TransmissionParams,
+    copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
+    Knowledge, TransmissionParams,
 };
 use crate::value::{
     EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
@@ -504,6 +504,11 @@ pub struct World {
     /// The transmission calibrations (`transmission.*`, derived and reserved). None until set; the
     /// transmission beat is then a no-op, so a world that holds no techniques runs unchanged.
     transmission: Option<TransmissionParams>,
+    /// The retention law scaling a band's technique-loss window by its memory (design Part 25.6,
+    /// [`RetentionLaw`]). None until set; the transmission beat then erodes at the raw
+    /// `transmission.loss_rate`, memory-independent. When set, a band's effective loss rate derives
+    /// from its mean memory through this curve, so a sharper-memoried band holds a technique longer.
+    retention: Option<RetentionLaw>,
     /// The reproduction calibrations (design Parts 25, 28, R-REPRO). None until set; the reproduce
     /// half of the life cadence is then a no-op, so a world that installs none only ages and dies.
     reproduction: Option<ReproductionParams>,
@@ -604,6 +609,7 @@ impl World {
             belief_diffusion_rate: None,
             knowledge: BTreeMap::new(),
             transmission: None,
+            retention: None,
             reproduction: None,
             mortality_hazard_by_race: None,
             drift: None,
@@ -710,6 +716,15 @@ impl World {
     /// transmission beat is a no-op, so a world that holds no techniques runs unchanged.
     pub fn set_transmission(&mut self, params: TransmissionParams) {
         self.transmission = Some(params);
+    }
+
+    /// Install the memory-scaled retention law (design Part 25.6, [`RetentionLaw`], world-wiring
+    /// increment 8). Until set, the transmission beat erodes an under-practised technique at the raw
+    /// `transmission.loss_rate`, memory-independent. When set, a band's effective loss rate derives
+    /// from its mean memory through this curve, so a sharper-memoried band holds a technique over a
+    /// longer window and a forgetful one over a shorter, from one race-blind rule (Principle 9).
+    pub fn set_retention(&mut self, law: RetentionLaw) {
+        self.retention = Some(law);
     }
 
     /// Originate a design in a being's knowledge at a starting proficiency (design Part 41): the being
@@ -2524,6 +2539,12 @@ impl World {
     /// knowledge-holder with no place erodes as its own singleton band, since it shares no locality
     /// with any other holder. The final knowledge is independent of the order the bands are processed
     /// in (the rolls key off design and tick, not the band), so replay is bit-identical.
+    ///
+    /// When a [`RetentionLaw`] is armed (world-wiring increment 8), a band's effective loss rate
+    /// derives from its own mean memory ([`World::band_loss_rate`]): a sharper-memoried band forgets an
+    /// under-practised technique over a longer window (a slower rate), a forgetful one over a shorter,
+    /// from one race-blind rule. With no retention law armed, every band erodes at the raw reserved
+    /// `transmission.loss_rate`, the memory-independent case.
     fn erode_knowledge_by_band(&mut self, params: &TransmissionParams) {
         // Partition the knowledge-holders by place (canonical); a placeless holder is its own singleton.
         let mut bands: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
@@ -2534,21 +2555,59 @@ impl World {
                 None => singletons.push(id),
             }
         }
+        // The retention law is cloned out (a small curve) so the per-band memory read below does not
+        // borrow-conflict with the knowledge mutation.
+        let retention = self.retention.clone();
         let groups = bands
             .into_values()
             .chain(singletons.into_iter().map(|id| vec![id]));
         for ids in groups {
+            // The band's effective loss rate: memory-scaled when a retention law is armed, else raw.
+            let band_params = match &retention {
+                Some(law) => TransmissionParams {
+                    loss_rate: self.band_loss_rate(law, params, &ids),
+                    ..*params
+                },
+                None => *params,
+            };
             let mut band: BTreeMap<StableId, Knowledge> = BTreeMap::new();
             for id in ids {
                 if let Some(k) = self.knowledge.remove(&id) {
                     band.insert(id, k);
                 }
             }
-            erode_and_cull(&mut band, params, self.clock, self.seed);
+            erode_and_cull(&mut band, &band_params, self.clock, self.seed);
             for (id, k) in band {
                 self.knowledge.insert(id, k);
             }
         }
+    }
+
+    /// A band's memory-scaled technique-loss rate (design Part 25.6, [`RetentionLaw`], world-wiring
+    /// increment 8). The neutral loss timescale is the number of ticks a neutral-memory band forgets an
+    /// under-practised technique over, the [`stability_span`] of the reserved raw `loss_rate` (the
+    /// ticks erosion at that rate consumes a full unit of proficiency). The retention law scales that
+    /// base window by the band's mean memory ([`World::band_mean_memory`]): a sharper-memoried band
+    /// gets a longer window and so a slower effective rate (`ONE / window`), a forgetful one a shorter
+    /// window and a faster rate. The rate keys on the memory scalar, never a race id (Principle 9), so
+    /// two bands of different composition forget at different rates from one rule. A band with no
+    /// representative memory (no member holds a mind) falls back to the raw rate rather than a
+    /// fabricated one. The window floors at one tick in [`RetentionLaw::window_ticks_for`], so the
+    /// divide is never by zero; a window past the fixed-point integer range clamps, giving a
+    /// vanishingly small rate (a technique a supremely-memoried band effectively never forgets).
+    fn band_loss_rate(
+        &self,
+        law: &RetentionLaw,
+        params: &TransmissionParams,
+        ids: &[StableId],
+    ) -> Fixed {
+        let memory = match self.band_mean_memory(ids) {
+            Some(m) => m,
+            None => return params.loss_rate,
+        };
+        let base_window = stability_span(params.loss_rate);
+        let window = law.window_ticks_for(memory, base_window);
+        Fixed::ONE.div(Fixed::from_int(window.min(i32::MAX as u64) as i32))
     }
 
     /// The tick's drift beat: run [`World::drift_languages`] against the world's own race registry.
@@ -5208,6 +5267,98 @@ name = "said"
         assert_eq!(flat.rate_for(dull_mem), flat.rate_for(keen_mem));
         // An empty band has no representative memory, never a fabricated one.
         assert_eq!(w.band_mean_memory(&[]), None);
+    }
+
+    #[test]
+    fn a_sharp_memoried_band_holds_a_technique_longer_than_a_forgetful_one() {
+        // World-wiring increment 8: with a retention law armed, a band's technique-loss window scales
+        // with its mean memory. Two isolated bands, each holding one below-floor design (two holders,
+        // under the floor of three) so it erodes, differ only in per-being memory; the sharp-memoried
+        // band forgets the design strictly later than the forgetful one, and the run replays bit for
+        // bit. The divergence falls out of memory through one race-blind rule (Principle 9).
+        const DESIGN: DesignId = 0x5;
+        // An increasing memory-scale curve: a forgetful mind gets under the base window, a sharp mind
+        // several times it. Labelled fixture, never an owner value.
+        let law = || RetentionLaw {
+            scale_by_memory: Curve::new([
+                (Fixed::ZERO, Fixed::from_ratio(1, 2)),
+                (Fixed::ONE, Fixed::from_int(5)),
+            ]),
+        };
+        let build = || {
+            let mut w = world().with_seed(0x_8E_31);
+            // A forgetful band at place 1 and a sharp band at place 2, two holders each.
+            let dull: Vec<StableId> = (0..2).map(|_| w.spawn(Fixed::ONE)).collect();
+            for &id in &dull {
+                w.minds.get_mut(&id).unwrap().memory = Fixed::from_ratio(1, 10);
+                w.set_place(id, 1);
+                w.originate_design(id, DESIGN, Fixed::ONE);
+            }
+            let keen: Vec<StableId> = (0..2).map(|_| w.spawn(Fixed::ONE)).collect();
+            for &id in &keen {
+                w.minds.get_mut(&id).unwrap().memory = Fixed::ONE;
+                w.set_place(id, 2);
+                w.originate_design(id, DESIGN, Fixed::ONE);
+            }
+            w.set_transmission(TransmissionParams {
+                drift_rate: Fixed::from_ratio(1, 100),
+                loss_practitioner_floor: 3,
+                loss_rate: Fixed::from_ratio(1, 4),
+            });
+            w.set_retention(law());
+            (w, dull, keen)
+        };
+        // Run both bands (isolated at separate places, so neither sustains the other) and return the
+        // tick each first loses the design entirely.
+        let held = |w: &World, band: &[StableId]| -> bool {
+            band.iter()
+                .any(|&id| w.knowledge_of(id).map(|k| k.holds(DESIGN)).unwrap_or(false))
+        };
+        let run_to_culls =
+            |w: &mut World, dull: &[StableId], keen: &[StableId]| -> (Option<u64>, Option<u64>) {
+                let (mut dull_cull, mut keen_cull) = (None, None);
+                for t in 1..=200u64 {
+                    w.tick(&[]);
+                    if dull_cull.is_none() && !held(w, dull) {
+                        dull_cull = Some(t);
+                    }
+                    if keen_cull.is_none() && !held(w, keen) {
+                        keen_cull = Some(t);
+                    }
+                    if dull_cull.is_some() && keen_cull.is_some() {
+                        break;
+                    }
+                }
+                (dull_cull, keen_cull)
+            };
+
+        let (mut w, dull, keen) = build();
+        let (dull_cull, keen_cull) = run_to_culls(&mut w, &dull, &keen);
+        let dull_cull = dull_cull.expect("the forgetful band eventually loses the design");
+        let keen_cull = keen_cull.expect("the sharp band eventually loses the design");
+        assert!(
+            keen_cull > dull_cull,
+            "the sharp-memoried band held the technique longer: keen lost at {keen_cull}, dull at {dull_cull}"
+        );
+
+        // Control: the same setup with the retention law removed. The memory channel is off, so both
+        // bands (same floor, same raw loss rate) forget on the same tick despite their different
+        // memory. The divergence above is due to the retention law, not the band composition.
+        let (mut off, dull_o, keen_o) = build();
+        off.retention = None;
+        let (dull_off, keen_off) = run_to_culls(&mut off, &dull_o, &keen_o);
+        assert_eq!(
+            dull_off, keen_off,
+            "with retention off the two bands forget on the same tick (the memory channel is off)"
+        );
+
+        // Bit-for-bit replay of the memory-scaled run.
+        let (mut w2, dull2, keen2) = build();
+        assert_eq!(
+            run_to_culls(&mut w2, &dull2, &keen2),
+            (Some(dull_cull), Some(keen_cull)),
+            "the memory-scaled retention run replays bit for bit"
+        );
     }
 
     #[test]
