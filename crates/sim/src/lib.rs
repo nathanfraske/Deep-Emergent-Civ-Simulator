@@ -74,6 +74,7 @@ pub mod decision;
 pub mod demography;
 pub mod dialogue;
 pub mod edibility;
+pub mod environ;
 pub mod epoch;
 pub mod evidence;
 pub mod evolve;
@@ -141,7 +142,10 @@ pub use census::{
 };
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
-pub use controller::{weight_count, Controller, ControllerDecision, ControllerLayout};
+pub use controller::{
+    forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
+    ControllerLayout, ForageGains,
+};
 pub use decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
 };
@@ -160,11 +164,11 @@ pub use evolve::{
     selection_gradient, EvolveParams, EvolveReport,
 };
 pub use genome::{
-    Allele, AlleleState, BuildChannel, Channel, CognitionChannel, CompositionAxisId,
-    ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect, GeneId, GenePool,
-    GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel, Incompatibility,
-    IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup, ReproductionMode,
-    SchemeId, TraitId,
+    append_controller_block, Allele, AlleleState, BuildChannel, Channel, CognitionChannel,
+    CompositionAxisId, ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect,
+    GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel,
+    Incompatibility, IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup,
+    ReproductionMode, SchemeId, ToleranceAxisId, TraitId,
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,

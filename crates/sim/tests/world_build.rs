@@ -31,12 +31,13 @@ use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    build_dawn_runner, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
-    DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef,
-    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
-    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
-    SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
+    append_controller_block, build_dawn_runner, taxis_move_weights, Articulation, Axiom,
+    AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel,
+    CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
+    EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool,
+    GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
+    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
+    TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -783,11 +784,143 @@ fn embodied_peoples() -> DawnPeoples {
             affordances: AffordanceRegistry::dev_default(),
             locomotion: LocomotionParams::dev_default(),
             organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
             controller_hidden: 0,
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
     }
+}
+
+/// A sexed race carrying a controller taxis gene block (base-level liveliness step 1), so its founders
+/// express a thermotaxis reaction norm and MOVE along the temperature gradient. Built by appending the
+/// full controller substrate to the sexed race's genes and seeding the pool spine with the taxis
+/// magnitudes (move-activation bias and heading gain), mirroring the run harness. Ploidy two, so the
+/// seeded weights express deterministically at the dawn; a valid Gaussian stamp lets the spine promote.
+fn moving_race() -> Race {
+    let mut race = a_sexed_race(0).with_body_plan(mobile_body());
+    let layout = ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    );
+    let seeds = taxis_move_weights(&layout, 0, 0, Fixed::ONE, Fixed::ONE);
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the moving race and a matching embodiment genesis, so the founders embody and disperse.
+fn dispersing_peoples() -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), moving_race());
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn founders_with_a_taxis_block_disperse_and_a_blank_race_does_not() {
+    // Base-level liveliness step 1: a founding race carrying a controller taxis gene block expresses a
+    // thermotaxis reaction norm, so its founders leave their single dawn cell and disperse along the
+    // temperature gradient the runner senses, through build_dawn_runner with no change to the tick. The
+    // control: the same dawn with a blank-controller race (no taxis block) stays put, so the movement is
+    // the seeded controller, not the mechanism (Principle 9: no authored heading).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let run_off = |peoples: &DawnPeoples, seed: u64| -> (usize, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            peoples,
+            seed,
+        )
+        .unwrap();
+        let dawn: std::collections::BTreeSet<(i32, i32)> = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .map(|w| {
+                let c = w.coord();
+                (c.x, c.y)
+            })
+            .collect();
+        assert_eq!(
+            dawn.len(),
+            1,
+            "the band spawns its founders on one dawn cell"
+        );
+        for _ in 0..60 {
+            runner.step();
+        }
+        let off = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| {
+                let c = w.coord();
+                !dawn.contains(&(c.x, c.y))
+            })
+            .count();
+        (off, runner.state_hash())
+    };
+
+    let (moved, hash_a) = run_off(&dispersing_peoples(), 0x515E);
+    assert!(
+        moved > 0,
+        "founders carrying a taxis block leave their dawn cell (dispersal): {moved} moved"
+    );
+
+    // The control: a blank-controller race stays on its dawn cell (no movement without a taxis block).
+    let (still, _) = run_off(&embodied_peoples(), 0x515E);
+    assert_eq!(
+        still, 0,
+        "a blank-controller race does not disperse: {still} moved (movement is the seeded controller)"
+    );
+
+    // Determinism: the dispersing run replays bit for bit.
+    let (_, hash_b) = run_off(&dispersing_peoples(), 0x515E);
+    assert_eq!(hash_a, hash_b, "the dispersing run replays bit for bit");
 }
 
 #[test]

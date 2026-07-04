@@ -189,6 +189,18 @@ impl ControllerLayout {
         self.hidden
     }
 
+    /// The input-block base index of a homeostatic axis: the offset in the input vector where the
+    /// axis's per-axis slots begin (its level, here-flag, two source-direction components, then its
+    /// signed slot). `None` if the axis does not feed this layout. A seed function reads this so it
+    /// never hardcodes an axis's position, which the registry's membership and canonical order set: add
+    /// or reorder an axis and the base follows the data (Principle 11), not a magic constant.
+    pub fn axis_input_base(&self, axis: HomeostaticAxisId) -> Option<usize> {
+        self.axes
+            .iter()
+            .position(|&a| a == axis)
+            .map(|i| INPUTS_PER_AXIS * i)
+    }
+
     /// The number of heritable weights this layout's controller carries, which is the number of
     /// [`ControllerParamId`]s a genome must reach to express a full controller. For a reaction norm
     /// this is `n_out * n_in`; for a recurrent network it adds the input-to-hidden, hidden-to-hidden,
@@ -287,6 +299,115 @@ pub fn weight_count(n_in: usize, n_out: usize, hidden: usize) -> usize {
     } else {
         hidden * n_in + hidden * hidden + n_out * hidden
     }
+}
+
+/// The nonzero founding-taxis weights for a MOVE-directional reaction-norm controller over one target
+/// axis (base-level liveliness, step 1): each entry names the [`ControllerParamId`] of one nonzero
+/// weight and the target value a founder should express for it. The pattern is the reaction-norm form
+/// of the tested taxis controller: the MOVE activation follows the bias input (so the being wants to
+/// move, `move_bias`), and the MOVE heading follows the target axis's source-direction percept (so it
+/// steers along that axis's gradient, `heading_gain`). Nothing here is a magnitude of its own: the two
+/// gains are the caller's reserved values (Principle 11), and this function is fixed mechanism that maps
+/// each nonzero weight to its heritable channel with no race branch (Principle 9).
+///
+/// The layout must give MOVE a directional output at `move_output` (its activation, then its two
+/// heading components at the next two output indices) and the target axis an input block starting at
+/// `axis_input_base` (its level, here-flag, two source-direction components, then its signed slot). For
+/// a reaction norm the weight feeding output `o` from input `i` is [`ControllerParamId`] `o * n_in + i`.
+/// A caller seeds each returned weight by adding a unit-effect gene on that channel and a pool locus at
+/// frequency one whose additive effect is `target / ploidy`, so a homozygous founder expresses exactly
+/// the target (the locus carries no additive variance at frequency one, so the dawn expression is
+/// deterministic and mutation is what later gives selection a gradient to act on).
+pub fn taxis_move_weights(
+    layout: &ControllerLayout,
+    move_output: usize,
+    axis_input_base: usize,
+    move_bias: Fixed,
+    heading_gain: Fixed,
+) -> Vec<(ControllerParamId, Fixed)> {
+    let n_in = layout.n_in();
+    let param = |output: usize, input: usize| ControllerParamId((output * n_in + input) as u32);
+    let bias = n_in - 1;
+    vec![
+        // MOVE activation from the bias input: the being wants to move.
+        (param(move_output, bias), move_bias),
+        // MOVE heading from the axis's source-direction percept: it steers along the gradient.
+        (param(move_output + 1, axis_input_base + 2), heading_gain),
+        (param(move_output + 2, axis_input_base + 3), heading_gain),
+    ]
+}
+
+/// The reserved gain magnitudes a founding forage-taxis reaction norm is seeded with (base-level
+/// liveliness step 3). Each is a controller-weight magnitude the caller supplies (Principle 11); the
+/// mechanism ([`forage_taxis_weights`]) maps each to its heritable channel with no race branch. The
+/// values are the owner's `controller.taxis.*` reserved lever; the dev harness stands up labelled
+/// fixtures.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ForageGains {
+    /// The MOVE-activation bias, so a being wants to move rather than idle (`controller.taxis.move_bias`).
+    pub move_bias: Fixed,
+    /// The suppression of MOVE when a forage source is on the current tile, so a being stops on food
+    /// rather than wandering off it (`controller.taxis.here_suppress`).
+    pub here_suppress: Fixed,
+    /// The gain steering the MOVE heading toward a forage source's direction and along a steer axis's
+    /// field gradient (`controller.taxis.heading_gain`).
+    pub heading_gain: Fixed,
+    /// The INGEST-activation drive from a forage source underfoot, so a being eats what it stands on
+    /// (`controller.taxis.ingest_drive`). The reserve-level gating that a single-axis taxis norm adds is
+    /// left to the reserve-room bound in the ingest arm, so a full being draws nothing without a
+    /// per-axis gate the shared scalar INGEST output cannot carry across several forage axes.
+    pub ingest_drive: Fixed,
+}
+
+/// The nonzero founding weights for a full FORAGE reaction norm over one or more target axes plus
+/// zero or more gradient-steer axes (base-level liveliness step 3): the being wants to move (the
+/// `move_bias`), stops when a forage source is underfoot (each forage axis's here-flag suppresses
+/// MOVE), steers toward each forage source and along each steer axis's field gradient (the source-
+/// direction and gradient percepts drive the MOVE heading), and ingests a forage source underfoot
+/// (each forage axis's here-flag drives the shared INGEST activation). A steer axis contributes only a
+/// heading pull (the temperature comfort gradient the runner supplies), never an ingest, since it has
+/// no consumable source. This is the multi-axis generalisation of the tested single-axis taxis
+/// controller: an energy-and-water grazer that thermoregulates is a forage set `[energy, water]` with a
+/// steer set `[temperature]`. Nothing here is a magnitude of its own: the gains are the caller's
+/// reserved values (Principle 11), and the mapping from each nonzero weight to its heritable channel
+/// carries no race id (Principle 9).
+///
+/// The layout must give MOVE a directional output at `move_output` (its activation, then its two
+/// heading components) and the INGEST scalar output at `ingest_output`; each forage and steer axis is
+/// named by its input-block base ([`ControllerLayout::axis_input_base`]). For a reaction norm the
+/// weight feeding output `o` from input `i` is [`ControllerParamId`] `o * n_in + i`. The forage and
+/// steer bases must be disjoint (an axis is a food source or a gradient to steer by, not both), so no
+/// two entries collide on one channel.
+pub fn forage_taxis_weights(
+    layout: &ControllerLayout,
+    move_output: usize,
+    ingest_output: usize,
+    forage_bases: &[usize],
+    steer_bases: &[usize],
+    gains: ForageGains,
+) -> Vec<(ControllerParamId, Fixed)> {
+    let n_in = layout.n_in();
+    let param = |output: usize, input: usize| ControllerParamId((output * n_in + input) as u32);
+    let bias = n_in - 1;
+    // MOVE activation from the bias input: the being wants to move (seeded once).
+    let mut out = vec![(param(move_output, bias), gains.move_bias)];
+    for &base in forage_bases {
+        let (here, dx, dy) = (base + 1, base + 2, base + 3);
+        // MOVE suppressed when this forage source is underfoot: stop to eat rather than wander off it.
+        out.push((param(move_output, here), Fixed::ZERO - gains.here_suppress));
+        // MOVE heading toward this forage source's known direction.
+        out.push((param(move_output + 1, dx), gains.heading_gain));
+        out.push((param(move_output + 2, dy), gains.heading_gain));
+        // INGEST fires when this forage source is underfoot (the reserve-room bound gates the amount).
+        out.push((param(ingest_output, here), gains.ingest_drive));
+    }
+    for &base in steer_bases {
+        let (dx, dy) = (base + 2, base + 3);
+        // MOVE heading along this steer axis's field gradient (the temperature comfort gradient).
+        out.push((param(move_output + 1, dx), gains.heading_gain));
+        out.push((param(move_output + 2, dy), gains.heading_gain));
+    }
+    out
 }
 
 /// What the controller decided this tick: which affordance to issue, how strongly, and, for a
@@ -459,6 +580,39 @@ mod tests {
             &AffordanceRegistry::dev_default(),
             hidden,
         )
+    }
+
+    #[test]
+    fn taxis_move_weights_land_on_the_move_activation_and_heading_slots() {
+        // Base-level liveliness step 1: the founding taxis weights target the MOVE activation from the
+        // bias input and the two MOVE heading components from the target axis's source-direction slots,
+        // at the reaction-norm indices output * n_in + input, carrying the caller's two gains.
+        let l = layout(0);
+        let n_in = l.n_in();
+        let mo = MOVE.0 as usize;
+        let w = taxis_move_weights(&l, mo, 0, Fixed::from_int(3), Fixed::from_int(5));
+        assert_eq!(w.len(), 3, "move activation and the two heading components");
+        assert!(
+            w.contains(&(
+                ControllerParamId((mo * n_in + (n_in - 1)) as u32),
+                Fixed::from_int(3)
+            )),
+            "move activation from the bias carries the move bias"
+        );
+        assert!(
+            w.contains(&(
+                ControllerParamId(((mo + 1) * n_in + 2) as u32),
+                Fixed::from_int(5)
+            )),
+            "move heading dx from the axis source-direction x carries the heading gain"
+        );
+        assert!(
+            w.contains(&(
+                ControllerParamId(((mo + 2) * n_in + 3) as u32),
+                Fixed::from_int(5)
+            )),
+            "move heading dy from the axis source-direction y carries the heading gain"
+        );
     }
 
     #[test]

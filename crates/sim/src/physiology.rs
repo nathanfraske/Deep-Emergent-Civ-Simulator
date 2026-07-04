@@ -73,6 +73,16 @@ pub const TISSUE_SPECIFIC_HEAT: &str = "therm.specific_heat";
 /// The biology-floor axis a tissue carries its gross energy density on (`bio.energy_density`), the
 /// reserve's per-unit specific energy.
 pub const ENERGY_DENSITY: &str = "bio.energy_density";
+/// The biology-floor axis a tissue (or a standing fluid supply) carries its water content on
+/// (`bio.water_fraction`), the hydration reserve's backing class. Named here as a shared constant so
+/// the environmental water-source writer and the metabolic water reserve agree on the class id; it is
+/// a data label like [`ENERGY_DENSITY`], not a special case (a world's alien fluid is another class).
+pub const WATER_FRACTION: &str = "bio.water_fraction";
+/// The biology-floor TOXIN class a cell carries its salinity dose on (`bio.salinity`), the class the
+/// environmental salinity field doses a cell with and a being's heritable salt tolerance is read
+/// against (base-level liveliness step 4). A data label like [`ENERGY_DENSITY`], not a special case: a
+/// world's dust, alkalinity, or arcane taint is another toxin class the same harm path reads.
+pub const SALINITY: &str = "bio.salinity";
 /// The mechanical-floor axis a tissue carries its material strength on (`mat.fracture_strength`, the
 /// same axis the individual-tier [`crate::body::Body::strength`] reads, design Part 35), the strength
 /// per unit of the tissue the whole-body work force integrates over. A tissue with none of it provides

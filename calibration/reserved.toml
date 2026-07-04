@@ -1207,6 +1207,45 @@ set_date = "2026-07-01"
 unit = "hidden_units"
 source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
+# --- base-level liveliness step 1: the founding thermotaxis reaction norm the dawn controller gene block
+# seeds (crates/sim/src/controller.rs taxis_move_weights, crates/sim/src/genome.rs
+# append_controller_block). These are the taxis weight MAGNITUDES a canonical race genesis reads to seed a
+# founder that moves along the temperature gradient; the dev-fixture run harness stands them up inline
+# (Fixed::ONE). The mechanism (which controller weight each is) is fixed Rust; only the magnitudes are
+# reserved (Principle 11), the same for every race (Principle 9). ---
+
+[[reserved]]
+id = "controller.taxis.move_bias"
+basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.heading_gain"
+basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights forage_taxis_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.here_suppress"
+basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
+
+[[reserved]]
+id = "controller.taxis.ingest_drive"
+basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
+status = "reserved"
+value = ""
+unit = "controller_weight"
+source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
+
 # behavior.controller_init_spread, controller_mutation_rate, and controller_mutation_step RETIRED
 # (controller-scaling derivation built, 2026-07-03; worksheet §13a): the three controller scalings no
 # longer stand as free numbers. They DERIVE through EvolveParams::from_layout (crates/sim/src/evolve.rs)
@@ -1796,3 +1835,259 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "count"
 source = "Part 25.7; the low end per docs/working/TEST_WORLDS.md (Tempest)"
+
+# --- base-level liveliness step 2: the environmental field stack (hydrology and primary productivity;
+# docs/working/BASE_LIVELINESS_HANDOFF.md; crates/sim/src/environ.rs). Every forcing constant is
+# reserved fail-loud (Principle 11): the saturation-curve affine tangent, the precipitation and
+# evaporation coefficients, the downhill routing fraction, and the productivity per-factor requirements
+# and soil baseline. The stencils are fixed Rust and the biome-to-water and productivity rules key off
+# the physical fields, never a biome or race label (Principles 8, 9); only these magnitudes are the
+# owner's. The dev-fixtures profile stands up labelled values so the harness runs. ---
+
+[[reserved]]
+id = "hydrology.saturation_slope"
+basis = "the affine slope of the saturation vapour pressure over temperature, the Clausius-Clapeyron tangent over the simulated band (laws::saturation_vapor_pressure): it sets how much less water cold air holds, so a cold humid cell crosses saturation and precipitates. Set from the physical Clausius-Clapeyron slope at the world's reference temperature over its temperature-axis scale"
+status = "reserved"
+value = ""
+unit = "mpa_per_temperature"
+source = "base-level liveliness step 2 (Part 15, Part 18); crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_t_ref"
+basis = "the reference temperature the saturation affine tangent is taken at (the midpoint of the world's habitable temperature band, so the tangent is accurate where most weather happens)"
+status = "reserved"
+value = ""
+unit = "temperature"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_e_ref"
+basis = "the saturation vapour pressure at the reference temperature, the physical saturation pressure of the world's condensing species at that temperature"
+status = "reserved"
+value = ""
+unit = "mpa"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.saturation_cap"
+basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate"
+status = "reserved"
+value = ""
+unit = "mpa"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+
+[[reserved]]
+id = "hydrology.precipitation_rate"
+basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_still"
+basis = "the still-air Dalton evaporation transfer coefficient a in E = (a + b|u|)(e_s - e_a) (laws::evaporation_rate), the base evaporation rate per unit vapour-pressure deficit with no wind. Set from the world's still-air mass-transfer coefficient"
+status = "reserved"
+value = ""
+unit = "evaporation_coefficient"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.evaporation_wind"
+basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives"
+status = "reserved"
+value = ""
+unit = "evaporation_coefficient"
+source = "base-level liveliness step 2 (wind in step 4); crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.evaporation_cap"
+basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning"
+status = "reserved"
+value = ""
+unit = "evaporation_flux"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
+
+[[reserved]]
+id = "hydrology.routing_rate"
+basis = "the fraction of a cell's standing water that flows to its lowest neighbour per tick, the downhill advection rate: it sets how fast water drains off slopes and pools in basins. Set from the drainage timescale of the world's terrain against the base tick and cell size; below the stencil stability bound the advection is unconditionally stable"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 2; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.water_requirement"
+basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.light_requirement"
+basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs"
+status = "reserved"
+value = ""
+unit = "light"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.temperature_requirement"
+basis = "the temperature a cell needs for full producer productivity, the Liebig denominator for the temperature factor: warmth supports growth up to saturation. Set from the growth-temperature scale of the world's producers (a too-hot penalty is a later refinement)"
+status = "reserved"
+value = ""
+unit = "temperature"
+source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.soil_requirement"
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side"
+status = "reserved"
+value = ""
+unit = "soil_nutrient"
+source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
+
+[[reserved]]
+id = "productivity.soil_baseline"
+basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands"
+status = "reserved"
+value = ""
+unit = "soil_nutrient"
+source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.max_water_depth"
+basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 3: the living resource loop (the standing food stock a grazer depletes
+# and the environment regrows toward the step-2 productivity capacity). The regrowth constants are read
+# fail-loud by EnvironCalib::from_manifest (crates/sim/src/environ.rs); the bite-to-reserve trophic
+# efficiency is the locomotion parameter locomotion.ingest_efficiency, reserved-with-basis in the
+# LocomotionParams struct until the locomotion parameters read from the manifest. Together the regrowth
+# rate, the colonization floor, and the trophic efficiency (with the metabolic drain) fix the carrying
+# capacity with no authored cap (Principle 8). ---
+
+[[reserved]]
+id = "productivity.regen_rate"
+basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+
+[[reserved]]
+id = "productivity.colonization"
+basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at"
+status = "reserved"
+value = ""
+unit = "producer_biomass"
+source = "base-level liveliness step 3; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 4: the salinity field (a per-cell salt mass advected downhill with the
+# water routing and weathered into every cell, capped, whose concentration is the bio.salinity toxin dose
+# a being's heritable tolerance is read against). The four salinity constants are read fail-loud by
+# EnvironCalib::from_manifest (crates/sim/src/environ.rs). The condition recovery and the founding
+# salinity-tolerance baseline are the LocomotionParams / race-genesis reserved-with-basis dev fixtures
+# (physiology.condition_recovery, tolerance.salinity_baseline), reserved in their struct docs until the
+# locomotion parameters and a canonical race genesis read the manifest. Together the salt forcing, the
+# tolerance baseline, the Hill exponent, and the recovery fix whether a salt flat is lethal to a naive
+# lineage and livable to a halophile that selects in (Principle 8: a graded dose, death the emergent cull). ---
+
+[[reserved]]
+id = "salinity.weathering_rate"
+basis = "the salt mass a cell gains per tick as salt leaches from rock and soil, the salinity field's source. Over many ticks it accumulates in endorheic basins (which route salt nowhere) while throughflow washes it from well-drained cells, so salt flats emerge where water evaporates faster than it drains. Set from the geochemical weathering rate of the world's terrain per base tick; larger raises the equilibrium salinity everywhere, smaller keeps salt flats rarer"
+status = "reserved"
+value = ""
+unit = "salt_mass_per_tick"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.salt_cap"
+basis = "the maximum salt mass a cell retains, so an endorheic basin's salt saturates rather than accumulating without bound (the coarse stand-in for a salt bed's finite solubility and burial). Bounds the salinity concentration a fully-evaporated basin reaches. Set from the salt a cell of the world's terrain holds at saturation"
+status = "reserved"
+value = ""
+unit = "salt_mass"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.dose_scale"
+basis = "the multiplier from a cell's salt concentration (salt over standing water plus the reference water) to the bio.salinity toxin dose the harm law reads against a being's heritable tolerance. Sets how lethal a given concentration is; set with the tolerance baseline and the Hill exponent so a dry salt flat's dose exceeds a naive tolerance yet a halophile's tolerance resists it"
+status = "reserved"
+value = ""
+unit = "dose_per_concentration"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs; civsim_physics::laws::harm_class"
+
+[[reserved]]
+id = "salinity.reference_water"
+basis = "the water added to a cell's standing depth when forming the salinity concentration salt/(water + reference), so a bone-dry salt flat reads a high but finite concentration and a well-watered cell dilutes its salt. It sets the water scale at which salt is diluted to harmlessness, so a genome-reachable tolerance can resist a dry flat; larger dilutes salt faster (a gentler gradient), smaller makes a dry flat more lethal. Set from the soil-water a dry cell holds at the world's scale"
+status = "reserved"
+value = ""
+unit = "water_depth"
+source = "base-level liveliness step 4; crates/sim/src/environ.rs"
+
+# --- base-level liveliness step 5: the belief-diffusion movers armed in build_dawn_runner
+# (crates/sim/src/worldbuild.rs), fail-loud from the manifest. Enculturation drifts each band's intrinsic
+# axiom stances toward the band mean on the life cadence; the pool diffusion advances a seeded aggregate
+# belief pool. The gossip spread the movement coupling drives reads Mind.beliefs directly and needs
+# neither of these. ---
+
+[[reserved]]
+id = "belief.enculturation_stubbornness"
+basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it"
+status = "reserved"
+value = ""
+unit = "ratio"
+source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
+
+[[reserved]]
+id = "belief.diffusion_rate"
+basis = "the per-tick rate an aggregate belief pool advances its diffusion (World::set_belief_diffusion_rate), the contagion speed of a seeded belief through a population. Set from the belief-transmission rate the world's social contact implies. Inert until a belief pool is seeded (no dawn pool is seeded this arc), so it is an armed no-op until the belief-pool seeding lands; surfaced now so the mover is armed fail-loud rather than silently unset"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"
+
+# --- base-level liveliness §4 and step 5: the surfacing-policy magnitudes read fail-loud by
+# LivelinessCalib::from_manifest (crates/sim/src/runner.rs) and armed in build_dawn_runner. Two hooks gate
+# and weight run-path world content: the environment-sourced hazard belief (does a salt flat register as a
+# hazard worth a belief, and how strong is that first-hand evidence), and the arc-scoped promotion (which
+# struggling beings are lifted to the individual dialogue tier, and how many at once). Each is a magnitude
+# feeding a belief or deciding who converses, so it is reserved-with-basis, never a hardcoded inline
+# constant (Principle 11). ---
+
+[[reserved]]
+id = "hazard.dose_threshold"
+basis = "the salinity dose above which a being standing on a cell registers it as a lethal hazard and forms the salt-flat belief (Runner::couple_conversation). Set at the lethality boundary the physics floor already defines: the dose at which net_harm on a naive lineage overtakes its condition recovery (physiology.condition_recovery), so a cell a being can survive raises no false alarm and a cell that kills it does. Larger makes fewer cells register as hazards, smaller makes the belief form on milder flats"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; civsim_physics::laws::net_harm"
+
+[[reserved]]
+id = "hazard.weight"
+basis = "the signed evidence weight a first-hand encounter with the salt-flat hazard carries into the belief pipeline (the Observe stimulus weight in Runner::couple_conversation). A first-hand percept is strong evidence, so set it from the belief subsystem's first-hand witness access weight (the WITNESSED channel) for consistency, so a directly-felt hazard commits a belief as firmly as any first-hand witness. Larger commits the hazard belief on fewer encounters, smaller needs more"
+status = "reserved"
+value = ""
+unit = "log_odds"
+source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; crates/sim/src/evidence.rs"
+
+[[reserved]]
+id = "promotion.stress_threshold"
+basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
+status = "reserved"
+value = ""
+unit = "reserve_level"
+source = "base-level liveliness §4; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "promotion.budget"
+basis = "the maximum beings promoted to the individual dialogue tier at once (Runner::arc_promotion_set), a performance bound: the per-tick individual-dialogue cost the frame budget allows. It defaults HIGH (liveliness over frugality, the owner ruling), the aggregate tier absorbing the rest with promote/restrict exact and conserved, so a generous budget costs compute, never fidelity. When more beings are in an arc than the budget, the most-stressed cells win. Set as an integer count from the per-tick dialogue cost the target frame budget affords"
+status = "reserved"
+value = ""
+unit = "count"
+source = "base-level liveliness §4; crates/sim/src/runner.rs"

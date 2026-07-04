@@ -146,6 +146,40 @@ impl HomeostaticRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a located, foraging grazer (base-level liveliness step 3): the two
+    /// metabolic reserves (energy and water, backed by tissue and drained by metabolism) plus the
+    /// temperature axis the field-coupled runner requires (non-draining, set each tick from the body
+    /// core temperature through the comfort-band map). This is the minimum a being that walks, thermo-
+    /// regulates, and eats needs: the temperature axis lets it couple to the field, and the energy and
+    /// water axes give it hunger and thirst, so a depletable resource loop can bound its lineage. The
+    /// axis set is data, so an alien creature with an arcane charge or a thermovore reserve adds another
+    /// backed axis without touching the mechanism (Principle 11). Not owner values.
+    pub fn dev_grazer() -> HomeostaticRegistry {
+        let mut reg = HomeostaticRegistry::dev_default(); // energy and water, both organ-backed
+        reg.axes.push(HomeostaticAxisDef {
+            id: TEMPERATURE,
+            name: "temperature".to_string(),
+            backing_component: None,
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+        });
+        // The condition reserve the environmental-harm sink drains (base-level liveliness step 4): a
+        // non-draining, unit-capacity axis degraded only by the measured net_harm of the cell's toxin
+        // dose, so a salt flat kills a naive being through the reserve-through-floor cull.
+        reg.axes.push(HomeostaticAxisDef {
+            id: CONDITION,
+            name: "condition".to_string(),
+            backing_component: None,
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+        });
+        reg
+    }
+
     /// A DEVELOPMENT FIXTURE for the thermal coupling: a single temperature axis whose reserve is a
     /// two-sided comfort band. Like integrity, it does not self-drain (its base and exertion draws are
     /// zero); its level is set each tick from the located body core temperature through the comfort-band
@@ -192,6 +226,15 @@ pub const TEMPERATURE: HomeostaticAxisId = HomeostaticAxisId(3);
 /// [`crate::medium`]). A being with no respiratory organ presents no exchange surface, takes up nothing,
 /// and suffocates, whatever the medium.
 pub const RESPIRATION: HomeostaticAxisId = HomeostaticAxisId(4);
+/// The condition axis: a derived, non-draining, unit-capacity reserve degraded by ENVIRONMENTAL HARM
+/// (base-level liveliness step 4). It does not self-drain (its base and exertion draws are zero) and,
+/// at the mass-only Walker tier, is not refreshed from a body (unlike [`INTEGRITY`], which the Body tier
+/// sources from `crate::body::Body::integrity`), so it is the condition reserve the per-tick harm sink
+/// drains by the measured `net_harm` of the cell's toxin dose against the being's heritable tolerances.
+/// When it falls through its floor the body dies of exposure, the emergent cull that makes a salt flat
+/// lethal to a naive lineage and livable to a heritable halophile line (Principle 8: death is the
+/// reserve-through-floor cull, never a fixed-dose exclusion gate).
+pub const CONDITION: HomeostaticAxisId = HomeostaticAxisId(5);
 
 /// A per-being DERIVED drain for one homeostatic axis: the resting and the exertion
 /// fraction-of-capacity-per-tick the physics derivation produced from the body's mass, tissue, and

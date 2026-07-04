@@ -42,7 +42,8 @@ use crate::breeding::BreedingSystemRegistry;
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::controller::Controller;
 use crate::decision::Curve;
-use crate::edibility::Physiology;
+use crate::edibility::{Physiology, ToleranceRegistry};
+use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use crate::langmod::{
     articulated_geometry, form_system_from_values, phoneme_priors, producible_values,
@@ -56,7 +57,8 @@ use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
 use crate::runner::{
-    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, Runner,
+    BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, LivelinessCalib,
+    Runner,
 };
 use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
@@ -122,6 +124,12 @@ pub struct EmbodimentGenesis {
     /// The organ registry a body plan's tissue composition (surface, specific heat, energy density,
     /// respiratory surface) is scored against, the same registry the physiology derivation reads.
     pub organs: BodyPlanRegistry,
+    /// The toxin-tolerance registry a founder's (and its descendants') heritable per-toxin-class
+    /// tolerance is expressed from the genome through (base-level liveliness step 4): which toxin classes
+    /// the world runs (`bio.salinity` and the like), and which gene channel and Hill each carries. Empty
+    /// leaves every being with no tolerance (the harm sink stays inert), so a world with no environmental
+    /// toxin runs exactly as before.
+    pub tolerances: ToleranceRegistry,
     /// The controller hidden width (zero is the reaction-norm controller; a positive width is the
     /// recurrent graduation).
     pub controller_hidden: usize,
@@ -321,6 +329,30 @@ pub fn build_dawn_runner(
     world.set_reproduction(ReproductionParams::from_manifest(manifest)?);
     world.arm_generational_drift();
 
+    // Arm the belief-diffusion movers (base-level liveliness step 5), fail-loud from the manifest: the
+    // per-generation enculturation of each band's intrinsic axiom stances (`set_stubbornness_split`, the
+    // conserved split between a being's own conviction and its band's mean) and the aggregate belief-pool
+    // diffusion rate (`set_belief_diffusion_rate`). Enculturation drifts the seeded intrinsic axioms on
+    // the life cadence; the pool diffusion is inert until a belief pool is seeded (no dawn pool is, so it
+    // is an armed no-op this arc, the honest limit). The gossip spread the movement coupling drives reads
+    // `Mind.beliefs` directly and needs neither.
+    world.set_stubbornness_split(manifest.require_fixed("belief.enculturation_stubbornness")?);
+    world.set_belief_diffusion_rate(manifest.require_fixed("belief.diffusion_rate")?);
+
+    // Install the modelled-dialogue substrate (base-level liveliness promotion policy), so a being the
+    // runner promotes into a narrative arc converses move-by-move rather than being silenced (a promoted
+    // being is skipped by the aggregate gossip fallback, so without a dialogue substrate it would neither
+    // gossip nor converse). The substrate is the labelled dev fixture (design Part 9.5; a canonical
+    // substrate is owner data); its content gate fails loud on a malformed load. Without a promoted set
+    // the dialogue step stays a no-op, so this is inert until the runner's promotion policy lifts a being.
+    let (force_floor, move_registry) = crate::dialogue::dev_substrate();
+    world
+        .set_dialogue(move_registry, force_floor)
+        .map_err(|e| CalibrationError::BadValue {
+            id: "dialogue.substrate".to_string(),
+            detail: format!("the dev dialogue substrate failed its content gate: {e:?}"),
+        })?;
+
     // Arm the derived per-race languages at the founder step (increment 2e), if a language genesis is
     // supplied: derive each articulating race's phonetic form system from the base geometry and its
     // own articulation, install a per-band lineage, and assign the band's founders, so the naming game
@@ -358,7 +390,7 @@ pub fn build_dawn_runner(
     // an embodiment genesis, assemble a located body sharing each founder's mind id and return one
     // runner carrying both minds and bodies (real-world unification step 3); without, a world-only
     // runner exactly as before.
-    match &peoples.embodiment {
+    let mut runner = match &peoples.embodiment {
         Some(genesis) => {
             let (embodiment, kit) =
                 assemble_dawn_embodiment(&world, map, peoples, &founders, genesis, manifest, seed)?;
@@ -368,10 +400,26 @@ pub fn build_dawn_runner(
             // bodies in lockstep. Without arming, the runner ticks minds and bodies but never embodies
             // a newborn (the pre-3c behaviour).
             runner.arm_lifecycle(kit);
-            Ok(runner)
+            runner
         }
-        None => Ok(Runner::with_world(field, calib, world)),
-    }
+        None => Runner::with_world(field, calib, world),
+    };
+
+    // Arm the environmental field stack (base-level liveliness step 2): hydrology and primary
+    // productivity advance each tick after the temperature field, and the standing producer biomass is
+    // written into the embodiment's resource field so the grazers have supply. Biosphere-ready: the
+    // productivity is the default abstract source of the per-cell producer biomass, which the
+    // living-biosphere addendum replaces with real producer occupants. Fail-loud on a reserved forcing
+    // constant (Principle 11).
+    runner.set_environ(
+        EnvironFields::from_map(map),
+        EnvironCalib::from_manifest(manifest)?,
+    );
+    // Arm the base-level liveliness surfacing policy (the hazard-belief and arc-promotion magnitudes),
+    // fail-loud from the manifest (Principle 11): the values that gate and weight the run-path story hooks
+    // are reserved-with-basis, not hardcoded inline constants.
+    runner.set_liveliness(LivelinessCalib::from_manifest(manifest)?);
+    Ok(runner)
 }
 
 /// Group the returned founders by their band, in band order, skipping any band whose race was not
@@ -469,14 +517,27 @@ fn assemble_dawn_embodiment(
                 Some(genome) => Controller::express(&race.genes, genome, &layout),
                 None => Controller::zeros(&layout),
             };
-            // The edibility physiology is the temperature-only development fixture for this arc; a
-            // canonical dawn edibility derivation is a follow-on (an honest limit, like the language
-            // genesis being a caller-supplied bundle).
-            let physiology = Physiology::dev_for_registry(&genesis.homeostatic);
+            // The consumer physiology: the nutrient requirements from the registry (the dev fixture)
+            // PLUS the heritable per-toxin-class tolerance expressed from the founder's genome through the
+            // tolerance registry (base-level liveliness step 4), so a founder carries its own salt (or
+            // dust) resistance and a lineage adapts to a gradient by selection. A founder with no genome
+            // falls back to the tolerance-free dev fixture.
+            let physiology = match world.genome_of(id) {
+                Some(genome) => Physiology::express(
+                    &genesis.homeostatic,
+                    &genesis.tolerances,
+                    &race.genes,
+                    genome,
+                ),
+                None => Physiology::dev_for_registry(&genesis.homeostatic),
+            };
             let walker = Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
             emb.add(walker, thermal);
         }
     }
+    // Arm the tolerance registry on the embodiment so the lifecycle pairing expresses a newborn's
+    // heritable tolerance from its own genome the same way (base-level liveliness step 4).
+    emb.set_tolerances(genesis.tolerances.clone());
     emb.set_physiology(EmbodiedPhysiology::from_manifest(
         manifest,
         genesis.organs.clone(),

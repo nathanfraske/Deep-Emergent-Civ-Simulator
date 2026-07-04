@@ -173,7 +173,23 @@ pub enum Channel {
     /// other channel. Sex is therefore read through [`GeneSet::express`] like any other
     /// phenotype, with no bespoke sex-determination phase and no reserved ratio.
     SexDetermination,
+    /// A heritable toxin-tolerance coordinate, by tolerance-axis id (base-level liveliness step 4,
+    /// R-WOUND). The expressed value is a being's per-toxin-class tolerance the dose-response
+    /// [`civsim_physics::laws::harm_class`] reads (a higher tolerance suffers less harm from a given
+    /// dose), so a lineage adapts to an environmental gradient (a salt flat, a dust haze) by selection
+    /// on this channel rather than being excluded at a fixed dose (Principle 8: a graded dose, never a
+    /// gate). The variant is the fixed engine interface; which toxin classes exist and which genes reach
+    /// them is data (a [`ToleranceRegistry`](crate::edibility::ToleranceRegistry) sibling to the
+    /// controller and composition registries, keyed off the floor toxin-class id, never a `RaceId`).
+    Tolerance(ToleranceAxisId),
 }
+
+/// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
+/// being's physiology carries a heritable tolerance for). A numeric id keeps [`Channel`] `Copy` and
+/// `Ord`; the class-name-to-id mapping is data in the [`ToleranceRegistry`](crate::edibility::ToleranceRegistry),
+/// sibling to the composition-axis and controller-parameter registries (base-level liveliness step 4).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ToleranceAxisId(pub u16);
 
 /// A controller-parameter id, an index into a being's behaviour controller's flat weight vector
 /// ([`crate::controller`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
@@ -362,6 +378,56 @@ impl GeneSet {
             total += genotypic.mul(weight);
         }
         total
+    }
+}
+
+/// Append a full founding controller gene block to a gene set and its parallel pool spine (base-level
+/// liveliness, step 1). This adds one unit-effect additive gene for EVERY one of the controller's
+/// `weight_count` heritable weights (so a founder carries the whole controller substrate and mutation
+/// can later turn any weight on, matching `crate::evolve::controller_gene_set`), each feeding its
+/// `Channel::Controller(ControllerParamId(k))` at a fresh locus. The pool spine is seeded from the
+/// `seeds` the caller derived from a taxis pattern (`crate::controller::taxis_move_weights`): a seeded
+/// weight's locus gets frequency `ONE` (the founder is homozygous, so the locus carries no additive
+/// variance and the dawn expression is deterministic) and additive effect `target / ploidy` (a
+/// `ploidy`-fold founder expresses `ploidy * (target / ploidy) = target`); an unseeded weight gets a
+/// balanced frequency and zero effect, so it expresses to zero until mutation moves it. The existing
+/// genes and their spine are untouched, so the cognition and sex loci keep their expression, and the
+/// `genes`, `freqs`, and `effects` vectors stay parallel and index-aligned (locus = gene index), the
+/// invariant [`GeneSet::express`] and [`GenePool`] read them by.
+///
+/// The seed magnitudes are the caller's reserved values (Principle 11); the `ONE` frequency, the
+/// balanced default, and the `target / ploidy` effect are mechanism (the deterministic-homozygote and
+/// dosage-normalising conventions), not fabricated content. Reads no race id (Principle 9).
+pub fn append_controller_block(
+    genes: &mut Vec<GeneDef>,
+    freqs: &mut Vec<Fixed>,
+    effects: &mut Vec<Fixed>,
+    ploidy: usize,
+    weight_count: usize,
+    seeds: &[(ControllerParamId, Fixed)],
+) {
+    let ploidy_fx = Fixed::from_int(ploidy.max(1) as i32);
+    let seed_of: std::collections::BTreeMap<u32, Fixed> =
+        seeds.iter().map(|&(p, t)| (p.0, t)).collect();
+    for k in 0..weight_count {
+        genes.push(GeneDef {
+            id: GeneId(genes.len() as u32),
+            effects: vec![GeneEffect {
+                channel: Channel::Controller(ControllerParamId(k as u32)),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        });
+        match seed_of.get(&(k as u32)) {
+            Some(&target) => {
+                freqs.push(Fixed::ONE);
+                effects.push(target.checked_div(ploidy_fx).unwrap_or(Fixed::ZERO));
+            }
+            None => {
+                freqs.push(Fixed::from_ratio(1, 2));
+                effects.push(Fixed::ZERO);
+            }
+        }
     }
 }
 

@@ -43,23 +43,29 @@ use std::time::Instant;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
-use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
+use civsim_sim::edibility::ToleranceRegistry;
+use civsim_sim::homeostasis::{
+    AffordanceRegistry, HomeostaticRegistry, ENERGY, TEMPERATURE, WATER,
+};
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::runner::Runner;
+use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
+use civsim_sim::runner::{Runner, HAZARD_ATTR, HAZARD_PRESENT, HAZARD_SUBJECT};
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    build_dawn_runner, nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples,
-    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
-    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
-    LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
+    append_controller_block, build_dawn_runner, forage_taxis_weights, nsm_gloss, Articulation,
+    Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry,
+    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
+    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
+    SourceModeId, Stimulus, TickInput, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId,
+    ValueProfile, World,
 };
-use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
 // --- dev-harness scaffolding (documented departures from the pure world-build path) ---
 
@@ -77,6 +83,68 @@ const MEMBERS_PER_BAND: usize = 6;
 
 /// The voice reception channel the founding races hear speech on (labelled fixture).
 const VOICE: SenseChannelId = SenseChannelId(1);
+
+// --- base-level liveliness step 1: the founding thermotaxis reaction norm and the selection dials.
+// Labelled DEV FIXTURES (the harness convention). Their reserved-with-basis home for a canonical race
+// genesis is `controller.taxis.*`, `genome.mutation_rate`, `genome.additive_mutation_step`, and the
+// per-race `environment_variance` in the manifest; here they are stood up as dev values so the run
+// moves. ---
+
+/// The MOVE affordance's activation output index in the dev-default affordance layout (MOVE is the
+/// lowest affordance id, so its activation is output 0, its heading components outputs 1 and 2).
+const MOVE_OUTPUT: usize = 0;
+/// The INGEST affordance's activation output index in the dev-default affordance layout (INGEST is the
+/// next affordance id after MOVE's three outputs, so its scalar activation is output 3).
+const INGEST_OUTPUT: usize = 3;
+/// DEV FIXTURE: the founding move-activation bias, set decisively to one so the clamped MOVE activation
+/// saturates and a founder wants to move (basis: the activation magnitude at which MOVE beats a resting
+/// zero and the being leaves its cell; reserved as `controller.taxis.move_bias`).
+const TAXIS_MOVE_BIAS: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding heading gain on a source-direction and gradient percept, set to one so the
+/// MOVE heading follows the unit direction (basis: the heading-follow strength; reserved as
+/// `controller.taxis.heading_gain`).
+const TAXIS_HEADING_GAIN: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding suppression of MOVE when a forage source is underfoot, set to one so a
+/// being stops on food rather than wandering off it (basis: the here-flag suppression strength; reserved
+/// as `controller.taxis.here_suppress`).
+const TAXIS_HERE_SUPPRESS: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding INGEST drive from a forage source underfoot, set to one so a being eats
+/// what it stands on (basis: the ingest-activation strength; reserved as `controller.taxis.ingest_drive`).
+const TAXIS_INGEST_DRIVE: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the founding salinity-tolerance additive effect on the tolerance locus (base-level
+/// liveliness step 4), seeded so the pool expresses a moderate salt tolerance with standing spread (basis:
+/// the salt tolerance a naive-to-halophile founding pool spans; reserved as `tolerance.salinity_baseline`).
+/// Selection near a salt flat and mutation carry the heritable adaptation from here.
+const TOLERANCE_SEED_EFFECT: Fixed = Fixed::ONE;
+/// DEV FIXTURE: the per-locus per-generation structural mutation rate, opened off zero so the founding
+/// controller weights drift and the movement-dependent fitness a later step gives them has a heritable
+/// gradient to select on (basis: the reserved `genome.mutation_rates` baseline; small so it explores
+/// without swamping selection).
+fn mutation_rate() -> Fixed {
+    Fixed::from_ratio(1, 100)
+}
+/// DEV FIXTURE: the additive mutation step, opened off zero so a controller weight can drift its
+/// magnitude across generations (basis: the reserved additive-step end; small).
+fn mutation_step() -> Fixed {
+    Fixed::from_ratio(1, 20)
+}
+/// DEV FIXTURE: the per-being developmental-environment variance half-width, opened off zero so
+/// littermates vary developmentally (basis: the reserved per-race `environment_variance`; small).
+fn env_variance() -> Fixed {
+    Fixed::from_ratio(1, 20)
+}
+
+/// The controller layout the founding forage-taxis block is sized against: the same registries the
+/// embodiment genesis installs (the dev-grazer homeostatic axes, energy and water and temperature, and
+/// the dev-default affordances, a reaction norm at hidden width zero), so `weight_count` and the taxis
+/// weight indices match the controller a founder expresses.
+fn dawn_layout() -> ControllerLayout {
+    ControllerLayout::new(
+        &HomeostaticRegistry::dev_grazer(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    )
+}
 
 /// The concepts the language reader samples, the first few NSM semantic primes (the anchor meanings a
 /// band coordinates words for first). Kept short so a snapshot line stays legible.
@@ -196,49 +264,108 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     let i = index as i64;
     let step = cfg.diversity_step;
 
-    let genes = GeneSet {
-        genes: vec![
-            GeneDef {
-                id: GeneId(0),
-                effects: vec![GeneEffect {
-                    channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode::additive(),
+    let mut genes = vec![
+        GeneDef {
+            id: GeneId(0),
+            effects: vec![GeneEffect {
+                channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        },
+        GeneDef {
+            id: GeneId(1),
+            effects: vec![GeneEffect {
+                channel: Channel::Cognition(CognitionChannel::MemoryCapacity),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        },
+        GeneDef {
+            id: GeneId(2),
+            effects: vec![GeneEffect {
+                channel: Channel::SexDetermination,
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode {
+                a: Fixed::ZERO,
+                d: Fixed::ONE,
+                kind: DominanceKind::Complete,
             },
-            GeneDef {
-                id: GeneId(1),
-                effects: vec![GeneEffect {
-                    channel: Channel::Cognition(CognitionChannel::MemoryCapacity),
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode::additive(),
-            },
-            GeneDef {
-                id: GeneId(2),
-                effects: vec![GeneEffect {
-                    channel: Channel::SexDetermination,
-                    weight: Fixed::ONE,
-                }],
-                dominance: DominanceMode {
-                    a: Fixed::ZERO,
-                    d: Fixed::ONE,
-                    kind: DominanceKind::Complete,
-                },
-            },
-        ],
-    };
+        },
+    ];
 
     // The two cognition loci start at index-shifted allele frequencies (races begin genetically
     // apart), while the sex locus stays balanced so both sexes appear and pairs can breed. The
-    // frequencies are clamped to a sane interior band.
+    // frequencies are clamped to a sane interior band. The cognition and sex loci carry a flat additive
+    // spine (effect zero); the controller block below adds its own.
     let freq0 = clamp_tenths(5 + i * step);
     let freq1 = clamp_tenths(5 - i * step);
-    let pool = GenePool::new(
-        SchemeId(0),
-        cfg.pool_ne,
-        vec![freq0, freq1, Fixed::from_ratio(1, 2)],
+    let mut freqs = vec![freq0, freq1, Fixed::from_ratio(1, 2)];
+    let mut effects = vec![Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
+
+    // Base-level liveliness step 4: a heritable salinity-tolerance gene (locus 3, Channel::Tolerance axis
+    // 0), so a founder expresses its own salt resistance and the pool carries standing variation for
+    // selection to act on near a salt flat. Seeded at a balanced frequency with a moderate additive
+    // effect, so founders range from naive (they die on a salt flat) to halophile (they live on it) and
+    // mutation opens the tail; the expressed magnitude is clamped non-negative in `Physiology::express`.
+    genes.push(GeneDef {
+        id: GeneId(genes.len() as u32),
+        effects: vec![GeneEffect {
+            channel: Channel::Tolerance(ToleranceAxisId(0)),
+            weight: Fixed::ONE,
+        }],
+        dominance: DominanceMode::additive(),
+    });
+    freqs.push(Fixed::from_ratio(1, 2));
+    effects.push(TOLERANCE_SEED_EFFECT);
+
+    // Base-level liveliness step 3: append the founding controller gene block seeding a FORAGE reaction
+    // norm over the dev-grazer registry, so a founder walks toward known food and water, stops on a source
+    // to ingest it, and steers along the temperature comfort gradient the runner senses (energy and water
+    // are the forage axes, temperature the steer axis; dev-default's MOVE is directional output 0, INGEST
+    // scalar output 3). The axis input bases come from the layout, so they follow the registry's data, not
+    // a magic constant. The full controller substrate is seeded (a gene per weight), with the taxis
+    // magnitudes carried in the pool additive spine; every other weight starts at zero and can mutate on.
+    // Reads no race id: the seeds are the same for every race (Principle 9).
+    let layout = dawn_layout();
+    let energy_base = layout
+        .axis_input_base(ENERGY)
+        .expect("the dev-grazer layout carries an energy axis");
+    let water_base = layout
+        .axis_input_base(WATER)
+        .expect("the dev-grazer layout carries a water axis");
+    let temp_base = layout
+        .axis_input_base(TEMPERATURE)
+        .expect("the dev-grazer layout carries a temperature axis");
+    let seeds = forage_taxis_weights(
+        &layout,
+        MOVE_OUTPUT,
+        INGEST_OUTPUT,
+        &[energy_base, water_base],
+        &[temp_base],
+        ForageGains {
+            move_bias: TAXIS_MOVE_BIAS,
+            here_suppress: TAXIS_HERE_SUPPRESS,
+            heading_gain: TAXIS_HEADING_GAIN,
+            ingest_drive: TAXIS_INGEST_DRIVE,
+        },
     );
+    // SexualDiploid (below), so ploidy two.
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    // The stamped integer-Gaussian approximation the additive spine draws through (the labelled
+    // SumOfUniforms{k=12} default of design 25.10; a canonical build reads genome.gauss_approx). The
+    // seeded loci sit at frequency one, so their within-locus deviation is zero and the draw is scaled
+    // out, but promote still draws it, so the stamp must be a real one, not the unset sentinel.
+    let pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
 
     // The innate belief stance walks off the baseline by index, so lineages of different races start
     // from different convictions and their per-band means diverge.
@@ -265,13 +392,17 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         ),
     };
 
+    // Base-level liveliness step 1: open the selection dials off zero (they were both zero, so a weight
+    // could not drift even if a locus existed), so the seeded controller weights mutate and the
+    // movement-dependent fitness a later step gives them has a heritable gradient to select on. Mutation
+    // uses the counter-keyed genome draw, so the run stays deterministic.
     let scheme = GeneticScheme {
         id: SchemeId(0),
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
-        mutation_rate: Fixed::ZERO,
-        additive_mutation_step: Fixed::ZERO,
-        gauss: GaussApprox::default(),
+        mutation_rate: mutation_rate(),
+        additive_mutation_step: mutation_step(),
+        gauss: GaussApprox::SumOfUniforms { k: 12 },
     };
 
     // The vocal tract is scaled off the shared base geometry by index, so each race derives a
@@ -281,12 +412,12 @@ fn full_race(index: usize, cfg: &Config) -> Race {
 
     Race::new(
         RaceId(index as u32),
-        genes,
+        GeneSet { genes },
         pool,
         scheme,
         intrinsic,
         Fixed::from_int(2),
-        Fixed::ZERO,
+        env_variance(),
         80,
         18,
     )
@@ -305,8 +436,11 @@ fn clamp_tenths(tenths: i64) -> Fixed {
     Fixed::from_ratio(tenths.clamp(3, 9), 10)
 }
 
-/// A mobile development body plan (the thermal-coupling fixture), so a founder's walker has an anatomy
-/// to derive its physiology and thermoregulate from. Labelled fixture, not owner data.
+/// A mobile development body plan (the grazer fixture), so a founder's walker has an anatomy to derive
+/// its physiology and thermoregulate from, and organs that BACK its metabolic reserves: a fat-body (kind
+/// 0, energy-dense) and a water-store (kind 2, water-rich) from the dev organ registry, so its energy and
+/// water reserve capacities are non-zero (`Homeostasis::new` derives them from organ composition, so an
+/// organ-less body would carry no reserves and starve at birth). Labelled fixture, not owner data.
 fn mobile_body() -> BodyPlan {
     BodyPlan {
         body_mass: Fixed::from_ratio(1, 2),
@@ -319,7 +453,16 @@ fn mobile_body() -> BodyPlan {
         },
         senses: vec![],
         locomotion: vec![1],
-        organs: vec![],
+        organs: vec![
+            Part {
+                kind: 0, // fat-body: backs the energy reserve
+                development: Fixed::from_ratio(1, 2),
+            },
+            Part {
+                kind: 2, // water-store: backs the water reserve
+                development: Fixed::from_ratio(1, 2),
+            },
+        ],
         temperament: Temperament {
             boldness: Fixed::from_ratio(1, 2),
             exploration: Fixed::from_ratio(1, 2),
@@ -370,10 +513,13 @@ fn language_genesis() -> LanguageGenesis {
 /// fixture (mirrors the world-build test genesis).
 fn embodiment_genesis() -> EmbodimentGenesis {
     EmbodimentGenesis {
-        homeostatic: HomeostaticRegistry::dev_thermal(),
+        homeostatic: HomeostaticRegistry::dev_grazer(),
         affordances: AffordanceRegistry::dev_default(),
         locomotion: LocomotionParams::dev_default(),
         organs: BodyPlanRegistry::dev_default(),
+        // The heritable salinity-tolerance class (base-level liveliness step 4), so a founder carries a
+        // salt resistance expressed from its genome and a lineage near a salt flat adapts by selection.
+        tolerances: ToleranceRegistry::dev_salinity(),
         controller_hidden: 0,
         submerged_medium_id: "medium.water".to_string(),
         emergent_medium_id: "medium.air".to_string(),
@@ -581,7 +727,7 @@ fn band_belief(w: &World, members: &[StableId]) -> Option<(f64, f64)> {
 
 /// The mean designs-known per being (the knowledge-depth signal). NOT-YET-OBSERVABLE as nonzero:
 /// `knowledge_of` is a live reader, but the world-build path arms no design origination (Part 41), so
-/// no design ever enters a being's knowledge and this reads zero every snapshot. Reported honestly as
+/// no design ever enters a being's knowledge and this reads zero every snapshot. Reported plainly as
 /// the live-but-inert reader it is, rather than substituting a fabricated number.
 fn mean_knowledge(w: &World) -> f64 {
     let ids = w.being_ids();
@@ -593,6 +739,207 @@ fn mean_knowledge(w: &World) -> f64 {
         .map(|&id| w.knowledge_of(id).map(|k| k.known.len()).unwrap_or(0))
         .sum();
     total as f64 / ids.len() as f64
+}
+
+/// The migration and dispersal reader (base-level liveliness step 1): how far the located population has
+/// spread from its dawn cells. Reports the distinct occupied cells now (it starts at one per band and
+/// grows as founders disperse along the temperature gradient), the count of beings standing off every
+/// dawn cell, and the greatest Chebyshev displacement of any being from the nearest dawn cell. Reads the
+/// runner's located walkers (a pure read of hashed state, so it never perturbs the run). `None` if the
+/// runner carries no embodied population.
+fn migration(runner: &Runner, dawn_cells: &BTreeSet<(i32, i32)>) -> Option<(usize, usize, i32)> {
+    let emb = runner.embodiment()?;
+    let mut occupied: BTreeSet<(i32, i32)> = BTreeSet::new();
+    let mut off_dawn = 0usize;
+    let mut max_disp = 0i32;
+    for w in emb.walkers() {
+        let c = w.coord();
+        let cell = (c.x, c.y);
+        occupied.insert(cell);
+        if !dawn_cells.contains(&cell) {
+            off_dawn += 1;
+        }
+        let nearest = dawn_cells
+            .iter()
+            .map(|&(dx, dy)| (c.x - dx).abs().max((c.y - dy).abs()))
+            .min()
+            .unwrap_or(0);
+        max_disp = max_disp.max(nearest);
+    }
+    Some((occupied.len(), off_dawn, max_disp))
+}
+
+/// The distinct cells the embodied population stands on at the dawn, before any tick: one per founding
+/// band (each band spawns its members on its band cell), the baseline the migration reader measures
+/// dispersal against.
+fn dawn_cells(runner: &Runner) -> BTreeSet<(i32, i32)> {
+    runner
+        .embodiment()
+        .map(|emb| {
+            emb.walkers()
+                .iter()
+                .map(|w| {
+                    let c = w.coord();
+                    (c.x, c.y)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The per-cell field-state reader (base-level liveliness step 2): samples the environmental field
+/// stack, reporting the fraction of cells holding standing water, the mean and peak water depth, and the
+/// mean productivity capacity (the ceiling the food supply regrows toward). A pure read of hashed state.
+/// `None` if the runner carries no environmental stack.
+fn field_state(runner: &Runner) -> Option<(f64, f64, f64, f64)> {
+    let env = runner.environ()?;
+    let (w, h) = env.dims();
+    let n = (w as f64) * (h as f64);
+    if n <= 0.0 {
+        return None;
+    }
+    let mut wet = 0.0;
+    let mut water_sum = 0.0;
+    let mut water_max = 0.0f64;
+    let mut capacity_sum = 0.0;
+    for y in 0..h {
+        for x in 0..w {
+            let water = env.water_at(x, y).to_f64_lossy();
+            if water > 0.0 {
+                wet += 1.0;
+            }
+            water_sum += water;
+            water_max = water_max.max(water);
+            capacity_sum += env.capacity_at(x, y).to_f64_lossy();
+        }
+    }
+    Some((wet / n, water_sum / n, water_max, capacity_sum / n))
+}
+
+/// The carrying-capacity pressure reader (base-level liveliness step 3): the scarcity that bounds each
+/// lineage. Reports the GLOBAL standing food (the grazable `bio.energy_density` stock over the whole
+/// map), its occupancy against the productivity capacity, the population the standing food supports per
+/// unit, and, crucially, the LOCAL occupancy at the cells beings stand on. The global number is
+/// diluted by the empty wilderness (a clustered population grazes only a few of hundreds of cells), so
+/// the local occupancy is where the carrying capacity truly bites: it falls as beings graze their own
+/// cells down, the scarcity signal that bounds each lineage with no authored cap. A pure read of hashed
+/// state; `None` if the runner carries no located resource loop.
+fn carrying_capacity(runner: &Runner) -> Option<(f64, f64, f64)> {
+    let env = runner.environ()?;
+    let emb = runner.embodiment()?;
+    let resources = emb.resources();
+    let standing = resources.total_supply(ENERGY_DENSITY).to_f64_lossy();
+    let (w, h) = env.dims();
+    let capacity: f64 = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| env.capacity_at(x, y).to_f64_lossy())
+        .sum();
+    let occupancy = if capacity > 0.0 {
+        standing / capacity
+    } else {
+        0.0
+    };
+    // The local pressure: sum the standing food and the capacity over the distinct cells a being stands
+    // on. This is where grazing happens, so it shows the scarcity the global average hides.
+    let occupied: BTreeSet<(i32, i32)> = emb
+        .walkers()
+        .iter()
+        .map(|wk| {
+            let c = wk.coord();
+            (c.x, c.y)
+        })
+        .collect();
+    let mut local_standing = 0.0;
+    let mut local_capacity = 0.0;
+    for &(x, y) in &occupied {
+        local_standing += resources
+            .supply(Coord3::ground(x, y), ENERGY_DENSITY)
+            .to_f64_lossy();
+        local_capacity += env.capacity_at(x, y).to_f64_lossy();
+    }
+    let local_occupancy = if local_capacity > 0.0 {
+        local_standing / local_capacity
+    } else {
+        1.0
+    };
+    Some((standing, occupancy, local_occupancy))
+}
+
+/// The salinity-and-adaptation reader (base-level liveliness step 4): the environmental salt gradient and
+/// the population's heritable answer to it. Reports the fraction of cells carrying meaningful salt (the
+/// salt flats emerging in endorheic basins), the peak salt mass, and the mean expressed salinity
+/// TOLERANCE over the living embodied population (the halophile signal: it rises over generations where a
+/// lineage lives near salt, the measured proof that the gradient selects an adaptation rather than
+/// excluding a lineage at a fixed dose). A pure read of hashed state; `None` if the runner carries no
+/// located population.
+fn salinity_state(runner: &Runner) -> Option<(f64, f64, f64)> {
+    let env = runner.environ()?;
+    let emb = runner.embodiment()?;
+    let (w, h) = env.dims();
+    let n = (w as f64) * (h as f64);
+    if n <= 0.0 {
+        return None;
+    }
+    let mut salty_cells = 0.0;
+    let mut salt_max = 0.0f64;
+    for y in 0..h {
+        for x in 0..w {
+            let salt = env.salt_at(x, y).to_f64_lossy();
+            if salt > 0.1 {
+                salty_cells += 1.0;
+            }
+            salt_max = salt_max.max(salt);
+        }
+    }
+    let tolerances: Vec<f64> = emb
+        .walkers()
+        .iter()
+        .filter_map(|wk| wk.physiology.tolerance(SALINITY).map(|t| t.to_f64_lossy()))
+        .collect();
+    let mean_tolerance = if tolerances.is_empty() {
+        0.0
+    } else {
+        tolerances.iter().sum::<f64>() / tolerances.len() as f64
+    };
+    Some((salty_cells / n, salt_max, mean_tolerance))
+}
+
+/// The dynamic belief-spread reader (base-level liveliness step 5): how far the environment-sourced
+/// salt-flat HAZARD belief has spread through the population. A being forms this belief first-hand when it
+/// stands on a salt flat, then gossip carries it to whoever shares its live cell, so a migrant that
+/// crossed a flat seeds the belief in a band that never did. Reports the count of beings that hold the
+/// hazard belief (a committed `(HAZARD_SUBJECT, HAZARD_ATTR) -> HAZARD_PRESENT`) and the population, so
+/// the fraction climbs outward from the flats as the idea rides movement and gossip. This reads the
+/// DYNAMIC `Mind.beliefs` inference state (not the intrinsic axiom seed the `band_belief` reader reads),
+/// the belief-spread reader the handoff asks for. `None` if the runner carries no cognition world.
+fn hazard_belief_spread(runner: &Runner) -> Option<(usize, usize)> {
+    let w = runner.world()?;
+    let params = w.belief_params();
+    let ids = w.being_ids();
+    if ids.is_empty() {
+        return None;
+    }
+    let holders = ids
+        .iter()
+        .filter(|&&id| {
+            w.mind(id)
+                .and_then(|m| m.belief(HAZARD_SUBJECT, HAZARD_ATTR, params))
+                == Some(HAZARD_PRESENT)
+        })
+        .count();
+    Some((holders, ids.len()))
+}
+
+/// The promoted-set-and-arcs reader (base-level liveliness §4, the generous arc-scoped promotion policy):
+/// how many beings are lifted to the individual move-by-move dialogue tier because they are living a
+/// narrative arc (a survival struggle, their energy or condition worn low), the rest running the
+/// aggregate gossip tier. Reports the promoted count and the population, so the named individuals living
+/// their arcs are legible: the count rises when the land presses the population (a lean generation
+/// promotes many strugglers) and falls when it is fed. A pure read of hashed state; `None` if the runner
+/// carries no cognition world.
+fn promoted_arcs(runner: &Runner) -> Option<(usize, usize)> {
+    let w = runner.world()?;
+    Some((w.promoted_ids().len(), w.population()))
 }
 
 /// The mean body temperature over the living, embodied population, in the manifest's thermal units.
@@ -618,6 +965,7 @@ fn snapshot(
     runner: &Runner,
     cfg: &Config,
     prev: &BTreeSet<StableId>,
+    dawn: &BTreeSet<(i32, i32)>,
 ) -> BTreeSet<StableId> {
     let w = runner.world().expect("the unified runner carries a world");
     let bands = bands_by_place(w);
@@ -694,6 +1042,78 @@ fn snapshot(
             "  physiology: mean body_temp {t:.3}  |  births {births}  deaths {deaths} (this window)"
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
+    }
+
+    // The field-state signal (step 2): the environmental stack's water and productivity.
+    match field_state(runner) {
+        Some((wet, mean_water, max_water, mean_capacity)) => println!(
+            "  field: {:.0}% cells wet  |  mean water {mean_water:.3} (peak {max_water:.3})  |  \
+             mean productivity {mean_capacity:.3}",
+            wet * 100.0
+        ),
+        None => println!("  field: no environmental stack"),
+    }
+
+    // The carrying-capacity pressure signal (step 3): the standing food, the productivity ceiling it
+    // regrows toward, the occupancy (standing over capacity, so a low value is grazing scarcity), and the
+    // population the standing food currently feeds. This is the number that shows the population settling
+    // where its metabolic draw meets what the land regrows, with no authored cap.
+    match carrying_capacity(runner) {
+        Some((standing, occupancy, local_occupancy)) => {
+            let pop = w.population().max(1);
+            println!(
+                "  carrying capacity: standing food {standing:.1} (global occupancy {:.0}%)  |  \
+                 LOCAL occupancy {:.0}% (grazing pressure {:.0}% where beings graze)  |  {:.2} food/being",
+                occupancy * 100.0,
+                local_occupancy * 100.0,
+                (1.0 - local_occupancy) * 100.0,
+                standing / pop as f64,
+            );
+        }
+        None => println!("  carrying capacity: no located resource loop"),
+    }
+
+    // The salinity-and-adaptation signal (step 4): the salt gradient and the population's mean heritable
+    // salt tolerance (the halophile answer, which rises over generations where a lineage lives near salt).
+    match salinity_state(runner) {
+        Some((salty, salt_max, mean_tol)) => println!(
+            "  salinity: {:.0}% cells salty (peak salt {salt_max:.2})  |  mean salt tolerance {mean_tol:.3} \
+             (heritable, selects up near salt)",
+            salty * 100.0
+        ),
+        None => println!("  salinity: no located population"),
+    }
+
+    // The belief-spread signal (step 5): how far the environment-sourced salt-flat hazard belief has
+    // ridden gossip and migration outward from the beings that discovered it first-hand on a flat.
+    match hazard_belief_spread(runner) {
+        Some((holders, total)) if total > 0 => println!(
+            "  belief spread: {holders}/{total} hold the salt-flat hazard belief ({:.0}%): it rides \
+             movement-coupled gossip to co-located beings (proven in world.rs), but births do not yet \
+             inherit beliefs (as lexicons do not), so it thins as the origin cohort ages out",
+            100.0 * holders as f64 / total as f64
+        ),
+        _ => println!("  belief spread: no cognition world"),
+    }
+
+    // The promotion signal (§4): the beings lifted to the individual dialogue tier because they are
+    // living a survival arc, the resolution knob on the story turned up on what is already happening.
+    match promoted_arcs(runner) {
+        Some((promoted, pop)) if pop > 0 => println!(
+            "  arcs: {promoted}/{pop} beings promoted to the individual tier (living a survival arc; the \
+             aggregate tier carries the rest, generous by default)"
+        ),
+        _ => println!("  arcs: no cognition world"),
+    }
+
+    // The migration signal (step 1): dispersal of the located population from its dawn cells.
+    match migration(runner, dawn) {
+        Some((cells, off, disp)) => println!(
+            "  migration: {cells} distinct cells occupied (from {} dawn cells)  |  {off} beings off \
+             their dawn cell  |  max displacement {disp}",
+            dawn.len()
+        ),
+        None => println!("  migration: no located population"),
     }
 
     println!("  state_hash: {:032x}", runner.state_hash());
@@ -863,27 +1283,59 @@ fn main() {
     }
 
     let founders: BTreeSet<StableId> = runner.world().unwrap().being_ids().into_iter().collect();
+    // The dawn cells the migration reader measures dispersal against (one per founding band).
+    let dawn = dawn_cells(&runner);
     println!("  dawn seeded {} founders\n", founders.len());
 
     let total_ticks = cfg.generations * GEN_TICKS;
     let snapshot_every = (cfg.generations / 10).max(1);
 
+    // Base-level liveliness step 5: seed the salt-flat HAZARD belief into the FIRST band's founders at the
+    // dawn (a discovery), so the belief-spread reader shows the idea riding gossip and migration outward
+    // from one band into others as beings move and meet. This is the "a belief seeded in one dawn band"
+    // demonstration; the environment source (a being forming the belief first-hand on a salt flat) is also
+    // wired in the runner but fires rarely, since foragers avoid the barren flats. A strong evidence weight
+    // so the belief commits at once and has something to spread.
+    let seed_ids: Vec<StableId> = founders.iter().copied().take(MEMBERS_PER_BAND).collect();
+    let seed_batch: Vec<TickInput> = seed_ids
+        .iter()
+        .map(|&id| TickInput {
+            mind: id,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject: HAZARD_SUBJECT,
+                attr: HAZARD_ATTR,
+                hyps: vec![HAZARD_PRESENT, 0],
+                toward: HAZARD_PRESENT,
+                weight: Fixed::from_int(50),
+                from: id,
+            },
+        })
+        .collect();
+
     let start = Instant::now();
     let mut prev = founders;
+    let mut first_tick = true;
     for gen in 1..=cfg.generations {
         for _ in 0..GEN_TICKS {
-            runner.step();
+            if first_tick {
+                // Inject the dawn discovery once; the belief then rides gossip and movement on its own.
+                runner.step_with_world_inputs(&seed_batch);
+                first_tick = false;
+            } else {
+                runner.step();
+            }
         }
         // Snapshot at every tenth of the run; the final generation is reported once, by the FINAL
         // block below, so it is not double-printed here.
         if gen % snapshot_every == 0 && gen != cfg.generations {
-            prev = snapshot(&format!("SNAPSHOT gen {gen}"), &runner, &cfg, &prev);
+            prev = snapshot(&format!("SNAPSHOT gen {gen}"), &runner, &cfg, &prev, &dawn);
             println!();
         }
     }
     let elapsed = start.elapsed();
 
-    let _ = snapshot("FINAL", &runner, &cfg, &prev);
+    let _ = snapshot("FINAL", &runner, &cfg, &prev, &dawn);
     println!();
     println!(
         "  ticked {} generations x {} = {} ticks in {:.2}s ({:.1} ms/generation)",

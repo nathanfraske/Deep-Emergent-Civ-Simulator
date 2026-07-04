@@ -85,10 +85,12 @@
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
-use crate::edibility::Physiology;
+use crate::edibility::{Physiology, ToleranceRegistry};
+use crate::environ::{EnvironCalib, EnvironFields};
+use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    RESPIRATION, TEMPERATURE,
+    CONDITION, ENERGY, RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -97,7 +99,7 @@ use crate::physiology::{
     self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
-use crate::world::{PlaceId, TickInput, World};
+use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -121,6 +123,96 @@ const SYS_FIELD: SystemId = SystemId(0);
 const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
 const SYS_WORLD: SystemId = SystemId(3);
+
+// Base-level liveliness step 5 (conversation liveliness): the movement coupling and an environment-
+// sourced belief. The runner republishes each being's live cell into the cognition world each tick so
+// gossip and converse cluster by where a being stands, and injects a first-order belief about the salt-
+// flat hazard it discovers underfoot, so a fact found in one place rides gossip and a migrant into
+// another band's cell.
+
+/// The offset a live cell coordinate is mapped into a conversational [`PlaceId`] by, `base + y*width + x`,
+/// so a cell-derived conversational place never collides with a small dawn-band `PlaceId` (the frozen
+/// lineage ids). The mapping is a stable function of the coordinate (determinism, R-RNG-COORD).
+const CELL_PLACE_BASE: u32 = 1_000_000;
+
+/// The reserved landmark subject the salt-flat hazard belief is ABOUT (base-level liveliness step 5): a
+/// fixed id far above any minted being id, so the belief "the land holds a hazard" never aliases a
+/// belief about a being. Public so the harness reader measures the same question the runner writes.
+pub const HAZARD_SUBJECT: StableId = StableId(u64::MAX - 1);
+/// The attribute id of the salt-flat hazard belief (a reserved high id, disjoint from other belief attrs).
+pub const HAZARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 1);
+/// The value id meaning "a hazard is present here" (the belief a being forms on a salt flat).
+pub const HAZARD_PRESENT: ValueId = 1;
+/// The value id meaning "no hazard" (the competing hypothesis).
+pub const HAZARD_ABSENT: ValueId = 0;
+/// The tick-input ordinal the env-sourced hazard observation carries, high so it orders after any
+/// external input to the same mind (determinism: the tick sorts inputs by mind then ordinal).
+const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
+
+// The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
+// RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
+// survival is at stake (a metabolic reserve or its condition worn low) is in a narrative arc (a struggle
+// to eat, a battle with a lethal salt flat), and the runner promotes it, and every being sharing its
+// live cell (the talk-hole guard: a promoted being needs promoted partners or it neither gossips nor
+// converses), to the individual move-by-move dialogue tier for the duration of that arc, restricting it
+// back to the aggregate when its arc resolves (its reserves recover). Emergent (Principle 9: the arc is
+// the being's own state, never a scripted hero), deterministic (a canonical-order threshold and a
+// stable ranking, no RNG), and cheap (promote/restrict is exact and conserved, design Part 54).
+
+/// The reserved calibrations of the base-level liveliness surfacing policy (§4 and step 5): the numbers
+/// that gate and weight the two run-path story hooks, the environment-sourced hazard belief and the
+/// arc-scoped promotion. Each value gates or weights world content (a belief that propagates, which
+/// beings converse), so none is a hardcoded inline constant: the mechanism is fixed Rust, the magnitudes
+/// are reserved-with-basis in the manifest (Principle 11), read fail-loud by [`Self::from_manifest`]. The
+/// labelled dev fixture [`Self::dev_default`] stands the same numbers up for the test and harness paths
+/// that construct a runner without a manifest, so those paths are unchanged.
+#[derive(Clone, Copy, Debug)]
+pub struct LivelinessCalib {
+    /// The salinity dose above which a being registers the cell as a lethal hazard and forms the belief.
+    /// Manifest home `hazard.dose_threshold`; basis: the dose at which the salt-flat harm on a naive
+    /// lineage overtakes its condition recovery, the lethality boundary the physics floor already defines.
+    pub hazard_dose_threshold: Fixed,
+    /// The signed evidence weight a first-hand encounter with the hazard carries into the belief pipeline.
+    /// Manifest home `hazard.weight`; basis: a first-hand percept is strong evidence, set from the belief
+    /// subsystem's first-hand witness access weight for consistency.
+    pub hazard_weight: Fixed,
+    /// The survival-margin level below which a being is in an arc and is promoted to the individual tier.
+    /// Manifest home `promotion.stress_threshold`; basis: the fraction of a reserve at which a being is
+    /// meaningfully struggling, the generous default half a reserve.
+    pub promotion_stress_threshold: Fixed,
+    /// The maximum beings promoted to the individual tier at once, a performance bound. Manifest home
+    /// `promotion.budget`; basis: the per-tick individual-dialogue cost the frame budget allows,
+    /// defaulting high (liveliness over frugality, the owner ruling) so the aggregate tier absorbs the rest.
+    pub promotion_budget: usize,
+}
+
+impl LivelinessCalib {
+    /// Read the four surfacing-policy values fail-loud from the manifest (Principle 11): a reserved value
+    /// left unset refuses to build rather than running on a fabricated default. The budget is stored as a
+    /// fixed-point count and truncated to its integer part.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<LivelinessCalib, CalibrationError> {
+        let budget = m.require_fixed("promotion.budget")?;
+        Ok(LivelinessCalib {
+            hazard_dose_threshold: m.require_fixed("hazard.dose_threshold")?,
+            hazard_weight: m.require_fixed("hazard.weight")?,
+            promotion_stress_threshold: m.require_fixed("promotion.stress_threshold")?,
+            promotion_budget: (budget.to_bits() >> Fixed::FRAC_BITS).max(0) as usize,
+        })
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE standing up the same magnitudes the manifest would carry, for the
+    /// test and harness paths that build a runner without a manifest. Half a reserve is the generous
+    /// stress default, unit weight the strong first-hand percept, a dose of one the lethal-flat boundary,
+    /// and a budget of 64 the high default the aggregate tier makes affordable.
+    pub fn dev_default() -> LivelinessCalib {
+        LivelinessCalib {
+            hazard_dose_threshold: Fixed::ONE,
+            hazard_weight: Fixed::ONE,
+            promotion_stress_threshold: Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)), // 1/2
+            promotion_budget: 64,
+        }
+    }
+}
 
 /// A declared access from resource-id slices (a small local convenience over [`Access::new`]).
 fn access(reads: &[ResourceId], writes: &[ResourceId]) -> Access {
@@ -689,6 +781,11 @@ pub struct Embodiment {
     /// respiration); `None` keeps the labelled scalar metabolize (the evolve harness and the existing
     /// thermal fixtures), so installing the physiology is opt-in and disturbs no existing caller.
     physiology: Option<EmbodiedPhysiology>,
+    /// The toxin-tolerance registry a newborn's heritable tolerance is expressed from at the lifecycle
+    /// pairing beat (base-level liveliness step 4). Empty by default (no tolerance, the harm sink inert),
+    /// set by the world-build ([`Embodiment::set_tolerances`]) so a child inherits its parents' salt (or
+    /// dust) resistance through its own genome, the same way the founder step expresses it.
+    tolerances: ToleranceRegistry,
 }
 
 impl Embodiment {
@@ -733,7 +830,16 @@ impl Embodiment {
             resources: ResourceField::new(),
             seed,
             physiology: None,
+            tolerances: ToleranceRegistry::default(),
         }
+    }
+
+    /// Install the toxin-tolerance registry (base-level liveliness step 4), so the lifecycle pairing
+    /// expresses a newborn's heritable per-toxin-class tolerance from its own genome exactly as the
+    /// founder step does. Set before the embodiment is handed to the runner; without it a newborn carries
+    /// no tolerance (the harm sink stays inert for it).
+    pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
+        self.tolerances = tolerances;
     }
 
     /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
@@ -743,6 +849,13 @@ impl Embodiment {
     /// body-to-medium exchange rate. Opt-in: an embodiment without it keeps the scalar path unchanged.
     pub fn set_physiology(&mut self, physiology: EmbodiedPhysiology) {
         self.physiology = Some(physiology);
+    }
+
+    /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
+    /// step 2): the environmental stack writes the standing producer-biomass supply into it each tick
+    /// before the embodiment step reads it. Crate-internal; the runner owns the write path.
+    pub(crate) fn resources_mut(&mut self) -> &mut ResourceField {
+        &mut self.resources
     }
 
     /// The controller layout derived from this embodiment's registries, against which a caller builds
@@ -765,6 +878,12 @@ impl Embodiment {
     /// The located beings, for reading and rendering (a pure read).
     pub fn walkers(&self) -> &[Walker] {
         &self.walkers
+    }
+
+    /// The standing resource field the grazers deplete and the environment regrows (a pure read, for the
+    /// carrying-capacity reader; base-level liveliness step 3).
+    pub fn resources(&self) -> &ResourceField {
+        &self.resources
     }
 }
 
@@ -831,6 +950,24 @@ pub struct Runner {
     /// [`Runner::arm_lifecycle`] is called), so a world-only, embodiment-only, or unarmed runner never
     /// embodies a newborn and the reconciliation beat is a no-op.
     lifecycle: Option<LifecycleKit>,
+    /// The environmental field stack (base-level liveliness step 2), armed on the run path so hydrology
+    /// and primary productivity advance each tick after the temperature field and write the standing
+    /// producer biomass into the embodiment's resource field. `None` on a runner without it, so the
+    /// temperature-only paths are unchanged. Stepped inside [`Runner::step_field`], folded into
+    /// `state_hash`.
+    environ: Option<(EnvironFields, EnvironCalib)>,
+    /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
+    /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
+    /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
+    /// by any other path (a test harness, a scripted scene) is never clobbered. Not folded into
+    /// `state_hash`: it is a derived function of the reserves and cells the hash already covers, and the
+    /// promotions themselves live in the world's own canonical state.
+    arc_promoted: BTreeSet<StableId>,
+    /// The reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
+    /// arc-promotion magnitudes). Initialized to the labelled dev fixture in every constructor so the
+    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
+    /// overrides it fail-loud from the manifest through [`Runner::set_liveliness`].
+    liveliness: LivelinessCalib,
 }
 
 impl Runner {
@@ -847,6 +984,9 @@ impl Runner {
             world: None,
             embodiment: None,
             lifecycle: None,
+            environ: None,
+            arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -880,6 +1020,9 @@ impl Runner {
             world: Some(world),
             embodiment: None,
             lifecycle: None,
+            environ: None,
+            arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -932,6 +1075,9 @@ impl Runner {
             world: None,
             embodiment: Some(embodiment),
             lifecycle: None,
+            environ: None,
+            arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -1007,6 +1153,9 @@ impl Runner {
             world: Some(world),
             embodiment: Some(embodiment),
             lifecycle: None,
+            environ: None,
+            arc_promoted: BTreeSet::new(),
+            liveliness: LivelinessCalib::dev_default(),
         }
     }
 
@@ -1017,6 +1166,27 @@ impl Runner {
     /// embodies a newborn (the pre-3c behaviour), so arming is opt-in and additive.
     pub fn arm_lifecycle(&mut self, kit: LifecycleKit) {
         self.lifecycle = Some(kit);
+    }
+
+    /// Arm the environmental field stack (base-level liveliness step 2): hydrology and primary
+    /// productivity advance each tick after the temperature field, and the standing producer biomass is
+    /// written into the embodiment's resource field so the grazers have supply. Folded into `state_hash`.
+    /// Without it a runner is temperature-only, exactly as before.
+    pub fn set_environ(&mut self, fields: EnvironFields, calib: EnvironCalib) {
+        self.environ = Some((fields, calib));
+    }
+
+    /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
+    /// arc-promotion magnitudes), overriding the labelled dev fixture the constructors install. The dawn
+    /// build reads these fail-loud from the manifest (Principle 11); a runner left unarmed keeps the dev
+    /// fixture, so the test and harness paths are unchanged.
+    pub fn set_liveliness(&mut self, calib: LivelinessCalib) {
+        self.liveliness = calib;
+    }
+
+    /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
+    pub fn environ(&self) -> Option<&EnvironFields> {
+        self.environ.as_ref().map(|(f, _)| f)
     }
 
     /// Place a being on the map at a coordinate with an initial body temperature.
@@ -1083,17 +1253,193 @@ impl Runner {
     /// embodiment coupling, then tick the composed cognition world with `world_inputs` as
     /// the fixed final sub-phase. Kept private so the empty-batch and driven-batch entry
     /// points cannot diverge.
-    fn step_inner(&mut self, world_inputs: &[TickInput]) {
+    /// Step the temperature field and, when an environmental stack is armed, advance it against the
+    /// same-tick field and write the standing producer biomass into the embodiment's resource field
+    /// (base-level liveliness step 2). Shared by the pinned order ([`Runner::step_inner`]) and the
+    /// scheduled order (the `SYS_FIELD` phase), so both advance the field and its environment identically
+    /// before the body and embodiment phases read them. The environment step is a pure deterministic fold
+    /// (Principle 3); the supply write keys off the physical productivity, no label (Principles 8, 9).
+    fn step_field(&mut self) {
         self.field.step(&self.calib);
+        if let Some((env, calib)) = self.environ.as_mut() {
+            let calib = *calib;
+            env.step(&self.field, &calib);
+        }
+        // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
+        // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
+        // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
+        // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
+        // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
+        if let Some((env, calib)) = self.environ.as_ref() {
+            if let Some(emb) = self.embodiment.as_mut() {
+                env.regrow_supply(emb.resources_mut(), calib);
+            }
+        }
+    }
+
+    fn step_inner(&mut self, world_inputs: &[TickInput]) {
+        self.step_field();
         self.phase_body_exchange();
         if self.embodiment.is_some() {
             self.step_embodiment();
         }
+        // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
+        // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
+        // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
+        // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
+        let inputs = self.couple_conversation(world_inputs);
         if let Some(world) = self.world.as_mut() {
-            world.tick(world_inputs);
+            world.tick(&inputs);
         }
         self.reconcile_lifecycle();
         self.clock += 1;
+    }
+
+    /// The conversation-movement coupling and the environment belief source (base-level liveliness step
+    /// 5). Republishes each located being's live cell into the cognition world as a conversational
+    /// [`PlaceId`] (`CELL_PLACE_BASE + y*width + x`, a stable function of the coordinate), so gossip and
+    /// converse cluster by where a being stands now rather than its frozen dawn band, and builds a
+    /// first-order hazard OBSERVATION for every being standing on a salt flat (a cell whose salinity dose
+    /// exceeds the reserved `hazard.dose_threshold`), so a fact discovered in the world enters
+    /// `Mind.beliefs` and rides gossip. Returns the caller's `world_inputs` merged with the env observations (the env ones
+    /// last, at a high ordinal, so the tick's canonical mind-then-ordinal sort is deterministic). Reads
+    /// the embodiment and environ (immutably) before the mutable world publish, and draws no randomness,
+    /// so it replays and is worker-count invariant. A runner with no embodiment publishes nothing and
+    /// returns the inputs unchanged.
+    fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
+        // The reserved surfacing-policy magnitudes (Copy), read once so the borrow of the embodiment and
+        // environ below does not conflict with the read.
+        let live = self.liveliness;
+        let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
+        let mut env_inputs: Vec<TickInput> = Vec::new();
+        // Per-being stress (the lower of its energy and condition margins) and its cell, for the
+        // arc-scoped promotion policy: a being whose stress is high is in a survival arc.
+        let mut stress: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        if let Some(emb) = self.embodiment.as_ref() {
+            let (width, _) = self.field.dims();
+            let environ = self.environ.as_ref();
+            for w in emb.walkers() {
+                let c = w.coord();
+                let cell = CELL_PLACE_BASE.wrapping_add((c.y.max(0) * width + c.x.max(0)) as u32);
+                cells.insert(w.id, cell);
+                // The survival margin: the lower of the energy and condition reserve levels, counting an
+                // axis only when the being carries that reserve (its capacity is positive), so a
+                // being whose registry lacks the axis reads a full margin rather than a false zero. A being
+                // whose margin is below the stress threshold is in a narrative arc (starving, or worn by a
+                // hazard); a thermal-only fixture carries neither axis, so it yields a full margin and
+                // promotes no one.
+                let axis_margin = |axis| {
+                    if w.homeostasis.capacity(axis) > Fixed::ZERO {
+                        w.homeostasis.level(axis)
+                    } else {
+                        Fixed::ONE
+                    }
+                };
+                let margin = axis_margin(ENERGY).min(axis_margin(CONDITION));
+                stress.insert(w.id, margin);
+                if let Some((env, calib)) = environ {
+                    if env.salinity_dose(c.x, c.y, calib) > live.hazard_dose_threshold {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: ENV_HAZARD_ORDINAL,
+                            stim: Stimulus::Observe {
+                                subject: HAZARD_SUBJECT,
+                                attr: HAZARD_ATTR,
+                                hyps: vec![HAZARD_PRESENT, HAZARD_ABSENT],
+                                toward: HAZARD_PRESENT,
+                                weight: live.hazard_weight,
+                                from: w.id,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        // The promoted set: every being sharing a cell that holds a being in a survival arc (the
+        // talk-hole guard promotes whole co-located groups), capped at the generous budget by keeping the
+        // most-stressed cells. A pure deterministic function of the reserves and the cells (no RNG).
+        let promote_set = self.arc_promotion_set(&cells, &stress);
+        if let Some(world) = self.world.as_mut() {
+            world.set_conversational_cells(cells);
+            // The beings already promoted before this policy touches anything, minus the set the policy
+            // itself held last tick, are the ones promoted by some OTHER path (a test harness, a scripted
+            // scene). The policy must never claim ownership of those, so it never restricts them.
+            let externally_owned: BTreeSet<StableId> = world
+                .promoted_ids()
+                .into_iter()
+                .filter(|id| !self.arc_promoted.contains(id))
+                .collect();
+            // Apply the arc-scoped promotion, touching only the set this policy owns. Promote the new arc
+            // set, then restrict every being the policy promoted last tick that has left the arc (its arc
+            // resolved). A being promoted by another path is never in `arc_promoted`, so it is left
+            // untouched, and a being still in the arc is not restricted.
+            for &id in &promote_set {
+                world.promote(id);
+            }
+            for &id in &self.arc_promoted {
+                if !promote_set.contains(&id) {
+                    world.restrict(id);
+                }
+            }
+            // The policy now owns exactly the arc set it chose, minus any being another path already held
+            // promoted (which stays that path's to restrict), so it can never later clobber an external
+            // promotion that happened to coincide with a survival arc.
+            self.arc_promoted = promote_set.difference(&externally_owned).copied().collect();
+        } else {
+            // No world to promote into: the policy owns nothing this tick.
+            self.arc_promoted = BTreeSet::new();
+        }
+        if env_inputs.is_empty() {
+            world_inputs.to_vec()
+        } else {
+            let mut merged = world_inputs.to_vec();
+            merged.extend(env_inputs);
+            merged
+        }
+    }
+
+    /// The arc-scoped promotion set (base-level liveliness §4): the beings to promote to the individual
+    /// dialogue tier this tick, from the per-being survival stress and the live conversational cells. A
+    /// cell is "in an arc" when any being in it is below the stress threshold; the whole cell is promoted
+    /// together (the talk-hole guard, so a promoted being has promoted partners to converse with). When
+    /// more beings sit in arc-cells than the generous budget allows, the most-stressed cells win (a stable
+    /// ranking by the cell's lowest margin, then its id), so the choice is deterministic and camera-free
+    /// (Principle 10). Returns the promoted ids as a canonical set.
+    fn arc_promotion_set(
+        &self,
+        cells: &BTreeMap<StableId, PlaceId>,
+        stress: &BTreeMap<StableId, Fixed>,
+    ) -> BTreeSet<StableId> {
+        // Group beings by cell, and find each cell's lowest margin (its stress). Canonical (cell, id).
+        let mut by_cell: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        for (&id, &cell) in cells {
+            by_cell.entry(cell).or_default().push(id);
+        }
+        // Cells that hold at least one being in a survival arc, with the cell's lowest margin.
+        let mut arc_cells: Vec<(Fixed, PlaceId, Vec<StableId>)> = by_cell
+            .into_iter()
+            .filter_map(|(cell, ids)| {
+                let lowest = ids
+                    .iter()
+                    .map(|id| stress.get(id).copied().unwrap_or(Fixed::ONE))
+                    .min()
+                    .unwrap_or(Fixed::ONE);
+                (lowest < self.liveliness.promotion_stress_threshold).then_some((lowest, cell, ids))
+            })
+            .collect();
+        // Most-stressed cell first (lowest margin), ties broken by cell id, so the budget selection is
+        // a deterministic, stable order.
+        arc_cells.sort_by(|a, b| a.0.to_bits().cmp(&b.0.to_bits()).then(a.1.cmp(&b.1)));
+        let mut promoted = BTreeSet::new();
+        for (_, _, ids) in arc_cells {
+            if promoted.len() >= self.liveliness.promotion_budget {
+                break;
+            }
+            for id in ids {
+                promoted.insert(id);
+            }
+        }
+        promoted
     }
 
     /// The body-thermal exchange phase: every located being pulls its core temperature toward its
@@ -1165,14 +1511,19 @@ impl Runner {
     /// Run one tick phase by its [`SystemId`], the dispatch the scheduled executor drives.
     fn run_phase(&mut self, sid: SystemId, world_inputs: &[TickInput]) {
         if sid == SYS_FIELD {
-            self.field.step(&self.calib);
+            self.step_field();
         } else if sid == SYS_BODY {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
             self.step_embodiment();
         } else if sid == SYS_WORLD {
+            // The conversation-movement coupling and env belief source run here (base-level liveliness
+            // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
+            // them after step_embodiment, so the scheduled and pinned orders publish identical cells and
+            // inject identical env observations.
+            let inputs = self.couple_conversation(world_inputs);
             if let Some(world) = self.world.as_mut() {
-                world.tick(world_inputs);
+                world.tick(&inputs);
             }
         }
     }
@@ -1331,7 +1682,7 @@ impl Runner {
             &emb.layout,
             &emb.afford,
             &terrain,
-            &emb.resources,
+            &mut emb.resources,
             &emb.params,
             emb.seed,
             self.clock,
@@ -1476,7 +1827,16 @@ impl Runner {
                         Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
                         None => Controller::zeros(&emb.layout),
                     };
-                    let physiology = Physiology::dev_for_registry(&emb.homeo);
+                    // The newborn's consumer physiology, its heritable per-toxin-class tolerance expressed
+                    // from its OWN genome through the embodiment's tolerance registry (base-level liveliness
+                    // step 4), so salt (or dust) resistance is inherited and selection carries across
+                    // generations. A newborn with no genome falls back to the tolerance-free dev fixture.
+                    let physiology = match world.genome_of(id) {
+                        Some(genome) => {
+                            Physiology::express(&emb.homeo, &emb.tolerances, &race.genes, genome)
+                        }
+                        None => Physiology::dev_for_registry(&emb.homeo),
+                    };
                     let exchange_rate = derive_body_exchange_rate(
                         &plan,
                         &phys.organs,
@@ -1510,6 +1870,12 @@ impl Runner {
         let mut h = StateHasher::new();
         h.write_u64(self.clock);
         self.field.hash(&mut h);
+        // The environmental field stack (base-level liveliness step 2), folded in canonical field order
+        // after the temperature field. A field left out here would pass replay while hiding divergence,
+        // so the dynamic environmental fields fold with the temperature field.
+        if let Some((env, _)) = &self.environ {
+            env.hash_into(&mut h);
+        }
         for (id, t) in &self.body_temp {
             h.write_stable(*id);
             h.write_fixed(*t);
@@ -1520,6 +1886,10 @@ impl Runner {
             h.write_u64(wh as u64);
         }
         if let Some(emb) = &self.embodiment {
+            // The standing food-and-water stock the grazers deplete and the environment regrows (base-
+            // level liveliness step 3): dynamic state that must fold, or a divergence in the regrow-and-
+            // graze loop would pass replay while hiding. Walks canonical (coordinate, class) order.
+            emb.resources.hash_into(&mut h);
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {
