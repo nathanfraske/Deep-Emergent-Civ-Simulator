@@ -65,6 +65,10 @@ use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, Trai
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
 use crate::tom::{self, AccessChannelRegistry, AccessWeights};
+use crate::transmission::{
+    copy_drift, copy_fidelity, erode_and_cull, transmit, transmit_draw, DesignId, Knowledge,
+    TransmissionParams,
+};
 use crate::value::{
     EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
 };
@@ -492,6 +496,14 @@ pub struct World {
     /// The aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from the
     /// gossip parameters). None until set; the belief-diffusion beat is then a no-op.
     belief_diffusion_rate: Option<Fixed>,
+    /// Per-being technique knowledge (design Parts 20, 23, 25, 41, R-DEEPTECH): the content-addressed
+    /// designs each being holds and its proficiency at each. Empty until a design is originated
+    /// ([`World::originate_design`]); the transmission beat then spreads and erodes it. A design is an
+    /// opaque [`DesignId`], never a technique enum (Principle 4).
+    knowledge: BTreeMap<StableId, Knowledge>,
+    /// The transmission calibrations (`transmission.*`, derived and reserved). None until set; the
+    /// transmission beat is then a no-op, so a world that holds no techniques runs unchanged.
+    transmission: Option<TransmissionParams>,
     /// The reproduction calibrations (design Parts 25, 28, R-REPRO). None until set; the reproduce
     /// half of the life cadence is then a no-op, so a world that installs none only ages and dies.
     reproduction: Option<ReproductionParams>,
@@ -590,6 +602,8 @@ impl World {
             lang_of: BTreeMap::new(),
             belief_pools: BTreeMap::new(),
             belief_diffusion_rate: None,
+            knowledge: BTreeMap::new(),
+            transmission: None,
             reproduction: None,
             mortality_hazard_by_race: None,
             drift: None,
@@ -690,6 +704,33 @@ impl World {
     /// half of the life cadence is a no-op, so a world that installs none only ages and dies.
     pub fn set_reproduction(&mut self, params: ReproductionParams) {
         self.reproduction = Some(params);
+    }
+
+    /// Install the transmission calibrations (design Parts 23, 41, R-DEEPTECH). Until set, the
+    /// transmission beat is a no-op, so a world that holds no techniques runs unchanged.
+    pub fn set_transmission(&mut self, params: TransmissionParams) {
+        self.transmission = Some(params);
+    }
+
+    /// Originate a design in a being's knowledge at a starting proficiency (design Part 41): the being
+    /// invents or first holds a content-addressed technique the transmission beat then spreads. The
+    /// content address (which content owns which [`DesignId`]) is the composition evaluator's job; this
+    /// is the seam a producer or a test seeds a design through.
+    pub fn originate_design(&mut self, being: StableId, design: DesignId, proficiency: Fixed) {
+        self.knowledge
+            .entry(being)
+            .or_default()
+            .originate(design, proficiency);
+    }
+
+    /// A being's technique knowledge, if any (for inspection and tools).
+    pub fn knowledge_of(&self, being: StableId) -> Option<&Knowledge> {
+        self.knowledge.get(&being)
+    }
+
+    /// How many beings hold a design (its practitioner count, a read of canon for tests and the view).
+    pub fn holders_of(&self, design: DesignId) -> u32 {
+        self.knowledge.values().filter(|k| k.holds(design)).count() as u32
     }
 
     /// Stamp the world's integer-Gaussian approximation (design 25.10, `genome.gauss_approx`), the
@@ -2036,9 +2077,9 @@ impl World {
     /// Remove a being from the world, pruning every per-being map it appears in (the death and
     /// out-migration primitive of design Part 20). Minds, placement, genome, intrinsic beliefs,
     /// affect, age, sensorium, drives, the last action, lexicon, language assignment, the
-    /// promoted set, and every trust edge naming the being are all dropped, so no dangling
-    /// reference to a departed being survives (referential integrity, design Part 58). Idempotent:
-    /// removing an unknown being is a no-op.
+    /// promoted set, technique knowledge, and every trust edge naming the being are all dropped, so
+    /// no dangling reference to a departed being survives (referential integrity, design Part 58).
+    /// Idempotent: removing an unknown being is a no-op.
     pub fn remove_being(&mut self, id: StableId) {
         self.minds.remove(&id);
         self.place_of.remove(&id);
@@ -2055,6 +2096,7 @@ impl World {
         self.lexicons.remove(&id);
         self.lang_of.remove(&id);
         self.promoted.remove(&id);
+        self.knowledge.remove(&id);
         self.trust
             .retain(|(listener, speaker), _| *listener != id && *speaker != id);
     }
@@ -2199,6 +2241,7 @@ impl World {
         self.converse();
         self.gossip();
         self.diffuse_beliefs();
+        self.transmit_step();
         self.converse_language();
         self.drift_step();
         self.life_cadence();
@@ -2208,11 +2251,12 @@ impl World {
     /// wall-clock nanoseconds spent in each of the six cognition phases (perceive, decide, converse,
     /// gossip, converse_language, drift_languages), so a benchmark can see where a tick's time goes.
     /// It produces exactly the state `tick(&[])` would, since it runs the same phases in the same
-    /// order with an empty input batch, including the coarse life-cadence beat (run after the six,
-    /// untimed because it fires only on the cadence period); the `Instant` it reads is non-canonical
-    /// and never enters state, so the resulting hash is unchanged (Principle 3). This exists to
-    /// answer "profile before optimizing" (Part 13), and it is compiled into the library only as a
-    /// measurement tool.
+    /// order with an empty input batch; the coarse per-cadence beats (enculturate, diffuse_beliefs,
+    /// transmit_step) and the life-cadence beat run at their `tick` positions but untimed, because
+    /// each fires only on its cadence period and is not one of the profiled six. The `Instant` it
+    /// reads is non-canonical and never enters state, so the resulting hash is unchanged (Principle
+    /// 3). This exists to answer "profile before optimizing" (Part 13), and it is compiled into the
+    /// library only as a measurement tool.
     pub fn tick_timed(&mut self) -> [u128; 6] {
         use std::time::Instant;
         self.clock += 1;
@@ -2223,20 +2267,26 @@ impl World {
         let s = Instant::now();
         self.decide();
         ns[1] = s.elapsed().as_nanos();
+        // The cadence-gated enculturation beat, at its tick position, untimed.
+        self.enculturate();
         let s = Instant::now();
         self.converse();
         ns[2] = s.elapsed().as_nanos();
         let s = Instant::now();
         self.gossip();
         ns[3] = s.elapsed().as_nanos();
+        // The aggregate belief-diffusion and technique-transmission beats, at their tick positions,
+        // untimed (each fires on its own cadence and is not one of the profiled six).
+        self.diffuse_beliefs();
+        self.transmit_step();
         let s = Instant::now();
         self.converse_language();
         ns[4] = s.elapsed().as_nanos();
         let s = Instant::now();
         self.drift_step();
         ns[5] = s.elapsed().as_nanos();
-        // The coarse life beat runs after the six cognition phases so tick_timed produces the same
-        // state tick would; it is not one of the profiled six (it fires only on the cadence period).
+        // The coarse life beat runs after the cognition phases so tick_timed produces the same state
+        // tick would; it is not one of the profiled six (it fires only on the cadence period).
         self.life_cadence();
         ns
     }
@@ -2365,6 +2415,138 @@ impl World {
                 if let Some(belief) = pool.get_mut(&key) {
                     belief.advance_diffusion(rate, Fixed::ONE);
                 }
+            }
+        }
+    }
+
+    /// A being's copy cognition, the (memory, perception) pair the transmission fidelity and drift are
+    /// derived from (design Parts 20, 25, [`crate::transmission::copy_fidelity`]). Memory is the being's
+    /// expressed memory capacity (retention: how well a copied technique is held) and perception is its
+    /// expressed reasoning acuity (resolution: how sharply the demonstration is read), both read off the
+    /// being's own [`Mind`], itself expressed from the genome. A being with no mind reads neutral (no
+    /// modulation, [`Fixed::ONE`] each), matching how an uninstalled sensorium reads at full acuity, so a
+    /// world of default cognition copies at full fidelity. This reads per-being data and never branches
+    /// on race identity (Principle 9): two races differ here only through their expressed cognition.
+    fn copy_cognition(&self, being: StableId) -> (Fixed, Fixed) {
+        match self.minds.get(&being) {
+            Some(m) => (m.memory, m.acuity),
+            None => (Fixed::ONE, Fixed::ONE),
+        }
+    }
+
+    /// The transmission beat (design Parts 20, 23, 25, 41, R-DEEPTECH): each tick, within each band, a
+    /// learner copies from a co-located holder every design the learner lacks, at a fidelity and drift
+    /// derived from the learner's own expressed memory and perception (never a per-race table,
+    /// Principle 9, [`World::copy_cognition`]); then a design held by fewer than the reserved
+    /// practitioner floor erodes and, past the structural floor, is lost (a dark age), while a culture
+    /// that still holds it can re-transmit it for free later (rediscovery, the content address is
+    /// stable). A high-fidelity culture ratchets designs in and deepens; a low-fidelity one loses them
+    /// and stays shallow, so the two diverge from their per-being cognition alone.
+    ///
+    /// Two-pass gather-then-apply (the gossip and reproduce shape): pass one is a pure read over the
+    /// pre-tick knowledge, gathering for each learner, for each design it lacks, the best local
+    /// demonstrator (highest proficiency, ties to lowest holder id) so a learner copies each new
+    /// technique at most once per tick from the strongest source; pass two applies the gathered copies
+    /// in canonical (place, learner, design) order through the counter-keyed [`transmit`] kernel, then
+    /// erodes and culls the whole population. Reading the frozen snapshot means a copy implanted this
+    /// tick neither seeds another copy nor changes another design's fate this tick, so the beat is
+    /// order-independent and replays bit for bit. Inert until the transmission calibrations are set and
+    /// some design is originated, so a world that holds no techniques runs unchanged.
+    fn transmit_step(&mut self) {
+        let params = match self.transmission {
+            Some(p) => p,
+            None => return,
+        };
+        if self.knowledge.is_empty() {
+            return;
+        }
+        let by_place = self.colocated_index();
+        // Pass one (pure read): for each learner, the best local demonstrator of each design it lacks.
+        // Gathered against the pre-tick snapshot, walked in canonical place, learner-id, then (via the
+        // BTreeMap) design-address order, so the copy list is fully canonical.
+        let mut copies: Vec<(StableId, StableId, DesignId, Fixed, Fixed, Fixed)> = Vec::new();
+        for members in by_place.values() {
+            for &learner in members {
+                let (memory, perception) = self.copy_cognition(learner);
+                let fidelity = copy_fidelity(memory, perception);
+                let drift = copy_drift(params.drift_rate, memory, perception);
+                let learner_known: Option<&BTreeSet<DesignId>> =
+                    self.knowledge.get(&learner).map(|k| &k.known);
+                // Best local holder per lacked design: highest proficiency, ties to the lowest holder
+                // id (holders are walked in id order, so an equal-proficiency later holder never wins).
+                let mut best: BTreeMap<DesignId, (StableId, Fixed)> = BTreeMap::new();
+                for &holder in members {
+                    if holder == learner {
+                        continue;
+                    }
+                    let Some(hk) = self.knowledge.get(&holder) else {
+                        continue;
+                    };
+                    for &design in &hk.known {
+                        if learner_known.is_some_and(|k| k.contains(&design)) {
+                            continue;
+                        }
+                        let hp = hk.proficiency_of(design);
+                        let take = match best.get(&design) {
+                            Some(&(_, bp)) => hp > bp,
+                            None => true,
+                        };
+                        if take {
+                            best.insert(design, (holder, hp));
+                        }
+                    }
+                }
+                for (design, (holder, hp)) in best {
+                    copies.push((learner, holder, design, hp, fidelity, drift));
+                }
+            }
+        }
+        // Pass two (the write walk): each gathered copy through the counter-keyed transmit kernel, then
+        // the per-band erosion and loss pass (below).
+        for (learner, holder, design, hp, fidelity, drift) in copies {
+            let draw = transmit_draw(learner, holder, design, self.clock, self.seed);
+            let mut lk = self.knowledge.remove(&learner).unwrap_or_default();
+            transmit(&mut lk, design, hp, fidelity, drift, draw);
+            self.knowledge.insert(learner, lk);
+        }
+        self.erode_knowledge_by_band(&params);
+    }
+
+    /// Erode and cull knowledge per co-located band (design Parts 23, 41, [`erode_and_cull`]): a
+    /// technique dies out in a band too small to sustain it (held by fewer than the reserved
+    /// practitioner floor there) while a larger band keeps it, so a later re-contact re-transmits it
+    /// for free (rediscovery, the content address is stable). Loss operates on the same locality
+    /// transmission does (the co-located band), so the two are consistent, and the practitioner floor
+    /// is the band's own count rather than a world-wide tally that would let a distant civilization
+    /// prop up a technique no local culture still practises. Bands are walked in canonical place order,
+    /// each band's members through the counter-keyed [`erode_and_cull`] (whose forgetting roll is keyed
+    /// on the design and tick, so a design erodes in lockstep wherever it is below floor); a
+    /// knowledge-holder with no place erodes as its own singleton band, since it shares no locality
+    /// with any other holder. The final knowledge is independent of the order the bands are processed
+    /// in (the rolls key off design and tick, not the band), so replay is bit-identical.
+    fn erode_knowledge_by_band(&mut self, params: &TransmissionParams) {
+        // Partition the knowledge-holders by place (canonical); a placeless holder is its own singleton.
+        let mut bands: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
+        let mut singletons: Vec<StableId> = Vec::new();
+        for id in self.knowledge.keys().copied().collect::<Vec<_>>() {
+            match self.place_of.get(&id) {
+                Some(&place) => bands.entry(place).or_default().push(id),
+                None => singletons.push(id),
+            }
+        }
+        let groups = bands
+            .into_values()
+            .chain(singletons.into_iter().map(|id| vec![id]));
+        for ids in groups {
+            let mut band: BTreeMap<StableId, Knowledge> = BTreeMap::new();
+            for id in ids {
+                if let Some(k) = self.knowledge.remove(&id) {
+                    band.insert(id, k);
+                }
+            }
+            erode_and_cull(&mut band, params, self.clock, self.seed);
+            for (id, k) in band {
+                self.knowledge.insert(id, k);
             }
         }
     }
@@ -3358,6 +3540,21 @@ impl World {
         for (place, pool) in &self.belief_pools {
             h.write_u32(*place);
             pool.hash_into(&mut h);
+        }
+        // Per-being technique knowledge (design Parts 20, 23, 25, 41, R-DEEPTECH): the transmission
+        // beat's spread, drift, and loss are canonical state, so two worlds whose cultures diverged in
+        // what techniques they hold and how well fold to different hashes. Walked by being id (the
+        // BTreeMap is ordered), each holder's designs in address order with its proficiency, each run
+        // length-prefixed so an empty or absent holder is unambiguous. Knowledge carries no hash_into
+        // of its own, so it folds here directly.
+        h.write_u64(self.knowledge.len() as u64);
+        for (being, k) in &self.knowledge {
+            h.write_stable(*being);
+            h.write_u64(k.known.len() as u64);
+            for design in &k.known {
+                h.write_u64(*design);
+                h.write_fixed(k.proficiency_of(*design));
+            }
         }
         h.finish()
     }

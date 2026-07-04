@@ -345,16 +345,18 @@ fn the_offset_preserves_the_mean_and_is_an_odd_reflection() {
 // life-cadence period and mortality-hazard curve (an earlier defect), then each being's age and
 // personality trait trajectory and each lineage's race maturity and lifespan (blind-audit defect 7),
 // the aggregate belief pools (the belief-diffusion beat, world-wiring increment 4, an empty
-// length-zero pool set here), and the reproductive census with the life-fraction mortality hazard
-// (the reproduction beat, world-wiring increment 5). The zero-variance backward-compat property (a
-// zero spread reproduces the no-offset dawn) is unchanged; only the folded field set grew.
+// length-zero pool set here), the reproductive census with the life-fraction mortality hazard
+// (the reproduction beat, world-wiring increment 5), and the per-being technique knowledge (the
+// transmission beat, world-wiring increment 7, an empty length-zero holder set here). The
+// zero-variance backward-compat property (a zero spread reproduces the no-offset dawn) is unchanged;
+// only the folded field set grew.
 #[test]
 fn zero_variance_reproduces_the_pre_offset_state_hash() {
     let (w, ids) = seed_cohort(0xDE0D_0007, race(0, Fixed::from_int(4), Fixed::ZERO), 7, 12);
     assert_eq!(ids.len(), 12);
     assert_eq!(
         w.state_hash(),
-        0x4f4deaf57224cdfb6ccc26059ca9674bu128,
+        0x702f475c6f5082fba8f4e9817a50f9ebu128,
         "a zero developmental variance reproduces the pre-offset dawn bit for bit"
     );
 }
