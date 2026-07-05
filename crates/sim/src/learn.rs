@@ -36,10 +36,13 @@
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
 use civsim_core::{Fixed, StableId};
+use civsim_world::Coord3;
 
+use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::evidence::{good_weight, AttrKindId, ValueId};
-use crate::percept::feature_bucket;
+use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
+use crate::locomotion::ResourceField;
+use crate::percept::{feature_bucket, PerceptRegistry};
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -198,11 +201,70 @@ pub fn feature_observations(
         .collect()
 }
 
+/// The belief-derived expected-harm AVOIDANCE gradient for a being at `here` (harm-learning arc slice
+/// c): the summed inverse-distance repulsion away from every cell within `sense_range` whose feature-kind
+/// the being holds a committed HARMS belief about. Each believed-harmful cell contributes a vector
+/// pointing from the cell toward the being, weighted by inverse distance (nearer harmful ground repels
+/// harder), so the raw sum points away from the bulk of believed harm; a being that believes nothing
+/// nearby harms it gets a zero gradient. The caller normalises the raw sum to a unit percept, exactly as
+/// the temperature gradient is normalised.
+///
+/// This is a PERCEPT, not a heading. The runner feeds it into the reserve axis's direction slot the
+/// evolved controller reads, and ONLY a heritable weight lifted off founding-zero by selection turns it
+/// into avoidance, so the flight behaviour emerges rather than being authored (Principle 9): the
+/// mechanism never subtracts a harm term from the heading itself. It reads the being's own beliefs and
+/// the raw features it senses, never a hazard label or a race id (Principle 8). Pure and RNG-free.
+pub fn avoidance_gradient(
+    mind: &Mind,
+    here: Coord3,
+    resources: &ResourceField,
+    percepts: &PerceptRegistry,
+    sense_range: i64,
+    granularity: Fixed,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    if percepts.is_empty() {
+        return (Fixed::ZERO, Fixed::ZERO);
+    }
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    let r = sense_range.max(0) as i32;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let cell = Coord3::ground(here.x + dx, here.y + dy);
+            let features = percepts.perceive(resources.composition(cell));
+            let believes_harm = features.iter().enumerate().any(|(channel, &amount)| {
+                amount > Fixed::ZERO && {
+                    let subject =
+                        feature_subject(channel as u16, feature_bucket(amount, granularity));
+                    mind.belief(subject, HARM_ATTR, params) == Some(HARMS)
+                }
+            });
+            if believes_harm {
+                // A vector from the harmful cell toward the being (away from the harm), weighted by
+                // inverse distance: (-dx, -dy) / (dx^2 + dy^2). No square root; nearer harm repels harder.
+                let d2 = Fixed::from_int(dx * dx + dy * dy);
+                if let (Some(cx), Some(cy)) = (
+                    Fixed::from_int(-dx).checked_div(d2),
+                    Fixed::from_int(-dy).checked_div(d2),
+                ) {
+                    ax = ax.saturating_add(cx);
+                    ay = ay.saturating_add(cy);
+                }
+            }
+        }
+    }
+    (ax, ay)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::Mind;
-    use crate::evidence::InferenceParams;
+    use crate::homeostasis::{HomeostaticRegistry, CONDITION};
+    use crate::physiology::SALINITY;
 
     fn params() -> InferenceParams {
         // The evidence engine's dev thresholds: clamp 50, commit at 3 nats, margin 1.
@@ -365,6 +427,106 @@ mod tests {
             mind.belief(subject, HARM_ATTR, &params()),
             Some(BENIGN),
             "harm-free experience on the feature commits BENIGN, so the belief is defeasible"
+        );
+    }
+
+    fn salt_field(cell: Coord3, dose: Fixed) -> ResourceField {
+        let mut f = ResourceField::new();
+        let mut toxins = std::collections::BTreeMap::new();
+        toxins.insert(SALINITY.to_string(), dose);
+        f.set(
+            cell,
+            crate::edibility::Composition {
+                nutrients: std::collections::BTreeMap::new(),
+                toxins,
+            },
+        );
+        f
+    }
+
+    #[test]
+    fn the_avoidance_gradient_points_away_from_a_believed_harmful_cell_and_is_zero_without_the_belief(
+    ) {
+        // Harm-learning arc slice c, the belief-to-behaviour percept: a being that has learned the salt
+        // harms it reads an avoidance gradient pointing AWAY from the believed-harmful ground; a being
+        // that has learned nothing reads none. The gradient is a percept the controller weights, so no
+        // flight is authored here (that emerges when selection lifts the weight).
+        let _ = (HomeostaticRegistry::dev_default(), CONDITION); // the axis the gradient routes into
+        let calib = HarmLearningCalib::dev_default();
+        let percepts = PerceptRegistry::dev_salinity();
+        let here = Coord3::ground(5, 5);
+        let salt = Coord3::ground(7, 5); // two tiles due east of the being
+        let dose = Fixed::from_int(2);
+        let field = salt_field(salt, dose);
+        let subject = feature_subject(0, feature_bucket(dose, calib.feature_granularity));
+
+        // A being that believes nothing harmful nearby has no avoidance gradient.
+        let mut mind = Mind::new(StableId(1), Fixed::ONE);
+        assert_eq!(
+            avoidance_gradient(
+                &mind,
+                here,
+                &field,
+                &percepts,
+                4,
+                calib.feature_granularity,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no learned harm nearby, no avoidance gradient"
+        );
+
+        // Teach it that the salt harms (commit HARMS about the salt feature-kind).
+        for _ in 0..3 {
+            mind.consider(
+                subject,
+                HARM_ATTR,
+                [HARMS, BENIGN],
+                HARMS,
+                calib.observation_weight(),
+                mind.id,
+            );
+        }
+        assert_eq!(mind.belief(subject, HARM_ATTR, &params()), Some(HARMS));
+        let (gx, gy) = avoidance_gradient(
+            &mind,
+            here,
+            &field,
+            &percepts,
+            4,
+            calib.feature_granularity,
+            &params(),
+        );
+        // The salt is to the EAST (+x), so the avoidance gradient points WEST (-x), away from it, with
+        // no north-south component (the salt is due east).
+        assert!(
+            gx < Fixed::ZERO,
+            "the gradient points away from the salt to the east: gx={gx:?}"
+        );
+        assert_eq!(
+            gy,
+            Fixed::ZERO,
+            "the salt is due east, so no north-south pull"
+        );
+    }
+
+    #[test]
+    fn a_world_with_no_percepts_reads_no_avoidance_gradient() {
+        // The opt-out short-circuit: without a declared percept the being senses no feature and forms no
+        // avoidance, so the gradient is zero and the run is unchanged.
+        let mind = Mind::new(StableId(1), Fixed::ONE);
+        let field = salt_field(Coord3::ground(6, 5), Fixed::from_int(2));
+        assert_eq!(
+            avoidance_gradient(
+                &mind,
+                Coord3::ground(5, 5),
+                &field,
+                &PerceptRegistry::empty(),
+                4,
+                Fixed::ONE,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
         );
     }
 }
