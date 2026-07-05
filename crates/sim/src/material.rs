@@ -484,6 +484,72 @@ impl MaterialField {
     }
 }
 
+/// The per-column EARTHWORK DELTA: how far a being's digging and depositing has moved a surface column's
+/// elevation from the worldgen baseline (material-substrate arc, cascade item 5, modifiable terrain). A
+/// sparse field keyed by the ground column (a [`Coord3`] at z zero), empty by default (no cell reworked),
+/// a sibling of [`MaterialField`]. The physics reads the EFFECTIVE elevation as the worldgen elevation plus
+/// the delta, so a dug pit (a negative delta) pools water and a raised mound (a positive delta) sheds it,
+/// the hydrology's downhill target recomputing from the effective elevation rather than a one-time
+/// worldgen precompute. Digging is a fracture contest over the ground's derived hardness (the extraction
+/// contest, reused), the removed matter conserved as a carried load and set down elsewhere as a mound; this
+/// field is the elevation bookkeeping that lets the dig and the deposit reshape the terrain, not only move
+/// matter between a cell and a carrier. Off the run path until the dig affordance wires it, so declaring it
+/// leaves every scenario byte-identical (the opt-in empty-default pattern).
+#[derive(Clone, Debug, Default)]
+pub struct EarthworkField {
+    /// The elevation delta at each reworked column, keyed by its ground [`Coord3`] (z zero). A column not
+    /// present reads a zero delta (the absence convention). A column driven back to a zero delta is pruned,
+    /// so the canonical walk stays minimal.
+    deltas: BTreeMap<Coord3, Fixed>,
+}
+
+impl EarthworkField {
+    /// An empty field: worldgen terrain everywhere, nothing dug or mounded.
+    pub fn new() -> EarthworkField {
+        EarthworkField::default()
+    }
+
+    /// Whether no column has been reworked (the opt-out state a scenario that declares no earthwork stays
+    /// in, so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.deltas.is_empty()
+    }
+
+    /// The elevation delta at a column (positive a mound, negative a pit); an unreworked column reads zero.
+    /// The column is the ground [`Coord3`] (`Coord3::ground(x, y)`); the caller passes the surface column.
+    pub fn delta(&self, column: Coord3) -> Fixed {
+        self.deltas.get(&column).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Move a column's elevation by `change` (negative to dig down, positive to mound up), accumulating onto
+    /// any prior rework. A column driven back to zero is pruned to keep the canonical walk minimal. A pure
+    /// deterministic bookkeeping write with no randomness, the earthwork sibling of
+    /// [`MaterialField::deposit`].
+    pub fn adjust(&mut self, column: Coord3, change: Fixed) {
+        if change == Fixed::ZERO {
+            return;
+        }
+        let entry = self.deltas.entry(column).or_insert(Fixed::ZERO);
+        *entry = entry.saturating_add(change);
+        if *entry == Fixed::ZERO {
+            self.deltas.remove(&column);
+        }
+    }
+
+    /// Fold the earthwork into a hash in canonical (column, delta) order, for the runner's `state_hash`
+    /// beside [`MaterialField::hash_into`]. An empty field folds nothing, so an opted-out run is unchanged;
+    /// nothing calls it on the run path yet, so the substrate is hash-neutral until the dig affordance wires
+    /// it. The `BTreeMap` walks in canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (column, delta) in &self.deltas {
+            h.write_i64(column.x as i64);
+            h.write_i64(column.y as i64);
+            h.write_i64(column.z as i64);
+            h.write_fixed(*delta);
+        }
+    }
+}
+
 /// One horizontal stratum of a ground profile: a substance filling every cell in an inclusive z-band
 /// at a fixed volume. The membership is data (a substance id and a z-band), so a world's stratigraphy
 /// is data-defined, never a `Rock`/`Soil`/`Ore` enum (Principle 8 and 11): a new stratum is a data
@@ -644,6 +710,53 @@ values = [
             m.set(s, Fixed::from_int(*v));
         }
         m
+    }
+
+    #[test]
+    fn the_earthwork_field_accumulates_digs_and_mounds_and_folds_canonically() {
+        let mut ew = EarthworkField::new();
+        assert!(ew.is_empty());
+        let a = Coord3::ground(2, 3);
+        let b = Coord3::ground(5, 1);
+        // An unreworked column reads a zero delta.
+        assert_eq!(ew.delta(a), Fixed::ZERO);
+        // Digging lowers the column; a second dig accumulates.
+        ew.adjust(a, Fixed::from_int(-2));
+        ew.adjust(a, Fixed::from_int(-1));
+        assert_eq!(ew.delta(a), Fixed::from_int(-3), "digs accumulate");
+        // Mounding another column raises it.
+        ew.adjust(b, Fixed::from_int(4));
+        assert_eq!(ew.delta(b), Fixed::from_int(4));
+        assert!(!ew.is_empty());
+        // Filling a pit back to the baseline prunes the column (a zero delta is void).
+        ew.adjust(a, Fixed::from_int(3));
+        assert_eq!(
+            ew.delta(a),
+            Fixed::ZERO,
+            "a column back at baseline reads zero"
+        );
+        // The hash is canonical: two fields with the same deltas built in different orders fold identically.
+        let mut c1 = EarthworkField::new();
+        c1.adjust(Coord3::ground(0, 0), Fixed::from_int(1));
+        c1.adjust(Coord3::ground(9, 9), Fixed::from_int(-1));
+        let mut c2 = EarthworkField::new();
+        c2.adjust(Coord3::ground(9, 9), Fixed::from_int(-1));
+        c2.adjust(Coord3::ground(0, 0), Fixed::from_int(1));
+        let hash = |ew: &EarthworkField| {
+            let mut h = StateHasher::new();
+            ew.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            hash(&c1),
+            hash(&c2),
+            "the fold is insertion-order-independent"
+        );
+        // An empty field folds nothing (opting out is hash-neutral).
+        let mut h = StateHasher::new();
+        EarthworkField::new().hash_into(&mut h);
+        let mut h0 = StateHasher::new();
+        assert_eq!(h.finish(), h0.finish(), "an empty earthwork folds no bytes");
     }
 
     #[test]
