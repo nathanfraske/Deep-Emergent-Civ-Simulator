@@ -76,6 +76,11 @@ use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 /// start with empty lexicons (the world-build birth does not yet copy a parent's lexicon), so the
 /// naming game needs ticks to fold them into their band's consensus before the next cohort arrives.
 const GEN_TICKS: u64 = 128;
+/// The dev-run world extent (a bounded plane), reported by the migration reader so a reader can tell a
+/// small footprint in a large world from a filled one.
+const WORLD_W: i32 = 32;
+const WORLD_H: i32 = 24;
+const WORLD_CELLS: i32 = WORLD_W * WORLD_H;
 
 /// Founding members per band, so the founding population scales by the band count. Enough per band
 /// that a gene-fed two-sex cohort holds a compatible pair to breed.
@@ -747,11 +752,16 @@ fn mean_knowledge(w: &World) -> f64 {
 /// dawn cell, and the greatest Chebyshev displacement of any being from the nearest dawn cell. Reads the
 /// runner's located walkers (a pure read of hashed state, so it never perturbs the run). `None` if the
 /// runner carries no embodied population.
-fn migration(runner: &Runner, dawn_cells: &BTreeSet<(i32, i32)>) -> Option<(usize, usize, i32)> {
+fn migration(
+    runner: &Runner,
+    dawn_cells: &BTreeSet<(i32, i32)>,
+) -> Option<(usize, usize, i32, f64)> {
     let emb = runner.embodiment()?;
     let mut occupied: BTreeSet<(i32, i32)> = BTreeSet::new();
     let mut off_dawn = 0usize;
     let mut max_disp = 0i32;
+    let mut disp_sum = 0i64;
+    let mut n = 0i64;
     for w in emb.walkers() {
         let c = w.coord();
         let cell = (c.x, c.y);
@@ -765,8 +775,18 @@ fn migration(runner: &Runner, dawn_cells: &BTreeSet<(i32, i32)>) -> Option<(usiz
             .min()
             .unwrap_or(0);
         max_disp = max_disp.max(nearest);
+        disp_sum += nearest as i64;
+        n += 1;
     }
-    Some((occupied.len(), off_dawn, max_disp))
+    // Mean displacement (display only, f64) alongside the max, so a tight clump (mean near max, both
+    // small) is distinguishable from a genuine spread (mean well below a large max). The world-cell total
+    // it is reported against lets a reader tell a small footprint in a large world from a filled one.
+    let mean_disp = if n > 0 {
+        disp_sum as f64 / n as f64
+    } else {
+        0.0
+    };
+    Some((occupied.len(), off_dawn, max_disp, mean_disp))
 }
 
 /// The distinct cells the embodied population stands on at the dawn, before any tick: one per founding
@@ -962,11 +982,26 @@ fn mean_body_temp(runner: &Runner) -> Option<f64> {
 /// the current `state_hash`.
 fn snapshot(
     label: &str,
-    runner: &Runner,
+    runner: &mut Runner,
     cfg: &Config,
     prev: &BTreeSet<StableId>,
     dawn: &BTreeSet<(i32, i32)>,
 ) -> BTreeSet<StableId> {
+    // Non-canonical observability: drain the cause-of-death log for this window (before any immutable
+    // borrow of the runner) and tally it by reserve, so the run reports WHAT killed beings, which the
+    // snapshot-diff death count cannot. Aging deaths carry no reserve cause and are the remainder.
+    let mut death_cause: BTreeMap<&str, usize> = BTreeMap::new();
+    for axis in runner.take_obs_deaths() {
+        let cause = match axis.0 {
+            0 => "starvation",
+            1 => "thirst",
+            2 => "incoherence",
+            3 => "exposure",
+            5 => "wear",
+            _ => "other",
+        };
+        *death_cause.entry(cause).or_default() += 1;
+    }
     let w = runner.world().expect("the unified runner carries a world");
     let bands = bands_by_place(w);
     let current: BTreeSet<StableId> = w.being_ids().into_iter().collect();
@@ -1043,6 +1078,13 @@ fn snapshot(
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
     }
+    if !death_cause.is_empty() {
+        let parts: Vec<String> = death_cause
+            .iter()
+            .map(|(c, n)| format!("{n} {c}"))
+            .collect();
+        println!("  cause of death (this window): {}", parts.join(", "));
+    }
 
     // The field-state signal (step 2): the environmental stack's water and productivity.
     match field_state(runner) {
@@ -1108,9 +1150,9 @@ fn snapshot(
 
     // The migration signal (step 1): dispersal of the located population from its dawn cells.
     match migration(runner, dawn) {
-        Some((cells, off, disp)) => println!(
-            "  migration: {cells} distinct cells occupied (from {} dawn cells)  |  {off} beings off \
-             their dawn cell  |  max displacement {disp}",
+        Some((cells, off, disp, mean)) => println!(
+            "  migration: {cells} of {WORLD_CELLS} world cells occupied (from {} dawn cells)  |  {off} \
+             beings off their dawn cell  |  displacement max {disp}, mean {mean:.1}",
             dawn.len()
         ),
         None => println!("  migration: no located population"),
@@ -1229,7 +1271,7 @@ fn main() {
     let resolution = resolve_medium(&manifest, &cfg.medium);
 
     // A generated world large enough that the founding bands land on distinct cells.
-    let topo = FlatBounded::new(32, 24, 1);
+    let topo = FlatBounded::new(WORLD_W, WORLD_H, 1);
     let biomes = BiomeSet::dev_default();
     let map = TileMap::generate(cfg.seed, topo, &biomes, &WorldgenParams::dev_default());
 
@@ -1329,13 +1371,19 @@ fn main() {
         // Snapshot at every tenth of the run; the final generation is reported once, by the FINAL
         // block below, so it is not double-printed here.
         if gen % snapshot_every == 0 && gen != cfg.generations {
-            prev = snapshot(&format!("SNAPSHOT gen {gen}"), &runner, &cfg, &prev, &dawn);
+            prev = snapshot(
+                &format!("SNAPSHOT gen {gen}"),
+                &mut runner,
+                &cfg,
+                &prev,
+                &dawn,
+            );
             println!();
         }
     }
     let elapsed = start.elapsed();
 
-    let _ = snapshot("FINAL", &runner, &cfg, &prev, &dawn);
+    let _ = snapshot("FINAL", &mut runner, &cfg, &prev, &dawn);
     println!();
     println!(
         "  ticked {} generations x {} = {} ticks in {:.2}s ({:.1} ms/generation)",
