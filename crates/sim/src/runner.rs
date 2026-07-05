@@ -90,7 +90,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
-    RESPIRATION, TEMPERATURE,
+    RELEASE, RESPIRATION, TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
@@ -1417,6 +1417,41 @@ impl Embodiment {
         spoil
     }
 
+    /// Enact a being's decided RELEASE (material-substrate arc, cascade item 5, modifiable terrain, the
+    /// deposit-and-mound half): set the carried load down onto the ground underfoot (the inverse of
+    /// [`Embodiment::grasp_underfoot`]) AND raise the column by the volume deposited, so a mound rises where
+    /// matter was set down. Each carried substance is deposited in canonical id order (a deterministic draw)
+    /// and the column is raised by the total, conservation-symmetric with [`Embodiment::dig_underfoot`]
+    /// lowering it: what a being digs from a pit here and carries to there raises a mound there, so terracing
+    /// EMERGES from the dig and release primitives with no mound verb. Reads only the being's carried load
+    /// and coordinate, no race, kind, or role (Principle 9). Returns the volume deposited. Opt-in: a being
+    /// carrying nothing sets nothing down and the terrain is unchanged.
+    pub fn release_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some((coord, column, substances)) =
+            self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+                let c = w.coord();
+                let subs: Vec<String> = w.carried.substances().map(|(s, _)| s.clone()).collect();
+                (c, Coord3::ground(c.x, c.y), subs)
+            })
+        else {
+            return Fixed::ZERO;
+        };
+        let mut deposited = Fixed::ZERO;
+        for substance in &substances {
+            let want = self
+                .walkers
+                .iter()
+                .find(|w| w.id == walker_id)
+                .map(|w| w.carried.volume(substance))
+                .unwrap_or(Fixed::ZERO);
+            deposited += self.put_down(walker_id, coord, substance, want);
+        }
+        if deposited > Fixed::ZERO {
+            self.earthwork.adjust(column, deposited);
+        }
+        deposited
+    }
+
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
     /// step 2): the environmental stack writes the standing producer-biomass supply into it each tick
     /// before the embodiment step reads it. Crate-internal; the runner owns the write path.
@@ -2431,6 +2466,9 @@ impl Runner {
                     }
                     DIG => {
                         emb.dig_underfoot(id);
+                    }
+                    RELEASE => {
+                        emb.release_underfoot(id);
                     }
                     _ => {}
                 }

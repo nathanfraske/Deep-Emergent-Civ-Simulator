@@ -1741,6 +1741,88 @@ fn a_being_digs_a_pit_lowering_the_terrain_only_through_an_evolved_weight() {
 }
 
 #[test]
+fn releasing_a_carried_load_raises_the_column_the_mound_half_of_terraforming() {
+    // Material-substrate arc item 5, the DEPOSIT-AND-MOUND half: a being sets its carried load down and the
+    // column rises by the volume deposited, conservation-symmetric with digging lowering it. So a mound is
+    // the consequence of the release primitive, not a coded verb: what a being digs from a pit and carries
+    // elsewhere raises a mound there, and terracing emerges from the dig and release primitives. It happens
+    // only through the evolved release decision; a blank founder holding the same load never sets it down.
+    use civsim_sim::material::SubstanceMix;
+
+    let cell = Coord3::ground(3, 3);
+    let load = Fixed::from_int(5);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+
+    let build = |release_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_earthmover(),
+            LocomotionParams::dev_default(),
+            0,
+            0xEA47,
+        );
+        // Outputs: move [act,dx,dy] 0..2, ingest [act] 3, dig [act] 4, release [act] 5.
+        assert_eq!(
+            emb.layout().n_out(),
+            6,
+            "earthmover layout: move(3) + ingest(1) + dig(1) + release(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if release_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[5 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> release activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        // The being already carries a load (dug elsewhere and brought here).
+        let mut carried = SubstanceMix::new();
+        carried.add("granite", load);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let elevation = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // The deciding being sets its load down: the cell gains the matter, the column rises by exactly the
+    // deposited volume (a mound), and the being carries nothing more.
+    let mut mover = build(true);
+    mover.step();
+    assert_eq!(
+        carried(&mover),
+        Fixed::ZERO,
+        "the being set its whole load down"
+    );
+    assert_eq!(ground(&mover), load, "the matter is now on the ground");
+    assert_eq!(
+        elevation(&mover),
+        load,
+        "the column rose by the deposited volume: a mound"
+    );
+
+    // The blank founder never releases: it holds its load and the terrain is unchanged.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(carried(&founder), load, "the blank founder holds its load");
+    assert_eq!(ground(&founder), Fixed::ZERO, "nothing was set down");
+    assert_eq!(elevation(&founder), Fixed::ZERO, "the terrain is unchanged");
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

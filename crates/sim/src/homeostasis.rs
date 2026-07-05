@@ -710,6 +710,32 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a terrain-shaping world: move, ingest, dig, and release (material-substrate
+    /// arc, cascade item 5, modifiable terrain, the deposit-and-mound half). An earthmover can dig a pit
+    /// (DIG lowers a column and loads the carrier) and set the spoil down elsewhere (RELEASE deposits the
+    /// carried load and raises that column), so terracing, a mound beside a pit, EMERGES from sequencing the
+    /// two primitives, no MOUND verb. Release is the inverse of grasp, a scalar operation (setting the load
+    /// down underfoot, no aim), unconditional (`requires: None`): any body may open its grasp, and the
+    /// consequence is the deposited matter and the raised column ([`crate::runner::Embodiment::release_underfoot`]).
+    pub fn dev_earthmover() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: DIG,
+            name: "dig".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg.affordances.push(AffordanceDef {
+            id: RELEASE,
+            name: "release".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -784,6 +810,9 @@ pub const CRAFT: AffordanceId = AffordanceId(6);
 /// The dig affordance (excavating the ground underfoot: a fracture contest that lowers the column and
 /// yields spoil), in the digger fixture only (material-substrate arc, cascade item 5, modifiable terrain).
 pub const DIG: AffordanceId = AffordanceId(7);
+/// The release affordance (setting the carried load down underfoot, the inverse of grasp: it deposits the
+/// matter and raises the column), in the earthmover fixture only (material-substrate arc, cascade item 5).
+pub const RELEASE: AffordanceId = AffordanceId(8);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
