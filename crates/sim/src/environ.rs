@@ -47,6 +47,7 @@ use civsim_world::{Coord3, TileMap};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
+use crate::material::EarthworkField;
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
 use crate::stocks::Stock;
@@ -246,13 +247,18 @@ pub struct EnvironFields {
     /// where fresh water flows through, written as the `bio.salinity` toxin class.
     salt: ScalarField,
     /// Static per-cell worldgen inputs (row-major): the moisture the precipitation reads and the
-    /// latitude light the productivity reads. The frozen elevation feeds the precomputed `downhill`
-    /// target and is not stored past construction.
+    /// latitude light the productivity reads. The frozen worldgen elevation is kept too (base level per
+    /// cell), so the downhill routing can be recomputed against the terrain a being has dug or mounded
+    /// (material-substrate item 5); with no earthwork it is the same base that seeded `downhill`, so the
+    /// routing is unchanged and the run is byte-identical.
     moisture: Vec<Fixed>,
     light: Vec<Fixed>,
-    /// The precomputed downhill target index of each cell: the lowest-elevation of its four neighbours
-    /// (ties broken in the fixed order up, down, left, right), or the cell itself when no neighbour is
-    /// strictly lower (a basin, which retains its water). Static, since elevation is frozen.
+    elevation: Vec<Fixed>,
+    /// The downhill target index of each cell: the lowest-elevation of its four neighbours (ties broken
+    /// in the fixed order up, down, left, right), or the cell itself when no neighbour is strictly lower
+    /// (a basin, which retains its water). Seeded from the frozen worldgen elevation and recomputed from
+    /// the effective elevation (base plus earthwork delta) whenever digging has reshaped the terrain
+    /// ([`Self::recouple_terrain`]), so a dug pit becomes a basin that pools its water and salt.
     downhill: Vec<usize>,
 }
 
@@ -287,6 +293,7 @@ impl EnvironFields {
             salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture,
             light,
+            elevation,
             downhill,
         }
     }
@@ -311,6 +318,42 @@ impl EnvironFields {
     /// The field extent.
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
+    }
+
+    /// Whether a cell is a basin: it routes its water to itself because no neighbour is strictly lower, so
+    /// it retains what flows in (a natural bowl or a dug pit). A pure read of the downhill routing, for the
+    /// hydrology reader and to observe the terrain coupling (material-substrate item 5): a being that digs a
+    /// deep enough pit turns its cell into a basin here, and a mound can lift a cell out of one.
+    pub fn is_basin(&self, x: i32, y: i32) -> bool {
+        let i = self.idx(x, y);
+        self.downhill[i] == i
+    }
+
+    /// Recompute the downhill water routing against the terrain a being has reshaped (material-substrate
+    /// item 5, the hydrology coupling): the effective elevation is the frozen worldgen base plus the
+    /// per-column earthwork delta digging and mounding have accumulated, and the routing is rebuilt from
+    /// it by the same pure fold that seeded it ([`compute_downhill`]). So a dug pit that drops a cell below
+    /// its neighbours becomes a basin that routes to itself and pools its water and salt, and a mound that
+    /// lifts a cell sheds them, the terrain change feeding the physics with no water verb. Opt-in and
+    /// crucible-safe: an empty earthwork leaves the base elevation and so the seeded routing untouched
+    /// (the fold is pure, base plus zero equals base), so a run in which nothing digs never recomputes and
+    /// stays byte-identical; only a reshaped column pays the rebuild. Keyed off the physical elevation, no
+    /// label (Principles 3, 8, 9).
+    pub fn recouple_terrain(&mut self, earthwork: &EarthworkField) {
+        if earthwork.is_empty() {
+            return;
+        }
+        let mut effective = self.elevation.clone();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let delta = earthwork.delta(Coord3::ground(x, y));
+                if delta != Fixed::ZERO {
+                    let i = self.idx(x, y);
+                    effective[i] = effective[i].saturating_add(delta);
+                }
+            }
+        }
+        self.downhill = compute_downhill(&effective, self.width, self.height);
     }
 
     /// One canonical step of the environmental stack (base-level liveliness step 2): advance the
@@ -652,6 +695,7 @@ mod tests {
             salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture: vec![moisture; elev_tenths.len()],
             light: vec![Fixed::ONE; elev_tenths.len()],
+            elevation,
             downhill,
         }
     }
@@ -770,6 +814,67 @@ mod tests {
             s.water.cells[4] > Fixed::ZERO,
             "water flowed downhill into the basin centre: {:?}",
             s.water.cells[4]
+        );
+    }
+
+    #[test]
+    fn a_dug_pit_becomes_a_basin_that_pools_its_water() {
+        // Material-substrate item 5, the hydrology coupling. On a plane sloping down to the right, every
+        // interior cell routes to its lower-x neighbour, so nothing ponds in the middle. Dig the centre a
+        // full unit below the plane and recouple the routing to the reshaped terrain: the centre becomes a
+        // basin its four neighbours drain into, so water placed on the rim pools in the pit where before it
+        // ran off to the right. The terrain change feeds the physics with no water verb.
+        let elev = [3, 2, 1, 3, 2, 1, 3, 2, 1]; // sloping down to the right (lower x-elevation eastward)
+        let mut s = stack_of(3, 3, &elev, Fixed::ZERO);
+        let centre = s.idx(1, 1);
+        assert!(
+            !s.is_basin(1, 1),
+            "on the bare slope the interior routes east, it is no basin"
+        );
+
+        // Dig the centre a full unit below the plane (its elevation was 0.2; now -0.8, below every
+        // neighbour) and recouple the hydrology to the new terrain.
+        let mut ew = EarthworkField::new();
+        ew.adjust(Coord3::ground(1, 1), Fixed::ZERO - Fixed::ONE);
+        s.recouple_terrain(&ew);
+        assert!(
+            s.is_basin(1, 1),
+            "the dug pit routes to itself, it retains its water"
+        );
+        for &(x, y) in &[(1, 0), (1, 2), (0, 1), (2, 1)] {
+            let i = s.idx(x, y);
+            assert_eq!(
+                s.downhill[i], centre,
+                "the neighbour at ({x},{y}) now drains into the dug pit"
+            );
+        }
+
+        // Route water: a unit on each of the four neighbours, one routing-only step, and it flows into the
+        // pit, which before the dig would have run east off the map.
+        for &(x, y) in &[(1, 0), (1, 2), (0, 1), (2, 1)] {
+            let i = s.idx(x, y);
+            s.water.cells[i] = Fixed::ONE;
+        }
+        let temp = Field::new(3, 3, vec![Fixed::ZERO; 9]);
+        s.step_hydrology(&temp, &routing_only());
+        assert!(
+            s.water.cells[centre] > Fixed::ZERO,
+            "water pooled in the dug pit: {:?}",
+            s.water.cells[centre]
+        );
+    }
+
+    #[test]
+    fn an_empty_earthwork_leaves_the_routing_byte_identical() {
+        // The crucible-safety guarantee: with nothing dug, recoupling the terrain is a no-op, so the seeded
+        // worldgen routing is unchanged. A run in which no being reshapes the ground never recomputes the
+        // routing and cannot diverge, so every existing scenario stays byte-identical.
+        let mut s = stack_of(3, 3, &[3, 2, 1, 3, 2, 1, 3, 2, 1], Fixed::ZERO);
+        let before = s.downhill.clone();
+        s.recouple_terrain(&EarthworkField::new());
+        assert_eq!(
+            s.downhill, before,
+            "an empty earthwork changes no routing (the opt-in no-op)"
         );
     }
 

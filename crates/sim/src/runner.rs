@@ -1907,12 +1907,26 @@ impl Runner {
         }
     }
 
+    /// Recouple the hydrology routing to the terrain this tick's digging reshaped (material-substrate item
+    /// 5): after the embodiment step has moved matter and adjusted the earthwork, rebuild the environmental
+    /// stack's downhill targets from the effective elevation, so next tick's hydrology and salinity route
+    /// water and salt into a dug pit and off a mound. A pure deterministic fold ([`EnvironFields::recouple_terrain`]),
+    /// worker-count independent, run identically after the embodiment phase in the pinned and scheduled
+    /// orders. Opt-in and crucible-safe: the recompute is skipped on an empty earthwork, so a run in which
+    /// nothing digs keeps the seeded worldgen routing and stays byte-identical.
+    fn recouple_hydrology(&mut self) {
+        if let (Some((env, _)), Some(emb)) = (self.environ.as_mut(), self.embodiment.as_ref()) {
+            env.recouple_terrain(emb.earthwork());
+        }
+    }
+
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.step_field();
         self.phase_body_exchange();
         if self.embodiment.is_some() {
             self.step_embodiment();
         }
+        self.recouple_hydrology();
         // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
         // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
@@ -2133,9 +2147,10 @@ impl Runner {
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
     /// touch (design Part 57): the field step writes the field; the body-thermal exchange reads the
     /// field and the located index and writes the body temperatures; the embodiment coupling reads the
-    /// field and writes the body temperatures, the index, and the union being population; the cognition
-    /// world reads and writes the world and the union being population. Only the phases this runner
-    /// actually runs are declared, so a field-only runner declares two systems and a fully composed one
+    /// field and writes the body temperatures, the index, the union being population, and the field
+    /// (it recouples the hydrology routing to this tick's digging, material-substrate item 5); the
+    /// cognition world reads and writes the world and the union being population. Only the phases this
+    /// runner runs are declared, so a field-only runner declares two systems and a fully composed one
     /// declares four.
     ///
     /// The embodiment coupling and the cognition world both write [`RES_BEING`] (real-world
@@ -2153,7 +2168,7 @@ impl Runner {
         if self.embodiment.is_some() {
             sys.insert(
                 SYS_EMBODIMENT,
-                access(&[RES_FIELD], &[RES_BODY, RES_INDEX, RES_BEING]),
+                access(&[RES_FIELD], &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING]),
             );
         }
         if self.world.is_some() {
@@ -2173,6 +2188,11 @@ impl Runner {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
             self.step_embodiment();
+            // Recouple the hydrology to this tick's digging, exactly as step_inner does after
+            // step_embodiment (material-substrate item 5): a pure fold touching only the environmental
+            // downhill routing, which no other phase reads this tick, so the placement is order-safe and
+            // the scheduled and pinned orders stay bit-identical.
+            self.recouple_hydrology();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs

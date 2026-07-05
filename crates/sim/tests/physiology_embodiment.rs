@@ -1823,6 +1823,145 @@ fn releasing_a_carried_load_raises_the_column_the_mound_half_of_terraforming() {
 }
 
 #[test]
+fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_runner() {
+    // Material-substrate arc item 5, the HYDROLOGY COUPLING through the full runner: a being digs a pit and
+    // the environmental stack recouples its downhill routing to the reshaped terrain, so the dug cell
+    // becomes a basin that retains its water where before it drained. It happens only through the evolved
+    // dig decision and only where the ground is reshaped: a deciding being turns its cell into a basin; a
+    // blank being that digs nothing leaves the worldgen routing untouched. Proven identically in the pinned
+    // and scheduled tick orders. Physics-gated, no race or label (Principles 3, 9).
+    use civsim_sim::environ::{EnvironCalib, EnvironFields};
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+    use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+
+    let (w, h) = (16, 12);
+    let map = TileMap::generate(
+        0x5EED,
+        FlatBounded::new(w, h, 1),
+        &BiomeSet::dev_default(),
+        &WorldgenParams::dev_default(),
+    );
+    // Choose the interior cell that is CLOSEST to becoming a basin: it drains now (its elevation is above
+    // its lowest neighbour, so it is no worldgen basin), by the smallest margin on the map. A single dig
+    // then tips it below its lowest neighbour and into a basin, so the dig is the sole cause of the flip (a
+    // clean causal separation, robust to the generated elevation). The margin is read from the exposed tile
+    // elevations, so the test picks a cell a realistic scoop can clear.
+    let elev = |x: i32, y: i32| map.tile(Coord3::ground(x, y)).unwrap().elevation;
+    let margin = |x: i32, y: i32| -> Option<Fixed> {
+        let here = elev(x, y);
+        let low = [
+            elev(x, y - 1),
+            elev(x, y + 1),
+            elev(x - 1, y),
+            elev(x + 1, y),
+        ]
+        .into_iter()
+        .fold(here, |a, b| if b < a { b } else { a });
+        if here > low {
+            Some(here - low)
+        } else {
+            None // already a basin (no strictly-lower neighbour)
+        }
+    };
+    let (fx, fy) = (1..w - 1)
+        .flat_map(|x| (1..h - 1).map(move |y| (x, y)))
+        .filter(|&(x, y)| margin(x, y).is_some())
+        .min_by_key(|&(x, y)| margin(x, y).unwrap())
+        .expect("some interior cell of the generated map drains rather than ponding");
+    let cell = Coord3::ground(fx, fy);
+    let heap = Fixed::from_int(100000);
+
+    let build = |dig_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_digger(),
+            LocomotionParams::dev_default(),
+            0,
+            0xD16,
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if dig_weight {
+            let mut wv = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wv[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> dig activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, wv)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        emb.set_extraction_params(ExtractionParams {
+            working_area: Fixed::from_ratio(1, 1_000_000),
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(w, h, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(305)), calib(), emb);
+        r.set_environ(EnvironFields::from_map(&map), EnvironCalib::dev_fixture());
+        r
+    };
+
+    let is_basin = |r: &Runner| -> bool { r.environ().unwrap().is_basin(fx, fy) };
+    let dug = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // Pinned order: the being excavates a pit and the routing recouples the cell into a basin.
+    let mut pinned = build(true);
+    assert!(
+        !is_basin(&pinned),
+        "the chosen cell drains on the bare worldgen map, it is no basin yet"
+    );
+    pinned.step();
+    assert!(dug(&pinned) < Fixed::ZERO, "the deciding being dug a pit");
+    assert!(
+        is_basin(&pinned),
+        "the dug pit recoupled the hydrology: the cell is now a basin that pools its water (pinned order)"
+    );
+
+    // Scheduled order: the deterministic scheduler recouples identically.
+    let mut scheduled = build(true);
+    scheduled.step_scheduled(&[]);
+    assert!(
+        is_basin(&scheduled),
+        "the scheduled order recouples the same basin (bit-identical to the pinned order)"
+    );
+
+    // A blank being digs nothing: the earthwork stays empty, so the routing keeps the worldgen baseline and
+    // the cell still drains (the opt-in no-op that keeps a non-digging run byte-identical).
+    let mut blank = build(false);
+    blank.step();
+    assert_eq!(dug(&blank), Fixed::ZERO, "the blank being digs nothing");
+    assert!(
+        !is_basin(&blank),
+        "with nothing dug the routing is untouched and the cell still drains"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
