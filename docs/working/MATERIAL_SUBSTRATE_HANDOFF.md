@@ -190,3 +190,38 @@ It is the base of the dependency order, and the arc note flags it as such. Every
 It is also the lowest-risk landing. The READ slice adds a `MaterialField` (the proven `ResourceField` shape) populated at worldgen from `Substance` TOML rows, deriving hardness and density by reading `PhysicsRegistry` exactly as `ResourceField` derives axis-presence today, with NO run-path consumer and NO fold into `state_hash`. Existing scenarios stay byte-identical because nothing reads it yet. The hash-changing WIRE slice that follows, folding `MaterialField` into `state_hash` and pointing `cut_penetrate` at the cell's derived hardness instead of the global reference target, is isolated and opt-in, so the first observable milestone (a being clears a rock's hardness and yields ore because it needs metal) lands behind a flag that leaves every prior run reproducible.
 
 Files to open first: `crates/sim/src/locomotion.rs:199-344` (the field to clone), `crates/physics/src/lib.rs:402-447,585` and `crates/physics/data/mechanical_floor.toml` (the substance registry and axes to read), `crates/sim/src/runner.rs:2115` (the fold site), and `crates/world/src/worldgen.rs:31-37,131-137` (the surface-only tile and the `z==0`-only fill to extend down the column).
+
+
+---
+
+## MATTER-AFFORDANCE GAP ADDENDUM (surveyed on the owner's local models, 2026-07-05)
+
+The cascade above affords GRASP, EXTRACT, and the craft and cut kernels, and plans terrain, fire, shelter, and the cycle. The owner asked what else a creature should be able to DO with a material that none of that affords. A survey (two local Qwen models, split across mechanical, ingestive, body, locomotive, constructive, and social modes) surfaced the following, each held to the one rule (need + grown physics-derived affordance + structured matter, founder-zero, physics-gated) and sorted into materials-core additions to build here versus ones that bridge a neighbour arc.
+
+### Materials-core (add to this arc, in a force-and-manipulation extension after item 4)
+
+Force affordances, the biggest named-but-unbuilt rider, now specified:
+- THROW: launch matter as a projectile, a grown impulse over object mass into a ballistic arc, impact stress against the target's fracture hardness. Ranged predation and defence.
+- PUSH / DRAG / ROLL: displace a load too heavy to lift, grown force against static and dynamic friction. Heavy transport, terrain clearing.
+- LEVER: multiply force through a rigid grown limb on a fulcrum object, torque and moment-arm against a threshold. Breaks bonded matter, precision force.
+- DAM / BLOCK: place matter to obstruct a flow, hydrostatic pressure against the block's structural integrity. Water storage and trapping (couples to item 5's hydrology).
+- STRIKE-WITH-A-HELD-OBJECT: a carried object multiplies the grown STRIKE against a target, effective mass of limb plus tool into a contact pressure against the target's fracture hardness. The recursive tool-use loop (a tool to make a better tool), and it rides the crafting seam just signed off (the target-material cut read). The survey's top pick, and the one that decouples force from biology.
+
+Other materials-core:
+- INGEST-FOR-COMPOSITION: eat matter because a reserve needs it (geophagy for a mineral, salt, or grit a homeostatic axis is low on), the NEED-side complement to harm-learning, which reads the same cell composition to AVOID a harm; this reads it to SEEK what a reserve lacks, closing that loop.
+- FLOAT / RAFT: buoyant matter carrying a being over water, Archimedes displacement against total mass. Extends carry to load-bearing platforms.
+- BURROW-THROUGH: move through soft matter by displacing it, contact pressure against soil cohesion and yield. Bridges extraction to terrain.
+- MIX / KNEAD: a physical, non-thermal combination (mud, mortar, dough), mechanical work against particle adhesion, a transform beside smelt.
+- STACK / ASSEMBLE: place discrete objects into a structure held by their own centre-of-mass and friction interlock, distinct from item 5's elevation-field deposit. Nest, cairn, dry-stack wall.
+- WEAVE / BIND: join matter by tension and friction (fibre into cordage or a net, knot friction against slip), a topological joining with no thermal or chemical bond. The survey's other top pick; unlocks cordage, nets, traps, textiles, and load-sharing.
+- CACHE / HOARD: deposit matter in a concealed cell and retrieve it (needs a place-memory), the physical basis of a larder.
+- GIVE / TRANSFER: a load moving from one carrier to another by proximity, a simultaneous release and acquire, the physical seed of provisioning and trade.
+
+### Bridges a neighbour arc (flag, do not build here)
+- COAT / WEAR / ADORN (bridges anatomy): apply matter to one's own body to change its thermal, optical, or defensive physics (mud, a covering, pigment). Reads on the being's own covering and thermal exchange.
+- CLIMB / GRIP (bridges anatomy): the grip is a grown part; the holds are matter. A locomotion mode over the anatomy read.
+- MARK / SIGNAL with matter (bridges communication-reach): a deposited marker or pattern as a non-linguistic signal.
+- PLANT / SOW / TEND (bridges biosphere-into-run): place a biological propagule to grow; needs living organisms and germination.
+
+### Placement and acceptance
+Most ride the built carry and extract substrate and the anatomy affordances, so they slot into a force-and-manipulation extension after item 4 and before or alongside item 5 (which DAM and BURROW couple to). The most important still-missing are STRIKE-WITH-A-HELD-OBJECT (the tool loop), INGEST-FOR-COMPOSITION (the harm-learning complement), the force affordances as a set, and WEAVE / BIND. Each is gated by the same acceptance as the rest of the arc: a blind concept-verification that the behaviour emerges from need plus affordance plus matter, never scripted, never a per-race table.
