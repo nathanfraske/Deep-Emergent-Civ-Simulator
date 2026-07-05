@@ -32,6 +32,7 @@ use civsim_sim::homeostasis::{
 };
 use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::medium::{MediumField, RESPIRATORY_SURFACE};
+use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::ENERGY_DENSITY;
 use civsim_sim::runner::{BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, Runner};
 use civsim_world::Coord3;
@@ -343,6 +344,85 @@ fn the_coupled_physiology_runner_replays_and_matches_the_scheduler() {
     assert_eq!(
         pinned_a, scheduled,
         "the scheduler variant diverged from the pinned order with the physiology live"
+    );
+}
+
+#[test]
+fn the_interoceptive_delta_fold_is_deterministic_and_scheduler_invariant() {
+    // Harm-learning arc slice a determinism guard: with the feature percept declared, each being's
+    // interoceptive reserve-delta memory is new per-being dynamic state that folds into state_hash. It
+    // is snapshotted in the serial embodiment phase in canonical id order and draws no randomness, so
+    // the coupled runner must stay bit-identical across runs and between the pinned order and the
+    // scheduler variant. Two resting beings whose reserves drain each tick exercise the fold with real
+    // changing levels; the run without percepts stays hash-neutral (carried by every existing suite).
+    let setpoint = 305;
+    let build = || -> Runner {
+        let (organs, fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Opt into the feature percept: this rebuilds the layout to carry the feature block and turns
+        // on the per-being reserve-delta snapshot. The blank controller is expressed against the
+        // rebuilt layout so its weight vector is the right length.
+        emb.set_percepts(PerceptRegistry::dev_salinity());
+        let blank = Controller::zeros(emb.layout());
+        emb.add(
+            resting_walker(
+                1,
+                Coord3::ground(1, 1),
+                body((3, 4), vec![organ(fat, (3, 4))]),
+                &reg,
+                &organs,
+                blank.clone(),
+            ),
+            band(setpoint),
+        );
+        emb.add(
+            resting_walker(
+                2,
+                Coord3::ground(6, 4),
+                body((1, 3), vec![organ(fat, (1, 2))]),
+                &reg,
+                &organs,
+                blank,
+            ),
+            band(setpoint),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
+    };
+
+    let trace = |mut r: Runner, scheduled: bool| -> Vec<u128> {
+        (0..50)
+            .map(|_| {
+                if scheduled {
+                    r.step_scheduled(&[]);
+                } else {
+                    r.step();
+                }
+                r.state_hash()
+            })
+            .collect()
+    };
+
+    let pinned_a = trace(build(), false);
+    let pinned_b = trace(build(), false);
+    assert_eq!(
+        pinned_a, pinned_b,
+        "the feature-percept runner did not replay bit for bit"
+    );
+    let scheduled = trace(build(), true);
+    assert_eq!(
+        pinned_a, scheduled,
+        "the interoceptive-delta fold diverged between the pinned order and the scheduler"
     );
 }
 

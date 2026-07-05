@@ -96,6 +96,7 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
+use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, MetabolicAnchors,
@@ -854,6 +855,12 @@ pub struct Embodiment {
     /// set by the world-build ([`Embodiment::set_tolerances`]) so a child inherits its parents' salt (or
     /// dust) resistance through its own genome, the same way the founder step expresses it.
     tolerances: ToleranceRegistry,
+    /// The perceived-feature registry the beings sense underfoot (harm-learning arc slice a). EMPTY by
+    /// default, so the controller layout carries no feature block and every run hash is unchanged; the
+    /// world-build installs a non-empty registry ([`Embodiment::set_percepts`], which rebuilds the
+    /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
+    /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
+    percepts: PerceptRegistry,
 }
 
 impl Embodiment {
@@ -900,6 +907,7 @@ impl Embodiment {
             seed,
             physiology: None,
             tolerances: ToleranceRegistry::default(),
+            percepts: PerceptRegistry::empty(),
         }
     }
 
@@ -909,6 +917,24 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
+    /// block (harm-learning arc slice a). Set BEFORE the embodiment's beings are built, exactly like
+    /// [`set_organs`] and [`set_physiology`]: the beings' controllers are expressed against
+    /// [`Embodiment::layout`], so a percept added after they exist would leave their weight vectors the
+    /// wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
+    /// unchanged (opt-in). The new feature weights a founder then expresses are zero (unseeded
+    /// channels), so the percept has no behavioural effect until selection lifts a weight, the emergent
+    /// pattern.
+    pub fn set_percepts(&mut self, percepts: PerceptRegistry) {
+        self.layout = ControllerLayout::with_percepts(
+            &self.homeo,
+            &self.afford,
+            &percepts,
+            self.layout.hidden(),
+        );
+        self.percepts = percepts;
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -1793,6 +1819,7 @@ impl Runner {
             &field_dirs,
             &field_signed,
             &drains,
+            &emb.percepts,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
@@ -2036,6 +2063,15 @@ impl Runner {
                 }
                 for hv in &w.hidden {
                     h.write_fixed(*hv);
+                }
+                // The interoceptive delta memory (harm-learning arc slice a): new per-being dynamic
+                // state, folded in canonical axis order after the hidden state. Empty (never
+                // snapshotted) where the world declares no percepts, so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.reserve_memory.is_empty() {
+                    for axis in &emb.homeo.axes {
+                        h.write_fixed(w.reserve_memory.prev_level(axis.id));
+                    }
                 }
             }
         }

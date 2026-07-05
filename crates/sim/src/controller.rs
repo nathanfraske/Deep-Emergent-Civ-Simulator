@@ -65,6 +65,7 @@ use crate::homeostasis::{
     AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry,
 };
+use crate::percept::PerceptRegistry;
 
 /// Minus one, the low clamp of the activation.
 const NEG_ONE: Fixed = Fixed::from_int(-1);
@@ -129,7 +130,15 @@ pub struct ControllerLayout {
     axes: Vec<HomeostaticAxisId>,
     /// The output slot groups, one per affordance, in canonical id order.
     outputs: Vec<OutputSlot>,
-    /// The number of inputs (`INPUTS_PER_AXIS * axes + 1` for the bias).
+    /// The number of raw perceived-feature channels (the width of the feature input block; harm-
+    /// learning arc slice a). Zero when the world declares no percepts, in which case the input vector,
+    /// the weight count, and the genome expression are all identical to a world without the feature
+    /// substrate: the feature block is OPT-IN and hash-neutral by default (the emergent-anatomy
+    /// pattern). Each channel is the raw amount of one declared substance class on the cell the being
+    /// stands on ([`crate::percept::PerceptRegistry`]), a percept the evolved weights may learn to act
+    /// on, sitting between the per-axis blocks and the bias.
+    n_features: usize,
+    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -150,8 +159,27 @@ impl ControllerLayout {
         afford: &AffordanceRegistry,
         hidden: usize,
     ) -> ControllerLayout {
+        ControllerLayout::with_percepts(homeo, afford, &PerceptRegistry::empty(), hidden)
+    }
+
+    /// Build a layout that also feeds a block of raw perceived-feature channels, one per class the
+    /// percept registry declares (harm-learning arc slice a). The feature block sits between the
+    /// per-axis blocks and the bias, so the per-axis input bases ([`axis_input_base`]) and the
+    /// bias-as-last-input convention the seed helpers rely on both hold unchanged; an EMPTY percept
+    /// registry yields exactly [`ControllerLayout::new`]'s layout (`n_features` zero), so the feature
+    /// substrate is opt-in and a world that declares no percepts is bit-identical. The feature channels
+    /// grow `n_in`, so the weight count and the genome expression grow with them: a founder expresses
+    /// zero for the new feature weights (unseeded channels), so the percept has no effect until
+    /// selection lifts a weight off zero, the emergent pattern (Principle 8).
+    pub fn with_percepts(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
-        let n_in = INPUTS_PER_AXIS * axes.len() + 1;
+        let n_features = percept.len();
+        let n_in = INPUTS_PER_AXIS * axes.len() + n_features + 1;
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         let mut outputs = Vec::with_capacity(defs.len());
@@ -168,6 +196,7 @@ impl ControllerLayout {
         ControllerLayout {
             axes,
             outputs,
+            n_features,
             n_in,
             n_out,
             hidden,
@@ -201,6 +230,19 @@ impl ControllerLayout {
             .map(|i| INPUTS_PER_AXIS * i)
     }
 
+    /// The number of raw perceived-feature channels this layout feeds (zero when no percepts are
+    /// declared; harm-learning arc slice a).
+    pub fn n_features(&self) -> usize {
+        self.n_features
+    }
+
+    /// The input-vector index where the feature block begins: after all the per-axis blocks, before
+    /// the bias. A caller writing a feature vector, and a seed function reaching a feature weight, read
+    /// this so neither hardcodes the block's position, which the axis count sets.
+    pub fn feature_input_base(&self) -> usize {
+        INPUTS_PER_AXIS * self.axes.len()
+    }
+
     /// The number of heritable weights this layout's controller carries, which is the number of
     /// [`ControllerParamId`]s a genome must reach to express a full controller. For a reaction norm
     /// this is `n_out * n_in`; for a recurrent network it adds the input-to-hidden, hidden-to-hidden,
@@ -224,6 +266,25 @@ impl ControllerLayout {
         source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
         signed: &BTreeMap<HomeostaticAxisId, Fixed>,
     ) -> Vec<Fixed> {
+        self.build_input_with_features(homeo, here, source_dirs, signed, &[])
+    }
+
+    /// Build the input vector including the raw perceived-feature block (harm-learning arc slice a):
+    /// the per-axis blocks and bias exactly as [`build_input`], plus each declared feature channel's
+    /// raw value written into the feature block ([`feature_input_base`] onward, in registry order).
+    /// `features` is the [`crate::percept::PerceptRegistry::perceive`] read of the cell the being stands
+    /// on; a shorter slice leaves the unfilled channels zero (clean degrade). With no features (an empty
+    /// slice and `n_features` zero) the result is byte-identical to [`build_input`] before the feature
+    /// substrate existed, so an opted-out world is unchanged. A pure read of physiology, earned
+    /// knowledge, and the physical feature underfoot (Principles 9, 10).
+    pub fn build_input_with_features(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -238,7 +299,11 @@ impl ControllerLayout {
                 v[INPUTS_PER_AXIS * a + SIGNED_SLOT] = s;
             }
         }
-        v[INPUTS_PER_AXIS * self.axes.len()] = Fixed::ONE; // the bias input
+        let fbase = self.feature_input_base();
+        for (k, &f) in features.iter().enumerate().take(self.n_features) {
+            v[fbase + k] = f;
+        }
+        v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
     }
 

@@ -72,9 +72,10 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    CONDITION, INGEST, MOVE,
+    ReserveMemory, CONDITION, INGEST, MOVE,
 };
 use crate::morphogen::Structure;
+use crate::percept::PerceptRegistry;
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -379,6 +380,11 @@ pub struct Walker {
     /// What this being knows: the tiles bearing a source of each axis that it has perceived. It
     /// navigates by this, not by the world, so it can only head for a source it has come to know.
     pub known: BTreeMap<HomeostaticAxisId, BTreeSet<Coord3>>,
+    /// The being's memory of its reserve levels at the previous tick, the substrate of the
+    /// interoceptive DELTA percept (harm-learning arc slice a). Empty until the harm-learning path
+    /// snapshots it, so a being in a world that declares no percepts carries an empty memory that folds
+    /// nothing into `state_hash` (the delta percept is opt-in, hash-neutral by default).
+    pub reserve_memory: ReserveMemory,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -406,6 +412,7 @@ impl Walker {
             controller,
             hidden,
             known: BTreeMap::new(),
+            reserve_memory: ReserveMemory::new(),
             alive: true,
         }
     }
@@ -655,6 +662,9 @@ pub fn step<T: Terrain>(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        // The field-less scoring/fixture path senses no features (the evolve proxy and movement tests
+        // run without the percept substrate), so the controller feature block, if any, reads zero.
+        &PerceptRegistry::empty(),
     )
 }
 
@@ -695,12 +705,23 @@ pub fn step_with_field_dirs<T: Terrain>(
     field_dirs: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>>,
     field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
+    percepts: &PerceptRegistry,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
     for w in walkers.iter_mut() {
         if !w.alive {
             continue;
+        }
+        // Snapshot the reserves at the START of the tick, so this tick's interoceptive delta
+        // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes: the
+        // associative learner (harm-learning arc slice b) reads it after metabolism to get "my
+        // CONDITION fell this tick" (harm), the raw signal it correlates with the feature underfoot.
+        // Opt-in: only where the world declares percepts, so a world without the feature substrate
+        // carries an empty memory that folds nothing into `state_hash` and stays bit-identical. A pure
+        // canonical-order snapshot drawing no randomness.
+        if !percepts.is_empty() {
+            w.reserve_memory.snapshot(homeo, &w.homeostasis);
         }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
         perceive(w, resources, homeo, p.sense_range);
@@ -744,7 +765,14 @@ pub fn step_with_field_dirs<T: Terrain>(
         // none is supplied so the signed input reads zero, as it did before this percept existed.
         let empty_signed = BTreeMap::new();
         let signed = field_signed.get(&w.id).unwrap_or(&empty_signed);
-        let input = layout.build_input(&w.homeostasis, &here_axes, &dirs, signed);
+        // The raw perceived-feature vector for the cell the being stands on (harm-learning arc slice a):
+        // the amount of each declared substance class underfoot, in registry order. Empty when the
+        // world declares no percepts, so the feature block is absent and the input is byte-identical to
+        // before the feature substrate existed. A pure physical read of what is here, no threshold and
+        // no label (Principles 8, 9).
+        let features = percepts.perceive(resources.composition(here));
+        let input =
+            layout.build_input_with_features(&w.homeostasis, &here_axes, &dirs, signed, &features);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
         // A grown body reads its affordances from its own structure's physics directly; a catalog body
@@ -1506,6 +1534,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &BTreeMap::new(),
+                    &crate::percept::PerceptRegistry::empty(),
                 );
             }
             let (x, y) = (ws[0].x, ws[0].y);
@@ -1589,6 +1618,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &BTreeMap::new(),
+                    &crate::percept::PerceptRegistry::empty(),
                 );
             }
             ws[0].coord()
@@ -1827,6 +1857,7 @@ mod tests {
             &empty_dirs,
             &empty_signed,
             &empty_drains,
+            &crate::percept::PerceptRegistry::empty(),
         );
 
         let after = field.supply(tile, WATER_CLASS);
@@ -1943,6 +1974,7 @@ mod tests {
                     &empty_dirs,
                     &empty_signed,
                     &empty_drains,
+                    &crate::percept::PerceptRegistry::empty(),
                 );
                 if !ws[0].alive {
                     break;
@@ -1965,6 +1997,111 @@ mod tests {
         assert!(
             halophile > naive,
             "the salt flat is lethal to the naive lineage and livable to the halophile: {halophile} > {naive}"
+        );
+    }
+
+    #[test]
+    fn the_feature_channel_and_interoceptive_delta_are_read_on_the_flat() {
+        // Harm-learning arc slice a, THE MILESTONE: a being standing on the salt flat reads a high
+        // bio.salinity FEATURE channel in its controller input, and its interoceptive CONDITION DELTA
+        // goes negative as the salt wears it. Both are pure reads of already-hashed physical state (the
+        // tile's composition and the being's own reserves), draw no randomness, and replay bit for bit.
+        // Declaring a percept grows the controller feature block by exactly one input; a world that
+        // declares no percepts is untouched (that hash-neutrality is carried by every existing suite
+        // staying green with the wiring in place).
+        use crate::percept::PerceptRegistry;
+
+        let reg = condition_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let percepts = PerceptRegistry::dev_salinity();
+        let l = ControllerLayout::with_percepts(&reg, &afford, &percepts, 0);
+        assert_eq!(
+            l.n_features(),
+            1,
+            "declaring one percept grows the controller feature block by one channel"
+        );
+        assert_eq!(
+            l.n_in(),
+            ControllerLayout::new(&reg, &afford, 0).n_in() + 1,
+            "the feature block adds exactly one input over the percept-less layout"
+        );
+
+        let tile = Coord3::ground(0, 0);
+        let dose = Fixed::from_int(2); // a fully-evaporated salt flat's dose
+        let mut field = ResourceField::new();
+        field.set(tile, salt_cell(dose));
+
+        // The feature the being senses underfoot is the raw salinity dose, and it reaches the controller
+        // input at the feature block: a high bio.salinity channel (Principle 9, a raw physical read).
+        let features = percepts.perceive(field.composition(tile));
+        assert_eq!(
+            features,
+            vec![dose],
+            "the being senses the raw salinity dose as its one feature channel"
+        );
+        let homeo0 = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let input = l.build_input_with_features(
+            &homeo0,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &features,
+        );
+        assert_eq!(
+            input[l.feature_input_base()],
+            dose,
+            "the salinity feature reaches the controller input at the feature block base"
+        );
+
+        // On the run: a naive being idles on the flat (a zeros controller, so it stays), takes salt harm
+        // each tick, and its interoceptive CONDITION delta reads the net fall.
+        let c = Controller::zeros(&l);
+        let p = LocomotionParams::dev_default();
+        let empty_dirs: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
+            BTreeMap::new();
+        let empty_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> = BTreeMap::new();
+        let empty_drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
+            BTreeMap::new();
+        let run_delta = || -> Fixed {
+            let mut ws = vec![Walker::new(
+                StableId(1),
+                tile,
+                mobile_body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                salt_physiology(Fixed::from_ratio(1, 5)), // naive: harm outpaces the recovery
+                c.clone(),
+            )];
+            let mut field = field.clone();
+            for t in 0..3u64 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &BodyPlanRegistry::dev_default(),
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    SEED,
+                    t,
+                    &empty_dirs,
+                    &empty_signed,
+                    &empty_drains,
+                    &percepts,
+                );
+            }
+            // The delta since the start of the last tick: the net CONDITION change the salt harm drove.
+            ws[0].reserve_memory.delta(CONDITION, &ws[0].homeostasis)
+        };
+        let delta_a = run_delta();
+        assert!(
+            delta_a < Fixed::ZERO,
+            "the interoceptive CONDITION delta goes negative as the salt wears the naive being: {delta_a:?}"
+        );
+        let delta_b = run_delta();
+        assert_eq!(
+            delta_a, delta_b,
+            "the interoceptive delta is deterministic and replays bit for bit"
         );
     }
 }
