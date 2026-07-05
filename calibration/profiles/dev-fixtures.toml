@@ -531,20 +531,36 @@ unit = "ratio_per_tick"
 source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
 
 [[reserved]]
-id = "hazard.dose_threshold"
-basis = "FIXTURE placeholder; the salinity dose above which a being registers a cell as a lethal hazard and forms the salt-flat belief"
+id = "harm.noise_floor"
+basis = "FIXTURE placeholder; the largest per-tick reserve fall a resting, unharmed body incurs (the resting base_drain scaled to the tick), so only a supra-drain fall registers as harm (the associative learner)"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.feature_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a raw feature amount into a perceived kind (the sensorium per-class just-noticeable difference), coarse enough that a salt-flat dose range buckets into one or two kinds"
 status = "set"
 value = "1"
 unit = "dose"
-source = "dev fixture for base-level liveliness §4/step 5; crates/sim/src/runner.rs"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
 
 [[reserved]]
-id = "hazard.weight"
-basis = "FIXTURE placeholder; the signed evidence weight a first-hand hazard encounter carries into the belief pipeline (a strong first-hand percept)"
+id = "harm.p_harm_given_harms"
+basis = "FIXTURE placeholder; P(the harm signal fires | this feature harms me), the fraction of ticks a naive being on a harmful cell is worn faster than it heals (the dose-and-physics harm rate)"
 status = "set"
-value = "1"
-unit = "log_odds"
-source = "dev fixture for base-level liveliness §4/step 5; crates/sim/src/runner.rs"
+value = "0.9"
+unit = "probability"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.p_harm_given_benign"
+basis = "FIXTURE placeholder; P(the harm signal fires | this feature is benign), the false-attribution rate of a transient reserve dip unrelated to the feature"
+status = "set"
+value = "0.1"
+unit = "probability"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
 
 [[reserved]]
 id = "promotion.stress_threshold"

@@ -87,15 +87,18 @@ use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
-use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
-    AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
+    is_harm_tick, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
+    HomeostaticRegistry, CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
+};
+use crate::learn::{
+    avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
+use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, MetabolicAnchors,
@@ -138,19 +141,11 @@ const SYS_WORLD: SystemId = SystemId(3);
 /// lineage ids). The mapping is a stable function of the coordinate (determinism, R-RNG-COORD).
 const CELL_PLACE_BASE: u32 = 1_000_000;
 
-/// The reserved landmark subject the salt-flat hazard belief is ABOUT (base-level liveliness step 5): a
-/// fixed id far above any minted being id, so the belief "the land holds a hazard" never aliases a
-/// belief about a being. Public so the harness reader measures the same question the runner writes.
-pub const HAZARD_SUBJECT: StableId = StableId(u64::MAX - 1);
-/// The attribute id of the salt-flat hazard belief (a reserved high id, disjoint from other belief attrs).
-pub const HAZARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 1);
-/// The value id meaning "a hazard is present here" (the belief a being forms on a salt flat).
-pub const HAZARD_PRESENT: ValueId = 1;
-/// The value id meaning "no hazard" (the competing hypothesis).
-pub const HAZARD_ABSENT: ValueId = 0;
-/// The tick-input ordinal the env-sourced hazard observation carries, high so it orders after any
-/// external input to the same mind (determinism: the tick sorts inputs by mind then ordinal).
-const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
+/// The base tick-input ordinal an experientially-learned feature observation carries (harm-learning arc
+/// slice b), one per present feature channel, high so it orders after any external input to the same
+/// mind (determinism: the tick sorts inputs by mind then ordinal). Replaces the retired hazard ordinal:
+/// the being now observes the raw features it senses rather than a single injected hazard.
+const LEARN_ORDINAL_BASE: u32 = 1_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -171,14 +166,6 @@ const ENV_HAZARD_ORDINAL: u32 = 1_000_000;
 /// that construct a runner without a manifest, so those paths are unchanged.
 #[derive(Clone, Copy, Debug)]
 pub struct LivelinessCalib {
-    /// The salinity dose above which a being registers the cell as a lethal hazard and forms the belief.
-    /// Manifest home `hazard.dose_threshold`; basis: the dose at which the salt-flat harm on a naive
-    /// lineage overtakes its condition recovery, the lethality boundary the physics floor already defines.
-    pub hazard_dose_threshold: Fixed,
-    /// The signed evidence weight a first-hand encounter with the hazard carries into the belief pipeline.
-    /// Manifest home `hazard.weight`; basis: a first-hand percept is strong evidence, set from the belief
-    /// subsystem's first-hand witness access weight for consistency.
-    pub hazard_weight: Fixed,
     /// The survival-margin level below which a being is in an arc and is promoted to the individual tier.
     /// Manifest home `promotion.stress_threshold`; basis: the fraction of a reserve at which a being is
     /// meaningfully struggling, the generous default half a reserve.
@@ -190,14 +177,13 @@ pub struct LivelinessCalib {
 }
 
 impl LivelinessCalib {
-    /// Read the four surfacing-policy values fail-loud from the manifest (Principle 11): a reserved value
+    /// Read the surfacing-policy values fail-loud from the manifest (Principle 11): a reserved value
     /// left unset refuses to build rather than running on a fabricated default. The budget is stored as a
-    /// fixed-point count and truncated to its integer part.
+    /// fixed-point count and truncated to its integer part. The belief-formation calibrations moved to
+    /// [`HarmLearningCalib`] when the injected hazard belief was retired for the associative learner.
     pub fn from_manifest(m: &CalibrationManifest) -> Result<LivelinessCalib, CalibrationError> {
         let budget = m.require_fixed("promotion.budget")?;
         Ok(LivelinessCalib {
-            hazard_dose_threshold: m.require_fixed("hazard.dose_threshold")?,
-            hazard_weight: m.require_fixed("hazard.weight")?,
             promotion_stress_threshold: m.require_fixed("promotion.stress_threshold")?,
             promotion_budget: (budget.to_bits() >> Fixed::FRAC_BITS).max(0) as usize,
         })
@@ -205,12 +191,9 @@ impl LivelinessCalib {
 
     /// A labelled DEVELOPMENT FIXTURE standing up the same magnitudes the manifest would carry, for the
     /// test and harness paths that build a runner without a manifest. Half a reserve is the generous
-    /// stress default, unit weight the strong first-hand percept, a dose of one the lethal-flat boundary,
-    /// and a budget of 64 the high default the aggregate tier makes affordable.
+    /// stress default, and a budget of 64 the high default the aggregate tier makes affordable.
     pub fn dev_default() -> LivelinessCalib {
         LivelinessCalib {
-            hazard_dose_threshold: Fixed::ONE,
-            hazard_weight: Fixed::ONE,
             promotion_stress_threshold: Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)), // 1/2
             promotion_budget: 64,
         }
@@ -854,6 +837,12 @@ pub struct Embodiment {
     /// set by the world-build ([`Embodiment::set_tolerances`]) so a child inherits its parents' salt (or
     /// dust) resistance through its own genome, the same way the founder step expresses it.
     tolerances: ToleranceRegistry,
+    /// The perceived-feature registry the beings sense underfoot (harm-learning arc slice a). EMPTY by
+    /// default, so the controller layout carries no feature block and every run hash is unchanged; the
+    /// world-build installs a non-empty registry ([`Embodiment::set_percepts`], which rebuilds the
+    /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
+    /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
+    percepts: PerceptRegistry,
 }
 
 impl Embodiment {
@@ -900,6 +889,7 @@ impl Embodiment {
             seed,
             physiology: None,
             tolerances: ToleranceRegistry::default(),
+            percepts: PerceptRegistry::empty(),
         }
     }
 
@@ -909,6 +899,24 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
+    /// block (harm-learning arc slice a). Set BEFORE the embodiment's beings are built, exactly like
+    /// [`set_organs`] and [`set_physiology`]: the beings' controllers are expressed against
+    /// [`Embodiment::layout`], so a percept added after they exist would leave their weight vectors the
+    /// wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
+    /// unchanged (opt-in). The new feature weights a founder then expresses are zero (unseeded
+    /// channels), so the percept has no behavioural effect until selection lifts a weight, the emergent
+    /// pattern.
+    pub fn set_percepts(&mut self, percepts: PerceptRegistry) {
+        self.layout = ControllerLayout::with_percepts(
+            &self.homeo,
+            &self.afford,
+            &percepts,
+            self.layout.hidden(),
+        );
+        self.percepts = percepts;
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -1051,6 +1059,13 @@ pub struct Runner {
     /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
     /// overrides it fail-loud from the manifest through [`Runner::set_liveliness`].
     liveliness: LivelinessCalib,
+    /// The reserved calibrations of the experiential associative learner (harm-learning arc slice b):
+    /// the harm-noise floor, the feature granularity, and the two harm likelihoods the belief-formation
+    /// weight reads. Initialized to the labelled dev fixture in every constructor; the world-build
+    /// overrides it fail-loud from the manifest through [`Runner::set_harm_learning`]. They REPLACE the
+    /// retired `hazard_dose_threshold`/`hazard_weight`, which authored the belief a being now forms for
+    /// itself.
+    harm_learning: HarmLearningCalib,
 }
 
 impl Runner {
@@ -1071,6 +1086,7 @@ impl Runner {
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
+            harm_learning: HarmLearningCalib::dev_default(),
         }
     }
 
@@ -1108,6 +1124,7 @@ impl Runner {
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
+            harm_learning: HarmLearningCalib::dev_default(),
         }
     }
 
@@ -1158,6 +1175,7 @@ impl Runner {
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
+            harm_learning: HarmLearningCalib::dev_default(),
         }
     }
 
@@ -1231,6 +1249,7 @@ impl Runner {
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
+            harm_learning: HarmLearningCalib::dev_default(),
         }
     }
 
@@ -1257,6 +1276,14 @@ impl Runner {
     /// fixture, so the test and harness paths are unchanged.
     pub fn set_liveliness(&mut self, calib: LivelinessCalib) {
         self.liveliness = calib;
+    }
+
+    /// Arm the reserved calibrations of the experiential associative learner (harm-learning arc slice b),
+    /// overriding the labelled dev fixture the constructors install. The dawn build reads these fail-loud
+    /// from the manifest (Principle 11); a runner left unarmed keeps the dev fixture, so the test and
+    /// harness paths are unchanged.
+    pub fn set_harm_learning(&mut self, calib: HarmLearningCalib) {
+        self.harm_learning = calib;
     }
 
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
@@ -1377,21 +1404,23 @@ impl Runner {
         self.clock += 1;
     }
 
-    /// The conversation-movement coupling and the environment belief source (base-level liveliness step
-    /// 5). Republishes each located being's live cell into the cognition world as a conversational
+    /// The conversation-movement coupling and the experiential-learning belief source (harm-learning arc
+    /// slice b). Republishes each located being's live cell into the cognition world as a conversational
     /// [`PlaceId`] (`CELL_PLACE_BASE + y*width + x`, a stable function of the coordinate), so gossip and
-    /// converse cluster by where a being stands now rather than its frozen dawn band, and builds a
-    /// first-order hazard OBSERVATION for every being standing on a salt flat (a cell whose salinity dose
-    /// exceeds the reserved `hazard.dose_threshold`), so a fact discovered in the world enters
-    /// `Mind.beliefs` and rides gossip. Returns the caller's `world_inputs` merged with the env observations (the env ones
-    /// last, at a high ordinal, so the tick's canonical mind-then-ordinal sort is deterministic). Reads
-    /// the embodiment and environ (immutably) before the mutable world publish, and draws no randomness,
-    /// so it replays and is worker-count invariant. A runner with no embodiment publishes nothing and
-    /// returns the inputs unchanged.
+    /// converse cluster by where a being stands now rather than its frozen dawn band, and builds the
+    /// being's OWN feature observations: for each present feature of the cell it stands on, one piece of
+    /// evidence toward "this feature harms me" (a harm tick, its own interoceptive reserve fall) or "this
+    /// feature is benign" (a harm-free tick), so the being forms the belief for itself rather than the
+    /// run injecting it. Returns the caller's `world_inputs` merged with those observations (the learned
+    /// ones last, at a high ordinal, so the tick's canonical mind-then-ordinal sort is deterministic).
+    /// Reads the embodiment and world (immutably) before the mutable world publish, and draws no
+    /// randomness, so it replays and is worker-count invariant. A runner with no embodiment publishes
+    /// nothing and returns the inputs unchanged; a world that declares no percepts observes no features,
+    /// so the learner is inert and the run is unchanged.
     fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
-        // The reserved surfacing-policy magnitudes (Copy), read once so the borrow of the embodiment and
-        // environ below does not conflict with the read.
-        let live = self.liveliness;
+        // The learner calibrations (Copy), read once so the borrow of the embodiment below does not
+        // conflict with the read.
+        let harm_learn = self.harm_learning;
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
         // Per-being stress (the lower of its energy and condition margins) and its cell, for the
@@ -1399,7 +1428,6 @@ impl Runner {
         let mut stress: BTreeMap<StableId, Fixed> = BTreeMap::new();
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
-            let environ = self.environ.as_ref();
             for w in emb.walkers() {
                 let c = w.coord();
                 let cell = CELL_PLACE_BASE.wrapping_add((c.y.max(0) * width + c.x.max(0)) as u32);
@@ -1419,21 +1447,47 @@ impl Runner {
                 };
                 let margin = axis_margin(ENERGY).min(axis_margin(CONDITION));
                 stress.insert(w.id, margin);
-                if let Some((env, calib)) = environ {
-                    if env.salinity_dose(c.x, c.y, calib) > live.hazard_dose_threshold {
-                        env_inputs.push(TickInput {
-                            mind: w.id,
-                            ordinal: ENV_HAZARD_ORDINAL,
-                            stim: Stimulus::Observe {
-                                subject: HAZARD_SUBJECT,
-                                attr: HAZARD_ATTR,
-                                hyps: vec![HAZARD_PRESENT, HAZARD_ABSENT],
-                                toward: HAZARD_PRESENT,
-                                weight: live.hazard_weight,
-                                from: w.id,
-                            },
-                        });
-                    }
+                // Experiential associative learning (harm-learning arc slice b): the being forms the
+                // belief "this feature harms me" for ITSELF, replacing the injected hazard Observe. It
+                // felt harm this tick if any reserve fell beyond the metabolic-drain noise floor (its
+                // OWN interoceptive delta, from the reserve-memory snapshot taken at the top of this
+                // tick's embodiment step), and it senses the raw features of the cell it stands on. For
+                // each present feature it contributes one piece of evidence toward HARMS (a harm tick)
+                // or BENIGN (a harm-free tick), keyed on a per-feature belief subject, scaled by its own
+                // heritable belief plasticity. Nothing reads a dose threshold, a hazard label, or a race
+                // id: the sign is the reserve falling, the subject a raw quantized percept, so "this
+                // ground harms me" emerges from the correlation (Principles 8, 9). Inert where the world
+                // declares no percepts (an empty feature vector yields no observation), so an opted-out
+                // run is unchanged.
+                let harm = emb.homeo.axes.iter().any(|axis| {
+                    is_harm_tick(
+                        w.reserve_memory.delta(axis.id, &w.homeostasis),
+                        harm_learn.harm_noise_floor,
+                    )
+                });
+                let features = emb.percepts.perceive(emb.resources.composition(c));
+                let plasticity = self
+                    .world
+                    .as_ref()
+                    .and_then(|world| world.mind(w.id))
+                    .map(|m| m.plasticity)
+                    .unwrap_or(Fixed::ONE);
+                for (k, obs) in feature_observations(harm, &features, plasticity, &harm_learn)
+                    .into_iter()
+                    .enumerate()
+                {
+                    env_inputs.push(TickInput {
+                        mind: w.id,
+                        ordinal: LEARN_ORDINAL_BASE + k as u32,
+                        stim: Stimulus::Observe {
+                            subject: obs.subject,
+                            attr: HARM_ATTR,
+                            hyps: vec![HARMS, BENIGN],
+                            toward: obs.toward,
+                            weight: obs.weight,
+                            from: w.id,
+                        },
+                    });
                 }
             }
         }
@@ -1649,16 +1703,49 @@ impl Runner {
         // directional percept. Read from the field (immutable) before the mutable embodiment borrow; a
         // pure field quantity, drawing no RNG. It is a percept, not a heading: a controller must evolve
         // to act on it, and how it combines it with its comfort reserve is selection's to wire.
+        let harm_gran = self.harm_learning.feature_granularity;
         let field_dirs: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
             match self.embodiment.as_ref() {
-                Some(emb) => emb
-                    .walkers
-                    .iter()
-                    .map(|w| {
-                        let (gx, gy) = self.field.gradient_at(w.coord().x, w.coord().y);
-                        (w.id, BTreeMap::from([(TEMPERATURE, unit(gx, gy))]))
-                    })
-                    .collect(),
+                Some(emb) => {
+                    // The belief-avoidance gradient (harm-learning arc slice c) routes into the CONDITION
+                    // axis's direction slot, so a being that has learned some ground harms it senses a
+                    // unit direction away from it. Only where the registry carries CONDITION.
+                    let condition_reg = emb.homeo.axis(CONDITION).is_some();
+                    emb.walkers
+                        .iter()
+                        .map(|w| {
+                            let coord = w.coord();
+                            let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
+                            let mut dirs = BTreeMap::from([(TEMPERATURE, unit(gx, gy))]);
+                            // The avoidance percept: the belief-derived expected-harm gradient into
+                            // CONDITION's dead direction slot, present only when the world carries the
+                            // being's mind. A zero gradient (no learned harm nearby) is not inserted, so a
+                            // being with no harmful belief is unchanged; and the evolved
+                            // CONDITION-dir-to-heading weight (founding-zero) must be lifted by selection
+                            // before the gradient moves the being, so avoidance emerges (Principle 9).
+                            if condition_reg {
+                                if let Some(world) = self.world.as_ref() {
+                                    if let Some(mind) = world.mind(w.id) {
+                                        let raw = avoidance_gradient(
+                                            mind,
+                                            coord,
+                                            &emb.resources,
+                                            &emb.percepts,
+                                            emb.params.sense_range,
+                                            harm_gran,
+                                            world.belief_params(),
+                                        );
+                                        let (ax, ay) = unit(raw.0, raw.1);
+                                        if ax != Fixed::ZERO || ay != Fixed::ZERO {
+                                            dirs.insert(CONDITION, (ax, ay));
+                                        }
+                                    }
+                                }
+                            }
+                            (w.id, dirs)
+                        })
+                        .collect()
+                }
                 None => return,
             };
         // (0b) Physics to percept, the signed thermoreceptor: each being senses the signed deviation of
@@ -1793,6 +1880,7 @@ impl Runner {
             &field_dirs,
             &field_signed,
             &drains,
+            &emb.percepts,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
@@ -2036,6 +2124,15 @@ impl Runner {
                 }
                 for hv in &w.hidden {
                     h.write_fixed(*hv);
+                }
+                // The interoceptive delta memory (harm-learning arc slice a): new per-being dynamic
+                // state, folded in canonical axis order after the hidden state. Empty (never
+                // snapshotted) where the world declares no percepts, so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.reserve_memory.is_empty() {
+                    for axis in &emb.homeo.axes {
+                        h.write_fixed(w.reserve_memory.prev_level(axis.id));
+                    }
                 }
             }
         }
@@ -2595,6 +2692,471 @@ source = "test"
             signed_deviation(hot, &b),
             signed_deviation(cold, &b),
             "but the signed thermoreceptor distinguishes them"
+        );
+    }
+
+    #[test]
+    fn a_being_forms_the_harm_belief_through_the_runner_and_the_falsifier_holds() {
+        // Harm-learning arc slice d, the run-level acceptance of the FORMATION loop and its falsifier,
+        // through the actual Runner tick: a being whose body stands on a salt cell feels its own
+        // CONDITION fall, senses the salinity underfoot, and COMMITS the "this feature harms me" belief
+        // for itself in its mind, with no injected observation. The falsifier (remove the harm: a fully
+        // tolerant being on the identical salt) forms no such belief, so the belief tracks the felt harm,
+        // not the mere presence of the substance. This ties the whole learner path end to end through
+        // couple_conversation, which the unit tests exercise piecewise.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::{feature_bucket, PerceptId, PerceptRegistry};
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A registry with the required non-draining TEMPERATURE axis and the CONDITION reserve the salt
+        // harm wears. No draining energy axis, so the being lives on its CONDITION until the salt wears it.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    // A large condition reserve so the being survives several ticks of salt harm and
+                    // accumulates enough correlation evidence to COMMIT the belief before it is worn
+                    // through (the formation, not the mortality, is what this test measures; the cull is
+                    // proven elsewhere).
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let salt_physiology = |tolerance: Fixed| Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: [(crate::physiology::SALINITY.to_string(), tolerance)]
+                .into_iter()
+                .collect(),
+            hill: [(crate::physiology::SALINITY.to_string(), 2u8)]
+                .into_iter()
+                .collect(),
+        };
+
+        // The salt feature-subject the being should form a belief about: channel 0 (the one declared
+        // salinity percept), bucket of the flat's dose under the dev feature granularity. A fully-
+        // evaporated salt flat's dose (two), which wears a naive being faster than it heals.
+        let dose = Fixed::from_int(2);
+        let percepts = PerceptRegistry::dev_salinity();
+        assert_eq!(percepts.percepts()[0].id, PerceptId(0));
+        let subject = feature_subject(0, feature_bucket(dose, Fixed::ONE));
+
+        // Run the being on the salt for a few ticks (an idle, blank controller, so it stays on the salt),
+        // capturing the first HARMS commit before the salt eventually wears it through.
+        let run = |tolerance: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x5A17,
+            );
+            emb.set_percepts(percepts.clone());
+            let blank = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    salt_physiology(tolerance),
+                    blank,
+                ),
+                band(),
+            );
+            // The salt cell the being stands on (a bio.salinity toxin dose), and a benign neighbourhood.
+            let mut salt_toxins = BTreeMap::new();
+            salt_toxins.insert(crate::physiology::SALINITY.to_string(), dose);
+            emb.resources_mut().set(
+                tile,
+                Composition {
+                    nutrients: BTreeMap::new(),
+                    toxins: salt_toxins,
+                },
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            let mut committed = None;
+            for _ in 0..10 {
+                runner.step();
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => {
+                        if let Some(v) = m.belief(subject, HARM_ATTR, &bp) {
+                            committed = Some(v);
+                        }
+                    }
+                    None => break, // the being died; keep the last committed value
+                }
+            }
+            committed
+        };
+
+        // The naive being (low salt tolerance) is worn by the salt, feels it, and forms the HARMS belief
+        // for itself through the runner, with no injected observation.
+        assert_eq!(
+            run(Fixed::from_ratio(1, 5)),
+            Some(HARMS),
+            "a naive being on the salt forms the HARMS belief for itself through the runner"
+        );
+        // The falsifier: a fully tolerant being takes no harm from the identical salt, so it forms no
+        // HARMS belief. The belief tracks the felt harm, not the substance's presence.
+        assert_ne!(
+            run(Fixed::from_int(5)),
+            Some(HARMS),
+            "remove the harm (full salt tolerance) and no HARMS belief forms: the belief tracks harm"
+        );
+    }
+
+    #[test]
+    fn a_holder_that_avoids_the_hazard_outlives_a_naive_being_on_the_same_harm() {
+        // Harm-learning arc slice d, the ADAPTIVE leg: the belief pays off in survival. Two beings sit on
+        // the western edge of a salt region (salt to their east). Both hold the HARMS belief about the
+        // salt feature; the one whose controller has the evolved CONDITION-dir-to-heading weight steers
+        // WEST off the salt (its avoidance percept points away from the believed harm to the east) and
+        // keeps its condition, while the one with the founding-zero weight cannot act on the belief, stays
+        // on the salt, and is worn. So the belief is adaptive only through the evolved weight, and
+        // avoidance is what makes it worth carrying (Principle 9). No authored flight: both hold the same
+        // belief; only the evolved weight differs.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::{forage_taxis_weights, ForageGains};
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::{feature_bucket, PerceptRegistry};
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: [(
+                crate::physiology::SALINITY.to_string(),
+                Fixed::from_ratio(1, 5),
+            )]
+            .into_iter()
+            .collect(),
+            hill: [(crate::physiology::SALINITY.to_string(), 2u8)]
+                .into_iter()
+                .collect(),
+        };
+
+        let dose = Fixed::from_int(2);
+        let percepts = PerceptRegistry::dev_salinity();
+        let subject = feature_subject(0, feature_bucket(dose, Fixed::ONE));
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let avoider = world.spawn(Fixed::ONE);
+        let stayer = world.spawn(Fixed::ONE);
+        world.set_place(avoider, 0);
+        world.set_place(stayer, 1);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        emb.set_percepts(percepts.clone());
+        let layout = emb.layout().clone();
+        // The avoider's controller: it wants to move and steers its MOVE heading along the CONDITION
+        // avoidance gradient (CONDITION as a steer axis), so it acts on the belief. MOVE is output 0
+        // (act, dx, dy), INGEST the scalar output at 3.
+        let cond_base = layout.axis_input_base(CONDITION).unwrap();
+        let gains = ForageGains {
+            move_bias: Fixed::ONE,
+            here_suppress: Fixed::ZERO,
+            heading_gain: Fixed::ONE,
+            ingest_drive: Fixed::ZERO,
+        };
+        let mut avoider_w = vec![Fixed::ZERO; layout.weight_count()];
+        for (pid, v) in forage_taxis_weights(&layout, 0, 3, &[], &[cond_base], gains) {
+            avoider_w[pid.0 as usize] = v;
+        }
+        let avoider_ctrl =
+            Controller::from_weights(layout.n_in(), layout.n_out(), layout.hidden(), avoider_w);
+        let blank = Controller::zeros(&layout);
+
+        // Both start on the western EDGE of a salt region: salt fills every cell with x >= 5, the safe
+        // ground is x < 5, and each being stands at x = 5 (on the salt, salt to its east, safe to its
+        // west), one row apart so they do not share a cell.
+        let av_start = Coord3::ground(5, 3);
+        let st_start = Coord3::ground(5, 6);
+        emb.add(
+            Walker::new(
+                avoider,
+                av_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                avoider_ctrl,
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                stayer,
+                st_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+        for y in 0..8 {
+            for x in 5..8 {
+                let mut toxins = BTreeMap::new();
+                toxins.insert(crate::physiology::SALINITY.to_string(), dose);
+                emb.resources_mut().set(
+                    Coord3::ground(x, y),
+                    Composition {
+                        nutrients: BTreeMap::new(),
+                        toxins,
+                    },
+                );
+            }
+        }
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Both beings already hold the HARMS belief about the salt (they have learned it): seed each once
+        // so the leg under test is avoidance-and-survival, not formation (formation is the previous test).
+        let seed = |id: StableId| TickInput {
+            mind: id,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: HARM_ATTR,
+                hyps: vec![HARMS, 0],
+                toward: HARMS,
+                weight: Fixed::from_int(50),
+                from: id,
+            },
+        };
+        runner.step_with_world_inputs(&[seed(avoider), seed(stayer)]);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let level = |r: &Runner, id: StableId| -> Fixed {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.homeostasis.level(CONDITION))
+                .unwrap_or(Fixed::ZERO)
+        };
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(0)
+        };
+        // Both hold the same belief, but only the avoider can act on it: it steered west off the salt and
+        // kept its condition, while the stayer could not and was worn.
+        assert!(
+            x_of(&runner, avoider) < 5,
+            "the avoider steered west off the salt (x = {})",
+            x_of(&runner, avoider)
+        );
+        assert_eq!(
+            x_of(&runner, stayer),
+            5,
+            "the stayer, unable to act on the belief, stayed on the salt"
+        );
+        assert!(
+            level(&runner, avoider) > level(&runner, stayer),
+            "the avoider outlived the stayer on the same harm: condition {:?} > {:?}",
+            level(&runner, avoider),
+            level(&runner, stayer)
+        );
+    }
+
+    #[test]
+    fn a_learned_feature_harm_belief_rides_the_shipped_gossip_to_a_co_located_naive_being() {
+        // Harm-learning arc slice d, the TRANSMISSION leg: because a learned "this feature harms me"
+        // belief is an ordinary (subject, attr) frame, it rides the shipped overhearing transmission for
+        // free. A holder co-located with a naive being conveys the belief through gossip, so the idea
+        // spreads by presence (not by an authored teaching path, not by reading kinship), and it persists
+        // only while a holder is present, which is what makes the loop's persistence possible.
+        use crate::evidence::InferenceParams;
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::world::GossipParams;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        world.set_gossip(GossipParams {
+            told_weight: Fixed::from_int(3),
+            trust_baseline: Fixed::ONE,
+            trust_penalty: Fixed::from_ratio(1, 2),
+        });
+        let holder = world.spawn(Fixed::ONE);
+        let naive = world.spawn(Fixed::ONE);
+        // Co-located: they share one conversational place, so a speaker's committed beliefs reach the
+        // other (the overhearing follow-on).
+        world.set_place(holder, 7);
+        world.set_place(naive, 7);
+
+        let subject = feature_subject(0, feature_bucket(Fixed::from_int(2), Fixed::ONE));
+        // Before any tick, neither being holds the belief.
+        assert_eq!(
+            world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
+            None,
+            "the naive being starts with no belief"
+        );
+        // The holder has LEARNED the salt harms it (a committed feature-harm belief); the naive has not.
+        let seed = TickInput {
+            mind: holder,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: HARM_ATTR,
+                hyps: vec![HARMS, 0],
+                toward: HARMS,
+                weight: Fixed::from_int(50),
+                from: holder,
+            },
+        };
+        // One tick: the holder commits the learned belief, then the shipped overhearing transmission
+        // carries it to the co-located naive being in the same tick's gossip beat.
+        world.tick(&[seed]);
+        assert_eq!(
+            world.mind(holder).unwrap().belief(subject, HARM_ATTR, &bp),
+            Some(HARMS),
+            "the holder holds the learned feature-harm belief"
+        );
+        assert_eq!(
+            world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
+            Some(HARMS),
+            "the learned belief rode the shipped gossip to the co-located naive being by presence"
         );
     }
 }

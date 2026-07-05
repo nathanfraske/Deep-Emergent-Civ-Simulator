@@ -91,6 +91,15 @@ impl Composition {
         self.toxins.get(axis).copied().unwrap_or(Fixed::ZERO)
     }
 
+    /// The raw amount of a substance class present, whatever its valence: the nutrient supply plus the
+    /// toxin dose of the class (a class lives in at most one map, so one term is zero). This is the
+    /// valence-blind percept read the feature substrate uses ([`crate::percept`]): a being senses how
+    /// much of a substance is underfoot, never that the floor filed it as food or poison, so its
+    /// meaning is learned by correlation with felt outcome, not authored (Principle 8).
+    pub fn sensed(&self, class: &str) -> Fixed {
+        self.nutrient(class).saturating_add(self.toxin(class))
+    }
+
     /// Draw a genesis composition for a species over an explicit ordered list of nutrient class ids
     /// and toxin class ids: the nutrient simplex is a stick-breaking walk (remainder starts at one,
     /// each class takes a heritable fraction of the remainder, the last class takes the rest), so it

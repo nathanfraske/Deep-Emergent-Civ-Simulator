@@ -2061,20 +2061,36 @@ source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim
 # constant (Principle 11). ---
 
 [[reserved]]
-id = "hazard.dose_threshold"
-basis = "the salinity dose above which a being standing on a cell registers it as a lethal hazard and forms the salt-flat belief (Runner::couple_conversation). Set at the lethality boundary the physics floor already defines: the dose at which net_harm on a naive lineage overtakes its condition recovery (physiology.condition_recovery), so a cell a being can survive raises no false alarm and a cell that kills it does. Larger makes fewer cells register as hazards, smaller makes the belief form on milder flats"
+id = "harm.noise_floor"
+basis = "the per-tick reserve fall below which a change is ordinary metabolic drain, not harm (the associative learner, Runner::couple_conversation through learn::is_harm_tick). Set at the largest per-tick reserve fall a resting, unharmed body incurs (the resting base_drain scaled to the tick), so only a supra-drain fall registers as the interoceptive harm signal the belief keys off. Larger ignores milder harm, smaller reads ordinary living as harm"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "harm.feature_granularity"
+basis = "the quantization step that buckets a raw feature amount into a perceived kind (learn::feature_bucket), the key a per-feature belief subject is minted from. Set at the sensorium's per-class just-noticeable difference for the sensed substance, so it is the acuity the perception subsystem already defines rather than a free parameter, coarse enough that ordinary spatial variation in a hazard reads as one or two kinds and fine enough to separate a harmful ground from a benign one. Larger merges distinct grounds, smaller splits one ground into a continuum the belief cannot generalise over"
 status = "reserved"
 value = ""
 unit = "dose"
-source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; civsim_physics::laws::net_harm"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/percept.rs; crates/sim/src/sensorium.rs"
 
 [[reserved]]
-id = "hazard.weight"
-basis = "the signed evidence weight a first-hand encounter with the salt-flat hazard carries into the belief pipeline (the Observe stimulus weight in Runner::couple_conversation). A first-hand percept is strong evidence, so set it from the belief subsystem's first-hand witness access weight (the WITNESSED channel) for consistency, so a directly-felt hazard commits a belief as firmly as any first-hand witness. Larger commits the hazard belief on fewer encounters, smaller needs more"
+id = "harm.p_harm_given_harms"
+basis = "P(the interoceptive harm signal fires | this feature truly harms me), the first of the two likelihoods the belief-formation weight reads (learn::good_weight). Set at the fraction of ticks a naive being on a harmful cell is worn faster than it heals, the dose-and-physics harm rate the floor implies, the way trace.rs sets an observation reliability. Together with p_harm_given_benign it sets how strong a single correlation observation is (ln of their ratio)"
 status = "reserved"
 value = ""
-unit = "log_odds"
-source = "base-level liveliness §4/step 5; crates/sim/src/runner.rs; crates/sim/src/evidence.rs"
+unit = "probability"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
+
+[[reserved]]
+id = "harm.p_harm_given_benign"
+basis = "P(the interoceptive harm signal fires | this feature is benign), the second of the two likelihoods the belief-formation weight reads (learn::good_weight). Set at the false-attribution rate of a transient reserve dip unrelated to the feature, the way trace.rs sets a false-attribution rate; low, so a benign cell rarely earns harm evidence. Larger weakens each observation, smaller strengthens it"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
 
 [[reserved]]
 id = "promotion.stress_threshold"
