@@ -736,6 +736,77 @@ fn affords_structure(
 /// affordance with a zero `min_capability` still requires a positive reading, not merely a present part.
 const MIN_CAP: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 20)); // ~1e-6
 
+/// A being's memory of its reserve levels at the previous tick, the substrate of the interoceptive
+/// DELTA percept (harm-learning arc slice a; Principles 3, 9). It retains the per-axis normalised
+/// level so the per-tick change `delta(axis) = level_now - level_prev` is a pure fixed-point
+/// subtraction: the raw interoceptive signal a being feels, a reserve FALLING felt as harm and rising
+/// as relief, read with no cause attached. CONDITION's per-tick change already nets
+/// `condition_recovery - harm` (`crate::locomotion`), so its delta is the net environmental-harm
+/// signal for free, and keying off the homeostatic registry generalises the signal past CONDITION to
+/// any reserve (a food that sickens is an energy or toxin-backed reserve falling after ingestion).
+///
+/// This is new per-being DYNAMIC state: it must fold into `state_hash` alongside the reserve levels
+/// (in canonical axis order), and it draws no randomness, so a run stays bit-identical across worker
+/// widths. It is populated only where the harm-learning path runs; an empty memory folds nothing and
+/// leaves a run's hash unchanged, so the delta percept is opt-in (the emergent-anatomy pattern).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReserveMemory {
+    prev: BTreeMap<HomeostaticAxisId, Fixed>,
+}
+
+impl ReserveMemory {
+    /// An empty memory: no prior levels retained, so the first tick feels no change (the clean
+    /// degrade) and nothing folds into the hash until the first snapshot.
+    pub fn new() -> ReserveMemory {
+        ReserveMemory {
+            prev: BTreeMap::new(),
+        }
+    }
+
+    /// The per-tick change in an axis's normalised level since the last snapshot: `level_now -
+    /// level_prev`. An axis never snapshotted reads a zero delta (no prior, so no felt change), so a
+    /// being's first tick on that axis feels nothing rather than a spurious jump from zero.
+    pub fn delta(&self, axis: HomeostaticAxisId, homeo: &Homeostasis) -> Fixed {
+        let now = homeo.level(axis);
+        let prev = self.prev.get(&axis).copied().unwrap_or(now);
+        now - prev
+    }
+
+    /// The retained previous level of an axis, or zero if none is held (for folding into the hash in
+    /// the runner's canonical axis walk).
+    pub fn prev_level(&self, axis: HomeostaticAxisId) -> Fixed {
+        self.prev.get(&axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Snapshot the current normalised level of every registered axis, to be the previous levels next
+    /// tick. Called once per body-tick after the reserves settle, in the registry's canonical axis
+    /// order, drawing no randomness.
+    pub fn snapshot(&mut self, reg: &HomeostaticRegistry, homeo: &Homeostasis) {
+        self.prev.clear();
+        for axis in &reg.axes {
+            self.prev.insert(axis.id, homeo.level(axis.id));
+        }
+    }
+
+    /// Whether any prior levels are held (an unsnapshotted memory folds nothing into the hash).
+    pub fn is_empty(&self) -> bool {
+        self.prev.is_empty()
+    }
+}
+
+/// Whether this tick's interoceptive `delta` counts as HARM: a reserve falling (a negative delta)
+/// whose magnitude exceeds the harm-noise floor, so ordinary metabolic drain and measurement jitter
+/// are not read as harm. Pure and RNG-free; the associative learner (slice b) calls it to decide
+/// whether a cell's feature earns evidence toward "this ground harms me" this tick.
+///
+/// RESERVED: the harm-noise floor. Basis: the noise floor of normal metabolic drain the physiology
+/// defines, the largest per-tick reserve fall a resting, unharmed body incurs (`base_drain` scaled to
+/// the tick), so only a fall beyond ordinary living registers as harm. Surfaced for the owner, never
+/// fabricated.
+pub fn is_harm_tick(delta: Fixed, harm_noise_floor: Fixed) -> bool {
+    delta < Fixed::ZERO && delta.abs() > harm_noise_floor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -788,6 +859,57 @@ mod tests {
         assert_eq!(h.level(ENERGY), Fixed::ONE, "energy starts full");
         assert_eq!(h.level(WATER), Fixed::ONE, "water starts full");
         assert!(h.is_alive(&reg));
+    }
+
+    #[test]
+    fn reserve_delta_is_the_signed_change_since_the_last_snapshot() {
+        let reg = HomeostaticRegistry::dev_default();
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+        let mut mem = ReserveMemory::new();
+        // An unsnapshotted memory folds nothing and feels no change on the first read.
+        assert!(mem.is_empty());
+        assert_eq!(
+            mem.delta(ENERGY, &h),
+            Fixed::ZERO,
+            "no prior, no felt change"
+        );
+
+        mem.snapshot(&reg, &h);
+        assert!(!mem.is_empty());
+        // A drain since the snapshot is felt as a negative delta of exactly that fall.
+        h.adjust(ENERGY, Fixed::ZERO - Fixed::from_ratio(1, 4));
+        assert_eq!(
+            mem.delta(ENERGY, &h),
+            Fixed::ZERO - Fixed::from_ratio(1, 4),
+            "a quarter-capacity fall reads as a -0.25 delta"
+        );
+        // A gain reads as a positive delta.
+        let mut h2 = Homeostasis::from_mass(&reg, Fixed::ONE);
+        h2.adjust(ENERGY, Fixed::ZERO - Fixed::from_ratio(1, 2));
+        let mut mem2 = ReserveMemory::new();
+        mem2.snapshot(&reg, &h2);
+        h2.adjust(ENERGY, Fixed::from_ratio(1, 4));
+        assert_eq!(
+            mem2.delta(ENERGY, &h2),
+            Fixed::from_ratio(1, 4),
+            "relief is positive"
+        );
+    }
+
+    #[test]
+    fn a_harm_tick_is_a_fall_beyond_the_noise_floor_only() {
+        let floor = Fixed::from_ratio(1, 100);
+        // A fall bigger than the floor is harm.
+        assert!(is_harm_tick(Fixed::ZERO - Fixed::from_ratio(1, 10), floor));
+        // A fall smaller than the floor (ordinary drain) is not.
+        assert!(!is_harm_tick(
+            Fixed::ZERO - Fixed::from_ratio(1, 1000),
+            floor
+        ));
+        // A rise (relief) is never harm however large.
+        assert!(!is_harm_tick(Fixed::from_ratio(1, 2), floor));
+        // Exactly at the floor magnitude is not harm (strict).
+        assert!(!is_harm_tick(Fixed::ZERO - floor, floor));
     }
 
     #[test]

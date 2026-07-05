@@ -92,6 +92,7 @@ pub mod lod;
 pub mod mate_choice;
 pub mod medium;
 pub mod morphogen;
+pub mod percept;
 pub mod personality;
 pub mod physiology;
 pub mod primes;
