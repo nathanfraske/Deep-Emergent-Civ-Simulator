@@ -1041,6 +1041,11 @@ pub struct Runner {
     /// `state_hash`: it is a derived function of the reserves and cells the hash already covers, and the
     /// promotions themselves live in the world's own canonical state.
     arc_promoted: BTreeSet<StableId>,
+    /// Non-canonical observability: the reserve axis whose depletion killed each locomotion death since
+    /// the last drain, so the run harness can report cause of death (which reserve ran out). A pure read
+    /// of a dying being's own homeostasis through `dead_axis`, drained by `take_obs_deaths`, and NOT
+    /// folded into `state_hash` (observation, not canonical state), so it never perturbs the run.
+    obs_deaths: Vec<HomeostaticAxisId>,
     /// The reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
     /// arc-promotion magnitudes). Initialized to the labelled dev fixture in every constructor so the
     /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
@@ -1064,6 +1069,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
         }
     }
@@ -1100,6 +1106,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
         }
     }
@@ -1149,6 +1156,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
         }
     }
@@ -1221,6 +1229,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             arc_promoted: BTreeSet::new(),
+            obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
         }
     }
@@ -1290,6 +1299,13 @@ impl Runner {
     }
 
     /// The coupled embodied-being population, if any (a pure read, for tests and rendering).
+    /// Non-canonical observability: drain and return the reserve axis behind each locomotion death since
+    /// the last call, for the run harness's cause-of-death reader. Not part of canonical state or
+    /// `state_hash`, so draining it never affects the run.
+    pub fn take_obs_deaths(&mut self) -> Vec<HomeostaticAxisId> {
+        std::mem::take(&mut self.obs_deaths)
+    }
+
     pub fn embodiment(&self) -> Option<&Embodiment> {
         self.embodiment.as_ref()
     }
@@ -1806,19 +1822,25 @@ impl Runner {
         if self.world.is_none() || self.embodiment.is_none() {
             return;
         }
-        // (1) Locomotion deaths propagate to the world.
-        let dead_bodies: Vec<StableId> = self
-            .embodiment
-            .as_ref()
-            .unwrap()
-            .walkers
-            .iter()
-            .filter(|w| !w.alive)
-            .map(|w| w.id)
-            .collect();
-        if !dead_bodies.is_empty() {
+        // (1) Locomotion deaths propagate to the world. Record each death's cause (the reserve axis that
+        // fell to its death floor) on the non-folded observability log before removal, a pure read of the
+        // dying being's own homeostasis, never canonical state.
+        let dead: Vec<(StableId, Option<HomeostaticAxisId>)> = {
+            let emb = self.embodiment.as_ref().unwrap();
+            emb.walkers
+                .iter()
+                .filter(|w| !w.alive)
+                .map(|w| (w.id, w.homeostasis.dead_axis(&emb.homeo)))
+                .collect()
+        };
+        if !dead.is_empty() {
+            for (_, cause) in &dead {
+                if let Some(axis) = cause {
+                    self.obs_deaths.push(*axis);
+                }
+            }
             let world = self.world.as_mut().unwrap();
-            for id in &dead_bodies {
+            for (id, _) in &dead {
                 world.remove_being(*id);
             }
         }
