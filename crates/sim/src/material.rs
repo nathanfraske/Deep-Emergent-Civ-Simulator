@@ -299,6 +299,86 @@ impl MaterialField {
     }
 }
 
+/// One horizontal stratum of a ground profile: a substance filling every cell in an inclusive z-band
+/// at a fixed volume. The membership is data (a substance id and a z-band), so a world's stratigraphy
+/// is data-defined, never a `Rock`/`Soil`/`Ore` enum (Principle 8 and 11): a new stratum is a data
+/// edit, and the substance is any [`civsim_physics::Substance`] the ground floor declares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroundLayer {
+    /// The physics substance id filling this stratum.
+    pub substance: String,
+    /// The lowest z the stratum fills, inclusive; z counts down from the surface at zero.
+    pub z_lo: i32,
+    /// The highest z the stratum fills, inclusive.
+    pub z_hi: i32,
+    /// The volume of the substance deposited in each cell of the stratum.
+    pub volume: Fixed,
+}
+
+/// A ground profile: the stratigraphy a world's z-column is filled from, a list of [`GroundLayer`]s.
+/// Overlapping strata accumulate in a cell (an ore band within bedrock is the two substances mixed),
+/// so a mixed cell's bulk properties are the volume-weighted mean of its strata, derived from the
+/// registry. The profile is data (Principle 11); the fill is fixed Rust and deterministic.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroundProfile {
+    /// The strata; deposits accumulate, so the fill result is independent of their order.
+    pub layers: Vec<GroundLayer>,
+}
+
+impl GroundProfile {
+    /// A labelled DEVELOPMENT FIXTURE stratigraphy, not owner values: a loam topsoil at the surface, a
+    /// granite bedrock below it, and a hematite ore band within the bedrock, so a filled world exercises
+    /// both a single-substance cell and a mixed (ore-in-rock) cell. The substances are ground-floor rows
+    /// ([`civsim_physics::PhysicsRegistry::ground`]); this fixture lets a material world be filled and
+    /// seen now, the way the worldgen fixtures let the map be generated before the owner sets the
+    /// authoritative worldgen calibration.
+    pub fn dev() -> GroundProfile {
+        GroundProfile {
+            layers: vec![
+                GroundLayer {
+                    substance: "loam".to_string(),
+                    z_lo: 0,
+                    z_hi: 0,
+                    volume: Fixed::ONE,
+                },
+                GroundLayer {
+                    substance: "granite".to_string(),
+                    z_lo: -3,
+                    z_hi: -1,
+                    volume: Fixed::ONE,
+                },
+                GroundLayer {
+                    substance: "hematite".to_string(),
+                    z_lo: -2,
+                    z_hi: -2,
+                    volume: Fixed::ONE,
+                },
+            ],
+        }
+    }
+
+    /// Fill a material layer from this profile over a `width` by `height` surface extent, depositing
+    /// each stratum's substance into every cell of its z-band in canonical (x, y, z) order with no
+    /// randomness. This is the deterministic worldgen population of the ground (cascade item 1): a
+    /// material-declaring world builds its z-column here, and every derived hardness, weight, and fuel
+    /// value downstream reads the substances placed. A non-positive extent yields an empty field (the
+    /// opt-out). Off the default assembly path, so a scenario that does not fill the ground stays empty
+    /// and byte-identical.
+    pub fn fill(&self, width: i32, height: i32) -> MaterialField {
+        let mut field = MaterialField::new();
+        for x in 0..width {
+            for y in 0..height {
+                for layer in &self.layers {
+                    for z in layer.z_lo..=layer.z_hi {
+                        field.deposit(Coord3 { x, y, z }, &layer.substance, layer.volume);
+                    }
+                }
+            }
+        }
+        field
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +581,62 @@ values = [
         empty.hash_into(&mut folded);
         let fresh = StateHasher::new();
         assert_eq!(folded.finish(), fresh.finish());
+    }
+
+    #[test]
+    fn a_ground_profile_fills_the_z_column_deterministically() {
+        let profile = GroundProfile::dev();
+        let field = profile.fill(2, 2);
+        for x in 0..2 {
+            for y in 0..2 {
+                // Every surface cell carries the loam topsoil.
+                assert_eq!(field.volume(Coord3 { x, y, z: 0 }, "loam"), Fixed::ONE);
+                // Every bedrock cell (z in -1..-3) carries granite.
+                for z in [-1, -2, -3] {
+                    assert_eq!(
+                        field.volume(Coord3 { x, y, z }, "granite"),
+                        Fixed::ONE,
+                        "granite at z={z}"
+                    );
+                }
+                // The ore band at z=-2 is a mixed cell: granite plus hematite.
+                assert_eq!(field.volume(Coord3 { x, y, z: -2 }, "hematite"), Fixed::ONE);
+                let ore = field
+                    .cell(Coord3 { x, y, z: -2 })
+                    .expect("the ore cell holds matter");
+                assert_eq!(ore.total_volume(), Fixed::from_int(2));
+            }
+        }
+        // No matter above the surface or below the profile.
+        assert!(field.cell(Coord3 { x: 0, y: 0, z: 1 }).is_none());
+        assert!(field.cell(Coord3 { x: 0, y: 0, z: -4 }).is_none());
+        // Deterministic: a second fill folds to an identical hash.
+        let (mut a, mut b) = (StateHasher::new(), StateHasher::new());
+        field.hash_into(&mut a);
+        profile.fill(2, 2).hash_into(&mut b);
+        assert_eq!(a.finish(), b.finish());
+    }
+
+    #[test]
+    fn a_filled_ground_derives_real_densities_from_the_ground_registry() {
+        // End to end: the substances the profile places read their cited densities off the world ground
+        // registry, and a mixed cell reads the volume-weighted mean between them.
+        let reg = PhysicsRegistry::ground().expect("the ground registry loads");
+        let field = GroundProfile::dev().fill(1, 1);
+        // A pure bedrock cell reads granite's own cited density.
+        assert_eq!(
+            field.bulk_density(Coord3 { x: 0, y: 0, z: -1 }, &reg),
+            Fixed::from_int(2700)
+        );
+        // The ore band (granite 2700 plus hematite 5260, equal volume) reads their mean, 3980.
+        assert_eq!(
+            field.bulk_density(Coord3 { x: 0, y: 0, z: -2 }, &reg),
+            Fixed::from_int(3980)
+        );
+        // The topsoil reads loam's cited density.
+        assert_eq!(
+            field.bulk_density(Coord3 { x: 0, y: 0, z: 0 }, &reg),
+            Fixed::from_int(1400)
+        );
     }
 }
