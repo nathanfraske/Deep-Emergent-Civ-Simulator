@@ -1249,6 +1249,9 @@ impl Embodiment {
         };
         let eta = self.params.ingest_efficiency;
         let mut gained = Fixed::ZERO;
+        // The substances the being eats this bite, for the toxin harm below (a set so a substance that feeds
+        // two reserves is not counted twice against its own toxicity).
+        let mut eaten: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for i in 0..self.homeo.axes.len() {
             let Some(substance) = self.homeo.axes[i].backing_component.clone() else {
                 continue; // an axis with no backing substance is not fed by matter
@@ -1287,6 +1290,55 @@ impl Embodiment {
                 w.homeostasis.ingest(axis_id, gain);
             }
             gained += gain;
+            if taken > Fixed::ZERO {
+                eaten.insert(substance);
+            }
+        }
+        // The HARM-HALF (the symmetric completion of ingestion): the toxins in what was eaten harm the eater
+        // against its OWN inherited per-toxin-class tolerance, the same edibility harm side the exposure read
+        // applies, so eating a poison for its nutrient costs and a food that sickens ONE eater feeds another
+        // safely. Read only the classes the being carries a tolerance for (never the substance's mat.* axes),
+        // dose each from the eaten substance's registry concentration, and net_harm against the being's
+        // tolerance and Hill exponent, per consumer, no per-substance poison label (Principle 9). Applied to
+        // CONDITION (a no-op for a being with no CONDITION axis), so the felt harm feeds the existing
+        // harm-learning loop: a being can now learn "this food sickens me", not only "this place harms me".
+        let harm = match self.material_registry.as_ref() {
+            Some(reg) if !eaten.is_empty() => {
+                match self.walkers.iter().find(|w| w.id == walker_id) {
+                    Some(w) => {
+                        let mut classes: Vec<(Fixed, Option<Fixed>, u8)> = Vec::new();
+                        for class in w.physiology.tolerances.keys() {
+                            let mut dose = Fixed::ZERO;
+                            for substance in &eaten {
+                                if let Some(sub) = reg.substance(substance) {
+                                    dose = dose.saturating_add(
+                                        sub.vector.get(class).copied().unwrap_or(Fixed::ZERO),
+                                    );
+                                }
+                            }
+                            if dose > Fixed::ZERO {
+                                classes.push((
+                                    dose,
+                                    w.physiology.tolerance(class),
+                                    w.physiology.hill_exp(class),
+                                ));
+                            }
+                        }
+                        laws::net_harm(
+                            &classes,
+                            self.params.harm_caps.harm_cap,
+                            self.params.harm_caps.total_harm_cap,
+                        )
+                    }
+                    None => Fixed::ZERO,
+                }
+            }
+            _ => Fixed::ZERO,
+        };
+        if harm > Fixed::ZERO {
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                w.homeostasis.adjust(CONDITION, Fixed::ZERO - harm);
+            }
         }
         gained
     }

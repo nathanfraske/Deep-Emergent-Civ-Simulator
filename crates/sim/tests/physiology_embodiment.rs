@@ -1231,6 +1231,170 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
 }
 
 #[test]
+fn eating_a_food_that_sickens_harms_the_sensitive_eater_and_spares_the_tolerant_one() {
+    // Material-substrate arc item 4, the HARM-HALF of INGEST-FOR-COMPOSITION (the owner's seam): eating is
+    // not only benefit. A being that eats a substance carrying a toxin takes the harm against its OWN
+    // inherited tolerance, so the same brackish food (a nutrient laced with salt) sickens a salt-sensitive
+    // eater and spares a salt-tolerant one, per consumer, no per-substance poison label (Principle 9). The
+    // felt harm lands on CONDITION, the same reserve the harm-learning loop reads, so a being can learn "this
+    // food sickens me", the symmetric completion of the composition read harm-learning opened.
+    use civsim_sim::homeostasis::{HomeostaticAxisDef, CONDITION};
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::SALINITY;
+
+    // A registry whose brackish substance both FEEDS a mineral reserve and carries a salinity toxin.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "bio.salinity"
+measures = "a salinity toxin concentration"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1000"
+real = "test fixture"
+
+[[substance]]
+id = "brackish"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1200" },
+  { axis = "bio.salinity", value = "2" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // A mineral-storing tissue backs the brackish reserve so the being has room to eat into.
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "mineral-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("brackish", Fixed::ONE)]),
+    });
+    // A registry with a brackish-backed mineral reserve, a CONDITION reserve for the harm to land on, and
+    // the required temperature axis.
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "mineral".to_string(),
+                backing_component: Some("brackish".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: CONDITION,
+                name: "condition".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x5A17,
+    );
+    let blank = Controller::zeros(emb.layout());
+    // Two beings differing only in salinity tolerance: sensitive (low) and tolerant (high).
+    let mut add_eater = |id: u64, tolerance: Fixed| {
+        let mut walker = resting_walker(
+            id,
+            cell,
+            body((1, 1), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            blank.clone(),
+        );
+        walker
+            .physiology
+            .tolerances
+            .insert(SALINITY.to_string(), tolerance);
+        // Open room in the mineral reserve so the being eats brackish (and takes its toxin).
+        walker
+            .homeostasis
+            .set_level(ENERGY, Fixed::from_ratio(1, 2));
+        emb.add(walker, band(305));
+    };
+    add_eater(1, Fixed::from_ratio(1, 10)); // sensitive: low salt tolerance
+    add_eater(2, Fixed::from_int(100)); // tolerant: high salt tolerance
+
+    let mut field = MaterialField::new();
+    field.deposit(cell, "brackish", Fixed::from_int(100000));
+    emb.set_material(field);
+    emb.set_material_registry(
+        civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+    );
+
+    let condition = |e: &Embodiment, id: u64| -> Fixed {
+        e.walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .homeostasis
+            .level(CONDITION)
+    };
+    let full = condition(&emb, 1);
+    assert_eq!(full, Fixed::ONE, "both beings start at full condition");
+    assert_eq!(condition(&emb, 2), Fixed::ONE);
+
+    // Both eat the brackish food (gaining the mineral); the toxin harm lands per tolerance.
+    assert!(
+        emb.geophage(StableId(1)) > Fixed::ZERO,
+        "the sensitive being eats the brackish food"
+    );
+    assert!(
+        emb.geophage(StableId(2)) > Fixed::ZERO,
+        "the tolerant being eats the same food"
+    );
+
+    let sensitive = condition(&emb, 1);
+    let tolerant = condition(&emb, 2);
+    // The salt-sensitive eater is harmed by the food (its condition fell); the salt-tolerant one is not (or
+    // far less), the SAME food read against each being's own inherited tolerance.
+    assert!(
+        sensitive < full,
+        "the food sickens the sensitive eater: its condition fell to {sensitive:?}"
+    );
+    assert!(
+        tolerant > sensitive,
+        "the same food spares the tolerant eater: {tolerant:?} > {sensitive:?}"
+    );
+}
+
+#[test]
 fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
     // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
     // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A
