@@ -7,6 +7,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-05: material-substrate item 6 STARTED (slice A live fire: combustible matter burns when hot), on branch claude/material-substrate, PR #93
+
+Item 6 (live fire) has its first slice: the resolved combustion law, already floor-built in civsim_physics, now runs in the world as a field process, so hot fuel burns. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 6 SLICE A LIVE FIRE paragraph). Commit `70c8fa4`.
+
+WHAT LANDED: `crates/sim/src/material.rs` gains a `FireField` (a sparse `Coord3`-to-intensity sibling of `EarthworkField`) recording the combustion energy each burning cell releases, plus a `CombustionCalib` (the reserved burn rate and energy cap, surfaced-with-basis on the struct like `ExtractionParams`). `crates/sim/src/runner.rs`: a `Runner::step_combustion` beat, run inside `step_field` (so both tick orders source the fire from the settled temperature), scans the material field for combustible matter and combusts a cell holding a substance that carries `therm.fuel_value` and stands at or above its `therm.ignition_temperature` through `laws::combustion`, consuming a bounded fraction of its fuel and lighting the fire field; the burned volume is the law's own energy-over-fuel-value relation back through density, no coded rate. Armed opt-in via `Runner::set_combustion`.
+
+OPT-IN / hash-neutral: the beat runs only when a combustion calib is armed with a material registry present, and the fire field folds into `state_hash` only when non-empty, so a scenario with no combustion or nothing hot enough burns nothing and stays byte-identical (crucible unchanged at `254bc17c`, world_build 16 and world_determinism 3 replay-identical). Proven by a `FireField` unit test and an end-to-end runner test (oak in a hot field burns and lights the fire field while granite in the same cell and the same oak in a cold field do not, both tick orders). 632 sim lib tests plus all integration binaries green, fmt and clippy (`--all-targets -D warnings`) clean.
+
+HONEST LIMIT: the oxidiser is not supplied, so a self-oxidising fuel (oak, which declares no oxidiser demand) burns on the current data and an oxygen-demanding fuel reads oxidiser-limited to nothing. STOPPED: item 6 slice A pushed (`70c8fa4`). NEXT slices, building ahead per the standing directive: item 6 slice B (the medium-oxygen gate that makes fire need air), slice C (the heat injection that lets fire warm the cell and spread through the temperature diffusion, needs `therm.specific_heat` on the fuel and the energy-to-temperature conversion), then item 7 (shelter), item 8 (the matter cycle, the owner-ruled data-defined `TransformKindRegistry` keyed to physics kernels, never named-transform arms), and the force-and-manipulation extension as a primitive-completeness check. Open emergence debts unchanged (ground-working affordance consolidation; CRAFT-from-strike-a-core). Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-05: material-substrate item 5 COMPLETE (hydrology coupling: a dug pit pools water), on branch claude/material-substrate, PR #93
 
 Item 5 (modifiable terrain) closes: the terrain a being reshapes now feeds the water physics, so a dug pit ponds and a mound sheds. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 5 HYDROLOGY COUPLING paragraph). Commit `284cc4e`.
