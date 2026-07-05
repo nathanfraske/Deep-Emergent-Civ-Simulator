@@ -305,6 +305,28 @@ impl Homeostasis {
         Homeostasis { reserves }
     }
 
+    /// A being at full reserves, capacities sourced from a GROWN body structure rather than a catalog organ
+    /// set (emergent-anatomy Step 3, the metabolic-tier grow): the metabolic sibling of the affordance and
+    /// speed direct reads. For each backed axis, the capacity is [`Structure::backed_capacity`], the grown
+    /// segments' `bio.*` tissue composition summed directly, with no organ kind id and no registry. A
+    /// non-backed axis (integrity, temperature) is unit capacity, level set each tick, exactly as in
+    /// [`Homeostasis::new`]. So a grown body sources its own metabolism from its grown tissue: a body whose
+    /// tissue backs no energy carries no energy reserve and starves at birth, leaning on the same
+    /// reserve-floor cull as any other death (Principle 8), never a morphology gate. This lets a grown race
+    /// found a body with no catalog `BodyPlan` at all, the catalog metabolic tier retired.
+    pub fn from_structure(reg: &HomeostaticRegistry, structure: &Structure) -> Homeostasis {
+        let mut reserves = BTreeMap::new();
+        for axis in &reg.axes {
+            let cap = match &axis.backing_component {
+                Some(axis_id) => structure.backed_capacity(axis_id),
+                // A derived, non-stored axis (integrity, temperature): unit capacity, level set each tick.
+                None => Fixed::ONE,
+            };
+            reserves.insert(axis.id, Stock::new(cap, cap, Fixed::ZERO));
+        }
+        Homeostasis { reserves }
+    }
+
     /// A labelled DEVELOPMENT FALLBACK: capacities set from body mass alone (`capacity_per_mass *
     /// body_mass`), for tests and fixtures that do not model organs. This is the pre-anatomy path and
     /// is NOT the production constructor: sourcing a reserve from body mass leaks size back into the

@@ -81,6 +81,14 @@ pub struct MorphogenProgram {
     pub geometry_axes: Vec<AxisSpec>,
     /// The material axes a segment carries (`mat.*`, `opt.*`), each with its floor range.
     pub material_axes: Vec<AxisSpec>,
+    /// The biology-floor tissue-composition axes a segment carries (`bio.*`, energy density, water fraction,
+    /// and the rest), each with its floor range (emergent-anatomy Step 3, the metabolic-tier grow). These are
+    /// grown into the same per-segment material map as the mechanical and optical axes, but they feed the
+    /// METABOLISM rather than the function-law dispatch: a grown body's reserve capacity is summed directly
+    /// off this composition ([`Structure::backed_capacity`]), so a grown body sources its own metabolism from
+    /// its tissue with no organ kind id. Their parameters sit AFTER the branch and spawn parameters, so adding
+    /// a bio axis does not shift the geometry, material, branch, or spawn parameter indices.
+    pub bio_axes: Vec<AxisSpec>,
     /// RESERVED. The hard cap on growth generations (recursion depth), a termination guarantee. Basis: the
     /// number of developmental tiers a body plan represents (a handful), a performance-and-termination
     /// bound rather than a realism one.
@@ -98,7 +106,7 @@ impl MorphogenProgram {
     /// per-generation growth fraction, per material axis a fraction, plus a branch fraction and a spawn
     /// fraction. The morphogen block appended to a founder gene set is this many loci.
     pub fn param_count(&self) -> usize {
-        self.geometry_axes.len() * 2 + self.material_axes.len() + 2
+        self.geometry_axes.len() * 2 + self.material_axes.len() + 2 + self.bio_axes.len()
     }
 
     /// The parameter index of geometry axis `i`'s root fraction.
@@ -126,6 +134,12 @@ impl MorphogenProgram {
         self.branch_param() + 1
     }
 
+    /// The parameter index of bio axis `i`'s tissue-composition fraction, placed AFTER the spawn parameter so
+    /// adding a bio axis does not shift the geometry, material, branch, or spawn indices.
+    fn bio_param(&self, i: usize) -> usize {
+        self.spawn_param() + 1 + i
+    }
+
     /// A labelled DEVELOPMENT FIXTURE program over the mechanical and optical floor axes a body part's
     /// function is read from, with plausible per-segment ranges grounded in the floor: a weapon reads
     /// PIERCE from a small `contact_area` and a hard material, a limb reads LOCOMOTE from a `section_modulus`
@@ -149,6 +163,14 @@ impl MorphogenProgram {
                 geo("mat.indentation_hardness", dec("1"), dec("3000")),
                 geo("mat.yield_strength", dec("1"), dec("200")),
                 geo("opt.refractive_index", dec("1"), dec("1.5")),
+            ],
+            // The biology-floor tissue-composition axes the metabolism reads: energy density (gross bomb
+            // calorimetry, kJ/g) and water fraction, the two the dev homeostatic reserves back. RESERVED
+            // (the floor's own axis ranges, biology_floor.toml); labelled dev fixtures until a floor registry
+            // supplies them.
+            bio_axes: vec![
+                geo("bio.energy_density", dec("0"), dec("38")),
+                geo("bio.water_fraction", dec("0"), dec("1")),
             ],
             // Labelled dev caps: a shallow developmental tree, wide enough to grow a limbed, multi-part
             // body but hard-bounded so the recursion always halts.
@@ -270,6 +292,27 @@ impl Structure {
             best = best.max(self.max_capability(def.id, fns, refs, caps));
         }
         best
+    }
+
+    /// The metabolic reserve capacity a grown body's tissue backs on a biology-floor axis (emergent-anatomy
+    /// Step 3, the metabolic-tier grow): the sum over grown segments of each segment's development-weighted
+    /// tissue composition on that axis. It mirrors how [`crate::homeostasis::Homeostasis::new`] sums a catalog
+    /// organ set (`Σ development · composition`), but reads DIRECTLY off the grown segments' `bio.*` composition
+    /// with no organ kind id and no registry, the metabolic sibling of the affordance and speed direct reads.
+    /// Each segment's development is a uniform fraction of a full body (`1 / MASS_REFERENCE_SEGMENTS`, the same
+    /// reference the digest's `body_mass` uses, so the reserve scale and the mass scale agree). A body whose
+    /// grown tissue carries none of the axis backs no reserve there (the absence convention), so an
+    /// energy-less grown body carries no energy reserve and starves at birth through the ordinary cull.
+    pub fn backed_capacity(&self, axis_id: &str) -> Fixed {
+        let per_segment = Fixed::from_ratio(1, MASS_REFERENCE_SEGMENTS as i64);
+        let mut sum = Fixed::ZERO;
+        for seg in &self.segments {
+            let backed = per_segment
+                .checked_mul(seg.mat(axis_id))
+                .unwrap_or(Fixed::ZERO);
+            sum = sum.saturating_add(backed);
+        }
+        sum
     }
 
     /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
@@ -417,6 +460,15 @@ pub fn grow(program: &MorphogenProgram, params: &[Fixed], seed: u64, id: StableI
         let f = frac(params, program.material_param(i));
         material.insert(spec.axis.clone(), map_range(f, spec.lo, spec.hi));
     }
+    // The biology-floor tissue composition (emergent-anatomy Step 3): grown into the same material map as the
+    // mechanical and optical axes, so a grown segment carries its metabolic tissue (`bio.*`) alongside its
+    // function-geometry, and a child inherits it exactly as it inherits the material. This is what the
+    // metabolism sums off ([`Structure::backed_capacity`]); the function-law dispatch reads only the
+    // mechanical and optical axes, so the bio composition is metabolic-only and blind to the affordance reads.
+    for (i, spec) in program.bio_axes.iter().enumerate() {
+        let f = frac(params, program.bio_param(i));
+        material.insert(spec.axis.clone(), map_range(f, spec.lo, spec.hi));
+    }
     let mut segments = vec![Segment {
         parent: None,
         depth: 0,
@@ -555,7 +607,7 @@ fn dec(s: &str) -> Fixed {
 mod tests {
     use super::*;
     use crate::genome::{Allele, Haplotype, SchemeId};
-    use crate::homeostasis::{AffordanceRegistry, MOVE, STRIKE};
+    use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry, MOVE, STRIKE};
     use crate::locomotion::{locomotion_speed_structure, LocomotionParams};
 
     fn caps() -> CapabilityCaps {
@@ -760,6 +812,59 @@ mod tests {
             inert.whole_body_viability(&fns, &refs, &caps),
             Fixed::ZERO,
             "inert matter reads no viable function and falls through the viability floor"
+        );
+    }
+
+    #[test]
+    fn a_grown_body_sources_its_metabolic_reserve_from_its_own_tissue() {
+        // Emergent-anatomy Step 3, the metabolic-tier grow: a grown body sources its own metabolic reserve
+        // capacity from its grown bio.* tissue composition, summed DIRECTLY off the segments with no organ
+        // kind id (the metabolic sibling of the affordance direct read). A body whose tissue carries energy
+        // density backs a positive energy reserve; one whose tissue carries none backs zero and starves at
+        // birth through the ordinary reserve-floor cull, never a morphology gate.
+        let program = MorphogenProgram::dev_default();
+        // The bio parameters sit after spawn: energy_density then water_fraction (see `bio_param`).
+        let energy = program.param_count() - 2;
+        let water = program.param_count() - 1;
+
+        let nourished = grow(
+            &program,
+            &params(&program, &[(energy, "0.5"), (water, "0.5")]),
+            0x1,
+            StableId(1),
+        );
+        assert!(
+            nourished.backed_capacity("bio.energy_density") > Fixed::ZERO,
+            "a grown body whose tissue carries energy density backs a positive energy reserve"
+        );
+        assert!(
+            nourished.backed_capacity("bio.water_fraction") > Fixed::ZERO,
+            "and a positive water reserve from its water fraction"
+        );
+
+        let energyless = grow(
+            &program,
+            &vec![Fixed::ZERO; program.param_count()],
+            0x1,
+            StableId(1),
+        );
+        assert_eq!(
+            energyless.backed_capacity("bio.energy_density"),
+            Fixed::ZERO,
+            "a grown body whose tissue carries no energy backs no energy reserve"
+        );
+
+        // Homeostasis::from_structure builds the reserve set over a metabolizing (energy and water) registry:
+        // a nourished grown body is born alive on its own reserves, an energy-less one is born already dead
+        // (its reserve is at the floor), the metabolic viability that lets a grown race need no catalog body.
+        let reg = HomeostaticRegistry::dev_default();
+        assert!(
+            Homeostasis::from_structure(&reg, &nourished).is_alive(&reg),
+            "a grown body with metabolic tissue is birth-viable on its own grown reserves"
+        );
+        assert!(
+            !Homeostasis::from_structure(&reg, &energyless).is_alive(&reg),
+            "an energy-less grown body carries no reserve and starves at birth"
         );
     }
 
