@@ -65,7 +65,7 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_world::Coord3;
 
-use civsim_compose::{CapabilityCaps, CapabilityRefs};
+use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawRegistry};
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::controller::{Controller, ControllerLayout};
@@ -137,6 +137,13 @@ pub struct LocomotionParams {
     /// axis ranges (the same derive-from-floor-range discipline [`civsim_compose::CapabilityCaps::derive`]
     /// uses); a labelled dev fixture until the parameters read the floor registry.
     pub capability_caps: CapabilityCaps,
+    /// The reference leg length at which a limb's stride saturates, in metres (`locomotion.reference_leg_length`,
+    /// the `mech.arm_length` axis). RESERVED. Basis: the leg length of a maximal-stride body, the arm length
+    /// at which the stride factor reaches one; a fraction of it gives a proportionally shorter stride. This
+    /// (with the limb's own LOCOMOTE strength) replaces the `sqrt(body_mass)` allometric proxy: the ground
+    /// speed now reads the grown limb rather than a mass power law, so a longer, stouter limb moves faster.
+    /// A labelled dev fixture until the parameters read the manifest.
+    pub reference_leg_length: Fixed,
 }
 
 impl LocomotionParams {
@@ -168,6 +175,9 @@ impl LocomotionParams {
                 pressure: Fixed::from_int(150_000),
                 depth: Fixed::from_int(100),
             },
+            // A labelled fixture: a half-metre maximal-stride leg, so the dev-fixture walk limb (arm_length
+            // 0.3 m) strides at six-tenths of the reference and a longer swim/slither limb saturates it.
+            reference_leg_length: Fixed::from_ratio(1, 2),
         }
     }
 }
@@ -413,9 +423,6 @@ impl Walker {
 
 /// One-half, the tile centre offset.
 const HALF: Fixed = Fixed::from_bits(1i64 << 31);
-/// The registry id of the rooted (non-)locomotion mode: a body carrying only this bears no limb (the
-/// kind carries no geometry), so it reads no LOCOMOTE capability and does not walk.
-const ROOTED_MODE: u16 = 0;
 /// The smallest squared heading magnitude that counts as a directional signal; below it the being
 /// has no gradient to follow and explores instead.
 const HEADING_EPS: Fixed = Fixed::from_bits(1i64 << 22); // ~1e-3
@@ -432,18 +439,52 @@ fn floor_i32(v: Fixed) -> i32 {
 /// ground. A body with no locomotion organ does not move. Whether the being has the reserves to move
 /// is the metabolism's concern, not this pure physical speed.
 ///
-/// The `sqrt(body_mass)` allometric size proxy is the next authored proxy the emergent-anatomy arc
-/// retires: the ground speed will scale with the grown limb length (a stride derived from the LOCOMOTE
-/// limb's `mech.arm_length`) rather than a mass power law, the same physics read the affordance gate now
-/// uses. That slice re-baselines the run-path state hash and re-tunes the R-BEHAVIOR-EVOLVE scoring
-/// harness, so it is split from this affordance-gate retirement (which is hash-neutral).
-pub fn locomotion_speed(body: &BodyPlan, terrain_cost: Fixed, p: &LocomotionParams) -> Fixed {
-    let mobile = !body.locomotion.is_empty() && body.locomotion.iter().any(|&m| m != ROOTED_MODE);
-    if !mobile {
-        return Fixed::ZERO;
+/// The size factor is DERIVED from the body's grown limbs (emergent-anatomy step one), not from an
+/// allometric mass power law: across the body's locomotion modes the strongest LOCOMOTE limb (one that
+/// bears a reference propulsive load without buckling, read from its section modulus, length, and yield
+/// through [`civsim_compose::derive_capabilities`]) sets both the stride (its `mech.arm_length` over the
+/// reserved reference leg length) and the push (its LOCOMOTE capability, one minus the bending
+/// utilization). This retires the `sqrt(body_mass)` proxy: a longer, stouter limb strides farther and
+/// pushes off harder, so a strong-limbed lineage disperses faster than a weak-limbed one, by physics
+/// rather than by mass, blind to any kind or race id. Per-being limb variation (and so per-being speed)
+/// returns when step two grows the limb geometry per body.
+pub fn locomotion_speed(
+    body: &BodyPlan,
+    organs: &BodyPlanRegistry,
+    terrain_cost: Fixed,
+    p: &LocomotionParams,
+) -> Fixed {
+    // The strongest locomotor limb the body bears: its LOCOMOTE capability (structural push) and its leg
+    // length (stride), a pure physics read over the organ registry, blind to any kind or race id.
+    let fns = FunctionLawRegistry::dev_seed();
+    let mut best_cap = Fixed::ZERO;
+    let mut stride_leg = Fixed::ZERO;
+    for &m in &body.locomotion {
+        if let Some(k) = organs.locomotion.iter().find(|k| k.id == m) {
+            let geo = |axis: &str| k.geo(axis);
+            let mat = |axis: &str| k.mat(axis);
+            let cap = derive_capabilities(&fns, &geo, &mat, &p.capability_refs, &p.capability_caps)
+                .score(FunctionLawRegistry::ID_LOCOMOTE);
+            if cap > best_cap {
+                best_cap = cap;
+                stride_leg = k.geo("mech.arm_length");
+            }
+        }
     }
-    // Allometric size factor: sqrt(body_mass) in [0, 1], so a bigger body strides faster.
-    let size = body.body_mass.clamp(Fixed::ZERO, Fixed::ONE).sqrt();
+    if best_cap <= Fixed::ZERO {
+        return Fixed::ZERO; // no limb bears a propulsive load: rooted, by physics not by a mode id
+    }
+    // Stride length from the grown limb over the reserved reference leg length, clamped to [0, 1], scaled
+    // by the limb's structural push (its LOCOMOTE capability): the grown-limb size factor that retires
+    // sqrt(body_mass).
+    let stride = if p.reference_leg_length > Fixed::ZERO {
+        stride_leg
+            .div(p.reference_leg_length)
+            .clamp(Fixed::ZERO, Fixed::ONE)
+    } else {
+        Fixed::ZERO
+    };
+    let size = stride.mul(best_cap);
     // Activity factor between the reserved floor and one.
     let activity = p.activity_floor
         + (Fixed::ONE - p.activity_floor)
@@ -651,7 +692,7 @@ pub fn step_with_field_dirs<T: Terrain>(
                 match d.affordance {
                     MOVE => {
                         let cost = terrain.cost(here);
-                        let speed = locomotion_speed(&w.body, cost, p);
+                        let speed = locomotion_speed(&w.body, organs, cost, p);
                         if speed > Fixed::ZERO {
                             let (hx, hy) = d.heading.unwrap_or((Fixed::ZERO, Fixed::ZERO));
                             let mag2 = hx.mul(hx) + hy.mul(hy);
@@ -941,7 +982,7 @@ mod tests {
     /// no LOCOMOTE capability), so it cannot walk, whatever its kingdom.
     fn rooted_body() -> BodyPlan {
         let mut b = mobile_body();
-        b.locomotion = vec![ROOTED_MODE];
+        b.locomotion = vec![0]; // the rooted mark (kind id 0), which bears no limb geometry
         b
     }
 
@@ -1260,29 +1301,155 @@ mod tests {
         assert!(died_at.is_some(), "unfed and unwatered, the being dies");
     }
 
+    /// A locomotion mode kind carrying a section modulus, arm length, and yield strength, so a test can
+    /// vary a limb's strength (its section) at a fixed stride (its arm length) and read the effect on
+    /// speed. The values are `(section_modulus, arm_length, yield_strength)` as fixed-point.
+    fn limb_kind(
+        id: u16,
+        section: Fixed,
+        arm: Fixed,
+        yield_strength: Fixed,
+    ) -> crate::anatomy::KindDef {
+        let mut geometry = BTreeMap::new();
+        geometry.insert("mech.section_modulus".to_string(), section);
+        geometry.insert("mech.arm_length".to_string(), arm);
+        let mut material = BTreeMap::new();
+        material.insert("mat.yield_strength".to_string(), yield_strength);
+        crate::anatomy::KindDef {
+            id,
+            name: format!("limb{id}"),
+            fantasy: false,
+            geometry,
+            material,
+        }
+    }
+
+    /// A registry whose locomotion modes are a stout limb (id 1) and a slender near-yield limb (id 2) of
+    /// EQUAL stride (arm length 0.3 m), so a test isolates the limb's structural strength from its length.
+    fn strength_registry() -> BodyPlanRegistry {
+        let mut reg = BodyPlanRegistry::dev_default();
+        reg.locomotion = vec![
+            // The rooted mark (kind id 0): no limb geometry, reads no LOCOMOTE capability.
+            crate::anatomy::KindDef {
+                id: 0,
+                name: "rooted".to_string(),
+                fantasy: false,
+                geometry: BTreeMap::new(),
+                material: BTreeMap::new(),
+            },
+            // A stout limb: a large section modulus, so the reference load raises little bending stress
+            // and the LOCOMOTE capability is near one.
+            limb_kind(
+                1,
+                Fixed::from_ratio(1, 10_000),
+                Fixed::from_ratio(3, 10),
+                Fixed::from_int(150),
+            ),
+            // A slender limb of the SAME length but a far smaller section, so the same load raises a
+            // bending stress near yield and the capability is low: a weaker locomotor.
+            limb_kind(
+                2,
+                Fixed::from_ratio(1, 5_000_000),
+                Fixed::from_ratio(3, 10),
+                Fixed::from_int(150),
+            ),
+        ];
+        reg
+    }
+
     #[test]
-    fn a_bigger_more_active_body_moves_faster() {
+    fn a_stronger_limbed_body_moves_faster_at_equal_stride() {
+        // Ground speed now reads the grown limb, not body mass: at an IDENTICAL stride (arm length), the
+        // stouter limb reads a greater LOCOMOTE capability (its section bears the propulsive load far from
+        // yield) and so pushes the body off faster. The mass power law is retired for a physics read of
+        // the limb, so a strong-limbed lineage disperses faster than a weak-limbed one.
+        let organs = strength_registry();
         let p = LocomotionParams::dev_default();
-        let mut small = mobile_body();
-        small.body_mass = Fixed::from_ratio(1, 16);
-        small.temperament.activity = Fixed::from_ratio(1, 4);
-        let mut big = mobile_body();
-        big.body_mass = Fixed::ONE;
-        big.temperament.activity = Fixed::ONE;
-        let vs = locomotion_speed(&small, Fixed::ONE, &p);
-        let vb = locomotion_speed(&big, Fixed::ONE, &p);
+        let mut strong = mobile_body();
+        strong.locomotion = vec![1]; // the stout limb
+        let mut weak = mobile_body();
+        weak.locomotion = vec![2]; // the slender limb, same stride
+        let vstr = locomotion_speed(&strong, &organs, Fixed::ONE, &p);
+        let vw = locomotion_speed(&weak, &organs, Fixed::ONE, &p);
         assert!(
-            vb > vs,
-            "the larger, more active body has the greater ground speed"
+            vstr > vw,
+            "the stronger limb moves the body faster at equal stride ({vstr:?} > {vw:?})"
+        );
+        assert!(
+            vw > Fixed::ZERO,
+            "the slender limb still bears its load and moves"
+        );
+    }
+
+    #[test]
+    fn a_strong_limbed_lineage_disperses_faster_than_a_weak_limbed_one() {
+        // The blind concept-verification on the run-path locomotion step: two beings identical but for
+        // their limb's structural strength (the stout section vs the slender near-yield one, at EQUAL
+        // stride), each driven by a controller that wants to move but knows of no source, so it explores.
+        // Given the same id and seed they draw the IDENTICAL sequence of exploration headings, so the only
+        // difference is the step SIZE, the grown-limb speed. The stouter limb reads a greater LOCOMOTE
+        // capability, pushes off faster, and ends farther from the origin: with the sqrt(body_mass) proxy
+        // retired, movement speed is a physics read of the limb, so a strong-limbed lineage disperses
+        // faster, and the property manifests in the run, not only in the pure-speed unit read above.
+        let organs = strength_registry();
+        let reg = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let p = LocomotionParams::dev_default();
+        // A controller that always wants to move but authors no heading, so it explores every tick.
+        let n_in = l.n_in();
+        let mut wts = vec![Fixed::ZERO; l.weight_count()];
+        wts[n_in - 1] = Fixed::ONE; // move_act bias positive; no directional weights
+        let mover = Controller::from_weights(n_in, l.n_out(), l.hidden(), wts);
+        let disperse2 = |mode: u16| -> Fixed {
+            let mut body = mobile_body();
+            body.locomotion = vec![mode];
+            let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            let phys = Physiology::dev_for_registry(&reg);
+            let mut ws = vec![Walker::new(
+                StableId(1),
+                Coord3::ground(0, 0),
+                body,
+                homeo,
+                phys,
+                mover.clone(),
+            )];
+            let mut field = ResourceField::new(); // no source: the being explores
+            for t in 0..15u64 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &organs,
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    SEED,
+                    t,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                );
+            }
+            let (x, y) = (ws[0].x, ws[0].y);
+            x.mul(x) + y.mul(y) // squared displacement from the origin
+        };
+        let stout = disperse2(1);
+        let slender = disperse2(2);
+        assert!(
+            stout > slender,
+            "the strong-limbed being disperses farther from the origin ({stout:?} > {slender:?})"
         );
     }
 
     #[test]
     fn difficult_terrain_slows_a_body() {
+        let organs = BodyPlanRegistry::dev_default();
         let p = LocomotionParams::dev_default();
         let body = mobile_body();
-        let open = locomotion_speed(&body, Fixed::ONE, &p);
-        let rough = locomotion_speed(&body, Fixed::from_int(3), &p);
+        let open = locomotion_speed(&body, &organs, Fixed::ONE, &p);
+        let rough = locomotion_speed(&body, &organs, Fixed::from_int(3), &p);
         assert!(rough < open, "costlier ground slows the body");
     }
 
