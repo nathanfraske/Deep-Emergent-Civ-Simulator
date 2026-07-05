@@ -2694,4 +2694,172 @@ source = "test"
             "but the signed thermoreceptor distinguishes them"
         );
     }
+
+    #[test]
+    fn a_being_forms_the_harm_belief_through_the_runner_and_the_falsifier_holds() {
+        // Harm-learning arc slice d, the run-level acceptance of the FORMATION loop and its falsifier,
+        // through the actual Runner tick: a being whose body stands on a salt cell feels its own
+        // CONDITION fall, senses the salinity underfoot, and COMMITS the "this feature harms me" belief
+        // for itself in its mind, with no injected observation. The falsifier (remove the harm: a fully
+        // tolerant being on the identical salt) forms no such belief, so the belief tracks the felt harm,
+        // not the mere presence of the substance. This ties the whole learner path end to end through
+        // couple_conversation, which the unit tests exercise piecewise.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::{feature_bucket, PerceptId, PerceptRegistry};
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A registry with the required non-draining TEMPERATURE axis and the CONDITION reserve the salt
+        // harm wears. No draining energy axis, so the being lives on its CONDITION until the salt wears it.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    // A large condition reserve so the being survives several ticks of salt harm and
+                    // accumulates enough correlation evidence to COMMIT the belief before it is worn
+                    // through (the formation, not the mortality, is what this test measures; the cull is
+                    // proven elsewhere).
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let salt_physiology = |tolerance: Fixed| Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: [(crate::physiology::SALINITY.to_string(), tolerance)]
+                .into_iter()
+                .collect(),
+            hill: [(crate::physiology::SALINITY.to_string(), 2u8)]
+                .into_iter()
+                .collect(),
+        };
+
+        // The salt feature-subject the being should form a belief about: channel 0 (the one declared
+        // salinity percept), bucket of the flat's dose under the dev feature granularity. A fully-
+        // evaporated salt flat's dose (two), which wears a naive being faster than it heals.
+        let dose = Fixed::from_int(2);
+        let percepts = PerceptRegistry::dev_salinity();
+        assert_eq!(percepts.percepts()[0].id, PerceptId(0));
+        let subject = feature_subject(0, feature_bucket(dose, Fixed::ONE));
+
+        // Run the being on the salt for a few ticks (an idle, blank controller, so it stays on the salt),
+        // capturing the first HARMS commit before the salt eventually wears it through.
+        let run = |tolerance: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x5A17,
+            );
+            emb.set_percepts(percepts.clone());
+            let blank = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    salt_physiology(tolerance),
+                    blank,
+                ),
+                band(),
+            );
+            // The salt cell the being stands on (a bio.salinity toxin dose), and a benign neighbourhood.
+            let mut salt_toxins = BTreeMap::new();
+            salt_toxins.insert(crate::physiology::SALINITY.to_string(), dose);
+            emb.resources_mut().set(
+                tile,
+                Composition {
+                    nutrients: BTreeMap::new(),
+                    toxins: salt_toxins,
+                },
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            let mut committed = None;
+            for _ in 0..10 {
+                runner.step();
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => {
+                        if let Some(v) = m.belief(subject, HARM_ATTR, &bp) {
+                            committed = Some(v);
+                        }
+                    }
+                    None => break, // the being died; keep the last committed value
+                }
+            }
+            committed
+        };
+
+        // The naive being (low salt tolerance) is worn by the salt, feels it, and forms the HARMS belief
+        // for itself through the runner, with no injected observation.
+        assert_eq!(
+            run(Fixed::from_ratio(1, 5)),
+            Some(HARMS),
+            "a naive being on the salt forms the HARMS belief for itself through the runner"
+        );
+        // The falsifier: a fully tolerant being takes no harm from the identical salt, so it forms no
+        // HARMS belief. The belief tracks the felt harm, not the substance's presence.
+        assert_ne!(
+            run(Fixed::from_int(5)),
+            Some(HARMS),
+            "remove the harm (full salt tolerance) and no HARMS belief forms: the belief tracks harm"
+        );
+    }
 }
