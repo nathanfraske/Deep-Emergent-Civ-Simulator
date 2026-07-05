@@ -96,6 +96,7 @@ use crate::learn::{
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::material::MaterialField;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -843,6 +844,14 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// The located material substrate the world is made of (material-substrate arc, cascade item 1):
+    /// a per-cell mixture of physics substances by volume. EMPTY by default, so a scenario that
+    /// declares no material layer folds nothing into `state_hash` and replays bit-for-bit (the opt-in
+    /// empty default). The world-build populates it ([`Embodiment::set_material`]) to opt a world into
+    /// matter; nothing on the run path reads its derived hardness or density yet (that arrives with the
+    /// extraction contest), so this slice folds the substrate into the canonical state without a
+    /// consumer.
+    material: MaterialField,
 }
 
 impl Embodiment {
@@ -890,6 +899,7 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            material: MaterialField::new(),
         }
     }
 
@@ -935,6 +945,24 @@ impl Embodiment {
     /// body-to-medium exchange rate. Opt-in: an embodiment without it keeps the scalar path unchanged.
     pub fn set_physiology(&mut self, physiology: EmbodiedPhysiology) {
         self.physiology = Some(physiology);
+    }
+
+    /// Install the located material substrate the world is made of (material-substrate arc, cascade
+    /// item 1): the per-cell substance mixture the ground is built from. Opt-in, like [`set_percepts`]
+    /// and [`set_physiology`]: an embodiment without it keeps an empty material layer, so folding the
+    /// substrate into `state_hash` is byte-identical and every existing scenario replays bit-for-bit.
+    /// A populated layer becomes canonical dynamic state (matter is moved, deposited, and consumed as
+    /// the cascade wires up), so it folds into the hash from here.
+    pub fn set_material(&mut self, material: MaterialField) {
+        self.material = material;
+    }
+
+    /// The located material substrate, for reading (a pure read; the derived hardness and density a
+    /// contest works against are read against a [`civsim_physics::PhysicsRegistry`] the caller supplies).
+    /// The run-path write accessor (extraction, deposit, decay) arrives with its first consumer, so the
+    /// mutation stays an id-sorted sequential draw off hashed state.
+    pub fn material(&self) -> &MaterialField {
+        &self.material
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
@@ -2113,6 +2141,11 @@ impl Runner {
             // level liveliness step 3): dynamic state that must fold, or a divergence in the regrow-and-
             // graze loop would pass replay while hiding. Walks canonical (coordinate, class) order.
             emb.resources.hash_into(&mut h);
+            // The located material substrate (material-substrate arc, cascade item 1): the per-cell
+            // substance mixture the world is made of, folded beside the resource field in canonical
+            // (Coord3, substance-id, volume) order. Empty for every scenario that declares no material
+            // layer, so folding it writes no bytes and the run is byte-identical (the opt-in default).
+            emb.material.hash_into(&mut h);
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {

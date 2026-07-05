@@ -427,6 +427,95 @@ fn the_interoceptive_delta_fold_is_deterministic_and_scheduler_invariant() {
 }
 
 #[test]
+fn the_material_substrate_folds_into_state_hash_and_stays_deterministic() {
+    // Material-substrate arc slice 1 WIRE determinism guard: a populated material layer is canonical
+    // dynamic state that folds into state_hash beside the resource field, in canonical (Coord3,
+    // substance-id, volume) order and drawing no randomness, so a runner carrying matter replays bit
+    // for bit and folds identically between the pinned order and the scheduler variant. An empty
+    // material layer (every existing scenario) folds no bytes, so the fold is byte-identical there
+    // (carried by every existing suite); this test proves the fold is live and order-invariant.
+    use civsim_sim::material::{MaterialField, SubstanceMix};
+
+    let setpoint = 305;
+    let material = || -> MaterialField {
+        let mut field = MaterialField::new();
+        let mut ground = SubstanceMix::new();
+        ground.set("granite", Fixed::from_int(4));
+        ground.set("soil", Fixed::from_int(1));
+        field.set_cell(Coord3::ground(2, 3), ground);
+        // A subsurface ore deposit, exercising a non-ground z and the deposit path.
+        field.deposit(Coord3 { x: 5, y: 1, z: -1 }, "ore", Fixed::from_int(2));
+        field
+    };
+    let build = |with_material: bool| -> Runner {
+        let (organs, fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        if with_material {
+            emb.set_material(material());
+        }
+        let blank = Controller::zeros(emb.layout());
+        emb.add(
+            resting_walker(
+                1,
+                Coord3::ground(1, 1),
+                body((3, 4), vec![organ(fat, (3, 4))]),
+                &reg,
+                &organs,
+                blank,
+            ),
+            band(setpoint),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
+    };
+
+    let trace = |mut r: Runner, scheduled: bool| -> Vec<u128> {
+        (0..30)
+            .map(|_| {
+                if scheduled {
+                    r.step_scheduled(&[]);
+                } else {
+                    r.step();
+                }
+                r.state_hash()
+            })
+            .collect()
+    };
+
+    // With matter in the ground, the coupled runner replays bit for bit and folds identically between
+    // the pinned order and the scheduler variant.
+    let pinned_a = trace(build(true), false);
+    let pinned_b = trace(build(true), false);
+    assert_eq!(
+        pinned_a, pinned_b,
+        "the material-bearing runner did not replay bit for bit"
+    );
+    let scheduled = trace(build(true), true);
+    assert_eq!(
+        pinned_a, scheduled,
+        "the material fold diverged between the pinned order and the scheduler"
+    );
+
+    // The fold is live: a populated material layer changes the hash versus an empty one (the opt-out
+    // state every existing scenario stays in), so the substrate is part of the canonical state.
+    let empty = trace(build(false), false);
+    assert_ne!(
+        pinned_a, empty,
+        "folding the material layer left the hash unchanged, so it is not canonical"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
