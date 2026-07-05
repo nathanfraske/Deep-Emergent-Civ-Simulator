@@ -204,6 +204,54 @@ fn pierce(
     normalize(depth, refs.reference_penetration_depth)
 }
 
+/// The CUT capability of a part's edge against a SPECIFIC target material (material-substrate arc, cascade
+/// item 4, crafting, the load-bearing seam). It runs the same contact-pressure-into-penetration contest
+/// [`pierce`] does, but the resistance it must defeat is read from the TARGET's own material axes
+/// (`mat.indentation_hardness`, `mat.specific_cut_energy`) rather than the one global reference target
+/// [`pierce`] measures against. So the same edge cuts soft hide well and hard granite poorly, and a harder
+/// sharper edge parts stone a softer blunter one cannot, diverging on the target's substance DATA alone,
+/// never a per-material branch: mining flint versus granite and cutting hide versus wood become one
+/// contest over different target rows. The part's own `mat.indentation_hardness` still caps the pressure a
+/// soft edge sustains before it blunts, so a soft tool cannot exceed a hard target's resistance however
+/// sharp; the strike force, delivered energy, and reference depth stay reserved.
+///
+/// A target axis the substance does not carry reads zero (the absence convention): a target with no
+/// declared hardness or cutting energy offers no resistance and cuts fully, the same zero-for-absent rule
+/// the leaf read holds. A pure fixed-point read, opt-in beside [`derive_capabilities`] so declaring it
+/// changes no existing capability score. The follow-on that folds CUT into [`FunctionLawRegistry`] as a
+/// data-bound kernel (retiring [`pierce`]'s global reference target) lands when a consumer reads it.
+pub fn cut_capability_against_target(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    target: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> Fixed {
+    let contact_area = geo("mech.contact_area");
+    if contact_area <= Fixed::ZERO {
+        return Fixed::ZERO; // no edge, no contact: nothing to cut with
+    }
+    let applied = laws::contact_pressure(refs.reference_strike_force, contact_area, caps.pressure);
+    let hardness = mat("mat.indentation_hardness");
+    let effective = if hardness > Fixed::ZERO {
+        applied.min(hardness)
+    } else {
+        applied
+    };
+    // The penetration into THIS target: zero unless the effective pressure clears the target's own
+    // hardness, then graded by the delivered energy over the target's own cutting energy. Both are read
+    // from the target closure, so the divergence between targets is substance data, not code.
+    let depth = laws::cut_penetrate(
+        effective,
+        target("mat.indentation_hardness"),
+        refs.reference_delivered_energy,
+        target("mat.specific_cut_energy"),
+        contact_area,
+        caps.depth,
+    );
+    normalize(depth, refs.reference_penetration_depth)
+}
+
 /// Normalize a raw physics reading to `[0, 1]` against a reserved reference level (the reading that
 /// counts as full capability). A non-positive reference reads zero (an unset reference offers no
 /// capability rather than a fabricated one); an overflow in the division reads full.
@@ -509,6 +557,66 @@ mod tests {
             hide_pierce,
             Fixed::ZERO,
             "a soft blunt surface is not a weapon: it does not clear the target hardness"
+        );
+    }
+
+    #[test]
+    fn a_cut_reads_the_targets_own_material_so_the_same_edge_diverges_by_target() {
+        // The crafting seam (material-substrate item 4): a cut contest reads the TARGET's material, so the
+        // same edge parts a soft target and stalls on a hard one, and a harder sharper edge parts stone a
+        // softer one cannot, all from the target's substance data with no per-material branch.
+        let refs = CapabilityRefs::dev_refs();
+        let caps = test_caps();
+        // A modest flint edge: a small contact area, a moderate own hardness.
+        let edge_geo = geo_of([("mech.contact_area", "0.00000005")].into_iter().collect());
+        let edge_mat = mat_of([("mat.indentation_hardness", "500")].into_iter().collect());
+        // A soft target (hide): low hardness, low cutting energy. A hard target (granite): high both.
+        let hide = mat_of(
+            [
+                ("mat.indentation_hardness", "5"),
+                ("mat.specific_cut_energy", "2"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let granite = mat_of(
+            [
+                ("mat.indentation_hardness", "5000"),
+                ("mat.specific_cut_energy", "1000"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let on_hide = cut_capability_against_target(&edge_geo, &edge_mat, &hide, &refs, &caps);
+        let on_granite =
+            cut_capability_against_target(&edge_geo, &edge_mat, &granite, &refs, &caps);
+        assert!(
+            on_hide > Fixed::ZERO,
+            "the edge parts soft hide: {on_hide:?}"
+        );
+        assert_eq!(
+            on_granite,
+            Fixed::ZERO,
+            "the same edge cannot part granite: its pressure does not clear the harder target"
+        );
+
+        // A harder, sharper edge (a smaller contact patch, a harder own material) raises its effective
+        // pressure over granite's hardness and parts it: a better tool works harder matter, the crafting
+        // payoff, from geometry and material alone.
+        let pick_geo = geo_of([("mech.contact_area", "0.000000005")].into_iter().collect());
+        let pick_mat = mat_of([("mat.indentation_hardness", "6000")].into_iter().collect());
+        let pick_on_granite =
+            cut_capability_against_target(&pick_geo, &pick_mat, &granite, &refs, &caps);
+        assert!(
+            pick_on_granite > Fixed::ZERO,
+            "a harder sharper edge parts the granite the softer one could not: {pick_on_granite:?}"
+        );
+
+        // The contest reads the target: the same edge on two targets differs only because the target data
+        // differs, no branch on a material name.
+        assert!(
+            on_hide > on_granite,
+            "the divergence is the target's substance data, not the edge"
         );
     }
 
