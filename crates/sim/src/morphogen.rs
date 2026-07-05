@@ -81,14 +81,17 @@ pub struct MorphogenProgram {
     pub geometry_axes: Vec<AxisSpec>,
     /// The material axes a segment carries (`mat.*`, `opt.*`), each with its floor range.
     pub material_axes: Vec<AxisSpec>,
-    /// The biology-floor tissue-composition axes a segment carries (`bio.*`, energy density, water fraction,
-    /// and the rest), each with its floor range (emergent-anatomy Step 3, the metabolic-tier grow). These are
-    /// grown into the same per-segment material map as the mechanical and optical axes, but they feed the
-    /// METABOLISM rather than the function-law dispatch: a grown body's reserve capacity is summed directly
-    /// off this composition ([`Structure::backed_capacity`]), so a grown body sources its own metabolism from
-    /// its tissue with no organ kind id. Their parameters sit AFTER the branch and spawn parameters, so adding
-    /// a bio axis does not shift the geometry, material, branch, or spawn parameter indices.
-    pub bio_axes: Vec<AxisSpec>,
+    /// The tissue-composition axes a segment carries that feed the METABOLISM rather than the function-law
+    /// dispatch (emergent-anatomy Step 3, the metabolic-tier grow): the biology-floor `bio.*` axes (energy
+    /// density, water fraction, convective and respiratory surface), the `mat.fracture_strength` a muscle's
+    /// force integrates over, the `therm.specific_heat` a body's thermal mass reads, and the `mat.density` its
+    /// buoyancy reads, each with its floor range. These are grown into the same per-segment material map as
+    /// the mechanical and optical axes, but a grown body's reserve capacity, muscle force, exchange surface,
+    /// and thermal mass are summed or averaged directly off this composition ([`Structure::composition_sum`],
+    /// [`Structure::composition_mean`]), so a grown body sources its own metabolism and physiology from its
+    /// tissue with no organ kind id. Their parameters sit AFTER the branch and spawn parameters, so adding a
+    /// composition axis does not shift the geometry, material, branch, or spawn parameter indices.
+    pub composition_axes: Vec<AxisSpec>,
     /// RESERVED. The hard cap on growth generations (recursion depth), a termination guarantee. Basis: the
     /// number of developmental tiers a body plan represents (a handful), a performance-and-termination
     /// bound rather than a realism one.
@@ -106,7 +109,7 @@ impl MorphogenProgram {
     /// per-generation growth fraction, per material axis a fraction, plus a branch fraction and a spawn
     /// fraction. The morphogen block appended to a founder gene set is this many loci.
     pub fn param_count(&self) -> usize {
-        self.geometry_axes.len() * 2 + self.material_axes.len() + 2 + self.bio_axes.len()
+        self.geometry_axes.len() * 2 + self.material_axes.len() + 2 + self.composition_axes.len()
     }
 
     /// The parameter index of geometry axis `i`'s root fraction.
@@ -136,7 +139,7 @@ impl MorphogenProgram {
 
     /// The parameter index of bio axis `i`'s tissue-composition fraction, placed AFTER the spawn parameter so
     /// adding a bio axis does not shift the geometry, material, branch, or spawn indices.
-    fn bio_param(&self, i: usize) -> usize {
+    fn composition_param(&self, i: usize) -> usize {
         self.spawn_param() + 1 + i
     }
 
@@ -164,11 +167,15 @@ impl MorphogenProgram {
                 geo("mat.yield_strength", dec("1"), dec("200")),
                 geo("opt.refractive_index", dec("1"), dec("1.5")),
             ],
-            // The biology-floor tissue-composition axes the metabolism reads: energy density (gross bomb
-            // calorimetry, kJ/g) and water fraction, the two the dev homeostatic reserves back. RESERVED
-            // (the floor's own axis ranges, biology_floor.toml); labelled dev fixtures until a floor registry
-            // supplies them.
-            bio_axes: vec![
+            // The tissue-composition axes the metabolism and physiology read. RESERVED (the floor's own axis
+            // ranges, biology_floor.toml and the mechanical/thermal floors); labelled dev fixtures until a
+            // floor registry supplies them. The convective surface, muscle strength, and specific heat lead;
+            // energy density and water fraction stay LAST so a caller addressing them by `param_count() - 2`
+            // and `- 1` (the two the reserves back) is stable as more physiology axes are added.
+            composition_axes: vec![
+                geo("bio.convective_surface", dec("0"), dec("500")),
+                geo("mat.fracture_strength", dec("0"), dec("200")),
+                geo("therm.specific_heat", dec("0"), dec("5000")),
                 geo("bio.energy_density", dec("0"), dec("38")),
                 geo("bio.water_fraction", dec("0"), dec("1")),
             ],
@@ -294,16 +301,16 @@ impl Structure {
         best
     }
 
-    /// The metabolic reserve capacity a grown body's tissue backs on a biology-floor axis (emergent-anatomy
-    /// Step 3, the metabolic-tier grow): the sum over grown segments of each segment's development-weighted
-    /// tissue composition on that axis. It mirrors how [`crate::homeostasis::Homeostasis::new`] sums a catalog
-    /// organ set (`Σ development · composition`), but reads DIRECTLY off the grown segments' `bio.*` composition
-    /// with no organ kind id and no registry, the metabolic sibling of the affordance and speed direct reads.
-    /// Each segment's development is a uniform fraction of a full body (`1 / MASS_REFERENCE_SEGMENTS`, the same
-    /// reference the digest's `body_mass` uses, so the reserve scale and the mass scale agree). A body whose
-    /// grown tissue carries none of the axis backs no reserve there (the absence convention), so an
-    /// energy-less grown body carries no energy reserve and starves at birth through the ordinary cull.
-    pub fn backed_capacity(&self, axis_id: &str) -> Fixed {
+    /// The development-weighted SUM of a grown body's tissue composition on an axis (emergent-anatomy Step 3,
+    /// the metabolic-tier grow): `Σ over segments of (per-segment development · composition)`. It mirrors how
+    /// [`crate::homeostasis::Homeostasis::new`] and the whole-body physiology reads sum a catalog organ set
+    /// (`Σ development · composition`), but reads DIRECTLY off the grown segments with no organ kind id and no
+    /// registry, the metabolic sibling of the affordance and speed direct reads. Each segment's development is
+    /// a uniform fraction of a full body (`1 / MASS_REFERENCE_SEGMENTS`, the same reference the digest's
+    /// `body_mass` uses, so the reserve scale and the mass scale agree). An extensive quantity (a reserve
+    /// capacity, an exchange surface, a muscle's total strength) reads as this sum; a body whose grown tissue
+    /// carries none of the axis reads zero (the absence convention).
+    pub fn composition_sum(&self, axis_id: &str) -> Fixed {
         let per_segment = Fixed::from_ratio(1, MASS_REFERENCE_SEGMENTS as i64);
         let mut sum = Fixed::ZERO;
         for seg in &self.segments {
@@ -315,24 +322,37 @@ impl Structure {
         sum
     }
 
-    /// The whole-body per-mass energy density a grown body's tissue reads (`bio.energy_density`), the
-    /// specific energy the derived metabolic drain reads to bridge the reserve to stored joules
-    /// (emergent-anatomy Step 3): the development-weighted average over the grown segments, mirroring
-    /// [`crate::physiology::whole_body_energy_density`] over a catalog organ set but read DIRECTLY off the
-    /// grown tissue. Every grown segment carries the same development, so this is the mean of the segments'
-    /// energy density. Zero for a body with no energy tissue (which starves at once, so the derived drain is
-    /// never reached on it).
-    pub fn whole_body_energy_density(&self) -> Fixed {
+    /// The mean of a grown body's tissue composition on an axis, over the grown segments (emergent-anatomy
+    /// Step 3). An intensive quantity (a per-mass energy density, a specific heat, a density) reads as this
+    /// mean rather than a sum; every grown segment carries the same development, so the development-weighted
+    /// average is the plain mean. Zero for a body with no segments (which cannot arise, a body has a root).
+    pub fn composition_mean(&self, axis_id: &str) -> Fixed {
         let n = self.segments.len();
         if n == 0 {
             return Fixed::ZERO;
         }
         let mut sum = Fixed::ZERO;
         for seg in &self.segments {
-            sum = sum.saturating_add(seg.mat("bio.energy_density"));
+            sum = sum.saturating_add(seg.mat(axis_id));
         }
         sum.checked_div(Fixed::from_int(n as i32))
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The metabolic reserve capacity a grown body's tissue backs on a biology-floor axis: the extensive
+    /// [`Structure::composition_sum`] on that axis (energy density, water fraction), which
+    /// [`crate::homeostasis::Homeostasis::from_structure`] sums into a reserve. A body whose tissue carries no
+    /// energy backs no energy reserve and starves at birth through the ordinary cull.
+    pub fn backed_capacity(&self, axis_id: &str) -> Fixed {
+        self.composition_sum(axis_id)
+    }
+
+    /// The whole-body per-mass energy density a grown body's tissue reads (`bio.energy_density`), the specific
+    /// energy the derived metabolic drain reads to bridge the reserve to stored joules: the intensive
+    /// [`Structure::composition_mean`] on that axis, mirroring [`crate::physiology::whole_body_energy_density`]
+    /// over a catalog organ set but read DIRECTLY off the grown tissue.
+    pub fn whole_body_energy_density(&self) -> Fixed {
+        self.composition_mean("bio.energy_density")
     }
 
     /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
@@ -485,8 +505,8 @@ pub fn grow(program: &MorphogenProgram, params: &[Fixed], seed: u64, id: StableI
     // function-geometry, and a child inherits it exactly as it inherits the material. This is what the
     // metabolism sums off ([`Structure::backed_capacity`]); the function-law dispatch reads only the
     // mechanical and optical axes, so the bio composition is metabolic-only and blind to the affordance reads.
-    for (i, spec) in program.bio_axes.iter().enumerate() {
-        let f = frac(params, program.bio_param(i));
+    for (i, spec) in program.composition_axes.iter().enumerate() {
+        let f = frac(params, program.composition_param(i));
         material.insert(spec.axis.clone(), map_range(f, spec.lo, spec.hi));
     }
     let mut segments = vec![Segment {
@@ -843,7 +863,7 @@ mod tests {
         // density backs a positive energy reserve; one whose tissue carries none backs zero and starves at
         // birth through the ordinary reserve-floor cull, never a morphology gate.
         let program = MorphogenProgram::dev_default();
-        // The bio parameters sit after spawn: energy_density then water_fraction (see `bio_param`).
+        // The bio parameters sit after spawn: energy_density then water_fraction (see `composition_param`).
         let energy = program.param_count() - 2;
         let water = program.param_count() - 1;
 
@@ -885,6 +905,54 @@ mod tests {
         assert!(
             !Homeostasis::from_structure(&reg, &energyless).is_alive(&reg),
             "an energy-less grown body carries no reserve and starves at birth"
+        );
+    }
+
+    #[test]
+    fn a_grown_body_sums_and_averages_its_physiology_composition() {
+        // Emergent-anatomy Step 3, the derived-physiology grow: a grown body reads its exchange surface and
+        // muscle strength as an extensive SUM over its tissue (`composition_sum`) and its specific heat as an
+        // intensive MEAN (`composition_mean`), directly off the grown segments with no organ kind id, exactly
+        // as the reserve capacity and energy density do. A body whose tissue carries none reads zero.
+        let program = MorphogenProgram::dev_default();
+        let n = program.param_count();
+        // The physiology composition params lead the composition block (convective surface, fracture
+        // strength, specific heat), before the energy density and water fraction the reserves back.
+        let surface = n - 5;
+        let fracture = n - 4;
+        let specific_heat = n - 3;
+        let grown = grow(
+            &program,
+            &params(
+                &program,
+                &[(surface, "0.5"), (fracture, "0.5"), (specific_heat, "0.5")],
+            ),
+            0x1,
+            StableId(1),
+        );
+        assert!(
+            grown.composition_sum("bio.convective_surface") > Fixed::ZERO,
+            "a grown body sums its exchange surface off its tissue"
+        );
+        assert!(
+            grown.composition_sum("mat.fracture_strength") > Fixed::ZERO,
+            "and its muscle strength"
+        );
+        assert!(
+            grown.composition_mean("therm.specific_heat") > Fixed::ZERO,
+            "and averages its specific heat"
+        );
+
+        let bare = grow(
+            &program,
+            &vec![Fixed::ZERO; program.param_count()],
+            0x1,
+            StableId(1),
+        );
+        assert_eq!(
+            bare.composition_sum("bio.convective_surface"),
+            Fixed::ZERO,
+            "a body with no such tissue reads zero"
         );
     }
 
