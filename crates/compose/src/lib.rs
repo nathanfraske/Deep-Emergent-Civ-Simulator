@@ -48,6 +48,7 @@
 //! threshold derives to the physics collapse boundary, the interface penalty curve and the proxy
 //! criticality weights are reserved-with-basis and supplied by the caller.
 
+pub mod capability;
 pub mod combinator;
 pub mod eval;
 pub mod form;
@@ -57,6 +58,10 @@ pub mod node;
 pub mod promote;
 pub mod proxy;
 
+pub use capability::{
+    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
+    FunctionLawDef, FunctionLawId, FunctionLawRegistry,
+};
 pub use combinator::{CombinatorDef, CombinatorKernel, CombinatorKey, CombinatorRegistry};
 pub use eval::{
     evaluate_node, evaluate_uncached, ComposeError, EvalParams, Memo, NodeEval, PenaltyCurve,

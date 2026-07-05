@@ -273,7 +273,7 @@ pub fn whole_body_energy_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> 
 /// The body's mass in kilograms: the normalized `body_mass` trait times the reserved kilogram bridge.
 /// An overflowing product routes to zero (an unrepresentably huge body has no meaningful metabolism
 /// here), matching the law kernels' degenerate-input convention.
-fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
+pub fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
     plan.body_mass
         .checked_mul(anchors.body_mass_kg_scale)
         .unwrap_or(Fixed::ZERO)
@@ -290,6 +290,38 @@ pub fn derive_base_drain(
     plan: &BodyPlan,
     organs: &BodyPlanRegistry,
     energy_capacity: Fixed,
+    energy_density: Fixed,
+    ambient_temp: Fixed,
+    setpoint: Fixed,
+    medium_h: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> Fixed {
+    base_drain_from(
+        plan,
+        energy_capacity,
+        energy_density,
+        whole_body_surface(plan, organs),
+        ambient_temp,
+        setpoint,
+        medium_h,
+        tick,
+        anchors,
+    )
+}
+
+/// The base drain over EXPLICIT composition scalars (the exposed surface and per-mass energy density),
+/// supplied by the caller from either a catalog organ set ([`derive_base_drain`]) or a GROWN body's grown
+/// tissue ([`crate::morphogen::Structure::composition_sum`] / `whole_body_energy_density`), so a fully grown
+/// body pays its thermoregulatory and basal drain off its own tissue rather than the empty digest's zeros
+/// (emergent-anatomy Step 3, the derived-physiology grow). The math is identical; only the source of the
+/// surface and energy density differs.
+#[allow(clippy::too_many_arguments)]
+pub fn base_drain_from(
+    plan: &BodyPlan,
+    energy_capacity: Fixed,
+    energy_density: Fixed,
+    surface: Fixed,
     ambient_temp: Fixed,
     setpoint: Fixed,
     medium_h: Fixed,
@@ -300,10 +332,9 @@ pub fn derive_base_drain(
     let basal = laws::basal_metabolic_rate(mass_kg, anchors.kleiber_a, RATE_MAX);
     // At rest the body holds its set point; the thermoregulatory demand is the heat shed to the medium
     // at that core temperature over the body's exposed surface.
-    let area = whole_body_surface(plan, organs);
     let heat_loss = laws::resting_heat_loss(
         medium_h,
-        area,
+        surface,
         setpoint,
         ambient_temp,
         anchors.emissivity,
@@ -316,7 +347,6 @@ pub fn derive_base_drain(
     // R-UNITS-PIN owner calibration (the honest units limit); the mechanism derives, the absolute scale
     // is the owner's anchors and the floor's energy-density units.
     let reserve_mass = energy_capacity.checked_mul(mass_kg).unwrap_or(Fixed::ZERO);
-    let energy_density = whole_body_energy_density(plan, organs);
     laws::metabolic_drain_fraction(
         basal,
         heat_loss,
@@ -338,19 +368,19 @@ pub fn derive_base_drain(
 /// exertion term a thousand times too small).
 pub fn derive_exertion_coupling(
     plan: &BodyPlan,
-    organs: &BodyPlanRegistry,
     energy_capacity: Fixed,
+    energy_density: Fixed,
     force: Fixed,
     velocity: Fixed,
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
     let work_power = laws::power_watts(force, velocity, POWER_MAX);
-    // The same size-scaled reserve-energy bridge as the base drain (see derive_base_drain).
+    // The same size-scaled reserve-energy bridge as the base drain (see derive_base_drain). The per-mass
+    // energy density is supplied by the caller, so a grown body reads its own grown tissue.
     let reserve_mass = energy_capacity
         .checked_mul(body_mass_kg(plan, anchors))
         .unwrap_or(Fixed::ZERO);
-    let energy_density = whole_body_energy_density(plan, organs);
     laws::metabolic_drain_fraction(
         work_power,
         Fixed::ZERO,
@@ -376,8 +406,30 @@ pub fn derive_body_exchange_rate(
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
-    let area = whole_body_surface(plan, organs);
-    let ha = match medium_h.checked_mul(area) {
+    body_exchange_rate_from(
+        plan,
+        whole_body_surface(plan, organs),
+        whole_body_specific_heat(plan, organs),
+        medium_h,
+        tick,
+        anchors,
+    )
+}
+
+/// The body-to-medium thermal exchange rate over EXPLICIT composition scalars (the exposed surface and the
+/// specific heat), supplied by the caller from either a catalog organ set ([`derive_body_exchange_rate`]) or
+/// a GROWN body's grown tissue ([`crate::morphogen::Structure::composition_sum`] / `composition_mean`), so a
+/// fully grown body couples to the medium off its own tissue rather than the empty digest's zeros
+/// (emergent-anatomy Step 3, the derived-physiology grow). The math is identical.
+pub fn body_exchange_rate_from(
+    plan: &BodyPlan,
+    surface: Fixed,
+    specific_heat: Fixed,
+    medium_h: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> Fixed {
+    let ha = match medium_h.checked_mul(surface) {
         Some(x) => x,
         None => return Fixed::ONE,
     };
@@ -386,8 +438,7 @@ pub fn derive_body_exchange_rate(
         return Fixed::ZERO;
     }
     let mass_kg = body_mass_kg(plan, anchors);
-    let c = whole_body_specific_heat(plan, organs);
-    let mc = match mass_kg.checked_mul(c) {
+    let mc = match mass_kg.checked_mul(specific_heat) {
         Some(x) => x,
         // An enormous thermal mass barely responds over one tick.
         None => return Fixed::ZERO,
@@ -625,6 +676,7 @@ mod tests {
             &small,
             &organs,
             cap_small,
+            whole_body_energy_density(&small, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -635,6 +687,7 @@ mod tests {
             &large,
             &organs,
             cap_large,
+            whole_body_energy_density(&large, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -672,6 +725,7 @@ mod tests {
             &plan,
             &organs,
             cap,
+            whole_body_energy_density(&plan, &organs),
             Fixed::from_int(250),
             setpoint,
             anchors.medium_h,
@@ -682,6 +736,7 @@ mod tests {
             &plan,
             &organs,
             cap,
+            whole_body_energy_density(&plan, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -705,12 +760,13 @@ mod tests {
         // watt-scale basal drain it is summed with), kept below the full-drain saturation so the
         // scaling with velocity is visible.
         let force = Fixed::ONE;
+        let ed = whole_body_energy_density(&plan, &organs);
         let slow =
-            derive_exertion_coupling(&plan, &organs, cap, force, Fixed::ONE, Fixed::ONE, &anchors);
+            derive_exertion_coupling(&plan, cap, ed, force, Fixed::ONE, Fixed::ONE, &anchors);
         let fast = derive_exertion_coupling(
             &plan,
-            &organs,
             cap,
+            ed,
             force,
             Fixed::from_int(4),
             Fixed::ONE,
@@ -835,6 +891,7 @@ source = "test"
                 &plan,
                 &organs,
                 cap,
+                whole_body_energy_density(&plan, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
                 anchors.medium_h,

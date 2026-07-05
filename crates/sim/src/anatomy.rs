@@ -30,11 +30,39 @@ use civsim_core::{Fixed, Rng};
 
 /// A body-plan trait kind (a natural weapon, a covering, a sense, or a locomotion mode). The
 /// membership of each registry is data; `fantasy` gates a kind on a magical world profile.
+///
+/// A kind carries crude GEOMETRY (form-axis values, `mech.*`) and MATERIAL (mechanical-floor axis
+/// values, `mat.*`), the same string-keyed sorted-walk composition shape [`TissueComposition`] uses, so a
+/// part's FUNCTION is read from its own physics through the compose function-law dispatch
+/// (`civsim_compose::derive_capabilities`) rather than an authored tag (emergent-anatomy arc, step one).
+/// These are LABELLED DEVELOPMENT-FIXTURE values grounded in the cited floor axes, not owner canon: a
+/// claw is a small-area hard point because that is what makes it a weapon in physics, not because a
+/// person tagged it `F_STRIKE`. Growth stays crude in step one (the values are per-kind stand-ins); the
+/// developmental program of step two grows them from the genome. A kind that carries no geometry or
+/// material simply reads no capability (the zero-for-absent accessor is the natural gate).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct KindDef {
     pub id: u16,
     pub name: String,
     pub fantasy: bool,
+    /// The crude geometry the kind's part carries, keyed by form/geometry axis id (`mech.contact_area`,
+    /// `mech.edge_radius`, and the rest), sorted for a deterministic walk. Absent axis reads zero.
+    pub geometry: std::collections::BTreeMap<String, Fixed>,
+    /// The crude material the kind's part is made of, keyed by mechanical-floor axis id
+    /// (`mat.indentation_hardness`, and the rest), sorted for a deterministic walk. Absent axis reads zero.
+    pub material: std::collections::BTreeMap<String, Fixed>,
+}
+
+impl KindDef {
+    /// The kind's value on a geometry axis, or zero if it carries none (the substrate absence convention).
+    pub fn geo(&self, axis: &str) -> Fixed {
+        self.geometry.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The kind's value on a material axis, or zero if it carries none.
+    pub fn mat(&self, axis: &str) -> Fixed {
+        self.material.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
 }
 
 /// An organ's tissue composition: its value on each biology-floor material axis, keyed by the floor
@@ -104,8 +132,43 @@ fn defs(entries: &[(&str, bool)]) -> Vec<KindDef> {
             id: i as u16,
             name: name.to_string(),
             fantasy,
+            geometry: std::collections::BTreeMap::new(),
+            material: std::collections::BTreeMap::new(),
         })
         .collect()
+}
+
+/// One kind development-fixture entry with geometry and material: (name, fantasy, geometry pairs as
+/// (form-axis id, decimal), material pairs as (mat-axis id, decimal)). The geometry and material are the
+/// crude per-kind physics a part's function is derived from; labelled fixtures grounded in the floor axes.
+type KindFixture<'a> = (
+    &'a str,
+    bool,
+    &'a [(&'a str, &'a str)],
+    &'a [(&'a str, &'a str)],
+);
+
+/// Build kinds carrying crude geometry and material, so a part's function is a physics read (step one).
+/// The decimal literals are parsed the same exact way the compose form fixtures are; a malformed literal
+/// is a programming error in the fixture, never runtime input.
+fn kinds(entries: &[KindFixture]) -> Vec<KindDef> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, &(name, fantasy, geo, mat))| KindDef {
+            id: i as u16,
+            name: name.to_string(),
+            fantasy,
+            geometry: geo.iter().map(|&(a, v)| (a.to_string(), dec(v))).collect(),
+            material: mat.iter().map(|&(a, v)| (a.to_string(), dec(v))).collect(),
+        })
+        .collect()
+}
+
+/// A decimal-string to `Fixed` for the labelled kind fixtures. Panics on a malformed literal (a fixture
+/// programming error, never runtime input).
+fn dec(s: &str) -> Fixed {
+    Fixed::from_decimal_str(s).expect("kind-fixture decimal literal")
 }
 
 /// One development-fixture organ entry: (name, fantasy gate, composition as (biology-floor axis id,
@@ -135,22 +198,134 @@ impl BodyPlanRegistry {
     /// Principle-9 affordance for the high-magic worlds.
     pub fn dev_default() -> BodyPlanRegistry {
         BodyPlanRegistry {
-            weapons: defs(&[
-                ("claws", false),
-                ("teeth", false),
-                ("horns", false),
-                ("antlers", false),
-                ("tusks", false),
-                ("sting", false),
-                ("beak", false),
-                ("spines", false),
-                ("talons", false),
-                ("mandibles", false),
-                // Magical (Part 34, gated on a magic profile).
-                ("mana-lash", true),
-                ("curse-touch", true),
-                ("ember-breath", true),
-                ("frost-fang", true),
+            // Weapons carry crude PIERCE geometry (a small contact area, a sharp edge radius) and material
+            // (indentation hardness), so weapon-ness is derived from physics (a hard small-area point cuts)
+            // rather than an authored tag. Labelled fixtures inside the mechanical floor's axis ranges,
+            // grounded in real weapon materials (keratin/bone ~200-400 MPa, enamel ~3000 MPa, sclerotized
+            // chitin ~500 MPa). The magical weapons carry a placeholder mechanical form so they still read
+            // as weapons until the thaumic track derives their true magical function.
+            weapons: kinds(&[
+                (
+                    "claws",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.00000005"),
+                        ("mech.edge_radius", "0.0001"),
+                    ],
+                    &[("mat.indentation_hardness", "300")],
+                ),
+                (
+                    "teeth",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000001"),
+                        ("mech.edge_radius", "0.0002"),
+                    ],
+                    &[("mat.indentation_hardness", "3000")],
+                ),
+                (
+                    "horns",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000005"),
+                        ("mech.edge_radius", "0.001"),
+                    ],
+                    &[("mat.indentation_hardness", "250")],
+                ),
+                (
+                    "antlers",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000008"),
+                        ("mech.edge_radius", "0.002"),
+                    ],
+                    &[("mat.indentation_hardness", "200")],
+                ),
+                (
+                    "tusks",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000006"),
+                        ("mech.edge_radius", "0.0015"),
+                    ],
+                    &[("mat.indentation_hardness", "250")],
+                ),
+                (
+                    "sting",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.00000002"),
+                        ("mech.edge_radius", "0.00005"),
+                    ],
+                    &[("mat.indentation_hardness", "150")],
+                ),
+                (
+                    "beak",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000003"),
+                        ("mech.edge_radius", "0.0005"),
+                    ],
+                    &[("mat.indentation_hardness", "300")],
+                ),
+                (
+                    "spines",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.00000003"),
+                        ("mech.edge_radius", "0.00008"),
+                    ],
+                    &[("mat.indentation_hardness", "200")],
+                ),
+                (
+                    "talons",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.00000005"),
+                        ("mech.edge_radius", "0.0001"),
+                    ],
+                    &[("mat.indentation_hardness", "350")],
+                ),
+                (
+                    "mandibles",
+                    false,
+                    &[
+                        ("mech.contact_area", "0.0000002"),
+                        ("mech.edge_radius", "0.0003"),
+                    ],
+                    &[("mat.indentation_hardness", "500")],
+                ),
+                // Magical (Part 34, gated on a magic profile); placeholder mechanical form until the thaumic track.
+                (
+                    "mana-lash",
+                    true,
+                    &[
+                        ("mech.contact_area", "0.0000004"),
+                        ("mech.edge_radius", "0.0008"),
+                    ],
+                    &[("mat.indentation_hardness", "200")],
+                ),
+                (
+                    "curse-touch",
+                    true,
+                    &[("mech.contact_area", "0.0000004")],
+                    &[("mat.indentation_hardness", "100")],
+                ),
+                (
+                    "ember-breath",
+                    true,
+                    &[("mech.contact_area", "0.0000005")],
+                    &[("mat.indentation_hardness", "100")],
+                ),
+                (
+                    "frost-fang",
+                    true,
+                    &[
+                        ("mech.contact_area", "0.0000001"),
+                        ("mech.edge_radius", "0.0002"),
+                    ],
+                    &[("mat.indentation_hardness", "1000")],
+                ),
             ]),
             coverings: defs(&[
                 ("bare hide", false),
@@ -165,30 +340,129 @@ impl BodyPlanRegistry {
                 ("stone-skin", true),
                 ("phase-hide", true),
             ]),
-            senses: defs(&[
-                ("vision", false),
-                ("smell", false),
-                ("hearing", false),
-                ("vibration", false),
-                ("echolocation", false),
-                ("electroreception", false),
+            // Senses carry crude optical material (a refractive index) so an optical sense's SIGHT function
+            // is derived from physics (a lens denser than the medium focuses). The optical channel is the
+            // one wired in step one; the acoustic, chemical, and field senses read no optical contrast and
+            // are their own kernels (a documented follow-on), so they carry a placeholder index for now.
+            senses: kinds(&[
+                ("vision", false, &[], &[("opt.refractive_index", "1.4")]),
+                ("smell", false, &[], &[("opt.refractive_index", "1.05")]),
+                ("hearing", false, &[], &[("opt.refractive_index", "1.05")]),
+                ("vibration", false, &[], &[("opt.refractive_index", "1.05")]),
+                (
+                    "echolocation",
+                    false,
+                    &[],
+                    &[("opt.refractive_index", "1.05")],
+                ),
+                (
+                    "electroreception",
+                    false,
+                    &[],
+                    &[("opt.refractive_index", "1.05")],
+                ),
                 // Magical.
-                ("mana-sight", true),
-                ("aura-sense", true),
+                ("mana-sight", true, &[], &[("opt.refractive_index", "1.3")]),
+                ("aura-sense", true, &[], &[("opt.refractive_index", "1.05")]),
             ]),
-            locomotion: defs(&[
-                ("rooted", false), // sessile: the mark of a plant, not a locomotion mode as such
-                ("walk", false),
-                ("run", false),
-                ("climb", false),
-                ("swim", false),
-                ("fly", false),
-                ("glide", false),
-                ("burrow", false),
-                ("slither", false),
+            // Locomotion modes carry crude LIMB geometry (a section modulus and length) and material (a
+            // bony yield strength), so a mode's LOCOMOTION function is derived from physics (a limb that
+            // bears its propulsive load can push off). The rooted mark carries none (not a limb), so it
+            // reads no locomotor capability. Labelled fixtures inside the floor axis ranges (cortical bone
+            // ~150 MPa yield).
+            locomotion: kinds(&[
+                ("rooted", false, &[], &[]), // sessile: the mark of a plant, no limb
+                (
+                    "walk",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.0001"),
+                        ("mech.arm_length", "0.3"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "run",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00012"),
+                        ("mech.arm_length", "0.35"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "climb",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00008"),
+                        ("mech.arm_length", "0.25"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "swim",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00006"),
+                        ("mech.arm_length", "0.4"),
+                    ],
+                    &[("mat.yield_strength", "80")],
+                ),
+                (
+                    "fly",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "glide",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "burrow",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.0001"),
+                        ("mech.arm_length", "0.15"),
+                    ],
+                    &[("mat.yield_strength", "150")],
+                ),
+                (
+                    "slither",
+                    false,
+                    &[
+                        ("mech.section_modulus", "0.00005"),
+                        ("mech.arm_length", "0.6"),
+                    ],
+                    &[("mat.yield_strength", "40")],
+                ),
                 // Magical.
-                ("levitate", true),
-                ("blink", true),
+                (
+                    "levitate",
+                    true,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
+                (
+                    "blink",
+                    true,
+                    &[
+                        ("mech.section_modulus", "0.00004"),
+                        ("mech.arm_length", "0.5"),
+                    ],
+                    &[("mat.yield_strength", "60")],
+                ),
             ]),
             organs: organ_defs(&[
                 // (name, fantasy, &[(biology-floor axis id, value)]). Function is derived from the

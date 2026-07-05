@@ -148,6 +148,14 @@ impl Phase {
     /// for a genuine key tie; distinct patterns sort by their canonical key alone and never touch
     /// the stream, so crystallization order is a pure function of canonical state (Principle 3).
     pub const CRYSTALLIZE: Phase = Phase(0x1A);
+    /// The developmental-growth draw (the emergent-anatomy morphogen kernel, Step 2): the bounded,
+    /// integer Fixed-point recursion that grows a body's structure from a genome's expressed growth-rule
+    /// parameters keys each stochastic growth branch (whether a segment spawns a child, and its geometry
+    /// jitter) on this phase, folding the master seed, the growing being's id as the locus, the parent
+    /// segment and child index, and the generation, with a per-draw-site slot. Growth is a pure function
+    /// of the genome, the seed, and the being id, blind to any race, kind, or niche (Principle 9), and the
+    /// grown structure folds into `state_hash` in canonical segment order.
+    pub const MORPHOGEN: Phase = Phase(0x1B);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
@@ -299,6 +307,15 @@ mod tests {
         assert_ne!(crystallize, know_loss);
         assert_ne!(Phase::CRYSTALLIZE, Phase::BELIEF_LIFT);
         assert_ne!(Phase::CRYSTALLIZE, Phase::MORTALITY);
+        // The morphogen developmental-growth phase (0x1B) is the next free value after CRYSTALLIZE
+        // (0x1A); a growth branch draw must not alias the crystallization, genesis, or development
+        // streams it neighbours on counter zero, so growth stays its own reproducible stream.
+        let morphogen = DrawKey::entity(42, 9, Phase::MORPHOGEN).rng(seed).at(0);
+        assert_eq!(Phase::MORPHOGEN, Phase(0x1B));
+        assert_ne!(morphogen, crystallize);
+        assert_ne!(morphogen, development);
+        assert_ne!(Phase::MORPHOGEN, Phase::CRYSTALLIZE);
+        assert_ne!(Phase::MORPHOGEN, Phase::GENESIS);
     }
 
     #[test]

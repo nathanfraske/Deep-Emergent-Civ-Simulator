@@ -182,6 +182,16 @@ pub enum Channel {
     /// them is data (a [`ToleranceRegistry`](crate::edibility::ToleranceRegistry) sibling to the
     /// controller and composition registries, keyed off the floor toxin-class id, never a `RaceId`).
     Tolerance(ToleranceAxisId),
+    /// A heritable developmental-growth parameter, by morphogen-parameter id (emergent-anatomy Step 2).
+    /// The morphogen program is the growth-rule set a deterministic recursion iterates from a seed to
+    /// grow a body's structure (segments, appendages, surfaces, cavities) with real geometry, whose part
+    /// function the Step-1 function-law dispatch reads from the grown physics; its parameters (root
+    /// geometry, per-generation growth factors, branching thresholds, per-segment material) are the
+    /// heritable data expressed here, one value per morphogen-parameter id, so a body's SHAPE is a
+    /// lineage's inheritance the way its controller and composition are, evolving under selection rather
+    /// than being drawn from a catalog (Principle 8). The variant is the fixed engine interface; the
+    /// growth program's parameter count and what each parameter means are data ([`crate::morphogen`]).
+    Morphogen(MorphogenParamId),
 }
 
 /// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
@@ -199,6 +209,14 @@ pub struct ToleranceAxisId(pub u16);
 /// through [`TraitId`], so the width costs nothing.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ControllerParamId(pub u32);
+
+/// A morphogen-parameter id, an index into a being's developmental-growth program's flat parameter
+/// vector ([`crate::morphogen`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
+/// and the growth rules it indexes are data, sibling to the controller-parameter registry. It is a
+/// `u32` (not a `u16`), so a rich growth program (many axes over many generations) cannot silently
+/// collide two parameters on one channel by truncation; `Channel` is already `u32`-sized.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct MorphogenParamId(pub u32);
 
 /// A composition-axis id, an index into the biosphere composition-axis registry (the floor
 /// axes an organism's tissue varies over). A numeric id keeps [`Channel`] `Copy` and `Ord`;
@@ -414,6 +432,47 @@ pub fn append_controller_block(
             id: GeneId(genes.len() as u32),
             effects: vec![GeneEffect {
                 channel: Channel::Controller(ControllerParamId(k as u32)),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        });
+        match seed_of.get(&(k as u32)) {
+            Some(&target) => {
+                freqs.push(Fixed::ONE);
+                effects.push(target.checked_div(ploidy_fx).unwrap_or(Fixed::ZERO));
+            }
+            None => {
+                freqs.push(Fixed::from_ratio(1, 2));
+                effects.push(Fixed::ZERO);
+            }
+        }
+    }
+}
+
+/// Append a morphogen-program block to a founder gene set: one unit-weight locus per growth parameter,
+/// feeding [`Channel::Morphogen`] (emergent-anatomy Step 2). The identical mechanism as
+/// [`append_controller_block`]: seeded parameters get a deterministic-homozygote `ONE` frequency and a
+/// dosage-normalised `target / ploidy` effect, unseeded ones a balanced default that expresses to zero
+/// until mutation moves it, the three parallel vectors kept index-aligned (locus = gene index). So a
+/// lineage's body SHAPE drifts, recombines, mutates, promotes, and demotes through the existing
+/// [`GenePool`] and [`GeneticScheme`] with no per-channel code. The seed magnitudes are the caller's
+/// reserved values (Principle 11); reads no race id (Principle 9).
+pub fn append_morphogen_block(
+    genes: &mut Vec<GeneDef>,
+    freqs: &mut Vec<Fixed>,
+    effects: &mut Vec<Fixed>,
+    ploidy: usize,
+    param_count: usize,
+    seeds: &[(MorphogenParamId, Fixed)],
+) {
+    let ploidy_fx = Fixed::from_int(ploidy.max(1) as i32);
+    let seed_of: std::collections::BTreeMap<u32, Fixed> =
+        seeds.iter().map(|&(p, t)| (p.0, t)).collect();
+    for k in 0..param_count {
+        genes.push(GeneDef {
+            id: GeneId(genes.len() as u32),
+            effects: vec![GeneEffect {
+                channel: Channel::Morphogen(MorphogenParamId(k as u32)),
                 weight: Fixed::ONE,
             }],
             dominance: DominanceMode::additive(),

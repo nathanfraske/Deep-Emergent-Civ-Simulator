@@ -34,10 +34,14 @@ use civsim_sim::anatomy::{
     sample_body_plan, BodyPlan, BodyPlanRegistry, Part, Temperament, WorldProfile,
 };
 use civsim_sim::biosphere::{grounded, Niche, SourceRef, Species};
+use civsim_sim::body::{Body, BodyParams, BLOOD};
 use civsim_sim::genome::{GenePool, SchemeId};
-use civsim_sim::homeostasis::{birth_viable, Homeostasis, HomeostaticRegistry, ENERGY};
+use civsim_sim::homeostasis::{
+    birth_viable, AffordanceRegistry, Homeostasis, HomeostaticRegistry, ENERGY, MOVE,
+};
 use civsim_sim::lineage::SpeciesId;
 use civsim_sim::stocks::Stock;
+use civsim_sim::{CapabilityCaps, CapabilityRefs};
 
 // Dev-registry organ kind ids (crate::anatomy BodyPlanRegistry::dev_default): 0 fat-body (energy
 // dense), 1 glycogen-store, 2 water-store (zero energy density, the reserveless case).
@@ -273,5 +277,169 @@ fn culling_the_reserveless_selects_no_body_mass_class() {
     assert!(
         viable > 0 && nonviable > 0,
         "the cull is non-trivial and non-total: {viable} viable, {nonviable} nonviable"
+    );
+}
+
+#[test]
+fn a_parts_weapon_function_is_a_pure_physics_read_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one, the derive-not-tag steering guarantee extended to CAPABILITY: a part's
+    // weapon function is DERIVED from its own geometry and material (Body::can_strike over the compose
+    // function-law dispatch), never from an authored F_STRIKE tag, and the read keys on no layer, kingdom,
+    // niche, or race. The proof: the SAME weapon (a claws part, kind 0) reads the identical can_strike
+    // whatever the body around it, because the derive reads only the weapon part's physics.
+    let params = BodyParams::dev_default();
+    let reg = BodyPlanRegistry::dev_default();
+
+    // Two bodies sharing one weapon (claws, kind 0) but differing wildly in every other trait: a light
+    // bare producer-shaped body and a heavy armored one with extra organs. can_strike on the weapon must
+    // be identical, because the surrounding body, its mass, its armor, and its notional layer do not enter
+    // the read.
+    let light = body(
+        (1, 50),
+        (0, 1),
+        vec![part(0, (1, 2))],
+        vec![part(FAT_BODY, (1, 8))],
+    );
+    let heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![part(0, (1, 2))],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    let bl = Body::from_body_plan(&light, BLOOD, &params, &reg);
+    let bh = Body::from_body_plan(&heavy, BLOOD, &params, &reg);
+    let wl = bl.parts.len() - 1;
+    let wh = bh.parts.len() - 1;
+    assert!(
+        bl.can_strike(wl, &params),
+        "the claws part is a weapon by its physics"
+    );
+    assert_eq!(
+        bl.can_strike(wl, &params),
+        bh.can_strike(wh, &params),
+        "the same weapon reads the same can_strike whatever the body, mass, armor, or layer around it"
+    );
+
+    // A body carrying no weapon reads no strike, again by physics (no weapon geometry), not a missing tag.
+    let unarmed = body((1, 1), (1, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    let bu = Body::from_body_plan(&unarmed, BLOOD, &params, &reg);
+    for i in 0..bu.parts.len() {
+        assert!(
+            !bu.can_strike(i, &params),
+            "no part of a weaponless body strikes: weapon-ness is a physics read, not a tag"
+        );
+    }
+}
+
+#[test]
+fn locomotion_and_sight_are_pure_physics_reads_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one, the derive-not-tag steering guarantee for the limb and optical-sense
+    // reads: a part's LOCOMOTION function (Body::can_move, the LOCOMOTE law) and its SIGHT function
+    // (Body::can_sense, the REFRACT law) are DERIVED from its own geometry and material, never an
+    // F_LOCOMOTION or F_SIGHT tag, and the read keys on no layer, kingdom, niche, or race.
+    let params = BodyParams::dev_default();
+    let reg = BodyPlanRegistry::dev_default();
+
+    // Two bodies sharing one walking limb (locomotion mode 1) but differing wildly in mass, armor, and
+    // organs. can_move on the limb must be identical: the read is the limb's own physics, not the body.
+    let mut light = body((1, 50), (0, 1), vec![], vec![part(FAT_BODY, (1, 8))]);
+    light.locomotion = vec![1];
+    let mut heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    heavy.locomotion = vec![1];
+    let bl = Body::from_body_plan(&light, BLOOD, &params, &reg);
+    let bh = Body::from_body_plan(&heavy, BLOOD, &params, &reg);
+    let ll = bl.parts.iter().position(|p| p.name == "limb0").unwrap();
+    let lh = bh.parts.iter().position(|p| p.name == "limb0").unwrap();
+    assert!(
+        bl.can_move(ll, &params),
+        "a walking limb is a locomotor by its physics"
+    );
+    assert_eq!(
+        bl.can_move(ll, &params),
+        bh.can_move(lh, &params),
+        "the same limb reads the same can_move whatever the body, mass, armor, or layer around it"
+    );
+    // The torso is no limb (no section modulus): can_move false, by physics.
+    let torso = bl.parts.iter().position(|p| p.name == "torso").unwrap();
+    assert!(
+        !bl.can_move(torso, &params),
+        "the torso bears no load-bearing limb geometry"
+    );
+
+    // A rooted-only body grows no limb, so no part reads a locomotor: not by a missing tag, by physics.
+    let mut sessile = body((1, 4), (0, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    sessile.locomotion = vec![0]; // the rooted mark
+    let bs = Body::from_body_plan(&sessile, BLOOD, &params, &reg);
+    for i in 0..bs.parts.len() {
+        assert!(
+            !bs.can_move(i, &params),
+            "a rooted body has no locomotor part"
+        );
+    }
+
+    // Sight: the head carries the first sense's optical material, so a vision head (kind 0, index 1.4)
+    // reads an eye; the read is the head's own physics, invariant to the body around it.
+    assert!(
+        bl.can_sense(
+            bl.parts.iter().position(|p| p.name == "head").unwrap(),
+            &params
+        ),
+        "a head bearing a lens (refractive index above the medium) sees, by physics"
+    );
+}
+
+#[test]
+fn the_run_path_move_affordance_is_a_pure_physics_read_with_no_layer_or_race_key() {
+    // Emergent-anatomy step one on the RUN path (the aggregate/embodiment tier the dawn ticks, not the
+    // promoted-individual `Body`): a body's MOVE affordance is DERIVED from its locomotion parts'
+    // LOCOMOTE capability against the organ registry, retiring the authored `MorphCategory::Locomotion`
+    // gate. The read keys on the mode's own physics, never the body's mass, armor, organs, or a race id,
+    // so two wildly different bodies sharing one walking limb afford MOVE identically and a rooted body
+    // affords none, by physics not by an anatomy category.
+    let afford = AffordanceRegistry::dev_default();
+    let organs = BodyPlanRegistry::dev_default();
+    let refs = CapabilityRefs::dev_refs();
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+
+    // Two bodies sharing the walk mode (id 1) but differing in mass, armor, and organs.
+    let light = body((1, 50), (0, 1), vec![], vec![part(FAT_BODY, (1, 8))]);
+    let heavy = body(
+        (1, 1),
+        (1, 1),
+        vec![],
+        vec![part(FAT_BODY, (1, 1)), part(WATER_STORE, (1, 1))],
+    );
+    let light_moves = afford
+        .afforded(&light, &organs, &refs, &caps)
+        .contains(&MOVE);
+    let heavy_moves = afford
+        .afforded(&heavy, &organs, &refs, &caps)
+        .contains(&MOVE);
+    assert!(
+        light_moves,
+        "a body bearing a walking limb affords MOVE by physics"
+    );
+    assert_eq!(
+        light_moves, heavy_moves,
+        "the same locomotion mode reads the same MOVE affordance whatever the body, mass, armor, or layer"
+    );
+
+    // A rooted-only body (the rooted mark, kind id 0, bears no limb geometry) affords no MOVE, by physics
+    // not by a missing tag.
+    let mut sessile = body((1, 4), (0, 1), vec![], vec![part(FAT_BODY, (1, 2))]);
+    sessile.locomotion = vec![0];
+    assert!(
+        !afford
+            .afforded(&sessile, &organs, &refs, &caps)
+            .contains(&MOVE),
+        "a rooted body affords no movement: the MOVE gate is a derived capability, not an anatomy category"
     );
 }

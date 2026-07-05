@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::Fixed;
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::body::{
     apply_insult, Body, BodyParams, DamageModeRegistry, FluidRegistry, Insult, TissueRegistry,
     BLOOD, CUT,
@@ -29,6 +29,7 @@ use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticRegistry, INTEGRITY, MOVE, STRIKE,
 };
+use civsim_sim::{CapabilityCaps, CapabilityRefs};
 
 fn plan(mass: (i64, i64), legs: usize, weapons: usize) -> BodyPlan {
     BodyPlan {
@@ -72,7 +73,12 @@ fn a_wound_lowers_the_integrity_the_controller_reads() {
     let params = BodyParams::dev_default();
     let fluids = FluidRegistry::dev_default();
 
-    let mut body = Body::from_body_plan(&plan((3, 4), 4, 0), BLOOD, &params);
+    let mut body = Body::from_body_plan(
+        &plan((3, 4), 4, 0),
+        BLOOD,
+        &params,
+        &BodyPlanRegistry::dev_default(),
+    );
     let mut homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(3, 4));
 
     // Refresh integrity from the body (the derived mirror, design Part 35).
@@ -126,14 +132,27 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
     let afford = AffordanceRegistry::dev_predator(); // move, ingest, strike
     let layout = ControllerLayout::new(&reg, &afford, 0);
 
-    let armed = plan((1, 1), 4, 1); // bears a weapon
+    // The capability context an affordance is derived against (emergent-anatomy step one): the organ
+    // registry the body's part kinds index, the dev references, and the mechanical floor's own ceilings.
+    let organs = BodyPlanRegistry::dev_default();
+    let refs = CapabilityRefs::dev_refs();
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+
+    let armed = plan((1, 1), 4, 1); // bears a weapon (kind 0, claws: a hard, small-area point)
     let unarmed = plan((1, 1), 4, 0);
     assert!(
-        afford.afforded(&armed).contains(&STRIKE),
+        afford
+            .afforded(&armed, &organs, &refs, &caps)
+            .contains(&STRIKE),
         "a body with a weapon affords a strike"
     );
     assert!(
-        !afford.afforded(&unarmed).contains(&STRIKE),
+        !afford
+            .afforded(&unarmed, &organs, &refs, &caps)
+            .contains(&STRIKE),
         "a weaponless body affords no strike"
     );
 
@@ -149,13 +168,17 @@ fn a_body_with_a_weapon_affords_and_can_decide_to_strike() {
     let homeo = Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 2));
     let input = layout.build_input(&homeo, &BTreeSet::new(), &BTreeMap::new(), &BTreeMap::new());
     let (out, _) = controller.evaluate(&input, &[]);
-    let decision = layout.decide(&out, &afford.afforded(&armed)).unwrap();
+    let decision = layout
+        .decide(&out, &afford.afforded(&armed, &organs, &refs, &caps))
+        .unwrap();
     assert_eq!(
         decision.affordance, STRIKE,
         "the controller decides to strike"
     );
     // Against a body that cannot strike, the same controller falls back to another afforded act.
-    let decision2 = layout.decide(&out, &afford.afforded(&unarmed)).unwrap();
+    let decision2 = layout
+        .decide(&out, &afford.afforded(&unarmed, &organs, &refs, &caps))
+        .unwrap();
     assert_ne!(
         decision2.affordance, STRIKE,
         "a body that cannot strike does not decide to"

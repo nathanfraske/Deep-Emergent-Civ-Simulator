@@ -90,16 +90,19 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    CONDITION, ENERGY, RESPIRATION, TEMPERATURE,
+    CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
+use crate::morphogen::{express_program, grow, Structure};
 use crate::physiology::{
-    self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
+    self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
+    derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
+use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -727,22 +730,53 @@ fn being_derived_drains(
     for axis in &emb.homeo.axes {
         let drain = if axis.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY) {
             let cap = w.homeostasis.capacity(axis.id);
-            let base = derive_base_drain(
+            // The composition scalars the derived drain reads: a GROWN body reads its own grown tissue
+            // directly (emergent-anatomy Step 3, the metabolic and derived-physiology grow), a catalog body
+            // its organs, so a fully grown body metabolizes and thermoregulates off its grown tissue and
+            // needs no catalog organs. The energy density and exposed surface both follow the body a being
+            // actually carries; the muscle force is the grown strength summed over the tissue, scaled to mass.
+            let (energy_density, surface, force) = match &w.structure {
+                Some(s) => (
+                    s.whole_body_energy_density(),
+                    s.composition_sum(physiology::CONVECTIVE_SURFACE),
+                    s.composition_sum(physiology::MUSCLE_STRENGTH)
+                        .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+                        .unwrap_or(Fixed::ZERO),
+                ),
+                None => (
+                    physiology::whole_body_energy_density(&w.body, &phys.organs),
+                    physiology::whole_body_surface(&w.body, &phys.organs),
+                    physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+                ),
+            };
+            let base = base_drain_from(
                 &w.body,
-                &phys.organs,
                 cap,
+                energy_density,
+                surface,
                 ambient,
                 setpoint,
                 phys.anchors.medium_h,
                 phys.tick_seconds,
                 &phys.anchors,
             );
-            let velocity = locomotion::locomotion_speed(&w.body, Fixed::ONE, &emb.params);
-            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
+            // A grown body's exertion velocity reads its grown limb; a catalog body's the registry mode
+            // (emergent-anatomy Step 2), so the derived drain follows the body a being actually carries.
+            let velocity = match &w.structure {
+                Some(s) => locomotion::locomotion_speed_structure(
+                    s,
+                    w.body.temperament.activity,
+                    Fixed::ONE,
+                    &emb.params,
+                ),
+                None => {
+                    locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params)
+                }
+            };
             let exertion = derive_exertion_coupling(
                 &w.body,
-                &phys.organs,
                 cap,
+                energy_density,
                 force,
                 velocity,
                 phys.tick_seconds,
@@ -760,6 +794,34 @@ fn being_derived_drains(
     map
 }
 
+/// The body-to-medium thermal exchange rate for a being, reading its GROWN tissue's exposed surface and
+/// specific heat directly when it carries a grown structure (emergent-anatomy Step 3, the derived-physiology
+/// grow), and its catalog organs otherwise. So a fully grown body couples to the medium off its own tissue,
+/// with no catalog organs; a catalog body is byte-identical to the prior read.
+fn walker_exchange_rate(
+    body: &BodyPlan,
+    structure: &Option<Structure>,
+    phys: &EmbodiedPhysiology,
+) -> Fixed {
+    match structure {
+        Some(s) => body_exchange_rate_from(
+            body,
+            s.composition_sum(physiology::CONVECTIVE_SURFACE),
+            s.composition_mean(physiology::TISSUE_SPECIFIC_HEAT),
+            phys.anchors.medium_h,
+            phys.tick_seconds,
+            &phys.anchors,
+        ),
+        None => derive_body_exchange_rate(
+            body,
+            &phys.organs,
+            phys.anchors.medium_h,
+            phys.tick_seconds,
+            &phys.anchors,
+        ),
+    }
+}
+
 /// The embodied-being population coupled to the field on the evolved-controller substrate (Part 8.4,
 /// R-BEHAVIOR-EVOLVE). It owns the located beings ([`Walker`], each with its evolved controller), the
 /// data-defined physiology and affordance registries and the controller layout derived from them, the
@@ -772,6 +834,12 @@ pub struct Embodiment {
     thermal: BTreeMap<StableId, BeingThermal>,
     homeo: HomeostaticRegistry,
     afford: AffordanceRegistry,
+    /// The organ registry a being's part kinds are looked up in, so an affordance and the ground speed are
+    /// DERIVED from each part's grown geometry and material through the function-law dispatch, blind to any
+    /// kind or race id (emergent-anatomy step one). A labelled dev fixture by default ([`Embodiment::new`]);
+    /// the world-build installs the world's own registry ([`Embodiment::set_organs`]), the same one the
+    /// physiology reads, so the two agree.
+    organs: BodyPlanRegistry,
     layout: ControllerLayout,
     params: LocomotionParams,
     resources: ResourceField,
@@ -825,6 +893,7 @@ impl Embodiment {
             thermal: BTreeMap::new(),
             homeo,
             afford,
+            organs: BodyPlanRegistry::dev_default(),
             layout,
             params,
             resources: ResourceField::new(),
@@ -840,6 +909,15 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
+    /// step one). Set before the embodiment is handed to the runner, to the same [`BodyPlanRegistry`] the
+    /// physiology is built from, so the affordance derive, the speed derive, and the metabolic producers
+    /// all read one registry. Without it the embodiment keeps the labelled dev-fixture registry from
+    /// [`Embodiment::new`].
+    pub fn set_organs(&mut self, organs: BodyPlanRegistry) {
+        self.organs = organs;
     }
 
     /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
@@ -1055,13 +1133,7 @@ impl Runner {
             // phase_body_exchange then couples the being at its own surface-and-thermal-mass rate rather
             // than the labelled FieldCalib.exchange scalar (Principle 9: divergence from anatomy).
             if let Some(phys) = &embodiment.physiology {
-                let rate = derive_body_exchange_rate(
-                    &w.body,
-                    &phys.organs,
-                    phys.anchors.medium_h,
-                    phys.tick_seconds,
-                    &phys.anchors,
-                );
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -1133,13 +1205,7 @@ impl Runner {
             body_temp.insert(w.id, init);
             index.place(OccupantId::being(w.id), w.coord());
             if let Some(phys) = &embodiment.physiology {
-                let rate = derive_body_exchange_rate(
-                    &w.body,
-                    &phys.organs,
-                    phys.anchors.medium_h,
-                    phys.tick_seconds,
-                    &phys.anchors,
-                );
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -1644,6 +1710,27 @@ impl Runner {
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
             }
         }
+        // (1a) Physics to physiology, whole-body coherence (emergent-anatomy Step 3, the viability cull):
+        // a GROWN body's derived integrity reserve is set each tick to the greatest capability its grown
+        // segments read on ANY function law ([`crate::morphogen::Structure::whole_body_viability`]), a pure
+        // physics read. A body that reads no viable function is inert matter no life function can run on, so
+        // its integrity falls to the floor and it dies through the SAME reserve-floor cull as any other
+        // death (`metabolize` below reads `is_alive` over every axis, then `reconcile_lifecycle` retires the
+        // body), with no predicate that inspects morphology to reject it (Principle 8). Gated on the registry
+        // carrying the integrity axis and the walker carrying a grown structure, so a catalog body and a
+        // registry without integrity (every existing run scenario) are untouched: the cull is opt-in and
+        // hash-neutral until a race both grows its body and declares the integrity axis.
+        if emb.homeo.axis(INTEGRITY).is_some() {
+            let fns = FunctionLawRegistry::dev_seed();
+            let refs = &emb.params.capability_refs;
+            let caps = &emb.params.capability_caps;
+            for w in emb.walkers.iter_mut() {
+                if let Some(s) = w.structure.as_ref() {
+                    let viability = s.whole_body_viability(&fns, refs, caps);
+                    w.homeostasis.set_level(INTEGRITY, viability);
+                }
+            }
+        }
         // (1b) Physics to physiology, medium respiration (R-MEDIUM): when a physiology is installed and
         // the registry carries a RESPIRATION axis, each being exchanges its respirable-gas reserve with
         // the medium of the cell it stands in, through the Fick membrane law over its respiratory exchange
@@ -1681,6 +1768,7 @@ impl Runner {
             &emb.homeo,
             &emb.layout,
             &emb.afford,
+            &emb.organs,
             &terrain,
             &mut emb.resources,
             &emb.params,
@@ -1777,7 +1865,9 @@ impl Runner {
                     world
                         .race_of(id)
                         .and_then(|rid| world.race(rid))
-                        .map(|race| race.body.is_some())
+                        // A race founds embodied members if it declares a catalog body OR a developmental
+                        // program: a fully grown race (Step 3, the metabolic-tier grow) needs no catalog body.
+                        .map(|race| race.body.is_some() || race.morphogen.is_some())
                         .unwrap_or(false)
                 })
                 .collect()
@@ -1813,16 +1903,41 @@ impl Runner {
             let world = self.world.as_ref().unwrap();
             let emb = self.embodiment.as_ref().unwrap();
             let kit = self.lifecycle.as_ref().unwrap();
-            let expressed = world
-                .race_of(id)
-                .and_then(|rid| world.race(rid))
-                .and_then(|race| race.body.clone().map(|plan| (race, plan)));
+            let race = world.race_of(id).and_then(|rid| world.race(rid));
             let place_coord = world
                 .place_of(id)
                 .and_then(|place| kit.spawn_by_place.get(&place).copied());
-            match (expressed, place_coord, emb.physiology.as_ref()) {
-                (Some((race, plan)), Some(coord), Some(phys)) => {
-                    let homeostasis = Homeostasis::new(&emb.homeo, &plan, &phys.organs);
+            match (race, place_coord, emb.physiology.as_ref()) {
+                (Some(race), Some(coord), Some(phys)) => {
+                    // Grow the newborn's run-body from its OWN genome (emergent-anatomy Step 2), so a
+                    // lineage's evolved morphology governs the child's run affordances and ground speed.
+                    // Growth keys on (program, genome, emb.seed, id), a pure function reproduced on replay
+                    // and on a two-tier reload where the walker is regrown from the re-minted genome.
+                    let structure = match (&race.morphogen, world.genome_of(id)) {
+                        (Some(program), Some(genome)) => {
+                            let params = express_program(program, &race.genes, genome);
+                            Some(grow(program, &params, emb.seed, id))
+                        }
+                        _ => None,
+                    };
+                    // The metabolic body and reserves, exactly as the worldbuild founder step: a race with a
+                    // catalog body keeps it as the metabolic aggregate (its catalog organs source the
+                    // reserves, unchanged); a FULLY GROWN race (no catalog body) sources both from its grown
+                    // structure (the digest and the grown tissue), so it needs no catalog body (Step 3, the
+                    // metabolic-tier grow).
+                    let body_homeo = if let Some(plan) = &race.body {
+                        Some((
+                            plan.clone(),
+                            Homeostasis::new(&emb.homeo, plan, &phys.organs),
+                        ))
+                    } else {
+                        structure
+                            .as_ref()
+                            .map(|s| (s.digest(), Homeostasis::from_structure(&emb.homeo, s)))
+                    };
+                    let Some((body, homeostasis)) = body_homeo else {
+                        return; // a grown race whose newborn has no genome yet: cannot embody
+                    };
                     let controller = match world.genome_of(id) {
                         Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
                         None => Controller::zeros(&emb.layout),
@@ -1837,14 +1952,12 @@ impl Runner {
                         }
                         None => Physiology::dev_for_registry(&emb.homeo),
                     };
-                    let exchange_rate = derive_body_exchange_rate(
-                        &plan,
-                        &phys.organs,
-                        phys.anchors.medium_h,
-                        phys.tick_seconds,
-                        &phys.anchors,
-                    );
-                    let walker = Walker::new(id, coord, plan, homeostasis, physiology, controller);
+                    let exchange_rate = walker_exchange_rate(&body, &structure, phys);
+                    let mut walker =
+                        Walker::new(id, coord, body, homeostasis, physiology, controller);
+                    if let Some(s) = structure {
+                        walker = walker.with_structure(s);
+                    }
                     Some((walker, kit.thermal, coord, exchange_rate))
                 }
                 _ => None,

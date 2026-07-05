@@ -23,7 +23,9 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
-use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
+use civsim_sim::homeostasis::{
+    AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY,
+};
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
 use civsim_sim::locomotion::LocomotionParams;
@@ -31,13 +33,14 @@ use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, build_dawn_runner, taxis_move_weights, Articulation, Axiom,
-    AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel,
+    append_controller_block, append_morphogen_block, build_dawn_runner, express_program, grow,
+    taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs, Channel,
     CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
-    EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool,
-    GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
-    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
-    TraitDef, ValueAxisId, ValueProfile,
+    EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef, GeneEffect,
+    GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, MorphogenParamId,
+    MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
+    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -1275,4 +1278,638 @@ fn the_scheduled_order_matches_the_pinned_order() {
             "the scheduled order stays bit-identical to the pinned order"
         );
     }
+}
+
+/// A survivable body with NO catalog locomotor: [`mobile_body`] with its locomotion parts removed, so the
+/// CATALOG affords no movement. Its metabolism still runs (the dev thermal registry's one axis is derived,
+/// unit-capacity, so an organ-less body carries its reserve), which isolates the grown run-body as the sole
+/// source of any locomotion the founder shows.
+fn rooted_body() -> BodyPlan {
+    let mut b = mobile_body();
+    b.locomotion = vec![];
+    b
+}
+
+/// A morphogen race: a sexed race whose CATALOG body is rooted ([`rooted_body`]), carrying the same taxis
+/// controller block the dispersing race carries (so a founder WANTS to move along the temperature gradient),
+/// plus a morphogen program and a morphogen gene block. When `limbed`, the block is seeded so the founder
+/// GROWS a limb (a section modulus and arm length under a bony yield, a blunt tip so it is no weapon), which
+/// reads LOCOMOTE from its grown physics; when not, the block grows nothing (a single rootless segment whose
+/// tiny section buckles under the propulsive load, LOCOMOTE zero). So the ONLY difference between the two
+/// founders is the body their genome grows, and any dispersal is that grown limb, a locomotor the catalog
+/// body never carried.
+fn morphogen_race(limbed: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    let mut race = a_sexed_race(0)
+        .with_body_plan(rooted_body())
+        .with_morphogen(program.clone());
+    let layout = ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    );
+    let seeds = taxis_move_weights(&layout, 0, 0, Fixed::ONE, Fixed::ONE);
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    // The morphogen block, appended after the controller block (its loci take the next gene indices), so a
+    // founder's body grows from its own genome exactly as its controller expresses from it. A limbed founder
+    // seeds a real section modulus, arm length, and bony yield with a blunt tip; a rooted one seeds nothing.
+    let morph_seeds: Vec<(MorphogenParamId, Fixed)> = if limbed {
+        vec![
+            (MorphogenParamId(0), Fixed::ONE), // contact_area frac 1: a blunt tip, no weapon
+            (MorphogenParamId(1), Fixed::from_ratio(1, 2)), // section_modulus frac
+            (MorphogenParamId(2), Fixed::from_ratio(2, 5)), // arm_length frac 0.4
+            (MorphogenParamId(9), Fixed::from_ratio(3, 4)), // yield_strength frac 0.75: a bony limb
+        ]
+    } else {
+        vec![]
+    };
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the morphogen race and a matching embodiment genesis, so the founders embody and grow.
+fn morphogen_peoples(limbed: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), morphogen_race(limbed));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn a_founders_genome_grows_a_locomotor_the_catalog_body_lacks() {
+    // Emergent-anatomy Step 2 (B2b), the arc's thesis, blind-verified on the dawn run: a founder's body is
+    // GROWN from its own genome at genesis, and the run reads the grown body. A race whose CATALOG body is
+    // rooted (no locomotor) but whose GENOME grows a limb disperses from its dawn cell, because the run reads
+    // the grown limb, a locomotor the catalog body never carried. The control, the same race whose genome
+    // grows no limb, stays put. So the locomotion is the grown genome, never an authored catalog part
+    // (Principle 8: order emerges) and never a RaceId branch (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let build = |limbed: bool, seed: u64| {
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &morphogen_peoples(limbed),
+            seed,
+        )
+        .expect("a morphogen dawn assembles")
+    };
+
+    // The grown run-body is what the walker carries: the limbed founder's structure reads LOCOMOTE from its
+    // grown physics, though its catalog body carries no locomotion part.
+    let fns = FunctionLawRegistry::dev_seed();
+    let refs = CapabilityRefs::dev_refs();
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+    let limbed = build(true, 0x11B);
+    let walkers = limbed.embodiment().unwrap().walkers();
+    let w = &walkers[0];
+    assert!(
+        w.body.locomotion.is_empty(),
+        "the catalog body carries no locomotor: the run limb is the genome's, not the catalog's"
+    );
+    let structure = w
+        .structure
+        .as_ref()
+        .expect("a morphogen founder carries a grown structure");
+    assert!(
+        structure.max_capability(FunctionLawRegistry::ID_LOCOMOTE, &fns, &refs, &caps)
+            > Fixed::ZERO,
+        "the grown body reads LOCOMOTE from its physics: a limb the catalog never had"
+    );
+
+    // On the run: the limbed founders disperse from their single dawn cell; the rooted ones do not.
+    let run_off = |limbed: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build(limbed, seed);
+        let dawn: std::collections::BTreeSet<(i32, i32)> = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .map(|w| {
+                let c = w.coord();
+                (c.x, c.y)
+            })
+            .collect();
+        assert_eq!(
+            dawn.len(),
+            1,
+            "the band spawns its founders on one dawn cell"
+        );
+        for _ in 0..60 {
+            runner.step();
+        }
+        let off = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| {
+                let c = w.coord();
+                !dawn.contains(&(c.x, c.y))
+            })
+            .count();
+        (off, runner.state_hash())
+    };
+
+    let (moved, hash_a) = run_off(true, 0x515E);
+    assert!(
+        moved > 0,
+        "a founder whose genome grew a limb disperses on that grown locomotor: {moved} moved"
+    );
+    let (still, _) = run_off(false, 0x515E);
+    assert_eq!(
+        still, 0,
+        "a founder whose genome grew no limb stays put (the catalog body is rooted): {still} moved"
+    );
+
+    // Determinism: the grown-limb run replays bit for bit.
+    let (_, hash_b) = run_off(true, 0x515E);
+    assert_eq!(hash_a, hash_b, "the grown-limb run replays bit for bit");
+
+    // The grown structure is a pure function of the founder's (pool, seed, id): a rebuild reproduces each
+    // founder's grown body bit for bit, which is what a two-tier reload relies on (the walker is regrown
+    // from the re-minted genome, never serialized, so a save/load reproduces it exactly as a rebuild does).
+    let a = build(true, 0x11B);
+    let b = build(true, 0x11B);
+    let sa = a.embodiment().unwrap().walkers();
+    let sb = b.embodiment().unwrap().walkers();
+    assert_eq!(sa.len(), sb.len());
+    for (wa, wb) in sa.iter().zip(sb.iter()) {
+        assert_eq!(wa.id, wb.id, "the founders rebuild in the same id order");
+        assert_eq!(
+            wa.structure, wb.structure,
+            "each founder's grown body is reproduced bit for bit on a rebuild"
+        );
+    }
+
+    // A separate proof that regrowth from the re-minted genome is byte-identical, the reload guarantee made
+    // explicit: promote the founder's genome from the pool and regrow the structure from it, matching the
+    // walker the runner grew at genesis.
+    let regrown_race = morphogen_race(true);
+    let id0 = sa[0].id;
+    let genome = a
+        .world()
+        .unwrap()
+        .genome_of(id0)
+        .expect("the founder has a genome");
+    let params = express_program(
+        regrown_race.morphogen.as_ref().unwrap(),
+        &regrown_race.genes,
+        genome,
+    );
+    let regrown = grow(
+        regrown_race.morphogen.as_ref().unwrap(),
+        &params,
+        0x11B,
+        id0,
+    );
+    assert_eq!(
+        sa[0].structure.as_ref(),
+        Some(&regrown),
+        "regrowing from the re-minted genome reproduces the founder's grown body exactly"
+    );
+
+    // Worker invariance: the grown-limb dawn matches the scheduled order with the embodiment coupled.
+    let mut pinned = build(true, 0x515E);
+    let mut scheduled = build(true, 0x515E);
+    for _ in 0..20 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the grown-body dawn stays bit-identical under the scheduler"
+        );
+    }
+}
+
+/// A homeostatic registry for the viability cull: the thermal axis PLUS a derived integrity axis (emergent-
+/// anatomy Step 3). The integrity axis does not self-drain; its level is set each tick from the grown body's
+/// whole-body functional viability, so a body reading no viable function falls through the death floor. The
+/// death floor is the reserved minimum whole-body capability a grown body needs to be viable. Labelled dev
+/// fixture, RESERVED-with-basis (the minimum functional capability below which a body sustains no life
+/// function, a small positive fraction), never owner data.
+fn integrity_thermal_registry() -> HomeostaticRegistry {
+    let mut reg = HomeostaticRegistry::dev_thermal();
+    reg.axes.push(HomeostaticAxisDef {
+        id: INTEGRITY,
+        name: "integrity".to_string(),
+        backing_component: None,
+        capacity_per_mass: Fixed::ONE,
+        base_drain: Fixed::ZERO,
+        exertion_drain: Fixed::ZERO,
+        death_floor: Fixed::from_ratio(1, 32),
+    });
+    reg
+}
+
+/// A morphogen race for the viability cull with NO controller block (a blank reaction norm, so the founders
+/// sit still and the test isolates the cull from movement): the sexed race, a catalog body for the LOD-0
+/// metabolic tier, a morphogen program, and a morphogen block seeded to grow a viable LIMB (`limbed`) or
+/// nothing (an inert all-zero body). The grown body is what the run reads; a limbed founder reads a viable
+/// function, an inert one none.
+fn viability_race(limbed: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    let mut race = a_sexed_race(0)
+        .with_body_plan(mobile_body())
+        .with_morphogen(program.clone());
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    let morph_seeds: Vec<(MorphogenParamId, Fixed)> = if limbed {
+        vec![
+            (MorphogenParamId(0), Fixed::ONE),
+            (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
+            (MorphogenParamId(2), Fixed::from_ratio(2, 5)),
+            (MorphogenParamId(9), Fixed::from_ratio(3, 4)),
+        ]
+    } else {
+        vec![]
+    };
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the viability race and an embodiment genesis carrying the integrity-bearing registry.
+fn viability_peoples(limbed: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), viability_race(limbed));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: integrity_thermal_registry(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn an_incoherent_grown_body_is_culled_through_the_ordinary_reserve_floor_path() {
+    // Emergent-anatomy Step 3 (the viability cull): selection prunes incoherent grown bodies through the
+    // EXISTING reserve-floor death path, never a new seed-time gate. A race whose genome grows a viable LIMB
+    // survives; the SAME race (same id, same registry, same everything else) whose genome grows an INERT body
+    // (all-zero morphogen, a degenerate structure reading no viable function) has its derived integrity
+    // reserve set to that zero viability each tick, falls through the reserved viability floor, and dies
+    // through the same is_alive -> reconcile_lifecycle cull as any other death, with no code that inspects
+    // morphology to reject it (Principle 8). The opposite verdicts for one race id prove the cull reads the
+    // grown physics, never a RaceId or label (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let run = |limbed: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &viability_peoples(limbed),
+            seed,
+        )
+        .expect("a morphogen dawn assembles");
+        assert_eq!(
+            runner.world().unwrap().being_ids().len(),
+            8,
+            "the band seeds its founders as living bodies"
+        );
+        for _ in 0..20 {
+            runner.step();
+        }
+        let alive = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count();
+        (alive, runner.state_hash())
+    };
+
+    let (coherent_alive, hash_a) = run(true, 0x5111);
+    assert!(
+        coherent_alive > 0,
+        "a founder whose genome grew a viable limb reads a viable function and survives: {coherent_alive} alive"
+    );
+
+    let (inert_alive, _) = run(false, 0x5111);
+    assert_eq!(
+        inert_alive, 0,
+        "a founder whose genome grew an inert body reads no viable function and is culled: {inert_alive} alive"
+    );
+
+    // Determinism: the viability-cull run replays bit for bit.
+    let (_, hash_b) = run(true, 0x5111);
+    assert_eq!(hash_a, hash_b, "the viability-cull run replays bit for bit");
+}
+
+/// A FULLY GROWN race (emergent-anatomy Step 3, the metabolic-tier grow): a developmental program and NO
+/// catalog body, so it founds embodied members whose metabolism is sourced from their grown tissue. The
+/// morphogen block grows a limb (a coherent body) always, plus energy and water tissue when `nourished`, so
+/// the ONLY difference between the two variants is whether the grown tissue backs a metabolic reserve. No
+/// controller block: a blank reaction norm, so the founders sit still and the test isolates metabolic survival.
+fn fully_grown_race(nourished: bool, physiological: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    // NO with_body_plan: race.body stays None, the fully grown case.
+    let mut race = a_sexed_race(0).with_morphogen(program.clone());
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    // A limb (a coherent body); the composition params sit after spawn, the physiology axes (convective
+    // surface, muscle strength, specific heat) leading the energy density and water fraction the reserves
+    // back. `nourished` seeds the reserves; `physiological` additionally seeds the derived-physiology tissue,
+    // so a body grows an exchange surface, muscle, and thermal mass the run reads.
+    let surface = program.param_count() - 5;
+    let muscle = program.param_count() - 4;
+    let specific_heat = program.param_count() - 3;
+    let energy = program.param_count() - 2;
+    let water = program.param_count() - 1;
+    let mut morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
+        (MorphogenParamId(0), Fixed::ONE),
+        (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
+        (MorphogenParamId(2), Fixed::from_ratio(2, 5)),
+        (MorphogenParamId(9), Fixed::from_ratio(3, 4)),
+    ];
+    if nourished {
+        morph_seeds.push((MorphogenParamId(energy as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((MorphogenParamId(water as u32), Fixed::from_ratio(1, 2)));
+    }
+    if physiological {
+        morph_seeds.push((MorphogenParamId(surface as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((MorphogenParamId(muscle as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((
+            MorphogenParamId(specific_heat as u32),
+            Fixed::from_ratio(1, 2),
+        ));
+    }
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the fully grown race and an embodiment genesis over a metabolizing registry (energy and
+/// water, both backed by grown tissue, plus temperature and condition), so the reserve sourced from grown
+/// tissue is exercised and an energy-less body starves.
+fn fully_grown_peoples(nourished: bool, physiological: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), fully_grown_race(nourished, physiological));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_grazer(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn a_fully_grown_race_founds_bodies_with_no_catalog_body_and_starves_without_grown_tissue() {
+    // Emergent-anatomy Step 3, the metabolic-tier grow: a race that declares a developmental program and NO
+    // catalog body founds embodied members whose metabolic reserves are sourced from their GROWN tissue, so
+    // the catalog metabolic body is retired and a grown race needs no catalog body. A nourished grown founder
+    // (its tissue carries energy and water) survives on its grown reserves; the SAME race whose tissue carries
+    // none is born with no reserve and starves through the ordinary reserve-floor cull, the metabolic
+    // viability read from grown physics, never a catalog body (Principle 8) and never a RaceId (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let run = |nourished: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &fully_grown_peoples(nourished, false),
+            seed,
+        )
+        .expect("a fully grown dawn assembles");
+        // The founders embody though their race declares NO catalog body, on their grown metabolism.
+        assert_eq!(
+            runner.world().unwrap().being_ids().len(),
+            8,
+            "the band seeds its founders"
+        );
+        let emb = runner.embodiment().unwrap();
+        assert!(
+            emb.walkers().iter().all(|w| w.structure.is_some()),
+            "every founder carries a grown body"
+        );
+        assert!(
+            emb.walkers().iter().all(|w| w.body.organs.is_empty()),
+            "and no catalog organs: the metabolic body is grown, not catalog"
+        );
+        for _ in 0..20 {
+            runner.step();
+        }
+        let alive = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count();
+        (alive, runner.state_hash())
+    };
+
+    let (nourished_alive, hash_a) = run(true, 0x11B);
+    assert!(
+        nourished_alive > 0,
+        "a fully grown founder whose tissue carries energy and water survives on its grown reserves: {nourished_alive} alive"
+    );
+
+    let (starved_alive, _) = run(false, 0x11B);
+    assert_eq!(
+        starved_alive, 0,
+        "a fully grown founder whose tissue carries no energy is born with no reserve and starves: {starved_alive} alive"
+    );
+
+    // Determinism: the fully grown metabolic run replays bit for bit.
+    let (_, hash_b) = run(true, 0x11B);
+    assert_eq!(
+        hash_a, hash_b,
+        "the fully grown metabolic run replays bit for bit"
+    );
+}
+
+#[test]
+fn a_fully_grown_bodys_derived_physiology_is_read_from_its_grown_tissue() {
+    // Emergent-anatomy Step 3, the derived-physiology grow: a fully grown body reads its exchange surface,
+    // muscle strength, and thermal mass off its OWN grown tissue, not the empty digest's safe zeros. Proven
+    // two ways. (1) Structurally at genesis: a physiology-seeded fully grown founder's grown structure reads
+    // a positive convective surface, muscle strength, and specific heat directly (composition_sum / _mean),
+    // with no catalog organs. (2) On the run: that grown exchange surface is LOAD-BEARING, a physiological
+    // body pays the thermoregulatory drain its surface incurs against the medium and does not outlast a
+    // 20-tick run, while the same fully grown race with the reserves but NO grown surface survives. The
+    // grown surface changing the run outcome proves the run's derived drain reads the grown tissue, never a
+    // catalog organ (Principle 8), never a RaceId (Principle 9, same race id, opposite outcomes).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let build = |physiological: bool| {
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &fully_grown_peoples(true, physiological),
+            0x11B,
+        )
+        .expect("a fully grown dawn assembles")
+    };
+
+    // (1) The grown structure reads its physiology composition directly, with no catalog organs.
+    let physiological = build(true);
+    let founder = &physiological.embodiment().unwrap().walkers()[0];
+    assert!(
+        founder.body.organs.is_empty(),
+        "no catalog organs: the physiology is grown, not catalog"
+    );
+    let s = founder
+        .structure
+        .as_ref()
+        .expect("a fully grown founder carries a grown structure");
+    assert!(
+        s.composition_sum("bio.convective_surface") > Fixed::ZERO,
+        "a grown body reads its exchange surface off its tissue (not thermally inert)"
+    );
+    assert!(
+        s.composition_sum("mat.fracture_strength") > Fixed::ZERO,
+        "and its muscle strength (not exertion-free)"
+    );
+    assert!(
+        s.composition_mean("therm.specific_heat") > Fixed::ZERO,
+        "and its thermal mass"
+    );
+
+    // (2) The grown surface is load-bearing on the run: it drives a thermoregulatory drain the surfaceless
+    // body does not pay.
+    let survivors = |physiological: bool| -> usize {
+        let mut runner = build(physiological);
+        for _ in 0..20 {
+            runner.step();
+        }
+        runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count()
+    };
+    assert!(
+        survivors(false) > 0,
+        "a fully grown body with the reserves but no grown exchange surface pays no thermoregulatory drain and survives"
+    );
+    assert_eq!(
+        survivors(true),
+        0,
+        "the same race whose genome grows an exchange surface pays the thermoregulatory drain the run reads off that grown tissue, and does not outlast the run"
+    );
 }
