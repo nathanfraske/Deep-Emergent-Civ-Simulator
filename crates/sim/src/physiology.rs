@@ -273,7 +273,7 @@ pub fn whole_body_energy_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> 
 /// The body's mass in kilograms: the normalized `body_mass` trait times the reserved kilogram bridge.
 /// An overflowing product routes to zero (an unrepresentably huge body has no meaningful metabolism
 /// here), matching the law kernels' degenerate-input convention.
-fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
+pub fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
     plan.body_mass
         .checked_mul(anchors.body_mass_kg_scale)
         .unwrap_or(Fixed::ZERO)
@@ -297,14 +297,44 @@ pub fn derive_base_drain(
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
+    base_drain_from(
+        plan,
+        energy_capacity,
+        energy_density,
+        whole_body_surface(plan, organs),
+        ambient_temp,
+        setpoint,
+        medium_h,
+        tick,
+        anchors,
+    )
+}
+
+/// The base drain over EXPLICIT composition scalars (the exposed surface and per-mass energy density),
+/// supplied by the caller from either a catalog organ set ([`derive_base_drain`]) or a GROWN body's grown
+/// tissue ([`crate::morphogen::Structure::composition_sum`] / `whole_body_energy_density`), so a fully grown
+/// body pays its thermoregulatory and basal drain off its own tissue rather than the empty digest's zeros
+/// (emergent-anatomy Step 3, the derived-physiology grow). The math is identical; only the source of the
+/// surface and energy density differs.
+#[allow(clippy::too_many_arguments)]
+pub fn base_drain_from(
+    plan: &BodyPlan,
+    energy_capacity: Fixed,
+    energy_density: Fixed,
+    surface: Fixed,
+    ambient_temp: Fixed,
+    setpoint: Fixed,
+    medium_h: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> Fixed {
     let mass_kg = body_mass_kg(plan, anchors);
     let basal = laws::basal_metabolic_rate(mass_kg, anchors.kleiber_a, RATE_MAX);
     // At rest the body holds its set point; the thermoregulatory demand is the heat shed to the medium
     // at that core temperature over the body's exposed surface.
-    let area = whole_body_surface(plan, organs);
     let heat_loss = laws::resting_heat_loss(
         medium_h,
-        area,
+        surface,
         setpoint,
         ambient_temp,
         anchors.emissivity,
@@ -315,9 +345,7 @@ pub fn derive_base_drain(
     // physical mass, so the bridge to stored joules scales with size (a larger body stores proportionally
     // more absolute energy). The exact kJ/g-to-joule reconciliation of the reserve units is the
     // R-UNITS-PIN owner calibration (the honest units limit); the mechanism derives, the absolute scale
-    // is the owner's anchors and the floor's energy-density units. The per-mass energy density is supplied
-    // by the caller (the catalog organs' [`whole_body_energy_density`], or a GROWN body's grown tissue via
-    // [`crate::morphogen::Structure::whole_body_energy_density`]), so a grown body reads its own tissue.
+    // is the owner's anchors and the floor's energy-density units.
     let reserve_mass = energy_capacity.checked_mul(mass_kg).unwrap_or(Fixed::ZERO);
     laws::metabolic_drain_fraction(
         basal,
@@ -378,8 +406,30 @@ pub fn derive_body_exchange_rate(
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
-    let area = whole_body_surface(plan, organs);
-    let ha = match medium_h.checked_mul(area) {
+    body_exchange_rate_from(
+        plan,
+        whole_body_surface(plan, organs),
+        whole_body_specific_heat(plan, organs),
+        medium_h,
+        tick,
+        anchors,
+    )
+}
+
+/// The body-to-medium thermal exchange rate over EXPLICIT composition scalars (the exposed surface and the
+/// specific heat), supplied by the caller from either a catalog organ set ([`derive_body_exchange_rate`]) or
+/// a GROWN body's grown tissue ([`crate::morphogen::Structure::composition_sum`] / `composition_mean`), so a
+/// fully grown body couples to the medium off its own tissue rather than the empty digest's zeros
+/// (emergent-anatomy Step 3, the derived-physiology grow). The math is identical.
+pub fn body_exchange_rate_from(
+    plan: &BodyPlan,
+    surface: Fixed,
+    specific_heat: Fixed,
+    medium_h: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> Fixed {
+    let ha = match medium_h.checked_mul(surface) {
         Some(x) => x,
         None => return Fixed::ONE,
     };
@@ -388,8 +438,7 @@ pub fn derive_body_exchange_rate(
         return Fixed::ZERO;
     }
     let mass_kg = body_mass_kg(plan, anchors);
-    let c = whole_body_specific_heat(plan, organs);
-    let mc = match mass_kg.checked_mul(c) {
+    let mc = match mass_kg.checked_mul(specific_heat) {
         Some(x) => x,
         // An enormous thermal mass barely responds over one tick.
         None => return Fixed::ZERO,

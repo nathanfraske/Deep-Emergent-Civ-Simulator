@@ -95,9 +95,10 @@ use crate::homeostasis::{
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
-use crate::morphogen::{express_program, grow};
+use crate::morphogen::{express_program, grow, Structure};
 use crate::physiology::{
-    self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
+    self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
+    derive_exertion_coupling, MetabolicAnchors,
 };
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
@@ -729,18 +730,30 @@ fn being_derived_drains(
     for axis in &emb.homeo.axes {
         let drain = if axis.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY) {
             let cap = w.homeostasis.capacity(axis.id);
-            // The per-mass energy density the drain bridges the reserve through: a GROWN body reads its own
-            // grown tissue (emergent-anatomy Step 3, the metabolic-tier grow), a catalog body its organs, so
-            // a fully grown body metabolizes off its grown energy density and needs no catalog organs.
-            let energy_density = match &w.structure {
-                Some(s) => s.whole_body_energy_density(),
-                None => physiology::whole_body_energy_density(&w.body, &phys.organs),
+            // The composition scalars the derived drain reads: a GROWN body reads its own grown tissue
+            // directly (emergent-anatomy Step 3, the metabolic and derived-physiology grow), a catalog body
+            // its organs, so a fully grown body metabolizes and thermoregulates off its grown tissue and
+            // needs no catalog organs. The energy density and exposed surface both follow the body a being
+            // actually carries; the muscle force is the grown strength summed over the tissue, scaled to mass.
+            let (energy_density, surface, force) = match &w.structure {
+                Some(s) => (
+                    s.whole_body_energy_density(),
+                    s.composition_sum(physiology::CONVECTIVE_SURFACE),
+                    s.composition_sum(physiology::MUSCLE_STRENGTH)
+                        .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+                        .unwrap_or(Fixed::ZERO),
+                ),
+                None => (
+                    physiology::whole_body_energy_density(&w.body, &phys.organs),
+                    physiology::whole_body_surface(&w.body, &phys.organs),
+                    physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+                ),
             };
-            let base = derive_base_drain(
+            let base = base_drain_from(
                 &w.body,
-                &phys.organs,
                 cap,
                 energy_density,
+                surface,
                 ambient,
                 setpoint,
                 phys.anchors.medium_h,
@@ -760,7 +773,6 @@ fn being_derived_drains(
                     locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params)
                 }
             };
-            let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
             let exertion = derive_exertion_coupling(
                 &w.body,
                 cap,
@@ -780,6 +792,34 @@ fn being_derived_drains(
         map.insert(axis.id, drain);
     }
     map
+}
+
+/// The body-to-medium thermal exchange rate for a being, reading its GROWN tissue's exposed surface and
+/// specific heat directly when it carries a grown structure (emergent-anatomy Step 3, the derived-physiology
+/// grow), and its catalog organs otherwise. So a fully grown body couples to the medium off its own tissue,
+/// with no catalog organs; a catalog body is byte-identical to the prior read.
+fn walker_exchange_rate(
+    body: &BodyPlan,
+    structure: &Option<Structure>,
+    phys: &EmbodiedPhysiology,
+) -> Fixed {
+    match structure {
+        Some(s) => body_exchange_rate_from(
+            body,
+            s.composition_sum(physiology::CONVECTIVE_SURFACE),
+            s.composition_mean(physiology::TISSUE_SPECIFIC_HEAT),
+            phys.anchors.medium_h,
+            phys.tick_seconds,
+            &phys.anchors,
+        ),
+        None => derive_body_exchange_rate(
+            body,
+            &phys.organs,
+            phys.anchors.medium_h,
+            phys.tick_seconds,
+            &phys.anchors,
+        ),
+    }
 }
 
 /// The embodied-being population coupled to the field on the evolved-controller substrate (Part 8.4,
@@ -1093,13 +1133,7 @@ impl Runner {
             // phase_body_exchange then couples the being at its own surface-and-thermal-mass rate rather
             // than the labelled FieldCalib.exchange scalar (Principle 9: divergence from anatomy).
             if let Some(phys) = &embodiment.physiology {
-                let rate = derive_body_exchange_rate(
-                    &w.body,
-                    &phys.organs,
-                    phys.anchors.medium_h,
-                    phys.tick_seconds,
-                    &phys.anchors,
-                );
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -1171,13 +1205,7 @@ impl Runner {
             body_temp.insert(w.id, init);
             index.place(OccupantId::being(w.id), w.coord());
             if let Some(phys) = &embodiment.physiology {
-                let rate = derive_body_exchange_rate(
-                    &w.body,
-                    &phys.organs,
-                    phys.anchors.medium_h,
-                    phys.tick_seconds,
-                    &phys.anchors,
-                );
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -1924,13 +1952,7 @@ impl Runner {
                         }
                         None => Physiology::dev_for_registry(&emb.homeo),
                     };
-                    let exchange_rate = derive_body_exchange_rate(
-                        &body,
-                        &phys.organs,
-                        phys.anchors.medium_h,
-                        phys.tick_seconds,
-                        &phys.anchors,
-                    );
+                    let exchange_rate = walker_exchange_rate(&body, &structure, phys);
                     let mut walker =
                         Walker::new(id, coord, body, homeostasis, physiology, controller);
                     if let Some(s) = structure {

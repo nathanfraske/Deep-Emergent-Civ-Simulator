@@ -1685,14 +1685,20 @@ fn an_incoherent_grown_body_is_culled_through_the_ordinary_reserve_floor_path() 
 /// morphogen block grows a limb (a coherent body) always, plus energy and water tissue when `nourished`, so
 /// the ONLY difference between the two variants is whether the grown tissue backs a metabolic reserve. No
 /// controller block: a blank reaction norm, so the founders sit still and the test isolates metabolic survival.
-fn fully_grown_race(nourished: bool) -> Race {
+fn fully_grown_race(nourished: bool, physiological: bool) -> Race {
     let program = MorphogenProgram::dev_default();
     // NO with_body_plan: race.body stays None, the fully grown case.
     let mut race = a_sexed_race(0).with_morphogen(program.clone());
     let mut genes = race.genes.genes.clone();
     let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
     let mut effects = vec![Fixed::ZERO; 3];
-    // A limb (a coherent body), common to both variants; the bio parameters sit after spawn.
+    // A limb (a coherent body); the composition params sit after spawn, the physiology axes (convective
+    // surface, muscle strength, specific heat) leading the energy density and water fraction the reserves
+    // back. `nourished` seeds the reserves; `physiological` additionally seeds the derived-physiology tissue,
+    // so a body grows an exchange surface, muscle, and thermal mass the run reads.
+    let surface = program.param_count() - 5;
+    let muscle = program.param_count() - 4;
+    let specific_heat = program.param_count() - 3;
     let energy = program.param_count() - 2;
     let water = program.param_count() - 1;
     let mut morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
@@ -1704,6 +1710,14 @@ fn fully_grown_race(nourished: bool) -> Race {
     if nourished {
         morph_seeds.push((MorphogenParamId(energy as u32), Fixed::from_ratio(1, 2)));
         morph_seeds.push((MorphogenParamId(water as u32), Fixed::from_ratio(1, 2)));
+    }
+    if physiological {
+        morph_seeds.push((MorphogenParamId(surface as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((MorphogenParamId(muscle as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((
+            MorphogenParamId(specific_heat as u32),
+            Fixed::from_ratio(1, 2),
+        ));
     }
     append_morphogen_block(
         &mut genes,
@@ -1722,9 +1736,9 @@ fn fully_grown_race(nourished: bool) -> Race {
 /// One band of the fully grown race and an embodiment genesis over a metabolizing registry (energy and
 /// water, both backed by grown tissue, plus temperature and condition), so the reserve sourced from grown
 /// tissue is exercised and an energy-less body starves.
-fn fully_grown_peoples(nourished: bool) -> DawnPeoples {
+fn fully_grown_peoples(nourished: bool, physiological: bool) -> DawnPeoples {
     let mut races = BTreeMap::new();
-    races.insert(RaceId(0), fully_grown_race(nourished));
+    races.insert(RaceId(0), fully_grown_race(nourished, physiological));
     let mut breeding = BreedingSystemRegistry::new();
     breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
     DawnPeoples {
@@ -1770,7 +1784,7 @@ fn a_fully_grown_race_founds_bodies_with_no_catalog_body_and_starves_without_gro
             Profile::Development,
             &resolution,
             &map,
-            &fully_grown_peoples(nourished),
+            &fully_grown_peoples(nourished, false),
             seed,
         )
         .expect("a fully grown dawn assembles");
@@ -1819,5 +1833,83 @@ fn a_fully_grown_race_founds_bodies_with_no_catalog_body_and_starves_without_gro
     assert_eq!(
         hash_a, hash_b,
         "the fully grown metabolic run replays bit for bit"
+    );
+}
+
+#[test]
+fn a_fully_grown_bodys_derived_physiology_is_read_from_its_grown_tissue() {
+    // Emergent-anatomy Step 3, the derived-physiology grow: a fully grown body reads its exchange surface,
+    // muscle strength, and thermal mass off its OWN grown tissue, not the empty digest's safe zeros. Proven
+    // two ways. (1) Structurally at genesis: a physiology-seeded fully grown founder's grown structure reads
+    // a positive convective surface, muscle strength, and specific heat directly (composition_sum / _mean),
+    // with no catalog organs. (2) On the run: that grown exchange surface is LOAD-BEARING, a physiological
+    // body pays the thermoregulatory drain its surface incurs against the medium and does not outlast a
+    // 20-tick run, while the same fully grown race with the reserves but NO grown surface survives. The
+    // grown surface changing the run outcome proves the run's derived drain reads the grown tissue, never a
+    // catalog organ (Principle 8), never a RaceId (Principle 9, same race id, opposite outcomes).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let build = |physiological: bool| {
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &fully_grown_peoples(true, physiological),
+            0x11B,
+        )
+        .expect("a fully grown dawn assembles")
+    };
+
+    // (1) The grown structure reads its physiology composition directly, with no catalog organs.
+    let physiological = build(true);
+    let founder = &physiological.embodiment().unwrap().walkers()[0];
+    assert!(
+        founder.body.organs.is_empty(),
+        "no catalog organs: the physiology is grown, not catalog"
+    );
+    let s = founder
+        .structure
+        .as_ref()
+        .expect("a fully grown founder carries a grown structure");
+    assert!(
+        s.composition_sum("bio.convective_surface") > Fixed::ZERO,
+        "a grown body reads its exchange surface off its tissue (not thermally inert)"
+    );
+    assert!(
+        s.composition_sum("mat.fracture_strength") > Fixed::ZERO,
+        "and its muscle strength (not exertion-free)"
+    );
+    assert!(
+        s.composition_mean("therm.specific_heat") > Fixed::ZERO,
+        "and its thermal mass"
+    );
+
+    // (2) The grown surface is load-bearing on the run: it drives a thermoregulatory drain the surfaceless
+    // body does not pay.
+    let survivors = |physiological: bool| -> usize {
+        let mut runner = build(physiological);
+        for _ in 0..20 {
+            runner.step();
+        }
+        runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count()
+    };
+    assert!(
+        survivors(false) > 0,
+        "a fully grown body with the reserves but no grown exchange surface pays no thermoregulatory drain and survives"
+    );
+    assert_eq!(
+        survivors(true),
+        0,
+        "the same race whose genome grows an exchange surface pays the thermoregulatory drain the run reads off that grown tissue, and does not outlast the run"
     );
 }
