@@ -234,6 +234,42 @@ impl SubstanceMix {
     }
 }
 
+/// The volume of matter a contact FORCE detaches from a cell in one extraction stroke (material-substrate
+/// arc, cascade item 4, the extraction contest). It composes two mechanical floor laws, never a bespoke
+/// rule: the being's `force` spread over its `working_area` is a contact pressure
+/// ([`laws::contact_pressure`]); that pressure works against the cell's FRACTURE-gating hardness
+/// ([`SubstanceMix::fracture_hardness`], the hardest constituent), and [`laws::cut_penetrate`] returns the
+/// penetration depth, which is ZERO unless the pressure clears the hardness (the rock holds) and otherwise
+/// sizes with the delivered work over the material's specific cutting energy; the detached volume is that
+/// depth over the working area. So a being too weak to raise its pressure over the rock's fracture
+/// strength mines nothing, a stronger one breaks the same rock, and a harder rock yields less to the same
+/// force, all from physics against substance DATA, never a "miner" branch or a per-race yield table
+/// (Principles 8, 9). A pure fixed-point read with no randomness, saturating rather than panicking on a
+/// pathological product (the caller bounds the result by what the cell in fact holds). Every input is
+/// derived or reserved-with-basis at the call site: `force` from the being's grown physiology, the areas
+/// and the specific cutting energy from geometry and the substance floor, the caps from the physics floor.
+#[allow(clippy::too_many_arguments)]
+pub fn extraction_yield(
+    force: Fixed,
+    working_area: Fixed,
+    fracture_hardness: Fixed,
+    delivered_energy: Fixed,
+    specific_cut_energy: Fixed,
+    pressure_max: Fixed,
+    depth_max: Fixed,
+) -> Fixed {
+    let pressure = laws::contact_pressure(force, working_area, pressure_max);
+    let depth = laws::cut_penetrate(
+        pressure,
+        fracture_hardness,
+        delivered_energy,
+        specific_cut_energy,
+        working_area,
+        depth_max,
+    );
+    depth.checked_mul(working_area).unwrap_or(Fixed::MAX)
+}
+
 /// The matter that sits in each z-cell of the world, the ground truth of what the world is made of: a
 /// per-cell [`SubstanceMix`] keyed by [`Coord3`], a Coord3-keyed sibling of
 /// [`crate::locomotion::ResourceField`] of the same sparse shape. A cell with no entry is void (no
@@ -602,6 +638,69 @@ values = [
             "matter with no declared fracture strength offers none"
         );
         assert_eq!(SubstanceMix::new().fracture_hardness(&reg), Fixed::ZERO);
+    }
+
+    #[test]
+    fn the_extraction_contest_gates_on_fracture_strength_and_sizes_on_cutting_energy() {
+        // The extraction kernel composes contact_pressure and cut_penetrate: the being's force over its
+        // working area is a pressure that must CLEAR the cell's fracture strength to break anything loose
+        // (the strength gate), and above the gate the detached volume is sized by the delivered work over
+        // the material's specific cutting energy (the energy sizing). The two axes are independent, as the
+        // fracture physics is: strength decides whether the rock breaks, energy decides how much comes off.
+        let p_max = Fixed::from_int(1_000_000);
+        let d_max = Fixed::from_int(1000);
+        let area = Fixed::from_ratio(1, 100); // 0.01 m^2, a tool-tip contact
+        let energy = Fixed::from_int(1_000_000);
+        let cut_energy = Fixed::from_int(100);
+        let soft = Fixed::from_int(5);
+        let hard = Fixed::from_int(2000);
+        // pressure = force / (area * 1e6). A weak force (1000 N over 0.01 m^2 = 0.1 MPa) does not clear
+        // even the soft rock, so nothing yields.
+        let weak = Fixed::from_int(1000);
+        assert_eq!(
+            extraction_yield(weak, area, soft, energy, cut_energy, p_max, d_max),
+            Fixed::ZERO,
+            "a being too weak to raise its pressure over the fracture strength mines nothing"
+        );
+        // A strong force (1e7 N over 0.01 m^2 = 1000 MPa) clears the soft rock and detaches a positive,
+        // exact volume: depth = energy / (cut_energy * area) / 1e6 = 1e6 / 1 / 1e6 = 1.0, volume = depth *
+        // area = 0.01.
+        let strong = Fixed::from_int(10_000_000);
+        let soft_yield = extraction_yield(strong, area, soft, energy, cut_energy, p_max, d_max);
+        assert_eq!(
+            soft_yield,
+            Fixed::from_ratio(1, 100),
+            "above the gate the yield is the swept volume of the cut depth"
+        );
+        // The SAME strong force on a rock whose fracture strength (2000 MPa) exceeds the 1000 MPa pressure
+        // yields nothing: it cannot break the rock, however much work it delivers.
+        assert_eq!(
+            extraction_yield(strong, area, hard, energy, cut_energy, p_max, d_max),
+            Fixed::ZERO,
+            "a rock too strong for the being's pressure holds"
+        );
+        // An even stronger force raises the pressure over the hard rock's strength and mines it: a stronger
+        // being clears a gate a weaker one cannot (the force controls the strength gate).
+        let mighty = Fixed::from_int(100_000_000);
+        assert!(
+            extraction_yield(mighty, area, hard, energy, cut_energy, p_max, d_max) > Fixed::ZERO,
+            "a stronger being breaks the harder rock the weaker one could not"
+        );
+        // Above the gate, a tougher-to-cut material (higher specific cutting energy) yields LESS to the
+        // same force and work: the energy sizes the removal.
+        let tough_cut = Fixed::from_int(400);
+        assert!(
+            extraction_yield(strong, area, soft, energy, tough_cut, p_max, d_max) < soft_yield,
+            "a tougher material yields less to the same work"
+        );
+        // More delivered work yields more, at the same pressure above the gate (the energy sizing is
+        // monotone).
+        let more_energy = Fixed::from_int(2_000_000);
+        assert!(
+            extraction_yield(strong, area, soft, more_energy, cut_energy, p_max, d_max)
+                > soft_yield,
+            "more delivered work detaches more matter"
+        );
     }
 
     #[test]
