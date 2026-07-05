@@ -7,6 +7,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-05: material-substrate item 6 slice C (fire spreads and burns out), on branch claude/material-substrate, PR #93
+
+The emergent payoff of live fire, the slice the gate steered to after signing off slice A. Fire now SPREADS cell to cell and EXTINGUISHES when fuel runs out, both emergent. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 6 SLICE C HEAT INJECTION paragraph). Commit `973b8b2`.
+
+WHAT LANDED: a burning cell raises its own temperature by the heat its combustion releases (`Field::add_heat` in `crates/sim/src/runner.rs`), that heat spreads through the ordinary temperature diffusion, and a neighbouring fuel cell whose temperature crosses its ignition gate catches, so spread and extinction fall out of the combustion gate over the diffused temperature with no coded spread rule. The beat computes the cell's temperature rise as the reserved heat-retention fraction of the released energy over the cell's heat capacity (volume-weighted density times specific heat, `/1000` for the kJ/J unit match, overflow-guarded). Oak gained its cited `therm.specific_heat` (1700) and `CombustionCalib` gained the reserved `heat_fraction` (basis: combustion efficiency and the radiative-and-convective loss fraction, dev-fixture one-tenth).
+
+OPT-IN / hash-neutral: the injection runs only inside the combustion beat, so a scenario with no combustion armed never touches the temperature field and stays byte-identical (crucible `254bc17c`, world_build 16 and world_determinism 3 replay-identical). Proven end to end (`fire_spreads_along_a_fuel_row_and_burns_out_behind_it`): fire spreads down a fuel row, the source dims as its fuel depletes and drops out of the fire field when it burns out, scheduled order bit-identical to pinned. 814 sim tests plus 84 physics tests green, fmt and clippy (`--all-targets -D warnings`) clean.
+
+HONEST LIMITS: the lumped single-cell thermal model runs hotter than a real gas-plume flame, and the reserved heat fraction with the field's diffusion and relaxation rates jointly set spread readiness (owner-calibrated; the test uses a labelled fire-timescale field calib with slow relaxation). STOPPED: slice C pushed (`973b8b2`). This turn built THREE increments (item 5 hydrology coupling, item 6 slice A live fire, item 6 slice C heat injection), each gate-quality, committed, pushed, documented; the gate signed off item 5 hydrology and item 6 slice A. NEXT, building ahead: item 6 slice B (the medium-oxygen gate so fire needs air, reads the medium's respirable content as the oxidiser and enriches oak's `therm.oxidiser_demand` from the cited data), then item 7 (shelter), item 8 (the matter cycle, the owner-ruled data-defined `TransformKindRegistry` keyed to physics kernels), and the force-and-manipulation extension as a primitive-completeness check. Open emergence debts unchanged. Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-05: material-substrate item 6 STARTED (slice A live fire: combustible matter burns when hot), on branch claude/material-substrate, PR #93
 
 Item 6 (live fire) has its first slice: the resolved combustion law, already floor-built in civsim_physics, now runs in the world as a field process, so hot fuel burns. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 6 SLICE A LIVE FIRE paragraph). Commit `70c8fa4`.
