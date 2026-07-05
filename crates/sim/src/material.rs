@@ -346,17 +346,26 @@ pub struct CombustionCalib {
     /// representability cap, not an authored quantity, mirroring the extraction pressure ceiling: it bounds a
     /// cell's per-tick energy release to the fixed-point range so a large fuel mass cannot overflow the field.
     pub energy_cap: Fixed,
+    /// The fraction of the released combustion energy retained as SENSIBLE HEAT that raises the burning
+    /// cell's temperature, the rest lost to radiation and carried off by the hot combustion gas. RESERVED.
+    /// Basis: the combustion efficiency and the radiative-and-convective loss fraction of an open fire, so a
+    /// real flame settles at its adiabatic-minus-losses temperature rather than the full adiabatic flame
+    /// temperature the complete-combustion fuel value implies; a combustion-thermodynamics datum set from the
+    /// flame-temperature literature. It sets how hot a fire runs and so how readily it spreads. A
+    /// realism-and-coupling bound, surfaced for the owner, never invented.
+    pub heat_fraction: Fixed,
 }
 
 impl CombustionCalib {
-    /// A labelled DEVELOPMENT FIXTURE: a burn-rate fraction and the energy cap. Not owner canon; a stand-in
-    /// so the combustion beat can run until the owner sets the burn rate against its basis. The value
-    /// exercises the mechanism (a hot fuel cell burns down over several ticks) without standing for a
-    /// calibrated rate.
+    /// A labelled DEVELOPMENT FIXTURE: a burn-rate fraction, the energy cap, and the heat-retention fraction.
+    /// Not owner canon; a stand-in so the combustion beat can run until the owner sets the reserved values
+    /// against their bases. The values exercise the mechanism (a hot fuel cell burns down over several ticks,
+    /// stays hot, and heats its neighbours enough to spread) without standing for calibrated rates.
     pub fn dev_fixture() -> CombustionCalib {
         CombustionCalib {
             burn_rate: Fixed::from_ratio(1, 4),
             energy_cap: Fixed::from_int(1_000_000_000),
+            heat_fraction: Fixed::from_ratio(1, 10),
         }
     }
 }

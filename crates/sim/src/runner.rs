@@ -405,6 +405,19 @@ impl Field {
         self.temp[self.idx(x, y)]
     }
 
+    /// Raise a cell's temperature by a heat source (material-substrate arc, cascade item 6, live fire): the
+    /// sensible-heat rise a combustion beat injects, added to the cell's current temperature. A cell off the
+    /// field or a non-positive delta is a no-op. The added heat then spreads and decays through the ordinary
+    /// diffusion-and-relaxation step, so a hot burning cell warms its neighbours and cools when the source
+    /// stops, no coded spread.
+    pub fn add_heat(&mut self, x: i32, y: i32, delta: Fixed) {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height || delta <= Fixed::ZERO {
+            return;
+        }
+        let i = self.idx(x, y);
+        self.temp[i] = self.temp[i].saturating_add(delta);
+    }
+
     /// The field extent.
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
@@ -1954,16 +1967,22 @@ impl Runner {
     /// combustible substance hot enough burns nothing, so the fire field stays empty and folds no bytes.
     ///
     /// The fire field is rebuilt from empty each tick, so a cell that runs out of fuel or cools below its
-    /// ignition temperature drops out. The oxidiser is not yet supplied (self-oxidising fuels burn on the
-    /// current data; an oxygen-demanding fuel reads zero oxidiser and so does not burn), so the medium-oxygen
-    /// gate that makes fire need air is the next slice.
+    /// ignition temperature drops out. The released energy also raises the burning cell's temperature (the
+    /// reserved heat-retention fraction of it, over the cell's own heat capacity derived from its matter's
+    /// density and specific heat), so the heat spreads through the ordinary temperature diffusion and a
+    /// neighbour whose fuel crosses its ignition gate catches: fire SPREADS and EXTINGUISHES with no coded
+    /// spread rule, both emergent from the physics. The oxidiser is not yet supplied (self-oxidising fuels
+    /// burn on the current data; an oxygen-demanding fuel reads zero oxidiser and so does not burn), so the
+    /// medium-oxygen gate that makes fire need air is the next slice.
     fn step_combustion(&mut self) {
         let Some(calib) = self.combustion else {
             return;
         };
         // Read phase: over every cell of combustible matter, compute this tick's burn (consumed fuel volume
-        // and released energy) against the settled temperature. Snapshotted so the material take below does
-        // not alias the read. Borrows the embodiment and the field immutably (disjoint fields of the runner).
+        // and released energy) against the settled temperature, and the cell's heat capacity (for the
+        // temperature rise the release drives). Snapshotted so the material take below does not alias the
+        // read. Borrows the embodiment and the field immutably (disjoint fields of the runner).
+        let mut heat_caps: BTreeMap<Coord3, Fixed> = BTreeMap::new();
         let burns: Vec<(Coord3, String, Fixed, Fixed)> = {
             let Some(emb) = self.embodiment.as_ref() else {
                 return;
@@ -1978,6 +1997,27 @@ impl Runner {
             let mut out = Vec::new();
             for (cell, mix) in emb.material.cells() {
                 let temperature = self.field.at(cell.x, cell.y);
+                // The cell's heat capacity (kJ/K), the volume-weighted sum of each substance's mass times its
+                // specific heat (J/(kg*K), the /1000 converting to kJ to match the fuel value's kJ energy). A
+                // substance carrying no specific heat is thermally transparent here (contributes nothing). The
+                // burning cell's temperature rise divides the released energy by this, so a massive cell heats
+                // slower than a thin one from the same fire.
+                let mut cap = Fixed::ZERO;
+                for (s, &v) in mix.substances() {
+                    let d = axis(s, "mat.density").unwrap_or(Fixed::ZERO);
+                    let sh = axis(s, "therm.specific_heat").unwrap_or(Fixed::ZERO);
+                    if d <= Fixed::ZERO || sh <= Fixed::ZERO {
+                        continue;
+                    }
+                    if let Some(mass) = v.checked_mul(d) {
+                        if let Some(hc_j) = mass.checked_mul(sh) {
+                            if let Some(hc_kj) = hc_j.checked_div(Fixed::from_int(1000)) {
+                                cap = cap.saturating_add(hc_kj);
+                            }
+                        }
+                    }
+                }
+                heat_caps.insert(*cell, cap);
                 for (substance, &volume) in mix.substances() {
                     // Only a substance carrying a fuel value is combustible; others (rock, soil) are skipped.
                     let Some(fuel_value) = axis(substance, "therm.fuel_value") else {
@@ -2036,20 +2076,38 @@ impl Runner {
         };
         // Apply phase: consume the burned fuel and rebuild the fire field with this tick's released energy per
         // cell (a cell with two combustible substances sums their release). Borrows the embodiment mutably.
-        let Some(emb) = self.embodiment.as_mut() else {
-            return;
-        };
         let mut per_cell: BTreeMap<Coord3, Fixed> = BTreeMap::new();
-        for (cell, substance, burned_volume, energy) in burns {
-            emb.material.take(cell, &substance, burned_volume);
-            let entry = per_cell.entry(cell).or_insert(Fixed::ZERO);
-            *entry = entry.saturating_add(energy);
+        {
+            let Some(emb) = self.embodiment.as_mut() else {
+                return;
+            };
+            for (cell, substance, burned_volume, energy) in burns {
+                emb.material.take(cell, &substance, burned_volume);
+                let entry = per_cell.entry(cell).or_insert(Fixed::ZERO);
+                *entry = entry.saturating_add(energy);
+            }
+            let mut fire = FireField::new();
+            for (cell, energy) in &per_cell {
+                fire.set(*cell, *energy);
+            }
+            emb.fire = fire;
         }
-        let mut fire = FireField::new();
+        // Heat phase: raise each burning cell's temperature by the reserved heat-retention fraction of its
+        // released energy over its heat capacity, so the fire warms the field and, through the ordinary
+        // diffusion, its neighbours (fire spreads). The embodiment borrow has ended, so the field is borrowed
+        // disjointly. A cell with no heat capacity (no substance carrying a specific heat) burns without
+        // heating, the honest degrade.
         for (cell, energy) in per_cell {
-            fire.set(cell, energy);
+            let cap = heat_caps.get(&cell).copied().unwrap_or(Fixed::ZERO);
+            if cap <= Fixed::ZERO {
+                continue;
+            }
+            let rise = energy
+                .checked_div(cap)
+                .and_then(|q| q.checked_mul(calib.heat_fraction))
+                .unwrap_or(Fixed::ZERO);
+            self.field.add_heat(cell.x, cell.y, rise);
         }
-        emb.fire = fire;
     }
 
     /// Recouple the hydrology routing to the terrain this tick's digging reshaped (material-substrate item

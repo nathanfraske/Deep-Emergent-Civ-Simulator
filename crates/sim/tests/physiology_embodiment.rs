@@ -2052,6 +2052,102 @@ fn combustible_matter_burns_when_it_is_hot_enough_and_a_cold_cell_and_rock_do_no
 }
 
 #[test]
+fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
+    // Material-substrate arc item 6, LIVE FIRE, the emergent payoff: a burning cell raises its temperature
+    // by the heat its combustion releases, that heat spreads through the ordinary temperature diffusion, and
+    // a neighbouring fuel cell whose temperature crosses its ignition gate catches. So fire SPREADS from cell
+    // to cell and EXTINGUISHES when a cell's fuel runs out, both emergent from the physics with no coded
+    // spread rule: it is the combustion gate over the diffused temperature, tick after tick.
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let (w, h) = (8, 8);
+    let src = Coord3::ground(2, 2);
+    let mid = Coord3::ground(3, 2);
+    let far = Coord3::ground(4, 2);
+
+    let build = || -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x00F1,
+        );
+        let mut field = MaterialField::new();
+        for c in [src, mid, far] {
+            field.deposit(c, "oak", Fixed::from_int(50));
+        }
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A sustained ignition source at src (baseline 900, which holds above oak's 570 K ignition against
+        // the diffusion to its cold neighbours), the rest of the field cold ambient (305 K).
+        let mut baseline = vec![Fixed::from_int(305); (w * h) as usize];
+        baseline[(2 * w + 2) as usize] = Fixed::from_int(900);
+        // A fire-timescale field calibration: the ambient relaxation is slow next to a fire, so the
+        // combustion heat persists and spreads rather than being pulled straight back to the cold baseline.
+        // A labelled fixture, not owner canon; the reserved heat fraction and these field rates jointly set
+        // how readily fire spreads, the owner's to calibrate to the real fire and ambient dynamics.
+        let fire_calib = FieldCalib {
+            diffusion: Fixed::from_ratio(1, 8),
+            relaxation: Fixed::from_ratio(1, 64),
+            exchange: Fixed::from_ratio(1, 2),
+        };
+        let mut r = Runner::with_embodiment(Field::new(w, h, baseline), fire_calib, emb);
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let lit = |r: &Runner, c: Coord3| -> Fixed { r.embodiment().unwrap().fire().intensity(c) };
+
+    let mut r = build();
+    // A few ticks in: only the source is alight; the far cell has not caught yet.
+    for _ in 0..5 {
+        r.step();
+    }
+    let src_early = lit(&r, src);
+    assert!(src_early > Fixed::ZERO, "the ignition source is alight");
+    assert_eq!(lit(&r, far), Fixed::ZERO, "the far cell has not caught yet");
+
+    // Run on: the heat has spread down the row and the far cell, cold at the start, is now burning.
+    for _ in 0..35 {
+        r.step();
+    }
+    assert!(
+        lit(&r, far) > Fixed::ZERO,
+        "fire spread down the fuel row and the far cell caught, through the temperature field alone"
+    );
+    assert!(
+        lit(&r, src) < src_early,
+        "the source is burning down: its fire dims as its fuel depletes"
+    );
+
+    // Run to exhaustion: the source, out of fuel, has dropped out of the fire field (extinction), no coded
+    // burnout rule, the combustion gate simply stops firing when there is nothing left to burn.
+    for _ in 0..80 {
+        r.step();
+    }
+    assert_eq!(
+        lit(&r, src),
+        Fixed::ZERO,
+        "the source burned out and dropped out of the fire field"
+    );
+
+    // The scheduled tick order spreads the fire bit-identically to the pinned order.
+    let mut pinned = build();
+    let mut scheduled = build();
+    for _ in 0..40 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+    }
+    assert_eq!(
+        lit(&pinned, far),
+        lit(&scheduled, far),
+        "the scheduled and pinned orders spread the fire identically"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
