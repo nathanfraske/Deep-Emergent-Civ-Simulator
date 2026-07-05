@@ -91,6 +91,7 @@ pub mod located;
 pub mod locomotion;
 pub mod lod;
 pub mod mate_choice;
+pub mod material;
 pub mod medium;
 pub mod morphogen;
 pub mod percept;
