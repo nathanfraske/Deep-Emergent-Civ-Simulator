@@ -241,3 +241,14 @@ A second survey (cec-worker-quality through eight second-order lenses: matter st
 A systemic property, not one affordance: MATTER WEAR AND FAILURE as a driver. Tools wear and break, structures weaken, stored goods spoil, so matter's degradation over use drives a remaking treadmill (a worn tool must be re-ground or remade), which ties to persistent object identity and the matter cycle.
 
 Bridges a neighbour arc (flag, do not build here): body-repair and medicine (POULTICE to draw a toxin transdermally, SPLINT, groom, thermal contact) bridge anatomy; scent-gradient and thermal-trace tracking (reading matter as a passive record) bridge communication-reach.
+
+
+### Round 3: the big-cap re-run of the three lenses that hit the wall (2026-07-05)
+
+Re-run at a 20k cap with a brief-reasoning instruction; all three finished clean (5 to 6k tokens, no loop). The collective-handling lens (which had degenerated) recovered the important insight the loop had lost. After discarding finds too physically exotic for the tech level (multi-agent resonant fracture, steam-jet thrust, vapor-deposition bonding, controlled crack-steering, vibration damping), the solid additions are:
+
+- COOPERATIVE FORCE (the collective-labour primitive): summed force from several beings on one object, exceeding any individual's, gated on coordination and proximity, so a load beyond one being's strength moves, and large prey is restrained by many holding a taut line at once. This is the seed of collective construction and the group hunt, and the arc had no multi-being matter-handling at all. The most important recovery, and it wants an emergence guard: the coordination arises from each being's own drive plus proximity plus a parallel affordance, never a scripted team. Home: materials-core, leaning bridges-anatomy for the coordination.
+- THERMAL-SHOCK FRACTURE (fire-setting): heat matter, then quench or strike it to crack along thermal-stress planes, a thermal route to break rock distinct from the mechanical extraction contest, and a real prehistoric quarrying method. Ties to live fire (item 6). Home: materials-core.
+- THERMAL JOINING / SHRINK-FIT: heat a piece to expand it, cool it to contract and lock, an interference fit that hafts a tool head without a binding. A joining route through thermal strain, beyond weave/bind. Home: materials-core.
+- INTERLOCK JOINERY: shear-resisting interlocking geometry (a mortise and tenon, a keyed joint) that converts a shear load into compression, beyond friction-stacking and tension-binding. The structural-joinery layer that carries a real building. Home: materials-core.
+- PRESSURE-VENTING (niche): vent a pressurizing or fermenting store before it bursts, which ties to the ferment case under process-over-time. Home: bridges-biosphere.
