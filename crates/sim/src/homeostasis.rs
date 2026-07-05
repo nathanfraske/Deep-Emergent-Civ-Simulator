@@ -642,6 +642,28 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a mineral-eating world: move, ingest, and geophage (material-substrate
+    /// arc, cascade item 4, the force-and-manipulation extension, INGEST-FOR-COMPOSITION). Kept distinct
+    /// from [`AffordanceRegistry::dev_default`] so the foraging tests keep their two-affordance layout; a
+    /// geophage's controller layout carries the extra geophage output and can evolve to use it, the emergent
+    /// decision to eat the matter underfoot for a reserve that needs it (a mineral, salt, grit). Geophage is
+    /// a scalar operation (eating the matter underfoot, no aim) and, like ingest, is unconditional
+    /// (`requires: None`): any body may attempt to eat matter, and what it gains is its own physiology's
+    /// assimilation of the substance against its reserve's need ([`crate::runner::Embodiment::geophage`]),
+    /// never a capability label. This is the need-side complement to harm-learning: the same cell
+    /// composition a being learns to AVOID for a harm, another being SEEKS for a nutrient it lacks.
+    pub fn dev_geophage() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: GEOPHAGE,
+            name: "geophage".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -707,6 +729,9 @@ pub const GRASP: AffordanceId = AffordanceId(3);
 /// The extract affordance (breaking bonded matter underfoot loose in a fracture contest and taking it), in
 /// the miner fixture only (material-substrate arc, cascade item 4, the extraction contest).
 pub const EXTRACT: AffordanceId = AffordanceId(4);
+/// The geophage affordance (eating the matter underfoot for a reserve backed by that substance), in the
+/// geophage fixture only (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION).
+pub const GEOPHAGE: AffordanceId = AffordanceId(5);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race

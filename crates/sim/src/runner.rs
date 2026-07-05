@@ -89,7 +89,8 @@ use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, ENERGY, EXTRACT, GRASP, INTEGRITY, RESPIRATION, TEMPERATURE,
+    HomeostaticRegistry, CONDITION, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY, RESPIRATION,
+    TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
@@ -1208,6 +1209,74 @@ impl Embodiment {
         self.grasp_underfoot(walker_id)
     }
 
+    /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
+    /// eat the matter the being stands on for any reserve backed by a substance the cell holds. For each
+    /// homeostatic axis whose backing substance is present in the cell, the being draws it through the SAME
+    /// edibility satisfaction the forage ingest uses ([`laws::satisfaction`] over the being's own
+    /// assimilation and requirement), bounded by the room left in the reserve, grossed up by the ingest
+    /// efficiency to the mass removed, taken from the cell, and the assimilated part deposited in the
+    /// reserve. So a being with a mineral deficit standing on that mineral refills from it and a full one
+    /// draws nothing: this is the need-side complement to the harm-learning read, the same cell composition
+    /// another being learns to AVOID for a harm, this one SEEKS for a nutrient it lacks, and it is what
+    /// makes a mined or standing mineral worth something (the payoff that lets mineral-seeking, and the
+    /// mining that reaches a bonded mineral, emerge under selection). Reads only the axis backing
+    /// substances, the cell's matter, and the being's own physiology, no race, kind, or role (Principle 9).
+    /// Returns the total assimilated. Naturally opt-in: an empty material field (every existing scenario)
+    /// holds no substance, so the supply is zero and nothing is drawn, and only a being that decided the
+    /// geophage affordance (in a geophage fixture) reaches here at all.
+    pub fn geophage(&mut self, walker_id: StableId) -> Fixed {
+        let Some(coord) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .map(|w| w.coord())
+        else {
+            return Fixed::ZERO;
+        };
+        let eta = self.params.ingest_efficiency;
+        let mut gained = Fixed::ZERO;
+        for i in 0..self.homeo.axes.len() {
+            let Some(substance) = self.homeo.axes[i].backing_component.clone() else {
+                continue; // an axis with no backing substance is not fed by matter
+            };
+            let axis_id = self.homeo.axes[i].id;
+            let supply = self.material.volume(coord, &substance);
+            if supply <= Fixed::ZERO {
+                continue; // the cell holds none of this substance
+            }
+            // Size the bite from the being's own physiology and the room its reserve has left (immutable).
+            let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+                return gained;
+            };
+            let frac = laws::satisfaction(
+                supply,
+                w.physiology.assimilation(&substance),
+                w.physiology.requirement(&substance),
+            );
+            let cap = w.homeostasis.capacity(axis_id);
+            let room = cap - w.homeostasis.amount(axis_id);
+            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
+            if target_gain <= Fixed::ZERO {
+                continue; // the reserve is full: draw nothing, deplete nothing
+            }
+            let gross = if eta > Fixed::ZERO {
+                target_gain.checked_div(eta).unwrap_or(target_gain)
+            } else {
+                target_gain
+            };
+            // Take the gross bite from the cell and deposit the assimilated part in the reserve (each field
+            // mutated on its own, so the cell loses the bite and the being gains the bite times the
+            // efficiency, conservation-honest as the forage ingest is).
+            let taken = self.material.take(coord, &substance, gross);
+            let gain = taken.checked_mul(eta).unwrap_or(taken);
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                w.homeostasis.ingest(axis_id, gain);
+            }
+            gained += gain;
+        }
+        gained
+    }
+
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
     /// step 2): the environmental stack writes the standing producer-biomass supply into it each tick
     /// before the embodiment step reads it. Crate-internal; the runner owns the write path.
@@ -2207,6 +2276,9 @@ impl Runner {
                     }
                     EXTRACT => {
                         emb.extract_underfoot(id);
+                    }
+                    GEOPHAGE => {
+                        emb.geophage(id);
                     }
                     _ => {}
                 }

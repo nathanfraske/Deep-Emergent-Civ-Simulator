@@ -1103,6 +1103,134 @@ values = [
 }
 
 #[test]
+fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
+    // Material-substrate arc item 4, INGEST-FOR-COMPOSITION, the mining payoff and emergence-closer: a
+    // mineral in the ground is worth something because a being whose reserve needs it eats it and survives,
+    // where one that does not starves of the mineral. Two beings share one embodiment, one body, one
+    // draining mineral reserve, and one identical halite (rock salt) seam each; they differ in ONE gene, the
+    // controller weight feeding the geophage output. The one whose geophage weight is lifted eats the salt
+    // it stands on each tick and lives; the blank founder, expressing zero on that channel, never eats
+    // though it stands on the same salt, drains its reserve, and dies. So a mineral's fitness value, the
+    // reason to seek it and (later) mine it, is an evolved phenotype resolved by physiology against
+    // substance data, no per-race diet table (Principles 8, 9).
+    use civsim_sim::homeostasis::HomeostaticAxisDef;
+    use civsim_sim::material::MaterialField;
+
+    // A registry whose one draining reserve is backed by the halite substance (rock salt): a mineral need.
+    // The required temperature axis does not drain. The reserve drains each tick and, refilled or not,
+    // decides survival.
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "mineral".to_string(),
+                backing_component: Some("halite".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 50),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+    // A mineral-storing tissue backs the halite reserve, so the being has a mineral reserve to drain and
+    // refill (an axis with no tissue backing it would have zero capacity, the starve-at-birth cull).
+    let mut organs = BodyPlanRegistry::dev_default();
+    let mineral_store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: mineral_store,
+        name: "mineral-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("halite", Fixed::ONE)]),
+    });
+    let store_body = || body((3, 4), vec![organ(mineral_store, (1, 1))]);
+    let seam = Fixed::from_int(100000);
+    let eater_cell = Coord3::ground(2, 2);
+    let founder_cell = Coord3::ground(5, 5);
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x6E0,
+    );
+    // The geophage output is the fifth output (move [act,dx,dy] 0..2, ingest [act] 3, geophage [act] 4).
+    assert_eq!(
+        emb.layout().n_out(),
+        5,
+        "geophage layout: move(3) + ingest(1) + geophage(1)"
+    );
+    let n_in = emb.layout().n_in();
+    let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+    w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> geophage activation
+    let eater_ctrl = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+    let blank = Controller::zeros(emb.layout());
+
+    emb.add(
+        resting_walker(1, eater_cell, store_body(), &reg, &organs, eater_ctrl),
+        band(305),
+    );
+    emb.add(
+        resting_walker(2, founder_cell, store_body(), &reg, &organs, blank),
+        band(305),
+    );
+    let mut field = MaterialField::new();
+    field.deposit(eater_cell, "halite", seam);
+    field.deposit(founder_cell, "halite", seam);
+    emb.set_material(field);
+    // No material registry and no anatomy physiology are needed: geophagy reads the being's own edibility
+    // physiology (halite assimilation, from the mineral-backed axis) and the cell's volume, not the floor.
+
+    let mut runner =
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb);
+    for _ in 0..200 {
+        runner.step();
+    }
+
+    let alive = |r: &Runner, id: u64| -> bool {
+        r.embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .alive
+    };
+    let ground = |r: &Runner, coord: Coord3| -> Fixed {
+        r.embodiment().unwrap().material().volume(coord, "halite")
+    };
+
+    // The evolved-weight being ate its way through the drain and lives; its seam lost some salt.
+    assert!(
+        alive(&runner, 1),
+        "the being that geophages its needed mineral survives"
+    );
+    assert!(
+        ground(&runner, eater_cell) < seam,
+        "the eater drew salt from its seam (the mineral is consumed to satisfy the need)"
+    );
+    // The blank founder never ate, drained its mineral reserve, and died; its seam is untouched.
+    assert!(
+        !alive(&runner, 2),
+        "the blank founder never geophages and starves of the mineral it stood on"
+    );
+    assert_eq!(
+        ground(&runner, founder_cell),
+        seam,
+        "the founder's seam is untouched: it never ate"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
