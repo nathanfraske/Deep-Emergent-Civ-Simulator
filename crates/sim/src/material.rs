@@ -40,6 +40,12 @@ const AXIS_DENSITY: &str = "mat.density";
 /// extraction contest works against.
 const AXIS_HARDNESS: &str = "mat.indentation_hardness";
 
+/// The stress-a-substance-fractures-at axis of the mechanical floor, read to derive the resistance the
+/// extraction contest must overcome to break matter loose (material-substrate arc, cascade item 4). This
+/// is the axis the fracture law (`laws::fracture_onset`) gates on, distinct from the indentation hardness
+/// (`AXIS_HARDNESS`) a plastic-indentation cut gates on.
+const AXIS_FRACTURE: &str = "mat.fracture_strength";
+
 /// The substance a single cell is made of: a mixture keyed by physics [`Substance`] id, each carrying
 /// the VOLUME of that substance present in the cell (a fantasy or real substance alike, whatever the
 /// registry declares). A substance the cell bears none of is simply absent (reads as zero, the
@@ -184,6 +190,35 @@ impl SubstanceMix {
         self.bulk(reg, AXIS_HARDNESS)
     }
 
+    /// The greatest value of a floor axis over the mixture's constituents (the MAXIMUM, not the
+    /// volume-weighted mean), read from the registry. An empty cell reads zero. This is the aggregation a
+    /// FRACTURE-GATING property takes: a composite does not fracture until the force clears its STRONGEST
+    /// load-bearing constituent, so the resistance is the hardest phase, never the average (see
+    /// [`SubstanceMix::fracture_hardness`]).
+    fn constituent_max(&self, reg: &PhysicsRegistry, axis: &str) -> Fixed {
+        self.volumes
+            .keys()
+            .map(|substance| SubstanceMix::axis_value(reg, substance, axis))
+            .fold(Fixed::ZERO, |acc, v| if v > acc { v } else { acc })
+    }
+
+    /// The cell's FRACTURE-GATING hardness: the GREATEST [`AXIS_FRACTURE`] among its constituents (the
+    /// hardest load-bearing phase), read from the registry (material-substrate arc, cascade item 4). This
+    /// is the resistance the extraction contest must clear to break any matter loose, and it is NOT the
+    /// volume-weighted mean [`bulk_hardness`] uses: hardness does not average linearly, and a composite
+    /// breaks at its strongest bond, so ore embedded in granite breaks at the granite, not at a blend of
+    /// the two. A single-substance cell reads that substance's own fracture strength; a cell of a substance
+    /// carrying no fracture datum reads zero (the absence convention: matter with no declared fracture
+    /// resistance offers none). An empty cell reads zero.
+    ///
+    /// The honest limit: the strongest constituent is the proxy for the load-bearing matrix. Where the
+    /// continuous phase that holds a composite together is not its hardest constituent, a matrix-phase
+    /// datum would refine this; until a substance declares which phase is load-bearing, the hardest
+    /// constituent is the defensible read and delivers the ore-in-rock outcome the physics needs.
+    pub fn fracture_hardness(&self, reg: &PhysicsRegistry) -> Fixed {
+        self.constituent_max(reg, AXIS_FRACTURE)
+    }
+
     /// Fold the mixture into a hash in canonical (substance-id, volume) order. Defined for the wiring
     /// slice that folds the material layer into `state_hash`; nothing calls it on the run path yet, so
     /// declaring the substrate is hash-neutral. The `BTreeMap` walks in sorted id order, so the fold is
@@ -292,6 +327,18 @@ impl MaterialField {
         self.matter
             .get(&coord)
             .map(|mix| mix.bulk_hardness(reg))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The FRACTURE-GATING hardness of a cell's matter, derived from the registry: the greatest fracture
+    /// strength among its constituents, the resistance an extraction contest must clear to break matter
+    /// loose (material-substrate arc, cascade item 4). This is the hardest load-bearing phase, not the
+    /// bulk mean [`bulk_hardness`] takes, so ore in rock breaks at the rock (see
+    /// [`SubstanceMix::fracture_hardness`]). An empty cell reads zero (no matter to break).
+    pub fn fracture_hardness(&self, coord: Coord3, reg: &PhysicsRegistry) -> Fixed {
+        self.matter
+            .get(&coord)
+            .map(|mix| mix.fracture_hardness(reg))
             .unwrap_or(Fixed::ZERO)
     }
 
@@ -420,6 +467,17 @@ range_lo = "1"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
 [[substance]]
 id = "granite"
 participates_in = []
@@ -427,6 +485,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "2700" },
   { axis = "mat.indentation_hardness", value = "5000" },
+  { axis = "mat.fracture_strength", value = "20" },
 ]
 
 [[substance]]
@@ -436,6 +495,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "1500" },
   { axis = "mat.indentation_hardness", value = "100" },
+  { axis = "mat.fracture_strength", value = "3" },
 ]
 
 [[substance]]
@@ -506,11 +566,51 @@ values = [
     }
 
     #[test]
+    fn the_fracture_gating_hardness_is_the_hardest_constituent_not_the_mean() {
+        let reg = floor();
+        // A pure cell reads its substance's own fracture strength, at any volume.
+        for v in [1, 4, 9] {
+            assert_eq!(
+                mix(&[("granite", v)]).fracture_hardness(&reg),
+                Fixed::from_int(20),
+                "pure granite fractures at its own strength, v={v}"
+            );
+        }
+        // Ore in rock: a mostly-soft cell with a little granite fractures at the GRANITE (the hardest
+        // constituent, 20), NOT at the volume-weighted mean the bulk read would take. With granite 1 and
+        // soil 3 the mean fracture would be (1*20 + 3*3) / 4 = 29/4 ~= 7, far below 20; the contest must
+        // clear the granite to break anything loose, so the read is 20. This is the gate's item-4 note:
+        // ore embedded in granite breaks at the granite, not at a blend.
+        let ore_in_rock = mix(&[("granite", 1), ("soil", 3)]);
+        assert_eq!(
+            ore_in_rock.fracture_hardness(&reg),
+            Fixed::from_int(20),
+            "the cell fractures at its hardest constituent (20), not the ~7 the mean would give"
+        );
+        // A constituent carrying no fracture datum contributes zero to the max (the absence convention),
+        // so granite plus peat still fractures at the granite.
+        assert_eq!(
+            mix(&[("granite", 5), ("peat", 5)]).fracture_hardness(&reg),
+            Fixed::from_int(20),
+            "peat declares no fracture resistance, so the granite still gates"
+        );
+        // A cell of only a fracture-datum-less substance offers no fracture resistance; an empty cell
+        // likewise reads zero.
+        assert_eq!(
+            mix(&[("peat", 3)]).fracture_hardness(&reg),
+            Fixed::ZERO,
+            "matter with no declared fracture strength offers none"
+        );
+        assert_eq!(SubstanceMix::new().fracture_hardness(&reg), Fixed::ZERO);
+    }
+
+    #[test]
     fn an_unregistered_substance_and_an_empty_cell_read_zero() {
         let reg = floor();
         let mystery = mix(&[("orichalcum", 5)]);
         assert_eq!(mystery.bulk_density(&reg), Fixed::ZERO);
         assert_eq!(mystery.bulk_hardness(&reg), Fixed::ZERO);
+        assert_eq!(mystery.fracture_hardness(&reg), Fixed::ZERO);
         assert_eq!(mystery.mass(&reg), Fixed::ZERO);
         let empty = SubstanceMix::new();
         assert!(empty.is_empty());
