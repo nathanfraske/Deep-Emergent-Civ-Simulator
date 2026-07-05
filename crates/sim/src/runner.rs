@@ -2022,6 +2022,37 @@ impl Runner {
         // gradient-following on the signed bit climbs toward comfort from either side; one that has not
         // explores or, wired for one side only, walks into danger on the other. The per-being derived
         // drain (when a physiology is installed) is applied through metabolize_derived inside the step.
+        // Material-substrate item 3: the per-being carried-load speed penalty. A load factor (>= 1)
+        // divides a laden being's ground speed (`1 + load_penalty * carried_weight / carry_capacity`),
+        // so a being near its strength limit moves slowest. Empty unless the embodiment declares a
+        // material registry and a being carries a load, so an opted-out run inserts no factor and every
+        // existing scenario is byte-identical.
+        let load_factors: BTreeMap<StableId, Fixed> =
+            match (&emb.material_registry, &emb.physiology) {
+                (Some(reg), Some(phys)) => emb
+                    .walkers
+                    .iter()
+                    .filter_map(|w| {
+                        if w.carried.is_empty() {
+                            return None;
+                        }
+                        let capacity = being_muscle_force(w, phys);
+                        if capacity <= Fixed::ZERO {
+                            return None;
+                        }
+                        let weight = w.carried.weight(reg, standard_gravity(), FORCE_CEILING);
+                        let ratio = weight.checked_div(capacity).unwrap_or(Fixed::ZERO);
+                        let factor = Fixed::ONE
+                            + emb
+                                .params
+                                .load_penalty
+                                .checked_mul(ratio)
+                                .unwrap_or(Fixed::ZERO);
+                        Some((w.id, factor))
+                    })
+                    .collect(),
+                _ => BTreeMap::new(),
+            };
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -2037,6 +2068,7 @@ impl Runner {
             &field_signed,
             &drains,
             &emb.percepts,
+            &load_factors,
         );
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.

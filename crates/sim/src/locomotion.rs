@@ -91,6 +91,14 @@ pub struct LocomotionParams {
     /// `1 + terrain_penalty * (cost - 1)`). RESERVED. Basis: the slowdown of real difficult ground
     /// (broken, steep, or wet terrain) relative to open ground.
     pub terrain_penalty: Fixed,
+    /// How much a carried load slows movement (material-substrate arc, cascade item 3): the ground speed
+    /// is divided by `1 + load_penalty * carried_weight / carry_capacity`, so a being carrying a load at
+    /// its whole-body muscle-force limit moves at `1 / (1 + load_penalty)` of its unladen speed, and an
+    /// unladen being is unaffected (the divisor is one). RESERVED. Basis: the fractional slowdown real
+    /// load carriage incurs at the limit of what a body can bear (the load-carriage and march-speed
+    /// literature on speed versus the carried fraction of a body's capacity); a labelled dev fixture
+    /// through [`Self::dev_default`] until set.
+    pub load_penalty: Fixed,
     /// The lowest activity factor, so even a sluggish body creeps rather than freezing (the
     /// temperament activity axis scales speed between this floor and one). RESERVED. Basis: the
     /// ratio of a slow gait to a brisk one.
@@ -155,6 +163,9 @@ impl LocomotionParams {
         LocomotionParams {
             base_speed: Fixed::from_ratio(1, 1),
             terrain_penalty: Fixed::from_ratio(1, 1),
+            // A being carrying a load at its full muscle-force capacity moves at half speed (divisor 2);
+            // a labelled dev fixture, not an owner value.
+            load_penalty: Fixed::from_ratio(1, 1),
             activity_floor: Fixed::from_ratio(1, 4),
             sense_range: 4,
             explore_persistence: 6,
@@ -674,6 +685,8 @@ pub fn step<T: Terrain>(
         // The field-less scoring/fixture path senses no features (the evolve proxy and movement tests
         // run without the percept substrate), so the controller feature block, if any, reads zero.
         &PerceptRegistry::empty(),
+        // No carried-load penalty on the field-less fixture path (nothing picks matter up here).
+        &BTreeMap::new(),
     )
 }
 
@@ -715,6 +728,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
     percepts: &PerceptRegistry,
+    load_factors: &BTreeMap<StableId, Fixed>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -805,6 +819,14 @@ pub fn step_with_field_dirs<T: Terrain>(
                                 locomotion_speed_structure(s, w.body.temperament.activity, cost, p)
                             }
                             None => locomotion_speed(&w.body, organs, cost, p),
+                        };
+                        // A carried load slows the being (material-substrate arc, cascade item 3): the
+                        // per-walker load factor (>= 1) divides the ground speed. It is 1 for an unladen
+                        // being (byte-identical) and rises with the fraction of its strength the load
+                        // consumes, so an over-laden being moves slower, by physics not by a label.
+                        let speed = match load_factors.get(&w.id) {
+                            Some(f) if *f > Fixed::ONE => speed.div(*f),
+                            _ => speed,
                         };
                         if speed > Fixed::ZERO {
                             let (hx, hy) = d.heading.unwrap_or((Fixed::ZERO, Fixed::ZERO));
@@ -1495,6 +1517,80 @@ mod tests {
     }
 
     #[test]
+    fn a_carried_load_slows_a_moving_being() {
+        // Material-substrate item 3, the carried-load locomotion penalty: two identical exploring beings
+        // draw the SAME heading sequence (same id and seed), so the only difference is the step SIZE. The
+        // being whose load factor exceeds one covers less ground, because the factor divides its ground
+        // speed; an empty or unit load factor leaves the walk byte-identical (the opt-out).
+        let organs = strength_registry();
+        let reg = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let p = LocomotionParams::dev_default();
+        let n_in = l.n_in();
+        let mut wts = vec![Fixed::ZERO; l.weight_count()];
+        wts[n_in - 1] = Fixed::ONE; // move_act bias positive, no directional weights: it explores
+        let mover = Controller::from_weights(n_in, l.n_out(), l.hidden(), wts);
+        let disperse = |factor: Option<Fixed>| -> Fixed {
+            let mut body = mobile_body();
+            body.locomotion = vec![1];
+            let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            let phys = Physiology::dev_for_registry(&reg);
+            let mut ws = vec![Walker::new(
+                StableId(1),
+                Coord3::ground(0, 0),
+                body,
+                homeo,
+                phys,
+                mover.clone(),
+            )];
+            let mut field = ResourceField::new();
+            let load_factors: BTreeMap<StableId, Fixed> = match factor {
+                Some(f) => [(StableId(1), f)].into_iter().collect(),
+                None => BTreeMap::new(),
+            };
+            for t in 0..15u64 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &organs,
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    7,
+                    t,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &PerceptRegistry::empty(),
+                    &load_factors,
+                );
+            }
+            let (dx, dy) = (
+                ws[0].x - Fixed::from_ratio(1, 2),
+                ws[0].y - Fixed::from_ratio(1, 2),
+            );
+            dx.mul(dx) + dy.mul(dy)
+        };
+        let unladen = disperse(None);
+        let laden = disperse(Some(Fixed::from_int(3))); // divisor 3: a third the ground speed
+        assert!(
+            laden < unladen,
+            "a laden being disperses less than an unladen one ({laden:?} < {unladen:?})"
+        );
+        assert!(unladen > Fixed::ZERO, "the unladen being does move");
+        // A unit load factor is below the penalty threshold, so it leaves the walk byte-identical (the
+        // opt-out: an unladen being, whose factor map is empty, is never slowed).
+        assert_eq!(
+            disperse(None),
+            disperse(Some(Fixed::ONE)),
+            "a load factor of one leaves the walk unchanged"
+        );
+    }
+
+    #[test]
     fn a_strong_limbed_lineage_disperses_faster_than_a_weak_limbed_one() {
         // The blind concept-verification on the run-path locomotion step: two beings identical but for
         // their limb's structural strength (the stout section vs the slender near-yield one, at EQUAL
@@ -1544,6 +1640,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
+                    &std::collections::BTreeMap::new(),
                 );
             }
             let (x, y) = (ws[0].x, ws[0].y);
@@ -1628,6 +1725,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
+                    &std::collections::BTreeMap::new(),
                 );
             }
             ws[0].coord()
@@ -1867,6 +1965,7 @@ mod tests {
             &empty_signed,
             &empty_drains,
             &crate::percept::PerceptRegistry::empty(),
+            &std::collections::BTreeMap::new(),
         );
 
         let after = field.supply(tile, WATER_CLASS);
@@ -1984,6 +2083,7 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
+                    &std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
                     break;
@@ -2097,6 +2197,7 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &percepts,
+                    &std::collections::BTreeMap::new(),
                 );
             }
             // The delta since the start of the last tick: the net CONDITION change the salt harm drove.
@@ -2189,6 +2290,7 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
+                    &std::collections::BTreeMap::new(),
                 );
             }
             ws[0].x
