@@ -1,0 +1,53 @@
+# The ground-material floor: the located substances the world's z-column is made of, extended onto the
+# mechanical floor (the material-substrate arc, cascade item 1, docs/working/MATERIAL_SUBSTRATE_HANDOFF.md).
+# Each is a real substance carrying its cited BULK DENSITY, the datum a carry weighs (density times
+# volume through law.weight) and the mass an extraction yields. The mechanical-contest axes (fracture,
+# compressive, tensile strength) are carried where a consuming contest reads them (granite, for the
+# extraction contest that mines rock); the remaining ground substances carry density now and gain their
+# dig, dissolve, or fracture axes as the contests that read them are built, so no value is authored
+# ahead of a consumer. Densities are cited real data. This floor extends the mechanical floor rather
+# than editing it, the same way the fluids and optics floors add air and water, so the mechanical
+# floor's identity and its tests are untouched.
+
+[[substance]]
+id = "granite"
+participates_in = ["law.fracture_onset", "law.contact_pressure"]
+real = "CRC Handbook of Chemistry and Physics (granite bulk density ~2.7 g/cm^3); Goodman, Introduction to Rock Mechanics (granite unconfined compressive strength ~100 to 250 MPa, tensile strength ~7 to 25 MPa)"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.compressive_strength", value = "200" },
+  { axis = "mat.ultimate_tensile_strength", value = "15" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+
+[[substance]]
+id = "loam"
+participates_in = []
+real = "Hillel, Environmental Soil Physics; FAO soil bulk-density tables (loam topsoil bulk density ~1.4 g/cm^3)"
+values = [
+  { axis = "mat.density", value = "1400" },
+]
+
+[[substance]]
+id = "clay"
+participates_in = []
+real = "Terzaghi and Peck, Soil Mechanics in Engineering Practice (compacted dry clay bulk density ~1.9 g/cm^3)"
+values = [
+  { axis = "mat.density", value = "1900" },
+]
+
+[[substance]]
+id = "hematite"
+participates_in = []
+real = "CRC Handbook of Chemistry and Physics (hematite, Fe2O3, density 5.26 g/cm^3), the iron-ore exemplar"
+values = [
+  { axis = "mat.density", value = "5260" },
+]
+
+[[substance]]
+id = "halite"
+participates_in = []
+real = "CRC Handbook of Chemistry and Physics (halite, rock salt NaCl, density 2.17 g/cm^3)"
+values = [
+  { axis = "mat.density", value = "2170" },
+]

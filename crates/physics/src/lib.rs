@@ -604,6 +604,19 @@ impl PhysicsRegistry {
         Self::from_toml_str(&text)
     }
 
+    /// The world material registry: the mechanical floor plus the ground-material substances a world's
+    /// z-column is made of (`ground_floor.toml`), built from the crate's EMBEDDED floor data so a caller
+    /// (the sim's world-build) needs no filesystem path. The material substrate reads a cell's substance
+    /// mixture against this to derive its bulk density and, where a contest reads them, its mechanical
+    /// properties (the material-substrate arc, cascade item 1). The ground floor EXTENDS the mechanical
+    /// floor rather than editing it, so the mechanical floor's identity and its tests are untouched.
+    pub fn ground() -> Result<Self, PhysicsError> {
+        let mut reg =
+            PhysicsRegistry::from_toml_str(include_str!("../data/mechanical_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
+        Ok(reg)
+    }
+
     /// Extend this registry with another floor file's axes, laws, and substances, then revalidate the
     /// whole. A wave loads onto the previous floor rather than duplicating the shared axes it reads:
     /// the wave-2 fluids, chemistry, and optics floor references the wave-1 mechanical and material
