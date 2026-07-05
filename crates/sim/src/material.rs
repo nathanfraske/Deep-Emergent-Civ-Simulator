@@ -29,7 +29,7 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StateHasher};
-use civsim_physics::PhysicsRegistry;
+use civsim_physics::{laws, PhysicsRegistry};
 use civsim_world::Coord3;
 
 /// The bulk mass-per-unit-volume axis of the mechanical floor (`mechanical_floor.toml`), read to
@@ -158,6 +158,17 @@ impl SubstanceMix {
     /// weighs (through `laws::weight`). Derived, never stored (Principle 11).
     pub fn mass(&self, reg: &PhysicsRegistry) -> Fixed {
         self.weighted_sum(reg, AXIS_DENSITY)
+    }
+
+    /// The load force this matter exerts under gravity: its [`mass`](SubstanceMix::mass) times the local
+    /// gravitational acceleration, capped at the physics force ceiling
+    /// ([`civsim_physics::laws::weight`]). This is the weight a carrier's grown strength is contested
+    /// against when it lifts a load (material-substrate arc, cascade item 3): a being can take up matter
+    /// whose weight its whole-body muscle force covers and no more, so the carry limit is grown strength
+    /// versus derived weight, never a per-race carry table. The gravity is the world's reserved value,
+    /// passed in (the same datum the buoyancy and weight physics already read).
+    pub fn weight(&self, reg: &PhysicsRegistry, gravity: Fixed, force_max: Fixed) -> Fixed {
+        laws::weight(self.mass(reg), gravity, force_max)
     }
 
     /// The cell's bulk density: the volume-weighted mean of [`AXIS_DENSITY`] over its mixture, read
@@ -637,6 +648,33 @@ values = [
         assert_eq!(
             field.bulk_density(Coord3 { x: 0, y: 0, z: 0 }, &reg),
             Fixed::from_int(1400)
+        );
+    }
+
+    #[test]
+    fn a_carry_load_weighs_its_derived_mass_under_gravity() {
+        let reg = floor();
+        // A granite load of volume 2 has mass 2*2700 = 5400; at unit gravity it weighs 5400.
+        let load = mix(&[("granite", 2)]);
+        assert_eq!(load.mass(&reg), Fixed::from_int(5400));
+        assert_eq!(
+            load.weight(&reg, Fixed::ONE, Fixed::from_int(1_000_000)),
+            Fixed::from_int(5400)
+        );
+        // Doubling the gravity doubles the weight (F = m g).
+        assert_eq!(
+            load.weight(&reg, Fixed::from_int(2), Fixed::from_int(1_000_000)),
+            Fixed::from_int(10800)
+        );
+        // The physics force ceiling caps a heavy load's weight.
+        assert_eq!(
+            load.weight(&reg, Fixed::ONE, Fixed::from_int(1000)),
+            Fixed::from_int(1000)
+        );
+        // An empty carrier weighs nothing.
+        assert_eq!(
+            SubstanceMix::new().weight(&reg, Fixed::ONE, Fixed::from_int(1000)),
+            Fixed::ZERO
         );
     }
 }
