@@ -7,6 +7,14 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-05: emergent-anatomy Step 2 slice B1 gated; slice B2a (run-read plumbing) built
+
+The gate signed off slice B1 (the digest + direct-read bridge) and directed slice B2, the run wiring (the payoff). B2 splits into B2a (the run-read plumbing, hash-neutral, this increment) and B2b (the growth + genesis seeding + blind-verify, hash-changing, next).
+
+Slice B2a (hash-neutral, unit-proven): `Walker` gains an `Option<Structure>` field (crates/sim/src/locomotion.rs; a `with_structure` builder so the founder/newborn embodiment can hand a grown body without changing `Walker::new`'s many callers). It is NOT folded into `state_hash` directly (a static derived body folds only through the dynamic state it drives, position and reserves, exactly as the catalog body does). The run reads route through it: `step_with_field_dirs`'s affordance read and ground-speed read, and the runner's exertion-drain velocity (runner.rs `being_derived_drains`), use `afforded_structure` / `locomotion_speed_structure` when the walker carries a grown structure, else the catalog path. Hash-neutral because every existing walker carries `None`, so the catalog path is unchanged and the full sim suite (including determinism/replay/worker-invariance) is green with no hash moved. Proven by a routing test: a walker whose GROWN structure is rooted stays put though its catalog body is a mobile walker, and one whose grown structure bears a limb moves, so the grown body governs the run, not the catalog. Next: slice B2b, the growth seams (grow each founder from `world.genome_of(id)` at worldbuild, the newborn at runner, seed the morphogen block into the founder gene set so growth is genome-driven, hand the grown Structure to `Walker::with_structure`), the state-hash re-baseline, replay/worker-invariance, the 5090 re-confirm, and the blind concept-verification (a lineage grows a novel morphology reading as a weapon/locomotor the catalog never had, observable on the run).
+
+---
+
 ## 2026-07-05: emergent-anatomy Step 2 slice A gated; slice B1 (digest + direct-read bridge) built
 
 The gate signed off Step 2 slice A (the morphogen growth kernel; it audited `grow()` line-by-line and confirmed the triple termination guarantee, the counter-keyed determinism, and the empty steering scan) and directed slice B, the run-path wiring. On the fork I surfaced (a grown Structure carries geometry inline with no catalog kind ids, but every run read resolves a part's kind id against the ONE shared organs registry), the owner ruled (2026-07-05): read the grown Structure DIRECTLY on the body (retire the kind-id indirection for grown bodies, not intern grown morphologies into the catalog), and SPLIT the work (digest + direct-read bridge first, hash-neutral; then the run wiring, hash-changing).

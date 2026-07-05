@@ -737,8 +737,19 @@ fn being_derived_drains(
                 phys.tick_seconds,
                 &phys.anchors,
             );
-            let velocity =
-                locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params);
+            // A grown body's exertion velocity reads its grown limb; a catalog body's the registry mode
+            // (emergent-anatomy Step 2), so the derived drain follows the body a being actually carries.
+            let velocity = match &w.structure {
+                Some(s) => locomotion::locomotion_speed_structure(
+                    s,
+                    w.body.temperament.activity,
+                    Fixed::ONE,
+                    &emb.params,
+                ),
+                None => {
+                    locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params)
+                }
+            };
             let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
             let exertion = derive_exertion_coupling(
                 &w.body,

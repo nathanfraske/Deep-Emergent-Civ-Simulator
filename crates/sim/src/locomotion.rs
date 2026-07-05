@@ -357,6 +357,15 @@ pub struct Walker {
     pub y: Fixed,
     /// The body plan the movement physics reads (mass, activity, whether it has locomotion at all).
     pub body: BodyPlan,
+    /// The grown body structure, when the being's body was GROWN from its genome (emergent-anatomy Step 2)
+    /// rather than drawn from a catalog. When `Some`, the run reads its affordances and ground speed from
+    /// the grown segments' physics DIRECTLY ([`Structure`], via `afforded_structure` /
+    /// `locomotion_speed_structure`), with no organs registry and no kind id; when `None`, the being carries
+    /// a catalog body read against the shared registry. Materialised once (the LOD split: the aggregate
+    /// `body` is the digest, the structure the full grown graph); it is not folded into `state_hash`
+    /// directly (a static derived body), so its effect on the run folds only through the dynamic state it
+    /// drives (position, reserves), the same as the catalog body.
+    pub structure: Option<Structure>,
     /// The homeostatic reserves: the being's needs as physical states of its body.
     pub homeostasis: Homeostasis,
     /// The consumer physiology the ingest measure reads: its per-class requirement and assimilation
@@ -391,6 +400,7 @@ impl Walker {
             x: Fixed::from_int(tile.x) + HALF,
             y: Fixed::from_int(tile.y) + HALF,
             body,
+            structure: None,
             homeostasis,
             physiology,
             controller,
@@ -398,6 +408,16 @@ impl Walker {
             known: BTreeMap::new(),
             alive: true,
         }
+    }
+
+    /// Attach a GROWN body structure to this walker (emergent-anatomy Step 2): the run then reads the
+    /// being's affordances and ground speed from the grown segments' physics directly, rather than from the
+    /// catalog `body` against the shared organs registry. The aggregate `body` stays as the LOD-0 digest the
+    /// metabolism reads. A builder, so the founder and newborn embodiment can grow a body from the genome
+    /// and hand it here without changing [`Walker::new`]'s many callers.
+    pub fn with_structure(mut self, structure: Structure) -> Walker {
+        self.structure = Some(structure);
+        self
     }
 
     /// The tile the being currently stands on.
@@ -727,7 +747,12 @@ pub fn step_with_field_dirs<T: Terrain>(
         let input = layout.build_input(&w.homeostasis, &here_axes, &dirs, signed);
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
-        let afforded = afford.afforded(&w.body, organs, &p.capability_refs, &p.capability_caps);
+        // A grown body reads its affordances from its own structure's physics directly; a catalog body
+        // reads them against the shared organs registry (emergent-anatomy Step 2).
+        let afforded = match &w.structure {
+            Some(s) => afford.afforded_structure(s, &p.capability_refs, &p.capability_caps),
+            None => afford.afforded(&w.body, organs, &p.capability_refs, &p.capability_caps),
+        };
         let decision = layout.decide(&out, &afforded);
 
         let mut exertion = Fixed::ZERO;
@@ -736,7 +761,14 @@ pub fn step_with_field_dirs<T: Terrain>(
                 match d.affordance {
                     MOVE => {
                         let cost = terrain.cost(here);
-                        let speed = locomotion_speed(&w.body, organs, cost, p);
+                        // A grown body's ground speed reads its own strongest grown limb; a catalog body's
+                        // reads the mode kind in the shared registry (emergent-anatomy Step 2).
+                        let speed = match &w.structure {
+                            Some(s) => {
+                                locomotion_speed_structure(s, w.body.temperament.activity, cost, p)
+                            }
+                            None => locomotion_speed(&w.body, organs, cost, p),
+                        };
                         if speed > Fixed::ZERO {
                             let (hx, hy) = d.heading.unwrap_or((Fixed::ZERO, Fixed::ZERO));
                             let mag2 = hx.mul(hx) + hy.mul(hy);
@@ -1495,6 +1527,82 @@ mod tests {
         let open = locomotion_speed(&body, &organs, Fixed::ONE, &p);
         let rough = locomotion_speed(&body, &organs, Fixed::from_int(3), &p);
         assert!(rough < open, "costlier ground slows the body");
+    }
+
+    #[test]
+    fn the_run_reads_a_grown_structure_when_the_walker_carries_one() {
+        // The Step-2 run wiring (slice B2a): when a walker carries a GROWN structure, the run reads its
+        // affordances and speed from the grown segments' physics, NOT from the catalog `body`. A being whose
+        // catalog body is a walker but whose grown structure is rooted does not move; one whose grown
+        // structure bears a limb does. The grown body governs the run, by physics not by the catalog.
+        use crate::morphogen::{grow, MorphogenProgram};
+        let program = MorphogenProgram::dev_default();
+        let mut limbed_params = vec![Fixed::ZERO; program.param_count()];
+        limbed_params[1] = Fixed::from_ratio(1, 2); // section_modulus fraction
+        limbed_params[2] = Fixed::from_ratio(2, 5); // arm_length fraction
+        limbed_params[9] = Fixed::from_ratio(3, 4); // yield_strength fraction
+        let limbed = grow(&program, &limbed_params, 0x1, StableId(1));
+        let rooted = grow(
+            &program,
+            &vec![Fixed::ZERO; program.param_count()],
+            0x1,
+            StableId(1),
+        );
+
+        let reg = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let n_in = l.n_in();
+        let mut wts = vec![Fixed::ZERO; l.weight_count()];
+        wts[n_in - 1] = Fixed::ONE; // move_act bias positive: it explores every tick
+        let mover = Controller::from_weights(n_in, l.n_out(), l.hidden(), wts);
+        let p = LocomotionParams::dev_default();
+        let organs = BodyPlanRegistry::dev_default();
+
+        let run = |structure: Structure| -> Coord3 {
+            let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+            let phys = Physiology::dev_for_registry(&reg);
+            // The catalog body is a mobile walker (locomotion mode 1); the grown structure overrides it.
+            let walker = Walker::new(
+                StableId(1),
+                Coord3::ground(0, 0),
+                mobile_body(),
+                homeo,
+                phys,
+                mover.clone(),
+            )
+            .with_structure(structure);
+            let mut ws = vec![walker];
+            let mut field = ResourceField::new();
+            for t in 0..10u64 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &organs,
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    SEED,
+                    t,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                );
+            }
+            ws[0].coord()
+        };
+        assert_ne!(
+            run(limbed),
+            Coord3::ground(0, 0),
+            "a walker carrying a grown limbed structure moves, reading MOVE from the grown limb"
+        );
+        assert_eq!(
+            run(rooted),
+            Coord3::ground(0, 0),
+            "a walker carrying a grown rooted structure stays put, though its catalog body is a walker"
+        );
     }
 
     #[test]
