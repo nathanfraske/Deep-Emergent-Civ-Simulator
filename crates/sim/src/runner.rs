@@ -110,6 +110,7 @@ use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
+use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -689,6 +690,31 @@ fn medium_sample(
     })
 }
 
+/// Standard gravity, the reference gravitational acceleration (NIST standard gravity 9.80665 m/s^2,
+/// the terran default `mech.gravitational_acceleration` cites), the datum the carry-load weight physics
+/// reads (material-substrate arc, cascade item 3). A cited physical constant, not a reserved tunable; a
+/// per-world gravity override rides Part 40, a documented follow-on.
+fn standard_gravity() -> Fixed {
+    Fixed::from_ratio(980665, 100000)
+}
+
+/// The physics force ceiling the weight law saturates at: the `mech.force` axis maximum (1e8 N, the
+/// mechanical floor's declared force range). A representability cap, not an authored quantity.
+const FORCE_CEILING: Fixed = Fixed::from_int(100_000_000);
+
+/// A being's whole-body muscle force, its carry capacity: a GROWN body sums its grown tissue's muscle
+/// strength scaled to body mass, a catalog body reads it off its organs, the same read the exertion
+/// drain uses ([`being_derived_drains`]). Blind to any kind or race id (Principle 9).
+fn being_muscle_force(w: &Walker, phys: &EmbodiedPhysiology) -> Fixed {
+    match &w.structure {
+        Some(s) => s
+            .composition_sum(physiology::MUSCLE_STRENGTH)
+            .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+            .unwrap_or(Fixed::ZERO),
+        None => physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+    }
+}
+
 /// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
 /// physiology. The metabolic axis (the one backed by the `bio.energy_density` floor axis, keyed off the
 /// floor id rather than a hardcoded axis constant, so the choice is data not a special case) drains at
@@ -852,6 +878,13 @@ pub struct Embodiment {
     /// extraction contest), so this slice folds the substrate into the canonical state without a
     /// consumer.
     material: MaterialField,
+    /// The physics registry a carried or worked load's weight and (later) hardness are DERIVED against
+    /// (material-substrate arc, cascade item 3): the world material registry
+    /// ([`civsim_physics::PhysicsRegistry::ground`]). `None` by default, so an embodiment that declares
+    /// no material registry cannot pick up matter (the carry actions no-op) and every existing scenario
+    /// is unchanged. Opt-in via [`Embodiment::set_material_registry`], the first run-path consumer of the
+    /// derived material properties.
+    material_registry: Option<PhysicsRegistry>,
 }
 
 impl Embodiment {
@@ -900,6 +933,7 @@ impl Embodiment {
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
             material: MaterialField::new(),
+            material_registry: None,
         }
     }
 
@@ -963,6 +997,100 @@ impl Embodiment {
     /// mutation stays an id-sorted sequential draw off hashed state.
     pub fn material(&self) -> &MaterialField {
         &self.material
+    }
+
+    /// Install the world material registry a carried load's weight is derived against (material-substrate
+    /// arc, cascade item 3): the ground registry ([`civsim_physics::PhysicsRegistry::ground`]). Opt-in;
+    /// without it the carry actions no-op and every existing scenario is unchanged. This is the first
+    /// run-path consumer of a substance's derived physical properties.
+    pub fn set_material_registry(&mut self, registry: PhysicsRegistry) {
+        self.material_registry = Some(registry);
+    }
+
+    /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
+    /// three limits with no randomness: what it wants, what the cell holds, and what its remaining carry
+    /// headroom bears (its grown whole-body muscle force minus the weight it already carries, over the
+    /// substance's weight per unit volume). A pure read, so a caller can size a pick-up before it moves
+    /// matter. Zero when the embodiment declares no material registry or physiology, the being is
+    /// unknown, the substance is weightless or unregistered (its weight cannot be derived, so it cannot
+    /// be lifted), or no headroom remains.
+    fn pickup_amount(
+        &self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let gravity = standard_gravity();
+        let capacity = being_muscle_force(w, phys);
+        let carried = w.carried.weight(reg, gravity, FORCE_CEILING);
+        let headroom = capacity - carried;
+        if headroom <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        // The substance's weight per unit volume: its density times gravity. A substance the registry
+        // carries no density for cannot be weighed, so it cannot be lifted (returns zero).
+        let density = reg
+            .substance(substance)
+            .and_then(|s| s.vector.get("mat.density").copied())
+            .unwrap_or(Fixed::ZERO);
+        let unit_weight = density.checked_mul(gravity).unwrap_or(Fixed::ZERO);
+        if unit_weight <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let fits = headroom.checked_div(unit_weight).unwrap_or(Fixed::ZERO);
+        want.min(fits)
+            .min(self.material.volume(coord, substance))
+            .max(Fixed::ZERO)
+    }
+
+    /// Pick up matter from the ground into the being's carried load (material-substrate arc, cascade item
+    /// 3, the hinge): the being takes as much of `substance` at `coord` as its grown strength bears
+    /// against the load's derived weight ([`Embodiment::pickup_amount`]), an id-keyed sequential draw off
+    /// hashed state with no fresh randomness. The carry limit is grown whole-body muscle force versus
+    /// physics-derived weight, never a per-race carry table (Principle 9). Returns the volume taken.
+    pub fn pick_up(
+        &mut self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let take = self.pickup_amount(walker_id, coord, substance, want);
+        if take <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let taken = self.material.take(coord, substance, take);
+        if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+            w.carried.add(substance, taken);
+        }
+        taken
+    }
+
+    /// Put matter down from the being's carried load onto the ground (material-substrate arc, cascade
+    /// item 3): the being deposits up to `want` of `substance` at `coord`, the inverse of
+    /// [`Embodiment::pick_up`]. Dropping is always permitted (no capacity gate). Returns the volume set
+    /// down, which persists at the coordinate with its substance identity.
+    pub fn put_down(
+        &mut self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let dropped = w.carried.take(substance, want);
+        self.material.deposit(coord, substance, dropped);
+        dropped
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness

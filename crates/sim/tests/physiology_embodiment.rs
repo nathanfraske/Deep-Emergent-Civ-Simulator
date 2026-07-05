@@ -589,6 +589,98 @@ fn a_carried_load_folds_into_state_hash_and_stays_deterministic() {
 }
 
 #[test]
+fn a_being_picks_up_and_puts_down_matter_bounded_by_its_grown_strength() {
+    // Material-substrate arc item 3, the carry hinge: a being takes matter from the ground into its
+    // carried load, as much as its grown whole-body muscle force bears against the load's derived weight
+    // and no more, and puts it back conserved. The limit is grown strength versus physics-derived weight,
+    // never a per-race carry table, so a being with no muscle carries nothing and a strong being is
+    // bounded by its strength rather than by the size of the heap.
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(1, 1);
+    let build = |with_muscle: bool, with_registry: bool| -> Embodiment {
+        let (mut organs, fat) = energy_registry();
+        let mut parts = vec![organ(fat, (1, 2))];
+        if with_muscle {
+            let muscle = organs.organs.len() as u16;
+            organs.organs.push(OrganKindDef {
+                id: muscle,
+                name: "muscle".to_string(),
+                fantasy: false,
+                composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+            });
+            parts.push(organ(muscle, (1, 1)));
+        }
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let blank = Controller::zeros(emb.layout());
+        emb.add(
+            resting_walker(1, cell, body((3, 4), parts), &reg, &organs, blank),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", Fixed::from_int(100000));
+        emb.set_material(field);
+        if with_registry {
+            emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        }
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb
+    };
+
+    // Without a material registry the load's weight cannot be derived, so the carry actions no-op.
+    let mut no_reg = build(true, false);
+    assert_eq!(
+        no_reg.pick_up(StableId(1), cell, "granite", Fixed::from_int(1)),
+        Fixed::ZERO
+    );
+
+    // A being with no muscle has zero carry capacity and lifts nothing.
+    let mut weak = build(false, true);
+    assert_eq!(
+        weak.pick_up(StableId(1), cell, "granite", Fixed::from_int(1)),
+        Fixed::ZERO
+    );
+
+    // A strong being lifts some granite, bounded by its strength: asking for the whole heap it takes a
+    // positive but limited amount, its strength is then spent (a second pick-up takes nothing more), and
+    // the heap still holds granite (the bound was strength, not availability). Conservation holds: the
+    // ground lost exactly what the being took.
+    let mut strong = build(true, true);
+    let taken = strong.pick_up(StableId(1), cell, "granite", Fixed::from_int(100000));
+    assert!(taken > Fixed::ZERO, "a strong being lifts some granite");
+    assert_eq!(
+        strong.pick_up(StableId(1), cell, "granite", Fixed::from_int(100000)),
+        Fixed::ZERO,
+        "its strength is spent, so it cannot bear more"
+    );
+    assert_eq!(
+        strong.material().volume(cell, "granite"),
+        Fixed::from_int(100000) - taken,
+        "the ground lost exactly what was taken"
+    );
+
+    // Put it back down: the load returns to the ground, conserved.
+    let dropped = strong.put_down(StableId(1), cell, "granite", Fixed::from_int(100000));
+    assert_eq!(dropped, taken, "the being sets down all it carried");
+    assert_eq!(
+        strong.material().volume(cell, "granite"),
+        Fixed::from_int(100000),
+        "the granite is fully restored to the ground"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
