@@ -2862,4 +2862,301 @@ source = "test"
             "remove the harm (full salt tolerance) and no HARMS belief forms: the belief tracks harm"
         );
     }
+
+    #[test]
+    fn a_holder_that_avoids_the_hazard_outlives_a_naive_being_on_the_same_harm() {
+        // Harm-learning arc slice d, the ADAPTIVE leg: the belief pays off in survival. Two beings sit on
+        // the western edge of a salt region (salt to their east). Both hold the HARMS belief about the
+        // salt feature; the one whose controller has the evolved CONDITION-dir-to-heading weight steers
+        // WEST off the salt (its avoidance percept points away from the believed harm to the east) and
+        // keeps its condition, while the one with the founding-zero weight cannot act on the belief, stays
+        // on the salt, and is worn. So the belief is adaptive only through the evolved weight, and
+        // avoidance is what makes it worth carrying (Principle 9). No authored flight: both hold the same
+        // belief; only the evolved weight differs.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::{forage_taxis_weights, ForageGains};
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::{feature_bucket, PerceptRegistry};
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: [(
+                crate::physiology::SALINITY.to_string(),
+                Fixed::from_ratio(1, 5),
+            )]
+            .into_iter()
+            .collect(),
+            hill: [(crate::physiology::SALINITY.to_string(), 2u8)]
+                .into_iter()
+                .collect(),
+        };
+
+        let dose = Fixed::from_int(2);
+        let percepts = PerceptRegistry::dev_salinity();
+        let subject = feature_subject(0, feature_bucket(dose, Fixed::ONE));
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let avoider = world.spawn(Fixed::ONE);
+        let stayer = world.spawn(Fixed::ONE);
+        world.set_place(avoider, 0);
+        world.set_place(stayer, 1);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        emb.set_percepts(percepts.clone());
+        let layout = emb.layout().clone();
+        // The avoider's controller: it wants to move and steers its MOVE heading along the CONDITION
+        // avoidance gradient (CONDITION as a steer axis), so it acts on the belief. MOVE is output 0
+        // (act, dx, dy), INGEST the scalar output at 3.
+        let cond_base = layout.axis_input_base(CONDITION).unwrap();
+        let gains = ForageGains {
+            move_bias: Fixed::ONE,
+            here_suppress: Fixed::ZERO,
+            heading_gain: Fixed::ONE,
+            ingest_drive: Fixed::ZERO,
+        };
+        let mut avoider_w = vec![Fixed::ZERO; layout.weight_count()];
+        for (pid, v) in forage_taxis_weights(&layout, 0, 3, &[], &[cond_base], gains) {
+            avoider_w[pid.0 as usize] = v;
+        }
+        let avoider_ctrl =
+            Controller::from_weights(layout.n_in(), layout.n_out(), layout.hidden(), avoider_w);
+        let blank = Controller::zeros(&layout);
+
+        // Both start on the western EDGE of a salt region: salt fills every cell with x >= 5, the safe
+        // ground is x < 5, and each being stands at x = 5 (on the salt, salt to its east, safe to its
+        // west), one row apart so they do not share a cell.
+        let av_start = Coord3::ground(5, 3);
+        let st_start = Coord3::ground(5, 6);
+        emb.add(
+            Walker::new(
+                avoider,
+                av_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                avoider_ctrl,
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                stayer,
+                st_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+        for y in 0..8 {
+            for x in 5..8 {
+                let mut toxins = BTreeMap::new();
+                toxins.insert(crate::physiology::SALINITY.to_string(), dose);
+                emb.resources_mut().set(
+                    Coord3::ground(x, y),
+                    Composition {
+                        nutrients: BTreeMap::new(),
+                        toxins,
+                    },
+                );
+            }
+        }
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Both beings already hold the HARMS belief about the salt (they have learned it): seed each once
+        // so the leg under test is avoidance-and-survival, not formation (formation is the previous test).
+        let seed = |id: StableId| TickInput {
+            mind: id,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: HARM_ATTR,
+                hyps: vec![HARMS, 0],
+                toward: HARMS,
+                weight: Fixed::from_int(50),
+                from: id,
+            },
+        };
+        runner.step_with_world_inputs(&[seed(avoider), seed(stayer)]);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let level = |r: &Runner, id: StableId| -> Fixed {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.homeostasis.level(CONDITION))
+                .unwrap_or(Fixed::ZERO)
+        };
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(0)
+        };
+        // Both hold the same belief, but only the avoider can act on it: it steered west off the salt and
+        // kept its condition, while the stayer could not and was worn.
+        assert!(
+            x_of(&runner, avoider) < 5,
+            "the avoider steered west off the salt (x = {})",
+            x_of(&runner, avoider)
+        );
+        assert_eq!(
+            x_of(&runner, stayer),
+            5,
+            "the stayer, unable to act on the belief, stayed on the salt"
+        );
+        assert!(
+            level(&runner, avoider) > level(&runner, stayer),
+            "the avoider outlived the stayer on the same harm: condition {:?} > {:?}",
+            level(&runner, avoider),
+            level(&runner, stayer)
+        );
+    }
+
+    #[test]
+    fn a_learned_feature_harm_belief_rides_the_shipped_gossip_to_a_co_located_naive_being() {
+        // Harm-learning arc slice d, the TRANSMISSION leg: because a learned "this feature harms me"
+        // belief is an ordinary (subject, attr) frame, it rides the shipped overhearing transmission for
+        // free. A holder co-located with a naive being conveys the belief through gossip, so the idea
+        // spreads by presence (not by an authored teaching path, not by reading kinship), and it persists
+        // only while a holder is present, which is what makes the loop's persistence possible.
+        use crate::evidence::InferenceParams;
+        use crate::learn::{feature_subject, HARMS, HARM_ATTR};
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::world::GossipParams;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        world.set_gossip(GossipParams {
+            told_weight: Fixed::from_int(3),
+            trust_baseline: Fixed::ONE,
+            trust_penalty: Fixed::from_ratio(1, 2),
+        });
+        let holder = world.spawn(Fixed::ONE);
+        let naive = world.spawn(Fixed::ONE);
+        // Co-located: they share one conversational place, so a speaker's committed beliefs reach the
+        // other (the overhearing follow-on).
+        world.set_place(holder, 7);
+        world.set_place(naive, 7);
+
+        let subject = feature_subject(0, feature_bucket(Fixed::from_int(2), Fixed::ONE));
+        // Before any tick, neither being holds the belief.
+        assert_eq!(
+            world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
+            None,
+            "the naive being starts with no belief"
+        );
+        // The holder has LEARNED the salt harms it (a committed feature-harm belief); the naive has not.
+        let seed = TickInput {
+            mind: holder,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: HARM_ATTR,
+                hyps: vec![HARMS, 0],
+                toward: HARMS,
+                weight: Fixed::from_int(50),
+                from: holder,
+            },
+        };
+        // One tick: the holder commits the learned belief, then the shipped overhearing transmission
+        // carries it to the co-located naive being in the same tick's gossip beat.
+        world.tick(&[seed]);
+        assert_eq!(
+            world.mind(holder).unwrap().belief(subject, HARM_ATTR, &bp),
+            Some(HARMS),
+            "the holder holds the learned feature-harm belief"
+        );
+        assert_eq!(
+            world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
+            Some(HARMS),
+            "the learned belief rode the shipped gossip to the co-located naive being by presence"
+        );
+    }
 }
