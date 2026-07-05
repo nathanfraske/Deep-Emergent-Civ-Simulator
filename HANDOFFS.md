@@ -7,6 +7,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-05: material-substrate item 5 COMPLETE (hydrology coupling: a dug pit pools water), on branch claude/material-substrate, PR #93
+
+Item 5 (modifiable terrain) closes: the terrain a being reshapes now feeds the water physics, so a dug pit ponds and a mound sheds. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 5 HYDROLOGY COUPLING paragraph). Commit `284cc4e`.
+
+WHAT LANDED: `crates/sim/src/environ.rs` now keeps the frozen worldgen elevation (a static input beside moisture and light, where before it was dropped after the one-time downhill precompute) and gains `recouple_terrain(&EarthworkField)`, which rebuilds the downhill routing from the EFFECTIVE elevation (worldgen base plus the per-column earthwork delta) by the same pure fold (`compute_downhill`) that seeded it, so a dug pit that drops a cell below its neighbours becomes a basin that ponds its water and its salt, and a mound sheds them. A new `is_basin(x,y)` read exposes the routing. `crates/sim/src/runner.rs`: a `recouple_hydrology` beat rebuilds the routing after the embodiment step, called identically in the pinned (`step_inner`) and scheduled (`run_phase` SYS_EMBODIMENT) orders; the embodiment phase's `tick_systems` access now declares it writes `RES_FIELD` (the write reinforces the existing field-step serialization and changes no batch, so scheduled stays bit-identical to pinned).
+
+CRUCIBLE-SAFE / OPT-IN: `recouple_terrain` skips an empty earthwork, so a non-digging run keeps the seeded worldgen routing byte-identical (the fold is pure, base plus zero equals base); only a reshaped column pays the rebuild. Crucible stays at `254bc17c`, world_build 16 and world_determinism 3 replay-identical. Proven three ways: an environ unit test (a plane whose interior drains until a dug centre becomes a basin its neighbours pond into, plus the empty-earthwork no-op guaranteeing byte-identity), the `is_basin` read, and an end-to-end runner test where a being digs through the FULL runner in both tick orders and its cell flips from draining to a basin while a blank being leaves the routing untouched (the test picks the map's minimum-margin non-basin cell so one realistic scoop tips it: a clean causal separation). 631 sim lib tests plus all integration binaries green, fmt and clippy (`--all-targets -D warnings`) clean, no new reserved value.
+
+STOPPED: hydrology coupling pushed to PR #93 (`284cc4e`). Item 5 is done (dig lowers, release mounds, water finds the pit). NEXT in the cascade, building ahead per the owner's standing directive (gate catches up per slice): item 6 (live fire), item 7 (shelter), item 8 (the matter cycle, IMPLEMENTING the owner-ruled data-defined TransformKindRegistry keyed to physics kernels, never named-transform arms), and the force-and-manipulation extension as a primitive-completeness check (not a verb-build; techniques emerge). Open emergence debts (direction of travel, not blocking): consolidate EXTRACT/DIG/GRASP and RELEASE/put_down into one extract + one deposit primitive (elevation change a consequence), and let CRAFT/knapping emerge from strike-a-core physics. Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-05: material-substrate item 5 STARTED (earthwork field + DIG, terrain lowers); a CI -D-warnings blocker fixed, on branch claude/material-substrate
 
 Item 5 (modifiable terrain) has its first observable: a being digs a pit. And a CI blocker was caught and fixed. Granular landings in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 5 SLICE A READ and SLICE B DIG paragraphs).
