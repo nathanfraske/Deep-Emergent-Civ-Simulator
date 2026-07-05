@@ -53,6 +53,7 @@ use crate::language::{
     DriftParams, FeatureDimId, FormSystem, LangId, Language, LanguageParams, ProductionModalityId,
 };
 use crate::locomotion::{LocomotionParams, Walker};
+use crate::morphogen::{express_program, grow};
 use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
@@ -531,7 +532,22 @@ fn assemble_dawn_embodiment(
                 ),
                 None => Physiology::dev_for_registry(&genesis.homeostatic),
             };
-            let walker = Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
+            let mut walker =
+                Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
+            // Emergent-anatomy Step 2 (B2b): if the race carries a developmental program, GROW this
+            // founder's run-body from its OWN genome and hand it to the walker, so the run reads the
+            // being's affordances and ground speed from the grown segments' physics rather than the
+            // race-uniform catalog body (the run-governing body is now genome-derived, per member).
+            // The catalog `plan` stays as the LOD-0 metabolic aggregate the reserves, physiology, and
+            // thermoregulation read: a grown segment carries geometry and material, not the organ
+            // kinds the metabolic reserves are sourced from, so the metabolic tier is not yet grown
+            // (an organ-less digest would carry no reserves and starve at birth). Growth is a pure
+            // function of (program, genome, seed, id), so it reproduces on replay and on a two-tier
+            // reload, where the walker is regrown from the re-minted genome, never serialized.
+            if let (Some(program), Some(genome)) = (&race.morphogen, world.genome_of(id)) {
+                let params = express_program(program, &race.genes, genome);
+                walker = walker.with_structure(grow(program, &params, seed, id));
+            }
             emb.add(walker, thermal);
         }
     }

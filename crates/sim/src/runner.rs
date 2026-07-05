@@ -95,6 +95,7 @@ use crate::homeostasis::{
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
+use crate::morphogen::{express_program, grow};
 use crate::physiology::{
     self, derive_base_drain, derive_body_exchange_rate, derive_exertion_coupling, MetabolicAnchors,
 };
@@ -1873,7 +1874,19 @@ impl Runner {
                         phys.tick_seconds,
                         &phys.anchors,
                     );
-                    let walker = Walker::new(id, coord, plan, homeostasis, physiology, controller);
+                    let mut walker =
+                        Walker::new(id, coord, plan, homeostasis, physiology, controller);
+                    // Emergent-anatomy Step 2 (B2b): grow the newborn's run-body from its OWN genome
+                    // exactly as the worldbuild founder step does, so a lineage's evolved morphology
+                    // governs the child's run affordances and ground speed, not the race-uniform
+                    // catalog body. The catalog `plan` stays the LOD-0 metabolic aggregate (a grown
+                    // segment carries no organ kinds, so the metabolic tier is not yet grown). Growth
+                    // keys on (program, genome, emb.seed, id), a pure function reproduced on replay and
+                    // on a two-tier reload where the walker is regrown from the re-minted genome.
+                    if let (Some(program), Some(genome)) = (&race.morphogen, world.genome_of(id)) {
+                        let params = express_program(program, &race.genes, genome);
+                        walker = walker.with_structure(grow(program, &params, emb.seed, id));
+                    }
                     Some((walker, kit.thermal, coord, exchange_rate))
                 }
                 _ => None,

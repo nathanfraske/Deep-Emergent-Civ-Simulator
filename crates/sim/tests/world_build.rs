@@ -31,13 +31,14 @@ use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, build_dawn_runner, taxis_move_weights, Articulation, Axiom,
-    AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel,
+    append_controller_block, append_morphogen_block, build_dawn_runner, express_program, grow,
+    taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs, Channel,
     CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
-    EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool,
-    GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, PersonalityProfile,
-    PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId,
-    TraitDef, ValueAxisId, ValueProfile,
+    EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef, GeneEffect,
+    GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, MorphogenParamId,
+    MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
+    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -1273,6 +1274,259 @@ fn the_scheduled_order_matches_the_pinned_order() {
             pinned.state_hash(),
             scheduled.state_hash(),
             "the scheduled order stays bit-identical to the pinned order"
+        );
+    }
+}
+
+/// A survivable body with NO catalog locomotor: [`mobile_body`] with its locomotion parts removed, so the
+/// CATALOG affords no movement. Its metabolism still runs (the dev thermal registry's one axis is derived,
+/// unit-capacity, so an organ-less body carries its reserve), which isolates the grown run-body as the sole
+/// source of any locomotion the founder shows.
+fn rooted_body() -> BodyPlan {
+    let mut b = mobile_body();
+    b.locomotion = vec![];
+    b
+}
+
+/// A morphogen race: a sexed race whose CATALOG body is rooted ([`rooted_body`]), carrying the same taxis
+/// controller block the dispersing race carries (so a founder WANTS to move along the temperature gradient),
+/// plus a morphogen program and a morphogen gene block. When `limbed`, the block is seeded so the founder
+/// GROWS a limb (a section modulus and arm length under a bony yield, a blunt tip so it is no weapon), which
+/// reads LOCOMOTE from its grown physics; when not, the block grows nothing (a single rootless segment whose
+/// tiny section buckles under the propulsive load, LOCOMOTE zero). So the ONLY difference between the two
+/// founders is the body their genome grows, and any dispersal is that grown limb, a locomotor the catalog
+/// body never carried.
+fn morphogen_race(limbed: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    let mut race = a_sexed_race(0)
+        .with_body_plan(rooted_body())
+        .with_morphogen(program.clone());
+    let layout = ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    );
+    let seeds = taxis_move_weights(&layout, 0, 0, Fixed::ONE, Fixed::ONE);
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    // The morphogen block, appended after the controller block (its loci take the next gene indices), so a
+    // founder's body grows from its own genome exactly as its controller expresses from it. A limbed founder
+    // seeds a real section modulus, arm length, and bony yield with a blunt tip; a rooted one seeds nothing.
+    let morph_seeds: Vec<(MorphogenParamId, Fixed)> = if limbed {
+        vec![
+            (MorphogenParamId(0), Fixed::ONE), // contact_area frac 1: a blunt tip, no weapon
+            (MorphogenParamId(1), Fixed::from_ratio(1, 2)), // section_modulus frac
+            (MorphogenParamId(2), Fixed::from_ratio(2, 5)), // arm_length frac 0.4
+            (MorphogenParamId(9), Fixed::from_ratio(3, 4)), // yield_strength frac 0.75: a bony limb
+        ]
+    } else {
+        vec![]
+    };
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the morphogen race and a matching embodiment genesis, so the founders embody and grow.
+fn morphogen_peoples(limbed: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), morphogen_race(limbed));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn a_founders_genome_grows_a_locomotor_the_catalog_body_lacks() {
+    // Emergent-anatomy Step 2 (B2b), the arc's thesis, blind-verified on the dawn run: a founder's body is
+    // GROWN from its own genome at genesis, and the run reads the grown body. A race whose CATALOG body is
+    // rooted (no locomotor) but whose GENOME grows a limb disperses from its dawn cell, because the run reads
+    // the grown limb, a locomotor the catalog body never carried. The control, the same race whose genome
+    // grows no limb, stays put. So the locomotion is the grown genome, never an authored catalog part
+    // (Principle 8: order emerges) and never a RaceId branch (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let build = |limbed: bool, seed: u64| {
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &morphogen_peoples(limbed),
+            seed,
+        )
+        .expect("a morphogen dawn assembles")
+    };
+
+    // The grown run-body is what the walker carries: the limbed founder's structure reads LOCOMOTE from its
+    // grown physics, though its catalog body carries no locomotion part.
+    let fns = FunctionLawRegistry::dev_seed();
+    let refs = CapabilityRefs::dev_refs();
+    let caps = CapabilityCaps {
+        pressure: Fixed::from_int(150_000),
+        depth: Fixed::from_int(100),
+    };
+    let limbed = build(true, 0x11B);
+    let walkers = limbed.embodiment().unwrap().walkers();
+    let w = &walkers[0];
+    assert!(
+        w.body.locomotion.is_empty(),
+        "the catalog body carries no locomotor: the run limb is the genome's, not the catalog's"
+    );
+    let structure = w
+        .structure
+        .as_ref()
+        .expect("a morphogen founder carries a grown structure");
+    assert!(
+        structure.max_capability(FunctionLawRegistry::ID_LOCOMOTE, &fns, &refs, &caps)
+            > Fixed::ZERO,
+        "the grown body reads LOCOMOTE from its physics: a limb the catalog never had"
+    );
+
+    // On the run: the limbed founders disperse from their single dawn cell; the rooted ones do not.
+    let run_off = |limbed: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build(limbed, seed);
+        let dawn: std::collections::BTreeSet<(i32, i32)> = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .map(|w| {
+                let c = w.coord();
+                (c.x, c.y)
+            })
+            .collect();
+        assert_eq!(
+            dawn.len(),
+            1,
+            "the band spawns its founders on one dawn cell"
+        );
+        for _ in 0..60 {
+            runner.step();
+        }
+        let off = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| {
+                let c = w.coord();
+                !dawn.contains(&(c.x, c.y))
+            })
+            .count();
+        (off, runner.state_hash())
+    };
+
+    let (moved, hash_a) = run_off(true, 0x515E);
+    assert!(
+        moved > 0,
+        "a founder whose genome grew a limb disperses on that grown locomotor: {moved} moved"
+    );
+    let (still, _) = run_off(false, 0x515E);
+    assert_eq!(
+        still, 0,
+        "a founder whose genome grew no limb stays put (the catalog body is rooted): {still} moved"
+    );
+
+    // Determinism: the grown-limb run replays bit for bit.
+    let (_, hash_b) = run_off(true, 0x515E);
+    assert_eq!(hash_a, hash_b, "the grown-limb run replays bit for bit");
+
+    // The grown structure is a pure function of the founder's (pool, seed, id): a rebuild reproduces each
+    // founder's grown body bit for bit, which is what a two-tier reload relies on (the walker is regrown
+    // from the re-minted genome, never serialized, so a save/load reproduces it exactly as a rebuild does).
+    let a = build(true, 0x11B);
+    let b = build(true, 0x11B);
+    let sa = a.embodiment().unwrap().walkers();
+    let sb = b.embodiment().unwrap().walkers();
+    assert_eq!(sa.len(), sb.len());
+    for (wa, wb) in sa.iter().zip(sb.iter()) {
+        assert_eq!(wa.id, wb.id, "the founders rebuild in the same id order");
+        assert_eq!(
+            wa.structure, wb.structure,
+            "each founder's grown body is reproduced bit for bit on a rebuild"
+        );
+    }
+
+    // A separate proof that regrowth from the re-minted genome is byte-identical, the reload guarantee made
+    // explicit: promote the founder's genome from the pool and regrow the structure from it, matching the
+    // walker the runner grew at genesis.
+    let regrown_race = morphogen_race(true);
+    let id0 = sa[0].id;
+    let genome = a
+        .world()
+        .unwrap()
+        .genome_of(id0)
+        .expect("the founder has a genome");
+    let params = express_program(
+        regrown_race.morphogen.as_ref().unwrap(),
+        &regrown_race.genes,
+        genome,
+    );
+    let regrown = grow(
+        regrown_race.morphogen.as_ref().unwrap(),
+        &params,
+        0x11B,
+        id0,
+    );
+    assert_eq!(
+        sa[0].structure.as_ref(),
+        Some(&regrown),
+        "regrowing from the re-minted genome reproduces the founder's grown body exactly"
+    );
+
+    // Worker invariance: the grown-limb dawn matches the scheduled order with the embodiment coupled.
+    let mut pinned = build(true, 0x515E);
+    let mut scheduled = build(true, 0x515E);
+    for _ in 0..20 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+        assert_eq!(
+            pinned.state_hash(),
+            scheduled.state_hash(),
+            "the grown-body dawn stays bit-identical under the scheduler"
         );
     }
 }

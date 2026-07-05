@@ -35,6 +35,7 @@ use crate::anatomy::BodyPlan;
 use crate::axiom::IntrinsicBeliefs;
 use crate::breeding::BreedingSystemId;
 use crate::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
+use crate::morphogen::MorphogenProgram;
 use crate::value::RaceId;
 use crate::world::PlaceId;
 
@@ -109,6 +110,17 @@ pub struct Race {
     /// thermal mass, metabolism, muscle force) from this plan alone through one kernel, never a
     /// `RaceId` branch (Principle 9).
     pub body: Option<BodyPlan>,
+    /// The race's developmental program (emergent-anatomy arc, design Part 35): the data-defined
+    /// morphogen [`MorphogenProgram`] a dawn member's body is GROWN from, the generative sibling of
+    /// [`Race::body`]. Where `body` is an authored catalog anatomy handed whole to every member,
+    /// this program is expressed against a member's own genome ([`crate::morphogen::express_program`])
+    /// and grown into a per-member [`crate::morphogen::Structure`] whose function is derived from the
+    /// grown geometry and material, never authored. `None` until declared, so a race with no program
+    /// keeps the catalog body path unchanged (the fail-quiet-until-declared convention, and the
+    /// hash-neutral opt-in: an existing catalog race is untouched); [`Race::with_morphogen`] sets it.
+    /// Two members of the race diverge in their grown bodies from their genomes alone through one
+    /// kernel, never a `RaceId` branch (Principle 9), and the program's axes are data (Principle 11).
+    pub morphogen: Option<MorphogenProgram>,
 }
 
 /// A race's articulation and hearing parameters (design Part 33.3): the two per-race scalars the
@@ -159,6 +171,7 @@ impl Race {
             breeding: BreedingSystemId(0),
             articulation: None,
             body: None,
+            morphogen: None,
         }
     }
 
@@ -178,6 +191,18 @@ impl Race {
     /// never a `RaceId` branch (Principle 9).
     pub fn with_body_plan(mut self, body: BodyPlan) -> Self {
         self.body = Some(body);
+        self
+    }
+
+    /// Set the race's developmental program (a builder over [`Race::new`], emergent-anatomy arc).
+    /// Until set, the race grows no body and keeps the catalog [`Race::body`] path (the
+    /// fail-quiet-until-declared convention, and the hash-neutral opt-in). The kernel that expresses
+    /// the program against a member's genome and grows a [`crate::morphogen::Structure`] from it is
+    /// fixed Rust; the program's geometry and material axes are per-race data (Principle 11), and two
+    /// members diverge in their grown bodies from their genomes alone, never a `RaceId` branch
+    /// (Principle 9).
+    pub fn with_morphogen(mut self, morphogen: MorphogenProgram) -> Self {
+        self.morphogen = Some(morphogen);
         self
     }
 
