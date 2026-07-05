@@ -34,7 +34,7 @@
 
 use civsim_core::Fixed;
 
-use crate::edibility::Composition;
+use crate::edibility::{Composition, ToleranceRegistry};
 
 /// A feature-percept id, minted through the registry (extensible, never a closed enum). The numeric
 /// value is the percept's slot in the controller's feature input block, in registry order.
@@ -90,6 +90,21 @@ impl PerceptRegistry {
     /// needs so a being can correlate felt harm with the ground it stands on.
     pub fn dev_salinity() -> PerceptRegistry {
         PerceptRegistry::from_classes(&[crate::physiology::SALINITY])
+    }
+
+    /// A registry over the toxin classes a world declares its beings tolerate (its harm-relevant
+    /// substances), derived from the tolerance registry (harm-learning arc slice b). A being perceives
+    /// the substance classes its physiology responds to, so the percept vocabulary grows with the
+    /// world's declared toxins as data (Principle 11), never a hardcoded `{salinity}` slot. The ids
+    /// follow the tolerance-registry order, so a world's biochemistry stays part of its reproducible
+    /// identity.
+    pub fn from_tolerances(tolerances: &ToleranceRegistry) -> PerceptRegistry {
+        let classes: Vec<&str> = tolerances
+            .classes
+            .iter()
+            .map(|c| c.class.as_str())
+            .collect();
+        PerceptRegistry::from_classes(&classes)
     }
 
     /// The percepts in canonical id order.

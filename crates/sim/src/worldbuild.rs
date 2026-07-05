@@ -52,8 +52,10 @@ use crate::langmod::{
 use crate::language::{
     DriftParams, FeatureDimId, FormSystem, LangId, Language, LanguageParams, ProductionModalityId,
 };
+use crate::learn::HarmLearningCalib;
 use crate::locomotion::{LocomotionParams, Walker};
 use crate::morphogen::{express_program, grow};
+use crate::percept::PerceptRegistry;
 use crate::personality::PersonalityRegistry;
 use crate::primes::nsm_concept_ids;
 use crate::race::{Articulation, BandSpec, Race};
@@ -416,10 +418,14 @@ pub fn build_dawn_runner(
         EnvironFields::from_map(map),
         EnvironCalib::from_manifest(manifest)?,
     );
-    // Arm the base-level liveliness surfacing policy (the hazard-belief and arc-promotion magnitudes),
-    // fail-loud from the manifest (Principle 11): the values that gate and weight the run-path story hooks
-    // are reserved-with-basis, not hardcoded inline constants.
+    // Arm the base-level liveliness surfacing policy (the arc-promotion magnitudes), fail-loud from the
+    // manifest (Principle 11): the values that gate and weight the run-path story hooks are
+    // reserved-with-basis, not hardcoded inline constants.
     runner.set_liveliness(LivelinessCalib::from_manifest(manifest)?);
+    // Arm the experiential associative learner's calibrations (harm-learning arc slice b) the same way,
+    // so a canonical run reads the harm-noise floor, feature granularity, and harm likelihoods fail-loud
+    // rather than the dev fixture.
+    runner.set_harm_learning(HarmLearningCalib::from_manifest(manifest)?);
     Ok(runner)
 }
 
@@ -572,6 +578,13 @@ fn assemble_dawn_embodiment(
     // Arm the tolerance registry on the embodiment so the lifecycle pairing expresses a newborn's
     // heritable tolerance from its own genome the same way (base-level liveliness step 4).
     emb.set_tolerances(genesis.tolerances.clone());
+    // Declare the perceived-feature registry from the world's harm-relevant toxin classes (harm-learning
+    // arc slice b): a being senses the substances its physiology responds to, so it can correlate felt
+    // harm with the ground it stands on and form the belief for itself (retiring the injected hazard
+    // Observe). Set before the beings are built (it rebuilds the controller layout to carry the feature
+    // block, exactly like set_organs and set_physiology). A world with no declared toxins declares no
+    // percepts, so the feature block and the learner stay inert and the run is unchanged.
+    emb.set_percepts(PerceptRegistry::from_tolerances(&genesis.tolerances));
     // Install the world's organ registry so an affordance and the ground speed are derived against the
     // same kinds the physiology reads (emergent-anatomy step one), not the labelled dev fixture.
     emb.set_organs(genesis.organs.clone());

@@ -322,6 +322,23 @@ mod tests {
     }
 
     #[test]
+    fn the_run_path_forms_the_belief_and_reads_no_injected_hazard() {
+        // A structural guarantee that the retirement is complete (the sibling of the metabolism
+        // substrate's identity-blindness check): the runner's canonical path no longer authors a hazard
+        // belief off a dose threshold, and it forms the belief through the associative learner instead.
+        // A future edit that reaches back for the injected hazard subject fails this build.
+        let src = include_str!("runner.rs");
+        assert!(
+            !src.contains("HAZARD_SUBJECT") && !src.contains("HAZARD_ATTR"),
+            "the injected hazard belief is retired: no HAZARD_* constant remains on the canonical path"
+        );
+        assert!(
+            src.contains("feature_observations("),
+            "the runner forms the belief through the experiential associative learner"
+        );
+    }
+
+    #[test]
     fn harm_free_ticks_on_a_feature_self_correct_toward_benign() {
         // Absence self-correction, the falsifier for free: a being that stands on the feature but is not
         // harmed (a tolerant halophile, or the hazard removed) accumulates BENIGN and commits it.

@@ -49,9 +49,10 @@ use civsim_sim::homeostasis::{
 };
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
+use civsim_sim::learn::{HARMS, HARM_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
-use civsim_sim::runner::{Runner, HAZARD_ATTR, HAZARD_PRESENT, HAZARD_SUBJECT};
+use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
@@ -62,8 +63,7 @@ use civsim_sim::{
     DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
     GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
     PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
-    SourceModeId, Stimulus, TickInput, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId,
-    ValueProfile, World,
+    SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
 };
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
@@ -924,15 +924,16 @@ fn salinity_state(runner: &Runner) -> Option<(f64, f64, f64)> {
     Some((salty_cells / n, salt_max, mean_tolerance))
 }
 
-/// The dynamic belief-spread reader (base-level liveliness step 5): how far the environment-sourced
-/// salt-flat HAZARD belief has spread through the population. A being forms this belief first-hand when it
-/// stands on a salt flat, then gossip carries it to whoever shares its live cell, so a migrant that
-/// crossed a flat seeds the belief in a band that never did. Reports the count of beings that hold the
-/// hazard belief (a committed `(HAZARD_SUBJECT, HAZARD_ATTR) -> HAZARD_PRESENT`) and the population, so
-/// the fraction climbs outward from the flats as the idea rides movement and gossip. This reads the
-/// DYNAMIC `Mind.beliefs` inference state (not the intrinsic axiom seed the `band_belief` reader reads),
-/// the belief-spread reader the handoff asks for. `None` if the runner carries no cognition world.
-fn hazard_belief_spread(runner: &Runner) -> Option<(usize, usize)> {
+/// The dynamic belief-spread reader (harm-learning arc slice b): how far a LEARNED "this ground harms
+/// me" belief has spread through the population. A being forms this belief for ITSELF when it feels its
+/// own condition fall while standing on a salt flat and correlates the felt harm with the salinity it
+/// senses underfoot (retiring the injected hazard Observe), then gossip carries the committed belief to
+/// whoever shares its live cell, so a migrant that crossed a flat seeds the belief in a band that never
+/// did. Reports the count of beings that hold any committed feature-harm belief (a `HARM_ATTR -> HARMS`
+/// on a per-feature subject) and the population, so the fraction climbs outward from the flats as the
+/// idea rides movement and gossip. This reads the DYNAMIC `Mind.beliefs` inference state (not the
+/// intrinsic axiom seed the `band_belief` reader reads). `None` if the runner carries no cognition world.
+fn feature_harm_belief_spread(runner: &Runner) -> Option<(usize, usize)> {
     let w = runner.world()?;
     let params = w.belief_params();
     let ids = w.being_ids();
@@ -942,9 +943,11 @@ fn hazard_belief_spread(runner: &Runner) -> Option<(usize, usize)> {
     let holders = ids
         .iter()
         .filter(|&&id| {
-            w.mind(id)
-                .and_then(|m| m.belief(HAZARD_SUBJECT, HAZARD_ATTR, params))
-                == Some(HAZARD_PRESENT)
+            w.mind(id).is_some_and(|m| {
+                m.committed_beliefs(params)
+                    .iter()
+                    .any(|b| b.attr == HARM_ATTR && b.value == HARMS)
+            })
         })
         .count();
     Some((holders, ids.len()))
@@ -1126,13 +1129,14 @@ fn snapshot(
         None => println!("  salinity: no located population"),
     }
 
-    // The belief-spread signal (step 5): how far the environment-sourced salt-flat hazard belief has
-    // ridden gossip and migration outward from the beings that discovered it first-hand on a flat.
-    match hazard_belief_spread(runner) {
+    // The belief-spread signal (harm-learning arc slice b): how far a LEARNED "this ground harms me"
+    // belief has ridden gossip and migration outward from the beings that formed it for themselves by
+    // correlating their own felt harm with the salinity they sensed on a flat.
+    match feature_harm_belief_spread(runner) {
         Some((holders, total)) if total > 0 => println!(
-            "  belief spread: {holders}/{total} hold the salt-flat hazard belief ({:.0}%): it rides \
-             movement-coupled gossip to co-located beings (proven in world.rs), but births do not yet \
-             inherit beliefs (as lexicons do not), so it thins as the origin cohort ages out",
+            "  belief spread: {holders}/{total} hold a learned feature-harm belief ({:.0}%): a being \
+             forms it for itself by correlating its own condition falling with the ground it stands on \
+             (no injected observation), then it rides movement-coupled gossip to co-located beings",
             100.0 * holders as f64 / total as f64
         ),
         _ => println!("  belief spread: no cognition world"),
@@ -1332,41 +1336,16 @@ fn main() {
     let total_ticks = cfg.generations * GEN_TICKS;
     let snapshot_every = (cfg.generations / 10).max(1);
 
-    // Base-level liveliness step 5: seed the salt-flat HAZARD belief into the FIRST band's founders at the
-    // dawn (a discovery), so the belief-spread reader shows the idea riding gossip and migration outward
-    // from one band into others as beings move and meet. This is the "a belief seeded in one dawn band"
-    // demonstration; the environment source (a being forming the belief first-hand on a salt flat) is also
-    // wired in the runner but fires rarely, since foragers avoid the barren flats. A strong evidence weight
-    // so the belief commits at once and has something to spread.
-    let seed_ids: Vec<StableId> = founders.iter().copied().take(MEMBERS_PER_BAND).collect();
-    let seed_batch: Vec<TickInput> = seed_ids
-        .iter()
-        .map(|&id| TickInput {
-            mind: id,
-            ordinal: 0,
-            stim: Stimulus::Observe {
-                subject: HAZARD_SUBJECT,
-                attr: HAZARD_ATTR,
-                hyps: vec![HAZARD_PRESENT, 0],
-                toward: HAZARD_PRESENT,
-                weight: Fixed::from_int(50),
-                from: id,
-            },
-        })
-        .collect();
+    // Harm-learning arc slice b: NO belief is seeded at the dawn. A being forms the "this ground harms
+    // me" belief for ITSELF by correlating its own felt condition fall with the salinity it senses on a
+    // flat (Runner::couple_conversation, the associative learner), so the belief-spread reader shows an
+    // EXPERIENTIALLY-formed idea riding gossip and migration outward rather than an injected discovery.
 
     let start = Instant::now();
     let mut prev = founders;
-    let mut first_tick = true;
     for gen in 1..=cfg.generations {
         for _ in 0..GEN_TICKS {
-            if first_tick {
-                // Inject the dawn discovery once; the belief then rides gossip and movement on its own.
-                runner.step_with_world_inputs(&seed_batch);
-                first_tick = false;
-            } else {
-                runner.step();
-            }
+            runner.step();
         }
         // Snapshot at every tenth of the run; the final generation is reported once, by the FINAL
         // block below, so it is not double-printed here.
