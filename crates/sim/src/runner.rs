@@ -1093,6 +1093,39 @@ impl Embodiment {
         dropped
     }
 
+    /// Enact a being's decided grasp (material-substrate arc, cascade item 3, the driver): pick the matter
+    /// the being stands on up into its carried load, each substance in canonical id order bounded by the
+    /// being's remaining strength headroom ([`Embodiment::pick_up`]). The evolved controller made the
+    /// decision (a grasp output that won the tick); this is the physics that follows, lifting as much loose
+    /// matter as the body bears and no more. A being on a void cell, or one already carrying to capacity,
+    /// lifts nothing. The want per substance is the cell's whole standing volume, so the strength-versus-
+    /// weight bound, not an authored rate, is what limits the lift; item 4's extraction contest will gate
+    /// WHICH substance yields by the fracture hardness, where this generic carry gates only by weight.
+    /// Returns the total volume lifted. The id-ordered walk is a deterministic tie-break over a shared
+    /// cell, never a per-substance preference (no race, kind, or role read; Principle 9).
+    pub fn grasp_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(coord) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .map(|w| w.coord())
+        else {
+            return Fixed::ZERO;
+        };
+        // The substances present, in canonical id (BTreeMap) order, snapshotted so the pick-up loop can
+        // mutate the cell without aliasing the read.
+        let substances: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix.substances().map(|(s, _)| s.clone()).collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut lifted = Fixed::ZERO;
+        for substance in &substances {
+            let want = self.material.volume(coord, substance);
+            lifted += self.pick_up(walker_id, coord, substance, want);
+        }
+        lifted
+    }
+
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
     /// step 2): the environmental stack writes the standing producer-biomass supply into it each tick
     /// before the embodiment step reads it. Crate-internal; the runner owns the write path.
@@ -2053,6 +2086,11 @@ impl Runner {
                     .collect(),
                 _ => BTreeMap::new(),
             };
+        // Material-substrate item 3, the driver: the per-being grasp decisions this step records, keyed by
+        // id, each the evolved grasp activation of a being whose controller chose to pick matter up. Empty
+        // unless a being's grasp output wins its decision, so an opted-out run (no grasp affordance, no
+        // grasp weight) records nothing and enacts nothing.
+        let mut grasp_intents: BTreeMap<StableId, Fixed> = BTreeMap::new();
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -2069,7 +2107,19 @@ impl Runner {
             &drains,
             &emb.percepts,
             &load_factors,
+            &mut grasp_intents,
         );
+        // (2b) Behaviour to matter: enact the grasp decisions in id order (the map is id-keyed, so the
+        // draw off the shared cell is deterministic), each a strength-bounded pick-up of the matter the
+        // being stands on (material-substrate item 3, the driver). A being that did not decide to grasp,
+        // or an embodiment with no material registry, moves no matter, so an opted-out run is byte-identical
+        // through here. The being did not move this tick (its grasp won its decision over MOVE), so its cell
+        // is where it stood when it decided.
+        for (&id, &activation) in grasp_intents.iter() {
+            if activation > Fixed::ZERO {
+                emb.grasp_underfoot(id);
+            }
+        }
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
         for w in emb.walkers.iter() {

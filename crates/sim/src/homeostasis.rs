@@ -600,6 +600,27 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a matter-carrying world: move, ingest, and grasp (material-substrate arc,
+    /// cascade item 3, the driver). Kept distinct from [`AffordanceRegistry::dev_default`] so the foraging
+    /// behaviour tests keep their two-affordance layout; a carrier's controller layout carries the extra
+    /// grasp output and can evolve to use it, the emergent decision to pick matter up. Grasp is a scalar
+    /// operation (taking the matter underfoot, no aim) and, like ingest, is unconditional (`requires:
+    /// None`): any body may attempt to lift, and the physical gating is the strength-versus-weight bound the
+    /// enactment applies ([`crate::runner::Embodiment::pick_up`]), never a capability label. A world that
+    /// wires a manipulator capability adds a `requires` here as data, the way item 4's extraction contest
+    /// will gate on contact pressure.
+    pub fn dev_carrier() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: GRASP,
+            name: "grasp".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -659,6 +680,9 @@ pub const MOVE: AffordanceId = AffordanceId(0);
 pub const INGEST: AffordanceId = AffordanceId(1);
 /// The strike affordance (a natural-weapon attack), in the combat fixture only.
 pub const STRIKE: AffordanceId = AffordanceId(2);
+/// The grasp affordance (picking the matter underfoot up into the carried load), in the carrier fixture
+/// only (material-substrate arc, cascade item 3, the driver).
+pub const GRASP: AffordanceId = AffordanceId(3);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race

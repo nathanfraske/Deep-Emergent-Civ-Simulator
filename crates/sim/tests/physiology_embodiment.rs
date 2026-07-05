@@ -681,6 +681,135 @@ fn a_being_picks_up_and_puts_down_matter_bounded_by_its_grown_strength() {
 }
 
 #[test]
+fn a_being_grasps_matter_only_through_an_evolved_controller_weight() {
+    // Material-substrate arc item 3, THE DRIVER: a being picks matter up only because its evolved
+    // controller decided to, never because the engine scripts "beings carry". Two beings share one
+    // embodiment, one body plan, one strength, and one granite heap each; they differ in ONE gene, the
+    // controller weight feeding the grasp output. The one whose grasp weight selection has lifted off zero
+    // grasps its heap (its cell loses matter, its carried load fills, bounded by its grown strength); the
+    // blank-controller founder, expressing zero on that channel, never grasps though it stands on the same
+    // matter and affords the same operation. This is the emergent pattern (Principles 8, 9): the affordance
+    // and the physics are fixed, the DECISION is an evolved phenotype, and a founder does nothing until
+    // selection gives it a reason to. The selection pressure that lifts the grasp weight (a need the carried
+    // matter serves) arrives with item 4's extraction contest; here the mechanism is proven at the decision.
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let grasper_cell = Coord3::ground(2, 2);
+    let founder_cell = Coord3::ground(5, 5);
+
+    // A shared organ registry with an energy store and a full muscle (so both bodies have carry capacity).
+    let (mut organs, fat) = energy_registry();
+    let muscle = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: muscle,
+        name: "muscle".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+    });
+    let reg = energy_thermal_registry();
+
+    // The carrier affordance registry adds GRASP (move, ingest, grasp), so the layout carries a grasp
+    // output the controller can drive. Every existing scenario keeps the two-affordance dev_default and is
+    // untouched.
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_carrier(),
+        LocomotionParams::dev_default(),
+        0,
+        0x64A5,
+    );
+
+    // The grasp output is the fifth output of the carrier layout (move [act,dx,dy] at 0..2, ingest [act]
+    // at 3, grasp [act] at 4), so the grasp being's controller is a single nonzero weight: the bias input
+    // (the always-on last input) driving the grasp activation to one, every other weight zero, so grasp
+    // wins its decision over the resting move and ingest outputs. A reaction-norm weight feeding output o
+    // from input i is index o * n_in + i.
+    assert_eq!(
+        emb.layout().n_out(),
+        5,
+        "the carrier layout has move(3) + ingest(1) + grasp(1) outputs"
+    );
+    let n_in = emb.layout().n_in();
+    let grasp_out = 4usize;
+    let bias = n_in - 1;
+    let mut grasp_weights = vec![Fixed::ZERO; emb.layout().weight_count()];
+    grasp_weights[grasp_out * n_in + bias] = Fixed::ONE;
+    let grasp_controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, grasp_weights);
+    let blank = Controller::zeros(emb.layout());
+
+    let plan = || body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]);
+    emb.add(
+        resting_walker(1, grasper_cell, plan(), &reg, &organs, grasp_controller),
+        band(305),
+    );
+    emb.add(
+        resting_walker(2, founder_cell, plan(), &reg, &organs, blank),
+        band(305),
+    );
+
+    // A granite heap under each being, identical.
+    let heap = Fixed::from_int(100000);
+    let mut field = MaterialField::new();
+    field.deposit(grasper_cell, "granite", heap);
+    field.deposit(founder_cell, "granite", heap);
+    emb.set_material(field);
+    emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+        organs,
+        MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+    ));
+
+    let mut runner =
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb);
+    runner.step();
+
+    let carried = |r: &Runner, id: u64| -> Fixed {
+        r.embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .carried
+            .total_volume()
+    };
+    let ground = |r: &Runner, coord: Coord3| -> Fixed {
+        r.embodiment().unwrap().material().volume(coord, "granite")
+    };
+
+    // The evolved-weight being grasped: it now carries a positive load, its heap lost exactly that much,
+    // and the amount is bounded by its strength (it did not scoop the whole heap).
+    let grasped = carried(&runner, 1);
+    assert!(
+        grasped > Fixed::ZERO,
+        "the being whose grasp weight is lifted picks matter up"
+    );
+    assert_eq!(
+        ground(&runner, grasper_cell),
+        heap - grasped,
+        "its cell lost exactly what it carried (conservation)"
+    );
+    assert!(
+        ground(&runner, grasper_cell) > Fixed::ZERO,
+        "its strength, not the heap, bounded the lift: matter remains"
+    );
+
+    // The blank founder, expressing zero on the grasp channel, never grasped though it stood on the same
+    // matter and afforded the same operation: it carries nothing and its heap is untouched.
+    assert_eq!(
+        carried(&runner, 2),
+        Fixed::ZERO,
+        "the blank founder does not grasp"
+    );
+    assert_eq!(
+        ground(&runner, founder_cell),
+        heap,
+        "the founder's heap is untouched"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

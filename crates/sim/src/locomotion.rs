@@ -72,7 +72,7 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    ReserveMemory, CONDITION, INGEST, MOVE,
+    ReserveMemory, CONDITION, GRASP, INGEST, MOVE,
 };
 use crate::material::SubstanceMix;
 use crate::morphogen::Structure;
@@ -687,6 +687,9 @@ pub fn step<T: Terrain>(
         &PerceptRegistry::empty(),
         // No carried-load penalty on the field-less fixture path (nothing picks matter up here).
         &BTreeMap::new(),
+        // The field-less fixture path enacts no grasp (it carries no material field); the sink is
+        // discarded, so a decided grasp on this path is inert.
+        &mut BTreeMap::new(),
     )
 }
 
@@ -729,6 +732,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
     percepts: &PerceptRegistry,
     load_factors: &BTreeMap<StableId, Fixed>,
+    grasp_intents: &mut BTreeMap<StableId, Fixed>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -896,6 +900,18 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // once per tick to the CONDITION reserve above (base-level liveliness step 4),
                         // whether or not the being ingests, so exposure harms a being that only passes
                         // through a toxic cell.
+                    }
+                    GRASP => {
+                        // The evolved decision to pick matter up (material-substrate arc, cascade item 3,
+                        // the driver): record this being's grasp activation for the embodiment's post-step
+                        // enactment pass, which owns the material field this function cannot reach and lifts
+                        // the matter underfoot bounded by the being's grown strength
+                        // ([`crate::runner::Embodiment::pick_up`]). Recorded rather than enacted here, so the
+                        // decision stays where the evolved controller makes it while the physics stays where
+                        // the matter lives. A blank controller expresses zero for its grasp weight, so this
+                        // arm never fires for it (`d.activation` would not clear the wins-the-decision bar);
+                        // only a being whose grasp weight selection has lifted off zero grasps.
+                        grasp_intents.insert(w.id, d.activation);
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle
                 }
@@ -1566,6 +1582,7 @@ mod tests {
                     &BTreeMap::new(),
                     &PerceptRegistry::empty(),
                     &load_factors,
+                    &mut BTreeMap::new(),
                 );
             }
             let (dx, dy) = (
@@ -1641,6 +1658,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &mut std::collections::BTreeMap::new(),
                 );
             }
             let (x, y) = (ws[0].x, ws[0].y);
@@ -1726,6 +1744,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &mut std::collections::BTreeMap::new(),
                 );
             }
             ws[0].coord()
@@ -1966,6 +1985,7 @@ mod tests {
             &empty_drains,
             &crate::percept::PerceptRegistry::empty(),
             &std::collections::BTreeMap::new(),
+            &mut std::collections::BTreeMap::new(),
         );
 
         let after = field.supply(tile, WATER_CLASS);
@@ -2084,6 +2104,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
                     break;
@@ -2198,6 +2219,7 @@ mod tests {
                     &empty_drains,
                     &percepts,
                     &std::collections::BTreeMap::new(),
+                    &mut std::collections::BTreeMap::new(),
                 );
             }
             // The delta since the start of the last tick: the net CONDITION change the salt harm drove.
@@ -2291,6 +2313,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &mut std::collections::BTreeMap::new(),
                 );
             }
             ws[0].x
