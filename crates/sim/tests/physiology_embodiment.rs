@@ -516,6 +516,79 @@ fn the_material_substrate_folds_into_state_hash_and_stays_deterministic() {
 }
 
 #[test]
+fn a_carried_load_folds_into_state_hash_and_stays_deterministic() {
+    // Material-substrate arc item 3 (the carry substrate): a being's carried load is per-being dynamic
+    // state folded into state_hash after the reserve memory, in canonical (substance-id, volume) order
+    // with no randomness, so a runner whose being bears matter replays bit for bit and folds identically
+    // between the pinned order and the scheduler variant. A being carrying nothing (every existing
+    // scenario) folds no bytes, so the fold is byte-identical there; this proves it is live and
+    // order-invariant.
+    use civsim_sim::material::SubstanceMix;
+
+    let setpoint = 305;
+    let build = |carrying: bool| -> Runner {
+        let (organs, fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let blank = Controller::zeros(emb.layout());
+        let mut w = resting_walker(
+            1,
+            Coord3::ground(1, 1),
+            body((3, 4), vec![organ(fat, (3, 4))]),
+            &reg,
+            &organs,
+            blank,
+        );
+        if carrying {
+            let mut load = SubstanceMix::new();
+            load.set("granite", Fixed::from_int(2));
+            load.set("hematite", Fixed::from_int(1));
+            w.carried = load;
+        }
+        emb.add(w, band(setpoint));
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
+    };
+    let trace = |mut r: Runner, scheduled: bool| -> Vec<u128> {
+        (0..30)
+            .map(|_| {
+                if scheduled {
+                    r.step_scheduled(&[]);
+                } else {
+                    r.step();
+                }
+                r.state_hash()
+            })
+            .collect()
+    };
+    let pinned_a = trace(build(true), false);
+    let pinned_b = trace(build(true), false);
+    assert_eq!(
+        pinned_a, pinned_b,
+        "the carrying runner did not replay bit for bit"
+    );
+    let scheduled = trace(build(true), true);
+    assert_eq!(
+        pinned_a, scheduled,
+        "the carried fold diverged between the pinned order and the scheduler"
+    );
+    let empty = trace(build(false), false);
+    assert_ne!(
+        pinned_a, empty,
+        "folding the carried load left the hash unchanged, so it is not canonical"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

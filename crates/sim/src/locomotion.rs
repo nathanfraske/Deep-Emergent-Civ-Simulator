@@ -74,6 +74,7 @@ use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
     ReserveMemory, CONDITION, INGEST, MOVE,
 };
+use crate::material::SubstanceMix;
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
 
@@ -385,6 +386,13 @@ pub struct Walker {
     /// snapshots it, so a being in a world that declares no percepts carries an empty memory that folds
     /// nothing into `state_hash` (the delta percept is opt-in, hash-neutral by default).
     pub reserve_memory: ReserveMemory,
+    /// The matter the being carries (material-substrate arc, cascade item 3): a mixture of substances by
+    /// volume, bound to the carrier. EMPTY by default, so a being that carries nothing folds nothing
+    /// into `state_hash` (the carry substrate is opt-in, hash-neutral by default). Pick-up moves matter
+    /// from the ground into it, bounded by the being's grown strength against the load's derived weight;
+    /// put-down deposits it back, and the carried weight feeds locomotion cost so an over-laden being
+    /// slows (both wired in the run-path slice that follows this substrate).
+    pub carried: SubstanceMix,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -413,6 +421,7 @@ impl Walker {
             hidden,
             known: BTreeMap::new(),
             reserve_memory: ReserveMemory::new(),
+            carried: SubstanceMix::new(),
             alive: true,
         }
     }

@@ -2167,6 +2167,13 @@ impl Runner {
                         h.write_fixed(w.reserve_memory.prev_level(axis.id));
                     }
                 }
+                // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
+                // per-being dynamic state folded after the reserve memory in canonical (substance-id,
+                // volume) order. Empty for a being carrying nothing, so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.carried.is_empty() {
+                    w.carried.hash_into(&mut h);
+                }
             }
         }
         h.finish()
