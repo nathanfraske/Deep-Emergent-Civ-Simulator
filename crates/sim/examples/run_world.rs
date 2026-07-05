@@ -51,6 +51,7 @@ use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::learn::{HARMS, HARM_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
+use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
@@ -141,12 +142,17 @@ fn env_variance() -> Fixed {
 
 /// The controller layout the founding forage-taxis block is sized against: the same registries the
 /// embodiment genesis installs (the dev-grazer homeostatic axes, energy and water and temperature, and
-/// the dev-default affordances, a reaction norm at hidden width zero), so `weight_count` and the taxis
-/// weight indices match the controller a founder expresses.
+/// the dev-default affordances, a reaction norm at hidden width zero), AND the same perceived-feature
+/// registry the world-build declares from the salinity tolerance (harm-learning arc slice b), so
+/// `weight_count` and the taxis weight indices match the controller a founder expresses and reads at run
+/// time. Sizing the seed against a layout WITHOUT the feature block would misplace every forage weight
+/// (a founder would read a feature slot as its move bias and never forage), so this must carry the same
+/// percepts the run does.
 fn dawn_layout() -> ControllerLayout {
-    ControllerLayout::new(
+    ControllerLayout::with_percepts(
         &HomeostaticRegistry::dev_grazer(),
         &AffordanceRegistry::dev_default(),
+        &PerceptRegistry::from_tolerances(&ToleranceRegistry::dev_salinity()),
         0,
     )
 }

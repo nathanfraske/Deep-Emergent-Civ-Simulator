@@ -494,6 +494,16 @@ fn assemble_dawn_embodiment(
         genesis.controller_hidden,
         seed,
     );
+    // Declare the perceived-feature registry from the world's harm-relevant toxin classes (harm-learning
+    // arc slice b): a being senses the substances its physiology responds to, so it can correlate felt
+    // harm with the ground it stands on and form the belief for itself (retiring the injected hazard
+    // Observe). This MUST precede the layout clone below, because it rebuilds the controller layout to
+    // carry the feature block: the founder controllers are expressed against `layout`, so a layout cloned
+    // before this call would express them at the wrong width (their bias and forage weights would land on
+    // the pre-feature indices, and a founder would read a feature slot as its move bias and never forage).
+    // A world with no declared toxins declares no percepts, so the layout is unchanged and the run is
+    // byte-identical.
+    emb.set_percepts(PerceptRegistry::from_tolerances(&genesis.tolerances));
     let layout = emb.layout().clone();
     // The per-band spawn map the lifecycle pairing reads to place a newborn at its band's frozen dawn
     // site (real-world unification, step 3c). The grouping filters bands whose race is registered in the
@@ -578,13 +588,6 @@ fn assemble_dawn_embodiment(
     // Arm the tolerance registry on the embodiment so the lifecycle pairing expresses a newborn's
     // heritable tolerance from its own genome the same way (base-level liveliness step 4).
     emb.set_tolerances(genesis.tolerances.clone());
-    // Declare the perceived-feature registry from the world's harm-relevant toxin classes (harm-learning
-    // arc slice b): a being senses the substances its physiology responds to, so it can correlate felt
-    // harm with the ground it stands on and form the belief for itself (retiring the injected hazard
-    // Observe). Set before the beings are built (it rebuilds the controller layout to carry the feature
-    // block, exactly like set_organs and set_physiology). A world with no declared toxins declares no
-    // percepts, so the feature block and the learner stay inert and the run is unchanged.
-    emb.set_percepts(PerceptRegistry::from_tolerances(&genesis.tolerances));
     // Install the world's organ registry so an affordance and the ground speed are derived against the
     // same kinds the physiology reads (emergent-anatomy step one), not the labelled dev fixture.
     emb.set_organs(genesis.organs.clone());
