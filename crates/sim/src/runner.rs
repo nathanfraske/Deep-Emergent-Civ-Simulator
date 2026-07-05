@@ -91,7 +91,9 @@ use crate::homeostasis::{
     is_harm_tick, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
 };
-use crate::learn::{feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR};
+use crate::learn::{
+    avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
+};
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::medium;
@@ -1701,16 +1703,49 @@ impl Runner {
         // directional percept. Read from the field (immutable) before the mutable embodiment borrow; a
         // pure field quantity, drawing no RNG. It is a percept, not a heading: a controller must evolve
         // to act on it, and how it combines it with its comfort reserve is selection's to wire.
+        let harm_gran = self.harm_learning.feature_granularity;
         let field_dirs: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
             match self.embodiment.as_ref() {
-                Some(emb) => emb
-                    .walkers
-                    .iter()
-                    .map(|w| {
-                        let (gx, gy) = self.field.gradient_at(w.coord().x, w.coord().y);
-                        (w.id, BTreeMap::from([(TEMPERATURE, unit(gx, gy))]))
-                    })
-                    .collect(),
+                Some(emb) => {
+                    // The belief-avoidance gradient (harm-learning arc slice c) routes into the CONDITION
+                    // axis's direction slot, so a being that has learned some ground harms it senses a
+                    // unit direction away from it. Only where the registry carries CONDITION.
+                    let condition_reg = emb.homeo.axis(CONDITION).is_some();
+                    emb.walkers
+                        .iter()
+                        .map(|w| {
+                            let coord = w.coord();
+                            let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
+                            let mut dirs = BTreeMap::from([(TEMPERATURE, unit(gx, gy))]);
+                            // The avoidance percept: the belief-derived expected-harm gradient into
+                            // CONDITION's dead direction slot, present only when the world carries the
+                            // being's mind. A zero gradient (no learned harm nearby) is not inserted, so a
+                            // being with no harmful belief is unchanged; and the evolved
+                            // CONDITION-dir-to-heading weight (founding-zero) must be lifted by selection
+                            // before the gradient moves the being, so avoidance emerges (Principle 9).
+                            if condition_reg {
+                                if let Some(world) = self.world.as_ref() {
+                                    if let Some(mind) = world.mind(w.id) {
+                                        let raw = avoidance_gradient(
+                                            mind,
+                                            coord,
+                                            &emb.resources,
+                                            &emb.percepts,
+                                            emb.params.sense_range,
+                                            harm_gran,
+                                            world.belief_params(),
+                                        );
+                                        let (ax, ay) = unit(raw.0, raw.1);
+                                        if ax != Fixed::ZERO || ay != Fixed::ZERO {
+                                            dirs.insert(CONDITION, (ax, ay));
+                                        }
+                                    }
+                                }
+                            }
+                            (w.id, dirs)
+                        })
+                        .collect()
+                }
                 None => return,
             };
         // (0b) Physics to percept, the signed thermoreceptor: each being senses the signed deviation of

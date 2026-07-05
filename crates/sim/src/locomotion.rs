@@ -2104,4 +2104,101 @@ mod tests {
             "the interoceptive delta is deterministic and replays bit for bit"
         );
     }
+
+    #[test]
+    fn the_belief_avoidance_gradient_steers_a_being_only_through_an_evolved_weight() {
+        // Harm-learning arc slice c, THE MILESTONE: the belief-derived avoidance gradient (a westward
+        // percept, as if the being believes the salt to its east harms it) reaches the CONDITION
+        // direction slot, and a being whose evolved CONDITION-dir-to-heading weight is non-zero steers
+        // AWAY (west) by it, while a being with a blank controller (the founding-zero weight) ignores it
+        // and only explores. So avoidance is not authored: it EMERGES exactly when selection lifts the
+        // weight off zero (Principle 9). The gradient enters as an input the controller weights, the same
+        // way the temperature gradient does; the MOVE arm never subtracts a harm term itself.
+        use crate::controller::{forage_taxis_weights, ForageGains};
+
+        let reg = condition_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let l = ControllerLayout::new(&reg, &afford, 0);
+        let n_in = l.n_in();
+        let cond_base = l.axis_input_base(CONDITION).unwrap();
+        let p = LocomotionParams::dev_default();
+
+        // The avoider: it wants to move (move_bias) and steers its MOVE heading along the CONDITION
+        // gradient (CONDITION as a steer axis), so it follows the avoidance percept. MOVE is output 0
+        // (act, dx, dy at 0,1,2), INGEST the scalar output at 3.
+        let gains = ForageGains {
+            move_bias: Fixed::ONE,
+            here_suppress: Fixed::ZERO,
+            heading_gain: Fixed::ONE,
+            ingest_drive: Fixed::ZERO,
+        };
+        let mut avoider_w = vec![Fixed::ZERO; l.weight_count()];
+        for (pid, v) in forage_taxis_weights(&l, 0, 3, &[], &[cond_base], gains) {
+            avoider_w[pid.0 as usize] = v;
+        }
+        let avoider = Controller::from_weights(n_in, l.n_out(), l.hidden(), avoider_w);
+
+        // The blank: it wants to move but has no CONDITION-dir weight, so the same gradient is inert.
+        let mut blank_w = vec![Fixed::ZERO; l.weight_count()];
+        blank_w[n_in - 1] = Fixed::ONE; // move_act bias only
+        let blank = Controller::from_weights(n_in, l.n_out(), l.hidden(), blank_w);
+
+        // A westward avoidance gradient in the CONDITION direction slot (away from believed harm to the
+        // east), supplied per being exactly as the runner supplies it from the belief in slice c.
+        let west: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>> =
+            BTreeMap::from([(
+                StableId(1),
+                BTreeMap::from([(CONDITION, (Fixed::ZERO - Fixed::ONE, Fixed::ZERO))]),
+            )]);
+        let empty_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> = BTreeMap::new();
+        let empty_drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
+            BTreeMap::new();
+
+        let run_end_x = |controller: &Controller| -> Fixed {
+            let mut ws = vec![Walker::new(
+                StableId(1),
+                Coord3::ground(8, 8),
+                mobile_body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                controller.clone(),
+            )];
+            let mut field = ResourceField::new();
+            for t in 0..12u64 {
+                step_with_field_dirs(
+                    &mut ws,
+                    &reg,
+                    &l,
+                    &afford,
+                    &BodyPlanRegistry::dev_default(),
+                    &OpenGround,
+                    &mut field,
+                    &p,
+                    SEED,
+                    t,
+                    &west,
+                    &empty_signed,
+                    &empty_drains,
+                    &crate::percept::PerceptRegistry::empty(),
+                );
+            }
+            ws[0].x
+        };
+
+        let start_x = Fixed::from_int(8) + HALF;
+        let avoider_x = run_end_x(&avoider);
+        let blank_x = run_end_x(&blank);
+        // The avoider steered west, away from the believed harm to its east.
+        assert!(
+            avoider_x < start_x,
+            "the avoider steers west (away) by the CONDITION gradient: {avoider_x:?} < {start_x:?}"
+        );
+        // The blank being's founding-zero CONDITION-dir weight leaves the gradient inert, so it does not
+        // systematically flee west: avoidance appears only with the evolved weight, never authored.
+        assert!(
+            avoider_x < blank_x,
+            "avoidance emerges from the evolved weight: the avoider ends west of the blank explorer \
+             ({avoider_x:?} < {blank_x:?})"
+        );
+    }
 }
