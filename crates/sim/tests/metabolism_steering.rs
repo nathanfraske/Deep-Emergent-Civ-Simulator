@@ -25,8 +25,8 @@ use civsim_sim::anatomy::{
 };
 use civsim_sim::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
 use civsim_sim::physiology::{
-    derive_base_drain, derive_body_exchange_rate, MetabolicAnchors, CONVECTIVE_SURFACE,
-    ENERGY_DENSITY, TISSUE_SPECIFIC_HEAT,
+    derive_base_drain, derive_body_exchange_rate, whole_body_energy_density, MetabolicAnchors,
+    CONVECTIVE_SURFACE, ENERGY_DENSITY, TISSUE_SPECIFIC_HEAT,
 };
 
 /// A registry adding a high-surface water-rich tissue and a low-surface energy-dense tissue at known
@@ -121,6 +121,7 @@ fn two_bodies_diverge_in_derived_drain_and_exchange_from_composition_and_mass_al
         &big_dense,
         &organs,
         cap_big,
+        whole_body_energy_density(&big_dense, &organs),
         ambient,
         setpoint,
         anchors.medium_h,
@@ -131,6 +132,7 @@ fn two_bodies_diverge_in_derived_drain_and_exchange_from_composition_and_mass_al
         &small_watery,
         &organs,
         cap_small,
+        whole_body_energy_density(&small_watery, &organs),
         ambient,
         setpoint,
         anchors.medium_h,
@@ -177,6 +179,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         &plan,
         &organs,
         cap,
+        whole_body_energy_density(&plan, &organs),
         Fixed::from_int(270),
         Fixed::from_int(330),
         anchors.medium_h,
@@ -187,6 +190,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         &plan,
         &organs,
         cap,
+        whole_body_energy_density(&plan, &organs),
         Fixed::from_int(330),
         Fixed::from_int(270),
         anchors.medium_h,
@@ -203,6 +207,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         &plan,
         &organs,
         cap,
+        whole_body_energy_density(&plan, &organs),
         Fixed::from_int(310),
         Fixed::from_int(310),
         anchors.medium_h,
@@ -233,6 +238,7 @@ fn identical_physics_derive_identical_results_and_replay_bit_for_bit() {
                 p,
                 &organs,
                 cap,
+                whole_body_energy_density(p, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
                 anchors.medium_h,

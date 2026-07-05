@@ -503,9 +503,12 @@ fn assemble_dawn_embodiment(
         let Some(race) = peoples.races.get(race_id) else {
             continue;
         };
-        let Some(plan) = &race.body else {
-            continue; // a race with no body plan founds minds without bodies
-        };
+        // A race founds embodied members if it declares a catalog body OR a developmental program: a fully
+        // grown race (a morphogen program and no catalog body) sources its metabolism from its grown tissue
+        // and needs no catalog body (emergent-anatomy Step 3, the metabolic-tier grow).
+        if race.body.is_none() && race.morphogen.is_none() {
+            continue; // a race with neither founds minds without bodies
+        }
         let coord = Coord3::ground((band_index as i32 * 5) % mw, (band_index as i32 * 3) % mh);
         // Record this band's spawn coordinate under its PlaceId, so a newborn of the band (whose place
         // it inherits from its parents) spawns at the same site.
@@ -513,7 +516,34 @@ fn assemble_dawn_embodiment(
             spawn_by_place.insert(band.place, coord);
         }
         for &id in ids {
-            let homeostasis = Homeostasis::new(&genesis.homeostatic, plan, &genesis.organs);
+            // Grow this member's body from its OWN genome, if the race carries a program (emergent-anatomy
+            // Step 2). The run reads the grown segments' physics for affordances and ground speed.
+            let structure = match (&race.morphogen, world.genome_of(id)) {
+                (Some(program), Some(genome)) => {
+                    let params = express_program(program, &race.genes, genome);
+                    Some(grow(program, &params, seed, id))
+                }
+                _ => None,
+            };
+            // The LOD-0 metabolic body and the reserves. A race that declares a catalog body keeps it as the
+            // metabolic aggregate and sources its reserves from its catalog organs, whether or not it also
+            // grows a run structure (the B2b hybrid), so those scenarios are byte-identical. A FULLY GROWN
+            // race (no catalog body) sources both from its grown structure: the body is the digest and the
+            // reserves are summed off the grown tissue directly (emergent-anatomy Step 3, the metabolic-tier
+            // grow), so the catalog metabolic body is retired and a grown race needs no catalog body at all.
+            let (body, homeostasis) = if let Some(plan) = &race.body {
+                (
+                    plan.clone(),
+                    Homeostasis::new(&genesis.homeostatic, plan, &genesis.organs),
+                )
+            } else if let Some(s) = &structure {
+                (
+                    s.digest(),
+                    Homeostasis::from_structure(&genesis.homeostatic, s),
+                )
+            } else {
+                continue; // a grown race whose founder has no genome yet: cannot embody this member
+            };
             let controller = match world.genome_of(id) {
                 Some(genome) => Controller::express(&race.genes, genome, &layout),
                 None => Controller::zeros(&layout),
@@ -532,21 +562,9 @@ fn assemble_dawn_embodiment(
                 ),
                 None => Physiology::dev_for_registry(&genesis.homeostatic),
             };
-            let mut walker =
-                Walker::new(id, coord, plan.clone(), homeostasis, physiology, controller);
-            // Emergent-anatomy Step 2 (B2b): if the race carries a developmental program, GROW this
-            // founder's run-body from its OWN genome and hand it to the walker, so the run reads the
-            // being's affordances and ground speed from the grown segments' physics rather than the
-            // race-uniform catalog body (the run-governing body is now genome-derived, per member).
-            // The catalog `plan` stays as the LOD-0 metabolic aggregate the reserves, physiology, and
-            // thermoregulation read: a grown segment carries geometry and material, not the organ
-            // kinds the metabolic reserves are sourced from, so the metabolic tier is not yet grown
-            // (an organ-less digest would carry no reserves and starve at birth). Growth is a pure
-            // function of (program, genome, seed, id), so it reproduces on replay and on a two-tier
-            // reload, where the walker is regrown from the re-minted genome, never serialized.
-            if let (Some(program), Some(genome)) = (&race.morphogen, world.genome_of(id)) {
-                let params = express_program(program, &race.genes, genome);
-                walker = walker.with_structure(grow(program, &params, seed, id));
+            let mut walker = Walker::new(id, coord, body, homeostasis, physiology, controller);
+            if let Some(s) = structure {
+                walker = walker.with_structure(s);
             }
             emb.add(walker, thermal);
         }

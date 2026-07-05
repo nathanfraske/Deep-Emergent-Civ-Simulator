@@ -729,10 +729,18 @@ fn being_derived_drains(
     for axis in &emb.homeo.axes {
         let drain = if axis.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY) {
             let cap = w.homeostasis.capacity(axis.id);
+            // The per-mass energy density the drain bridges the reserve through: a GROWN body reads its own
+            // grown tissue (emergent-anatomy Step 3, the metabolic-tier grow), a catalog body its organs, so
+            // a fully grown body metabolizes off its grown energy density and needs no catalog organs.
+            let energy_density = match &w.structure {
+                Some(s) => s.whole_body_energy_density(),
+                None => physiology::whole_body_energy_density(&w.body, &phys.organs),
+            };
             let base = derive_base_drain(
                 &w.body,
                 &phys.organs,
                 cap,
+                energy_density,
                 ambient,
                 setpoint,
                 phys.anchors.medium_h,
@@ -755,8 +763,8 @@ fn being_derived_drains(
             let force = physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors);
             let exertion = derive_exertion_coupling(
                 &w.body,
-                &phys.organs,
                 cap,
+                energy_density,
                 force,
                 velocity,
                 phys.tick_seconds,
@@ -1829,7 +1837,9 @@ impl Runner {
                     world
                         .race_of(id)
                         .and_then(|rid| world.race(rid))
-                        .map(|race| race.body.is_some())
+                        // A race founds embodied members if it declares a catalog body OR a developmental
+                        // program: a fully grown race (Step 3, the metabolic-tier grow) needs no catalog body.
+                        .map(|race| race.body.is_some() || race.morphogen.is_some())
                         .unwrap_or(false)
                 })
                 .collect()
@@ -1865,16 +1875,41 @@ impl Runner {
             let world = self.world.as_ref().unwrap();
             let emb = self.embodiment.as_ref().unwrap();
             let kit = self.lifecycle.as_ref().unwrap();
-            let expressed = world
-                .race_of(id)
-                .and_then(|rid| world.race(rid))
-                .and_then(|race| race.body.clone().map(|plan| (race, plan)));
+            let race = world.race_of(id).and_then(|rid| world.race(rid));
             let place_coord = world
                 .place_of(id)
                 .and_then(|place| kit.spawn_by_place.get(&place).copied());
-            match (expressed, place_coord, emb.physiology.as_ref()) {
-                (Some((race, plan)), Some(coord), Some(phys)) => {
-                    let homeostasis = Homeostasis::new(&emb.homeo, &plan, &phys.organs);
+            match (race, place_coord, emb.physiology.as_ref()) {
+                (Some(race), Some(coord), Some(phys)) => {
+                    // Grow the newborn's run-body from its OWN genome (emergent-anatomy Step 2), so a
+                    // lineage's evolved morphology governs the child's run affordances and ground speed.
+                    // Growth keys on (program, genome, emb.seed, id), a pure function reproduced on replay
+                    // and on a two-tier reload where the walker is regrown from the re-minted genome.
+                    let structure = match (&race.morphogen, world.genome_of(id)) {
+                        (Some(program), Some(genome)) => {
+                            let params = express_program(program, &race.genes, genome);
+                            Some(grow(program, &params, emb.seed, id))
+                        }
+                        _ => None,
+                    };
+                    // The metabolic body and reserves, exactly as the worldbuild founder step: a race with a
+                    // catalog body keeps it as the metabolic aggregate (its catalog organs source the
+                    // reserves, unchanged); a FULLY GROWN race (no catalog body) sources both from its grown
+                    // structure (the digest and the grown tissue), so it needs no catalog body (Step 3, the
+                    // metabolic-tier grow).
+                    let body_homeo = if let Some(plan) = &race.body {
+                        Some((
+                            plan.clone(),
+                            Homeostasis::new(&emb.homeo, plan, &phys.organs),
+                        ))
+                    } else {
+                        structure
+                            .as_ref()
+                            .map(|s| (s.digest(), Homeostasis::from_structure(&emb.homeo, s)))
+                    };
+                    let Some((body, homeostasis)) = body_homeo else {
+                        return; // a grown race whose newborn has no genome yet: cannot embody
+                    };
                     let controller = match world.genome_of(id) {
                         Some(genome) => Controller::express(&race.genes, genome, &emb.layout),
                         None => Controller::zeros(&emb.layout),
@@ -1890,24 +1925,16 @@ impl Runner {
                         None => Physiology::dev_for_registry(&emb.homeo),
                     };
                     let exchange_rate = derive_body_exchange_rate(
-                        &plan,
+                        &body,
                         &phys.organs,
                         phys.anchors.medium_h,
                         phys.tick_seconds,
                         &phys.anchors,
                     );
                     let mut walker =
-                        Walker::new(id, coord, plan, homeostasis, physiology, controller);
-                    // Emergent-anatomy Step 2 (B2b): grow the newborn's run-body from its OWN genome
-                    // exactly as the worldbuild founder step does, so a lineage's evolved morphology
-                    // governs the child's run affordances and ground speed, not the race-uniform
-                    // catalog body. The catalog `plan` stays the LOD-0 metabolic aggregate (a grown
-                    // segment carries no organ kinds, so the metabolic tier is not yet grown). Growth
-                    // keys on (program, genome, emb.seed, id), a pure function reproduced on replay and
-                    // on a two-tier reload where the walker is regrown from the re-minted genome.
-                    if let (Some(program), Some(genome)) = (&race.morphogen, world.genome_of(id)) {
-                        let params = express_program(program, &race.genes, genome);
-                        walker = walker.with_structure(grow(program, &params, emb.seed, id));
+                        Walker::new(id, coord, body, homeostasis, physiology, controller);
+                    if let Some(s) = structure {
+                        walker = walker.with_structure(s);
                     }
                     Some((walker, kit.thermal, coord, exchange_rate))
                 }

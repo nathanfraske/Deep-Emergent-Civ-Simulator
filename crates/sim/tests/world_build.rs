@@ -1679,3 +1679,145 @@ fn an_incoherent_grown_body_is_culled_through_the_ordinary_reserve_floor_path() 
     let (_, hash_b) = run(true, 0x5111);
     assert_eq!(hash_a, hash_b, "the viability-cull run replays bit for bit");
 }
+
+/// A FULLY GROWN race (emergent-anatomy Step 3, the metabolic-tier grow): a developmental program and NO
+/// catalog body, so it founds embodied members whose metabolism is sourced from their grown tissue. The
+/// morphogen block grows a limb (a coherent body) always, plus energy and water tissue when `nourished`, so
+/// the ONLY difference between the two variants is whether the grown tissue backs a metabolic reserve. No
+/// controller block: a blank reaction norm, so the founders sit still and the test isolates metabolic survival.
+fn fully_grown_race(nourished: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    // NO with_body_plan: race.body stays None, the fully grown case.
+    let mut race = a_sexed_race(0).with_morphogen(program.clone());
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    // A limb (a coherent body), common to both variants; the bio parameters sit after spawn.
+    let energy = program.param_count() - 2;
+    let water = program.param_count() - 1;
+    let mut morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
+        (MorphogenParamId(0), Fixed::ONE),
+        (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
+        (MorphogenParamId(2), Fixed::from_ratio(2, 5)),
+        (MorphogenParamId(9), Fixed::from_ratio(3, 4)),
+    ];
+    if nourished {
+        morph_seeds.push((MorphogenParamId(energy as u32), Fixed::from_ratio(1, 2)));
+        morph_seeds.push((MorphogenParamId(water as u32), Fixed::from_ratio(1, 2)));
+    }
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the fully grown race and an embodiment genesis over a metabolizing registry (energy and
+/// water, both backed by grown tissue, plus temperature and condition), so the reserve sourced from grown
+/// tissue is exercised and an energy-less body starves.
+fn fully_grown_peoples(nourished: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), fully_grown_race(nourished));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_grazer(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn a_fully_grown_race_founds_bodies_with_no_catalog_body_and_starves_without_grown_tissue() {
+    // Emergent-anatomy Step 3, the metabolic-tier grow: a race that declares a developmental program and NO
+    // catalog body founds embodied members whose metabolic reserves are sourced from their GROWN tissue, so
+    // the catalog metabolic body is retired and a grown race needs no catalog body. A nourished grown founder
+    // (its tissue carries energy and water) survives on its grown reserves; the SAME race whose tissue carries
+    // none is born with no reserve and starves through the ordinary reserve-floor cull, the metabolic
+    // viability read from grown physics, never a catalog body (Principle 8) and never a RaceId (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let run = |nourished: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &fully_grown_peoples(nourished),
+            seed,
+        )
+        .expect("a fully grown dawn assembles");
+        // The founders embody though their race declares NO catalog body, on their grown metabolism.
+        assert_eq!(
+            runner.world().unwrap().being_ids().len(),
+            8,
+            "the band seeds its founders"
+        );
+        let emb = runner.embodiment().unwrap();
+        assert!(
+            emb.walkers().iter().all(|w| w.structure.is_some()),
+            "every founder carries a grown body"
+        );
+        assert!(
+            emb.walkers().iter().all(|w| w.body.organs.is_empty()),
+            "and no catalog organs: the metabolic body is grown, not catalog"
+        );
+        for _ in 0..20 {
+            runner.step();
+        }
+        let alive = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count();
+        (alive, runner.state_hash())
+    };
+
+    let (nourished_alive, hash_a) = run(true, 0x11B);
+    assert!(
+        nourished_alive > 0,
+        "a fully grown founder whose tissue carries energy and water survives on its grown reserves: {nourished_alive} alive"
+    );
+
+    let (starved_alive, _) = run(false, 0x11B);
+    assert_eq!(
+        starved_alive, 0,
+        "a fully grown founder whose tissue carries no energy is born with no reserve and starves: {starved_alive} alive"
+    );
+
+    // Determinism: the fully grown metabolic run replays bit for bit.
+    let (_, hash_b) = run(true, 0x11B);
+    assert_eq!(
+        hash_a, hash_b,
+        "the fully grown metabolic run replays bit for bit"
+    );
+}

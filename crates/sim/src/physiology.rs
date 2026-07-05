@@ -290,6 +290,7 @@ pub fn derive_base_drain(
     plan: &BodyPlan,
     organs: &BodyPlanRegistry,
     energy_capacity: Fixed,
+    energy_density: Fixed,
     ambient_temp: Fixed,
     setpoint: Fixed,
     medium_h: Fixed,
@@ -314,9 +315,10 @@ pub fn derive_base_drain(
     // physical mass, so the bridge to stored joules scales with size (a larger body stores proportionally
     // more absolute energy). The exact kJ/g-to-joule reconciliation of the reserve units is the
     // R-UNITS-PIN owner calibration (the honest units limit); the mechanism derives, the absolute scale
-    // is the owner's anchors and the floor's energy-density units.
+    // is the owner's anchors and the floor's energy-density units. The per-mass energy density is supplied
+    // by the caller (the catalog organs' [`whole_body_energy_density`], or a GROWN body's grown tissue via
+    // [`crate::morphogen::Structure::whole_body_energy_density`]), so a grown body reads its own tissue.
     let reserve_mass = energy_capacity.checked_mul(mass_kg).unwrap_or(Fixed::ZERO);
-    let energy_density = whole_body_energy_density(plan, organs);
     laws::metabolic_drain_fraction(
         basal,
         heat_loss,
@@ -338,19 +340,19 @@ pub fn derive_base_drain(
 /// exertion term a thousand times too small).
 pub fn derive_exertion_coupling(
     plan: &BodyPlan,
-    organs: &BodyPlanRegistry,
     energy_capacity: Fixed,
+    energy_density: Fixed,
     force: Fixed,
     velocity: Fixed,
     tick: Fixed,
     anchors: &MetabolicAnchors,
 ) -> Fixed {
     let work_power = laws::power_watts(force, velocity, POWER_MAX);
-    // The same size-scaled reserve-energy bridge as the base drain (see derive_base_drain).
+    // The same size-scaled reserve-energy bridge as the base drain (see derive_base_drain). The per-mass
+    // energy density is supplied by the caller, so a grown body reads its own grown tissue.
     let reserve_mass = energy_capacity
         .checked_mul(body_mass_kg(plan, anchors))
         .unwrap_or(Fixed::ZERO);
-    let energy_density = whole_body_energy_density(plan, organs);
     laws::metabolic_drain_fraction(
         work_power,
         Fixed::ZERO,
@@ -625,6 +627,7 @@ mod tests {
             &small,
             &organs,
             cap_small,
+            whole_body_energy_density(&small, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -635,6 +638,7 @@ mod tests {
             &large,
             &organs,
             cap_large,
+            whole_body_energy_density(&large, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -672,6 +676,7 @@ mod tests {
             &plan,
             &organs,
             cap,
+            whole_body_energy_density(&plan, &organs),
             Fixed::from_int(250),
             setpoint,
             anchors.medium_h,
@@ -682,6 +687,7 @@ mod tests {
             &plan,
             &organs,
             cap,
+            whole_body_energy_density(&plan, &organs),
             setpoint,
             setpoint,
             anchors.medium_h,
@@ -705,12 +711,13 @@ mod tests {
         // watt-scale basal drain it is summed with), kept below the full-drain saturation so the
         // scaling with velocity is visible.
         let force = Fixed::ONE;
+        let ed = whole_body_energy_density(&plan, &organs);
         let slow =
-            derive_exertion_coupling(&plan, &organs, cap, force, Fixed::ONE, Fixed::ONE, &anchors);
+            derive_exertion_coupling(&plan, cap, ed, force, Fixed::ONE, Fixed::ONE, &anchors);
         let fast = derive_exertion_coupling(
             &plan,
-            &organs,
             cap,
+            ed,
             force,
             Fixed::from_int(4),
             Fixed::ONE,
@@ -835,6 +842,7 @@ source = "test"
                 &plan,
                 &organs,
                 cap,
+                whole_body_energy_density(&plan, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
                 anchors.medium_h,

@@ -315,6 +315,26 @@ impl Structure {
         sum
     }
 
+    /// The whole-body per-mass energy density a grown body's tissue reads (`bio.energy_density`), the
+    /// specific energy the derived metabolic drain reads to bridge the reserve to stored joules
+    /// (emergent-anatomy Step 3): the development-weighted average over the grown segments, mirroring
+    /// [`crate::physiology::whole_body_energy_density`] over a catalog organ set but read DIRECTLY off the
+    /// grown tissue. Every grown segment carries the same development, so this is the mean of the segments'
+    /// energy density. Zero for a body with no energy tissue (which starves at once, so the derived drain is
+    /// never reached on it).
+    pub fn whole_body_energy_density(&self) -> Fixed {
+        let n = self.segments.len();
+        if n == 0 {
+            return Fixed::ZERO;
+        }
+        let mut sum = Fixed::ZERO;
+        for seg in &self.segments {
+            sum = sum.saturating_add(seg.mat("bio.energy_density"));
+        }
+        sum.checked_div(Fixed::from_int(n as i32))
+            .unwrap_or(Fixed::ZERO)
+    }
+
     /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
     /// that segment's leg length (`mech.arm_length`), the two the grown-limb ground speed
     /// ([`crate::locomotion::locomotion_speed_structure`]) reads. A structure whose every segment reads zero
