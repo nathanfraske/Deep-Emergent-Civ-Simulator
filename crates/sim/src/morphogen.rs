@@ -51,6 +51,7 @@ use civsim_compose::{
 };
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 
+use crate::anatomy::{BodyPlan, Part, Temperament};
 use crate::genome::{
     Channel, DominanceMode, GeneDef, GeneEffect, GeneId, GeneSet, Genome, MorphogenParamId,
 };
@@ -250,6 +251,68 @@ impl Structure {
         best
     }
 
+    /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
+    /// that segment's leg length (`mech.arm_length`), the two the grown-limb ground speed
+    /// ([`crate::locomotion::locomotion_speed_structure`]) reads. A structure whose every segment reads zero
+    /// LOCOMOTE bears no limb, so the capability is zero and the body is rooted, by physics not by a tag.
+    pub fn best_locomotor_stride(
+        &self,
+        fns: &FunctionLawRegistry,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> (Fixed, Fixed) {
+        let mut best_cap = Fixed::ZERO;
+        let mut stride = Fixed::ZERO;
+        for (i, seg) in self.segments.iter().enumerate() {
+            let cap = self
+                .segment_capabilities(i, fns, refs, caps)
+                .score(FunctionLawRegistry::ID_LOCOMOTE);
+            if cap > best_cap {
+                best_cap = cap;
+                stride = seg.geo("mech.arm_length");
+            }
+        }
+        (best_cap, stride)
+    }
+
+    /// The LOD-0 aggregate digest of the grown structure: the scalar [`BodyPlan`] the aggregate tier carries
+    /// while the full segment graph materialises only on promotion (the spec's LOD split). It derives the
+    /// morphology scalar the run reads on the tick, `body_mass`, as a coarse aggregate of the grown
+    /// structure's extent (the segment count over a reserved reference, clamped), and leaves the behavioural
+    /// and metabolic fields at neutral defaults: the temperament is a separate heritable channel, and the
+    /// metabolic organs (`bio.*` tissue composition, which this function-morphology kernel does not grow yet)
+    /// are supplied by the caller in the documented hybrid. A grown body's FUNCTION is read from the
+    /// structure directly ([`Structure::max_capability`], the affordance and speed reads), never from the
+    /// digest's part-lists, so those stay empty: the digest is the scalar summary, not the function source.
+    pub fn digest(&self) -> BodyPlan {
+        let count = Fixed::from_int(self.segments.len() as i32);
+        let reference = Fixed::from_int(MASS_REFERENCE_SEGMENTS as i32);
+        let body_mass = count
+            .checked_div(reference)
+            .unwrap_or(Fixed::ZERO)
+            .clamp(Fixed::ZERO, Fixed::ONE);
+        BodyPlan {
+            body_mass,
+            encephalization: HALF,
+            diet_breadth: HALF,
+            weapons: Vec::new(),
+            covering: Part {
+                kind: 0,
+                development: HALF,
+            },
+            senses: Vec::new(),
+            locomotion: Vec::new(),
+            organs: Vec::new(),
+            temperament: Temperament {
+                boldness: HALF,
+                exploration: HALF,
+                activity: HALF,
+                sociability: HALF,
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        }
+    }
+
     /// Fold the structure into a state hasher in canonical order: each segment in growth order, and within
     /// a segment the parent, depth, then its geometry and material axes in sorted key order (the `BTreeMap`
     /// walk is already sorted). Determinism (Principle 3): a grown structure folds identically wherever it
@@ -440,6 +503,12 @@ const GROWTH_HI: Fixed = Fixed::from_bits(3i64 << (Fixed::FRAC_BITS - 1)); // 3/
 /// One half, the jitter and rounding centre.
 const HALF: Fixed = Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1));
 
+/// The reserved reference segment count a full-mass body's grown structure reaches, so the LOD-0
+/// [`Structure::digest`] maps segment count to a `body_mass` fraction in `[0, 1]`. RESERVED. Basis: the
+/// segment count a maximal-mass body plan grows to (near the segment cap), a coarse aggregate the metabolism
+/// scale reads until a volumetric aggregate over the grown geometry replaces it.
+const MASS_REFERENCE_SEGMENTS: u16 = 16;
+
 /// An expressed parameter clamped to a `[0, 1]` fraction (the genome expresses a dimensionless coordinate;
 /// growth maps it into a physical range). An absent parameter reads zero.
 fn frac(params: &[Fixed], i: usize) -> Fixed {
@@ -465,6 +534,8 @@ fn dec(s: &str) -> Fixed {
 mod tests {
     use super::*;
     use crate::genome::{Allele, Haplotype, SchemeId};
+    use crate::homeostasis::{AffordanceRegistry, MOVE, STRIKE};
+    use crate::locomotion::{locomotion_speed_structure, LocomotionParams};
 
     fn caps() -> CapabilityCaps {
         CapabilityCaps {
@@ -675,6 +746,114 @@ mod tests {
         assert_ne!(
             a, b,
             "a heritable growth-parameter difference grows a different body"
+        );
+    }
+
+    // --- Slice B, the digest and the direct-read bridge (still off the run path) ---
+
+    /// A branching program that grows a multi-segment body, so the digest and the reads see structure.
+    fn branching(program: &MorphogenProgram) -> Vec<Fixed> {
+        params(
+            program,
+            &[
+                (1, "0.5"),
+                (2, "0.4"),
+                (4, "0.7"),
+                (5, "0.7"),
+                (9, "0.75"),
+                (11, "1"),   // branch fraction -> max_branch
+                (12, "0.9"), // spawn fraction -> most candidates grow
+            ],
+        )
+    }
+
+    #[test]
+    fn the_digest_aggregates_the_grown_structure_to_a_bodyplan() {
+        // The LOD-0 aggregate: a larger grown structure digests to a greater body_mass, the one morphology
+        // scalar the metabolism reads on the tick. The digest is a valid BodyPlan (its function is read from
+        // the structure directly, so its part-lists are empty by design).
+        let program = MorphogenProgram::dev_default();
+        let big = grow(&program, &branching(&program), 0x7, StableId(1));
+        let small = grow(&program, &params(&program, &[]), 0x7, StableId(1)); // spawn 0 -> the root alone
+        assert!(
+            big.len() > small.len(),
+            "the branching program grew a bigger body"
+        );
+        assert!(
+            big.digest().body_mass > small.digest().body_mass,
+            "a bigger grown structure digests to a greater body_mass"
+        );
+        assert!(
+            small.len() == 1,
+            "the non-branching program is the single root"
+        );
+        assert!(
+            big.digest().weapons.is_empty() && big.digest().locomotion.is_empty(),
+            "the digest's part-lists are empty: a grown body's function is read from the structure"
+        );
+    }
+
+    #[test]
+    fn the_run_reads_a_grown_body_directly_by_physics() {
+        // The direct-read bridge (owner's slice-B choice): the affordance gate and the ground speed read a
+        // grown Structure directly, with no catalog kind id and no organs registry. A grown limbed body
+        // affords MOVE and moves; a rooted grown body (no segment reads LOCOMOTE) affords no MOVE and does
+        // not move; a grown weapon body affords STRIKE. Function is a pure read of the grown physics.
+        let program = MorphogenProgram::dev_default();
+        let p = LocomotionParams::dev_default();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = CapabilityCaps {
+            pressure: Fixed::from_int(150_000),
+            depth: Fixed::from_int(100),
+        };
+        let half = Fixed::from_ratio(1, 2);
+
+        // A limbed body: a real section modulus, arm length, and bony yield.
+        let limbed = grow(
+            &program,
+            &params(&program, &[(1, "0.5"), (2, "0.4"), (9, "0.75")]),
+            0x1,
+            StableId(1),
+        );
+        let afford = AffordanceRegistry::dev_default();
+        assert!(
+            afford
+                .afforded_structure(&limbed, &refs, &caps)
+                .contains(&MOVE),
+            "a grown limbed body affords MOVE by physics"
+        );
+        assert!(
+            locomotion_speed_structure(&limbed, half, Fixed::ONE, &p) > Fixed::ZERO,
+            "and it moves"
+        );
+
+        // A rooted body: everything at the low end, so no segment bears a load-bearing limb.
+        let rooted = grow(&program, &params(&program, &[]), 0x1, StableId(1));
+        assert!(
+            !afford
+                .afforded_structure(&rooted, &refs, &caps)
+                .contains(&MOVE),
+            "a rooted grown body affords no movement: no segment reads LOCOMOTE"
+        );
+        assert_eq!(
+            locomotion_speed_structure(&rooted, half, Fixed::ONE, &p),
+            Fixed::ZERO,
+            "and it does not move"
+        );
+
+        // A weapon body: a small hard tip, in a combat-capable affordance fixture, affords STRIKE.
+        let weapon = grow(
+            &program,
+            &params(&program, &[(0, "0"), (8, "1")]),
+            0x1,
+            StableId(1),
+        );
+        let predator = AffordanceRegistry::dev_predator();
+        assert!(
+            predator
+                .afforded_structure(&weapon, &refs, &caps)
+                .contains(&STRIKE),
+            "a grown weapon body affords a strike by its physics"
         );
     }
 }

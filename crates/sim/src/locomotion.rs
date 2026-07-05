@@ -74,6 +74,7 @@ use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
     CONDITION, INGEST, MOVE,
 };
+use crate::morphogen::Structure;
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -490,6 +491,49 @@ pub fn locomotion_speed(
         + (Fixed::ONE - p.activity_floor)
             .mul(body.temperament.activity.clamp(Fixed::ZERO, Fixed::ONE));
     // Terrain divisor: 1 + terrain_penalty * (cost - 1), never below one.
+    let over = if terrain_cost > Fixed::ONE {
+        terrain_cost - Fixed::ONE
+    } else {
+        Fixed::ZERO
+    };
+    let divisor = Fixed::ONE + p.terrain_penalty.mul(over);
+    let raw = p.base_speed.mul(size).mul(activity);
+    let speed = if divisor > Fixed::ZERO {
+        raw.div(divisor)
+    } else {
+        raw
+    };
+    speed.clamp(Fixed::ZERO, p.base_speed)
+}
+
+/// The ground speed of a GROWN body, read from its [`Structure`] directly (emergent-anatomy Step 2): the
+/// same grown-limb physics as [`locomotion_speed`], but the stride and the structural push come from the
+/// structure's strongest LOCOMOTE segment ([`Structure::best_locomotor_stride`]) rather than a catalog mode
+/// looked up in the organs registry, so a body no catalog contains moves exactly as fast as its grown limb
+/// bears. The activity factor reads the being's temperament activity (carried on the LOD-0 digest), so the
+/// caller supplies it. A structure whose every segment reads zero LOCOMOTE is rooted and does not move.
+pub fn locomotion_speed_structure(
+    structure: &Structure,
+    activity: Fixed,
+    terrain_cost: Fixed,
+    p: &LocomotionParams,
+) -> Fixed {
+    let fns = FunctionLawRegistry::dev_seed();
+    let (best_cap, stride_leg) =
+        structure.best_locomotor_stride(&fns, &p.capability_refs, &p.capability_caps);
+    if best_cap <= Fixed::ZERO {
+        return Fixed::ZERO; // no grown limb bears a propulsive load: rooted, by physics
+    }
+    let stride = if p.reference_leg_length > Fixed::ZERO {
+        stride_leg
+            .div(p.reference_leg_length)
+            .clamp(Fixed::ZERO, Fixed::ONE)
+    } else {
+        Fixed::ZERO
+    };
+    let size = stride.mul(best_cap);
+    let activity = p.activity_floor
+        + (Fixed::ONE - p.activity_floor).mul(activity.clamp(Fixed::ZERO, Fixed::ONE));
     let over = if terrain_cost > Fixed::ONE {
         terrain_cost - Fixed::ONE
     } else {

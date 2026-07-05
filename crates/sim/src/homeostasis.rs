@@ -51,6 +51,7 @@ use civsim_compose::{
 };
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
+use crate::morphogen::Structure;
 use crate::stocks::Stock;
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
@@ -609,6 +610,25 @@ impl AffordanceRegistry {
             .map(|a| affords(body, a, organs, refs, caps))
             .unwrap_or(false)
     }
+
+    /// The affordances a GROWN body can perform, in canonical id order, read from its [`Structure`]
+    /// DIRECTLY (emergent-anatomy Step 2): the required capability is the greatest any grown segment reads
+    /// through the function-law dispatch, so a grown body strikes because a segment reads PIERCE and moves
+    /// because one reads LOCOMOTE, with no catalog kind id and no organ-registry lookup. This is the
+    /// grown-body counterpart to [`Self::afforded`]; a body carries one or the other (catalog parts read
+    /// against the shared registry, or its own grown structure), never both.
+    pub fn afforded_structure(
+        &self,
+        structure: &Structure,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> Vec<AffordanceId> {
+        self.affordances
+            .iter()
+            .filter(|a| affords_structure(structure, a, refs, caps))
+            .map(|a| a.id)
+            .collect()
+    }
 }
 
 /// The move affordance of the development fixture.
@@ -668,6 +688,24 @@ fn affords(
         None => true,
         Some(law) => {
             body_capability(body, organs, refs, caps, law) >= a.min_capability.max(MIN_CAP)
+        }
+    }
+}
+
+/// Whether a GROWN body affords an operation, read from its [`Structure`] directly: an unconditional
+/// operation any body performs; a gated one needs a grown segment reading the required capability at or
+/// above the threshold, the greatest any segment reads through the function-law dispatch.
+fn affords_structure(
+    structure: &Structure,
+    a: &AffordanceDef,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> bool {
+    match a.requires {
+        None => true,
+        Some(law) => {
+            let fns = FunctionLawRegistry::dev_seed();
+            structure.max_capability(law, &fns, refs, caps) >= a.min_capability.max(MIN_CAP)
         }
     }
 }
