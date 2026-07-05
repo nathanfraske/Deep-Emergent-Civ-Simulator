@@ -97,7 +97,10 @@ use crate::learn::{
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::material::{CraftParams, EarthworkField, ExtractionParams, MaterialField, WieldedTool};
+use crate::material::{
+    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
+    WieldedTool,
+};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -901,6 +904,12 @@ pub struct Embodiment {
     /// bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Digging lowers a column
     /// (a pit) and yields spoil; a deposit raises it (a mound), reshaping the terrain the physics reads.
     earthwork: EarthworkField,
+    /// The per-cell fire intensity a combustion beat sources over the burning cells (material-substrate arc,
+    /// cascade item 6, live fire): the combustion energy each cell of combustible matter releases this tick.
+    /// UNLIT by default, so a scenario with no combustion armed (or no combustible substance hot enough)
+    /// folds no bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Recomputed each
+    /// tick from the fuel present and the cell temperature, so it always reflects the current combustion.
+    fire: FireField,
 }
 
 impl Embodiment {
@@ -953,6 +962,7 @@ impl Embodiment {
             extraction: None,
             craft: None,
             earthwork: EarthworkField::new(),
+            fire: FireField::new(),
         }
     }
 
@@ -1022,6 +1032,12 @@ impl Embodiment {
     /// cascade item 5): the per-column elevation change from the worldgen baseline.
     pub fn earthwork(&self) -> &EarthworkField {
         &self.earthwork
+    }
+
+    /// The fire field, for reading which cells are burning and how hard (material-substrate arc, cascade
+    /// item 6): the per-cell combustion energy released this tick, sourced by the runner's combustion beat.
+    pub fn fire(&self) -> &FireField {
+        &self.fire
     }
 
     /// Install the world material registry a carried load's weight is derived against (material-substrate
@@ -1557,6 +1573,12 @@ pub struct Runner {
     /// temperature-only paths are unchanged. Stepped inside [`Runner::step_field`], folded into
     /// `state_hash`.
     environ: Option<(EnvironFields, EnvironCalib)>,
+    /// The reserved calibrations of the combustion beat (material-substrate arc, cascade item 6, live fire),
+    /// armed opt-in. `None` on a runner without it, so no combustion runs and every existing scenario is
+    /// byte-identical; armed via [`Runner::set_combustion`], the beat then sources the embodiment's fire
+    /// field from the combustible matter hot enough to burn. Off the calibrated worldbuild path until a later
+    /// slice wires it, exactly like the extraction and craft params.
+    combustion: Option<CombustionCalib>,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -1598,6 +1620,7 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            combustion: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1636,6 +1659,7 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            combustion: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1687,6 +1711,7 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            combustion: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1761,6 +1786,7 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            combustion: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1783,6 +1809,15 @@ impl Runner {
     /// Without it a runner is temperature-only, exactly as before.
     pub fn set_environ(&mut self, fields: EnvironFields, calib: EnvironCalib) {
         self.environ = Some((fields, calib));
+    }
+
+    /// Arm the combustion beat (material-substrate arc, cascade item 6, live fire): each tick, the
+    /// combustible matter a cell holds that stands at or above its ignition temperature burns, consuming a
+    /// bounded fraction of its fuel and lighting the embodiment's fire field. Opt-in: a runner left unarmed
+    /// runs no combustion, so every existing scenario is byte-identical. Reserved calibrations
+    /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    pub fn set_combustion(&mut self, calib: CombustionCalib) {
+        self.combustion = Some(calib);
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -1905,6 +1940,116 @@ impl Runner {
                 env.regrow_supply(emb.resources_mut(), calib);
             }
         }
+        self.step_combustion();
+    }
+
+    /// The combustion beat (material-substrate arc, cascade item 6, live fire): the combustible matter each
+    /// cell holds that stands at or above its ignition temperature burns through the resolved combustion law,
+    /// consuming a bounded fraction of its fuel from the material field and lighting the fire field with the
+    /// released energy. Run inside [`Runner::step_field`] after the temperature advances, so both tick orders
+    /// (pinned and scheduled) source the fire from the settled temperature identically. A pure deterministic
+    /// fold in canonical cell-and-substance order (Principle 3); the outcome keys off the substance's own
+    /// combustion axes (fuel value, ignition temperature, oxidiser demand) and the cell temperature, no race,
+    /// kind, or role (Principles 8, 9). Opt-in: a runner with no combustion calib, no material registry, or no
+    /// combustible substance hot enough burns nothing, so the fire field stays empty and folds no bytes.
+    ///
+    /// The fire field is rebuilt from empty each tick, so a cell that runs out of fuel or cools below its
+    /// ignition temperature drops out. The oxidiser is not yet supplied (self-oxidising fuels burn on the
+    /// current data; an oxygen-demanding fuel reads zero oxidiser and so does not burn), so the medium-oxygen
+    /// gate that makes fire need air is the next slice.
+    fn step_combustion(&mut self) {
+        let Some(calib) = self.combustion else {
+            return;
+        };
+        // Read phase: over every cell of combustible matter, compute this tick's burn (consumed fuel volume
+        // and released energy) against the settled temperature. Snapshotted so the material take below does
+        // not alias the read. Borrows the embodiment and the field immutably (disjoint fields of the runner).
+        let burns: Vec<(Coord3, String, Fixed, Fixed)> = {
+            let Some(emb) = self.embodiment.as_ref() else {
+                return;
+            };
+            let Some(reg) = emb.material_registry.as_ref() else {
+                return;
+            };
+            let axis = |substance: &str, id: &str| -> Option<Fixed> {
+                reg.substance(substance)
+                    .and_then(|s| s.vector.get(id).copied())
+            };
+            let mut out = Vec::new();
+            for (cell, mix) in emb.material.cells() {
+                let temperature = self.field.at(cell.x, cell.y);
+                for (substance, &volume) in mix.substances() {
+                    // Only a substance carrying a fuel value is combustible; others (rock, soil) are skipped.
+                    let Some(fuel_value) = axis(substance, "therm.fuel_value") else {
+                        continue;
+                    };
+                    if fuel_value <= Fixed::ZERO {
+                        continue;
+                    }
+                    let ignition =
+                        axis(substance, "therm.ignition_temperature").unwrap_or(Fixed::ZERO);
+                    let oxidiser_demand =
+                        axis(substance, "therm.oxidiser_demand").unwrap_or(Fixed::ZERO);
+                    let density = axis(substance, "mat.density").unwrap_or(Fixed::ZERO);
+                    if density <= Fixed::ZERO {
+                        continue; // no mass conversion without a density
+                    }
+                    // The fuel mass present, and the bounded fraction that can combust this tick (the reserved
+                    // burn rate: a fuel burns down over a timescale, not instantly).
+                    let fuel_mass = match volume.checked_mul(density) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    let burnable = fuel_mass
+                        .checked_mul(calib.burn_rate)
+                        .unwrap_or(Fixed::ZERO);
+                    if burnable <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The resolved combustion law gates on the ignition crossing. The oxidiser is not supplied
+                    // yet (zero), so a self-oxidising fuel (zero demand) burns and an oxygen-demanding one reads
+                    // oxidiser-limited to nothing, the honest limit until the medium-oxygen slice.
+                    let c = laws::combustion(
+                        fuel_value,
+                        oxidiser_demand,
+                        ignition,
+                        burnable,
+                        Fixed::ZERO,
+                        temperature,
+                        calib.energy_cap,
+                    );
+                    if !c.ignited || c.energy <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The burned mass follows from the released energy over the fuel value (the law's own
+                    // relation, exact below the energy cap); the consumed volume converts it back through the
+                    // substance density.
+                    let burned_mass = c.energy.checked_div(fuel_value).unwrap_or(Fixed::ZERO);
+                    let burned_volume = burned_mass.checked_div(density).unwrap_or(Fixed::ZERO);
+                    if burned_volume <= Fixed::ZERO {
+                        continue;
+                    }
+                    out.push((*cell, substance.clone(), burned_volume, c.energy));
+                }
+            }
+            out
+        };
+        // Apply phase: consume the burned fuel and rebuild the fire field with this tick's released energy per
+        // cell (a cell with two combustible substances sums their release). Borrows the embodiment mutably.
+        let Some(emb) = self.embodiment.as_mut() else {
+            return;
+        };
+        let mut per_cell: BTreeMap<Coord3, Fixed> = BTreeMap::new();
+        for (cell, substance, burned_volume, energy) in burns {
+            emb.material.take(cell, &substance, burned_volume);
+            let entry = per_cell.entry(cell).or_insert(Fixed::ZERO);
+            *entry = entry.saturating_add(energy);
+        }
+        let mut fire = FireField::new();
+        for (cell, energy) in per_cell {
+            fire.set(cell, energy);
+        }
+        emb.fire = fire;
     }
 
     /// Recouple the hydrology routing to the terrain this tick's digging reshaped (material-substrate item
@@ -2734,6 +2879,11 @@ impl Runner {
             // digging has made, folded after the material layer in canonical (column, delta) order. Empty
             // for every scenario where nothing digs, so it folds no bytes and the run is byte-identical.
             emb.earthwork.hash_into(&mut h);
+            // The fire field (material-substrate arc, cascade item 6): the per-cell combustion energy released
+            // this tick, folded after the earthwork in canonical (cell, intensity) order. Empty for every
+            // scenario with no combustion armed or nothing burning, so it folds no bytes and the run is
+            // byte-identical (the opt-in empty-default).
+            emb.fire.hash_into(&mut h);
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {

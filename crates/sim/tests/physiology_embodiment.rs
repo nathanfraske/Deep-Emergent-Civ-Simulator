@@ -1962,6 +1962,96 @@ fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_run
 }
 
 #[test]
+fn combustible_matter_burns_when_it_is_hot_enough_and_a_cold_cell_and_rock_do_not() {
+    // Material-substrate arc item 6, LIVE FIRE: a cell of combustible matter that stands at or above its
+    // ignition temperature burns through the resolved combustion law, consuming its fuel and lighting the
+    // fire field; the identical cell in a cold field does not, and a non-combustible substance in the same
+    // hot cell is untouched. The outcome is the substance's own combustion data against the cell temperature,
+    // no race, kind, or role (Principle 9), and it is opt-in: with no combustion armed nothing burns.
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let cell = Coord3::ground(2, 2);
+    let fuel0 = Fixed::from_int(4);
+    let rock0 = Fixed::from_int(4);
+    let (w, h) = (8, 8);
+
+    // A runner holding oak (a combustible carrying therm.fuel_value and therm.ignition_temperature 570) and
+    // granite (no fuel value) at one cell, over a UNIFORM temperature field (a fixed point of the diffusion
+    // step, so the cell holds its temperature), with the combustion beat armed.
+    let build = |field_temp: i32| -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x00F1,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "oak", fuel0);
+        field.deposit(cell, "granite", rock0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let oak = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "oak") };
+    let rock = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let burning = |r: &Runner| -> Fixed { r.embodiment().unwrap().fire().intensity(cell) };
+
+    // Hot field (600 K, above oak's 570 K ignition): the oak ignites, burns down its fuel, and lights the
+    // fire field; the granite in the same cell has no fuel value and is untouched.
+    let mut hot = build(600);
+    hot.step();
+    assert!(
+        oak(&hot) < fuel0,
+        "the hot oak burned down some of its fuel"
+    );
+    assert!(
+        burning(&hot) > Fixed::ZERO,
+        "the burning cell lit the fire field"
+    );
+    assert_eq!(
+        rock(&hot),
+        rock0,
+        "the non-combustible granite in the same cell did not burn"
+    );
+
+    // Burning continues while fuel and heat remain: a second tick consumes more oak.
+    let after_one = oak(&hot);
+    hot.step();
+    assert!(
+        oak(&hot) < after_one,
+        "the fire keeps consuming fuel while it burns"
+    );
+
+    // Cold field (305 K, below the ignition temperature): the same oak never ignites, so its fuel is intact
+    // and the fire field stays dark.
+    let mut cold = build(305);
+    cold.step();
+    assert_eq!(
+        oak(&cold),
+        fuel0,
+        "cold oak below its ignition point does not burn"
+    );
+    assert_eq!(burning(&cold), Fixed::ZERO, "a cold cell is not on fire");
+
+    // The scheduled tick order sources the same fire as the pinned order (bit-identical).
+    let mut scheduled = build(600);
+    scheduled.step_scheduled(&[]);
+    assert!(
+        burning(&scheduled) > Fixed::ZERO && oak(&scheduled) < fuel0,
+        "the scheduled order burns the fuel and lights the fire identically"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

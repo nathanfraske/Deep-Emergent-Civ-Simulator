@@ -330,6 +330,37 @@ impl CraftParams {
     }
 }
 
+/// The reserved parameters of the combustion contest (material-substrate arc, cascade item 6, live fire). The
+/// mechanism that reads them is fixed Rust (the resolved combustion law over the fuel a cell holds); these
+/// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CombustionCalib {
+    /// The fraction of a burning cell's fuel that combusts per tick, the reaction rate. RESERVED. Basis: the
+    /// characteristic mass-loss rate of a burning fuel bed over the base tick (a fuel burns down over a
+    /// timescale, not instantly), a reaction time constant set from the combustion literature's burn-rate
+    /// data against the world's tick; the combustion law would otherwise consume all a cell's fuel in one
+    /// tick. A larger fraction burns a fire out faster and hotter. A realism-and-rate bound, surfaced for
+    /// the owner, never invented.
+    pub burn_rate: Fixed,
+    /// The physics released-energy ceiling the combustion law saturates at per cell per tick. A
+    /// representability cap, not an authored quantity, mirroring the extraction pressure ceiling: it bounds a
+    /// cell's per-tick energy release to the fixed-point range so a large fuel mass cannot overflow the field.
+    pub energy_cap: Fixed,
+}
+
+impl CombustionCalib {
+    /// A labelled DEVELOPMENT FIXTURE: a burn-rate fraction and the energy cap. Not owner canon; a stand-in
+    /// so the combustion beat can run until the owner sets the burn rate against its basis. The value
+    /// exercises the mechanism (a hot fuel cell burns down over several ticks) without standing for a
+    /// calibrated rate.
+    pub fn dev_fixture() -> CombustionCalib {
+        CombustionCalib {
+            burn_rate: Fixed::from_ratio(1, 4),
+            energy_cap: Fixed::from_int(1_000_000_000),
+        }
+    }
+}
+
 /// A worked object a being wields as a tool (material-substrate arc, cascade item 4, crafting). This is the
 /// CONTEST INTERFACE of a tool, the two things an extraction or cut reads: its working GEOMETRY (the
 /// contact area its edge or point presses over) and its MATERIAL (the substance it is made of, whose
@@ -399,6 +430,13 @@ impl MaterialField {
     /// The substance mixture on a cell, if the cell holds any matter.
     pub fn cell(&self, coord: Coord3) -> Option<&SubstanceMix> {
         self.matter.get(&coord)
+    }
+
+    /// Every cell that holds matter, in canonical [`Coord3`] order, for a field process that reads the whole
+    /// substrate (the combustion beat scanning for combustible cells, cascade item 6). A pure read; the
+    /// `BTreeMap` walk is canonical, so a process built on it is reproducible and thread-invariant.
+    pub fn cells(&self) -> impl Iterator<Item = (&Coord3, &SubstanceMix)> + '_ {
+        self.matter.iter()
     }
 
     /// Add a volume of one substance to a cell (a deposit: mined spoil dropped, a corpse's remains, an
@@ -546,6 +584,66 @@ impl EarthworkField {
             h.write_i64(column.y as i64);
             h.write_i64(column.z as i64);
             h.write_fixed(*delta);
+        }
+    }
+}
+
+/// The per-cell FIRE INTENSITY (material-substrate arc, cascade item 6, LIVE FIRE): the combustion energy a
+/// cell releases this tick, keyed by its [`Coord3`], sparse over the burning cells. A cell holding a
+/// combustible substance (a substance carrying `therm.fuel_value`) that stands at or above its
+/// `therm.ignition_temperature` combusts through the resolved combustion law ([`civsim_physics::laws::combustion`]),
+/// consuming a bounded fraction of its fuel and releasing that fuel's chemical energy, which this field
+/// records so the world can read where and how hard it is burning (the render tint, the harm dose, the heat
+/// the later slice injects into the temperature field so fire spreads). It is RECOMPUTED each tick, not
+/// accumulated: a cell that runs out of fuel or cools below its ignition temperature drops out, so the field
+/// always reflects the current combustion. Off the run path until the combustion beat sources it, so
+/// declaring it leaves every scenario byte-identical (the opt-in empty-default pattern, the sibling of
+/// [`EarthworkField`]).
+#[derive(Clone, Debug, Default)]
+pub struct FireField {
+    /// The released combustion energy at each burning cell this tick, keyed by its [`Coord3`]. A cell not
+    /// present is not burning (intensity zero, the absence convention). A cell whose intensity falls to zero
+    /// is pruned, so the canonical walk stays minimal.
+    intensities: BTreeMap<Coord3, Fixed>,
+}
+
+impl FireField {
+    /// An unlit field: nothing burning anywhere.
+    pub fn new() -> FireField {
+        FireField::default()
+    }
+
+    /// Whether nothing is burning (the opt-out state a scenario that lights no fire stays in, so its
+    /// `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.intensities.is_empty()
+    }
+
+    /// The fire intensity at a cell (the released combustion energy this tick); an unlit cell reads zero.
+    pub fn intensity(&self, cell: Coord3) -> Fixed {
+        self.intensities.get(&cell).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Set a cell's fire intensity to this tick's released combustion energy. A zero (a cell that stopped
+    /// burning) is pruned to keep the canonical walk minimal. A pure deterministic write with no randomness;
+    /// the combustion beat rebuilds the field from an empty one each tick, so no stale entry survives.
+    pub fn set(&mut self, cell: Coord3, intensity: Fixed) {
+        if intensity <= Fixed::ZERO {
+            self.intensities.remove(&cell);
+        } else {
+            self.intensities.insert(cell, intensity);
+        }
+    }
+
+    /// Fold the fire field into a hash in canonical (cell, intensity) order, for the runner's `state_hash`
+    /// beside [`EarthworkField::hash_into`]. An empty (unlit) field folds nothing, so an opted-out run is
+    /// unchanged. The `BTreeMap` walks in canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (cell, intensity) in &self.intensities {
+            h.write_i64(cell.x as i64);
+            h.write_i64(cell.y as i64);
+            h.write_i64(cell.z as i64);
+            h.write_fixed(*intensity);
         }
     }
 }
@@ -757,6 +855,54 @@ values = [
         EarthworkField::new().hash_into(&mut h);
         let h0 = StateHasher::new();
         assert_eq!(h.finish(), h0.finish(), "an empty earthwork folds no bytes");
+    }
+
+    #[test]
+    fn the_fire_field_records_burning_cells_prunes_the_extinguished_and_folds_canonically() {
+        let mut fire = FireField::new();
+        assert!(fire.is_empty());
+        let a = Coord3::ground(2, 3);
+        let b = Coord3::ground(5, 1);
+        // An unlit cell reads zero intensity.
+        assert_eq!(fire.intensity(a), Fixed::ZERO);
+        // A burning cell records its released energy.
+        fire.set(a, Fixed::from_int(7));
+        fire.set(b, Fixed::from_int(3));
+        assert_eq!(fire.intensity(a), Fixed::from_int(7), "the cell burns");
+        assert!(!fire.is_empty());
+        // A cell that stops burning (zero intensity) is pruned, so the field reflects the current combustion.
+        fire.set(a, Fixed::ZERO);
+        assert_eq!(
+            fire.intensity(a),
+            Fixed::ZERO,
+            "an extinguished cell is unlit"
+        );
+        // The hash is canonical: two fields with the same intensities built in different orders fold identically.
+        let mut c1 = FireField::new();
+        c1.set(Coord3::ground(0, 0), Fixed::from_int(1));
+        c1.set(Coord3::ground(9, 9), Fixed::from_int(2));
+        let mut c2 = FireField::new();
+        c2.set(Coord3::ground(9, 9), Fixed::from_int(2));
+        c2.set(Coord3::ground(0, 0), Fixed::from_int(1));
+        let hash = |f: &FireField| {
+            let mut h = StateHasher::new();
+            f.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            hash(&c1),
+            hash(&c2),
+            "the fold is insertion-order-independent"
+        );
+        // An empty (unlit) field folds nothing (opting out is hash-neutral).
+        let mut h = StateHasher::new();
+        FireField::new().hash_into(&mut h);
+        let h0 = StateHasher::new();
+        assert_eq!(
+            h.finish(),
+            h0.finish(),
+            "an unlit fire field folds no bytes"
+        );
     }
 
     #[test]
