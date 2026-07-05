@@ -88,15 +88,15 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
-    is_harm_tick, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
+    is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
+    HomeostaticRegistry, CONDITION, ENERGY, EXTRACT, GRASP, INTEGRITY, RESPIRATION, TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::material::MaterialField;
+use crate::material::{ExtractionParams, MaterialField};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -885,6 +885,11 @@ pub struct Embodiment {
     /// is unchanged. Opt-in via [`Embodiment::set_material_registry`], the first run-path consumer of the
     /// derived material properties.
     material_registry: Option<PhysicsRegistry>,
+    /// The reserved parameters of the extraction contest (material-substrate arc, cascade item 4): the
+    /// working area a being's force presses over and the pressure cap. `None` by default, so an embodiment
+    /// that declares no extraction parameters cannot mine (the extract action no-ops) and every existing
+    /// scenario is unchanged. Opt-in via [`Embodiment::set_extraction_params`].
+    extraction: Option<ExtractionParams>,
 }
 
 impl Embodiment {
@@ -934,6 +939,7 @@ impl Embodiment {
             percepts: PerceptRegistry::empty(),
             material: MaterialField::new(),
             material_registry: None,
+            extraction: None,
         }
     }
 
@@ -1005,6 +1011,14 @@ impl Embodiment {
     /// run-path consumer of a substance's derived physical properties.
     pub fn set_material_registry(&mut self, registry: PhysicsRegistry) {
         self.material_registry = Some(registry);
+    }
+
+    /// Install the reserved extraction parameters a mining contest reads (material-substrate arc, cascade
+    /// item 4): the working area a being's force presses over and the pressure cap
+    /// ([`ExtractionParams`]). Opt-in; without it the extract action no-ops and every existing scenario is
+    /// unchanged.
+    pub fn set_extraction_params(&mut self, params: ExtractionParams) {
+        self.extraction = Some(params);
     }
 
     /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
@@ -1124,6 +1138,49 @@ impl Embodiment {
             lifted += self.pick_up(walker_id, coord, substance, want);
         }
         lifted
+    }
+
+    /// Enact a being's decided EXTRACT (material-substrate arc, cascade item 4, the extraction contest):
+    /// break the bonded matter the being stands on loose and take it into the carried load, but only if the
+    /// being's contact pressure clears the cell's FRACTURE-gating hardness. The being's grown whole-body
+    /// muscle force ([`being_muscle_force`]) pressed over its reserved working area is a contact pressure
+    /// ([`laws::contact_pressure`]); if that pressure does not exceed the cell's fracture hardness (the
+    /// hardest constituent's fracture strength, [`MaterialField::fracture_hardness`]) the rock holds and
+    /// nothing is taken, so a being too weak to fracture granite mines none of it however much it can lift.
+    /// Above the gate the matter is loose and the being takes as much as its strength bears against the
+    /// load's weight, the item-3 carry bound ([`Embodiment::grasp_underfoot`]), so extraction is fracture
+    /// THEN carry. This is the distinction from a bare grasp: grasp lifts already-loose matter (weight gate
+    /// only), extract must first break the bond (the fracture gate). All physics against substance data:
+    /// the force is derived, the hardness is the substance floor's, and the working area is reserved with a
+    /// basis, no race, kind, or role read (Principles 8, 9). Returns the volume extracted. Opt-in: an
+    /// embodiment with no extraction parameters, material registry, or physiology extracts nothing.
+    ///
+    /// The yield AMOUNT is the strength-bounded carry here (the fracture STRENGTH gates whether the rock
+    /// breaks); a later slice sizes the per-stroke yield by the delivered work over the substance's cutting
+    /// energy ([`crate::material::extraction_yield`], built and proven), once the mineable substances carry
+    /// a cited `mat.specific_cut_energy`.
+    pub fn extract_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(params), Some(reg), Some(phys)) = (
+            self.extraction.as_ref(),
+            self.material_registry.as_ref(),
+            self.physiology.as_ref(),
+        ) else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let force = being_muscle_force(w, phys);
+        let fracture = self.material.fracture_hardness(coord, reg);
+        // The fracture gate: the being's contact pressure must clear the cell's fracture-gating hardness to
+        // break any matter loose. A cell with no fracture resistance (loose soil, void) reads zero and any
+        // positive pressure breaks it (Principle 8: physics, no bonded-versus-loose tag).
+        let pressure = laws::contact_pressure(force, params.working_area, params.pressure_max);
+        if pressure <= fracture {
+            return Fixed::ZERO;
+        }
+        self.grasp_underfoot(walker_id)
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
@@ -2086,11 +2143,12 @@ impl Runner {
                     .collect(),
                 _ => BTreeMap::new(),
             };
-        // Material-substrate item 3, the driver: the per-being grasp decisions this step records, keyed by
-        // id, each the evolved grasp activation of a being whose controller chose to pick matter up. Empty
-        // unless a being's grasp output wins its decision, so an opted-out run (no grasp affordance, no
-        // grasp weight) records nothing and enacts nothing.
-        let mut grasp_intents: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        // Material-substrate items 3 and 4, the drivers: the per-being matter decisions this step records,
+        // keyed by id, each the decided affordance (GRASP or EXTRACT) and its evolved activation for a being
+        // whose controller chose to act on the matter underfoot. Empty unless such an output wins a being's
+        // decision, so an opted-out run (no grasp or extract affordance, no such weight) records nothing and
+        // enacts nothing.
+        let mut deferred_actions: BTreeMap<StableId, (AffordanceId, Fixed)> = BTreeMap::new();
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -2107,17 +2165,26 @@ impl Runner {
             &drains,
             &emb.percepts,
             &load_factors,
-            &mut grasp_intents,
+            &mut deferred_actions,
         );
-        // (2b) Behaviour to matter: enact the grasp decisions in id order (the map is id-keyed, so the
-        // draw off the shared cell is deterministic), each a strength-bounded pick-up of the matter the
-        // being stands on (material-substrate item 3, the driver). A being that did not decide to grasp,
-        // or an embodiment with no material registry, moves no matter, so an opted-out run is byte-identical
-        // through here. The being did not move this tick (its grasp won its decision over MOVE), so its cell
-        // is where it stood when it decided.
-        for (&id, &activation) in grasp_intents.iter() {
+        // (2b) Behaviour to matter: enact the matter decisions in id order (the map is id-keyed, so the
+        // draw off the shared cell is deterministic), dispatched by the decided affordance: GRASP lifts the
+        // loose matter underfoot bounded by strength (item 3, the driver), EXTRACT breaks bonded matter
+        // loose in a fracture contest and takes it (item 4). A being that decided neither, or an embodiment
+        // with no material registry, moves no matter, so an opted-out run is byte-identical through here.
+        // The being did not move this tick (its matter action won its decision over MOVE), so its cell is
+        // where it stood when it decided.
+        for (&id, &(affordance, activation)) in deferred_actions.iter() {
             if activation > Fixed::ZERO {
-                emb.grasp_underfoot(id);
+                match affordance {
+                    GRASP => {
+                        emb.grasp_underfoot(id);
+                    }
+                    EXTRACT => {
+                        emb.extract_underfoot(id);
+                    }
+                    _ => {}
+                }
             }
         }
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next

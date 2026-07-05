@@ -270,6 +270,37 @@ pub fn extraction_yield(
     depth.checked_mul(working_area).unwrap_or(Fixed::MAX)
 }
 
+/// The reserved parameters of the extraction contest (material-substrate arc, cascade item 4). The
+/// mechanism that reads them is fixed Rust; the working area is the owner's to set, surfaced with a basis,
+/// never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtractionParams {
+    /// The bearing AREA (m^2) a being's working surface presses against the rock, over which its grown
+    /// force becomes a contact pressure ([`laws::contact_pressure`]). RESERVED. Basis: the contact patch of
+    /// the body's working surface, a bare limb's tip or a hafted tool's edge, a body-and-tool geometry
+    /// datum the anatomy arc will derive per-part; a smaller area concentrates the same force to a higher
+    /// pressure (a pick bites where a fist cannot), so it sets how hard a rock a given strength can break.
+    /// A performance-and-realism bound, surfaced for the owner, never invented.
+    pub working_area: Fixed,
+    /// The physics pressure ceiling the contact-pressure law saturates at (the mechanical floor's pressure
+    /// axis maximum). A representability cap, not an authored quantity, mirroring the carry weight's force
+    /// ceiling.
+    pub pressure_max: Fixed,
+}
+
+impl ExtractionParams {
+    /// A labelled DEVELOPMENT FIXTURE: a working area of 0.001 m^2 (a ~10 cm^2 working surface) and the
+    /// pressure cap. Not owner canon; a stand-in so the extraction contest can run until the owner sets the
+    /// working area against its basis. Under the calibrated profile the manifest supplies the set value and
+    /// a scenario passes it in; the fixture keeps the fail-loud sentinel from blocking a dev run.
+    pub fn dev_fixture() -> ExtractionParams {
+        ExtractionParams {
+            working_area: Fixed::from_ratio(1, 1000),
+            pressure_max: Fixed::from_int(150_000),
+        }
+    }
+}
+
 /// The matter that sits in each z-cell of the world, the ground truth of what the world is made of: a
 /// per-cell [`SubstanceMix`] keyed by [`Coord3`], a Coord3-keyed sibling of
 /// [`crate::locomotion::ResourceField`] of the same sparse shape. A cell with no entry is void (no

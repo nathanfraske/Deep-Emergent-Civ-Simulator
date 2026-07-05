@@ -810,6 +810,134 @@ fn a_being_grasps_matter_only_through_an_evolved_controller_weight() {
 }
 
 #[test]
+fn a_being_mines_bonded_rock_only_when_it_decides_to_and_can_fracture_it() {
+    // Material-substrate arc item 4, THE EXTRACTION CONTEST wired into the run: a being breaks bonded
+    // matter loose only because its evolved controller decided to (the EXTRACT affordance) AND its contact
+    // pressure clears the rock's fracture-gating hardness (the physics contest). Two axes, both proven
+    // here: the DECISION (an evolved extract weight, a blank founder never mines) and the PHYSICS (the same
+    // deciding being mines when its force is concentrated over a small working area and fails when the same
+    // force is spread over a large one, because the fracture gate is pressure, not raw force). All against
+    // granite's cited fracture strength, no "miner" branch, no per-race yield table (Principles 8, 9).
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    // The extract output is the fifth output of the miner layout (move [act,dx,dy] at 0..2, ingest [act]
+    // at 3, extract [act] at 4), so the extractor's controller is a single nonzero weight: the bias input
+    // driving the extract activation to one, so extract wins its decision over the resting move and ingest.
+    let build = |extract_weight: bool, working_area: Fixed| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x4174,
+        );
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "miner layout: move(3) + ingest(1) + extract(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if extract_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> extract activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        emb.set_extraction_params(ExtractionParams {
+            working_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+
+    // A tiny working area concentrates the being's force to a pressure far above granite's fracture
+    // strength: the deciding being fractures the rock and takes a strength-bounded load, its heap losing
+    // exactly that much.
+    let small_area = Fixed::from_ratio(1, 1_000_000);
+    let mut mining = build(true, small_area);
+    mining.step();
+    let mined = carried(&mining);
+    assert!(
+        mined > Fixed::ZERO,
+        "a being that decides to extract and can fracture the rock mines it"
+    );
+    assert_eq!(
+        ground(&mining),
+        heap - mined,
+        "its cell lost exactly what it extracted (conservation)"
+    );
+    assert!(
+        ground(&mining) > Fixed::ZERO,
+        "its strength, not the seam, bounded the take: rock remains"
+    );
+
+    // The blank founder, expressing zero on the extract channel, never mines though it stands on the same
+    // rock, affords the same operation, and could fracture it: no decision, no mining.
+    let mut founder = build(false, small_area);
+    founder.step();
+    assert_eq!(
+        carried(&founder),
+        Fixed::ZERO,
+        "the blank founder does not mine"
+    );
+    assert_eq!(ground(&founder), heap, "the founder's seam is untouched");
+
+    // The SAME deciding being with the same strength, but its force spread over a large working area, cannot
+    // raise its pressure over granite's fracture strength: it decides to extract and gets nothing, because
+    // the contest is pressure, not raw force (a fist where a pick would bite). This is the fracture gate.
+    let large_area = Fixed::from_int(1000);
+    let mut spread = build(true, large_area);
+    spread.step();
+    assert_eq!(
+        carried(&spread),
+        Fixed::ZERO,
+        "spread too thin to fracture granite, the deciding being mines nothing"
+    );
+    assert_eq!(
+        ground(&spread),
+        heap,
+        "the rock holds against too low a pressure"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

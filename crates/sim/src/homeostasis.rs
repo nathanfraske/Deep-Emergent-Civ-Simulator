@@ -621,6 +621,27 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a matter-mining world: move, ingest, and extract (material-substrate arc,
+    /// cascade item 4, the extraction contest). Kept distinct from [`AffordanceRegistry::dev_default`] so
+    /// the foraging tests keep their two-affordance layout; a miner's controller layout carries the extra
+    /// extract output and can evolve to use it, the emergent decision to break bonded matter loose. Extract
+    /// is a scalar operation (working the matter underfoot, no aim) and, like ingest and grasp, is
+    /// unconditional (`requires: None`): any body may attempt to break matter, and the physical gating is
+    /// the fracture contest the enactment applies (the being's contact pressure against the cell's
+    /// fracture-gating hardness, [`crate::runner::Embodiment::extract_underfoot`]), never a capability
+    /// label. A world that wires a mining-tool capability adds a `requires` here as data.
+    pub fn dev_miner() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: EXTRACT,
+            name: "extract".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -683,6 +704,9 @@ pub const STRIKE: AffordanceId = AffordanceId(2);
 /// The grasp affordance (picking the matter underfoot up into the carried load), in the carrier fixture
 /// only (material-substrate arc, cascade item 3, the driver).
 pub const GRASP: AffordanceId = AffordanceId(3);
+/// The extract affordance (breaking bonded matter underfoot loose in a fracture contest and taking it), in
+/// the miner fixture only (material-substrate arc, cascade item 4, the extraction contest).
+pub const EXTRACT: AffordanceId = AffordanceId(4);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
