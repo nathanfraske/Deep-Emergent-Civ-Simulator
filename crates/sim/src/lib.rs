@@ -91,6 +91,7 @@ pub mod locomotion;
 pub mod lod;
 pub mod mate_choice;
 pub mod medium;
+pub mod morphogen;
 pub mod personality;
 pub mod physiology;
 pub mod primes;
@@ -164,15 +165,18 @@ pub use evolve::{
     selection_gradient, EvolveParams, EvolveReport,
 };
 pub use genome::{
-    append_controller_block, Allele, AlleleState, BuildChannel, Channel, CognitionChannel,
-    CompositionAxisId, ControllerParamId, DominanceKind, DominanceMode, GeneDef, GeneEffect,
-    GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome, ImbuedChannel,
-    Incompatibility, IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel, LinkageGroup,
-    ReproductionMode, SchemeId, ToleranceAxisId, TraitId,
+    append_controller_block, append_morphogen_block, Allele, AlleleState, BuildChannel, Channel,
+    CognitionChannel, CompositionAxisId, ControllerParamId, DominanceKind, DominanceMode, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome,
+    ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel,
+    LinkageGroup, MorphogenParamId, ReproductionMode, SchemeId, ToleranceAxisId, TraitId,
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
     HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry,
+};
+pub use morphogen::{
+    express_program, grow, morphogen_gene_set, AxisSpec, MorphogenProgram, Segment, Structure,
 };
 // The function-law dispatch types the affordance and body APIs read, re-exported so an external caller
 // can name the capability context an [`AffordanceRegistry::afforded`] or a [`body::BodyParams`] needs
