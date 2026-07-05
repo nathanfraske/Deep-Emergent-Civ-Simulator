@@ -72,7 +72,7 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, ReserveMemory, CONDITION, EXTRACT, GEOPHAGE, GRASP, INGEST, MOVE,
+    HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, EXTRACT, GEOPHAGE, GRASP, INGEST, MOVE,
 };
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
@@ -908,13 +908,14 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // whether or not the being ingests, so exposure harms a being that only passes
                         // through a toxic cell.
                     }
-                    GRASP | EXTRACT | GEOPHAGE => {
-                        // The evolved decision to act on the matter underfoot (material-substrate arc): GRASP
-                        // picks loose matter up (item 3, the driver), EXTRACT breaks bonded matter loose in a
-                        // fracture contest and takes it (item 4), GEOPHAGE eats the matter underfoot for a
-                        // reserve that needs it (item 4, INGEST-FOR-COMPOSITION). Each records its decided
-                        // affordance and activation for the embodiment's post-step enactment pass, which owns
-                        // the material field and the registry this function cannot reach
+                    GRASP | EXTRACT | GEOPHAGE | CRAFT => {
+                        // The evolved decision to act on matter (material-substrate arc): GRASP picks loose
+                        // matter up (item 3, the driver), EXTRACT breaks bonded matter loose in a fracture
+                        // contest and takes it (item 4), GEOPHAGE eats the matter underfoot for a reserve that
+                        // needs it (item 4, INGEST-FOR-COMPOSITION), CRAFT shapes the carried matter into a
+                        // wielded tool (item 4, knapping). Each records its decided affordance and activation
+                        // for the embodiment's post-step enactment pass, which owns the material field, the
+                        // carried load, and the registry this function cannot reach
                         // ([`crate::runner::Embodiment::grasp_underfoot`],
                         // [`crate::runner::Embodiment::extract_underfoot`]). Recorded rather than enacted here,
                         // so the decision stays where the evolved controller makes it while the physics stays

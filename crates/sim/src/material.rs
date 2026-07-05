@@ -301,6 +301,35 @@ impl ExtractionParams {
     }
 }
 
+/// The reserved parameters of the crafting contest (material-substrate arc, cascade item 4, knapping). The
+/// mechanism that reads them is fixed Rust; the numbers are the owner's to set, surfaced with a basis,
+/// never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CraftParams {
+    /// The working-edge contact AREA (m^2) a knapped tool presents, its intrinsic geometry, over which a
+    /// wielded tool concentrates a being's force ([`WieldedTool`]). RESERVED. Basis: the contact patch of
+    /// the working edge a shaping stroke produces (a knapped point or blade tip), a tool-geometry datum the
+    /// crafting-physics refinement will later derive from the fracture of the worked stone; a smaller edge
+    /// concentrates the same force into a higher pressure and works harder matter. A performance-and-realism
+    /// bound, surfaced for the owner, never invented.
+    pub edge_area: Fixed,
+    /// The VOLUME of carried matter a tool consumes to make (m^3). RESERVED. Basis: the material a shaped
+    /// tool of the working size embodies; a being that carries less than this cannot make the tool. A
+    /// geometry-and-scale datum, surfaced for the owner.
+    pub tool_volume: Fixed,
+}
+
+impl CraftParams {
+    /// A labelled DEVELOPMENT FIXTURE: a small working edge and a modest tool volume. Not owner canon; a
+    /// stand-in so the crafting contest can run until the owner sets the values against their bases.
+    pub fn dev_fixture() -> CraftParams {
+        CraftParams {
+            edge_area: Fixed::from_ratio(1, 1_000_000),
+            tool_volume: Fixed::from_int(1),
+        }
+    }
+}
+
 /// A worked object a being wields as a tool (material-substrate arc, cascade item 4, crafting). This is the
 /// CONTEST INTERFACE of a tool, the two things an extraction or cut reads: its working GEOMETRY (the
 /// contact area its edge or point presses over) and its MATERIAL (the substance it is made of, whose

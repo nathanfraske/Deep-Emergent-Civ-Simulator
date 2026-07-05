@@ -664,6 +664,33 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a tool-making world: move, ingest, extract, and craft (material-substrate
+    /// arc, cascade item 4, the knapping that shapes a tool from mined stone). A toolmaker can mine stone
+    /// (EXTRACT) and shape its carried stone into a wielded tool (CRAFT), the two halves of the recursive
+    /// tool loop: mine harder rock with a made tool, made from the rock it mined. Craft is a scalar
+    /// operation (working the carried matter, no aim) and, like the other matter actions, is unconditional
+    /// (`requires: None`): any body may attempt to shape what it carries, and what results is a tool whose
+    /// function the crafting seam's cut read derives from its geometry and material
+    /// ([`crate::runner::Embodiment::craft_from_carried`]), never a recipe catalog.
+    pub fn dev_toolmaker() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: EXTRACT,
+            name: "extract".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg.affordances.push(AffordanceDef {
+            id: CRAFT,
+            name: "craft".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -732,6 +759,9 @@ pub const EXTRACT: AffordanceId = AffordanceId(4);
 /// The geophage affordance (eating the matter underfoot for a reserve backed by that substance), in the
 /// geophage fixture only (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION).
 pub const GEOPHAGE: AffordanceId = AffordanceId(5);
+/// The craft affordance (shaping the carried matter into a wielded tool), in the toolmaker fixture only
+/// (material-substrate arc, cascade item 4, crafting, the knapping that makes a tool from mined stone).
+pub const CRAFT: AffordanceId = AffordanceId(6);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race

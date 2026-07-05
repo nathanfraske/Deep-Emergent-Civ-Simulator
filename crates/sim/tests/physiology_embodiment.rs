@@ -1231,6 +1231,245 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
 }
 
 #[test]
+fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
+    // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
+    // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A
+    // being carrying stone with a lifted craft weight wields a tool of that stone (its carried stock spent
+    // by the tool volume); a blank founder carrying the same stone never crafts. Founder-zero, evolved
+    // decision, the tool made of the stone worked (Principles 8, 9).
+    use civsim_sim::material::{CraftParams, SubstanceMix};
+
+    let cell = Coord3::ground(2, 2);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+    let stock = Fixed::from_int(5);
+
+    let build = |craft_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_toolmaker(),
+            LocomotionParams::dev_default(),
+            0,
+            0xC0A1,
+        );
+        // The craft output is the sixth output (move [act,dx,dy] 0..2, ingest [act] 3, extract [act] 4,
+        // craft [act] 5).
+        assert_eq!(
+            emb.layout().n_out(),
+            6,
+            "toolmaker layout: move(3)+ingest(1)+extract(1)+craft(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if craft_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[5 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> craft activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        let mut carried = SubstanceMix::new();
+        carried.add("granite", stock);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_craft_params(CraftParams::dev_fixture()); // edge 1e-6 m^2, tool volume 1
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let tool_substance = |r: &Runner| -> Option<String> {
+        r.embodiment().unwrap().walkers()[0]
+            .wielded
+            .as_ref()
+            .map(|t| t.substance.clone())
+    };
+    let carried_granite = |r: &Runner| -> Fixed {
+        r.embodiment().unwrap().walkers()[0]
+            .carried
+            .volume("granite")
+    };
+
+    // The evolved-weight being shaped its carried granite into a granite tool, spending the tool volume.
+    let mut maker = build(true);
+    maker.step();
+    assert_eq!(
+        tool_substance(&maker).as_deref(),
+        Some("granite"),
+        "the being crafts a tool of the stone it carried"
+    );
+    assert_eq!(
+        carried_granite(&maker),
+        stock - Fixed::ONE,
+        "the tool spent the reserved tool volume of its carried stone"
+    );
+
+    // The blank founder, expressing zero on the craft channel, never crafts though it carries the same stone.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(
+        tool_substance(&founder),
+        None,
+        "the blank founder wields no tool"
+    );
+    assert_eq!(
+        carried_granite(&founder),
+        stock,
+        "the founder's carried stone is untouched"
+    );
+}
+
+#[test]
+fn a_crafted_tool_closes_the_loop_and_mines_rock_the_bare_body_cannot() {
+    // Material-substrate arc item 4, the RECURSIVE TOOL LOOP end to end: a being that carries a hard stone
+    // shapes it into a tool and then, wielding it, breaks a rock its bare body could not. Driven at the
+    // method level (craft then extract) so the two-step chain is proven directly: knapping makes the tool,
+    // the tool multiplies the extraction. This is the payoff that gives mining and carrying a reason: a made
+    // point breaks matter a body cannot.
+    use civsim_sim::material::{CraftParams, ExtractionParams, MaterialField, SubstanceMix};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A floor: a granite target (fracture strength to clear), and a hard flint the being carries and shapes.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2600" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    let (mut organs, fat) = energy_registry();
+    let muscle = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: muscle,
+        name: "muscle".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+    });
+    let reg = energy_thermal_registry();
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_toolmaker(),
+        LocomotionParams::dev_default(),
+        0,
+        0xC10E,
+    );
+    let blank = Controller::zeros(emb.layout());
+    let mut walker = resting_walker(
+        1,
+        cell,
+        body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+        &reg,
+        &organs,
+        blank,
+    );
+    // The being carries exactly the tool volume of flint to shape, so after crafting it carries no residual
+    // load and its full strength is free to bear the granite it then mines.
+    let mut carried = SubstanceMix::new();
+    carried.add("flint", Fixed::ONE);
+    walker.carried = carried;
+    emb.add(walker, band(310));
+    let mut field = MaterialField::new();
+    field.deposit(cell, "granite", heap);
+    emb.set_material(field);
+    emb.set_material_registry(
+        civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+    );
+    // A large bare working area, so bare-handed the being cannot fracture the granite.
+    emb.set_extraction_params(ExtractionParams {
+        working_area: Fixed::from_int(1000),
+        pressure_max: Fixed::from_int(150_000),
+    });
+    emb.set_craft_params(CraftParams::dev_fixture()); // small edge, tool volume 1
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+        organs,
+        MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+    ));
+    let mut runner =
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb);
+
+    // Bare-handed (its large working area), the being cannot fracture the granite.
+    assert_eq!(
+        runner
+            .embodiment_mut()
+            .unwrap()
+            .extract_underfoot(StableId(1)),
+        Fixed::ZERO,
+        "bare-handed the being cannot break the granite"
+    );
+    // It shapes its carried flint into a tool.
+    assert!(
+        runner
+            .embodiment_mut()
+            .unwrap()
+            .craft_from_carried(StableId(1)),
+        "the being crafts a flint tool from its carried stone"
+    );
+    // Now wielding the flint point, the same being breaks the granite it could not touch bare-handed.
+    let mined = runner
+        .embodiment_mut()
+        .unwrap()
+        .extract_underfoot(StableId(1));
+    assert!(
+        mined > Fixed::ZERO,
+        "wielding its made tool, the being mines the rock its bare body could not: {mined:?}"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

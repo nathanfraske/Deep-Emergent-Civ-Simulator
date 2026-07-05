@@ -89,15 +89,15 @@ use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY, RESPIRATION,
-    TEMPERATURE,
+    HomeostaticRegistry, CONDITION, CRAFT, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
+    RESPIRATION, TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::material::{ExtractionParams, MaterialField};
+use crate::material::{CraftParams, ExtractionParams, MaterialField, WieldedTool};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -891,6 +891,11 @@ pub struct Embodiment {
     /// that declares no extraction parameters cannot mine (the extract action no-ops) and every existing
     /// scenario is unchanged. Opt-in via [`Embodiment::set_extraction_params`].
     extraction: Option<ExtractionParams>,
+    /// The reserved parameters of the crafting contest (material-substrate arc, cascade item 4, knapping):
+    /// the working-edge area a knapped tool presents and the volume of carried matter it consumes. `None`
+    /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
+    /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
+    craft: Option<CraftParams>,
 }
 
 impl Embodiment {
@@ -941,6 +946,7 @@ impl Embodiment {
             material: MaterialField::new(),
             material_registry: None,
             extraction: None,
+            craft: None,
         }
     }
 
@@ -1020,6 +1026,14 @@ impl Embodiment {
     /// unchanged.
     pub fn set_extraction_params(&mut self, params: ExtractionParams) {
         self.extraction = Some(params);
+    }
+
+    /// Install the reserved crafting parameters a knapping contest reads (material-substrate arc, cascade
+    /// item 4): the working-edge area a made tool presents and the carried volume it consumes
+    /// ([`CraftParams`]). Opt-in; without it the craft action no-ops and every existing scenario is
+    /// unchanged.
+    pub fn set_craft_params(&mut self, params: CraftParams) {
+        self.craft = Some(params);
     }
 
     /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
@@ -1275,6 +1289,44 @@ impl Embodiment {
             gained += gain;
         }
         gained
+    }
+
+    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter
+    /// the being carries into a wielded tool. It consumes the reserved tool volume of the FIRST substance
+    /// the being carries enough of (canonical id order, a deterministic tie-break over a mixture, never a
+    /// per-substance preference) and wields a tool of that substance with the reserved working-edge area,
+    /// replacing any prior tool. So a being that has mined and carried stone can shape it into a point, and
+    /// the tool it makes is only as good as the stone it worked (a hard stone a hard tool, a soft stone a
+    /// soft one, the tool's function derived from its material and geometry by the crafting seam's cut read,
+    /// never a recipe catalog). Reads only the carried substance ids and the reserved geometry, no race,
+    /// kind, or role (Principles 8, 9). Returns true if a tool was made. Opt-in: an embodiment with no
+    /// crafting parameters, or a being carrying too little of any one substance, makes nothing.
+    pub fn craft_from_carried(&mut self, walker_id: StableId) -> bool {
+        let Some(params) = self.craft else {
+            return false;
+        };
+        // The first substance the being carries enough of to shape a tool, in canonical id order.
+        let Some(substance) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .and_then(|w| {
+                w.carried
+                    .substances()
+                    .find(|(_, &vol)| vol >= params.tool_volume)
+                    .map(|(s, _)| s.clone())
+            })
+        else {
+            return false; // not carrying enough of any one substance to make a tool
+        };
+        if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+            w.carried.take(&substance, params.tool_volume);
+            w.wielded = Some(WieldedTool {
+                contact_area: params.edge_area,
+                substance,
+            });
+        }
+        true
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
@@ -1675,6 +1727,12 @@ impl Runner {
 
     pub fn embodiment(&self) -> Option<&Embodiment> {
         self.embodiment.as_ref()
+    }
+
+    /// The embodiment for mutation (a caller driving a matter action directly, or a test): the runner owns
+    /// it, so this is the write handle beside the read [`Runner::embodiment`].
+    pub fn embodiment_mut(&mut self) -> Option<&mut Embodiment> {
+        self.embodiment.as_mut()
     }
 
     /// One canonical tick, in a pinned within-tick order: step the field, let each located being
@@ -2279,6 +2337,9 @@ impl Runner {
                     }
                     GEOPHAGE => {
                         emb.geophage(id);
+                    }
+                    CRAFT => {
+                        emb.craft_from_carried(id);
                     }
                     _ => {}
                 }
