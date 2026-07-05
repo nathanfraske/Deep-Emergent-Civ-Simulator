@@ -1172,12 +1172,37 @@ impl Embodiment {
         };
         let coord = w.coord();
         let force = being_muscle_force(w, phys);
+        // The tool the being wields, if any (crafting, the tool multiplies the affordance): its working
+        // geometry and material, snapshotted so the being read ends before the mutable take below. A
+        // wielded tool presses the same force over its own (smaller) contact area, and blunts at its own
+        // indentation hardness; a bare being uses its reserved working area with no material cap. This is
+        // the one place the extraction contest reads the tool, so a crafted point breaks rock a fist cannot.
+        let (area, tool_hardness) = match &w.wielded {
+            Some(t) => {
+                let h = reg
+                    .substance(&t.substance)
+                    .and_then(|s| s.vector.get("mat.indentation_hardness").copied())
+                    .unwrap_or(Fixed::ZERO);
+                (t.contact_area, Some(h))
+            }
+            None => (params.working_area, None),
+        };
         let fracture = self.material.fracture_hardness(coord, reg);
         // The fracture gate: the being's contact pressure must clear the cell's fracture-gating hardness to
         // break any matter loose. A cell with no fracture resistance (loose soil, void) reads zero and any
         // positive pressure breaks it (Principle 8: physics, no bonded-versus-loose tag).
-        let pressure = laws::contact_pressure(force, params.working_area, params.pressure_max);
-        if pressure <= fracture {
+        let pressure = laws::contact_pressure(force, area, params.pressure_max);
+        // A wielded tool blunts at its own hardness: however concentrated, a soft tool cannot carry a
+        // pressure above the material it is made of, so a soft point cannot exceed a hard rock's resistance
+        // (the same cap the weapon and cut reads apply). A tool whose substance declares no hardness reads
+        // zero and blunts to no pressure (the absence convention: a tool must declare its hardness to work
+        // matter). A bare being (None) carries no material cap here yet: its working-surface hardness is an
+        // anatomy-arc follow-on, so its contest is unchanged.
+        let effective = match tool_hardness {
+            Some(h) => pressure.min(h),
+            None => pressure,
+        };
+        if effective <= fracture {
             return Fixed::ZERO;
         }
         self.grasp_underfoot(walker_id)
@@ -2450,6 +2475,12 @@ impl Runner {
                 // opted-out run's hash unchanged.
                 if !w.carried.is_empty() {
                     w.carried.hash_into(&mut h);
+                }
+                // The wielded tool (material-substrate arc, cascade item 4, crafting): the worked object a
+                // being bears, folded after the carried matter. `None` for a being wielding nothing, so it
+                // folds nothing and leaves an opted-out run's hash unchanged.
+                if let Some(tool) = &w.wielded {
+                    tool.hash_into(&mut h);
                 }
             }
         }

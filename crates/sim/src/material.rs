@@ -301,6 +301,37 @@ impl ExtractionParams {
     }
 }
 
+/// A worked object a being wields as a tool (material-substrate arc, cascade item 4, crafting). This is the
+/// CONTEST INTERFACE of a tool, the two things an extraction or cut reads: its working GEOMETRY (the
+/// contact area its edge or point presses over) and its MATERIAL (the substance it is made of, whose
+/// hardness the registry supplies). A crafted tool derived from a `FormDef` geometry and a `Substance`
+/// populates exactly these, so this struct is the forward-compatible view a tool presents to a contest,
+/// never a closed tool catalog: a sharper edge is a smaller `contact_area`, a harder tool a harder
+/// `substance`, and the physics does the rest (a small hard point concentrates the same force into a higher
+/// pressure and breaks harder rock, a soft one blunts before it reaches that pressure). The mass and
+/// hardness are DERIVED from the registry by the substance id, never stored (Principle 11).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WieldedTool {
+    /// The contact area (m^2) the tool's working surface presses over, its intrinsic geometry: a smaller
+    /// area concentrates the being's force into a higher pressure.
+    pub contact_area: Fixed,
+    /// The substance the tool is made of; its hardness (the pressure it sustains before it blunts) and its
+    /// other properties are read from the [`PhysicsRegistry`] by this id.
+    pub substance: String,
+}
+
+impl WieldedTool {
+    /// Fold the tool into a hash, its geometry then its substance id, in canonical order (the material fold
+    /// discipline). Called by the runner's per-walker `state_hash` fold when a being wields a tool; a being
+    /// with no tool folds nothing, so the wielded slot is opt-in and hash-neutral by default.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        h.write_fixed(self.contact_area);
+        for b in self.substance.as_bytes() {
+            h.write_u32(*b as u32);
+        }
+    }
+}
+
 /// The matter that sits in each z-cell of the world, the ground truth of what the world is made of: a
 /// per-cell [`SubstanceMix`] keyed by [`Coord3`], a Coord3-keyed sibling of
 /// [`crate::locomotion::ResourceField`] of the same sparse shape. A cell with no entry is void (no

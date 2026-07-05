@@ -938,6 +938,171 @@ fn a_being_mines_bonded_rock_only_when_it_decides_to_and_can_fracture_it() {
 }
 
 #[test]
+fn a_wielded_tool_multiplies_the_extraction_affordance_by_its_geometry_and_material() {
+    // Material-substrate arc item 4, crafting, THE TOOL MULTIPLIES THE AFFORDANCE: the same being, too
+    // weak-handed to fracture granite bare, breaks it when it wields a sharp hard tool, because the tool
+    // concentrates its force over a small contact area into a pressure that clears the rock, AND the tool
+    // must itself be hard enough (a sharp soft tool blunts and does nothing). This is the payoff loop's
+    // hinge, mining harder matter with a made tool, all geometry and material against substance data.
+    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A controlled floor: a granite target (a fracture strength to clear, a density to weigh the load), a
+    // hard flint tool material, and a soft chalk tool material. Kept in the test so the tool-material cap is
+    // exercised on known values without pinning shipped floor data.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "1000" },
+]
+
+[[substance]]
+id = "chalk"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "5" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    // A tool with a tiny contact area (a sharp point), of the given substance.
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        substance: substance.to_string(),
+    };
+    // A large bare working area, so the bare being cannot raise its pressure over granite's fracture
+    // strength: only a concentrating tool can.
+    let bare_area = Fixed::from_int(1000);
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x700,
+        );
+        let n_in = emb.layout().n_in();
+        let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+        w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> extract activation
+        let controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_extraction_params(ExtractionParams {
+            working_area: bare_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+
+    // Bare-handed, the deciding being spreads its force too thin to fracture granite: it mines nothing.
+    let mut bare = build(None);
+    bare.step();
+    assert_eq!(
+        carried(&bare),
+        Fixed::ZERO,
+        "bare-handed the being cannot fracture the granite"
+    );
+
+    // Wielding a sharp HARD flint tool, the same being concentrates its force into a pressure that clears
+    // the granite and mines it: the tool multiplied the affordance.
+    let mut with_flint = build(Some(tool("flint")));
+    with_flint.step();
+    assert!(
+        carried(&with_flint) > Fixed::ZERO,
+        "a sharp hard tool lets the same being mine the rock it could not touch bare-handed"
+    );
+
+    // Wielding an equally sharp but SOFT chalk tool, the being mines nothing: the tool blunts at its own low
+    // hardness before it reaches the granite's fracture strength, so the tool's material matters, not only
+    // its edge.
+    let mut with_chalk = build(Some(tool("chalk")));
+    with_chalk.step();
+    assert_eq!(
+        carried(&with_chalk),
+        Fixed::ZERO,
+        "a sharp but soft tool blunts and mines nothing: the tool material is part of the contest"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

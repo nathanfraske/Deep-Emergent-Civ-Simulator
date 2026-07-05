@@ -74,7 +74,7 @@ use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, ReserveMemory, CONDITION, EXTRACT, GRASP, INGEST, MOVE,
 };
-use crate::material::SubstanceMix;
+use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
 
@@ -404,6 +404,12 @@ pub struct Walker {
     /// put-down deposits it back, and the carried weight feeds locomotion cost so an over-laden being
     /// slows (both wired in the run-path slice that follows this substrate).
     pub carried: SubstanceMix,
+    /// The tool the being wields, if any (material-substrate arc, cascade item 4, crafting). `None` by
+    /// default, so a being wielding nothing folds nothing into `state_hash` (the wielded slot is opt-in,
+    /// hash-neutral by default) and its extraction contest uses its bare working surface. A wielded tool
+    /// supplies a smaller contact area and its own material to the extraction and cut contests, so a
+    /// crafted point breaks harder rock than a bare limb (the tool multiplies the affordance).
+    pub wielded: Option<WieldedTool>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -433,6 +439,7 @@ impl Walker {
             known: BTreeMap::new(),
             reserve_memory: ReserveMemory::new(),
             carried: SubstanceMix::new(),
+            wielded: None,
             alive: true,
         }
     }
