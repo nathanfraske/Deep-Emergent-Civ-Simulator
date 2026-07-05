@@ -251,6 +251,27 @@ impl Structure {
         best
     }
 
+    /// The whole-body functional viability (emergent-anatomy Step 3): the greatest capability any grown
+    /// segment reads on ANY function law, a pure physics read over the grown graph. A body that reads a
+    /// positive capability on some function (it can move, strike, or see) is functionally coherent; one that
+    /// reads near zero on EVERY law is inert matter no life function can run on, so it reads a viability near
+    /// zero and falls through a viability floor. It is the maximum over the same per-segment dispatch the
+    /// affordance and speed reads use, blind to any race, kind, or label (Principle 9), never a stored score:
+    /// the run sets a grown being's derived integrity reserve to this each tick, so an incoherent grown body
+    /// dies through the ordinary reserve-floor cull with no predicate that inspects morphology to reject it.
+    pub fn whole_body_viability(
+        &self,
+        fns: &FunctionLawRegistry,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> Fixed {
+        let mut best = Fixed::ZERO;
+        for def in fns.defs() {
+            best = best.max(self.max_capability(def.id, fns, refs, caps));
+        }
+        best
+    }
+
     /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
     /// that segment's leg length (`mech.arm_length`), the two the grown-limb ground speed
     /// ([`crate::locomotion::locomotion_speed_structure`]) reads. A structure whose every segment reads zero
@@ -699,6 +720,46 @@ mod tests {
         assert!(
             eye.max_capability(FunctionLawRegistry::ID_REFRACT, &fns, &refs, &caps) > Fixed::ZERO,
             "a grown tissue denser than the medium focuses light and is an eye by its physics"
+        );
+    }
+
+    #[test]
+    fn whole_body_viability_is_positive_for_a_functional_body_and_zero_for_inert_matter() {
+        // Emergent-anatomy Step 3, the viability read the run-tier cull sets a grown being's integrity from:
+        // a body that reads a positive capability on SOME function (a limb, a weapon, or an eye) is
+        // functionally coherent and reads a positive whole-body viability; a body grown from an all-zero
+        // program is inert matter (every axis at the floor's low end, so its tiny section buckles, its soft
+        // tip cannot pierce, and its tissue matches the medium and does not focus), reads no viable function,
+        // and its whole-body viability is zero. The read is the maximum over the same per-segment dispatch the
+        // affordance and speed reads use, so it earns its verdict from the grown physics and no tag.
+        let program = MorphogenProgram::dev_default();
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = caps();
+
+        let limb = grow(
+            &program,
+            &params(&program, &[(0, "1"), (1, "0.5"), (2, "0.4"), (9, "0.75")]),
+            0x1,
+            StableId(1),
+        );
+        assert!(
+            limb.whole_body_viability(&fns, &refs, &caps) > Fixed::ZERO,
+            "a body that reads a viable function is functionally coherent"
+        );
+
+        // An all-zero program: the root geometry maps every fraction to the floor's low end, a degenerate
+        // body no function can run on.
+        let inert = grow(
+            &program,
+            &vec![Fixed::ZERO; program.param_count()],
+            0x1,
+            StableId(1),
+        );
+        assert_eq!(
+            inert.whole_body_viability(&fns, &refs, &caps),
+            Fixed::ZERO,
+            "inert matter reads no viable function and falls through the viability floor"
         );
     }
 

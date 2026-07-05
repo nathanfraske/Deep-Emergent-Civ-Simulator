@@ -90,7 +90,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::evidence::{AttrKindId, ValueId};
 use crate::homeostasis::{
     AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId, HomeostaticRegistry,
-    CONDITION, ENERGY, RESPIRATION, TEMPERATURE,
+    CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -101,6 +101,7 @@ use crate::physiology::{
 };
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
+use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
@@ -1671,6 +1672,27 @@ impl Runner {
             if let (Some(&bt), Some(band)) = (self.body_temp.get(&w.id), emb.thermal.get(&w.id)) {
                 w.homeostasis
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
+            }
+        }
+        // (1a) Physics to physiology, whole-body coherence (emergent-anatomy Step 3, the viability cull):
+        // a GROWN body's derived integrity reserve is set each tick to the greatest capability its grown
+        // segments read on ANY function law ([`crate::morphogen::Structure::whole_body_viability`]), a pure
+        // physics read. A body that reads no viable function is inert matter no life function can run on, so
+        // its integrity falls to the floor and it dies through the SAME reserve-floor cull as any other
+        // death (`metabolize` below reads `is_alive` over every axis, then `reconcile_lifecycle` retires the
+        // body), with no predicate that inspects morphology to reject it (Principle 8). Gated on the registry
+        // carrying the integrity axis and the walker carrying a grown structure, so a catalog body and a
+        // registry without integrity (every existing run scenario) are untouched: the cull is opt-in and
+        // hash-neutral until a race both grows its body and declares the integrity axis.
+        if emb.homeo.axis(INTEGRITY).is_some() {
+            let fns = FunctionLawRegistry::dev_seed();
+            let refs = &emb.params.capability_refs;
+            let caps = &emb.params.capability_caps;
+            for w in emb.walkers.iter_mut() {
+                if let Some(s) = w.structure.as_ref() {
+                    let viability = s.whole_body_viability(&fns, refs, caps);
+                    w.homeostasis.set_level(INTEGRITY, viability);
+                }
             }
         }
         // (1b) Physics to physiology, medium respiration (R-MEDIUM): when a physiology is installed and

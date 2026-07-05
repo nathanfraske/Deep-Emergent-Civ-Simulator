@@ -23,7 +23,9 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
-use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
+use civsim_sim::homeostasis::{
+    AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY,
+};
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
 use civsim_sim::locomotion::LocomotionParams;
@@ -1529,4 +1531,151 @@ fn a_founders_genome_grows_a_locomotor_the_catalog_body_lacks() {
             "the grown-body dawn stays bit-identical under the scheduler"
         );
     }
+}
+
+/// A homeostatic registry for the viability cull: the thermal axis PLUS a derived integrity axis (emergent-
+/// anatomy Step 3). The integrity axis does not self-drain; its level is set each tick from the grown body's
+/// whole-body functional viability, so a body reading no viable function falls through the death floor. The
+/// death floor is the reserved minimum whole-body capability a grown body needs to be viable. Labelled dev
+/// fixture, RESERVED-with-basis (the minimum functional capability below which a body sustains no life
+/// function, a small positive fraction), never owner data.
+fn integrity_thermal_registry() -> HomeostaticRegistry {
+    let mut reg = HomeostaticRegistry::dev_thermal();
+    reg.axes.push(HomeostaticAxisDef {
+        id: INTEGRITY,
+        name: "integrity".to_string(),
+        backing_component: None,
+        capacity_per_mass: Fixed::ONE,
+        base_drain: Fixed::ZERO,
+        exertion_drain: Fixed::ZERO,
+        death_floor: Fixed::from_ratio(1, 32),
+    });
+    reg
+}
+
+/// A morphogen race for the viability cull with NO controller block (a blank reaction norm, so the founders
+/// sit still and the test isolates the cull from movement): the sexed race, a catalog body for the LOD-0
+/// metabolic tier, a morphogen program, and a morphogen block seeded to grow a viable LIMB (`limbed`) or
+/// nothing (an inert all-zero body). The grown body is what the run reads; a limbed founder reads a viable
+/// function, an inert one none.
+fn viability_race(limbed: bool) -> Race {
+    let program = MorphogenProgram::dev_default();
+    let mut race = a_sexed_race(0)
+        .with_body_plan(mobile_body())
+        .with_morphogen(program.clone());
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    let morph_seeds: Vec<(MorphogenParamId, Fixed)> = if limbed {
+        vec![
+            (MorphogenParamId(0), Fixed::ONE),
+            (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
+            (MorphogenParamId(2), Fixed::from_ratio(2, 5)),
+            (MorphogenParamId(9), Fixed::from_ratio(3, 4)),
+        ]
+    } else {
+        vec![]
+    };
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the viability race and an embodiment genesis carrying the integrity-bearing registry.
+fn viability_peoples(limbed: bool) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), viability_race(limbed));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: integrity_thermal_registry(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    }
+}
+
+#[test]
+fn an_incoherent_grown_body_is_culled_through_the_ordinary_reserve_floor_path() {
+    // Emergent-anatomy Step 3 (the viability cull): selection prunes incoherent grown bodies through the
+    // EXISTING reserve-floor death path, never a new seed-time gate. A race whose genome grows a viable LIMB
+    // survives; the SAME race (same id, same registry, same everything else) whose genome grows an INERT body
+    // (all-zero morphogen, a degenerate structure reading no viable function) has its derived integrity
+    // reserve set to that zero viability each tick, falls through the reserved viability floor, and dies
+    // through the same is_alive -> reconcile_lifecycle cull as any other death, with no code that inspects
+    // morphology to reject it (Principle 8). The opposite verdicts for one race id prove the cull reads the
+    // grown physics, never a RaceId or label (Principle 9).
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    let run = |limbed: bool, seed: u64| -> (usize, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &viability_peoples(limbed),
+            seed,
+        )
+        .expect("a morphogen dawn assembles");
+        assert_eq!(
+            runner.world().unwrap().being_ids().len(),
+            8,
+            "the band seeds its founders as living bodies"
+        );
+        for _ in 0..20 {
+            runner.step();
+        }
+        let alive = runner
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .filter(|w| w.alive)
+            .count();
+        (alive, runner.state_hash())
+    };
+
+    let (coherent_alive, hash_a) = run(true, 0x5111);
+    assert!(
+        coherent_alive > 0,
+        "a founder whose genome grew a viable limb reads a viable function and survives: {coherent_alive} alive"
+    );
+
+    let (inert_alive, _) = run(false, 0x5111);
+    assert_eq!(
+        inert_alive, 0,
+        "a founder whose genome grew an inert body reads no viable function and is culled: {inert_alive} alive"
+    );
+
+    // Determinism: the viability-cull run replays bit for bit.
+    let (_, hash_b) = run(true, 0x5111);
+    assert_eq!(hash_a, hash_b, "the viability-cull run replays bit for bit");
 }
