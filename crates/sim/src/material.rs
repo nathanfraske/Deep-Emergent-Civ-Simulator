@@ -755,7 +755,7 @@ values = [
         // An empty field folds nothing (opting out is hash-neutral).
         let mut h = StateHasher::new();
         EarthworkField::new().hash_into(&mut h);
-        let mut h0 = StateHasher::new();
+        let h0 = StateHasher::new();
         assert_eq!(h.finish(), h0.finish(), "an empty earthwork folds no bytes");
     }
 

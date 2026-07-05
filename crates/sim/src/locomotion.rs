@@ -72,7 +72,8 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, EXTRACT, GEOPHAGE, GRASP, INGEST, MOVE,
+    HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
+    MOVE,
 };
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
@@ -908,7 +909,7 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // whether or not the being ingests, so exposure harms a being that only passes
                         // through a toxic cell.
                     }
-                    GRASP | EXTRACT | GEOPHAGE | CRAFT => {
+                    GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG => {
                         // The evolved decision to act on matter (material-substrate arc): GRASP picks loose
                         // matter up (item 3, the driver), EXTRACT breaks bonded matter loose in a fracture
                         // contest and takes it (item 4), GEOPHAGE eats the matter underfoot for a reserve that

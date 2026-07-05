@@ -1634,6 +1634,113 @@ values = [
 }
 
 #[test]
+fn a_being_digs_a_pit_lowering_the_terrain_only_through_an_evolved_weight() {
+    // Material-substrate arc item 5, MODIFIABLE TERRAIN: a being excavates the ground underfoot, and the
+    // removed matter both loads its carrier AND lowers the column (a pit forms), so digging reshapes the
+    // terrain, not only mines it. It happens only through an evolved dig decision and the fracture contest:
+    // a deciding being that can fracture the ground digs a pit and carries the spoil; a blank founder on the
+    // same ground never digs and the terrain is untouched. Founder-zero, physics-gated (Principles 8, 9).
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    let build = |dig_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_digger(),
+            LocomotionParams::dev_default(),
+            0,
+            0xD16,
+        );
+        // The dig output is the fifth output (move [act,dx,dy] 0..2, ingest [act] 3, dig [act] 4).
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "digger layout: move(3) + ingest(1) + dig(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if dig_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> dig activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A small working area, so the being's force concentrates to a pressure that fractures the granite.
+        emb.set_extraction_params(ExtractionParams {
+            working_area: Fixed::from_ratio(1, 1_000_000),
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let elevation = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // The deciding being digs: it fractures the ground, carries the spoil, and the column drops by exactly
+    // the volume it removed (a pit), the ground conserved between the carrier and the lowered terrain.
+    let mut digger = build(true);
+    digger.step();
+    let spoil = carried(&digger);
+    assert!(
+        spoil > Fixed::ZERO,
+        "the deciding being excavates the ground"
+    );
+    assert_eq!(
+        ground(&digger),
+        heap - spoil,
+        "the cell lost exactly what was excavated"
+    );
+    assert_eq!(
+        elevation(&digger),
+        Fixed::ZERO - spoil,
+        "the column dropped by the excavated volume: a pit formed"
+    );
+
+    // The blank founder never digs: the terrain is untouched.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(
+        carried(&founder),
+        Fixed::ZERO,
+        "the blank founder does not dig"
+    );
+    assert_eq!(elevation(&founder), Fixed::ZERO, "the terrain is unchanged");
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

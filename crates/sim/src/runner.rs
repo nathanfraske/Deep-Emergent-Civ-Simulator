@@ -89,7 +89,7 @@ use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, CRAFT, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
+    HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
     RESPIRATION, TEMPERATURE,
 };
 use crate::learn::{
@@ -97,7 +97,7 @@ use crate::learn::{
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::material::{CraftParams, ExtractionParams, MaterialField, WieldedTool};
+use crate::material::{CraftParams, EarthworkField, ExtractionParams, MaterialField, WieldedTool};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -896,6 +896,11 @@ pub struct Embodiment {
     /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
     /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
     craft: Option<CraftParams>,
+    /// The per-column earthwork delta a being's digging has made to the terrain (material-substrate arc,
+    /// cascade item 5, modifiable terrain). EMPTY by default, so a scenario where nothing digs folds no
+    /// bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Digging lowers a column
+    /// (a pit) and yields spoil; a deposit raises it (a mound), reshaping the terrain the physics reads.
+    earthwork: EarthworkField,
 }
 
 impl Embodiment {
@@ -947,6 +952,7 @@ impl Embodiment {
             material_registry: None,
             extraction: None,
             craft: None,
+            earthwork: EarthworkField::new(),
         }
     }
 
@@ -1010,6 +1016,12 @@ impl Embodiment {
     /// mutation stays an id-sorted sequential draw off hashed state.
     pub fn material(&self) -> &MaterialField {
         &self.material
+    }
+
+    /// The earthwork delta field, for reading how digging has reshaped the terrain (material-substrate arc,
+    /// cascade item 5): the per-column elevation change from the worldgen baseline.
+    pub fn earthwork(&self) -> &EarthworkField {
+        &self.earthwork
     }
 
     /// Install the world material registry a carried load's weight is derived against (material-substrate
@@ -1379,6 +1391,30 @@ impl Embodiment {
             });
         }
         true
+    }
+
+    /// Enact a being's decided DIG (material-substrate arc, cascade item 5, modifiable terrain): excavate
+    /// the ground underfoot in the SAME extraction fracture contest ([`Embodiment::extract_underfoot`], the
+    /// fracture gate plus taking the spoil into the carried load) AND lower the column by the volume removed,
+    /// so a pit forms where matter left. This is the distinction from a bare extract: extract takes matter,
+    /// dig also reshapes the terrain, the earthwork delta being the elevation bookkeeping the physics will
+    /// read (a dug pit pools water). The column drops by the spoil volume (conservation of the ground, a unit
+    /// cell area), so what leaves the cell is both carried off and gone from the terrain's height. Reads only
+    /// the being's coordinate and the extraction contest, no race, kind, or role (Principle 9). Returns the
+    /// volume excavated. Opt-in: an embodiment with no extraction parameters digs nothing (the fracture
+    /// contest no-ops), so the earthwork stays empty and the run is byte-identical.
+    pub fn dig_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(column) = self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+            let c = w.coord();
+            Coord3::ground(c.x, c.y)
+        }) else {
+            return Fixed::ZERO;
+        };
+        let spoil = self.extract_underfoot(walker_id);
+        if spoil > Fixed::ZERO {
+            self.earthwork.adjust(column, Fixed::ZERO - spoil);
+        }
+        spoil
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
@@ -2393,6 +2429,9 @@ impl Runner {
                     CRAFT => {
                         emb.craft_from_carried(id);
                     }
+                    DIG => {
+                        emb.dig_underfoot(id);
+                    }
                     _ => {}
                 }
             }
@@ -2633,6 +2672,10 @@ impl Runner {
             // (Coord3, substance-id, volume) order. Empty for every scenario that declares no material
             // layer, so folding it writes no bytes and the run is byte-identical (the opt-in default).
             emb.material.hash_into(&mut h);
+            // The earthwork delta (material-substrate arc, cascade item 5): the per-column elevation change
+            // digging has made, folded after the material layer in canonical (column, delta) order. Empty
+            // for every scenario where nothing digs, so it folds no bytes and the run is byte-identical.
+            emb.earthwork.hash_into(&mut h);
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {

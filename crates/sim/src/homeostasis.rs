@@ -691,6 +691,25 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a terrain-shaping world: move, ingest, and dig (material-substrate arc,
+    /// cascade item 5, modifiable terrain). A digger excavates the ground underfoot in the same fracture
+    /// contest the extraction uses, but the removed matter LOWERS the column (a pit) as well as loading the
+    /// carrier, so digging reshapes the terrain rather than only mining it. Dig is a scalar operation
+    /// (working the ground underfoot, no aim) and, like the other matter actions, is unconditional
+    /// (`requires: None`): any body may attempt to dig, and the physical gating is the fracture contest the
+    /// enactment applies ([`crate::runner::Embodiment::dig_underfoot`]), never a capability label.
+    pub fn dev_digger() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: DIG,
+            name: "dig".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -762,6 +781,9 @@ pub const GEOPHAGE: AffordanceId = AffordanceId(5);
 /// The craft affordance (shaping the carried matter into a wielded tool), in the toolmaker fixture only
 /// (material-substrate arc, cascade item 4, crafting, the knapping that makes a tool from mined stone).
 pub const CRAFT: AffordanceId = AffordanceId(6);
+/// The dig affordance (excavating the ground underfoot: a fracture contest that lowers the column and
+/// yields spoil), in the digger fixture only (material-substrate arc, cascade item 5, modifiable terrain).
+pub const DIG: AffordanceId = AffordanceId(7);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
