@@ -85,6 +85,7 @@ pub mod institution;
 pub mod langdist;
 pub mod langmod;
 pub mod language;
+pub mod learn;
 pub mod lineage;
 pub mod located;
 pub mod locomotion;
