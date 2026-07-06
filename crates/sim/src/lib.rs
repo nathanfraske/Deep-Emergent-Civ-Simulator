@@ -172,11 +172,12 @@ pub use evolve::{
     selection_gradient, EvolveParams, EvolveReport,
 };
 pub use genome::{
-    append_controller_block, append_morphogen_block, Allele, AlleleState, BuildChannel, Channel,
-    CognitionChannel, CompositionAxisId, ControllerParamId, DominanceKind, DominanceMode, GeneDef,
-    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome, Haplotype, HybridOutcome,
-    ImbuedChannel, Incompatibility, IncompatibilityKind, IncompatibilityTable, LifeHistoryChannel,
-    LinkageGroup, MorphogenParamId, ReproductionMode, SchemeId, ToleranceAxisId, TraitId,
+    append_controller_block, append_morphogen_block, append_scalar_channel, Allele, AlleleState,
+    BuildChannel, Channel, CognitionChannel, CompositionAxisId, ControllerParamId, DominanceKind,
+    DominanceMode, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome,
+    Haplotype, HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind,
+    IncompatibilityTable, LifeHistoryChannel, LinkageGroup, MorphogenParamId, ReproductionMode,
+    SchemeId, ToleranceAxisId, TraitId,
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
