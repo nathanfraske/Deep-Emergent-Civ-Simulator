@@ -1395,6 +1395,107 @@ values = [
 }
 
 #[test]
+fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
+    // Ideation viability arc, slice B: the join that closes the discovery loop. A being that EXTRACTED a
+    // bonded food into its inventory can EAT it: geophage now draws its bite from what the being CARRIES,
+    // not only the cell underfoot, so extract-then-eat feeds a reserve rise (the felt reward the appetitive
+    // learner credits). Here the cell holds NO oilseed; the being carries it, and eating the carried oilseed
+    // lifts its energy reserve. Nothing authors the payoff: the energy is the seed's own physics, read
+    // through the same runtime edibility laws the cell path uses.
+    use civsim_sim::material::{MaterialField, SubstanceMix};
+
+    let cell = Coord3::ground(1, 1);
+    // A seed-storing tissue backs the reserve so the being has room to eat into (the same shape the mineral
+    // geophage fixture uses: the reserve's capacity is sized from a tissue carrying the backing axis).
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "seed-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("oilseed", Fixed::ONE)]),
+    });
+    // A homeostatic registry whose ENERGY reserve is BACKED BY the oilseed substance, so eating oilseed
+    // refills it; dev_for_registry then requires and assimilates oilseed by that backing component.
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "energy".to_string(),
+                backing_component: Some("oilseed".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0x0115EED,
+    );
+    let blank = Controller::zeros(emb.layout());
+    let mut walker = resting_walker(
+        1,
+        cell,
+        body((1, 1), vec![organ(store, (1, 1))]),
+        &reg,
+        &organs,
+        blank,
+    );
+    // Open room in the energy reserve, and carry the oilseed the being extracted (the cell holds none).
+    walker
+        .homeostasis
+        .set_level(ENERGY, Fixed::from_ratio(1, 2));
+    let mut carried = SubstanceMix::new();
+    carried.add("oilseed", Fixed::from_int(1000));
+    walker.carried = carried;
+    emb.add(walker, band(1));
+
+    // The material field holds NO oilseed (the being already extracted it into its inventory), and the real
+    // ground floor so the oilseed substance is known.
+    emb.set_material(MaterialField::new());
+    emb.set_material_registry(
+        civsim_physics::PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+    );
+
+    let energy = |e: &Embodiment| -> Fixed { e.walkers()[0].homeostasis.level(ENERGY) };
+    let carried_oilseed = |e: &Embodiment| -> Fixed { e.walkers()[0].carried.volume("oilseed") };
+    let before = energy(&emb);
+    let held = carried_oilseed(&emb);
+    assert!(
+        held > Fixed::ZERO,
+        "the being carries the extracted oilseed"
+    );
+
+    let gained = emb.geophage(StableId(1));
+    assert!(
+        gained > Fixed::ZERO,
+        "the being eats the oilseed it carries, though the cell holds none: the extract-then-eat join"
+    );
+    assert!(
+        energy(&emb) > before,
+        "eating the carried oilseed lifts the energy reserve, the felt reward the learner credits"
+    );
+    assert!(
+        carried_oilseed(&emb) < held,
+        "the eaten oilseed leaves the being's inventory (conservation-honest)"
+    );
+}
+
+#[test]
 fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
     // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
     // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A

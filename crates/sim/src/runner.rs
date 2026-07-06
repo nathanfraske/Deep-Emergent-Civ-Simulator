@@ -1387,14 +1387,20 @@ impl Embodiment {
                 continue; // an axis with no backing substance is not fed by matter
             };
             let axis_id = self.homeo.axes[i].id;
-            let supply = self.material.volume(coord, &substance);
-            if supply <= Fixed::ZERO {
-                continue; // the cell holds none of this substance
-            }
+            // Supply is the loose matter the being can eat NOW: the cell underfoot PLUS what it CARRIES, so a
+            // being that EXTRACTED a bonded food into its inventory can eat it (the join that closes the
+            // discovery loop's extract-then-eat, ideation viability arc). Carried matter that backs no
+            // reserve, an ordinary carried rock, reads zero here, so an existing scenario whose beings never
+            // carry a backing substance is byte-identical.
+            let cell_supply = self.material.volume(coord, &substance);
             // Size the bite from the being's own physiology and the room its reserve has left (immutable).
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return gained;
             };
+            let supply = cell_supply + w.carried.volume(&substance);
+            if supply <= Fixed::ZERO {
+                continue; // neither the cell nor the being's inventory holds this substance
+            }
             let frac = laws::satisfaction(
                 supply,
                 w.physiology.assimilation(&substance),
@@ -1411,10 +1417,21 @@ impl Embodiment {
             } else {
                 target_gain
             };
-            // Take the gross bite from the cell and deposit the assimilated part in the reserve (each field
-            // mutated on its own, so the cell loses the bite and the being gains the bite times the
-            // efficiency, conservation-honest as the forage ingest is).
-            let taken = self.material.take(coord, &substance, gross);
+            // Take the gross bite from the cell first, then from what the being carries, and deposit the
+            // assimilated part in the reserve (each field mutated on its own, conservation-honest as the
+            // forage ingest is): the cell loses what it held, the inventory the rest, and the being gains the
+            // total times the efficiency.
+            let from_cell = self.material.take(coord, &substance, gross);
+            let remaining = gross - from_cell;
+            let from_carried = if remaining > Fixed::ZERO {
+                match self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                    Some(w) => w.carried.take(&substance, remaining),
+                    None => Fixed::ZERO,
+                }
+            } else {
+                Fixed::ZERO
+            };
+            let taken = from_cell + from_carried;
             let gain = taken.checked_mul(eta).unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);
@@ -1669,6 +1686,28 @@ impl LifecycleKit {
     }
 }
 
+/// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
+/// canonical coupling is reserved). It maps a being's coupled reserve level to a reproductive vigor
+/// the world's reproduce beat reads as its per-generation eligibility to pair, so a being whose
+/// reserve runs low reproduces LESS rather than dying at a hard grace: an eater that keeps its reserve
+/// up out-reproduces a non-eater and selection spreads the eating lineage without a mass-starvation
+/// crash. Armed opt-in through [`Runner::set_reproductive_vigor_coupling`]; unarmed, the reproduce
+/// beat installs no vigor, takes no draw, and the run is byte-identical.
+#[derive(Clone, Copy, Debug)]
+pub struct ReproductiveVigorCalib {
+    /// The reserve axis the vigor reads: the coupled hunger whose level scales reproduction. A being
+    /// whose body does not carry this axis is left ungated (full vigor), so the coupling reaches only
+    /// the beings the physiology it names applies to (Principle 9: it keys off per-being physiology,
+    /// never a race label).
+    pub axis: HomeostaticAxisId,
+    /// The floor below which vigor bottoms out, in `[0, 1]`: a fully-depleted being still reproduces at
+    /// this rate rather than at zero, so the fitness cost is GRADED (reproduces less), never a hard
+    /// sterility (reproduces not at all). Reserved with its basis: the minimum viable per-generation
+    /// reproduction rate the demography can sustain without the lineage collapsing, a demographic floor
+    /// the population data sets, not a realism constant.
+    pub floor: Fixed,
+}
+
 /// The canonical runner: the temperature field, the located population, and their deterministic
 /// coupling. Constructed with an explicit [`FieldCalib`] (no authored default).
 pub struct Runner {
@@ -1763,6 +1802,13 @@ pub struct Runner {
     /// replays bit-for-bit. Armed via [`Runner::set_discovery`]; a proposal is sampled each tick from the
     /// being's binding graph, biased by its own reward beliefs, under the counter-keyed `HYPOTHESIZE` phase.
     discovery: Option<DiscoveryCalib>,
+    /// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture), armed
+    /// OPT-IN. `None` by default, so a runner with no coupling installs no vigor into its world, the
+    /// reproduce beat takes no eligibility draw, and every existing scenario and the crucible replay
+    /// bit-for-bit. Armed via [`Runner::set_reproductive_vigor_coupling`]; each tick before the world
+    /// tick the runner feeds each embodied being's vigor from its coupled reserve level, so a hungry
+    /// being reproduces less and selection spreads the eating lineage.
+    reproductive_vigor: Option<ReproductiveVigorCalib>,
 }
 
 impl Runner {
@@ -1789,6 +1835,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1832,6 +1879,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1888,6 +1936,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1967,6 +2016,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -2040,6 +2090,18 @@ impl Runner {
     /// the manifest (Principle 11).
     pub fn set_reward_learning(&mut self, calib: RewardLearningCalib) {
         self.reward_learning = Some(calib);
+    }
+
+    /// Arm the graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
+    /// canonical coupling is reserved). OPT-IN: unarmed (the default), the runner installs no vigor into
+    /// its world, the reproduce beat takes no eligibility draw, and the run is byte-identical; armed,
+    /// each tick before the world tick the runner feeds each embodied being's vigor from its coupled
+    /// reserve level, so a being whose reserve runs low reproduces less and an eater that keeps its
+    /// reserve up out-reproduces a non-eater, spreading the eating lineage without a mass-starvation
+    /// crash. The mapping and its floor are the labelled demonstration fixture; the canonical coupling
+    /// (and its floor, reserved with its basis) supersede it when set.
+    pub fn set_reproductive_vigor_coupling(&mut self, calib: ReproductiveVigorCalib) {
+        self.reproductive_vigor = Some(calib);
     }
 
     /// Arm the DISCOVERY loop (ideation / experiential-discovery arc, piece 2, slice 2c), so a being
@@ -2471,6 +2533,36 @@ impl Runner {
         }
     }
 
+    /// Feed each embodied being's reproductive vigor from its coupled reserve level, the graded
+    /// fitness-cost coupling of the viability-spread demonstration (a labelled dev fixture; the canonical
+    /// coupling is reserved). For each walker, `vigor = floor + (1 - floor) * reserve_level` on the
+    /// coupled axis, so a well-fed being (reserve full) reproduces at full rate and a depleted one bottoms
+    /// out at the floor rather than at zero: the cost is GRADED, never a hard sterility. Written into the
+    /// world each tick before the world tick, so the reproduce beat inside the tick reads this
+    /// generation's reserve. Opt-in and crucible-safe: unarmed the runner installs no vigor, the reproduce
+    /// beat takes no draw, and the run is byte-identical. The map is cleared and refilled each tick so a
+    /// being that died carries no stale entry, and a being whose body lacks the coupled axis is left
+    /// ungated (full vigor), so the coupling reaches only the physiology it names (Principle 9). Reads the
+    /// embodiment immutably before the mutable world write and draws no randomness, so it is worker-count
+    /// invariant.
+    fn couple_reproductive_vigor(&mut self) {
+        let Some(calib) = self.reproductive_vigor else {
+            return;
+        };
+        let (Some(world), Some(emb)) = (self.world.as_mut(), self.embodiment.as_ref()) else {
+            return;
+        };
+        world.clear_reproductive_vigor();
+        for w in emb.walkers.iter() {
+            if w.homeostasis.capacity(calib.axis) <= Fixed::ZERO {
+                continue;
+            }
+            let level = w.homeostasis.level(calib.axis);
+            let vigor = calib.floor + (Fixed::ONE - calib.floor).mul(level);
+            world.set_reproductive_vigor(w.id, vigor);
+        }
+    }
+
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.step_field();
         self.phase_body_exchange();
@@ -2483,6 +2575,10 @@ impl Runner {
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
         // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
         let inputs = self.couple_conversation(world_inputs);
+        // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
+        // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
+        // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
+        self.couple_reproductive_vigor();
         if let Some(world) = self.world.as_mut() {
             world.tick(&inputs);
         }
@@ -2519,6 +2615,30 @@ impl Runner {
         // Computed here where the mind is readable and applied to the walker below (a being that enacted
         // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
         let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        // Advance each being's eligibility trace BEFORE the reward credit reads it (ideation arc, piece 1,
+        // slice 1c, the record-before-credit ordering, the standard TD-lambda order): decay every remembered
+        // sequence by the reserved TD lambda (pruning those that underflow), then record the affordance the
+        // being acted on THIS tick at full eligibility, so a reserve rise felt this same tick credits the
+        // action that CAUSED it. Geophage and ingest refill the reserve on the tick they are enacted, so the
+        // felt rise is immediate; recording first gives the just-enacted action full eligibility for it, the
+        // way the standard trace credits the action that produced the reward, while a genuinely lagged reward
+        // still rides the decayed trace of earlier actions. Runs in canonical walker order, drawing no
+        // randomness. Only when the reward learner is armed; unarmed, no trace is ever populated, so this is
+        // inert and the run stays byte-identical.
+        if let Some(reward_learn) = reward_learn {
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(affordance) = w.decided_affordance {
+                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
+                            primitive: affordance.0,
+                            target_bucket: 0,
+                            param_bucket: 0,
+                        }]));
+                    }
+                }
+            }
+        }
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -2647,30 +2767,16 @@ impl Runner {
                 }
             }
         }
-        // Advance each being's eligibility trace for next tick (ideation arc, piece 1, slice 1c): decay every
-        // remembered sequence by the reserved TD lambda (pruning those that underflow) and record the
-        // affordance the being acted on this tick at full eligibility, so a reserve rise felt next tick
-        // credits it. Runs AFTER the credit read above, so this tick's reward credits the sequences executed
-        // on prior ticks (the interoceptive lag), in canonical walker order, drawing no randomness. Only when
-        // the reward learner is armed; unarmed, no trace is touched and the run stays byte-identical.
-        if let Some(reward_learn) = reward_learn {
+        // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that enacted an action
+        // this tick carries its prediction-error magnitude; one that enacted nothing resets to zero (surprise
+        // is about the last action). The eligibility trace was already decayed and this tick's action recorded
+        // BEFORE the credit read above (the record-before-credit order), so nothing advances the trace here.
+        // Only when discovery is armed, so an unarmed run never touches `surprise` (zero-by-default,
+        // byte-identical).
+        if reward_learn.is_some() && discovery.is_some() {
             if let Some(emb) = self.embodiment.as_mut() {
                 for w in emb.walkers.iter_mut() {
-                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
-                    if let Some(affordance) = w.decided_affordance {
-                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
-                            primitive: affordance.0,
-                            target_bucket: 0,
-                            param_bucket: 0,
-                        }]));
-                    }
-                    // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that
-                    // enacted an action last tick carries its prediction-error magnitude; one that enacted
-                    // nothing resets to zero (surprise is about the last action). Only when discovery is
-                    // armed, so an unarmed run never touches `surprise` (zero-by-default, byte-identical).
-                    if discovery.is_some() {
-                        w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
-                    }
+                    w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
                 }
             }
         }
@@ -5268,6 +5374,219 @@ values = [
         assert_ne!(
             primed.2, founder.2,
             "the exploration propensity folds into state_hash, so it is canonical state; a founder folds none"
+        );
+    }
+
+    #[test]
+    fn the_viability_loop_closes_a_primed_being_eats_the_oilseed_and_forms_the_reward_belief() {
+        // Ideation viability arc, slice C, the MECHANISM-CLOSES proof (acceptance half 1): the discovery loop
+        // closes end to end over the viability world. A being with a PRIMED exploration propensity, the same
+        // 2c-2 primed pattern, proposes and enacts GEOPHAGE against the fracturable oilseed it senses
+        // underfoot, EATS the seed through the real runtime geophage-and-edibility path (the reserve backed by
+        // the oilseed substance rises as it assimilates the kernel), feels that interoceptive rise as reward,
+        // and its appetitive learner COMMITS a REWARDS belief that its eating pays off, keyed on the enacted
+        // GEOPHAGE sequence, with NO injected observation and no coded payoff. The falsifier is founder-zero:
+        // an otherwise identical being whose exploration propensity is off never enacts, so it never eats, so
+        // no reserve rises and no reward belief forms. So "extract-and-eat this seed pays off" is a DISCOVERED,
+        // rewarded technique, emergent under the enact gate, never authored: the energy is the seed's own
+        // physics (Principle 9) and the belief tracks the felt reward, not the mere presence of the action.
+        // This is the run-level closure the free-run scenario cannot reach quickly (emergent drift is slow),
+        // isolated here the way 2c-2 isolates the enact gate: a single afforded matter primitive, GEOPHAGE, so
+        // every proposal is the eating action and the loop's closure is the only thing under test.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // The viability physiology: a draining ENERGY reserve BACKED BY the oilseed substance, so eating
+        // oilseed refills it and a hungry being that eats feels the rise as its own reward signal, plus a
+        // non-draining TEMPERATURE axis (no matter feeds it, so it never spuriously reads as reward).
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        // A GEOPHAGE-only affordance registry, the viability counterpart to 2c-2's grasp-only: geophage is the
+        // sole afforded matter primitive, so the sampled proposal is always the eating action (one the
+        // deferred-action pass enacts), and the gate's enactment is the only path from proposal to a bite. This
+        // isolates the loop's closure without the roulette dilution a broader registry (move, ingest, geophage)
+        // would add; the free-run scenario keeps the broad registry and reports the honest spread.
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The being requires and assimilates oilseed by its backing component, so eating the seed feeds the
+        // oilseed-backed reserve (the same shape the dev physiology derives for a backed axis).
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief the loop should form: the single-step sequence of the being's GEOPHAGE primitive, the
+        // subject the eligibility trace keys the reward credit on (target and param buckets zero, as the reward
+        // pass records them).
+        let geophage_subject = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run a being over the viability world with its exploration propensity PRIMED to `exploration`, the
+        // discovery loop and the reward learner both armed, and report whether it committed the REWARDS belief
+        // that its geophage pays off. Zero is a founder (never enacts); one is a being whose propensity is
+        // fully lifted (enacts its proposal every tick), standing in for the follow-on's Channel::Exploration
+        // expression exactly as the 2c-2 gate is proved primed.
+        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: open ample room in its oilseed reserve so each modest bite yields a clear rise
+            // (the reward signal) rather than saturating on the first and plateauing.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            // Prime the heritable exploration propensity (the only difference between the two beings).
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            // The real ground floor, so the oilseed substance is the actual seed (its real fracture strength
+            // makes FracturePotential read positive, so the loop proposes acting on it), and the fracturable
+            // percept the discovery loop reads.
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            let mut committed = None;
+            for _ in 0..24 {
+                // Replenish a MODEST standing supply of the fracturable oilseed underfoot each tick, below the
+                // being's per-class requirement, so the hungry being takes a small supply-limited bite every
+                // geophage and its reserve climbs gradually (a felt reward each tick) rather than gorging once
+                // and plateauing on the still-empty eligibility trace. The deposit serves both the percept (the
+                // loop keeps proposing while the seed is in reach) and the bite (geophage eats it).
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(geophage_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Primed exploration: the being enacts its proposed geophage every tick, eats the oilseed, feels its
+        // oilseed-backed reserve rise through the real edibility path, and COMMITS the belief that its geophage
+        // pays off, for itself, through the runner, with no injection. The loop closes: propose, enact, eat,
+        // feel, credit, believe.
+        assert_eq!(
+            run(Fixed::ONE),
+            Some(REWARDS),
+            "a primed being that eats the fracturable oilseed forms the REWARDS belief that its eating pays off"
+        );
+        // Founder-zero (the emergence falsifier): an otherwise identical being whose exploration propensity is
+        // off never enacts its proposal, so it never eats the seed, no reserve rises, and no reward belief
+        // forms. The rewarded technique EMERGES only where the enact gate fires; it is never authored.
+        assert_ne!(
+            run(Fixed::ZERO),
+            Some(REWARDS),
+            "a founder-zero being never enacts, so it never eats and forms no reward belief (founder-zero)"
         );
     }
 

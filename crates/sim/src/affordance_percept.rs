@@ -489,4 +489,31 @@ values = [
             "the keen point reads positive sharpness"
         );
     }
+
+    #[test]
+    fn oilseed_reads_a_positive_fracture_potential_and_carries_energy_density() {
+        // Ideation viability arc, slice A: the `oilseed` substance the viability world uses to close the
+        // discovery loop is at once FRACTURABLE (a positive FracturePotential an ordinary forager can act
+        // on) and ENERGY-DENSE (bio.energy_density, the kernel's assimilable energy). Proven against the
+        // real embedded ground floor, so the authored environment carries both halves the loop needs: the
+        // percept that makes the being propose to break it, and the energy its extraction-and-ingestion
+        // pays off with (the ingest coupling in slice B turns the energy into a reserve rise).
+        let reg = PhysicsRegistry::ground().expect("the embedded ground floor loads");
+        let refs = AffordancePerceptRefs::dev_refs();
+        let oilseed = mix(&[("oilseed", 4)]);
+        let potential =
+            AffordancePerceptKind::FracturePotential.perceive(Some(&oilseed), None, &reg, &refs);
+        assert!(
+            potential > Fixed::ZERO,
+            "oilseed reads a positive fracture-potential, so the discovery loop proposes acting on it"
+        );
+        let energy = reg
+            .substance("oilseed")
+            .and_then(|s| s.vector.get("bio.energy_density").copied())
+            .unwrap_or(Fixed::ZERO);
+        assert!(
+            energy > Fixed::ZERO,
+            "oilseed carries a positive bio.energy_density, the nutrition the loop's payoff draws on"
+        );
+    }
 }

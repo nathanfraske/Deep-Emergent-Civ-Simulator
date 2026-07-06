@@ -61,3 +61,20 @@ values = [
   { axis = "bio.mineral_ash_fraction", value = "0.05" },
   { axis = "bio.decomposition_barrier", value = "273" },
 ]
+
+# An oil-rich hard-shelled seed: energy-dense food locked inside a lignified shell a forager must BREAK to
+# reach, the substance the viability world uses to close the discovery loop (ideation viability arc). It is
+# at once FRACTURABLE (a mat.fracture_strength an ordinary actor's contact stress can overwhelm, so its
+# FracturePotential reads positive and the discovery loop proposes acting on it) and ENERGY-DENSE
+# (bio.energy_density, the kernel's assimilable energy). Depositing it in a world is authored environment
+# (Principle 9); the technique of extracting and eating it is DISCOVERED, never authored. Carried nowhere by
+# default, so every existing world is unchanged.
+[[substance]]
+id = "oilseed"
+participates_in = ["law.fracture_onset", "law.contact_pressure"]
+real = "USDA FoodData Central (tree-nut and oilseed kernels ~2500 to 2900 kJ per 100 g, about 25 to 29 kJ/g, lipid-dominated; kernel bulk density ~1.0 to 1.1 g/cm^3). Koyuncu et al. (2004) and Braga et al. (1999) on nut-shell mechanics (lignified nut-shell rupture stress on the order of 5 to 20 MPa, an ordinary forager can crack it)"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "10" },
+  { axis = "bio.energy_density", value = "25" },
+]
