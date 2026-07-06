@@ -1990,9 +1990,10 @@ impl Runner {
     /// reserved heat-retention fraction of it, over the cell's own heat capacity derived from its matter's
     /// density and specific heat), so the heat spreads through the ordinary temperature diffusion and a
     /// neighbour whose fuel crosses its ignition gate catches: fire SPREADS and EXTINGUISHES with no coded
-    /// spread rule, both emergent from the physics. The oxidiser is not yet supplied (self-oxidising fuels
-    /// burn on the current data; an oxygen-demanding fuel reads zero oxidiser and so does not burn), so the
-    /// medium-oxygen gate that makes fire need air is the next slice.
+    /// spread rule, both emergent from the physics. The combustion also gates on the OXIDISER the cell's
+    /// medium supplies (the reserved supply times the medium's respirable content): a self-oxidising fuel
+    /// burns on temperature alone, while an oxygen-demanding fuel needs air, so it burns in the open and
+    /// starves in a sealed or anoxic cell. A cell with no medium field reads open atmosphere.
     fn step_combustion(&mut self) {
         let Some(calib) = self.combustion else {
             return;
@@ -2013,9 +2014,23 @@ impl Runner {
                 reg.substance(substance)
                     .and_then(|s| s.vector.get(id).copied())
             };
+            // The ambient medium supplying the fire's oxidiser, if a medium field is installed; without one
+            // the atmosphere is open (full respirable concentration), so a fire has air unless a medium says
+            // otherwise (a sealed or submerged cell).
+            let medium = emb.physiology.as_ref().map(|p| &p.medium);
             let mut out = Vec::new();
             for (cell, mix) in emb.material.cells() {
                 let temperature = self.field.at(cell.x, cell.y);
+                // The oxidiser mass the cell's medium supplies this tick (the reserved supply times the
+                // respirable content), the term that makes an oxygen-demanding fuel need air. Open air (no
+                // medium) reads full concentration; a near-anoxic medium reads almost none and starves the fire.
+                let respirable = match medium {
+                    Some(m) => m.respirable_at(cell.x, cell.y),
+                    None => Fixed::ONE,
+                };
+                let oxidiser_mass = respirable
+                    .checked_mul(calib.oxidiser_supply)
+                    .unwrap_or(Fixed::ZERO);
                 // The cell's heat capacity (kJ/K), the volume-weighted sum of each substance's mass times its
                 // specific heat (J/(kg*K), the /1000 converting to kJ to match the fuel value's kJ energy). A
                 // substance carrying no specific heat is thermally transparent here (contributes nothing). The
@@ -2065,15 +2080,16 @@ impl Runner {
                     if burnable <= Fixed::ZERO {
                         continue;
                     }
-                    // The resolved combustion law gates on the ignition crossing. The oxidiser is not supplied
-                    // yet (zero), so a self-oxidising fuel (zero demand) burns and an oxygen-demanding one reads
-                    // oxidiser-limited to nothing, the honest limit until the medium-oxygen slice.
+                    // The resolved combustion law gates on the ignition crossing and the oxidiser: a
+                    // self-oxidising fuel (zero demand) burns on temperature alone, while an oxygen-demanding
+                    // fuel needs the medium's oxidiser, so it burns in open air and starves in a sealed or
+                    // anoxic cell (the burn goes oxidiser-limited to nothing).
                     let c = laws::combustion(
                         fuel_value,
                         oxidiser_demand,
                         ignition,
                         burnable,
-                        Fixed::ZERO,
+                        oxidiser_mass,
                         temperature,
                         calib.energy_cap,
                     );

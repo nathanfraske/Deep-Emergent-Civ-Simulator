@@ -2052,6 +2052,69 @@ fn combustible_matter_burns_when_it_is_hot_enough_and_a_cold_cell_and_rock_do_no
 }
 
 #[test]
+fn an_oxygen_demanding_fire_burns_in_air_and_starves_in_an_anoxic_medium() {
+    // Material-substrate arc item 6, the OXYGEN GATE: an oxygen-demanding fuel (oak, which declares a
+    // therm.oxidiser_demand) burns only where the cell's medium supplies the oxidiser. In a rich (breathable)
+    // medium the same hot oak burns as it does in open air; in a near-anoxic medium the combustion goes
+    // oxidiser-limited to nothing and the fuel is spared, so fire needs air, from the medium's respirable
+    // content against the fuel's own stoichiometry, no coded rule (Principles 8, 9).
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let fuel0 = Fixed::from_int(4);
+
+    let build = |respirable: Fixed| -> Runner {
+        let (organs, _fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0A17,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "oak", fuel0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A uniform medium at the given respirable content: rich air breathes the fire, a near-anoxic medium
+        // starves it. Density and temperature are irrelevant to the oxidiser read.
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(w, h, respirable, Fixed::ZERO, Fixed::ZERO),
+        ));
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(600)), calib(), emb);
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let oak = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "oak") };
+    let burning = |r: &Runner| -> Fixed { r.embodiment().unwrap().fire().intensity(cell) };
+
+    // Rich air: the hot oak ignites and burns down its fuel.
+    let mut air = build(Fixed::ONE);
+    air.step();
+    assert!(oak(&air) < fuel0, "oak in rich air burns");
+    assert!(burning(&air) > Fixed::ZERO, "the fire is alight in air");
+
+    // Near-anoxic medium: the same hot oak cannot get the oxidiser it demands, so it does not burn.
+    let mut anoxic = build(Fixed::ZERO);
+    anoxic.step();
+    assert_eq!(
+        oak(&anoxic),
+        fuel0,
+        "oak in an anoxic medium is spared: no oxidiser, no burn"
+    );
+    assert_eq!(
+        burning(&anoxic),
+        Fixed::ZERO,
+        "the fire starves without air"
+    );
+}
+
+#[test]
 fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
     // Material-substrate arc item 6, LIVE FIRE, the emergent payoff: a burning cell raises its temperature
     // by the heat its combustion releases, that heat spreads through the ordinary temperature diffusion, and

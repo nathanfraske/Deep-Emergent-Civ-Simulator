@@ -354,18 +354,29 @@ pub struct CombustionCalib {
     /// flame-temperature literature. It sets how hot a fire runs and so how readily it spreads. A
     /// realism-and-coupling bound, surfaced for the owner, never invented.
     pub heat_fraction: Fixed,
+    /// The oxidiser MASS a cell's medium supplies to a fire per unit respirable content per tick, the term
+    /// that makes fire need air: the combustion law's oxidiser mass is this times the cell medium's
+    /// respirable content, so an oxygen-demanding fuel burns in open air and starves in a sealed or anoxic
+    /// space. RESERVED. Basis: the oxidiser mass the cell's air volume holds and replenishes at full
+    /// respirable concentration over the base tick, an atmosphere-supply datum set from the cell scale and
+    /// the air's oxygen content; a cell with no medium field reads full concentration (open atmosphere). A
+    /// physics-and-supply bound, surfaced for the owner, never invented.
+    pub oxidiser_supply: Fixed,
 }
 
 impl CombustionCalib {
-    /// A labelled DEVELOPMENT FIXTURE: a burn-rate fraction, the energy cap, and the heat-retention fraction.
-    /// Not owner canon; a stand-in so the combustion beat can run until the owner sets the reserved values
-    /// against their bases. The values exercise the mechanism (a hot fuel cell burns down over several ticks,
-    /// stays hot, and heats its neighbours enough to spread) without standing for calibrated rates.
+    /// A labelled DEVELOPMENT FIXTURE: a burn-rate fraction, the energy cap, the heat-retention fraction, and
+    /// the oxidiser supply. Not owner canon; a stand-in so the combustion beat can run until the owner sets
+    /// the reserved values against their bases. The values exercise the mechanism (a hot fuel cell burns down
+    /// over several ticks, stays hot, heats its neighbours enough to spread, and needs air) without standing
+    /// for calibrated rates. The oxidiser supply is large, so open air is fuel-limited and only a near-anoxic
+    /// medium starves the fire.
     pub fn dev_fixture() -> CombustionCalib {
         CombustionCalib {
             burn_rate: Fixed::from_ratio(1, 4),
             energy_cap: Fixed::from_int(1_000_000_000),
             heat_fraction: Fixed::from_ratio(1, 10),
+            oxidiser_supply: Fixed::from_int(1_000_000_000),
         }
     }
 }
