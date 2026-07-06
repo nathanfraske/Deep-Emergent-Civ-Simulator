@@ -2570,6 +2570,101 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
 }
 
 #[test]
+fn a_spent_hull_trace_weathers_slowly_when_warm_and_is_preserved_when_frozen() {
+    // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice D (the WEATHERING
+    // half): a spent_hull left in the world weathers by the SAME matter cycle carrion does, because it carries
+    // the same physics gates (a mineral-ash fraction and a freezing decomposition barrier), keyed off its own
+    // composition, not a tag (Principles 8, 11). This is the trace's falsifiability by PHYSICS: an unsupported
+    // trace fades, so an abandoned site loses its marks (and the reward-attraction pull that rides them) rather
+    // than persisting forever. The hull is RECALCITRANT (lignified shell), so it weathers SLOWLY: it outlives a
+    // being's lifespan, which is what lets a technique's mark persist past its maker, then fades if unvisited.
+    // The weathering rate is RESERVED, surfaced with its basis (the recalcitrant-lignin decomposition timescale
+    // of a nut shell, far slower than soft tissue), never fabricated; a dev value proves the mechanism here.
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let hull0 = Fixed::from_int(10);
+    // RESERVED (the weathering rate): the per-tick decomposition fraction of a lignified spent hull. Basis: the
+    // recalcitrant-lignin decomposition timescale (nut-shell material persists for years to decades in soil,
+    // far slower than the soft-tissue carrion the global fixture rate models), surfaced for the owner. A dev
+    // value here (slow enough to outlive a being, fast enough to show weathering in the test window).
+    let hull_weathering_rate = Fixed::from_ratio(1, 50);
+    let matter_cycle = MatterCycleCalib {
+        decomposition_rate: hull_weathering_rate,
+        fertility_scale: Fixed::from_ratio(1, 1000),
+    };
+
+    let build = |field_temp: i32| -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "spent_hull", hull0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_matter_cycle(matter_cycle);
+        r
+    };
+
+    let hull = |r: &Runner| -> Fixed {
+        r.embodiment()
+            .unwrap()
+            .material()
+            .volume(cell, "spent_hull")
+    };
+
+    // A warm cell (300 K, above the hull's 273 K decomposition barrier): the hull weathers, its mass moving
+    // into the decomposed sink.
+    let mut warm = build(300);
+    warm.step();
+    assert!(hull(&warm) < hull0, "a warm spent hull weathers");
+    assert!(
+        warm.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the weathered mass moved into the sink"
+    );
+    // But SLOWLY: after a single step the hull is barely touched (it is recalcitrant), so it durably persists,
+    // which is what lets a technique's mark outlive its maker.
+    assert!(
+        hull(&warm) > hull0.checked_div(Fixed::from_int(2)).unwrap(),
+        "the recalcitrant hull weathers slowly: most of it survives a step"
+    );
+    // Over many ticks it does fade, so an unvisited trace does not persist forever (falsifiability by physics),
+    // yet is still present after a span that outlives a being.
+    for _ in 0..30 {
+        warm.step();
+    }
+    assert!(hull(&warm) < hull0, "over many ticks the hull fades");
+    assert!(
+        hull(&warm) > Fixed::ZERO,
+        "but it is still present after a span that outlives a being (durable, not instant)"
+    );
+
+    // A frozen cell (250 K, below the barrier): the hull is preserved and nothing weathers, exactly as a
+    // frozen carcass is preserved.
+    let mut frozen = build(250);
+    for _ in 0..10 {
+        frozen.step();
+    }
+    assert_eq!(hull(&frozen), hull0, "a frozen spent hull is preserved");
+    assert_eq!(
+        frozen.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing weathered in the cold"
+    );
+}
+
+#[test]
 fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
     // Material-substrate arc item 7, SHELTER: a being whose cell is enclosed by insulating matter (a roof of
     // oak in the air cells above it) is buffered from a harsh field, its body temperature holding nearer its
