@@ -1217,48 +1217,6 @@ impl World {
             .map(|b| b.knowledge_level())
     }
 
-    /// Summarize the committed beliefs of a co-located group of living beings into a place-anchored
-    /// belief residue (the cultural-persistence substrate, the lifetime/demography keystone, pillar 2
-    /// slice 2a). For each being in `ids` that carries a mind, and each belief that mind has committed
-    /// (any `(subject, attr, value)`, walked in canonical question order), one member is folded into
-    /// that key's [`PrevailingBelief`] at the supplied per-member commitment `level`, so the residue's
-    /// `count` is how many of the group hold the belief and its intensive level is the conviction a
-    /// committed belief carries into the culture. The residue is the EVIDENCE a later co-located being
-    /// draws on to form its OWN belief (slice 2b), so a technique accumulates as re-earned evidence
-    /// rather than a conclusion handed down (Principle 8): it moves opaque [`BeliefKey`]s and reads no
-    /// attribute, subject, or value by name, so it persists any committed belief and cannot privilege
-    /// the reward one. Because the reward belief this arc cares about, the harm feature belief, and the
-    /// Part-28 axioms all commit into the same per-being belief store, the residue is general over all
-    /// of them.
-    ///
-    /// Pure and RNG-free, walking `ids` in the order given (the caller supplies canonical id order) and
-    /// each mind's frames in canonical question order, so the summary replays bit for bit. A READ in
-    /// this slice: nothing on the run path calls it, so it folds nothing into [`World::state_hash`] and
-    /// every existing run is byte-identical. The `level` is the reserved conviction a committed belief
-    /// enters the residue at, surfaced reserved-with-basis at the wire (slice 2b), never fabricated
-    /// here; a `level` of zero yields an inert residue (an SI-logistic carrier of zero never diffuses).
-    pub fn summarize_residue(&self, ids: &[StableId], level: Fixed) -> BeliefPool {
-        let mut counts: BTreeMap<BeliefKey, u32> = BTreeMap::new();
-        for &id in ids {
-            let Some(mind) = self.minds.get(&id) else {
-                continue;
-            };
-            for shared in mind.committed_beliefs(&self.belief_params) {
-                let key = BeliefKey {
-                    subject: shared.subject,
-                    attr: shared.attr,
-                    value: shared.value,
-                };
-                *counts.entry(key).or_insert(0) += 1;
-            }
-        }
-        let mut pool = BeliefPool::new();
-        for (key, count) in counts {
-            pool.seed(key, level, count);
-        }
-        pool
-    }
-
     /// A language lineage by id, for inspecting its parent and change log.
     pub fn lineage(&self, id: LangId) -> Option<&Language> {
         self.languages.get(&id)
@@ -5002,83 +4960,6 @@ name = "said"
                 .belief(StableId(99), AttrKindId(0), &bp),
             Some(10),
             "the rumour reached the co-located listener"
-        );
-    }
-
-    #[test]
-    fn summarize_residue_folds_co_located_committed_beliefs_into_a_place_pool() {
-        // Cultural-persistence pillar 2 slice 2a (the lifetime/demography keystone): the belief-residue
-        // summary reads the committed beliefs of a co-located group and folds them into a place-anchored
-        // BeliefPool, content-blind (any committed belief, never a key named), so a later being can draw
-        // on the residue after the discoverer dies. A READ, off the run path; the level is a fixture.
-        let mut w = gossip_world();
-        let a = w.spawn(Fixed::ONE);
-        let b = w.spawn(Fixed::ONE);
-        // Different frozen bands so gossip does not cross them; the summary reads ids, not places.
-        w.set_place(a, 1);
-        w.set_place(b, 2);
-        let obs =
-            |mind: StableId, ordinal: u32, subject: u64, toward: ValueId, lo: ValueId| TickInput {
-                mind,
-                ordinal,
-                stim: Stimulus::Observe {
-                    subject: StableId(subject),
-                    attr: AttrKindId(0),
-                    hyps: vec![toward, lo],
-                    toward,
-                    weight: Fixed::from_int(5),
-                    from: mind,
-                },
-            };
-        // A shared belief held by both, and an a-only belief on a distinct subject.
-        w.tick(&[
-            obs(a, 0, 99, 10, 20),
-            obs(b, 0, 99, 10, 20),
-            obs(a, 1, 55, 30, 40),
-        ]);
-        let bp = *w.belief_params();
-        assert_eq!(
-            w.mind(a).unwrap().belief(StableId(99), AttrKindId(0), &bp),
-            Some(10)
-        );
-        assert_eq!(
-            w.mind(b).unwrap().belief(StableId(99), AttrKindId(0), &bp),
-            Some(10)
-        );
-        assert_eq!(
-            w.mind(a).unwrap().belief(StableId(55), AttrKindId(0), &bp),
-            Some(30)
-        );
-
-        let level = Fixed::from_ratio(1, 2);
-        let pool = w.summarize_residue(&[a, b], level);
-        let shared_key = BeliefKey {
-            subject: StableId(99),
-            attr: AttrKindId(0),
-            value: 10,
-        };
-        let a_only_key = BeliefKey {
-            subject: StableId(55),
-            attr: AttrKindId(0),
-            value: 30,
-        };
-        // The shared belief is held by both (count two) at the commitment level; the a-only by one.
-        let sk = pool
-            .get(&shared_key)
-            .expect("the shared belief is in the residue");
-        assert_eq!(sk.count, 2);
-        assert_eq!(sk.knowledge_level(), level);
-        let ak = pool
-            .get(&a_only_key)
-            .expect("the a-only belief is in the residue");
-        assert_eq!(ak.count, 1);
-        assert_eq!(ak.knowledge_level(), level);
-
-        // Pure and content-blind: an empty group yields an empty residue, and it replays bit for bit.
-        assert!(w.summarize_residue(&[], level).is_empty());
-        assert_eq!(
-            w.summarize_residue(&[a, b], level).total_mass(),
-            pool.total_mass()
         );
     }
 
