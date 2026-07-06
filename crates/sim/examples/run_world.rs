@@ -63,7 +63,7 @@ use civsim_sim::material::MaterialField;
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
-use civsim_sim::runner::Runner;
+use civsim_sim::runner::{ReproductiveVigorCalib, Runner};
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
@@ -144,6 +144,20 @@ fn mutation_rate() -> Fixed {
 /// magnitude across generations (basis: the reserved additive-step end; small).
 fn mutation_step() -> Fixed {
     Fixed::from_ratio(1, 20)
+}
+/// DEV FIXTURE (viability DEMONSTRATION knob, labelled, non-canonical): the `viability` scenario runs the
+/// genome HOTTER so the heritable exploration propensity bootstraps off founder-zero in a watchable span of
+/// generations rather than the hundreds pure drift would take (the owner cleared dev values for speed-to-
+/// visible). The emergence line holds: the mutation is a mean-zero symmetric step that authors no direction,
+/// founders still start at exploration zero, and selection does the lifting. Every other scenario keeps
+/// `mutation_rate`/`mutation_step`, so nothing else changes. Basis: the point rate and additive step set so
+/// a positive-exploration tail is sampled each generation, wide enough for the seed-hunger squeeze to select
+/// on without swamping selection.
+fn viability_mutation_rate() -> Fixed {
+    Fixed::from_ratio(1, 8)
+}
+fn viability_mutation_step() -> Fixed {
+    Fixed::from_ratio(1, 4)
 }
 /// DEV FIXTURE: the per-being developmental-environment variance half-width, opened off zero so
 /// littermates vary developmentally (basis: the reserved per-race `environment_variance`; small).
@@ -468,12 +482,19 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     // could not drift even if a locus existed), so the seeded controller weights mutate and the
     // movement-dependent fitness a later step gives them has a heritable gradient to select on. Mutation
     // uses the counter-keyed genome draw, so the run stays deterministic.
+    // The `viability` DEMONSTRATION runs the genome hotter (labelled dev knob) so exploration bootstraps in
+    // tens of generations; every other scenario keeps the standard dev rates and stays byte-identical.
+    let (mut_rate, mut_step) = if cfg.viability {
+        (viability_mutation_rate(), viability_mutation_step())
+    } else {
+        (mutation_rate(), mutation_step())
+    };
     let scheme = GeneticScheme {
         id: SchemeId(0),
         reproduction: ReproductionMode::SexualDiploid,
         linkage_groups: Vec::new(),
-        mutation_rate: mutation_rate(),
-        additive_mutation_step: mutation_step(),
+        mutation_rate: mut_rate,
+        additive_mutation_step: mut_step,
         gauss: GaussApprox::SumOfUniforms { k: 12 },
     };
 
@@ -549,18 +570,72 @@ fn mobile_body() -> BodyPlan {
     }
 }
 
-/// The homeostatic axis id for the viability world's SEED-ENERGY reserve, backed by the oilseed substance
-/// so eating oilseed refills it. Distinct from the grazer axes (energy 0, water 1, temperature 3, condition
-/// 5), a leaf id not special-cased in the mechanism.
+/// The homeostatic axis id for the viability world's SEED-ENERGY reserve (the seed HUNGER), backed by the
+/// oilseed substance so eating oilseed refills it. Distinct from the grazer axes (energy 0, water 1,
+/// temperature 3, condition 5), a leaf id not special-cased in the mechanism.
 const SEED_ENERGY: HomeostaticAxisId = HomeostaticAxisId(10);
 
+/// The homeostatic axis id for the viability world's SEED-CRAVING reserve, also oilseed-backed. This is the
+/// felt-REWARD signal, kept distinct from the survival hunger: it drains FAST so it always carries room, so
+/// each bite of the seed is a supra-noise RISE the reward learner credits (the record-before-credit path
+/// lands it on the geophage that caused it). A being that keeps only the slow hunger reserve topped feels no
+/// rise once it is full and forms no belief; the fast craving is what makes eating read as reward even for a
+/// well-fed being. Non-lethal (an empty craving is appetite, not starvation). A leaf id.
+const SEED_CRAVING: HomeostaticAxisId = HomeostaticAxisId(11);
+
 /// DEV FIXTURE (a viability BALANCE KNOB, surfaced for the owner): the seed-energy reserve's per-tick base
-/// drain, set MODEST so the reserve opens a little room each tick and eating oilseed keeps paying off,
-/// without starving a being that has not found the seed (the reserve is non-lethal). The owner tunes this,
-/// the oilseed's nutritive value, and its accessibility to taste; it is NOT tuned to force the technique to
-/// spread. Basis: a small fraction of the reserve per generation, comparable to the labelled energy drain.
+/// drain, the seed HUNGER. Set so the reserve opens room over a handful of ticks, so a being gets hungry
+/// between bites and eating-while-hungry is a felt RISE the reward learner credits (the record-before-credit
+/// reward path lands that rise on the geophage that caused it), and so a being that never eats empties the
+/// reserve over a grace of about two generations and starves. The owner tunes this, the oilseed's nutritive
+/// value, and its accessibility to taste; it is set to a sensible viable world, NOT to force the spread.
+/// Basis: the grace the ecology needs for a first eater to appear, and a hunger period short enough that
+/// eating registers as reward.
 fn seed_energy_drain() -> Fixed {
-    Fixed::from_ratio(1, 400)
+    Fixed::from_ratio(1, 900)
+}
+
+/// DEV FIXTURE (the viability demonstration's graded fitness-cost floor): the reproductive vigor a being
+/// with a fully-depleted seed-energy reserve keeps, so a chronically seed-hungry being reproduces at this
+/// rate rather than at zero (the cost is GRADED, not a hard sterility). Set LOW so an eater that keeps its
+/// reserve up strongly out-reproduces a non-eater and selection spreads the eating lineage within tens of
+/// generations, but above zero so the founder-zero cohort (which starts seed-full and cannot eat yet) still
+/// reproduces while exploration bootstraps. The canonical floor is reserved with its basis (the minimum
+/// viable per-generation reproduction rate the demography sustains without the lineage collapsing); this is
+/// only the demonstration fixture. The owner tunes it.
+fn viability_repro_floor() -> Fixed {
+    Fixed::from_ratio(1, 2)
+}
+
+/// DEV FIXTURE (a viability BALANCE KNOB): the seed-CRAVING reserve's per-tick base drain, set FAST so the
+/// reserve always carries room and each bite is a felt RISE the reward learner credits, so a being that
+/// discovers eating forms the "eating pays off" belief within a few generations even when well fed (its slow
+/// hunger reserve topped). Basis: fast enough that a bite between the enact gate's intermittent geophages
+/// lands as a supra-noise rise, comparable to the sensorium just-noticeable difference.
+fn seed_craving_drain() -> Fixed {
+    Fixed::from_ratio(1, 64)
+}
+
+/// DEV FIXTURE (viability accessibility knob): the modest per-cell oilseed supply the demonstration keeps
+/// standing, topped up each generation (a renewable but SCARCE seed crop). Set BELOW the being's per-class
+/// requirement so a geophage bite is supply-limited and small: the seed reserve never tops off, so a being
+/// stays chronically hungry and each bite is a felt RISE the reward learner credits. A generous hoard
+/// instead lets a being pin its reserve full (no room, no rise), so eating reads as nothing and the belief
+/// never commits; the modest supply is the food pressure that makes eating pay off. The owner tunes it.
+fn viability_oilseed_supply() -> Fixed {
+    Fixed::from_int(100)
+}
+
+/// The viability world's standing oilseed crop: the modest supply on every ground cell, rebuilt at the top
+/// of the run and topped up each generation so the seed is a renewable but scarce food. Labelled fixture.
+fn viability_oilseed_field() -> MaterialField {
+    let mut material = MaterialField::new();
+    for y in 0..WORLD_H {
+        for x in 0..WORLD_W {
+            material.deposit(Coord3::ground(x, y), "oilseed", viability_oilseed_supply());
+        }
+    }
+    material
 }
 
 /// The seed-store organ's kind id in the viability organ registry: the next kind after the dev organs, so
@@ -598,10 +673,16 @@ fn viability_body() -> BodyPlan {
 }
 
 /// The viability world's homeostatic registry: the grazer axes plus a SEED-ENERGY reserve BACKED BY the
-/// oilseed substance, so eating oilseed lifts it (the felt reward the learner credits). Non-lethal
-/// (death_floor zero), so a being that has not found the seed is never killed by it, leaving the technique
-/// room to emerge; a modest base drain opens room so eating keeps paying off (a balance knob). Labelled
-/// fixture.
+/// oilseed substance, so eating oilseed lifts it (the felt reward the learner credits). NON-LETHAL (the
+/// death floor is out of reach) for the ruling-B demonstration: an empty seed reserve is HUNGER, not death.
+/// The seed-hunger couples to REPRODUCTION instead (the graded reproductive-vigor coupling): a being whose
+/// seed reserve runs low reproduces LESS, so a being that discovers geophage-on-oilseed keeps its reserve up
+/// and OUT-REPRODUCES one that never eats, and the exploration propensity that leads to eating spreads by
+/// differential reproduction rather than by a mass-starvation cull. That was the tension of the lethal
+/// variant: a lethal seed-hunger crashed the whole founder-zero cohort together, removing the food
+/// competition that made the hunger a pressure. The graded reproductive cost keeps the population large and
+/// food-pressured while still selecting the eating lineage. Labelled dev fixture; the emergence line holds
+/// (a physiology-and-selection gradient, never an authored technique).
 fn viability_homeostatic() -> HomeostaticRegistry {
     let mut reg = HomeostaticRegistry::dev_grazer();
     reg.axes.push(HomeostaticAxisDef {
@@ -611,11 +692,28 @@ fn viability_homeostatic() -> HomeostaticRegistry {
         capacity_per_mass: Fixed::ONE,
         base_drain: seed_energy_drain(),
         exertion_drain: Fixed::ZERO,
-        // NON-LETHAL: a death floor well below any reachable level, so a being that has not found the seed
-        // is never killed by an empty seed-energy reserve (the reserve is a bonus food drive, not a
-        // survival axis), leaving the discovered technique room to emerge under selection rather than
-        // wiping the founders before exploration can drift off zero. `death_floor` is a die-at threshold,
-        // so zero would kill at an empty reserve; this puts it out of reach.
+        // NON-LETHAL: the death floor is out of reach, so an empty seed reserve is HUNGER, not death. The
+        // seed-hunger couples to reproduction through the runner's graded reproductive-vigor coupling (keyed
+        // on this axis): a being that never eats drains it and reproduces at the floor rate, while one that
+        // discovers eating keeps it up and reproduces at full rate, so differential REPRODUCTION selects the
+        // exploration propensity that leads to eating (the run path has no fitness scorer). The reproductive
+        // cost is graded, so the eating lineage spreads without the mass starvation a lethal hunger caused.
+        death_floor: Fixed::from_int(-1000),
+    });
+    // The seed-CRAVING reserve: also oilseed-backed, so the SAME geophage bite that feeds the survival hunger
+    // feeds it, but it drains FAST and never kills. Because it drains fast it always carries room, so each
+    // bite is a supra-noise RISE the reward learner credits toward "eating the seed pays off" (the
+    // record-before-credit path lands that rise on the geophage that caused it). Without it, a being that
+    // eats enough to survive keeps its slow hunger reserve topped, feels no rise, and never forms the belief;
+    // the fast craving is what makes eating read as reward even for a well-fed eater. Non-lethal (death_floor
+    // out of reach): an empty craving is appetite, not starvation.
+    reg.axes.push(HomeostaticAxisDef {
+        id: SEED_CRAVING,
+        name: "seed-craving".to_string(),
+        backing_component: Some("oilseed".to_string()),
+        capacity_per_mass: Fixed::ONE,
+        base_drain: seed_craving_drain(),
+        exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_int(-1000),
     });
     reg
@@ -1577,20 +1675,20 @@ fn main() {
     if cfg.armed() {
         let material_registry =
             PhysicsRegistry::ground().expect("the embedded ground physics floor loads");
-        // The viability oilseed is deposited generously (an accessibility balance knob, the owner's to
-        // tune), so a being that discovers extract-and-eat has a real food; inert granite's amount is
-        // immaterial.
-        let (substance, volume) = if cfg.viability {
-            ("oilseed", Fixed::from_int(100))
+        // `viability` seeds a MODEST renewable oilseed crop (topped up each generation in the run loop), so a
+        // being crops it in small bites and stays hungry, the food pressure that makes eating pay off;
+        // `discovery` seeds inert granite whose amount is immaterial.
+        let material = if cfg.viability {
+            viability_oilseed_field()
         } else {
-            ("granite", Fixed::from_int(4))
-        };
-        let mut material = MaterialField::new();
-        for y in 0..WORLD_H {
-            for x in 0..WORLD_W {
-                material.deposit(Coord3::ground(x, y), substance, volume);
+            let mut material = MaterialField::new();
+            for y in 0..WORLD_H {
+                for x in 0..WORLD_W {
+                    material.deposit(Coord3::ground(x, y), "granite", Fixed::from_int(4));
+                }
             }
-        }
+            material
+        };
         if let Some(emb) = runner.embodiment_mut() {
             emb.set_material(material);
             emb.set_material_registry(material_registry);
@@ -1600,8 +1698,45 @@ fn main() {
             );
         }
         runner.set_discovery(DiscoveryCalib::dev_default());
-        runner.set_reward_learning(RewardLearningCalib::dev_default());
+        // The `viability` DEMONSTRATION lowers the REWARD-NOISE FLOOR (a labelled dev knob). The default floor
+        // is the largest per-tick rise ordinary metabolic recovery produces, so a rise below it is dismissed
+        // as recovery noise. But the SEED reserve has no metabolic recovery (it rises ONLY when the being eats
+        // the seed), so a small rise is a real reward, not noise; and a being on a gently-draining reserve
+        // eats-while-hungry in a small supra-drain step whose rise falls under the default floor, so with the
+        // default the reward reads as nothing and the "eating pays off" belief never commits. A low floor lets
+        // those real small rises register. It reads the seed's own physics still (a being that never eats
+        // feels no rise and forms nothing); it only stops dismissing a small true reward as noise. Every other
+        // armed scenario keeps the default reward calib.
+        let reward_calib = if cfg.viability {
+            RewardLearningCalib {
+                reward_noise_floor: Fixed::from_ratio(1, 10_000),
+                // A FAST eligibility decay (short TD-lambda), a labelled dev knob: the seed reward is
+                // IMMEDIATE (a geophage refills the seed reserve on the tick it is enacted), so with the
+                // record-before-credit path the credit lands full-weight on the geophage tick itself; a short
+                // decay keeps that just-enacted geophage from accumulating NEUTRAL evidence over the many
+                // forage or idle ticks it would otherwise linger in the trace for. So "eating the seed pays
+                // off" reads off the eat that paid off, not the whole window around it. The default longer
+                // window fits a reward that truly lags its action; the seed reward does not lag.
+                eligibility_decay: Fixed::from_ratio(1, 8),
+                ..RewardLearningCalib::dev_default()
+            }
+        } else {
+            RewardLearningCalib::dev_default()
+        };
+        runner.set_reward_learning(reward_calib);
         if cfg.viability {
+            // Arm the graded reproductive-vigor coupling (the ruling-B demonstration): a being's per-generation
+            // eligibility to pair scales with its SEED-ENERGY reserve, so a being that discovered eating keeps
+            // its reserve up and out-reproduces one that never eats, and selection spreads the eating lineage
+            // without the mass-starvation crash a lethal seed-hunger caused. Keyed on SEED_ENERGY (the slow
+            // survival hunger an eater refills and a non-eater lets drain), floored so the founder-zero cohort
+            // still reproduces while exploration bootstraps. A labelled dev fixture; the canonical coupling and
+            // its floor are reserved with their basis. The emergence line holds: a physiology-and-selection
+            // gradient, not an authored technique.
+            runner.set_reproductive_vigor_coupling(ReproductiveVigorCalib {
+                axis: SEED_ENERGY,
+                floor: viability_repro_floor(),
+            });
             println!(
                 "  VIABILITY SCENARIO ARMED (opt-in): {} ground cells seeded with fracturable, energy-dense \
                  oilseed; founders carry an oilseed-backed seed-energy reserve and afford geophage; \
@@ -1641,6 +1776,14 @@ fn main() {
     for gen in 1..=cfg.generations {
         for _ in 0..GEN_TICKS {
             runner.step();
+        }
+        // The viability seed crop is renewable: top the modest oilseed back up on every cell each generation,
+        // so the standing supply stays scarce-but-present across the run rather than depleting to nothing.
+        // Opt-in; every other scenario leaves the material field untouched.
+        if cfg.viability {
+            if let Some(emb) = runner.embodiment_mut() {
+                emb.set_material(viability_oilseed_field());
+            }
         }
         // Snapshot at every tenth of the run; the final generation is reported once, by the FINAL
         // block below, so it is not double-printed here.
