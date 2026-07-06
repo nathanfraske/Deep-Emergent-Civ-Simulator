@@ -568,3 +568,72 @@ fn per_tick_mortality_staggers_deaths_within_the_cadence_and_replays() {
         a.population()
     );
 }
+
+#[test]
+fn per_tick_birth_staggers_births_within_the_cadence_and_replays() {
+    // The lifetime/demography keystone, pillar 1 slice 1b: with per-tick staggered birth armed, mature
+    // pairs bear across the ticks of a cadence (overlapping generations) rather than all at once on the
+    // boundary, while the mean fecundity per cadence is preserved. The per-birth draws re-key from the
+    // generation ordinal to the birth tick, so a run replays bit for bit. Labelled fixtures throughout.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), sex_determined_race(0, 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 24,
+    }];
+    let build = |seed: u64, armed: bool| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_breeding_systems(registry());
+        let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+        for &id in &founders {
+            w.set_age(id, 20);
+        }
+        w.set_life_cadence(8);
+        w.set_reproduction(reproduction());
+        if armed {
+            w.arm_per_tick_birth();
+        }
+        let start = w.population();
+        (w, start)
+    };
+
+    // Armed: within the cadence, before the boundary tick, births have already staggered in.
+    let (mut a, start) = build(0xB147, true);
+    for _ in 0..7 {
+        a.tick(&[]);
+    }
+    assert!(
+        a.population() > start,
+        "per-tick birth staggers births across the cadence: {} from {start} before the boundary",
+        a.population()
+    );
+
+    // Unarmed: the per-cadence bearing fires only on the boundary tick, so the population is flat before
+    // it, then the whole cohort bears at once.
+    let (mut u, ustart) = build(0xB147, false);
+    for _ in 0..7 {
+        u.tick(&[]);
+    }
+    assert_eq!(
+        u.population(),
+        ustart,
+        "per-cadence birth bears nothing before the boundary tick"
+    );
+    u.tick(&[]); // the cadence boundary
+    assert!(
+        u.population() > ustart,
+        "the per-cadence cohort bears on the boundary"
+    );
+
+    // The staggered birth trajectory replays bit for bit (the per-birth draws key on the birth tick).
+    let (mut a2, _) = build(0xB147, true);
+    for _ in 0..7 {
+        a2.tick(&[]);
+    }
+    assert_eq!(
+        a.state_hash(),
+        a2.state_hash(),
+        "the staggered birth trajectory replays bit for bit"
+    );
+}

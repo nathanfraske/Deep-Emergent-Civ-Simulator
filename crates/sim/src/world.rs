@@ -97,6 +97,13 @@ const SLOT_ADDRESSEE: u32 = 0;
 /// (R-RNG-COORD slot rule); the vigor gate replays bit for bit and does not perturb preference.
 const SLOT_REPRO_VIGOR: u32 = 1;
 
+/// The REPRODUCE-phase draw slot for the per-tick staggered-birth bearing gate (the lifetime/demography
+/// keystone, pillar 1 slice 1b): when births run per-tick, a mature pair bears with a small per-tick
+/// probability drawn on this slot, keyed on the initiator and the tick, namespaced away from the
+/// genome-recombination draws in `birth` (which key through [`DrawKey::pair`] on slot zero) so the two
+/// never alias on counter zero (R-RNG-COORD slot rule).
+const SLOT_BIRTH_TICK: u32 = 1;
+
 /// Read a felicity dimension from the world state the engine already carries (design Part
 /// 9.5). The dialogue step gates a move on these readings; a dimension the world does not
 /// yet model (an institutional role, a value distance, a channel reach) reads as `None`,
@@ -616,6 +623,19 @@ pub struct World {
     /// uses. This does not touch the census or drift (only births feed the effective size), so it is
     /// independent of the overlapping-generations effective-size question (R-OVERLAP-NE, slice 1b).
     per_tick_mortality: bool,
+    /// Whether births run per-tick and STAGGERED rather than a per-cadence synchronous cohort bearing
+    /// (the lifetime/demography keystone, pillar 1 slice 1b). False by default, so reproduction fires
+    /// once per cadence, one child per mature pair, exactly as before and an unarmed world is
+    /// byte-identical. When armed ([`World::arm_per_tick_birth`]), the reproduce beat fires EVERY tick
+    /// and each mature pair bears with a small per-tick probability (the per-cadence one-child fecundity
+    /// scaled by the ticks in a cadence), so births spread across ticks (overlapping generations) while
+    /// the mean fecundity per cadence is preserved, and the per-cadence reproduce in
+    /// [`World::life_cadence`] is skipped so no pair bears twice on the boundary. The per-birth draws
+    /// (recombination, the developmental offset, the mate-preference and vigor draws) are re-keyed from
+    /// the generation ordinal to the birth TICK, so two births a cadence apart never alias on the
+    /// generation coordinate. Drift stays one event per generation; the census-Ne handling under
+    /// overlapping generations is the breeder-restricted moments (R-OVERLAP-NE).
+    per_tick_birth: bool,
     /// The data-driven breeding-system registry (design Part 25, R-REPRO): resolves a race's
     /// [`crate::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
     /// sex is read off its sex-determination locus. Empty by default; when a race's system is not
@@ -696,6 +716,7 @@ impl World {
             life_cadence_ticks: LIFE_CADENCE_TICKS,
             mortality_hazard: None,
             per_tick_mortality: false,
+            per_tick_birth: false,
             breeding_systems: BreedingSystemRegistry::new(),
             census: ReproductiveCensus::new(),
             // The labelled stamped default (design 25.10, `genome.gauss_approx = SumOfUniforms{k=12}`):
@@ -794,6 +815,21 @@ impl World {
     /// independent of the overlapping-generations effective-size question (R-OVERLAP-NE).
     pub fn arm_per_tick_mortality(&mut self) {
         self.per_tick_mortality = true;
+    }
+
+    /// Arm per-tick staggered birth (the lifetime/demography keystone, pillar 1 slice 1b). Off by
+    /// default, so reproduction fires once per cadence, one child per mature pair, exactly as before and
+    /// an unarmed world is byte-identical. When armed, the reproduce beat fires EVERY tick and each
+    /// mature pair bears with a small per-tick probability (the per-cadence one-child fecundity scaled by
+    /// the ticks in a cadence, the linearized conversion, exact in the mean), so births STAGGER across
+    /// ticks (overlapping generations) while the mean fecundity per cadence is preserved, and the
+    /// per-cadence reproduce in [`World::life_cadence`] is skipped so no pair bears twice on the boundary.
+    /// The per-birth draws are re-keyed from the generation ordinal to the birth TICK so two births a
+    /// cadence apart never alias. Drift stays one event per generation; the census moments are restricted
+    /// to the actual breeders when births stagger, so the mixed-age window does not inflate the
+    /// reproductive-variance the effective size reads (the breeder-restricted census of the Ne ruling).
+    pub fn arm_per_tick_birth(&mut self) {
+        self.per_tick_birth = true;
     }
 
     /// Install the reproduction calibrations (design Parts 25, 28, R-REPRO). Until set, the reproduce
@@ -2153,7 +2189,11 @@ impl World {
         }
         self.age_step();
         self.drift_personalities();
-        self.reproduce();
+        // Skipped when per-tick staggered birth is armed (slice 1b): the per-tick birth beat in `tick`
+        // bears every tick instead, so bearing here too would double the cadence's births.
+        if !self.per_tick_birth {
+            self.reproduce();
+        }
         self.drift_pools();
         // Close the reproductive census window for the generation drift just consumed (world-wiring
         // real-world unification, step 1), so the next cohort's Ne reads only its own breeders rather
@@ -2312,6 +2352,16 @@ impl World {
             return;
         }
         let generation = self.clock / self.life_cadence_ticks;
+        // Under per-tick staggered birth (slice 1b) the per-birth draws (the vigor eligibility, the
+        // recombination and developmental and mate-preference draws in `birth`) key on the birth TICK,
+        // not the generation ordinal, so two births a cadence apart never alias on the same generation
+        // coordinate; unarmed, `coord` is the generation and every draw is exactly as before, so an
+        // unarmed world is byte-identical.
+        let coord = if self.per_tick_birth {
+            self.clock
+        } else {
+            generation
+        };
 
         // Group the mature beings by band (place), in canonical id order.
         let mut by_place: BTreeMap<PlaceId, Vec<StableId>> = BTreeMap::new();
@@ -2345,7 +2395,7 @@ impl World {
                 // coupled reserve runs low is often not eligible to initiate this generation, so it
                 // reproduces less. Inert (no draw, every being eligible) until the runner arms vigor,
                 // so an unarmed world and the crucible pair exactly as before.
-                if !self.reproductively_eligible(chooser, generation) {
+                if !self.reproductively_eligible(chooser, coord) {
                     continue;
                 }
                 let Some(race_id) = self.race_of.get(&chooser).copied() else {
@@ -2364,7 +2414,7 @@ impl World {
                             && self.sexes_compatible(race, chooser, c)
                             // A low-vigor being is also less likely to be CHOSEN, so the graded
                             // cost falls on both sides of a pairing, not the initiator alone.
-                            && self.reproductively_eligible(c, generation)
+                            && self.reproductively_eligible(c, coord)
                     })
                     .collect();
                 if candidates.is_empty() {
@@ -2382,6 +2432,22 @@ impl World {
         // cloned out so the mutable birth borrow does not conflict with the race registry; heritability
         // derives from the race's own pool (V_A over V_A+V_E), never authored.
         for (race_id, place, a, b) in pairs {
+            // Per-tick staggered birth (slice 1b): a mature pair bears with a small per-tick probability
+            // (the per-cadence one-child fecundity divided by the ticks in a cadence, the linearized
+            // conversion, exact in the mean), so births spread across the cadence rather than all landing
+            // on the boundary. The draw keys on the initiator and the tick on the dedicated birth slot,
+            // so it replays and never aliases the recombination draws in `birth`. Unarmed, no draw is
+            // taken and every pair bears once (byte-identical).
+            if self.per_tick_birth {
+                let scale = Fixed::from_ratio(1, self.life_cadence_ticks as i64);
+                let draw = DrawKey::entity(a.0, self.clock, Phase::REPRODUCE)
+                    .slot(SLOT_BIRTH_TICK)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                if draw >= scale {
+                    continue;
+                }
+            }
             let Some(race) = self.races.get(&race_id).cloned() else {
                 continue;
             };
@@ -2396,11 +2462,23 @@ impl World {
                 &band,
                 heritability,
                 params.mutation_spread,
-                generation,
+                coord,
                 &params.ring_law,
             ) {
                 self.place_of.insert(child, place);
             }
+        }
+    }
+
+    /// The per-tick staggered birth beat (the lifetime/demography keystone, pillar 1 slice 1b): when
+    /// armed ([`World::arm_per_tick_birth`]), run the reproduce beat EVERY tick, so a mature pair bears
+    /// at a staggered tick within the cadence rather than all pairs at once on the boundary (overlapping
+    /// generations). Inert unless armed, so an unarmed world never enters here and reproduces once per
+    /// cadence through [`World::life_cadence`] exactly as before (byte-identical). `reproduce` is a no-op
+    /// without installed reproduction calibrations, so beating it unconditionally when armed is safe.
+    fn per_tick_birth_step(&mut self) {
+        if self.per_tick_birth {
+            self.reproduce();
         }
     }
 
@@ -2651,6 +2729,7 @@ impl World {
         self.converse_language();
         self.drift_step();
         self.life_cadence();
+        self.per_tick_birth_step();
         self.per_tick_mortality_step();
     }
 
@@ -2694,8 +2773,10 @@ impl World {
         ns[5] = s.elapsed().as_nanos();
         // The coarse life beat runs after the cognition phases so tick_timed produces the same state
         // tick would; it is not one of the profiled six (it fires only on the cadence period). The
-        // per-tick staggered mortality beat follows it, matching `tick`, so tick_timed stays state-equal.
+        // per-tick staggered birth and mortality beats follow it, matching `tick`, so tick_timed stays
+        // state-equal.
         self.life_cadence();
+        self.per_tick_birth_step();
         self.per_tick_mortality_step();
         ns
     }
