@@ -5289,6 +5289,219 @@ values = [
     }
 
     #[test]
+    fn the_viability_loop_closes_a_primed_being_eats_the_oilseed_and_forms_the_reward_belief() {
+        // Ideation viability arc, slice C, the MECHANISM-CLOSES proof (acceptance half 1): the discovery loop
+        // closes end to end over the viability world. A being with a PRIMED exploration propensity, the same
+        // 2c-2 primed pattern, proposes and enacts GEOPHAGE against the fracturable oilseed it senses
+        // underfoot, EATS the seed through the real runtime geophage-and-edibility path (the reserve backed by
+        // the oilseed substance rises as it assimilates the kernel), feels that interoceptive rise as reward,
+        // and its appetitive learner COMMITS a REWARDS belief that its eating pays off, keyed on the enacted
+        // GEOPHAGE sequence, with NO injected observation and no coded payoff. The falsifier is founder-zero:
+        // an otherwise identical being whose exploration propensity is off never enacts, so it never eats, so
+        // no reserve rises and no reward belief forms. So "extract-and-eat this seed pays off" is a DISCOVERED,
+        // rewarded technique, emergent under the enact gate, never authored: the energy is the seed's own
+        // physics (Principle 9) and the belief tracks the felt reward, not the mere presence of the action.
+        // This is the run-level closure the free-run scenario cannot reach quickly (emergent drift is slow),
+        // isolated here the way 2c-2 isolates the enact gate: a single afforded matter primitive, GEOPHAGE, so
+        // every proposal is the eating action and the loop's closure is the only thing under test.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // The viability physiology: a draining ENERGY reserve BACKED BY the oilseed substance, so eating
+        // oilseed refills it and a hungry being that eats feels the rise as its own reward signal, plus a
+        // non-draining TEMPERATURE axis (no matter feeds it, so it never spuriously reads as reward).
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        // A GEOPHAGE-only affordance registry, the viability counterpart to 2c-2's grasp-only: geophage is the
+        // sole afforded matter primitive, so the sampled proposal is always the eating action (one the
+        // deferred-action pass enacts), and the gate's enactment is the only path from proposal to a bite. This
+        // isolates the loop's closure without the roulette dilution a broader registry (move, ingest, geophage)
+        // would add; the free-run scenario keeps the broad registry and reports the honest spread.
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The being requires and assimilates oilseed by its backing component, so eating the seed feeds the
+        // oilseed-backed reserve (the same shape the dev physiology derives for a backed axis).
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief the loop should form: the single-step sequence of the being's GEOPHAGE primitive, the
+        // subject the eligibility trace keys the reward credit on (target and param buckets zero, as the reward
+        // pass records them).
+        let geophage_subject = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run a being over the viability world with its exploration propensity PRIMED to `exploration`, the
+        // discovery loop and the reward learner both armed, and report whether it committed the REWARDS belief
+        // that its geophage pays off. Zero is a founder (never enacts); one is a being whose propensity is
+        // fully lifted (enacts its proposal every tick), standing in for the follow-on's Channel::Exploration
+        // expression exactly as the 2c-2 gate is proved primed.
+        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: open ample room in its oilseed reserve so each modest bite yields a clear rise
+            // (the reward signal) rather than saturating on the first and plateauing.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            // Prime the heritable exploration propensity (the only difference between the two beings).
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            // The real ground floor, so the oilseed substance is the actual seed (its real fracture strength
+            // makes FracturePotential read positive, so the loop proposes acting on it), and the fracturable
+            // percept the discovery loop reads.
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            let mut committed = None;
+            for _ in 0..24 {
+                // Replenish a MODEST standing supply of the fracturable oilseed underfoot each tick, below the
+                // being's per-class requirement, so the hungry being takes a small supply-limited bite every
+                // geophage and its reserve climbs gradually (a felt reward each tick) rather than gorging once
+                // and plateauing on the still-empty eligibility trace. The deposit serves both the percept (the
+                // loop keeps proposing while the seed is in reach) and the bite (geophage eats it).
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(geophage_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Primed exploration: the being enacts its proposed geophage every tick, eats the oilseed, feels its
+        // oilseed-backed reserve rise through the real edibility path, and COMMITS the belief that its geophage
+        // pays off, for itself, through the runner, with no injection. The loop closes: propose, enact, eat,
+        // feel, credit, believe.
+        assert_eq!(
+            run(Fixed::ONE),
+            Some(REWARDS),
+            "a primed being that eats the fracturable oilseed forms the REWARDS belief that its eating pays off"
+        );
+        // Founder-zero (the emergence falsifier): an otherwise identical being whose exploration propensity is
+        // off never enacts its proposal, so it never eats the seed, no reserve rises, and no reward belief
+        // forms. The rewarded technique EMERGES only where the enact gate fires; it is never authored.
+        assert_ne!(
+            run(Fixed::ZERO),
+            Some(REWARDS),
+            "a founder-zero being never enacts, so it never eats and forms no reward belief (founder-zero)"
+        );
+    }
+
+    #[test]
     fn surprise_lifts_a_beings_exploration_multiplicatively_and_never_lifts_a_founder() {
         // Ideation arc, piece 3, slice 3b (surprise-modulated exploration): a being's recent prediction error
         // (surprise) LIFTS its heritable exploration propensity at the enact gate, so it enacts its proposals
