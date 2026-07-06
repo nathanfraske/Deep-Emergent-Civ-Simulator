@@ -2044,29 +2044,43 @@ impl Runner {
             let mut out = Vec::new();
             for (cell, mix) in emb.material.cells() {
                 let temperature = self.field.at(cell.x, cell.y);
-                if temperature < calib.decomposition_barrier {
-                    continue; // frozen: a preserved remains does not decompose
-                }
                 for (substance, &volume) in mix.substances() {
+                    let Some(def) = reg.substance(substance) else {
+                        continue;
+                    };
                     // Organic matter carries a biological composition (an ash fraction); inorganic matter
                     // (rock, soil, metal) does not and is skipped. This is the substance's own physics, not a
                     // tag: what decomposes is what has a biological make-up (Principles 8, 11).
-                    let Some(_ash) = reg
-                        .substance(substance)
-                        .and_then(|s| s.vector.get("bio.mineral_ash_fraction").copied())
-                    else {
+                    if !def.vector.contains_key("bio.mineral_ash_fraction") {
+                        continue;
+                    }
+                    // The decomposition BARRIER is the substance's own thermal gate (its tissue-water
+                    // freezing point), read per-substance from its floor axis: at or below it a frozen
+                    // remains is preserved. A substance carrying no barrier axis does not decompose (the
+                    // barrier is its physical gate, so there is no global fallback for it).
+                    let Some(barrier) = def.vector.get("bio.decomposition_barrier").copied() else {
                         continue;
                     };
-                    let density = reg
-                        .substance(substance)
-                        .and_then(|s| s.vector.get("mat.density").copied())
+                    if temperature < barrier {
+                        continue; // frozen: a preserved remains does not decompose
+                    }
+                    let density = def
+                        .vector
+                        .get("mat.density")
+                        .copied()
                         .unwrap_or(Fixed::ZERO);
                     if density <= Fixed::ZERO {
                         continue;
                     }
-                    let decomposed = volume
-                        .checked_mul(calib.decomposition_rate)
-                        .unwrap_or(Fixed::ZERO);
+                    // The decomposition RATE is the substance's own per-tick fraction, read from its floor
+                    // axis, falling back to the global reserved rate for a substance that does not yet
+                    // declare its own.
+                    let rate = def
+                        .vector
+                        .get("bio.decomposition_rate")
+                        .copied()
+                        .unwrap_or(calib.decomposition_rate);
+                    let decomposed = volume.checked_mul(rate).unwrap_or(Fixed::ZERO);
                     if decomposed <= Fixed::ZERO {
                         continue;
                     }

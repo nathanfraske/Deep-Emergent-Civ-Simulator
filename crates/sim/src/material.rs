@@ -412,28 +412,30 @@ impl ShelterCalib {
 /// The reserved parameters of the matter cycle (material-substrate arc, cascade item 8): how a cell's
 /// organic matter decomposes over time. The mechanism that reads them is fixed Rust; these numbers are the
 /// owner's to set, surfaced with a basis, never fabricated (Principle 11).
+///
+/// The decomposition BARRIER (the thermal gate) and the RATE are read per-substance from the substance's
+/// own physics-floor axes (`bio.decomposition_barrier`, cited to the freezing point of the tissue water;
+/// `bio.decomposition_rate`, the reserved per-substance timescale), so decomposition varies by the organic
+/// matter's own physics rather than one global pair (the read-substance-physics direction). This calib
+/// carries only the GLOBAL FALLBACK rate, used for an organic substance that does not yet declare its own
+/// `bio.decomposition_rate`; the barrier has no global fallback, so a substance with no barrier axis does
+/// not decompose (the barrier is the substance's physical gate).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MatterCycleCalib {
-    /// The temperature at or above which organic matter decomposes; below it a frozen remains is preserved
-    /// (the thermal gate the resolved reaction kernel reads). RESERVED. Basis: the freezing point of the
-    /// organic matter's water (~273 K), below which microbial and enzymatic decomposition halts, so a frozen
-    /// carcass is preserved and a warm one rots; a physical-chemistry datum. A per-substance decomposition
-    /// onset is a refinement.
-    pub decomposition_barrier: Fixed,
-    /// The fraction of a decomposing substance's volume that breaks down per tick, the decomposition rate.
-    /// RESERVED. Basis: the characteristic decomposition timescale of the organic matter over the base tick
-    /// (a carcass rots over a timescale, not instantly); a decomposition-ecology datum. A larger fraction
-    /// rots matter faster.
+    /// The fallback fraction of a decomposing substance's volume that breaks down per tick, used when the
+    /// substance carries no per-substance `bio.decomposition_rate`. RESERVED. Basis: the characteristic
+    /// decomposition timescale of organic matter over the base tick (a carcass rots over a timescale, not
+    /// instantly); a decomposition-ecology datum. A larger fraction rots matter faster. Superseded per
+    /// substance once the owner sets each organic substance's own `bio.decomposition_rate`.
     pub decomposition_rate: Fixed,
 }
 
 impl MatterCycleCalib {
-    /// A labelled DEVELOPMENT FIXTURE: a freezing-point decomposition barrier and a rate that exercises the
-    /// mechanism (a warm carcass visibly rots over several ticks) without standing for a calibrated rate.
-    /// Not owner canon.
+    /// A labelled DEVELOPMENT FIXTURE: a fallback rate that exercises the mechanism (a warm carcass visibly
+    /// rots over several ticks) without standing for a calibrated rate. The barrier is the substance's own
+    /// (`bio.decomposition_barrier`), no longer a fixture field. Not owner canon.
     pub fn dev_fixture() -> MatterCycleCalib {
         MatterCycleCalib {
-            decomposition_barrier: Fixed::from_int(273),
             decomposition_rate: Fixed::from_ratio(1, 10),
         }
     }

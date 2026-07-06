@@ -55,8 +55,9 @@ values = [
 [[substance]]
 id = "carrion"
 participates_in = []
-real = "USDA / Greenfield and Southgate food-composition data (mammalian soft tissue density ~1000 to 1050 kg/m^3; whole-carcass mineral ash mass fraction ~0.05 including bone)"
+real = "USDA / Greenfield and Southgate food-composition data (mammalian soft tissue density ~1000 to 1050 kg/m^3; whole-carcass mineral ash mass fraction ~0.05 including bone). The decomposition barrier is the freezing point of the tissue water (~273 K), below which a carcass is preserved (CRC Handbook water fusion)"
 values = [
   { axis = "mat.density", value = "1000" },
   { axis = "bio.mineral_ash_fraction", value = "0.05" },
+  { axis = "bio.decomposition_barrier", value = "273" },
 ]

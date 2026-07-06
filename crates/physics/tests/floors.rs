@@ -83,8 +83,8 @@ fn the_biology_floor_loads_with_its_axes_and_three_laws() {
     let reg = biology();
     assert_eq!(
         reg.axis_count(),
-        20,
-        "the composition, toxin, and consumer axes, the respiratory-surface and convective-surface axes, plus the two derived score axes"
+        22,
+        "the composition, toxin, and consumer axes, the respiratory-surface and convective-surface axes, the two matter-cycle decomposition axes, plus the two derived score axes"
     );
     assert_eq!(reg.law_count(), 3, "net nutrition, harm, and edibility");
     // edibility reads the produced net-nutrition and net-harm scores, so it derives one tier
