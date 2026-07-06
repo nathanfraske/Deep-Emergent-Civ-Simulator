@@ -755,6 +755,9 @@ pub fn step<T: Terrain>(
         // No appetitive belief percept on the field-less fixture path (the layout carries no appetitive
         // block here), so the controller's appetitive input, if any, reads zero.
         &BTreeMap::new(),
+        // No attraction-direction percept on the field-less fixture path (the layout carries no attraction
+        // block here), so the controller's attraction input, if any, reads zero.
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -803,6 +806,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     material_field: &MaterialField,
     load_factors: &BTreeMap<StableId, Fixed>,
     appetitive: &BTreeMap<StableId, Vec<Fixed>>,
+    attraction: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -886,7 +890,15 @@ pub fn step_with_field_dirs<T: Terrain>(
         // input is byte-identical to before the material substrate existed. A pure physical read of the matter
         // here, the opaque signature (no label), the mirror of the biology feature read above (Principles 8, 9).
         let material = material_percepts.perceive(material_field.cell(here));
-        let input = layout.build_input_with_features_appetitive_and_material(
+        // The being's belief-derived ATTRACTION-direction percept for this tick (the lifetime/demography
+        // keystone, pillar 2, trace slice C3): the unit direction toward the nearest believed-rewarding
+        // material it senses, computed by the runner from its own reward beliefs and written into the
+        // controller's dedicated attraction block. Empty when the world does not enable the gradient (the
+        // layout carries no attraction block), so the input is byte-identical to before the block existed.
+        // Only an evolved attraction weight turns the direction into approach, the mirror of harm avoidance.
+        let empty_attraction: Vec<Fixed> = Vec::new();
+        let attract = attraction.get(&w.id).unwrap_or(&empty_attraction);
+        let input = layout.build_input_full(
             &w.homeostasis,
             &here_axes,
             &dirs,
@@ -894,6 +906,7 @@ pub fn step_with_field_dirs<T: Terrain>(
             &features,
             appetite,
             &material,
+            attract,
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
@@ -1693,6 +1706,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &load_factors,
                     &BTreeMap::new(), // no appetitive block on the fixture path
+                    &BTreeMap::new(), // no attraction block on the fixture path
                     &mut BTreeMap::new(),
                 );
             }
@@ -1772,6 +1786,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+                    &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -1861,6 +1876,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+                    &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2105,6 +2121,7 @@ mod tests {
             &crate::material::MaterialField::new(),
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+            &std::collections::BTreeMap::new(), // no attraction block on the fixture path
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -2227,6 +2244,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+                    &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -2345,6 +2363,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+                    &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2442,6 +2461,7 @@ mod tests {
                     &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
+                    &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }

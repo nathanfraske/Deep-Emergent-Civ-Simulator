@@ -95,9 +95,9 @@ use crate::homeostasis::{
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, avoidance_gradient, feature_observations, reward_observations,
-    sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS,
-    HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, feature_observations,
+    reward_observations, sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep,
+    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -909,6 +909,14 @@ pub struct Embodiment {
     /// material block) to opt a world into sensing the substances underfoot (the spent-hull trace and its
     /// siblings). The membership is the material-floor's data, so a new sensible substance is a data edit.
     material_percepts: MaterialPerceptRegistry,
+    /// Whether the controller layout feeds the belief-derived ATTRACTION-direction input (the
+    /// lifetime/demography keystone, pillar 2, trace slice C3). FALSE by default, so the layout carries no
+    /// attraction block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_attraction`],
+    /// which rebuilds the layout) to let a being sense the direction toward believed-rewarding matter (the
+    /// physical trace it re-earned a reward belief from). When true, the runner writes each being's unit
+    /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
+    /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
+    attraction: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1034,6 +1042,7 @@ impl Embodiment {
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
             material_percepts: MaterialPerceptRegistry::empty(),
+            attraction: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1066,6 +1075,20 @@ impl Embodiment {
     /// emergent pattern the feature block established.
     pub fn set_material_percepts(&mut self, material_percepts: MaterialPerceptRegistry) {
         self.material_percepts = material_percepts;
+        self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the belief-derived ATTRACTION-direction input in the controller layout, so a being
+    /// can sense the direction toward the nearest believed-rewarding material it senses and evolve to approach
+    /// it (the lifetime/demography keystone, pillar 2, trace slice C3, the behaviour half). Set BEFORE the
+    /// embodiment's beings are built, exactly like [`set_appetitive`] and [`set_material_percepts`], because
+    /// the beings' controllers are expressed against [`Embodiment::layout`], so a block added after they exist
+    /// would leave their weight vectors the wrong length. FALSE (the default) leaves the layout and every run
+    /// hash unchanged (opt-in). The new attraction weights a founder then expresses are zero (unseeded
+    /// channels), so the gradient moves no behaviour until selection lifts a weight, the positive mirror of
+    /// harm avoidance.
+    pub fn set_attraction(&mut self, enabled: bool) {
+        self.attraction = enabled;
         self.rebuild_layout();
     }
 
@@ -1113,12 +1136,13 @@ impl Embodiment {
     /// both feeding an input block the founder weights ignore until selection lifts them). Called by
     /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_appetitive_and_material(
+        self.layout = ControllerLayout::with_percepts_appetitive_material_and_attraction(
             &self.homeo,
             &self.afford,
             &self.percepts,
             self.appetitive,
             &self.material_percepts,
+            self.attraction,
             self.layout.hidden(),
         );
     }
@@ -3265,6 +3289,44 @@ impl Runner {
             },
             _ => BTreeMap::new(),
         };
+        // (0b') The belief-derived ATTRACTION-direction percept (the lifetime/demography keystone, pillar 2,
+        // physical-trace persistence, trace slice C3): each being senses the UNIT direction toward the nearest
+        // believed-rewarding material it senses, the positive mirror of the avoidance gradient. Present only
+        // when the embodiment enables the attraction input AND the reward learner is armed (its feature
+        // granularity keys the belief subject the gradient reconstructs, at MATERIAL_FEATURE_CHANNEL_BASE, the
+        // same offset the trace reward learner committed it under). A being with no reward belief nearby reads
+        // a zero direction and is omitted, so its attraction block reads zero. Read before the mutable
+        // embodiment borrow, RNG-free. Founder-zero: the direction moves no behaviour until selection lifts the
+        // attraction weight, so approaching the trace-marked place emerges (Principle 9).
+        let attraction: BTreeMap<StableId, Vec<Fixed>> = match (
+            self.embodiment.as_ref(),
+            self.world.as_ref(),
+            self.reward_learning,
+        ) {
+            (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
+                .walkers
+                .iter()
+                .filter_map(|w| {
+                    let mind = world.mind(w.id)?;
+                    let raw = attraction_gradient(
+                        mind,
+                        w.coord(),
+                        &emb.material,
+                        &emb.material_percepts,
+                        emb.params.sense_range,
+                        reward_learn.feature_granularity,
+                        MATERIAL_FEATURE_CHANNEL_BASE,
+                        world.belief_params(),
+                    );
+                    let (ax, ay) = unit(raw.0, raw.1);
+                    if ax == Fixed::ZERO && ay == Fixed::ZERO {
+                        return None;
+                    }
+                    Some((w.id, vec![ax, ay]))
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -3501,6 +3563,7 @@ impl Runner {
             &emb.material,
             &load_factors,
             &appetitive,
+            &attraction,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -6554,6 +6617,214 @@ values = [
             "the avoider outlived the stayer on the same harm: condition {:?} > {:?}",
             level(&runner, avoider),
             level(&runner, stayer)
+        );
+    }
+
+    #[test]
+    fn a_being_steers_toward_a_believed_rewarding_trace_only_through_an_evolved_attraction_weight()
+    {
+        // The lifetime/demography keystone, pillar 2, trace slice C3 (the ADAPTIVE leg, the positive mirror of
+        // the harm avoider): two beings sit WEST of a spent_hull region (the durable physical trace, to their
+        // east). Both hold the same REWARDS belief about the hull's material signature; the one whose
+        // controller has the evolved attraction-dir-to-heading weight steers EAST toward the believed-rewarding
+        // place (its attraction percept points toward the trace), while the one with the founder-zero weight
+        // cannot act on the belief and stays put. So the trace biases approach only through the evolved weight,
+        // and seeking the trace-marked place emerges (Principle 9): no authored approach, both hold the same
+        // belief, only the evolved weight differs. The exact sign-flipped mirror of the avoidance test.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+            REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        let hull_amount = Fixed::from_int(2);
+        let subject = feature_subject(
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            feature_bucket(
+                hull_amount,
+                RewardLearningCalib::dev_default().feature_granularity,
+            ),
+        );
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let approacher = world.spawn(Fixed::ONE);
+        let stayer = world.spawn(Fixed::ONE);
+        world.set_place(approacher, 0);
+        world.set_place(stayer, 1);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Arm the material percept AND the attraction input BEFORE the controllers are expressed, so the grown
+        // layout carries the attraction block the approacher's weight targets.
+        emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+        emb.set_attraction(true);
+        let layout = emb.layout().clone();
+        // The approacher's controller: it wants to move (MOVE activation from the bias) and steers its MOVE
+        // heading along the dedicated attraction-direction input, so it acts on the belief. MOVE is output 0
+        // (act, dx, dy); the reaction-norm weight for (output o, input i) sits at o * n_in + i.
+        let atbase = layout.attraction_input_base();
+        let n_in = layout.n_in();
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[n_in - 1] = Fixed::ONE; // MOVE activation (output 0) from the bias.
+        w[n_in + atbase] = Fixed::ONE; // MOVE dx (output 1) from the attraction dx input.
+        w[2 * n_in + atbase + 1] = Fixed::ONE; // MOVE dy (output 2) from the attraction dy input.
+        let approacher_ctrl = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), w);
+        let blank = Controller::zeros(&layout);
+
+        // Both start WEST of a hull region: spent_hull fills every cell with x >= 6, the empty ground is x < 6,
+        // and each stands at x = 3, one row apart so they do not share a cell.
+        let ap_start = Coord3::ground(3, 3);
+        let st_start = Coord3::ground(3, 6);
+        emb.add(
+            Walker::new(
+                approacher,
+                ap_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                approacher_ctrl,
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                stayer,
+                st_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+        // The durable trace to the east: a spent_hull region the beings perceive but cannot eat (it backs no
+        // reserve), so it persists and the attraction gradient reads it.
+        let mut material = MaterialField::new();
+        for y in 0..8 {
+            for x in 6..8 {
+                material.deposit(Coord3::ground(x, y), "spent_hull", hull_amount);
+            }
+        }
+        emb.set_material(material);
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The reward learner armed only for its feature granularity (the key the attraction gradient
+        // reconstructs the belief subject with); no eating happens, so it forms no belief and the seeded one
+        // stands.
+        runner.set_reward_learning(RewardLearningCalib::dev_default());
+        // Both beings already hold the REWARDS belief about the hull's material signature (they re-earned it):
+        // seed each once so the leg under test is approach, not formation.
+        let seed = |id: StableId| TickInput {
+            mind: id,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: REWARD_ATTR,
+                hyps: vec![REWARDS, NEUTRAL],
+                toward: REWARDS,
+                weight: Fixed::from_int(50),
+                from: id,
+            },
+        };
+        runner.step_with_world_inputs(&[seed(approacher), seed(stayer)]);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(0)
+        };
+        // Both hold the same belief, but only the approacher can act on it: it steered EAST toward the hull,
+        // while the stayer could not and stayed put.
+        assert!(
+            x_of(&runner, approacher) > 3,
+            "the approacher steered east toward the believed-rewarding hull (x = {})",
+            x_of(&runner, approacher)
+        );
+        assert_eq!(
+            x_of(&runner, stayer),
+            3,
+            "the stayer, unable to act on the belief, stayed put (founder-zero attraction weight)"
         );
     }
 

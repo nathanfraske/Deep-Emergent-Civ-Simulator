@@ -162,8 +162,19 @@ pub struct ControllerLayout {
     /// the new material-feature weights, so the percept moves no behaviour until selection lifts a weight off
     /// zero (Principle 8, the emergent pattern the feature block established).
     n_material: usize,
-    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + 1` for the
-    /// bias).
+    /// The width of the belief-derived ATTRACTION-direction input (the lifetime/demography keystone, pillar
+    /// 2, physical-trace persistence, trace slice C3): TWO when the world opts into the reward-attraction
+    /// gradient, else zero. The two channels carry the unit direction toward the nearest believed-rewarding
+    /// material the being senses ([`crate::learn::attraction_gradient`]), the positive mirror of the harm
+    /// avoidance gradient, which routes into the CONDITION axis's dead direction slot; the reward has no dead
+    /// reserve slot (the ENERGY slot carries live food-source memory), so it gets a DEDICATED clean channel of
+    /// its own. Zero yields an input vector, weight count, and genome expression identical to a world without
+    /// it, so it is OPT-IN and hash-neutral by default. The block sits AFTER the material block and before the
+    /// bias, so every earlier base and the bias-as-last convention hold unchanged. A founder expresses zero
+    /// for the attraction weights, so nothing is drawn toward a trace until selection lifts one (Principle 9).
+    n_attraction: usize,
+    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction
+    /// + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -255,15 +266,49 @@ impl ControllerLayout {
         material: &MaterialPerceptRegistry,
         hidden: usize,
     ) -> ControllerLayout {
+        ControllerLayout::with_percepts_appetitive_material_and_attraction(
+            homeo, afford, percept, appetitive, material, false, hidden,
+        )
+    }
+
+    /// Build a layout that also feeds the belief-derived ATTRACTION-direction input (the lifetime/demography
+    /// keystone, pillar 2, trace slice C3): TWO channels carrying the unit direction toward the nearest
+    /// believed-rewarding material the being senses ([`crate::learn::attraction_gradient`]), the positive
+    /// mirror of the harm avoidance gradient. Avoidance routes into the CONDITION axis's dead direction slot;
+    /// the reward has no dead reserve slot (the ENERGY slot carries live food-source memory), so it gets a
+    /// DEDICATED clean channel of its own, sitting AFTER the material block and before the bias, so every
+    /// earlier base and the bias-as-last convention hold unchanged. `attraction = false` yields exactly
+    /// [`ControllerLayout::with_percepts_appetitive_and_material`]'s layout (`n_attraction` zero), so it is
+    /// opt-in and a world that does not enable the gradient is bit-identical. A founder expresses zero for the
+    /// two attraction weights, so nothing is drawn toward a trace until selection lifts one (Principle 9, the
+    /// emergent pattern the feature block established).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_percepts_appetitive_material_and_attraction(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        appetitive: bool,
+        material: &MaterialPerceptRegistry,
+        attraction: bool,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
         let n_features = percept.len();
         let n_material = material.len();
+        // The attraction-direction input is two components (dx, dy), or none when the world does not enable
+        // the reward-attraction gradient.
+        let n_attraction = if attraction { 2 } else { 0 };
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         // One appetitive channel per affordance (aligned to the output slots below), or none when the
         // world does not opt into reward repetition.
         let n_appetitive = if appetitive { defs.len() } else { 0 };
-        let n_in = INPUTS_PER_AXIS * axes.len() + n_features + n_appetitive + n_material + 1;
+        let n_in = INPUTS_PER_AXIS * axes.len()
+            + n_features
+            + n_appetitive
+            + n_material
+            + n_attraction
+            + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
         for d in defs {
@@ -281,6 +326,7 @@ impl ControllerLayout {
             n_features,
             n_appetitive,
             n_material,
+            n_attraction,
             n_in,
             n_out,
             hidden,
@@ -354,6 +400,19 @@ impl ControllerLayout {
     /// width set.
     pub fn material_input_base(&self) -> usize {
         INPUTS_PER_AXIS * self.axes.len() + self.n_features + self.n_appetitive
+    }
+
+    /// The width of the attraction-direction input (two when the reward-attraction gradient is enabled, else
+    /// zero; the lifetime/demography keystone, pillar 2, trace slice C3).
+    pub fn n_attraction(&self) -> usize {
+        self.n_attraction
+    }
+
+    /// The input-vector index where the attraction-direction input begins: after the per-axis blocks, the
+    /// feature block, the appetitive block, and the material block, before the bias. A caller writing the
+    /// attraction direction reads this so it never hardcodes the block's position.
+    pub fn attraction_input_base(&self) -> usize {
+        INPUTS_PER_AXIS * self.axes.len() + self.n_features + self.n_appetitive + self.n_material
     }
 
     /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
@@ -464,6 +523,40 @@ impl ControllerLayout {
         appetitive: &[Fixed],
         material: &[Fixed],
     ) -> Vec<Fixed> {
+        self.build_input_full(
+            homeo,
+            here,
+            source_dirs,
+            signed,
+            features,
+            appetitive,
+            material,
+            &[],
+        )
+    }
+
+    /// Build the input vector including the belief-derived ATTRACTION-direction input (the lifetime/demography
+    /// keystone, pillar 2, trace slice C3): the per-axis blocks, feature block, appetitive block, material
+    /// block, and bias exactly as [`build_input_with_features_appetitive_and_material`], plus the two
+    /// attraction components (dx, dy) written into the attraction block ([`attraction_input_base`] onward).
+    /// `attraction` is the unit-normalised [`crate::learn::attraction_gradient`] read; a shorter slice leaves
+    /// the unfilled channels zero (clean degrade), and an empty slice with `n_attraction` zero is byte-
+    /// identical to the material builder before the attraction input existed, so an opted-out world is
+    /// unchanged. A pure read of physiology, earned knowledge, the biology feature underfoot, the being's
+    /// reward beliefs, the matter underfoot, and the direction toward believed-rewarding matter (Principles
+    /// 9, 10).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_input_full(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+        appetitive: &[Fixed],
+        material: &[Fixed],
+        attraction: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -489,6 +582,10 @@ impl ControllerLayout {
         let mbase = self.material_input_base();
         for (k, &m) in material.iter().enumerate().take(self.n_material) {
             v[mbase + k] = m;
+        }
+        let atbase = self.attraction_input_base();
+        for (k, &a) in attraction.iter().enumerate().take(self.n_attraction) {
+            v[atbase + k] = a;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
@@ -1003,6 +1100,97 @@ mod tests {
         assert_eq!(
             lit_out, dark_out,
             "a founder's behaviour is unmoved by the material percept (emergent, not authored)"
+        );
+    }
+
+    #[test]
+    fn the_attraction_direction_input_is_opt_in_byte_identical_and_founder_inert() {
+        // The lifetime/demography keystone, pillar 2, trace slice C3 (the behaviour half): the belief-derived
+        // attraction-direction input is opt-in and hash-neutral by default, TWO channels (dx, dy) when armed,
+        // sits AFTER the material block and before the bias, and is inert for a founder whose weights are all
+        // zero, so approaching a trace-marked place moves no behaviour until selection lifts a weight (Principle
+        // 8) and an opted-out world is bit-identical. The dedicated clean channel, the mirror of avoidance's
+        // dead CONDITION slot.
+        let homeo = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let percept = PerceptRegistry::empty();
+        let material = MaterialPerceptRegistry::from_substances(&["spent_hull"]);
+
+        // Opt-out: attraction off yields exactly the material layout (n_attraction zero).
+        let base = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+            &homeo, &afford, &percept, true, &material, false, 0,
+        );
+        let off = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+            &homeo, &afford, &percept, true, &material, false, 0,
+        );
+        assert_eq!(off, base);
+        assert_eq!(off.n_attraction(), 0);
+
+        // Opt-in: n_in grows by exactly two channels, the block sits after the material block and before the
+        // bias, and every earlier base is unchanged.
+        let on = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+            &homeo, &afford, &percept, true, &material, true, 0,
+        );
+        assert_eq!(on.n_attraction(), 2);
+        assert_eq!(on.n_in(), base.n_in() + 2);
+        assert_eq!(
+            on.attraction_input_base(),
+            base.material_input_base() + base.n_material()
+        );
+        assert_eq!(on.material_input_base(), base.material_input_base());
+
+        // The builder writes the two attraction components and keeps the bias last.
+        let here = BTreeSet::new();
+        let dirs = BTreeMap::new();
+        let signed = BTreeMap::new();
+        let homeostasis = Homeostasis::from_mass(&homeo, Fixed::ONE);
+        let material_vec = vec![Fixed::ZERO];
+        let attraction = vec![Fixed::from_int(1), Fixed::from_int(-1)];
+        let input = on.build_input_full(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &vec![Fixed::ZERO; on.n_appetitive()],
+            &material_vec,
+            &attraction,
+        );
+        let atbase = on.attraction_input_base();
+        assert_eq!(
+            input[atbase],
+            Fixed::from_int(1),
+            "attraction dx is written"
+        );
+        assert_eq!(
+            input[atbase + 1],
+            Fixed::from_int(-1),
+            "attraction dy is written"
+        );
+        assert_eq!(
+            input[on.n_in() - 1],
+            Fixed::ONE,
+            "the bias is still the last slot"
+        );
+
+        // A founder (all-zero weights) issues the identical output whether or not the attraction block is lit,
+        // so the gradient moves no behaviour until selection lifts an attraction weight off zero.
+        let founder = Controller::zeros(&on);
+        let dark = on.build_input_full(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &vec![Fixed::ZERO; on.n_appetitive()],
+            &material_vec,
+            &[Fixed::ZERO; 2],
+        );
+        let (lit_out, _) = founder.evaluate(&input, &[]);
+        let (dark_out, _) = founder.evaluate(&dark, &[]);
+        assert_eq!(
+            lit_out, dark_out,
+            "a founder's behaviour is unmoved by the attraction percept (emergent, not authored)"
         );
     }
 

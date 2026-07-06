@@ -44,6 +44,8 @@ use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
 use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
+use crate::material::MaterialField;
+use crate::material_percept::MaterialPerceptRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
@@ -538,6 +540,74 @@ pub fn avoidance_gradient(
                 if let (Some(cx), Some(cy)) = (
                     Fixed::from_int(-dx).checked_div(d2),
                     Fixed::from_int(-dy).checked_div(d2),
+                ) {
+                    ax = ax.saturating_add(cx);
+                    ay = ay.saturating_add(cy);
+                }
+            }
+        }
+    }
+    (ax, ay)
+}
+
+/// The belief-derived expected-reward ATTRACTION gradient for a being at `here` (the lifetime/demography
+/// keystone, pillar 2, physical-trace persistence, trace slice C3): the positive mirror of
+/// [`avoidance_gradient`], the summed inverse-distance attraction TOWARD every cell within `sense_range`
+/// whose MATERIAL signature the being holds a committed REWARDS belief about. Each believed-rewarding cell
+/// contributes a vector pointing from the being toward the cell, weighted by inverse distance (a nearer
+/// rewarding place pulls harder), so the raw sum points toward the bulk of believed reward; a being that
+/// believes nothing nearby pays off gets a zero gradient. The caller normalises the raw sum to a unit
+/// percept, exactly as [`avoidance_gradient`] and the temperature gradient are normalised. The material
+/// feature subject is reconstructed at `channel_base` ([`MATERIAL_FEATURE_CHANNEL_BASE`]), the same offset
+/// the trace reward learner committed it under, so this reads the belief that learner formed.
+///
+/// This is a PERCEPT, not a heading, the exact behavioural mirror of avoidance: the runner feeds it into a
+/// direction slot the evolved controller reads, and ONLY a heritable weight lifted off founder-zero by
+/// selection turns it into approach, so seeking the trace-marked place emerges rather than being authored
+/// (Principle 9): the mechanism never adds a reward term to the heading itself. It reads the being's own
+/// reward beliefs and the raw material it senses, never a label or a race id (Principle 8). Pure and
+/// RNG-free. The physical trace only BIASES the being toward the place; the being's own felt reward stays
+/// the sole gate to a committed belief.
+#[allow(clippy::too_many_arguments)]
+pub fn attraction_gradient(
+    mind: &Mind,
+    here: Coord3,
+    material: &MaterialField,
+    material_percepts: &MaterialPerceptRegistry,
+    sense_range: i64,
+    granularity: Fixed,
+    channel_base: u16,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    if material_percepts.is_empty() {
+        return (Fixed::ZERO, Fixed::ZERO);
+    }
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    let r = sense_range.max(0) as i32;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let cell = Coord3::ground(here.x + dx, here.y + dy);
+            let features = material_percepts.perceive(material.cell(cell));
+            let believes_reward = features.iter().enumerate().any(|(channel, &amount)| {
+                amount > Fixed::ZERO && {
+                    let subject = feature_subject(
+                        channel_base + channel as u16,
+                        feature_bucket(amount, granularity),
+                    );
+                    mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS)
+                }
+            });
+            if believes_reward {
+                // A vector from the being TOWARD the rewarding cell (the sign flip of avoidance's repulsion):
+                // (dx, dy) / (dx^2 + dy^2). No square root; a nearer rewarding place pulls harder.
+                let d2 = Fixed::from_int(dx * dx + dy * dy);
+                if let (Some(cx), Some(cy)) = (
+                    Fixed::from_int(dx).checked_div(d2),
+                    Fixed::from_int(dy).checked_div(d2),
                 ) {
                     ax = ax.saturating_add(cx);
                     ay = ay.saturating_add(cy);
@@ -1170,6 +1240,93 @@ mod tests {
                 &PerceptRegistry::empty(),
                 4,
                 Fixed::ONE,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
+        );
+    }
+
+    #[test]
+    fn a_being_reads_an_attraction_gradient_toward_a_believed_rewarding_material() {
+        // Trace slice C3, the belief-to-behaviour percept, the positive mirror of the avoidance gradient: a
+        // being that has re-earned "this material marks a place that pays off" reads an attraction gradient
+        // pointing TOWARD the believed-rewarding cell; a being that has learned nothing reads none. The
+        // gradient is a percept the controller weights, so no approach is authored here (it emerges when
+        // selection lifts the weight). The subject is reconstructed at the material channel base, the same
+        // offset the trace reward learner committed it under.
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+
+        let percepts = MaterialPerceptRegistry::from_substances(&["spent_hull"]);
+        let here = Coord3::ground(5, 5);
+        let hull_cell = Coord3::ground(7, 5); // two tiles due east of the being
+        let amount = Fixed::from_int(2);
+        let mut field = MaterialField::new();
+        field.deposit(hull_cell, "spent_hull", amount);
+        let gran = Fixed::ONE;
+        let subject = feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, feature_bucket(amount, gran));
+
+        // A being that believes nothing rewarding nearby has no attraction gradient.
+        let mut mind = Mind::new(StableId(1), Fixed::ONE);
+        assert_eq!(
+            attraction_gradient(
+                &mind,
+                here,
+                &field,
+                &percepts,
+                4,
+                gran,
+                MATERIAL_FEATURE_CHANNEL_BASE,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no learned reward nearby, no attraction gradient"
+        );
+
+        // Teach it that the hull marks a rewarding place (commit REWARDS about the material feature-kind).
+        for _ in 0..3 {
+            mind.consider(
+                subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                RewardLearningCalib::dev_default().observation_weight(),
+                mind.id,
+            );
+        }
+        assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), Some(REWARDS));
+        let (gx, gy) = attraction_gradient(
+            &mind,
+            here,
+            &field,
+            &percepts,
+            4,
+            gran,
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            &params(),
+        );
+        // The hull is to the EAST (+x), so the attraction gradient points EAST (+x), toward it, with no
+        // north-south component (the hull is due east). The exact sign flip of the avoidance gradient.
+        assert!(
+            gx > Fixed::ZERO,
+            "the gradient points toward the hull to the east: gx={gx:?}"
+        );
+        assert_eq!(
+            gy,
+            Fixed::ZERO,
+            "the hull is due east, so no north-south pull"
+        );
+
+        // Opt-out: an empty material-percept registry senses nothing, so the gradient is zero.
+        assert_eq!(
+            attraction_gradient(
+                &mind,
+                here,
+                &field,
+                &MaterialPerceptRegistry::empty(),
+                4,
+                gran,
+                MATERIAL_FEATURE_CHANNEL_BASE,
                 &params()
             ),
             (Fixed::ZERO, Fixed::ZERO),
