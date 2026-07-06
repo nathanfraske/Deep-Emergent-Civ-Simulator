@@ -80,6 +80,7 @@ pub mod environ;
 pub mod epoch;
 pub mod evidence;
 pub mod evolve;
+pub mod forward_model;
 pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
