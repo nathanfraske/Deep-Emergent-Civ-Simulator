@@ -614,6 +614,18 @@ impl PhysicsRegistry {
         let mut reg =
             PhysicsRegistry::from_toml_str(include_str!("../data/mechanical_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
+        // The reactive floors (material-substrate arc, cascade item 8, the matter cycle): the fluids,
+        // chemistry, and biology floors carry the transform physics a cell's matter reads to decompose,
+        // corrode, or burn (the corrosion electrode potentials and susceptibility, the combustion products'
+        // ash fraction, the ambient fluids). Loaded in the wave order (each extends the prior), so a
+        // substance can carry its own reaction, corrosion, and decomposition data and the matter cycle
+        // reads it straight from the floor (the north-star "dissolve into the floor"). Additive: the
+        // material-substrate derivations read specific axes by id, so a fuller registry leaves them
+        // unchanged, and worldgen fills the z-column from the ground floor's strata alone.
+        reg.extend_from_toml_str(include_str!("../data/fluids_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/chem_optics_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/em_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/biology_floor.toml"))?;
         Ok(reg)
     }
 
