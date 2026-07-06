@@ -605,6 +605,17 @@ pub struct World {
     /// cadence is then a no-op, so the hazard shape is never fabricated: aging (a bare increment)
     /// runs on the cadence regardless, but a being dies only against an owner-supplied curve.
     mortality_hazard: Option<Curve>,
+    /// Whether mortality runs as a per-tick STAGGERED cull rather than the per-cadence cohort cull (the
+    /// lifetime/demography keystone, pillar 1 slice 1a). False by default, so mortality beats once per
+    /// cadence exactly as before and an unarmed world is byte-identical. When armed
+    /// ([`World::arm_per_tick_mortality`]), every being faces the hazard EVERY tick at the per-cadence
+    /// probability scaled by the ticks in a cadence, so deaths stagger across ticks (overlapping
+    /// generations) while the mean turnover per cadence is preserved, and the per-cadence mortality in
+    /// [`World::life_cadence`] is skipped so no being is culled twice. The per-tick roll keys on the tick
+    /// rather than the age, so staggered deaths never collide on the age coordinate the per-cadence path
+    /// uses. This does not touch the census or drift (only births feed the effective size), so it is
+    /// independent of the overlapping-generations effective-size question (R-OVERLAP-NE, slice 1b).
+    per_tick_mortality: bool,
     /// The data-driven breeding-system registry (design Part 25, R-REPRO): resolves a race's
     /// [`crate::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
     /// sex is read off its sex-determination locus. Empty by default; when a race's system is not
@@ -684,6 +695,7 @@ impl World {
             workers: 1,
             life_cadence_ticks: LIFE_CADENCE_TICKS,
             mortality_hazard: None,
+            per_tick_mortality: false,
             breeding_systems: BreedingSystemRegistry::new(),
             census: ReproductiveCensus::new(),
             // The labelled stamped default (design 25.10, `genome.gauss_approx = SumOfUniforms{k=12}`):
@@ -767,6 +779,21 @@ impl World {
     /// beat is a no-op. The curve's shape is reserved with its basis (the senescence failure boundary).
     pub fn set_mortality_hazard_by_race(&mut self, hazard: Curve) {
         self.mortality_hazard_by_race = Some(hazard);
+    }
+
+    /// Arm per-tick staggered mortality (the lifetime/demography keystone, pillar 1 slice 1a). Off by
+    /// default, so mortality culls the whole cohort once per cadence exactly as before and an unarmed
+    /// world is byte-identical. When armed, every being faces the installed hazard EVERY tick at the
+    /// per-cadence probability scaled by the ticks in a cadence, so deaths STAGGER across ticks
+    /// (overlapping generations) while the mean turnover per cadence is preserved, and the per-cadence
+    /// mortality pass is skipped so no being is culled twice. The scaling is the linearized rate
+    /// conversion (`per-tick = per-cadence / ticks-per-cadence`), exact in the mean; the honest limit is
+    /// that it approximates the survival curve to first order rather than the exact geometric
+    /// `1 - (1 - p)^(1/N)`, a difference that vanishes for the small per-cadence hazards senescence
+    /// implies. This changes no census or drift timing (only births feed the effective size), so it is
+    /// independent of the overlapping-generations effective-size question (R-OVERLAP-NE).
+    pub fn arm_per_tick_mortality(&mut self) {
+        self.per_tick_mortality = true;
     }
 
     /// Install the reproduction calibrations (design Parts 25, 28, R-REPRO). Until set, the reproduce
@@ -2091,6 +2118,67 @@ impl World {
         Ok(dead)
     }
 
+    /// The per-tick staggered mortality beat (the lifetime/demography keystone, pillar 1 slice 1a). When
+    /// armed ([`World::arm_per_tick_mortality`]), run the installed hazard EVERY tick at the per-cadence
+    /// probability scaled by the ticks in a cadence (the linearized rate conversion), keyed on the being
+    /// and the TICK so each tick's roll is independent and staggered deaths never collide on the age
+    /// coordinate the per-cadence pass uses. By-race precedence, and the same unraceable-refusal (a pass
+    /// that meets a being it cannot race-normalize leaves the population untouched rather than partially
+    /// culling). Inert unless armed, so an unarmed world returns immediately here and is byte-identical.
+    /// Runs in the serial tick section drawing no shared state, so it is worker-count independent.
+    fn per_tick_mortality_step(&mut self) {
+        if !self.per_tick_mortality || self.life_cadence_ticks == 0 {
+            return;
+        }
+        let scale = Fixed::from_ratio(1, self.life_cadence_ticks as i64);
+        let clock = self.clock;
+        if let Some(hazard) = self.mortality_hazard_by_race.clone() {
+            // Resolve every being's life fraction first, refusing on the first being that cannot be
+            // race-normalized, so no partial cull runs before the refusal (mirrors the per-cadence pass).
+            let mut targets: Vec<(StableId, Fixed)> = Vec::with_capacity(self.ages.len());
+            for (&id, &age) in &self.ages {
+                match self.race_of.get(&id).and_then(|rid| self.races.get(rid)) {
+                    Some(race) => targets.push((id, race.life_fraction(age))),
+                    None => return,
+                }
+            }
+            self.cull_per_tick(targets, &hazard, scale, clock);
+        } else if let Some(hazard) = self.mortality_hazard.clone() {
+            let targets: Vec<(StableId, Fixed)> = self
+                .ages
+                .iter()
+                .map(|(&id, &age)| (id, crate::demography::hazard_age(age)))
+                .collect();
+            self.cull_per_tick(targets, &hazard, scale, clock);
+        }
+    }
+
+    /// Roll and cull one per-tick staggered mortality pass: for each `(being, hazard-x)` target the
+    /// chance is the hazard at `x`, clamped to `[0, 1]` then scaled by `scale` (the per-tick fraction of
+    /// the per-cadence probability), and the being dies when its [`Phase::MORTALITY`] roll keyed on the
+    /// `clock` falls under it. Removals run in id order. Shared by the by-race and raw-age branches.
+    fn cull_per_tick(
+        &mut self,
+        targets: Vec<(StableId, Fixed)>,
+        hazard: &Curve,
+        scale: Fixed,
+        clock: u64,
+    ) {
+        let dead: Vec<StableId> = targets
+            .into_iter()
+            .filter_map(|(id, x)| {
+                let chance = hazard.eval(x).clamp(Fixed::ZERO, Fixed::ONE).mul(scale);
+                let roll = DrawKey::entity(id.0, clock, Phase::MORTALITY)
+                    .rng(self.seed)
+                    .unit_fixed(0);
+                (roll < chance).then_some(id)
+            })
+            .collect();
+        for id in &dead {
+            self.remove_being(*id);
+        }
+    }
+
     /// The life-cadence beat, run once per [`World::tick`] but firing only on the cadence period
     /// (design Part 20, R-AGING). On a tick whose clock is a whole multiple of
     /// [`World::set_life_cadence`]'s period, every tracked being ages one step and then, if an
@@ -2124,12 +2212,16 @@ impl World {
         // the race registry, so it is moved out and back around the mutable cull (a cheap pointer swap
         // that cannot change state). A by-race pass that meets an unraceable being refuses rather than
         // partially culling, so the population is left intact on a config error.
-        if let Some(hazard) = self.mortality_hazard_by_race.clone() {
-            let races = std::mem::take(&mut self.races);
-            let _ = self.apply_mortality_by_race(&races, &hazard);
-            self.races = races;
-        } else if let Some(hazard) = self.mortality_hazard.clone() {
-            self.apply_mortality(&hazard);
+        // Skipped when per-tick staggered mortality is armed (pillar 1 slice 1a): the per-tick beat in
+        // `tick` culls every tick instead, so culling here too would kill the cohort twice.
+        if !self.per_tick_mortality {
+            if let Some(hazard) = self.mortality_hazard_by_race.clone() {
+                let races = std::mem::take(&mut self.races);
+                let _ = self.apply_mortality_by_race(&races, &hazard);
+                self.races = races;
+            } else if let Some(hazard) = self.mortality_hazard.clone() {
+                self.apply_mortality(&hazard);
+            }
         }
     }
 
@@ -2601,6 +2693,7 @@ impl World {
         self.converse_language();
         self.drift_step();
         self.life_cadence();
+        self.per_tick_mortality_step();
     }
 
     /// A profiling aid, not part of the simulation: advance one tick with no stimuli and return the
@@ -2642,8 +2735,10 @@ impl World {
         self.drift_step();
         ns[5] = s.elapsed().as_nanos();
         // The coarse life beat runs after the cognition phases so tick_timed produces the same state
-        // tick would; it is not one of the profiled six (it fires only on the cadence period).
+        // tick would; it is not one of the profiled six (it fires only on the cadence period). The
+        // per-tick staggered mortality beat follows it, matching `tick`, so tick_timed stays state-equal.
         self.life_cadence();
+        self.per_tick_mortality_step();
         ns
     }
 

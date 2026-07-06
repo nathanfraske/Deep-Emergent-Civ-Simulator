@@ -480,3 +480,91 @@ fn graded_reproductive_vigor_scales_reproduction_and_is_inert_at_full() {
         "the vigor-gated reproduction trajectory replays bit for bit"
     );
 }
+
+#[test]
+fn per_tick_mortality_staggers_deaths_within_the_cadence_and_replays() {
+    // The lifetime/demography keystone, pillar 1 slice 1a: with per-tick staggered mortality armed, a
+    // cohort dies gradually across the ticks of a cadence (overlapping generations) rather than all at
+    // once on the cadence boundary, while the mean turnover per cadence is preserved. Reproduction is
+    // NOT installed here, so the beat isolates mortality (no births confound the population count).
+    // Labelled fixtures throughout, never an owner value.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), sex_determined_race(0, 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 60,
+    }];
+    // A raw-age hazard reading a moderate per-cadence death chance at the cohort's age (the curve is on
+    // raw age, `demography::hazard_age`), so deaths are observable within a short cadence.
+    let build = |seed: u64, armed: bool| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_breeding_systems(registry());
+        let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+        for &id in &founders {
+            w.set_age(id, 40);
+        }
+        w.set_life_cadence(4);
+        w.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(40), Fixed::from_ratio(1, 2)),
+            (Fixed::from_int(80), Fixed::ONE),
+        ]));
+        if armed {
+            w.arm_per_tick_mortality();
+        }
+        (w, founders.len())
+    };
+
+    // Armed: within the cadence, before the boundary tick, deaths have already staggered in.
+    let (mut a, start) = build(0xA11CE, true);
+    for _ in 0..3 {
+        a.tick(&[]);
+    }
+    assert!(
+        a.population() < start,
+        "per-tick mortality staggers deaths across the cadence: {} of {start} remain before the boundary",
+        a.population()
+    );
+    assert!(
+        a.population() > 0,
+        "but it does not wipe the cohort in a cadence"
+    );
+
+    // Unarmed: the per-cadence cull fires only on the boundary tick, so nothing dies before it, then the
+    // whole cohort faces the roll at once.
+    let (mut u, ustart) = build(0xA11CE, false);
+    for _ in 0..3 {
+        u.tick(&[]);
+    }
+    assert_eq!(
+        u.population(),
+        ustart,
+        "per-cadence mortality culls nothing before the boundary tick"
+    );
+    u.tick(&[]); // the cadence boundary
+    assert!(
+        u.population() < ustart,
+        "the per-cadence cull lands all at once on the boundary"
+    );
+
+    // The staggered trajectory replays bit for bit (the per-tick roll keys on the being and the tick).
+    let (mut a2, _) = build(0xA11CE, true);
+    for _ in 0..3 {
+        a2.tick(&[]);
+    }
+    assert_eq!(
+        a.state_hash(),
+        a2.state_hash(),
+        "the staggered mortality trajectory replays bit for bit"
+    );
+
+    // Over a full cadence, both cull a substantial fraction (the mean turnover is preserved to first
+    // order): the armed cohort after one whole cadence sits well below its start, like the unarmed one.
+    a.tick(&[]);
+    assert!(
+        a.population() < start && a.population() > 0,
+        "over a full cadence the staggered cull removes a substantial fraction: {} of {start}",
+        a.population()
+    );
+}
