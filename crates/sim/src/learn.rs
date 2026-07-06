@@ -42,6 +42,7 @@ use std::collections::BTreeMap;
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
+use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
 use crate::percept::{feature_bucket, PerceptRegistry};
 
@@ -533,6 +534,46 @@ pub fn avoidance_gradient(
     (ax, ay)
 }
 
+/// The belief-derived APPETITIVE salience over a being's affordances (ideation / experiential-discovery
+/// arc, piece 1, the belief-to-behaviour feedback, the appetitive mirror of [`avoidance_gradient`]): for
+/// each affordance in the caller's canonical order, ONE when the being holds a committed REWARDS belief
+/// about that affordance's single-primitive sequence, ZERO otherwise. It is the exact mirror of the
+/// avoidance gradient's committed-belief test (`mind.belief(...) == Some(HARMS)`), read per AFFORDANCE
+/// rather than per CELL, because the reward belief is keyed on the ACTION the being took rather than the
+/// ground it stands on, so there is no spatial distance to weight by: a believed-rewarding action reads a
+/// full unit signal, every other reads zero.
+///
+/// This is a PERCEPT, not a decision. The runner writes each channel into the controller's appetitive
+/// input block (canonical affordance order), and ONLY a heritable weight lifted off founder-zero by
+/// selection turns "I believe this action pays off" into "issue it again", so REPETITION emerges rather
+/// than being authored (Principle 9): the mechanism never adds a reward term to an affordance's activation
+/// directly, and the afforded-set gate in [`crate::controller::ControllerLayout::decide`] still bounds
+/// which action can win, so a believed-rewarding action the body cannot currently perform is never forced.
+/// Reads only the being's own reward beliefs and the affordance ids, never an affordance's authored valence
+/// or a race id (Principle 8). Pure and RNG-free; the single-primitive subject matches exactly what the
+/// slice-1c credit pass commits, so the belief this reads is the belief that pass formed.
+pub fn appetitive_salience(
+    mind: &Mind,
+    affordances: &[AffordanceId],
+    params: &InferenceParams,
+) -> Vec<Fixed> {
+    affordances
+        .iter()
+        .map(|a| {
+            let subject = sequence_subject(&[SequenceStep {
+                primitive: a.0,
+                target_bucket: 0,
+                param_bucket: 0,
+            }]);
+            if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
+                Fixed::ONE
+            } else {
+                Fixed::ZERO
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +819,62 @@ mod tests {
                 assert_ne!(s.0, feature_subject(ch, bk).0);
             }
         }
+    }
+
+    #[test]
+    fn appetitive_salience_lights_only_the_affordance_the_being_believes_pays_off() {
+        // Slice 1d (READ): the belief-to-behaviour feedback PERCEPT, the appetitive mirror of the avoidance
+        // gradient. A being that has committed the REWARDS belief about ONE affordance's sequence reads a unit
+        // appetitive signal on that affordance's channel and zero on the others; a being that believes nothing
+        // reads all zeros, so a founder's percept is inert until a belief forms and an evolved weight lifts it.
+        let ingest = AffordanceId(1);
+        let grasp = AffordanceId(3);
+        let extract = AffordanceId(4);
+        let affordances = [ingest, grasp, extract];
+
+        let calib = RewardLearningCalib::dev_default();
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: ingest.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let mut mind = Mind::new(StableId(7), Fixed::ONE);
+        // A being that has learned nothing reads a flat-zero appetitive percept (no signal to act on).
+        assert_eq!(
+            appetitive_salience(&mind, &affordances, &params()),
+            vec![Fixed::ZERO; 3],
+            "a being with no reward belief reads no appetitive signal on any affordance"
+        );
+        // Teach it that its INGEST pays off (the belief slice 1c's credit pass forms).
+        for _ in 0..3 {
+            mind.consider(
+                ingest_subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                calib.observation_weight(),
+                mind.id,
+            );
+        }
+        assert_eq!(
+            mind.belief(ingest_subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the being has committed the ingest-pays-off belief"
+        );
+        // The appetitive percept now lights ONLY the ingest channel, in the caller's canonical order, and the
+        // channels for the actions it holds no belief about stay dark.
+        assert_eq!(
+            appetitive_salience(&mind, &affordances, &params()),
+            vec![Fixed::ONE, Fixed::ZERO, Fixed::ZERO],
+            "the appetitive percept lights only the affordance the being believes pays off"
+        );
+        // The salience aligns to the caller's affordance order, not a fixed index: reorder the inputs and the
+        // lit channel moves with ingest.
+        assert_eq!(
+            appetitive_salience(&mind, &[grasp, ingest], &params()),
+            vec![Fixed::ZERO, Fixed::ONE],
+            "the salience aligns to the caller's canonical affordance order"
+        );
     }
 
     #[test]
