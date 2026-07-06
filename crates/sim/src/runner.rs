@@ -2004,6 +2004,13 @@ impl Runner {
         self.field.step(&self.calib);
         if let Some((env, calib)) = self.environ.as_mut() {
             let calib = *calib;
+            // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
+            // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
+            // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
+            // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
+            if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
+                env.set_fertility_from(emb.soil(), mc.fertility_scale);
+            }
             env.step(&self.field, &calib);
         }
         // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the

@@ -47,7 +47,7 @@ use civsim_world::{Coord3, TileMap};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
-use crate::material::EarthworkField;
+use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
 use crate::stocks::Stock;
@@ -260,6 +260,16 @@ pub struct EnvironFields {
     /// the effective elevation (base plus earthwork delta) whenever digging has reshaped the terrain
     /// ([`Self::recouple_terrain`]), so a dug pit becomes a basin that pools its water and salt.
     downhill: Vec<usize>,
+    /// The per-cell SOIL FERTILITY supply (material-substrate arc, cascade item 8, slice C2): the extra
+    /// soil-nutrient supply, over the uniform `soil_baseline`, that the matter cycle's deposited nutrient
+    /// mass contributes to a cell's productivity soil factor. Derived each tick from the embodiment's soil
+    /// nutrient store by [`Self::set_fertility_from`] and read by [`Self::step_productivity`], so a cell
+    /// where a carcass rotted grows more where soil is the limiting factor (the matter cycle closes into
+    /// the food web). All-zero until the matter cycle deposits and the runner fills it, so a scenario with
+    /// no matter cycle armed reads the plain baseline and the productivity (and its hash) is unchanged. Not
+    /// folded into `state_hash`: it is a pure derived read of the embodiment's soil store (which folds
+    /// itself), and its effect enters the hash through the `capacity` it shifts.
+    fertility: Vec<Fixed>,
 }
 
 impl EnvironFields {
@@ -295,6 +305,7 @@ impl EnvironFields {
             light,
             elevation,
             downhill,
+            fertility: vec![Fixed::ZERO; n],
         }
     }
 
@@ -508,21 +519,48 @@ impl EnvironFields {
         self.water.cells = next;
     }
 
+    /// Fill the per-cell soil fertility supply from the matter cycle's soil nutrient store (material-
+    /// substrate arc, cascade item 8, slice C2), scaled by the reserved fertility scale (the soil supply
+    /// gained per unit deposited nutrient mass). Called by the runner before [`Self::step_productivity`]
+    /// when the matter cycle is armed, so a cell where a carcass rotted contributes its nutrient mass to
+    /// its productivity soil factor. The store is sparse (only decomposed cells carry nutrient); the
+    /// fertility vector is reset to zero and refilled each tick, so a cell that loses its nutrient (or a
+    /// scenario that disarms the matter cycle) reads no bonus. Multiple z-levels at a cell column sum into
+    /// the same 2D productivity cell. A pure deterministic fold in canonical (cell) order (Principle 3).
+    pub fn set_fertility_from(&mut self, soil: &SoilNutrientField, scale: Fixed) {
+        for f in self.fertility.iter_mut() {
+            *f = Fixed::ZERO;
+        }
+        for (cell, total) in soil.cell_totals() {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            let supply = total.checked_mul(scale).unwrap_or(Fixed::MAX);
+            self.fertility[i] = self.fertility[i].saturating_add(supply);
+        }
+    }
+
     /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
     /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
     /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
     /// cutoff (Principle 8). This is the ceiling; [`Self::regrow_supply`] regrows the standing stock
-    /// toward it and grazing depletes it (base-level liveliness step 3).
+    /// toward it and grazing depletes it (base-level liveliness step 3). The soil supply is the uniform
+    /// `soil_baseline` plus the per-cell fertility the matter cycle has deposited ([`Self::set_fertility_from`]),
+    /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
+    /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
+    /// baseline, so the productivity (and its hash) is unchanged.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
+                let soil = calib.soil_baseline.saturating_add(self.fertility[i]);
                 self.capacity.cells[i] = biomass_from(
                     self.water.cells[i],
                     self.light[i],
                     temp.at(x, y),
-                    calib.soil_baseline,
+                    soil,
                     calib,
                 );
             }
@@ -697,6 +735,7 @@ mod tests {
             light: vec![Fixed::ONE; elev_tenths.len()],
             elevation,
             downhill,
+            fertility: vec![Fixed::ZERO; elev_tenths.len()],
         }
     }
 
@@ -990,6 +1029,70 @@ mod tests {
                 "the productive cell supplies energy the grazers read"
             );
         }
+    }
+
+    #[test]
+    fn decomposed_soil_fertility_lifts_productivity_where_soil_is_the_limiting_factor() {
+        // Material-substrate item 8 slice C2 (the matter cycle closes into the food web): the nutrient the
+        // matter cycle deposits into the soil raises a cell's productivity where soil is the limiting Liebig
+        // factor. Under a soil-limited calibration (no uniform soil baseline), a wet, lit, warm cell still
+        // carries no capacity because soil starves it; fertilising that one cell lifts its capacity above
+        // zero, while an equally-viable unfertilised cell stays barren, so the lift is LOCAL to where the
+        // matter rotted (no coded fertility rule, just the deposited nutrient relaxing the soil factor).
+        let map = a_map(0x5EED);
+        let temp = Field::from_map(&map);
+        // Soil is the only starved factor: no uniform soil baseline, the other requirements the fixture's.
+        let calib = EnvironCalib {
+            soil_baseline: Fixed::ZERO,
+            ..EnvironCalib::dev_fixture()
+        };
+        let mut e = EnvironFields::from_map(&map);
+        // Accumulate water so some cells are wet (soil the only starved factor there).
+        for _ in 0..40 {
+            e.step(&temp, &calib);
+        }
+        let (w, h) = e.dims();
+        // With no soil supply, every cell is soil-limited to zero capacity.
+        let total_capacity: Fixed = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| e.capacity_at(x, y))
+            .fold(Fixed::ZERO, |a, b| a + b);
+        assert_eq!(
+            total_capacity,
+            Fixed::ZERO,
+            "with no soil supply every cell is soil-limited to zero productivity"
+        );
+        // Viable interior cells (wet, warm, off the dark poles), so only soil limits them: one to fertilise,
+        // one an unfertilised control.
+        let viable: Vec<(i32, i32)> = (1..h - 1)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| e.water_at(x, y) > Fixed::ZERO && temp.at(x, y) > Fixed::ZERO)
+            .collect();
+        assert!(
+            viable.len() >= 2,
+            "the wet world offers at least two viable cells to compare"
+        );
+        let (fx, fy) = viable[0];
+        let (ux, uy) = viable[1];
+        // Deposit soil nutrient at the fertilised cell (as the matter cycle would) and fill the fertility;
+        // a unit scale and a unit mass raise its soil supply to the requirement, so soil no longer starves.
+        let mut soil = SoilNutrientField::new();
+        soil.deposit(
+            Coord3::ground(fx, fy),
+            "bio.mineral_ash_fraction",
+            Fixed::from_int(1),
+        );
+        e.set_fertility_from(&soil, Fixed::ONE);
+        e.step(&temp, &calib);
+        assert!(
+            e.capacity_at(fx, fy) > Fixed::ZERO,
+            "the fertilised cell now carries productivity (the deposited nutrient relaxed the soil factor)"
+        );
+        assert_eq!(
+            e.capacity_at(ux, uy),
+            Fixed::ZERO,
+            "an equally-viable unfertilised cell stays barren (the lift is local to the deposit)"
+        );
     }
 
     #[test]

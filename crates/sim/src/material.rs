@@ -428,15 +428,25 @@ pub struct MatterCycleCalib {
     /// instantly); a decomposition-ecology datum. A larger fraction rots matter faster. Superseded per
     /// substance once the owner sets each organic substance's own `bio.decomposition_rate`.
     pub decomposition_rate: Fixed,
+    /// The soil-fertility scale (slice C2): the soil-nutrient supply a cell gains per unit of deposited
+    /// decomposed mass, the coupling from the matter cycle's soil store to the productivity soil factor.
+    /// RESERVED. Basis: the decomposed nutrient mass that raises a soil-limited cell's soil supply by one
+    /// soil requirement (`productivity.soil_requirement`), so a carcass fully fertilises the ground it fell
+    /// on; a soil-ecology coupling relating deposited nutrient mass to plant-available supply. Larger makes
+    /// a given carcass fertilise more strongly. Only read where the matter cycle is armed, so it stays off
+    /// the calibrated worldbuild path until a later slice wires the matter cycle onto it.
+    pub fertility_scale: Fixed,
 }
 
 impl MatterCycleCalib {
-    /// A labelled DEVELOPMENT FIXTURE: a fallback rate that exercises the mechanism (a warm carcass visibly
-    /// rots over several ticks) without standing for a calibrated rate. The barrier is the substance's own
-    /// (`bio.decomposition_barrier`), no longer a fixture field. Not owner canon.
+    /// A labelled DEVELOPMENT FIXTURE: a fallback rate and a fertility scale that exercise the mechanism (a
+    /// warm carcass visibly rots over several ticks and enriches the ground it fell on) without standing for
+    /// calibrated values. The barrier is the substance's own (`bio.decomposition_barrier`), no longer a
+    /// fixture field. Not owner canon.
     pub fn dev_fixture() -> MatterCycleCalib {
         MatterCycleCalib {
             decomposition_rate: Fixed::from_ratio(1, 10),
+            fertility_scale: Fixed::from_ratio(1, 1000),
         }
     }
 }
@@ -802,6 +812,17 @@ impl SoilNutrientField {
     pub fn total(&self) -> Fixed {
         self.cells.values().fold(Fixed::ZERO, |acc, m| {
             m.values().fold(acc, |a, v| a.saturating_add(*v))
+        })
+    }
+
+    /// Each enriched cell with its total nutrient mass, in canonical [`Coord3`] order (the productivity
+    /// fertility read walks this to fill its per-cell soil supply). An empty store yields nothing.
+    pub fn cell_totals(&self) -> impl Iterator<Item = (Coord3, Fixed)> + '_ {
+        self.cells.iter().map(|(cell, classes)| {
+            let total = classes
+                .values()
+                .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v));
+            (*cell, total)
         })
     }
 
