@@ -2139,6 +2139,20 @@ value = ""
 unit = "ratio_per_tick"
 source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
 
+# --- ideation / experiential-discovery arc, piece 2 (action-as-hypothesis): the affordance-percept
+# derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
+# when the affordance-percept block is wired onto the run path. Each is a physics reference scale, not a
+# per-affordance table: an affordance scalar is DERIVED from the matter's own axes against these
+# references (Principle 8/9), so a new sensible affordance percept is a data edit. ---
+
+[[reserved]]
+id = "affordance_percept.reference_stress"
+basis = "the reference actionable contact stress the fracture-potential percept is measured against (AffordancePerceptKind::FracturePotential): the contact stress an ORDINARY being delivers to matter it works, the extraction contest's reference force over a reference contact area (crates/sim/src/material.rs ExtractionParams), so the percept reads 'how breakable is this to an ordinary actor' and discriminates soft matter from hard rock. Set at that typical delivered stress, NOT the fracture axis's theoretical maximum, which would read every ordinary material as equally, trivially breakable. Larger reads more matter as breakable, smaller reserves the percept for the softest"
+status = "reserved"
+value = ""
+unit = "MPa"
+source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/sim/src/material.rs"
+
 [[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
