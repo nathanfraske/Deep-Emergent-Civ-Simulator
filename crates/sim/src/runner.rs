@@ -1686,6 +1686,28 @@ impl LifecycleKit {
     }
 }
 
+/// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
+/// canonical coupling is reserved). It maps a being's coupled reserve level to a reproductive vigor
+/// the world's reproduce beat reads as its per-generation eligibility to pair, so a being whose
+/// reserve runs low reproduces LESS rather than dying at a hard grace: an eater that keeps its reserve
+/// up out-reproduces a non-eater and selection spreads the eating lineage without a mass-starvation
+/// crash. Armed opt-in through [`Runner::set_reproductive_vigor_coupling`]; unarmed, the reproduce
+/// beat installs no vigor, takes no draw, and the run is byte-identical.
+#[derive(Clone, Copy, Debug)]
+pub struct ReproductiveVigorCalib {
+    /// The reserve axis the vigor reads: the coupled hunger whose level scales reproduction. A being
+    /// whose body does not carry this axis is left ungated (full vigor), so the coupling reaches only
+    /// the beings the physiology it names applies to (Principle 9: it keys off per-being physiology,
+    /// never a race label).
+    pub axis: HomeostaticAxisId,
+    /// The floor below which vigor bottoms out, in `[0, 1]`: a fully-depleted being still reproduces at
+    /// this rate rather than at zero, so the fitness cost is GRADED (reproduces less), never a hard
+    /// sterility (reproduces not at all). Reserved with its basis: the minimum viable per-generation
+    /// reproduction rate the demography can sustain without the lineage collapsing, a demographic floor
+    /// the population data sets, not a realism constant.
+    pub floor: Fixed,
+}
+
 /// The canonical runner: the temperature field, the located population, and their deterministic
 /// coupling. Constructed with an explicit [`FieldCalib`] (no authored default).
 pub struct Runner {
@@ -1780,6 +1802,13 @@ pub struct Runner {
     /// replays bit-for-bit. Armed via [`Runner::set_discovery`]; a proposal is sampled each tick from the
     /// being's binding graph, biased by its own reward beliefs, under the counter-keyed `HYPOTHESIZE` phase.
     discovery: Option<DiscoveryCalib>,
+    /// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture), armed
+    /// OPT-IN. `None` by default, so a runner with no coupling installs no vigor into its world, the
+    /// reproduce beat takes no eligibility draw, and every existing scenario and the crucible replay
+    /// bit-for-bit. Armed via [`Runner::set_reproductive_vigor_coupling`]; each tick before the world
+    /// tick the runner feeds each embodied being's vigor from its coupled reserve level, so a hungry
+    /// being reproduces less and selection spreads the eating lineage.
+    reproductive_vigor: Option<ReproductiveVigorCalib>,
 }
 
 impl Runner {
@@ -1806,6 +1835,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1849,6 +1879,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1905,6 +1936,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -1984,6 +2016,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            reproductive_vigor: None,
         }
     }
 
@@ -2057,6 +2090,18 @@ impl Runner {
     /// the manifest (Principle 11).
     pub fn set_reward_learning(&mut self, calib: RewardLearningCalib) {
         self.reward_learning = Some(calib);
+    }
+
+    /// Arm the graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
+    /// canonical coupling is reserved). OPT-IN: unarmed (the default), the runner installs no vigor into
+    /// its world, the reproduce beat takes no eligibility draw, and the run is byte-identical; armed,
+    /// each tick before the world tick the runner feeds each embodied being's vigor from its coupled
+    /// reserve level, so a being whose reserve runs low reproduces less and an eater that keeps its
+    /// reserve up out-reproduces a non-eater, spreading the eating lineage without a mass-starvation
+    /// crash. The mapping and its floor are the labelled demonstration fixture; the canonical coupling
+    /// (and its floor, reserved with its basis) supersede it when set.
+    pub fn set_reproductive_vigor_coupling(&mut self, calib: ReproductiveVigorCalib) {
+        self.reproductive_vigor = Some(calib);
     }
 
     /// Arm the DISCOVERY loop (ideation / experiential-discovery arc, piece 2, slice 2c), so a being
@@ -2488,6 +2533,36 @@ impl Runner {
         }
     }
 
+    /// Feed each embodied being's reproductive vigor from its coupled reserve level, the graded
+    /// fitness-cost coupling of the viability-spread demonstration (a labelled dev fixture; the canonical
+    /// coupling is reserved). For each walker, `vigor = floor + (1 - floor) * reserve_level` on the
+    /// coupled axis, so a well-fed being (reserve full) reproduces at full rate and a depleted one bottoms
+    /// out at the floor rather than at zero: the cost is GRADED, never a hard sterility. Written into the
+    /// world each tick before the world tick, so the reproduce beat inside the tick reads this
+    /// generation's reserve. Opt-in and crucible-safe: unarmed the runner installs no vigor, the reproduce
+    /// beat takes no draw, and the run is byte-identical. The map is cleared and refilled each tick so a
+    /// being that died carries no stale entry, and a being whose body lacks the coupled axis is left
+    /// ungated (full vigor), so the coupling reaches only the physiology it names (Principle 9). Reads the
+    /// embodiment immutably before the mutable world write and draws no randomness, so it is worker-count
+    /// invariant.
+    fn couple_reproductive_vigor(&mut self) {
+        let Some(calib) = self.reproductive_vigor else {
+            return;
+        };
+        let (Some(world), Some(emb)) = (self.world.as_mut(), self.embodiment.as_ref()) else {
+            return;
+        };
+        world.clear_reproductive_vigor();
+        for w in emb.walkers.iter() {
+            if w.homeostasis.capacity(calib.axis) <= Fixed::ZERO {
+                continue;
+            }
+            let level = w.homeostasis.level(calib.axis);
+            let vigor = calib.floor + (Fixed::ONE - calib.floor).mul(level);
+            world.set_reproductive_vigor(w.id, vigor);
+        }
+    }
+
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.step_field();
         self.phase_body_exchange();
@@ -2500,6 +2575,10 @@ impl Runner {
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
         // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
         let inputs = self.couple_conversation(world_inputs);
+        // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
+        // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
+        // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
+        self.couple_reproductive_vigor();
         if let Some(world) = self.world.as_mut() {
             world.tick(&inputs);
         }

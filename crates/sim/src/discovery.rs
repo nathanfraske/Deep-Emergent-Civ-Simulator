@@ -22,11 +22,17 @@
 //! The BINDING GRAPH ([`candidate_bindings`]) is the GENERIC cartesian of the body's afforded primitives
 //! and the affordance-typed targets the being perceives, with NO coded what-binds-to-what table: the being
 //! proposes "issue primitive P against a thing presenting affordance CHANNEL C" for the combinations, and
-//! the reward learner sorts which pay off. The target is keyed on the affordance CHANNEL (the TYPE of thing,
-//! fracturable or sharp), value-blind, so "strike a fracturable thing" is ONE template that generalises
-//! across instances (the percept VALUE drives which candidate the sampler prefers, in slice 2b's sampler,
-//! not the template's identity). This is the affordance-bound sampling the design calls for, kept emergent:
-//! there is no `if primitive == STRIKE { target = fracturable }` branch anywhere.
+//! the reward learner sorts which pay off. The candidate carries the affordance CHANNEL (the TYPE of thing,
+//! fracturable or sharp) as its target, so the being proposes a primitive against each present kind of
+//! thing, but the REWARD BELIEF the sampler weights by generalises over the PRIMITIVE alone: the credit
+//! pass, [`crate::learn::appetitive_salience`], the planner, and [`candidate_weight`] all key the belief on
+//! `target_bucket` zero, so a primitive a being learned pays off is preferred against every present target
+//! rather than re-learned per type. (Keying the belief on the channel index at the candidate site while the
+//! credit committed it on zero was a latent mismatch, masked in the single-channel viability world; keying
+//! it on the target's quantized perceived VALUE at the just-noticeable difference, so a hard and a soft
+//! target diverge as distinct learned actions, is the deferred generalisation.) This is the affordance-bound
+//! sampling the design calls for, kept emergent: there is no `if primitive == STRIKE { target = fracturable }`
+//! branch anywhere.
 //!
 //! This slice is READ only: the enumeration is a pure, RNG-free function off the run path (nothing samples
 //! or enacts yet, and `state_hash` folds nothing), so every existing scenario replays bit-for-bit. Slice
@@ -122,17 +128,35 @@ impl DiscoveryCalib {
 }
 
 /// The roulette weight of one candidate binding: the unit weight when the being holds a committed REWARDS
-/// belief about the candidate's sequence (it believes this action pays off, so it exploits), the reserved
+/// belief about the candidate's action (it believes this action pays off, so it exploits), the reserved
 /// exploration floor otherwise (an untried or unrewarded action, still proposed at the floor rate so
 /// discovery never stops). Reads only the being's own reward belief on the disjoint `REWARD_ATTR`, never a
-/// coded preference (Principle 9); the binary belief test mirrors [`crate::learn::appetitive_salience`].
+/// coded preference (Principle 9).
+///
+/// The belief is looked up on the PRIMITIVE-ONLY subject (`target_bucket` zero), the exact key the reward
+/// learner's credit pass commits and [`crate::learn::appetitive_salience`], the planner
+/// ([`crate::planner::plan_toward`]), and the surprise read all use, so the belief this reads is the belief
+/// those form. The candidate itself is proposed per affordance CHANNEL (its `target_bucket` carries the
+/// target type, so the being still tries a primitive against each present kind of thing), but the reward
+/// belief GENERALISES over the primitive: a being that learned a primitive pays off proposes it against
+/// every present target, rather than having to re-learn it per target type. Keying the credit and this
+/// lookup on the channel index instead was a latent mismatch (the belief committed on `target_bucket`
+/// zero never matched a channel-keyed lookup except on channel zero, which masked it in the single-channel
+/// viability world). The principled refinement, keying the belief on the target's quantized perceived
+/// VALUE at the just-noticeable difference rather than the primitive alone, so "strike a HARD thing" and
+/// "strike a SOFT thing" diverge as distinct learned actions, is the deferred generalisation; until it
+/// lands the belief generalises over the primitive, consistently across the whole ideation loop.
 fn candidate_weight(
     mind: &Mind,
     step: &SequenceStep,
     calib: &DiscoveryCalib,
     params: &InferenceParams,
 ) -> Fixed {
-    let subject = sequence_subject(std::slice::from_ref(step));
+    let subject = sequence_subject(&[SequenceStep {
+        primitive: step.primitive,
+        target_bucket: 0,
+        param_bucket: 0,
+    }]);
     if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
         Fixed::ONE
     } else {
@@ -285,26 +309,38 @@ mod tests {
 
     #[test]
     fn a_believed_candidate_dominates_the_draw_and_the_floor_keeps_exploring() {
-        // Slice 2b: the sampler prefers what the being believes pays off, but the reserved exploration floor
-        // keeps an unproven action in play. A being that has committed the "STRIKE a fracturable thing"
-        // belief proposes that action every tick when the floor is zero (pure exploit), while a naive being
-        // with a positive floor still proposes SOMETHING (it explores).
+        // Slice 2b: the sampler prefers the PRIMITIVE the being believes pays off, but the reserved
+        // exploration floor keeps an unproven action in play. A being that has committed the "STRIKE pays
+        // off" belief proposes a STRIKE every tick when the floor is zero (pure exploit), while a naive being
+        // with a positive floor still proposes SOMETHING (it explores). The belief generalises over the
+        // primitive (keyed on `target_bucket` zero, the same key the reward learner commits), so it lifts a
+        // STRIKE against EITHER present target, rather than the channel the belief was first committed on.
         let candidates = candidate_bindings(&[STRIKE, GRASP], &[Fixed::ONE, Fixed::ONE]); // 4 candidates
         let believed = candidates[0]; // STRIKE against channel 0
         let mut sage = Mind::new(StableId(1), Fixed::ONE);
         believe(&mut sage, &believed);
 
-        // Zero floor: only the believed candidate carries weight, so it is proposed every tick, by belief
-        // alone, never a coded preference.
+        // Zero floor: only the STRIKE candidates (against either present channel) carry weight, so a STRIKE
+        // is proposed every tick, by belief alone, never a coded preference. The GRASP candidates, unbelieved,
+        // carry no weight and are never proposed.
         let exploit = DiscoveryCalib {
             exploration_floor: Fixed::ZERO,
             ..DiscoveryCalib::dev_default()
         };
         for tick in 0..8 {
+            let proposal = sample_candidate(
+                &candidates,
+                &sage,
+                &exploit,
+                &params(),
+                StableId(1),
+                tick,
+                SEED,
+            );
             assert_eq!(
-                sample_candidate(&candidates, &sage, &exploit, &params(), StableId(1), tick, SEED),
-                Some(believed),
-                "with no exploration floor, the being proposes only the action it believes pays off"
+                proposal.map(|p| p.primitive),
+                Some(STRIKE.0),
+                "with no exploration floor, the being proposes only the primitive it believes pays off"
             );
         }
         // A naive being with a zero floor believes nothing and carries no weight: it proposes nothing.

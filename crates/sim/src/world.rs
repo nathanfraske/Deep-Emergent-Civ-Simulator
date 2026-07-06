@@ -91,6 +91,12 @@ const SAID_CHANNEL: &str = "said";
 /// collide with a future move-scoped draw on counter zero (the R-RNG-COORD slot rule).
 const SLOT_ADDRESSEE: u32 = 0;
 
+/// The MATE_CHOICE-phase draw slot for the graded reproductive-vigor eligibility gate (the
+/// viability-spread demonstration's dev-fixture coupling). Namespaced away from the mate-preference
+/// draws, which key on slot 0, so a vigor draw and a preference draw never alias on counter zero
+/// (R-RNG-COORD slot rule); the vigor gate replays bit for bit and does not perturb preference.
+const SLOT_REPRO_VIGOR: u32 = 1;
+
 /// Read a felicity dimension from the world state the engine already carries (design Part
 /// 9.5). The dialogue step gates a move on these readings; a dimension the world does not
 /// yet model (an institutional role, a value distance, a channel reach) reads as `None`,
@@ -549,6 +555,22 @@ pub struct World {
     /// when armed, each generation each race's gene pool drifts under the effective size its own
     /// reproductive census implies rather than the authored founder pool size.
     generational_drift_armed: bool,
+    /// Per-being reproductive vigor, the graded fitness-cost coupling (a labelled dev fixture for the
+    /// viability-spread demonstration, the canonical form reserved): a probability in `[0, 1]` the
+    /// reproduce beat reads as a being's eligibility to pair this generation, so a being whose coupled
+    /// reserve (its seed hunger) runs low reproduces LESS rather than dying at a hard grace. Empty by
+    /// default and a being with no entry pairs unconditionally, so a world that never installs vigor
+    /// (every existing test, the determinism crucible, the unarmed run) reproduces exactly as before,
+    /// byte for byte: with the map empty the beat takes NO vigor draw. When the runner arms it (feeding
+    /// each walker's coupled reserve level in each life cadence), a low-vigor being is often not
+    /// eligible to mate, so an eater that keeps its reserve up out-reproduces a non-eater and selection
+    /// spreads the eating lineage without the mass starvation a lethal hunger would cause. The gate is a
+    /// per-being, per-generation draw under [`Phase::MATE_CHOICE`] on a dedicated slot ([`SLOT_REPRO_VIGOR`]),
+    /// so it never collides with the mate-preference draws. Transient input fed fresh each generation
+    /// (never folded into [`World::state_hash`]); the births it changes are hashed through the newborns
+    /// themselves. The coefficient mapping reserve to vigor and the floor below which vigor bottoms out
+    /// are reserved with their basis (the runner supplies the demonstration's dev mapping).
+    reproductive_vigor: BTreeMap<StableId, Fixed>,
     /// The life-fraction mortality hazard (a curve on `age / race lifespan`, design Part 20, R-AGING):
     /// when set, the life cadence culls through [`World::apply_mortality_by_race`], so short- and
     /// long-lived races die on their own timescales from one curve. Distinct from the raw-age
@@ -651,6 +673,7 @@ impl World {
             retention: None,
             reproduction: None,
             generational_drift_armed: false,
+            reproductive_vigor: BTreeMap::new(),
             mortality_hazard_by_race: None,
             drift: None,
             language: None,
@@ -760,6 +783,33 @@ impl World {
     /// the real breeder structure. The drift keys on the census, never a race label (Principle 9).
     pub fn arm_generational_drift(&mut self) {
         self.generational_drift_armed = true;
+    }
+
+    /// Set a being's reproductive vigor, the graded fitness-cost coupling for the viability-spread
+    /// demonstration (a labelled dev fixture; the canonical coupling is reserved). Vigor is a
+    /// probability in `[0, 1]`: the reproduce beat lets a being pair this generation only when its
+    /// per-generation draw falls under its vigor, so a being whose coupled reserve runs low reproduces
+    /// LESS rather than dying. Off unless armed: with no vigor installed the beat takes no draw and
+    /// reproduces byte for byte as before, so this never perturbs an unarmed world or the crucible. The
+    /// runner feeds this each life cadence from a being's coupled reserve level; the map is transient
+    /// input, refreshed each generation, and is not folded into [`World::state_hash`]. The value passed
+    /// is clamped into `[0, 1]` so a caller cannot arm a vigor outside the probability range.
+    pub fn set_reproductive_vigor(&mut self, id: StableId, vigor: Fixed) {
+        self.reproductive_vigor
+            .insert(id, vigor.clamp(Fixed::ZERO, Fixed::ONE));
+    }
+
+    /// Clear every installed reproductive vigor, disarming the graded fitness-cost coupling so the
+    /// reproduce beat pairs unconditionally again (the byte-for-byte unarmed path). The runner calls
+    /// this before refeeding vigor each generation so a being that has died or left carries no stale
+    /// entry, and a test can call it to return the world to the pre-coupling baseline.
+    pub fn clear_reproductive_vigor(&mut self) {
+        self.reproductive_vigor.clear();
+    }
+
+    /// A being's currently installed reproductive vigor, if any (for inspection and the reader).
+    pub fn reproductive_vigor_of(&self, id: StableId) -> Option<Fixed> {
+        self.reproductive_vigor.get(&id).copied()
     }
 
     /// A race's gene pool, if the race is registered (for inspection: the post-dawn drift beat mutates
@@ -2131,6 +2181,36 @@ impl World {
     /// parents and the generation, never a sequential index, so replay is bit-exact and observer
     /// independent. Inert until [`World::set_reproduction`] installs the calibrations. Reads no race
     /// branch: the pairing keys off the gene-fed sex phenotype and the heritable preference alone.
+    /// Whether a being may pair in the reproduce beat this generation, under the graded
+    /// reproductive-vigor coupling (the viability-spread demonstration's dev fixture). With no vigor
+    /// installed (the map empty) the beat is unarmed: every mature being pairs and NO draw is taken, so
+    /// a world that never installs vigor reproduces byte for byte as before. When armed, a being's vigor
+    /// is the probability it is eligible: a full-vigor being (at or above one) always pairs and takes no
+    /// draw, and a below-full being pairs only when its per-generation draw falls under its vigor, so a
+    /// being whose coupled reserve runs low reproduces LESS rather than dying. A being the runner did not
+    /// feed (no entry while others are armed) defaults to full vigor, so it is never silently sterilized.
+    /// The draw keys on the being, the generation, and the dedicated [`SLOT_REPRO_VIGOR`] slot under
+    /// [`Phase::MATE_CHOICE`], so it replays bit for bit and never collides with the mate-preference
+    /// draws on that phase (which key on slot zero).
+    fn reproductively_eligible(&self, id: StableId, generation: u64) -> bool {
+        if self.reproductive_vigor.is_empty() {
+            return true;
+        }
+        let vigor = self
+            .reproductive_vigor
+            .get(&id)
+            .copied()
+            .unwrap_or(Fixed::ONE);
+        if vigor >= Fixed::ONE {
+            return true;
+        }
+        let draw = DrawKey::entity(id.0, generation, Phase::MATE_CHOICE)
+            .slot(SLOT_REPRO_VIGOR)
+            .rng(self.seed)
+            .unit_fixed(0);
+        draw < vigor
+    }
+
     fn reproduce(&mut self) {
         let params = match &self.reproduction {
             Some(p) => p.clone(),
@@ -2169,6 +2249,13 @@ impl World {
                 if paired.contains(&chooser) {
                     continue;
                 }
+                // The graded reproductive-vigor gate (the viability-spread coupling): a being whose
+                // coupled reserve runs low is often not eligible to initiate this generation, so it
+                // reproduces less. Inert (no draw, every being eligible) until the runner arms vigor,
+                // so an unarmed world and the crucible pair exactly as before.
+                if !self.reproductively_eligible(chooser, generation) {
+                    continue;
+                }
                 let Some(race_id) = self.race_of.get(&chooser).copied() else {
                     continue;
                 };
@@ -2183,6 +2270,9 @@ impl World {
                             && !paired.contains(&c)
                             && self.race_of.get(&c) == Some(&race_id)
                             && self.sexes_compatible(race, chooser, c)
+                            // A low-vigor being is also less likely to be CHOSEN, so the graded
+                            // cost falls on both sides of a pairing, not the initiator alone.
+                            && self.reproductively_eligible(c, generation)
                     })
                     .collect();
                 if candidates.is_empty() {
@@ -2262,6 +2352,7 @@ impl World {
         self.genomes.remove(&id);
         self.intrinsic.remove(&id);
         self.mate_prefs.remove(&id);
+        self.reproductive_vigor.remove(&id);
         self.affect.remove(&id);
         self.ages.remove(&id);
         self.race_of.remove(&id);

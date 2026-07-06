@@ -384,3 +384,99 @@ fn post_dawn_drift_moves_allele_frequencies_under_the_census_effective_size() {
         "a different seed drifts a different lineage"
     );
 }
+
+#[test]
+fn graded_reproductive_vigor_scales_reproduction_and_is_inert_at_full() {
+    // The graded fitness-cost coupling (the viability-spread demonstration's dev fixture): a being's
+    // reproductive vigor is the probability it is eligible to pair a generation, so a low-vigor being
+    // reproduces LESS rather than dying at a hard grace. Here the vigor is set once on the founders (the
+    // runner feeds it each generation from a coupled reserve). The proof is a monotone gradient, a
+    // full-vigor path that is byte-identical to the unarmed world (no draw at or above one), and a
+    // zero-vigor path that bears no children. Labelled fixtures throughout, never an owner value.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), sex_determined_race(0, 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 16,
+    }];
+    // Build a reproducing world and arm every founder to one vigor (None = unarmed, no vigor installed).
+    let build = |seed: u64, vigor: Option<Fixed>| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_breeding_systems(registry());
+        let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+        for &id in &founders {
+            w.set_age(id, 20);
+        }
+        w.set_life_cadence(4);
+        w.set_reproduction(reproduction());
+        if let Some(v) = vigor {
+            for &id in &founders {
+                w.set_reproductive_vigor(id, v);
+            }
+        }
+        w
+    };
+    let offspring_after = |seed: u64, vigor: Option<Fixed>| -> u64 {
+        let mut w = build(seed, vigor);
+        for _ in 0..24 {
+            w.tick(&[]);
+        }
+        w.census().total_offspring()
+    };
+
+    let seed = 0x5EED_0060;
+    let unarmed = offspring_after(seed, None);
+    let full = offspring_after(seed, Some(Fixed::ONE));
+    let half = offspring_after(seed, Some(Fixed::from_ratio(1, 2)));
+    let zero = offspring_after(seed, Some(Fixed::ZERO));
+
+    // Full vigor takes no eligibility draw (vigor at or above one is always eligible), so an all-full
+    // world is byte-identical to the unarmed world: the coupling never perturbs a fully-fed population.
+    let mut wu = build(seed, None);
+    let mut wf = build(seed, Some(Fixed::ONE));
+    for _ in 0..24 {
+        wu.tick(&[]);
+        wf.tick(&[]);
+    }
+    assert_eq!(
+        wu.state_hash(),
+        wf.state_hash(),
+        "full vigor reproduces byte-for-byte as the unarmed world"
+    );
+    assert_eq!(
+        full, unarmed,
+        "full vigor bears the same children as unarmed"
+    );
+
+    // Zero vigor is total ineligibility: no founder pairs, so no child is born. This is the corner of
+    // the gradient; the floor the runner supplies keeps the live coupling above it (graded, not sterile).
+    assert_eq!(zero, 0, "zero vigor bears no children");
+
+    // The gradient is monotone and graded, not a cliff: a half-vigor population still bears children
+    // (reproduces LESS, not not at all), fewer than a full one and more than a sterile one. A lower
+    // pairing probability means fewer pairs form each generation, so selection can favour the lineage
+    // that keeps its reserve (its vigor) up without the mass starvation a lethal hunger would cause.
+    assert!(
+        half > 0,
+        "half vigor still bears children (graded, not sterile): {half}"
+    );
+    assert!(
+        full > half && half > zero,
+        "reproduction grades down with vigor: full {full} > half {half} > zero {zero}"
+    );
+
+    // The gated trajectory replays bit for bit (the draw keys on the being, the generation, and the
+    // dedicated vigor slot, so it is a pure function of the seed and state).
+    let mut a = build(seed, Some(Fixed::from_ratio(1, 2)));
+    let mut b = build(seed, Some(Fixed::from_ratio(1, 2)));
+    for _ in 0..24 {
+        a.tick(&[]);
+        b.tick(&[]);
+    }
+    assert_eq!(
+        a.state_hash(),
+        b.state_hash(),
+        "the vigor-gated reproduction trajectory replays bit for bit"
+    );
+}
