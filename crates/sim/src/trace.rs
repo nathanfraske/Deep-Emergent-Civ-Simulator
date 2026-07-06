@@ -38,6 +38,8 @@
 //! build stays additive: the public `Trace` struct is untouched (no time-varying salience field,
 //! no `created_tick` sweep), and the global `World` mortality path is untouched.
 
+use std::collections::BTreeMap;
+
 use civsim_core::Fixed;
 use civsim_physics::laws;
 
@@ -61,55 +63,98 @@ pub struct TraceImplicationSpec {
     pub toward: ValueId,
 }
 
-/// The physical law a trace's perceptibility decays under.
+/// The fixed set of GENERAL physical-law kernels a transform binds to (material-substrate arc, cascade
+/// item 8, the owner-ruled hardening of the closed `DecayLaw` enum to a data-defined transform substrate).
 ///
-/// This is a CLOSED enum over the fixed physics kernels ([`civsim_physics::laws`]), not an open
-/// registry, and that is a deliberate OWNER CALL flagged here. The argument for a closed enum:
-/// `physics::laws` is itself a fixed, hand-authored kernel set (reaction, corrosion, and their
-/// siblings are Rust functions, not data), so a decay law can only ever bind to a kernel that
-/// exists in code; the membership cannot grow with world data the way a value axis or an
-/// institution function can. The argument against (for the owner to weigh): if decay laws should
-/// be composable or world-authored the way the value and semantic substrates are, this should
-/// become a data-defined registry keyed to a kernel by id. The build leans enum, mirroring how the
-/// laws it dispatches to are themselves a fixed kernel set; the reserved parameters inside each
-/// variant are the data.
-#[derive(Clone, Debug)]
-pub enum DecayLaw {
-    /// Organic decomposition: gated on thermal activity (the trace decomposes only above an
-    /// activation barrier, so a frozen remains is preserved), then an exponential decay in elapsed
-    /// time at a decomposition rate. Dispatches to [`civsim_physics::laws::reaction`] for the gate
-    /// and [`Fixed::exp`] for the decay.
-    Organic {
-        /// The thermal-activation barrier: decomposition proceeds only where temperature reaches it
-        /// (the generalization of an ignition or reaction threshold). RESERVED. Basis: the material's
-        /// reaction barrier the physics data already defines.
-        barrier: Fixed,
-        /// The per-unit-elapsed decomposition rate (the exponential decay constant). RESERVED. Basis:
-        /// the material's decomposition susceptibility through the reaction kernel, scaled per race by
-        /// the race's own `decay_multiplier`.
-        decomposition_rate: Fixed,
-    },
-    /// Electrochemical corrosion: a driving margin (oxidiser minus material potential, times
-    /// susceptibility, times an acidity factor) integrated linearly against elapsed time.
-    /// Dispatches to [`civsim_physics::laws::corrosion`].
-    Corroding {
-        /// The material's own electrode potential against the reference oxidiser. RESERVED. Basis:
-        /// the material's measured potential the physics data defines; an active (corroding)
-        /// material carries a negative potential against the reference.
-        material_potential: Fixed,
-        /// The material's corrosion susceptibility. RESERVED. Basis: the material's reactivity the
-        /// physics data defines.
-        susceptibility: Fixed,
-        /// The environment acidity (pH), where a lower value is more aggressive. RESERVED. Basis: the
-        /// chem.acidity axis the physics data defines.
-        acidity: Fixed,
-        /// The saturating cap on the corrosion rate. RESERVED. Basis: the rate ceiling the corrosion
-        /// kernel clamps against.
-        corrosion_max: Fixed,
-    },
-    /// A permanent trace: no physical decay (a carved mark, a moved boulder). Salience holds at
-    /// full for any elapsed time.
+/// Each id names a general physical law in [`civsim_physics::laws`], never a named transform (there is no
+/// combustion, cooking, or decay id): decomposition, corrosion, combustion, cooking, and smelting are DATA
+/// ROWS ([`TransformKind`]) over this fixed kernel set, each binding one of these kernels with its own
+/// reserved parameters. The mechanism is fixed Rust and the membership plus parameters are data (Principle
+/// 11), sibling to the value (Part 21), semantic (Part 33), and institution-function (Part 36) substrates.
+/// Extending the kernel set is a Rust change because a new kernel needs a physics law; the north star
+/// (owner ruling) is that once a transform emerges from a substance's own physics this dispatch dissolves
+/// into the floor and no registry is needed at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransformKernelId {
+    /// The thermal-activation / oxidation kernel ([`civsim_physics::laws::reaction`]): a transform proceeds
+    /// only above an activation barrier, then an exponential decay in elapsed time at a rate. Organic
+    /// decomposition binds here, and combustion is a sibling row with a higher barrier and rate.
+    Reaction,
+    /// The electrochemical corrosion kernel ([`civsim_physics::laws::corrosion`]): a driving margin
+    /// (oxidiser minus material potential, times susceptibility, times an acidity factor) integrated
+    /// linearly against elapsed time.
+    Corrosion,
+    /// The null kernel: no transform (a carved mark, a moved boulder). Salience holds at full for any
+    /// elapsed time.
     Static,
+}
+
+/// A TRANSFORM KIND: a data row binding a general physical-law [`TransformKernelId`] to its reserved
+/// parameters (material-substrate arc, cascade item 8). This is the data-defined replacement for the closed
+/// `DecayLaw` enum, hardened per the owner's ruling: the kernel is the fixed mechanism, the parameters are
+/// data keyed by name (Principle 11), so a new transform mode (combustion, cooking, smelting) is a new row
+/// binding an existing kernel, never a new enum arm. A trace's perceptibility decays under it; the matter
+/// cycle (the next slice) applies the same transform kinds to a cell's substances, conserving mass.
+#[derive(Clone, Debug)]
+pub struct TransformKind {
+    /// The general physical-law kernel this transform dispatches to.
+    pub kernel: TransformKernelId,
+    /// The kernel's reserved parameters, keyed by name. The Reaction kernel reads `barrier` (the
+    /// thermal-activation threshold, RESERVED, basis the material's reaction barrier the physics data
+    /// defines) and `decomposition_rate` (the per-elapsed decay constant, RESERVED, basis the material's
+    /// decomposition susceptibility, scaled per race by the race's `decay_multiplier`). The Corrosion kernel
+    /// reads `material_potential` (the material's electrode potential against the reference oxidiser,
+    /// RESERVED, an active material negative), `susceptibility` (its corrosion susceptibility, RESERVED),
+    /// `acidity` (the environment pH, RESERVED, lower more aggressive), and `corrosion_max` (the rate cap,
+    /// RESERVED). Each is reserved-with-basis; an absent parameter reads zero (the substrate absence
+    /// convention).
+    pub params: BTreeMap<String, Fixed>,
+}
+
+impl TransformKind {
+    /// A parameter by name; an absent one reads zero (the substrate absence convention).
+    pub fn param(&self, name: &str) -> Fixed {
+        self.params.get(name).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The organic-decomposition transform (the Reaction kernel): a thermal-activation barrier and a
+    /// per-elapsed decomposition rate.
+    pub fn reaction(barrier: Fixed, decomposition_rate: Fixed) -> TransformKind {
+        TransformKind {
+            kernel: TransformKernelId::Reaction,
+            params: BTreeMap::from([
+                ("barrier".to_string(), barrier),
+                ("decomposition_rate".to_string(), decomposition_rate),
+            ]),
+        }
+    }
+
+    /// The electrochemical-corrosion transform (the Corrosion kernel): the material potential,
+    /// susceptibility, environment acidity, and the saturating rate cap.
+    pub fn corrosion(
+        material_potential: Fixed,
+        susceptibility: Fixed,
+        acidity: Fixed,
+        corrosion_max: Fixed,
+    ) -> TransformKind {
+        TransformKind {
+            kernel: TransformKernelId::Corrosion,
+            params: BTreeMap::from([
+                ("material_potential".to_string(), material_potential),
+                ("susceptibility".to_string(), susceptibility),
+                ("acidity".to_string(), acidity),
+                ("corrosion_max".to_string(), corrosion_max),
+            ]),
+        }
+    }
+
+    /// The null transform (the Static kernel): no decay, a permanent trace.
+    pub fn static_kind() -> TransformKind {
+        TransformKind {
+            kernel: TransformKernelId::Static,
+            params: BTreeMap::new(),
+        }
+    }
 }
 
 /// A trace-kind definition: its reliability, what it implies, and how it decays. All data
@@ -132,8 +177,9 @@ pub struct TraceKindDef {
     pub false_attribution: Fixed,
     /// What perceiving the trace is evidence about (a trace kind can imply several things).
     pub implies: Vec<TraceImplicationSpec>,
-    /// The physical law the trace's perceptibility decays under.
-    pub decay: DecayLaw,
+    /// The transform kind (a general physical-law kernel plus its reserved parameters) the trace's
+    /// perceptibility decays under.
+    pub decay: TransformKind,
 }
 
 /// The set of trace kinds a world runs, in file (mint) order so a kind's position is stable and a
@@ -165,10 +211,7 @@ impl TraceKindRegistry {
                     attr: AttrKindId(0),
                     toward: 1,
                 }],
-                decay: DecayLaw::Organic {
-                    barrier: Fixed::from_int(0),
-                    decomposition_rate: Fixed::from_ratio(1, 100),
-                },
+                decay: TransformKind::reaction(Fixed::from_int(0), Fixed::from_ratio(1, 100)),
             },
             TraceKindDef {
                 id: DEV_BLOODSTAIN,
@@ -181,10 +224,7 @@ impl TraceKindRegistry {
                     attr: AttrKindId(0),
                     toward: 1,
                 }],
-                decay: DecayLaw::Organic {
-                    barrier: Fixed::from_int(0),
-                    decomposition_rate: Fixed::from_ratio(1, 20),
-                },
+                decay: TransformKind::reaction(Fixed::from_int(0), Fixed::from_ratio(1, 20)),
             },
             TraceKindDef {
                 id: DEV_CORRODED_BLADE,
@@ -194,12 +234,12 @@ impl TraceKindRegistry {
                     attr: AttrKindId(1),
                     toward: 1,
                 }],
-                decay: DecayLaw::Corroding {
-                    material_potential: Fixed::from_ratio(-44, 100),
-                    susceptibility: Fixed::from_ratio(1, 100),
-                    acidity: Fixed::from_int(7),
-                    corrosion_max: Fixed::ONE,
-                },
+                decay: TransformKind::corrosion(
+                    Fixed::from_ratio(-44, 100),
+                    Fixed::from_ratio(1, 100),
+                    Fixed::from_int(7),
+                    Fixed::ONE,
+                ),
             },
         ])
     }
@@ -249,13 +289,11 @@ pub fn organic_salience(
     kind: &TraceKindDef,
     race: &RaceBaseRates,
 ) -> Fixed {
-    let (barrier, decomposition_rate) = match kind.decay {
-        DecayLaw::Organic {
-            barrier,
-            decomposition_rate,
-        } => (barrier, decomposition_rate),
-        _ => return Fixed::ONE,
-    };
+    if kind.decay.kernel != TransformKernelId::Reaction {
+        return Fixed::ONE;
+    }
+    let barrier = kind.decay.param("barrier");
+    let decomposition_rate = kind.decay.param("decomposition_rate");
     // The reaction kernel reports whether temperature crosses the activation barrier. Only that
     // gate is used; the enthalpy sums are the deferred follow-on and enter as zero.
     let (_delta_h, thermally_active) =
@@ -295,15 +333,13 @@ pub fn organic_salience(
 /// and it corrodes. The per-place medium chemistry that would supply the actual oxidiser potential
 /// is a named follow-on, exactly as the temperature wiring is for organic decay.
 pub fn corroding_salience(elapsed: Fixed, kind: &TraceKindDef) -> Fixed {
-    let (material_potential, susceptibility, acidity, corrosion_max) = match kind.decay {
-        DecayLaw::Corroding {
-            material_potential,
-            susceptibility,
-            acidity,
-            corrosion_max,
-        } => (material_potential, susceptibility, acidity, corrosion_max),
-        _ => return Fixed::ONE,
-    };
+    if kind.decay.kernel != TransformKernelId::Corrosion {
+        return Fixed::ONE;
+    }
+    let material_potential = kind.decay.param("material_potential");
+    let susceptibility = kind.decay.param("susceptibility");
+    let acidity = kind.decay.param("acidity");
+    let corrosion_max = kind.decay.param("corrosion_max");
     let rate = laws::corrosion(
         Fixed::ZERO,
         material_potential,
@@ -387,14 +423,14 @@ mod tests {
             reliability: Fixed::from_ratio(9, 10),
             false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
-            decay: DecayLaw::Static,
+            decay: TransformKind::static_kind(),
         };
         let weak = TraceKindDef {
             id: DEV_BLOODSTAIN,
             reliability: Fixed::from_ratio(1, 2),
             false_attribution: Fixed::from_ratio(1, 5),
             implies: vec![],
-            decay: DecayLaw::Static,
+            decay: TransformKind::static_kind(),
         };
         let w_strong = mortality_implication_weight(&strong, CLAMP);
         let w_weak = mortality_implication_weight(&weak, CLAMP);
@@ -408,14 +444,14 @@ mod tests {
             reliability: Fixed::from_ratio(1, 2),
             false_attribution: Fixed::from_ratio(1, 5),
             implies: vec![],
-            decay: DecayLaw::Static,
+            decay: TransformKind::static_kind(),
         };
         let weak2 = TraceKindDef {
             id: DEV_BLOODSTAIN,
             reliability: Fixed::from_ratio(9, 10),
             false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
-            decay: DecayLaw::Static,
+            decay: TransformKind::static_kind(),
         };
         assert!(
             mortality_implication_weight(&strong2, CLAMP)
@@ -432,12 +468,12 @@ mod tests {
             reliability: Fixed::from_ratio(3, 4),
             false_attribution: Fixed::from_ratio(1, 10),
             implies: vec![],
-            decay: DecayLaw::Corroding {
-                material_potential: Fixed::from_ratio(-44, 100),
+            decay: TransformKind::corrosion(
+                Fixed::from_ratio(-44, 100),
                 susceptibility,
-                acidity: Fixed::from_int(7),
-                corrosion_max: Fixed::ONE,
-            },
+                Fixed::from_int(7),
+                Fixed::ONE,
+            ),
         }
     }
 
@@ -489,10 +525,7 @@ mod tests {
             reliability: Fixed::from_ratio(9, 10),
             false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
-            decay: DecayLaw::Organic {
-                barrier: Fixed::from_int(10),
-                decomposition_rate: Fixed::from_ratio(1, 10),
-            },
+            decay: TransformKind::reaction(Fixed::from_int(10), Fixed::from_ratio(1, 10)),
         };
         let elapsed = Fixed::from_int(20);
         // Below the barrier (frozen): preserved, full salience.
@@ -507,6 +540,42 @@ mod tests {
         assert!(
             warm > Fixed::ZERO,
             "some salience remains after finite decay"
+        );
+    }
+
+    #[test]
+    fn a_new_transform_mode_is_a_data_row_over_the_fixed_kernel_not_a_new_arm() {
+        // Item 8, the owner-ruled hardening: a new transform mode is a DATA ROW binding an existing general
+        // kernel with different parameters, never a new enum arm. Two transform kinds both bind the fixed
+        // Reaction kernel: an organic decomposition (a low barrier, a slow rate) and a hotter combustion-like
+        // reaction (a high barrier, a fast rate). They dispatch through the one kernel and differ only in
+        // their data, so adding "combustion" cost no code, only a row. The dispatch keys off the kernel id
+        // and the named parameters, never a transform name (Principles 8, 11).
+        let reg = RaceBaseRateRegistry::dev_default();
+        let race = reg.get(crate::base_rates::DEV_LONGLIVED).unwrap();
+        let decompose = TransformKind::reaction(Fixed::from_int(0), Fixed::from_ratio(1, 100));
+        let combust = TransformKind::reaction(Fixed::from_int(500), Fixed::from_ratio(1, 2));
+        // Both are the same fixed kernel, differing only in their data rows.
+        assert_eq!(decompose.kernel, TransformKernelId::Reaction);
+        assert_eq!(combust.kernel, TransformKernelId::Reaction);
+        assert_eq!(combust.param("barrier"), Fixed::from_int(500));
+        let mut corpse = corpse();
+        let elapsed = Fixed::from_int(20);
+        // At a warm-but-sub-combustion temperature, the decomposition row proceeds (it has crossed its low
+        // barrier) while the combustion row is still frozen below its high barrier: the same kernel, opposite
+        // outcomes, from the data alone.
+        corpse.decay = decompose;
+        let d = organic_salience(elapsed, Fixed::from_int(300), &corpse, race);
+        corpse.decay = combust;
+        let c = organic_salience(elapsed, Fixed::from_int(300), &corpse, race);
+        assert!(
+            d < Fixed::ONE,
+            "the decomposition row proceeds at 300 K ({d:?})"
+        );
+        assert_eq!(
+            c,
+            Fixed::ONE,
+            "the combustion row is frozen below its 500 K barrier, no burn ({c:?})"
         );
     }
 
@@ -535,7 +604,7 @@ mod tests {
             reliability: Fixed::ONE,
             false_attribution: Fixed::from_ratio(1, 100),
             implies: vec![],
-            decay: DecayLaw::Static,
+            decay: TransformKind::static_kind(),
         };
         assert_eq!(
             organic_salience(Fixed::from_int(1000), Fixed::from_int(50), &kind, race),

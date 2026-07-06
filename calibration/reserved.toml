@@ -87,7 +87,7 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 # corroding path integrates the physics corrosion kernel (laws::corrosion) linearly against elapsed
 # time. "Blood days, bone years" was terran organic chemistry a silicate or dispersing race has no
 # analogue for; the exponential-at-rate shape is kept. The reserved inputs (each trace kind's
-# DecayLaw parameters: barrier, decomposition_rate, material_potential, susceptibility, acidity,
+# TransformKind parameters: barrier, decomposition_rate, material_potential, susceptibility, acidity,
 # corrosion_max; each race's decay_multiplier) live as typed data on the trace-kind and
 # race-base-rate registries (labelled dev fixtures), not as a manifest entry. Removed rather than
 # left a fail-loud sentinel for a value the engine no longer authors.

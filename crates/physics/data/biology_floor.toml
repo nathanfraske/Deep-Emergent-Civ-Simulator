@@ -89,6 +89,33 @@ range_lo = "0"
 range_hi = "1.0"
 real = "Greenfield and Southgate, Food Composition Data (FAO 2003) (mineral salts and bone ash ~1.0)"
 
+# --- Matter-cycle decomposition axes (the per-substance parameters the matter cycle reads to
+# decompose a cell's organic matter over time; material-substrate arc, cascade item 8). The
+# barrier is a cited thermal threshold; the rate is a reserved per-substance timescale. Both are
+# read per-substance so decomposition varies by the organic matter's own physics, not a global. ---
+
+[[axis]]
+id = "bio.decomposition_barrier"
+measures = "the temperature at or above which the organic matter decomposes; at or below it a frozen remains is preserved"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "250"
+range_hi = "320"
+real = "the freezing point of the organic matter's water (~273 K); below it the tissue water phase-locks and microbial and enzymatic decomposition halts, so a frozen carcass is preserved and a warm one rots (CRC Handbook water fusion; a high-solute or antifreeze-bearing tissue depresses the point, hence the sub-273 window floor)"
+
+[[axis]]
+id = "bio.decomposition_rate"
+measures = "the fraction of the organic matter's volume that breaks down per tick once at or above its decomposition barrier"
+unit = "fraction"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1.0"
+fantasy = "the per-substance decomposition timescale (the fraction of volume lost per tick once warm), a reserved tuneable coupling the substance's decomposition kinetics with the tick duration rather than an external cited datum; surfaced-with-basis, set by the owner per organic substance. Until a substance carries its own, the matter cycle falls back to the global reserved MatterCycleCalib.decomposition_rate"
+
 [[axis]]
 id = "bio.toxin_load_coarse"
 measures = "the Tier-0 total toxin mass, the saturating sum of the Tier-1 toxin-class concentrations"

@@ -427,6 +427,2097 @@ fn the_interoceptive_delta_fold_is_deterministic_and_scheduler_invariant() {
 }
 
 #[test]
+fn the_material_substrate_folds_into_state_hash_and_stays_deterministic() {
+    // Material-substrate arc slice 1 WIRE determinism guard: a populated material layer is canonical
+    // dynamic state that folds into state_hash beside the resource field, in canonical (Coord3,
+    // substance-id, volume) order and drawing no randomness, so a runner carrying matter replays bit
+    // for bit and folds identically between the pinned order and the scheduler variant. An empty
+    // material layer (every existing scenario) folds no bytes, so the fold is byte-identical there
+    // (carried by every existing suite); this test proves the fold is live and order-invariant.
+    use civsim_sim::material::{MaterialField, SubstanceMix};
+
+    let setpoint = 305;
+    let material = || -> MaterialField {
+        let mut field = MaterialField::new();
+        let mut ground = SubstanceMix::new();
+        ground.set("granite", Fixed::from_int(4));
+        ground.set("soil", Fixed::from_int(1));
+        field.set_cell(Coord3::ground(2, 3), ground);
+        // A subsurface ore deposit, exercising a non-ground z and the deposit path.
+        field.deposit(Coord3 { x: 5, y: 1, z: -1 }, "ore", Fixed::from_int(2));
+        field
+    };
+    let build = |with_material: bool| -> Runner {
+        let (organs, fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        if with_material {
+            emb.set_material(material());
+        }
+        let blank = Controller::zeros(emb.layout());
+        emb.add(
+            resting_walker(
+                1,
+                Coord3::ground(1, 1),
+                body((3, 4), vec![organ(fat, (3, 4))]),
+                &reg,
+                &organs,
+                blank,
+            ),
+            band(setpoint),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
+    };
+
+    let trace = |mut r: Runner, scheduled: bool| -> Vec<u128> {
+        (0..30)
+            .map(|_| {
+                if scheduled {
+                    r.step_scheduled(&[]);
+                } else {
+                    r.step();
+                }
+                r.state_hash()
+            })
+            .collect()
+    };
+
+    // With matter in the ground, the coupled runner replays bit for bit and folds identically between
+    // the pinned order and the scheduler variant.
+    let pinned_a = trace(build(true), false);
+    let pinned_b = trace(build(true), false);
+    assert_eq!(
+        pinned_a, pinned_b,
+        "the material-bearing runner did not replay bit for bit"
+    );
+    let scheduled = trace(build(true), true);
+    assert_eq!(
+        pinned_a, scheduled,
+        "the material fold diverged between the pinned order and the scheduler"
+    );
+
+    // The fold is live: a populated material layer changes the hash versus an empty one (the opt-out
+    // state every existing scenario stays in), so the substrate is part of the canonical state.
+    let empty = trace(build(false), false);
+    assert_ne!(
+        pinned_a, empty,
+        "folding the material layer left the hash unchanged, so it is not canonical"
+    );
+}
+
+#[test]
+fn a_carried_load_folds_into_state_hash_and_stays_deterministic() {
+    // Material-substrate arc item 3 (the carry substrate): a being's carried load is per-being dynamic
+    // state folded into state_hash after the reserve memory, in canonical (substance-id, volume) order
+    // with no randomness, so a runner whose being bears matter replays bit for bit and folds identically
+    // between the pinned order and the scheduler variant. A being carrying nothing (every existing
+    // scenario) folds no bytes, so the fold is byte-identical there; this proves it is live and
+    // order-invariant.
+    use civsim_sim::material::SubstanceMix;
+
+    let setpoint = 305;
+    let build = |carrying: bool| -> Runner {
+        let (organs, fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let blank = Controller::zeros(emb.layout());
+        let mut w = resting_walker(
+            1,
+            Coord3::ground(1, 1),
+            body((3, 4), vec![organ(fat, (3, 4))]),
+            &reg,
+            &organs,
+            blank,
+        );
+        if carrying {
+            let mut load = SubstanceMix::new();
+            load.set("granite", Fixed::from_int(2));
+            load.set("hematite", Fixed::from_int(1));
+            w.carried = load;
+        }
+        emb.add(w, band(setpoint));
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
+    };
+    let trace = |mut r: Runner, scheduled: bool| -> Vec<u128> {
+        (0..30)
+            .map(|_| {
+                if scheduled {
+                    r.step_scheduled(&[]);
+                } else {
+                    r.step();
+                }
+                r.state_hash()
+            })
+            .collect()
+    };
+    let pinned_a = trace(build(true), false);
+    let pinned_b = trace(build(true), false);
+    assert_eq!(
+        pinned_a, pinned_b,
+        "the carrying runner did not replay bit for bit"
+    );
+    let scheduled = trace(build(true), true);
+    assert_eq!(
+        pinned_a, scheduled,
+        "the carried fold diverged between the pinned order and the scheduler"
+    );
+    let empty = trace(build(false), false);
+    assert_ne!(
+        pinned_a, empty,
+        "folding the carried load left the hash unchanged, so it is not canonical"
+    );
+}
+
+#[test]
+fn a_being_picks_up_and_puts_down_matter_bounded_by_its_grown_strength() {
+    // Material-substrate arc item 3, the carry hinge: a being takes matter from the ground into its
+    // carried load, as much as its grown whole-body muscle force bears against the load's derived weight
+    // and no more, and puts it back conserved. The limit is grown strength versus physics-derived weight,
+    // never a per-race carry table, so a being with no muscle carries nothing and a strong being is
+    // bounded by its strength rather than by the size of the heap.
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(1, 1);
+    let build = |with_muscle: bool, with_registry: bool| -> Embodiment {
+        let (mut organs, fat) = energy_registry();
+        let mut parts = vec![organ(fat, (1, 2))];
+        if with_muscle {
+            let muscle = organs.organs.len() as u16;
+            organs.organs.push(OrganKindDef {
+                id: muscle,
+                name: "muscle".to_string(),
+                fantasy: false,
+                composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+            });
+            parts.push(organ(muscle, (1, 1)));
+        }
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let blank = Controller::zeros(emb.layout());
+        emb.add(
+            resting_walker(1, cell, body((3, 4), parts), &reg, &organs, blank),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", Fixed::from_int(100000));
+        emb.set_material(field);
+        if with_registry {
+            emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        }
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb
+    };
+
+    // Without a material registry the load's weight cannot be derived, so the carry actions no-op.
+    let mut no_reg = build(true, false);
+    assert_eq!(
+        no_reg.pick_up(StableId(1), cell, "granite", Fixed::from_int(1)),
+        Fixed::ZERO
+    );
+
+    // A being with no muscle has zero carry capacity and lifts nothing.
+    let mut weak = build(false, true);
+    assert_eq!(
+        weak.pick_up(StableId(1), cell, "granite", Fixed::from_int(1)),
+        Fixed::ZERO
+    );
+
+    // A strong being lifts some granite, bounded by its strength: asking for the whole heap it takes a
+    // positive but limited amount, its strength is then spent (a second pick-up takes nothing more), and
+    // the heap still holds granite (the bound was strength, not availability). Conservation holds: the
+    // ground lost exactly what the being took.
+    let mut strong = build(true, true);
+    let taken = strong.pick_up(StableId(1), cell, "granite", Fixed::from_int(100000));
+    assert!(taken > Fixed::ZERO, "a strong being lifts some granite");
+    assert_eq!(
+        strong.pick_up(StableId(1), cell, "granite", Fixed::from_int(100000)),
+        Fixed::ZERO,
+        "its strength is spent, so it cannot bear more"
+    );
+    assert_eq!(
+        strong.material().volume(cell, "granite"),
+        Fixed::from_int(100000) - taken,
+        "the ground lost exactly what was taken"
+    );
+
+    // Put it back down: the load returns to the ground, conserved.
+    let dropped = strong.put_down(StableId(1), cell, "granite", Fixed::from_int(100000));
+    assert_eq!(dropped, taken, "the being sets down all it carried");
+    assert_eq!(
+        strong.material().volume(cell, "granite"),
+        Fixed::from_int(100000),
+        "the granite is fully restored to the ground"
+    );
+}
+
+#[test]
+fn a_being_grasps_matter_only_through_an_evolved_controller_weight() {
+    // Material-substrate arc item 3, THE DRIVER: a being picks matter up only because its evolved
+    // controller decided to, never because the engine scripts "beings carry". Two beings share one
+    // embodiment, one body plan, one strength, and one granite heap each; they differ in ONE gene, the
+    // controller weight feeding the grasp output. The one whose grasp weight selection has lifted off zero
+    // grasps its heap (its cell loses matter, its carried load fills, bounded by its grown strength); the
+    // blank-controller founder, expressing zero on that channel, never grasps though it stands on the same
+    // matter and affords the same operation. This is the emergent pattern (Principles 8, 9): the affordance
+    // and the physics are fixed, the DECISION is an evolved phenotype, and a founder does nothing until
+    // selection gives it a reason to. The selection pressure that lifts the grasp weight (a need the carried
+    // matter serves) arrives with item 4's extraction contest; here the mechanism is proven at the decision.
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let grasper_cell = Coord3::ground(2, 2);
+    let founder_cell = Coord3::ground(5, 5);
+
+    // A shared organ registry with an energy store and a full muscle (so both bodies have carry capacity).
+    let (mut organs, fat) = energy_registry();
+    let muscle = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: muscle,
+        name: "muscle".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+    });
+    let reg = energy_thermal_registry();
+
+    // The carrier affordance registry adds GRASP (move, ingest, grasp), so the layout carries a grasp
+    // output the controller can drive. Every existing scenario keeps the two-affordance dev_default and is
+    // untouched.
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_carrier(),
+        LocomotionParams::dev_default(),
+        0,
+        0x64A5,
+    );
+
+    // The grasp output is the fifth output of the carrier layout (move [act,dx,dy] at 0..2, ingest [act]
+    // at 3, grasp [act] at 4), so the grasp being's controller is a single nonzero weight: the bias input
+    // (the always-on last input) driving the grasp activation to one, every other weight zero, so grasp
+    // wins its decision over the resting move and ingest outputs. A reaction-norm weight feeding output o
+    // from input i is index o * n_in + i.
+    assert_eq!(
+        emb.layout().n_out(),
+        5,
+        "the carrier layout has move(3) + ingest(1) + grasp(1) outputs"
+    );
+    let n_in = emb.layout().n_in();
+    let grasp_out = 4usize;
+    let bias = n_in - 1;
+    let mut grasp_weights = vec![Fixed::ZERO; emb.layout().weight_count()];
+    grasp_weights[grasp_out * n_in + bias] = Fixed::ONE;
+    let grasp_controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, grasp_weights);
+    let blank = Controller::zeros(emb.layout());
+
+    let plan = || body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]);
+    emb.add(
+        resting_walker(1, grasper_cell, plan(), &reg, &organs, grasp_controller),
+        band(305),
+    );
+    emb.add(
+        resting_walker(2, founder_cell, plan(), &reg, &organs, blank),
+        band(305),
+    );
+
+    // A granite heap under each being, identical.
+    let heap = Fixed::from_int(100000);
+    let mut field = MaterialField::new();
+    field.deposit(grasper_cell, "granite", heap);
+    field.deposit(founder_cell, "granite", heap);
+    emb.set_material(field);
+    emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+        organs,
+        MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+    ));
+
+    let mut runner =
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb);
+    runner.step();
+
+    let carried = |r: &Runner, id: u64| -> Fixed {
+        r.embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .carried
+            .total_volume()
+    };
+    let ground = |r: &Runner, coord: Coord3| -> Fixed {
+        r.embodiment().unwrap().material().volume(coord, "granite")
+    };
+
+    // The evolved-weight being grasped: it now carries a positive load, its heap lost exactly that much,
+    // and the amount is bounded by its strength (it did not scoop the whole heap).
+    let grasped = carried(&runner, 1);
+    assert!(
+        grasped > Fixed::ZERO,
+        "the being whose grasp weight is lifted picks matter up"
+    );
+    assert_eq!(
+        ground(&runner, grasper_cell),
+        heap - grasped,
+        "its cell lost exactly what it carried (conservation)"
+    );
+    assert!(
+        ground(&runner, grasper_cell) > Fixed::ZERO,
+        "its strength, not the heap, bounded the lift: matter remains"
+    );
+
+    // The blank founder, expressing zero on the grasp channel, never grasped though it stood on the same
+    // matter and afforded the same operation: it carries nothing and its heap is untouched.
+    assert_eq!(
+        carried(&runner, 2),
+        Fixed::ZERO,
+        "the blank founder does not grasp"
+    );
+    assert_eq!(
+        ground(&runner, founder_cell),
+        heap,
+        "the founder's heap is untouched"
+    );
+}
+
+#[test]
+fn a_being_mines_bonded_rock_only_when_it_decides_to_and_can_fracture_it() {
+    // Material-substrate arc item 4, THE EXTRACTION CONTEST wired into the run: a being breaks bonded
+    // matter loose only because its evolved controller decided to (the EXTRACT affordance) AND its contact
+    // pressure clears the rock's fracture-gating hardness (the physics contest). Two axes, both proven
+    // here: the DECISION (an evolved extract weight, a blank founder never mines) and the PHYSICS (the same
+    // deciding being mines when its force is concentrated over a small working area and fails when the same
+    // force is spread over a large one, because the fracture gate is pressure, not raw force). All against
+    // granite's cited fracture strength, no "miner" branch, no per-race yield table (Principles 8, 9).
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    // The extract output is the fifth output of the miner layout (move [act,dx,dy] at 0..2, ingest [act]
+    // at 3, extract [act] at 4), so the extractor's controller is a single nonzero weight: the bias input
+    // driving the extract activation to one, so extract wins its decision over the resting move and ingest.
+    let build = |extract_weight: bool, working_area: Fixed| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x4174,
+        );
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "miner layout: move(3) + ingest(1) + extract(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if extract_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> extract activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        emb.set_extraction_params(ExtractionParams {
+            working_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+
+    // A tiny working area concentrates the being's force to a pressure far above granite's fracture
+    // strength: the deciding being fractures the rock and takes a strength-bounded load, its heap losing
+    // exactly that much.
+    let small_area = Fixed::from_ratio(1, 1_000_000);
+    let mut mining = build(true, small_area);
+    mining.step();
+    let mined = carried(&mining);
+    assert!(
+        mined > Fixed::ZERO,
+        "a being that decides to extract and can fracture the rock mines it"
+    );
+    assert_eq!(
+        ground(&mining),
+        heap - mined,
+        "its cell lost exactly what it extracted (conservation)"
+    );
+    assert!(
+        ground(&mining) > Fixed::ZERO,
+        "its strength, not the seam, bounded the take: rock remains"
+    );
+
+    // The blank founder, expressing zero on the extract channel, never mines though it stands on the same
+    // rock, affords the same operation, and could fracture it: no decision, no mining.
+    let mut founder = build(false, small_area);
+    founder.step();
+    assert_eq!(
+        carried(&founder),
+        Fixed::ZERO,
+        "the blank founder does not mine"
+    );
+    assert_eq!(ground(&founder), heap, "the founder's seam is untouched");
+
+    // The SAME deciding being with the same strength, but its force spread over a large working area, cannot
+    // raise its pressure over granite's fracture strength: it decides to extract and gets nothing, because
+    // the contest is pressure, not raw force (a fist where a pick would bite). This is the fracture gate.
+    let large_area = Fixed::from_int(1000);
+    let mut spread = build(true, large_area);
+    spread.step();
+    assert_eq!(
+        carried(&spread),
+        Fixed::ZERO,
+        "spread too thin to fracture granite, the deciding being mines nothing"
+    );
+    assert_eq!(
+        ground(&spread),
+        heap,
+        "the rock holds against too low a pressure"
+    );
+}
+
+#[test]
+fn a_wielded_tool_multiplies_the_extraction_affordance_by_its_geometry_and_material() {
+    // Material-substrate arc item 4, crafting, THE TOOL MULTIPLIES THE AFFORDANCE: the same being, too
+    // weak-handed to fracture granite bare, breaks it when it wields a sharp hard tool, because the tool
+    // concentrates its force over a small contact area into a pressure that clears the rock, AND the tool
+    // must itself be hard enough (a sharp soft tool blunts and does nothing). This is the payoff loop's
+    // hinge, mining harder matter with a made tool, all geometry and material against substance data.
+    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A controlled floor: a granite target (a fracture strength to clear, a density to weigh the load), a
+    // hard flint tool material, and a soft chalk tool material. Kept in the test so the tool-material cap is
+    // exercised on known values without pinning shipped floor data.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "1000" },
+]
+
+[[substance]]
+id = "chalk"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "5" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    // A tool with a tiny contact area (a sharp point), of the given substance.
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        substance: substance.to_string(),
+    };
+    // A large bare working area, so the bare being cannot raise its pressure over granite's fracture
+    // strength: only a concentrating tool can.
+    let bare_area = Fixed::from_int(1000);
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x700,
+        );
+        let n_in = emb.layout().n_in();
+        let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+        w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> extract activation
+        let controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_extraction_params(ExtractionParams {
+            working_area: bare_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+
+    // Bare-handed, the deciding being spreads its force too thin to fracture granite: it mines nothing.
+    let mut bare = build(None);
+    bare.step();
+    assert_eq!(
+        carried(&bare),
+        Fixed::ZERO,
+        "bare-handed the being cannot fracture the granite"
+    );
+
+    // Wielding a sharp HARD flint tool, the same being concentrates its force into a pressure that clears
+    // the granite and mines it: the tool multiplied the affordance.
+    let mut with_flint = build(Some(tool("flint")));
+    with_flint.step();
+    assert!(
+        carried(&with_flint) > Fixed::ZERO,
+        "a sharp hard tool lets the same being mine the rock it could not touch bare-handed"
+    );
+
+    // Wielding an equally sharp but SOFT chalk tool, the being mines nothing: the tool blunts at its own low
+    // hardness before it reaches the granite's fracture strength, so the tool's material matters, not only
+    // its edge.
+    let mut with_chalk = build(Some(tool("chalk")));
+    with_chalk.step();
+    assert_eq!(
+        carried(&with_chalk),
+        Fixed::ZERO,
+        "a sharp but soft tool blunts and mines nothing: the tool material is part of the contest"
+    );
+}
+
+#[test]
+fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
+    // Material-substrate arc item 4, INGEST-FOR-COMPOSITION, the mining payoff and emergence-closer: a
+    // mineral in the ground is worth something because a being whose reserve needs it eats it and survives,
+    // where one that does not starves of the mineral. Two beings share one embodiment, one body, one
+    // draining mineral reserve, and one identical halite (rock salt) seam each; they differ in ONE gene, the
+    // controller weight feeding the geophage output. The one whose geophage weight is lifted eats the salt
+    // it stands on each tick and lives; the blank founder, expressing zero on that channel, never eats
+    // though it stands on the same salt, drains its reserve, and dies. So a mineral's fitness value, the
+    // reason to seek it and (later) mine it, is an evolved phenotype resolved by physiology against
+    // substance data, no per-race diet table (Principles 8, 9).
+    use civsim_sim::homeostasis::HomeostaticAxisDef;
+    use civsim_sim::material::MaterialField;
+
+    // A registry whose one draining reserve is backed by the halite substance (rock salt): a mineral need.
+    // The required temperature axis does not drain. The reserve drains each tick and, refilled or not,
+    // decides survival.
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "mineral".to_string(),
+                backing_component: Some("halite".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 50),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+    // A mineral-storing tissue backs the halite reserve, so the being has a mineral reserve to drain and
+    // refill (an axis with no tissue backing it would have zero capacity, the starve-at-birth cull).
+    let mut organs = BodyPlanRegistry::dev_default();
+    let mineral_store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: mineral_store,
+        name: "mineral-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("halite", Fixed::ONE)]),
+    });
+    let store_body = || body((3, 4), vec![organ(mineral_store, (1, 1))]);
+    let seam = Fixed::from_int(100000);
+    let eater_cell = Coord3::ground(2, 2);
+    let founder_cell = Coord3::ground(5, 5);
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x6E0,
+    );
+    // The geophage output is the fifth output (move [act,dx,dy] 0..2, ingest [act] 3, geophage [act] 4).
+    assert_eq!(
+        emb.layout().n_out(),
+        5,
+        "geophage layout: move(3) + ingest(1) + geophage(1)"
+    );
+    let n_in = emb.layout().n_in();
+    let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+    w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> geophage activation
+    let eater_ctrl = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+    let blank = Controller::zeros(emb.layout());
+
+    emb.add(
+        resting_walker(1, eater_cell, store_body(), &reg, &organs, eater_ctrl),
+        band(305),
+    );
+    emb.add(
+        resting_walker(2, founder_cell, store_body(), &reg, &organs, blank),
+        band(305),
+    );
+    let mut field = MaterialField::new();
+    field.deposit(eater_cell, "halite", seam);
+    field.deposit(founder_cell, "halite", seam);
+    emb.set_material(field);
+    // No material registry and no anatomy physiology are needed: geophagy reads the being's own edibility
+    // physiology (halite assimilation, from the mineral-backed axis) and the cell's volume, not the floor.
+
+    let mut runner =
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb);
+    for _ in 0..200 {
+        runner.step();
+    }
+
+    let alive = |r: &Runner, id: u64| -> bool {
+        r.embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .alive
+    };
+    let ground = |r: &Runner, coord: Coord3| -> Fixed {
+        r.embodiment().unwrap().material().volume(coord, "halite")
+    };
+
+    // The evolved-weight being ate its way through the drain and lives; its seam lost some salt.
+    assert!(
+        alive(&runner, 1),
+        "the being that geophages its needed mineral survives"
+    );
+    assert!(
+        ground(&runner, eater_cell) < seam,
+        "the eater drew salt from its seam (the mineral is consumed to satisfy the need)"
+    );
+    // The blank founder never ate, drained its mineral reserve, and died; its seam is untouched.
+    assert!(
+        !alive(&runner, 2),
+        "the blank founder never geophages and starves of the mineral it stood on"
+    );
+    assert_eq!(
+        ground(&runner, founder_cell),
+        seam,
+        "the founder's seam is untouched: it never ate"
+    );
+}
+
+#[test]
+fn eating_a_food_that_sickens_harms_the_sensitive_eater_and_spares_the_tolerant_one() {
+    // Material-substrate arc item 4, the HARM-HALF of INGEST-FOR-COMPOSITION (the owner's seam): eating is
+    // not only benefit. A being that eats a substance carrying a toxin takes the harm against its OWN
+    // inherited tolerance, so the same brackish food (a nutrient laced with salt) sickens a salt-sensitive
+    // eater and spares a salt-tolerant one, per consumer, no per-substance poison label (Principle 9). The
+    // felt harm lands on CONDITION, the same reserve the harm-learning loop reads, so a being can learn "this
+    // food sickens me", the symmetric completion of the composition read harm-learning opened.
+    use civsim_sim::homeostasis::{HomeostaticAxisDef, CONDITION};
+    use civsim_sim::material::MaterialField;
+    use civsim_sim::physiology::SALINITY;
+
+    // A registry whose brackish substance both FEEDS a mineral reserve and carries a salinity toxin.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "bio.salinity"
+measures = "a salinity toxin concentration"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1000"
+real = "test fixture"
+
+[[substance]]
+id = "brackish"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1200" },
+  { axis = "bio.salinity", value = "2" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // A mineral-storing tissue backs the brackish reserve so the being has room to eat into.
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "mineral-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("brackish", Fixed::ONE)]),
+    });
+    // A registry with a brackish-backed mineral reserve, a CONDITION reserve for the harm to land on, and
+    // the required temperature axis.
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "mineral".to_string(),
+                backing_component: Some("brackish".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: CONDITION,
+                name: "condition".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x5A17,
+    );
+    let blank = Controller::zeros(emb.layout());
+    // Two beings differing only in salinity tolerance: sensitive (low) and tolerant (high).
+    let mut add_eater = |id: u64, tolerance: Fixed| {
+        let mut walker = resting_walker(
+            id,
+            cell,
+            body((1, 1), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            blank.clone(),
+        );
+        walker
+            .physiology
+            .tolerances
+            .insert(SALINITY.to_string(), tolerance);
+        // Open room in the mineral reserve so the being eats brackish (and takes its toxin).
+        walker
+            .homeostasis
+            .set_level(ENERGY, Fixed::from_ratio(1, 2));
+        emb.add(walker, band(305));
+    };
+    add_eater(1, Fixed::from_ratio(1, 10)); // sensitive: low salt tolerance
+    add_eater(2, Fixed::from_int(100)); // tolerant: high salt tolerance
+
+    let mut field = MaterialField::new();
+    field.deposit(cell, "brackish", Fixed::from_int(100000));
+    emb.set_material(field);
+    emb.set_material_registry(
+        civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+    );
+
+    let condition = |e: &Embodiment, id: u64| -> Fixed {
+        e.walkers()
+            .iter()
+            .find(|w| w.id == StableId(id))
+            .unwrap()
+            .homeostasis
+            .level(CONDITION)
+    };
+    let full = condition(&emb, 1);
+    assert_eq!(full, Fixed::ONE, "both beings start at full condition");
+    assert_eq!(condition(&emb, 2), Fixed::ONE);
+
+    // Both eat the brackish food (gaining the mineral); the toxin harm lands per tolerance.
+    assert!(
+        emb.geophage(StableId(1)) > Fixed::ZERO,
+        "the sensitive being eats the brackish food"
+    );
+    assert!(
+        emb.geophage(StableId(2)) > Fixed::ZERO,
+        "the tolerant being eats the same food"
+    );
+
+    let sensitive = condition(&emb, 1);
+    let tolerant = condition(&emb, 2);
+    // The salt-sensitive eater is harmed by the food (its condition fell); the salt-tolerant one is not (or
+    // far less), the SAME food read against each being's own inherited tolerance.
+    assert!(
+        sensitive < full,
+        "the food sickens the sensitive eater: its condition fell to {sensitive:?}"
+    );
+    assert!(
+        tolerant > sensitive,
+        "the same food spares the tolerant eater: {tolerant:?} > {sensitive:?}"
+    );
+}
+
+#[test]
+fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
+    // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
+    // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A
+    // being carrying stone with a lifted craft weight wields a tool of that stone (its carried stock spent
+    // by the tool volume); a blank founder carrying the same stone never crafts. Founder-zero, evolved
+    // decision, the tool made of the stone worked (Principles 8, 9).
+    use civsim_sim::material::{CraftParams, SubstanceMix};
+
+    let cell = Coord3::ground(2, 2);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+    let stock = Fixed::from_int(5);
+
+    let build = |craft_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_toolmaker(),
+            LocomotionParams::dev_default(),
+            0,
+            0xC0A1,
+        );
+        // The craft output is the sixth output (move [act,dx,dy] 0..2, ingest [act] 3, extract [act] 4,
+        // craft [act] 5).
+        assert_eq!(
+            emb.layout().n_out(),
+            6,
+            "toolmaker layout: move(3)+ingest(1)+extract(1)+craft(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if craft_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[5 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> craft activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        let mut carried = SubstanceMix::new();
+        carried.add("granite", stock);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_craft_params(CraftParams::dev_fixture()); // edge 1e-6 m^2, tool volume 1
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let tool_substance = |r: &Runner| -> Option<String> {
+        r.embodiment().unwrap().walkers()[0]
+            .wielded
+            .as_ref()
+            .map(|t| t.substance.clone())
+    };
+    let carried_granite = |r: &Runner| -> Fixed {
+        r.embodiment().unwrap().walkers()[0]
+            .carried
+            .volume("granite")
+    };
+
+    // The evolved-weight being shaped its carried granite into a granite tool, spending the tool volume.
+    let mut maker = build(true);
+    maker.step();
+    assert_eq!(
+        tool_substance(&maker).as_deref(),
+        Some("granite"),
+        "the being crafts a tool of the stone it carried"
+    );
+    assert_eq!(
+        carried_granite(&maker),
+        stock - Fixed::ONE,
+        "the tool spent the reserved tool volume of its carried stone"
+    );
+
+    // The blank founder, expressing zero on the craft channel, never crafts though it carries the same stone.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(
+        tool_substance(&founder),
+        None,
+        "the blank founder wields no tool"
+    );
+    assert_eq!(
+        carried_granite(&founder),
+        stock,
+        "the founder's carried stone is untouched"
+    );
+}
+
+#[test]
+fn a_crafted_tool_closes_the_loop_and_mines_rock_the_bare_body_cannot() {
+    // Material-substrate arc item 4, the RECURSIVE TOOL LOOP end to end: a being that carries a hard stone
+    // shapes it into a tool and then, wielding it, breaks a rock its bare body could not. Driven at the
+    // method level (craft then extract) so the two-step chain is proven directly: knapping makes the tool,
+    // the tool multiplies the extraction. This is the payoff that gives mining and carrying a reason: a made
+    // point breaks matter a body cannot.
+    use civsim_sim::material::{CraftParams, ExtractionParams, MaterialField, SubstanceMix};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A floor: a granite target (fracture strength to clear), and a hard flint the being carries and shapes.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2600" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    let (mut organs, fat) = energy_registry();
+    let muscle = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: muscle,
+        name: "muscle".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+    });
+    let reg = energy_thermal_registry();
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_toolmaker(),
+        LocomotionParams::dev_default(),
+        0,
+        0xC10E,
+    );
+    let blank = Controller::zeros(emb.layout());
+    let mut walker = resting_walker(
+        1,
+        cell,
+        body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+        &reg,
+        &organs,
+        blank,
+    );
+    // The being carries exactly the tool volume of flint to shape, so after crafting it carries no residual
+    // load and its full strength is free to bear the granite it then mines.
+    let mut carried = SubstanceMix::new();
+    carried.add("flint", Fixed::ONE);
+    walker.carried = carried;
+    emb.add(walker, band(310));
+    let mut field = MaterialField::new();
+    field.deposit(cell, "granite", heap);
+    emb.set_material(field);
+    emb.set_material_registry(
+        civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+    );
+    // A large bare working area, so bare-handed the being cannot fracture the granite.
+    emb.set_extraction_params(ExtractionParams {
+        working_area: Fixed::from_int(1000),
+        pressure_max: Fixed::from_int(150_000),
+    });
+    emb.set_craft_params(CraftParams::dev_fixture()); // small edge, tool volume 1
+    emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+        organs,
+        MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+    ));
+    let mut runner =
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb);
+
+    // Bare-handed (its large working area), the being cannot fracture the granite.
+    assert_eq!(
+        runner
+            .embodiment_mut()
+            .unwrap()
+            .extract_underfoot(StableId(1)),
+        Fixed::ZERO,
+        "bare-handed the being cannot break the granite"
+    );
+    // It shapes its carried flint into a tool.
+    assert!(
+        runner
+            .embodiment_mut()
+            .unwrap()
+            .craft_from_carried(StableId(1)),
+        "the being crafts a flint tool from its carried stone"
+    );
+    // Now wielding the flint point, the same being breaks the granite it could not touch bare-handed.
+    let mined = runner
+        .embodiment_mut()
+        .unwrap()
+        .extract_underfoot(StableId(1));
+    assert!(
+        mined > Fixed::ZERO,
+        "wielding its made tool, the being mines the rock its bare body could not: {mined:?}"
+    );
+}
+
+#[test]
+fn a_being_digs_a_pit_lowering_the_terrain_only_through_an_evolved_weight() {
+    // Material-substrate arc item 5, MODIFIABLE TERRAIN: a being excavates the ground underfoot, and the
+    // removed matter both loads its carrier AND lowers the column (a pit forms), so digging reshapes the
+    // terrain, not only mines it. It happens only through an evolved dig decision and the fracture contest:
+    // a deciding being that can fracture the ground digs a pit and carries the spoil; a blank founder on the
+    // same ground never digs and the terrain is untouched. Founder-zero, physics-gated (Principles 8, 9).
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    let cell = Coord3::ground(2, 2);
+    let heap = Fixed::from_int(100000);
+    let build = |dig_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_digger(),
+            LocomotionParams::dev_default(),
+            0,
+            0xD16,
+        );
+        // The dig output is the fifth output (move [act,dx,dy] 0..2, ingest [act] 3, dig [act] 4).
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "digger layout: move(3) + ingest(1) + dig(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if dig_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> dig activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A small working area, so the being's force concentrates to a pressure that fractures the granite.
+        emb.set_extraction_params(ExtractionParams {
+            working_area: Fixed::from_ratio(1, 1_000_000),
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let elevation = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // The deciding being digs: it fractures the ground, carries the spoil, and the column drops by exactly
+    // the volume it removed (a pit), the ground conserved between the carrier and the lowered terrain.
+    let mut digger = build(true);
+    digger.step();
+    let spoil = carried(&digger);
+    assert!(
+        spoil > Fixed::ZERO,
+        "the deciding being excavates the ground"
+    );
+    assert_eq!(
+        ground(&digger),
+        heap - spoil,
+        "the cell lost exactly what was excavated"
+    );
+    assert_eq!(
+        elevation(&digger),
+        Fixed::ZERO - spoil,
+        "the column dropped by the excavated volume: a pit formed"
+    );
+
+    // The blank founder never digs: the terrain is untouched.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(
+        carried(&founder),
+        Fixed::ZERO,
+        "the blank founder does not dig"
+    );
+    assert_eq!(elevation(&founder), Fixed::ZERO, "the terrain is unchanged");
+}
+
+#[test]
+fn releasing_a_carried_load_raises_the_column_the_mound_half_of_terraforming() {
+    // Material-substrate arc item 5, the DEPOSIT-AND-MOUND half: a being sets its carried load down and the
+    // column rises by the volume deposited, conservation-symmetric with digging lowering it. So a mound is
+    // the consequence of the release primitive, not a coded verb: what a being digs from a pit and carries
+    // elsewhere raises a mound there, and terracing emerges from the dig and release primitives. It happens
+    // only through the evolved release decision; a blank founder holding the same load never sets it down.
+    use civsim_sim::material::SubstanceMix;
+
+    let cell = Coord3::ground(3, 3);
+    let load = Fixed::from_int(5);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+
+    let build = |release_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_earthmover(),
+            LocomotionParams::dev_default(),
+            0,
+            0xEA47,
+        );
+        // Outputs: move [act,dx,dy] 0..2, ingest [act] 3, dig [act] 4, release [act] 5.
+        assert_eq!(
+            emb.layout().n_out(),
+            6,
+            "earthmover layout: move(3) + ingest(1) + dig(1) + release(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if release_weight {
+            let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+            w[5 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> release activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, w)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        // The being already carries a load (dug elsewhere and brought here).
+        let mut carried = SubstanceMix::new();
+        carried.add("granite", load);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let carried =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let ground =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let elevation = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // The deciding being sets its load down: the cell gains the matter, the column rises by exactly the
+    // deposited volume (a mound), and the being carries nothing more.
+    let mut mover = build(true);
+    mover.step();
+    assert_eq!(
+        carried(&mover),
+        Fixed::ZERO,
+        "the being set its whole load down"
+    );
+    assert_eq!(ground(&mover), load, "the matter is now on the ground");
+    assert_eq!(
+        elevation(&mover),
+        load,
+        "the column rose by the deposited volume: a mound"
+    );
+
+    // The blank founder never releases: it holds its load and the terrain is unchanged.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(carried(&founder), load, "the blank founder holds its load");
+    assert_eq!(ground(&founder), Fixed::ZERO, "nothing was set down");
+    assert_eq!(elevation(&founder), Fixed::ZERO, "the terrain is unchanged");
+}
+
+#[test]
+fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_runner() {
+    // Material-substrate arc item 5, the HYDROLOGY COUPLING through the full runner: a being digs a pit and
+    // the environmental stack recouples its downhill routing to the reshaped terrain, so the dug cell
+    // becomes a basin that retains its water where before it drained. It happens only through the evolved
+    // dig decision and only where the ground is reshaped: a deciding being turns its cell into a basin; a
+    // blank being that digs nothing leaves the worldgen routing untouched. Proven identically in the pinned
+    // and scheduled tick orders. Physics-gated, no race or label (Principles 3, 9).
+    use civsim_sim::environ::{EnvironCalib, EnvironFields};
+    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+    use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
+
+    let (w, h) = (16, 12);
+    let map = TileMap::generate(
+        0x5EED,
+        FlatBounded::new(w, h, 1),
+        &BiomeSet::dev_default(),
+        &WorldgenParams::dev_default(),
+    );
+    // Choose the interior cell that is CLOSEST to becoming a basin: it drains now (its elevation is above
+    // its lowest neighbour, so it is no worldgen basin), by the smallest margin on the map. A single dig
+    // then tips it below its lowest neighbour and into a basin, so the dig is the sole cause of the flip (a
+    // clean causal separation, robust to the generated elevation). The margin is read from the exposed tile
+    // elevations, so the test picks a cell a realistic scoop can clear.
+    let elev = |x: i32, y: i32| map.tile(Coord3::ground(x, y)).unwrap().elevation;
+    let margin = |x: i32, y: i32| -> Option<Fixed> {
+        let here = elev(x, y);
+        let low = [
+            elev(x, y - 1),
+            elev(x, y + 1),
+            elev(x - 1, y),
+            elev(x + 1, y),
+        ]
+        .into_iter()
+        .fold(here, |a, b| if b < a { b } else { a });
+        if here > low {
+            Some(here - low)
+        } else {
+            None // already a basin (no strictly-lower neighbour)
+        }
+    };
+    let (fx, fy) = (1..w - 1)
+        .flat_map(|x| (1..h - 1).map(move |y| (x, y)))
+        .filter(|&(x, y)| margin(x, y).is_some())
+        .min_by_key(|&(x, y)| margin(x, y).unwrap())
+        .expect("some interior cell of the generated map drains rather than ponding");
+    let cell = Coord3::ground(fx, fy);
+    let heap = Fixed::from_int(100000);
+
+    let build = |dig_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_digger(),
+            LocomotionParams::dev_default(),
+            0,
+            0xD16,
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if dig_weight {
+            let mut wv = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wv[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> dig activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, wv)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        emb.add(
+            resting_walker(
+                1,
+                cell,
+                body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+                &reg,
+                &organs,
+                controller,
+            ),
+            band(305),
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "granite", heap);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        emb.set_extraction_params(ExtractionParams {
+            working_area: Fixed::from_ratio(1, 1_000_000),
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(w, h, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(305)), calib(), emb);
+        r.set_environ(EnvironFields::from_map(&map), EnvironCalib::dev_fixture());
+        r
+    };
+
+    let is_basin = |r: &Runner| -> bool { r.environ().unwrap().is_basin(fx, fy) };
+    let dug = |r: &Runner| -> Fixed { r.embodiment().unwrap().earthwork().delta(cell) };
+
+    // Pinned order: the being excavates a pit and the routing recouples the cell into a basin.
+    let mut pinned = build(true);
+    assert!(
+        !is_basin(&pinned),
+        "the chosen cell drains on the bare worldgen map, it is no basin yet"
+    );
+    pinned.step();
+    assert!(dug(&pinned) < Fixed::ZERO, "the deciding being dug a pit");
+    assert!(
+        is_basin(&pinned),
+        "the dug pit recoupled the hydrology: the cell is now a basin that pools its water (pinned order)"
+    );
+
+    // Scheduled order: the deterministic scheduler recouples identically.
+    let mut scheduled = build(true);
+    scheduled.step_scheduled(&[]);
+    assert!(
+        is_basin(&scheduled),
+        "the scheduled order recouples the same basin (bit-identical to the pinned order)"
+    );
+
+    // A blank being digs nothing: the earthwork stays empty, so the routing keeps the worldgen baseline and
+    // the cell still drains (the opt-in no-op that keeps a non-digging run byte-identical).
+    let mut blank = build(false);
+    blank.step();
+    assert_eq!(dug(&blank), Fixed::ZERO, "the blank being digs nothing");
+    assert!(
+        !is_basin(&blank),
+        "with nothing dug the routing is untouched and the cell still drains"
+    );
+}
+
+#[test]
+fn combustible_matter_burns_when_it_is_hot_enough_and_a_cold_cell_and_rock_do_not() {
+    // Material-substrate arc item 6, LIVE FIRE: a cell of combustible matter that stands at or above its
+    // ignition temperature burns through the resolved combustion law, consuming its fuel and lighting the
+    // fire field; the identical cell in a cold field does not, and a non-combustible substance in the same
+    // hot cell is untouched. The outcome is the substance's own combustion data against the cell temperature,
+    // no race, kind, or role (Principle 9), and it is opt-in: with no combustion armed nothing burns.
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let cell = Coord3::ground(2, 2);
+    let fuel0 = Fixed::from_int(4);
+    let rock0 = Fixed::from_int(4);
+    let (w, h) = (8, 8);
+
+    // A runner holding oak (a combustible carrying therm.fuel_value and therm.ignition_temperature 570) and
+    // granite (no fuel value) at one cell, over a UNIFORM temperature field (a fixed point of the diffusion
+    // step, so the cell holds its temperature), with the combustion beat armed.
+    let build = |field_temp: i32| -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x00F1,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "oak", fuel0);
+        field.deposit(cell, "granite", rock0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let oak = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "oak") };
+    let rock = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "granite") };
+    let burning = |r: &Runner| -> Fixed { r.embodiment().unwrap().fire().intensity(cell) };
+
+    // Hot field (600 K, above oak's 570 K ignition): the oak ignites, burns down its fuel, and lights the
+    // fire field; the granite in the same cell has no fuel value and is untouched.
+    let mut hot = build(600);
+    hot.step();
+    assert!(
+        oak(&hot) < fuel0,
+        "the hot oak burned down some of its fuel"
+    );
+    assert!(
+        burning(&hot) > Fixed::ZERO,
+        "the burning cell lit the fire field"
+    );
+    assert_eq!(
+        rock(&hot),
+        rock0,
+        "the non-combustible granite in the same cell did not burn"
+    );
+
+    // Burning continues while fuel and heat remain: a second tick consumes more oak.
+    let after_one = oak(&hot);
+    hot.step();
+    assert!(
+        oak(&hot) < after_one,
+        "the fire keeps consuming fuel while it burns"
+    );
+
+    // Cold field (305 K, below the ignition temperature): the same oak never ignites, so its fuel is intact
+    // and the fire field stays dark.
+    let mut cold = build(305);
+    cold.step();
+    assert_eq!(
+        oak(&cold),
+        fuel0,
+        "cold oak below its ignition point does not burn"
+    );
+    assert_eq!(burning(&cold), Fixed::ZERO, "a cold cell is not on fire");
+
+    // The scheduled tick order sources the same fire as the pinned order (bit-identical).
+    let mut scheduled = build(600);
+    scheduled.step_scheduled(&[]);
+    assert!(
+        burning(&scheduled) > Fixed::ZERO && oak(&scheduled) < fuel0,
+        "the scheduled order burns the fuel and lights the fire identically"
+    );
+}
+
+#[test]
+fn an_oxygen_demanding_fire_burns_in_air_and_starves_in_an_anoxic_medium() {
+    // Material-substrate arc item 6, the OXYGEN GATE: an oxygen-demanding fuel (oak, which declares a
+    // therm.oxidiser_demand) burns only where the cell's medium supplies the oxidiser. In a rich (breathable)
+    // medium the same hot oak burns as it does in open air; in a near-anoxic medium the combustion goes
+    // oxidiser-limited to nothing and the fuel is spared, so fire needs air, from the medium's respirable
+    // content against the fuel's own stoichiometry, no coded rule (Principles 8, 9).
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let fuel0 = Fixed::from_int(4);
+
+    let build = |respirable: Fixed| -> Runner {
+        let (organs, _fat) = energy_registry();
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0A17,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "oak", fuel0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A uniform medium at the given respirable content: rich air breathes the fire, a near-anoxic medium
+        // starves it. Density and temperature are irrelevant to the oxidiser read.
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(w, h, respirable, Fixed::ZERO, Fixed::ZERO),
+        ));
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(600)), calib(), emb);
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let oak = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "oak") };
+    let burning = |r: &Runner| -> Fixed { r.embodiment().unwrap().fire().intensity(cell) };
+
+    // Rich air: the hot oak ignites and burns down its fuel.
+    let mut air = build(Fixed::ONE);
+    air.step();
+    assert!(oak(&air) < fuel0, "oak in rich air burns");
+    assert!(burning(&air) > Fixed::ZERO, "the fire is alight in air");
+
+    // Near-anoxic medium: the same hot oak cannot get the oxidiser it demands, so it does not burn.
+    let mut anoxic = build(Fixed::ZERO);
+    anoxic.step();
+    assert_eq!(
+        oak(&anoxic),
+        fuel0,
+        "oak in an anoxic medium is spared: no oxidiser, no burn"
+    );
+    assert_eq!(
+        burning(&anoxic),
+        Fixed::ZERO,
+        "the fire starves without air"
+    );
+}
+
+#[test]
+fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
+    // Material-substrate arc item 6, LIVE FIRE, the emergent payoff: a burning cell raises its temperature
+    // by the heat its combustion releases, that heat spreads through the ordinary temperature diffusion, and
+    // a neighbouring fuel cell whose temperature crosses its ignition gate catches. So fire SPREADS from cell
+    // to cell and EXTINGUISHES when a cell's fuel runs out, both emergent from the physics with no coded
+    // spread rule: it is the combustion gate over the diffused temperature, tick after tick.
+    use civsim_sim::material::{CombustionCalib, MaterialField};
+
+    let (w, h) = (8, 8);
+    let src = Coord3::ground(2, 2);
+    let mid = Coord3::ground(3, 2);
+    let far = Coord3::ground(4, 2);
+
+    let build = || -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x00F1,
+        );
+        let mut field = MaterialField::new();
+        for c in [src, mid, far] {
+            field.deposit(c, "oak", Fixed::from_int(50));
+        }
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A sustained ignition source at src (baseline 900, which holds above oak's 570 K ignition against
+        // the diffusion to its cold neighbours), the rest of the field cold ambient (305 K).
+        let mut baseline = vec![Fixed::from_int(305); (w * h) as usize];
+        baseline[(2 * w + 2) as usize] = Fixed::from_int(900);
+        // A fire-timescale field calibration: the ambient relaxation is slow next to a fire, so the
+        // combustion heat persists and spreads rather than being pulled straight back to the cold baseline.
+        // A labelled fixture, not owner canon; the reserved heat fraction and these field rates jointly set
+        // how readily fire spreads, the owner's to calibrate to the real fire and ambient dynamics.
+        let fire_calib = FieldCalib {
+            diffusion: Fixed::from_ratio(1, 8),
+            relaxation: Fixed::from_ratio(1, 64),
+            exchange: Fixed::from_ratio(1, 2),
+        };
+        let mut r = Runner::with_embodiment(Field::new(w, h, baseline), fire_calib, emb);
+        r.set_combustion(CombustionCalib::dev_fixture());
+        r
+    };
+
+    let lit = |r: &Runner, c: Coord3| -> Fixed { r.embodiment().unwrap().fire().intensity(c) };
+
+    let mut r = build();
+    // A few ticks in: only the source is alight; the far cell has not caught yet.
+    for _ in 0..5 {
+        r.step();
+    }
+    let src_early = lit(&r, src);
+    assert!(src_early > Fixed::ZERO, "the ignition source is alight");
+    assert_eq!(lit(&r, far), Fixed::ZERO, "the far cell has not caught yet");
+
+    // Run on: the heat has spread down the row and the far cell, cold at the start, is now burning.
+    for _ in 0..35 {
+        r.step();
+    }
+    assert!(
+        lit(&r, far) > Fixed::ZERO,
+        "fire spread down the fuel row and the far cell caught, through the temperature field alone"
+    );
+    assert!(
+        lit(&r, src) < src_early,
+        "the source is burning down: its fire dims as its fuel depletes"
+    );
+
+    // Run to exhaustion: the source, out of fuel, has dropped out of the fire field (extinction), no coded
+    // burnout rule, the combustion gate simply stops firing when there is nothing left to burn.
+    for _ in 0..80 {
+        r.step();
+    }
+    assert_eq!(
+        lit(&r, src),
+        Fixed::ZERO,
+        "the source burned out and dropped out of the fire field"
+    );
+
+    // The scheduled tick order spreads the fire bit-identically to the pinned order.
+    let mut pinned = build();
+    let mut scheduled = build();
+    for _ in 0..40 {
+        pinned.step();
+        scheduled.step_scheduled(&[]);
+    }
+    assert_eq!(
+        lit(&pinned, far),
+        lit(&scheduled, far),
+        "the scheduled and pinned orders spread the fire identically"
+    );
+}
+
+#[test]
+fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
+    // Material-substrate arc item 8, THE MATTER CYCLE: a cell's organic matter (carrion, which carries a
+    // biological composition) decomposes over time when it is warm enough, its lost mass leaving the located
+    // matter for the environment; a frozen cell preserves it. The decomposition is EXACTLY mass-conserving:
+    // what a cell loses enters the decomposed-mass sink bit for bit, so the total is invariant, the hard
+    // conservation the ConservationRegistry guards. Keyed off the substance's own composition physics and
+    // the cell temperature, no race, kind, or role (Principles 8, 9).
+    use civsim_sim::conservation::ConservationRegistry;
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+    let reg = civsim_physics::PhysicsRegistry::ground().unwrap();
+
+    let build = |field_temp: i32| -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "carrion", flesh0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+        r
+    };
+
+    let flesh =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "carrion") };
+    // The total matter mass the conservation guard watches: the located matter plus the decomposed sink.
+    let total_mass = move |r: &Runner| -> i128 {
+        let m = r.embodiment().unwrap().material().mass(cell, &reg);
+        let sink = r.embodiment().unwrap().decomposed_mass();
+        (m + sink).to_bits() as i128
+    };
+
+    // A warm cell (300 K, above the 273 K decomposition barrier): the carrion rots, its mass moving into the
+    // sink, and the ConservationRegistry sees the total unchanged (exact conservation).
+    let mut warm = build(300);
+    let mut conservation: ConservationRegistry<Runner> = ConservationRegistry::new();
+    conservation.register("matter_mass", total_mass);
+    let baseline = conservation.snapshot(&warm);
+    warm.step();
+    assert!(flesh(&warm) < flesh0, "warm carrion decomposes");
+    assert!(
+        warm.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the decomposed mass moved into the sink"
+    );
+    conservation
+        .check_against(&baseline, &warm)
+        .expect("the matter cycle conserves mass exactly (cell matter plus sink is invariant)");
+
+    // Many ticks keep conserving as the carrion rots down.
+    for _ in 0..10 {
+        warm.step();
+    }
+    conservation
+        .check_against(&baseline, &warm)
+        .expect("mass stays conserved as the carrion rots over many ticks");
+    assert!(
+        flesh(&warm) < flesh0.checked_div(Fixed::from_int(2)).unwrap(),
+        "the carrion has rotted well down"
+    );
+
+    // Slice C: the decomposed mass re-materialised into the cell's SOIL nutrient store (not a placeless
+    // scalar), LOCATED where the carrion rotted and SPLIT by the substance's own composition into a mineral
+    // class (the ash fraction) and an organic class (the remainder). The split is exact and complete.
+    let soil = warm.embodiment().unwrap().soil();
+    let mineral = soil.mass(cell, "bio.mineral_ash_fraction");
+    let organic = soil.mass(cell, "bio.organic_residue");
+    assert!(mineral > Fixed::ZERO, "the mineral ash enriched the soil");
+    assert!(
+        organic > Fixed::ZERO,
+        "the organic residue enriched the soil"
+    );
+    assert_eq!(
+        mineral + organic,
+        warm.embodiment().unwrap().decomposed_mass(),
+        "the mineral and organic shares are the whole decomposed mass (the split is complete)"
+    );
+    assert_eq!(
+        soil.cell_total(cell),
+        warm.embodiment().unwrap().decomposed_mass(),
+        "all the nutrient is located at the cell where the carrion rotted"
+    );
+    assert_eq!(
+        soil.cell_total(Coord3::ground(0, 0)),
+        Fixed::ZERO,
+        "a cell where nothing rotted is not enriched"
+    );
+    // Carrion's mineral-ash fraction (0.05) is small, so the organic residue is the larger share.
+    assert!(
+        organic > mineral,
+        "the organic residue outweighs the mineral ash (carrion is mostly soft tissue)"
+    );
+
+    // A frozen cell (250 K, below the barrier): the carrion is preserved and nothing decomposes.
+    let mut frozen = build(250);
+    frozen.step();
+    assert_eq!(flesh(&frozen), flesh0, "frozen carrion is preserved");
+    assert_eq!(
+        frozen.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing decomposed in the cold"
+    );
+
+    // The scheduled tick order decomposes bit-identically to the pinned order.
+    let mut pinned = build(300);
+    pinned.step();
+    let mut scheduled = build(300);
+    scheduled.step_scheduled(&[]);
+    assert_eq!(
+        scheduled.embodiment().unwrap().decomposed_mass(),
+        pinned.embodiment().unwrap().decomposed_mass(),
+        "the scheduled and pinned orders decompose identically"
+    );
+}
+
+#[test]
+fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
+    // Material-substrate arc item 7, SHELTER: a being whose cell is enclosed by insulating matter (a roof of
+    // oak in the air cells above it) is buffered from a harsh field, its body temperature holding nearer its
+    // warm start while an identical exposed being tracks the cold field. The buffering is the enclosing
+    // matter's own thermal resistance (its volume over its conductivity) attenuating the body-to-field
+    // coupling, no shelter tag: it keys off the substance's conductivity (Principles 8, 9, 11). Building the
+    // roof is the deferred emergent technique; this proves the primitive that makes a built roof matter.
+    use civsim_sim::material::{MaterialField, ShelterCalib};
+
+    let (w, h) = (8, 8);
+    let sheltered = Coord3::ground(2, 2);
+    let exposed = Coord3::ground(5, 5);
+
+    let build = || -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x50F7,
+        );
+        // A roof of oak (a low-conductivity insulator) in the air cells above the sheltered cell; nothing
+        // above the exposed cell.
+        let mut field = MaterialField::new();
+        for z in 1..=3 {
+            field.deposit(Coord3::new(2, 2, z), "oak", Fixed::from_int(10));
+        }
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A harsh cold field (280 K, below the beings' 310 K start), so an exposed body loses heat to it.
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(280)), calib(), emb);
+        r.set_shelter(ShelterCalib::dev_fixture());
+        // Two beings starting warm (310 K), one under the roof, one in the open.
+        r.place_being(StableId(1), sheltered, Fixed::from_int(310));
+        r.place_being(StableId(2), exposed, Fixed::from_int(310));
+        r
+    };
+
+    let mut r = build();
+    for _ in 0..15 {
+        r.step();
+    }
+    let warm = r.body_temp(StableId(1)).unwrap();
+    let cold = r.body_temp(StableId(2)).unwrap();
+    assert!(
+        warm > cold,
+        "the sheltered being held more of its warmth than the exposed one: {warm:?} vs {cold:?}"
+    );
+    assert!(
+        warm < Fixed::from_int(310) && cold < Fixed::from_int(310),
+        "both beings lost some heat to the cold field (shelter slows the loss, it does not stop it)"
+    );
+    assert!(
+        cold < Fixed::from_int(285),
+        "the exposed being cooled close to the field temperature"
+    );
+
+    // The scheduled tick order attenuates the exchange identically to the pinned order.
+    let mut scheduled = build();
+    for _ in 0..15 {
+        scheduled.step_scheduled(&[]);
+    }
+    assert_eq!(
+        scheduled.body_temp(StableId(1)).unwrap(),
+        warm,
+        "the scheduled order shelters the being bit-identically to the pinned order"
+    );
+}
+
+#[test]
+fn a_being_builds_its_own_roof_overhead_and_that_self_built_roof_shelters_it() {
+    // Material-substrate arc item 7, the OVERHEAD-DEPOSIT TECHNIQUE (the deferred emergent build the shelter
+    // primitive was waiting for): a being sets the insulating matter it carries down into the cell directly
+    // ABOVE it, so the roof it raises is one it CHOSE to build (the SHELTER affordance won its decision), and
+    // that self-built roof then attenuates its own body-to-field thermal exchange (item 7 slice A reads the
+    // overhead matter). So shelter EMERGES from need plus the deposit affordance plus carried matter, no
+    // shelter verb: the being that builds holds its warmth, the identical being carrying the same oak but not
+    // building stays exposed and cools. A blank founder holding the same load never builds.
+    use civsim_sim::material::{ShelterCalib, SubstanceMix};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let overhead = Coord3::new(2, 2, 1);
+    let load = Fixed::from_int(10);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+
+    let build = |shelter_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_builder(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0F00,
+        );
+        // Outputs: move [act,dx,dy] 0..2, ingest [act] 3, shelter [act] 4.
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "builder layout: move(3) + ingest(1) + shelter(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if shelter_weight {
+            let mut wts = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wts[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> shelter activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, wts)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        // The being carries a load of oak (a low-conductivity insulator) it could raise as a roof.
+        let mut carried = SubstanceMix::new();
+        carried.add("oak", load);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_material(civsim_sim::material::MaterialField::new());
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A harsh cold field (280 K, below the being's 310 K start), so an exposed body loses heat to it.
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(280)), calib(), emb);
+        r.set_shelter(ShelterCalib::dev_fixture());
+        r
+    };
+
+    let carried_now =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let roof = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(overhead, "oak") };
+
+    // The deciding being sets its load overhead: the cell above it gains the oak (a roof), and it carries
+    // nothing more. The build happened only through its evolved SHELTER decision.
+    let mut builder = build(true);
+    builder.step();
+    assert_eq!(
+        roof(&builder),
+        load,
+        "the being raised a roof of oak overhead"
+    );
+    assert_eq!(
+        carried_now(&builder),
+        Fixed::ZERO,
+        "the being set its whole load overhead"
+    );
+
+    // The blank founder never builds: it holds its load and no roof rises.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(roof(&founder), Fixed::ZERO, "no roof rose over the founder");
+    assert_eq!(
+        carried_now(&founder),
+        load,
+        "the blank founder holds its load"
+    );
+
+    // The self-built roof SHELTERS the builder: over the cold field it holds more of its warmth than the
+    // identical founder that carried the same oak but never raised it, which stays exposed and cools. The
+    // shelter is the physics consequence of the matter the being chose to place overhead.
+    for _ in 0..15 {
+        builder.step();
+        founder.step();
+    }
+    let sheltered = builder.body_temp(StableId(1)).unwrap();
+    let exposed = founder.body_temp(StableId(1)).unwrap();
+    assert!(
+        sheltered > exposed,
+        "the being under the roof it built held more warmth than the one that did not build: {sheltered:?} vs {exposed:?}"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

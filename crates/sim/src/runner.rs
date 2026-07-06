@@ -88,14 +88,19 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
-    is_harm_tick, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, ENERGY, INTEGRITY, RESPIRATION, TEMPERATURE,
+    is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
+    HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
+    RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
+use crate::material::{
+    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
+};
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -109,6 +114,7 @@ use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws;
+use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -397,6 +403,19 @@ impl Field {
     /// The temperature at a cell.
     pub fn at(&self, x: i32, y: i32) -> Fixed {
         self.temp[self.idx(x, y)]
+    }
+
+    /// Raise a cell's temperature by a heat source (material-substrate arc, cascade item 6, live fire): the
+    /// sensible-heat rise a combustion beat injects, added to the cell's current temperature. A cell off the
+    /// field or a non-positive delta is a no-op. The added heat then spreads and decays through the ordinary
+    /// diffusion-and-relaxation step, so a hot burning cell warms its neighbours and cools when the source
+    /// stops, no coded spread.
+    pub fn add_heat(&mut self, x: i32, y: i32, delta: Fixed) {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height || delta <= Fixed::ZERO {
+            return;
+        }
+        let i = self.idx(x, y);
+        self.temp[i] = self.temp[i].saturating_add(delta);
     }
 
     /// The field extent.
@@ -688,6 +707,31 @@ fn medium_sample(
     })
 }
 
+/// Standard gravity, the reference gravitational acceleration (NIST standard gravity 9.80665 m/s^2,
+/// the terran default `mech.gravitational_acceleration` cites), the datum the carry-load weight physics
+/// reads (material-substrate arc, cascade item 3). A cited physical constant, not a reserved tunable; a
+/// per-world gravity override rides Part 40, a documented follow-on.
+fn standard_gravity() -> Fixed {
+    Fixed::from_ratio(980665, 100000)
+}
+
+/// The physics force ceiling the weight law saturates at: the `mech.force` axis maximum (1e8 N, the
+/// mechanical floor's declared force range). A representability cap, not an authored quantity.
+const FORCE_CEILING: Fixed = Fixed::from_int(100_000_000);
+
+/// A being's whole-body muscle force, its carry capacity: a GROWN body sums its grown tissue's muscle
+/// strength scaled to body mass, a catalog body reads it off its organs, the same read the exertion
+/// drain uses ([`being_derived_drains`]). Blind to any kind or race id (Principle 9).
+fn being_muscle_force(w: &Walker, phys: &EmbodiedPhysiology) -> Fixed {
+    match &w.structure {
+        Some(s) => s
+            .composition_sum(physiology::MUSCLE_STRENGTH)
+            .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+            .unwrap_or(Fixed::ZERO),
+        None => physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+    }
+}
+
 /// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
 /// physiology. The metabolic axis (the one backed by the `bio.energy_density` floor axis, keyed off the
 /// floor id rather than a hardcoded axis constant, so the choice is data not a special case) drains at
@@ -843,6 +887,51 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// The located material substrate the world is made of (material-substrate arc, cascade item 1):
+    /// a per-cell mixture of physics substances by volume. EMPTY by default, so a scenario that
+    /// declares no material layer folds nothing into `state_hash` and replays bit-for-bit (the opt-in
+    /// empty default). The world-build populates it ([`Embodiment::set_material`]) to opt a world into
+    /// matter; nothing on the run path reads its derived hardness or density yet (that arrives with the
+    /// extraction contest), so this slice folds the substrate into the canonical state without a
+    /// consumer.
+    material: MaterialField,
+    /// The physics registry a carried or worked load's weight and (later) hardness are DERIVED against
+    /// (material-substrate arc, cascade item 3): the world material registry
+    /// ([`civsim_physics::PhysicsRegistry::ground`]). `None` by default, so an embodiment that declares
+    /// no material registry cannot pick up matter (the carry actions no-op) and every existing scenario
+    /// is unchanged. Opt-in via [`Embodiment::set_material_registry`], the first run-path consumer of the
+    /// derived material properties.
+    material_registry: Option<PhysicsRegistry>,
+    /// The reserved parameters of the extraction contest (material-substrate arc, cascade item 4): the
+    /// working area a being's force presses over and the pressure cap. `None` by default, so an embodiment
+    /// that declares no extraction parameters cannot mine (the extract action no-ops) and every existing
+    /// scenario is unchanged. Opt-in via [`Embodiment::set_extraction_params`].
+    extraction: Option<ExtractionParams>,
+    /// The reserved parameters of the crafting contest (material-substrate arc, cascade item 4, knapping):
+    /// the working-edge area a knapped tool presents and the volume of carried matter it consumes. `None`
+    /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
+    /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
+    craft: Option<CraftParams>,
+    /// The per-column earthwork delta a being's digging has made to the terrain (material-substrate arc,
+    /// cascade item 5, modifiable terrain). EMPTY by default, so a scenario where nothing digs folds no
+    /// bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Digging lowers a column
+    /// (a pit) and yields spoil; a deposit raises it (a mound), reshaping the terrain the physics reads.
+    earthwork: EarthworkField,
+    /// The per-cell fire intensity a combustion beat sources over the burning cells (material-substrate arc,
+    /// cascade item 6, live fire): the combustion energy each cell of combustible matter releases this tick.
+    /// UNLIT by default, so a scenario with no combustion armed (or no combustible substance hot enough)
+    /// folds no bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Recomputed each
+    /// tick from the fuel present and the cell temperature, so it always reflects the current combustion.
+    fire: FireField,
+    /// The per-cell SOIL NUTRIENT store the matter cycle deposits decomposed matter into (material-substrate
+    /// arc, cascade item 8, slice C): when a cell's organic matter decomposes, its lost mass re-materialises
+    /// HERE, located at the cell and split into nutrient classes by the substance's own composition (mineral
+    /// ash and organic residue), so the ground where a carcass rots is enriched rather than the mass sitting
+    /// in a placeless scalar. It is the mass-valued SINK that makes decomposition exactly mass-conserving:
+    /// what leaves a cell exactly enters here (the split conserves the loss bit for bit), so `sum(cell
+    /// masses) + this total` is invariant. Empty by default, folded into `state_hash` only when non-empty, so
+    /// a scenario with no matter cycle armed stays byte-identical.
+    soil: SoilNutrientField,
 }
 
 impl Embodiment {
@@ -890,6 +979,13 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            material: MaterialField::new(),
+            material_registry: None,
+            extraction: None,
+            craft: None,
+            earthwork: EarthworkField::new(),
+            fire: FireField::new(),
+            soil: SoilNutrientField::new(),
         }
     }
 
@@ -935,6 +1031,512 @@ impl Embodiment {
     /// body-to-medium exchange rate. Opt-in: an embodiment without it keeps the scalar path unchanged.
     pub fn set_physiology(&mut self, physiology: EmbodiedPhysiology) {
         self.physiology = Some(physiology);
+    }
+
+    /// Install the located material substrate the world is made of (material-substrate arc, cascade
+    /// item 1): the per-cell substance mixture the ground is built from. Opt-in, like [`set_percepts`]
+    /// and [`set_physiology`]: an embodiment without it keeps an empty material layer, so folding the
+    /// substrate into `state_hash` is byte-identical and every existing scenario replays bit-for-bit.
+    /// A populated layer becomes canonical dynamic state (matter is moved, deposited, and consumed as
+    /// the cascade wires up), so it folds into the hash from here.
+    pub fn set_material(&mut self, material: MaterialField) {
+        self.material = material;
+    }
+
+    /// The located material substrate, for reading (a pure read; the derived hardness and density a
+    /// contest works against are read against a [`civsim_physics::PhysicsRegistry`] the caller supplies).
+    /// The run-path write accessor (extraction, deposit, decay) arrives with its first consumer, so the
+    /// mutation stays an id-sorted sequential draw off hashed state.
+    pub fn material(&self) -> &MaterialField {
+        &self.material
+    }
+
+    /// The earthwork delta field, for reading how digging has reshaped the terrain (material-substrate arc,
+    /// cascade item 5): the per-column elevation change from the worldgen baseline.
+    pub fn earthwork(&self) -> &EarthworkField {
+        &self.earthwork
+    }
+
+    /// The fire field, for reading which cells are burning and how hard (material-substrate arc, cascade
+    /// item 6): the per-cell combustion energy released this tick, sourced by the runner's combustion beat.
+    pub fn fire(&self) -> &FireField {
+        &self.fire
+    }
+
+    /// The per-cell soil nutrient store the matter cycle deposits decomposed matter into (material-substrate
+    /// arc, cascade item 8, slice C): where a carcass rots, enriched by nutrient class, for the productivity
+    /// fertility read and the reader.
+    pub fn soil(&self) -> &SoilNutrientField {
+        &self.soil
+    }
+
+    /// The total mass the matter cycle has decomposed into the soil store (material-substrate arc, cascade
+    /// item 8): the sink side that closes decomposition's mass balance (`sum(cell masses) + this` is
+    /// invariant), summed over the soil store's cells and classes for the conservation guard and the reader.
+    pub fn decomposed_mass(&self) -> Fixed {
+        self.soil.total()
+    }
+
+    /// Install the world material registry a carried load's weight is derived against (material-substrate
+    /// arc, cascade item 3): the ground registry ([`civsim_physics::PhysicsRegistry::ground`]). Opt-in;
+    /// without it the carry actions no-op and every existing scenario is unchanged. This is the first
+    /// run-path consumer of a substance's derived physical properties.
+    pub fn set_material_registry(&mut self, registry: PhysicsRegistry) {
+        self.material_registry = Some(registry);
+    }
+
+    /// Install the reserved extraction parameters a mining contest reads (material-substrate arc, cascade
+    /// item 4): the working area a being's force presses over and the pressure cap
+    /// ([`ExtractionParams`]). Opt-in; without it the extract action no-ops and every existing scenario is
+    /// unchanged.
+    pub fn set_extraction_params(&mut self, params: ExtractionParams) {
+        self.extraction = Some(params);
+    }
+
+    /// Install the reserved crafting parameters a knapping contest reads (material-substrate arc, cascade
+    /// item 4): the working-edge area a made tool presents and the carried volume it consumes
+    /// ([`CraftParams`]). Opt-in; without it the craft action no-ops and every existing scenario is
+    /// unchanged.
+    pub fn set_craft_params(&mut self, params: CraftParams) {
+        self.craft = Some(params);
+    }
+
+    /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
+    /// three limits with no randomness: what it wants, what the cell holds, and what its remaining carry
+    /// headroom bears (its grown whole-body muscle force minus the weight it already carries, over the
+    /// substance's weight per unit volume). A pure read, so a caller can size a pick-up before it moves
+    /// matter. Zero when the embodiment declares no material registry or physiology, the being is
+    /// unknown, the substance is weightless or unregistered (its weight cannot be derived, so it cannot
+    /// be lifted), or no headroom remains.
+    fn pickup_amount(
+        &self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let gravity = standard_gravity();
+        let capacity = being_muscle_force(w, phys);
+        let carried = w.carried.weight(reg, gravity, FORCE_CEILING);
+        let headroom = capacity - carried;
+        if headroom <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        // The substance's weight per unit volume: its density times gravity. A substance the registry
+        // carries no density for cannot be weighed, so it cannot be lifted (returns zero).
+        let density = reg
+            .substance(substance)
+            .and_then(|s| s.vector.get("mat.density").copied())
+            .unwrap_or(Fixed::ZERO);
+        let unit_weight = density.checked_mul(gravity).unwrap_or(Fixed::ZERO);
+        if unit_weight <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let fits = headroom.checked_div(unit_weight).unwrap_or(Fixed::ZERO);
+        want.min(fits)
+            .min(self.material.volume(coord, substance))
+            .max(Fixed::ZERO)
+    }
+
+    /// Pick up matter from the ground into the being's carried load (material-substrate arc, cascade item
+    /// 3, the hinge): the being takes as much of `substance` at `coord` as its grown strength bears
+    /// against the load's derived weight ([`Embodiment::pickup_amount`]), an id-keyed sequential draw off
+    /// hashed state with no fresh randomness. The carry limit is grown whole-body muscle force versus
+    /// physics-derived weight, never a per-race carry table (Principle 9). Returns the volume taken.
+    pub fn pick_up(
+        &mut self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let take = self.pickup_amount(walker_id, coord, substance, want);
+        if take <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let taken = self.material.take(coord, substance, take);
+        if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+            w.carried.add(substance, taken);
+        }
+        taken
+    }
+
+    /// Put matter down from the being's carried load onto the ground (material-substrate arc, cascade
+    /// item 3): the being deposits up to `want` of `substance` at `coord`, the inverse of
+    /// [`Embodiment::pick_up`]. Dropping is always permitted (no capacity gate). Returns the volume set
+    /// down, which persists at the coordinate with its substance identity.
+    pub fn put_down(
+        &mut self,
+        walker_id: StableId,
+        coord: Coord3,
+        substance: &str,
+        want: Fixed,
+    ) -> Fixed {
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let dropped = w.carried.take(substance, want);
+        self.material.deposit(coord, substance, dropped);
+        dropped
+    }
+
+    /// Enact a being's decided grasp (material-substrate arc, cascade item 3, the driver): pick the matter
+    /// the being stands on up into its carried load, each substance in canonical id order bounded by the
+    /// being's remaining strength headroom ([`Embodiment::pick_up`]). The evolved controller made the
+    /// decision (a grasp output that won the tick); this is the physics that follows, lifting as much loose
+    /// matter as the body bears and no more. A being on a void cell, or one already carrying to capacity,
+    /// lifts nothing. The want per substance is the cell's whole standing volume, so the strength-versus-
+    /// weight bound, not an authored rate, is what limits the lift; item 4's extraction contest will gate
+    /// WHICH substance yields by the fracture hardness, where this generic carry gates only by weight.
+    /// Returns the total volume lifted. The id-ordered walk is a deterministic tie-break over a shared
+    /// cell, never a per-substance preference (no race, kind, or role read; Principle 9).
+    pub fn grasp_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(coord) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .map(|w| w.coord())
+        else {
+            return Fixed::ZERO;
+        };
+        // The substances present, in canonical id (BTreeMap) order, snapshotted so the pick-up loop can
+        // mutate the cell without aliasing the read.
+        let substances: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix.substances().map(|(s, _)| s.clone()).collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut lifted = Fixed::ZERO;
+        for substance in &substances {
+            let want = self.material.volume(coord, substance);
+            lifted += self.pick_up(walker_id, coord, substance, want);
+        }
+        lifted
+    }
+
+    /// Enact a being's decided EXTRACT (material-substrate arc, cascade item 4, the extraction contest):
+    /// break the bonded matter the being stands on loose and take it into the carried load, but only if the
+    /// being's contact pressure clears the cell's FRACTURE-gating hardness. The being's grown whole-body
+    /// muscle force ([`being_muscle_force`]) pressed over its reserved working area is a contact pressure
+    /// ([`laws::contact_pressure`]); if that pressure does not exceed the cell's fracture hardness (the
+    /// hardest constituent's fracture strength, [`MaterialField::fracture_hardness`]) the rock holds and
+    /// nothing is taken, so a being too weak to fracture granite mines none of it however much it can lift.
+    /// Above the gate the matter is loose and the being takes as much as its strength bears against the
+    /// load's weight, the item-3 carry bound ([`Embodiment::grasp_underfoot`]), so extraction is fracture
+    /// THEN carry. This is the distinction from a bare grasp: grasp lifts already-loose matter (weight gate
+    /// only), extract must first break the bond (the fracture gate). All physics against substance data:
+    /// the force is derived, the hardness is the substance floor's, and the working area is reserved with a
+    /// basis, no race, kind, or role read (Principles 8, 9). Returns the volume extracted. Opt-in: an
+    /// embodiment with no extraction parameters, material registry, or physiology extracts nothing.
+    ///
+    /// The yield AMOUNT is the strength-bounded carry here (the fracture STRENGTH gates whether the rock
+    /// breaks); a later slice sizes the per-stroke yield by the delivered work over the substance's cutting
+    /// energy ([`crate::material::extraction_yield`], built and proven), once the mineable substances carry
+    /// a cited `mat.specific_cut_energy`.
+    pub fn extract_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(params), Some(reg), Some(phys)) = (
+            self.extraction.as_ref(),
+            self.material_registry.as_ref(),
+            self.physiology.as_ref(),
+        ) else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let force = being_muscle_force(w, phys);
+        // The tool the being wields, if any (crafting, the tool multiplies the affordance): its working
+        // geometry and material, snapshotted so the being read ends before the mutable take below. A
+        // wielded tool presses the same force over its own (smaller) contact area, and blunts at its own
+        // indentation hardness; a bare being uses its reserved working area with no material cap. This is
+        // the one place the extraction contest reads the tool, so a crafted point breaks rock a fist cannot.
+        let (area, tool_hardness) = match &w.wielded {
+            Some(t) => {
+                let h = reg
+                    .substance(&t.substance)
+                    .and_then(|s| s.vector.get("mat.indentation_hardness").copied())
+                    .unwrap_or(Fixed::ZERO);
+                (t.contact_area, Some(h))
+            }
+            None => (params.working_area, None),
+        };
+        let fracture = self.material.fracture_hardness(coord, reg);
+        // The fracture gate: the being's contact pressure must clear the cell's fracture-gating hardness to
+        // break any matter loose. A cell with no fracture resistance (loose soil, void) reads zero and any
+        // positive pressure breaks it (Principle 8: physics, no bonded-versus-loose tag).
+        let pressure = laws::contact_pressure(force, area, params.pressure_max);
+        // A wielded tool blunts at its own hardness: however concentrated, a soft tool cannot carry a
+        // pressure above the material it is made of, so a soft point cannot exceed a hard rock's resistance
+        // (the same cap the weapon and cut reads apply). A tool whose substance declares no hardness reads
+        // zero and blunts to no pressure (the absence convention: a tool must declare its hardness to work
+        // matter). A bare being (None) carries no material cap here yet: its working-surface hardness is an
+        // anatomy-arc follow-on, so its contest is unchanged.
+        let effective = match tool_hardness {
+            Some(h) => pressure.min(h),
+            None => pressure,
+        };
+        if effective <= fracture {
+            return Fixed::ZERO;
+        }
+        self.grasp_underfoot(walker_id)
+    }
+
+    /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
+    /// eat the matter the being stands on for any reserve backed by a substance the cell holds. For each
+    /// homeostatic axis whose backing substance is present in the cell, the being draws it through the SAME
+    /// edibility satisfaction the forage ingest uses ([`laws::satisfaction`] over the being's own
+    /// assimilation and requirement), bounded by the room left in the reserve, grossed up by the ingest
+    /// efficiency to the mass removed, taken from the cell, and the assimilated part deposited in the
+    /// reserve. So a being with a mineral deficit standing on that mineral refills from it and a full one
+    /// draws nothing: this is the need-side complement to the harm-learning read, the same cell composition
+    /// another being learns to AVOID for a harm, this one SEEKS for a nutrient it lacks, and it is what
+    /// makes a mined or standing mineral worth something (the payoff that lets mineral-seeking, and the
+    /// mining that reaches a bonded mineral, emerge under selection). Reads only the axis backing
+    /// substances, the cell's matter, and the being's own physiology, no race, kind, or role (Principle 9).
+    /// Returns the total assimilated. Naturally opt-in: an empty material field (every existing scenario)
+    /// holds no substance, so the supply is zero and nothing is drawn, and only a being that decided the
+    /// geophage affordance (in a geophage fixture) reaches here at all.
+    pub fn geophage(&mut self, walker_id: StableId) -> Fixed {
+        let Some(coord) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .map(|w| w.coord())
+        else {
+            return Fixed::ZERO;
+        };
+        let eta = self.params.ingest_efficiency;
+        let mut gained = Fixed::ZERO;
+        // The substances the being eats this bite, for the toxin harm below (a set so a substance that feeds
+        // two reserves is not counted twice against its own toxicity).
+        let mut eaten: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for i in 0..self.homeo.axes.len() {
+            let Some(substance) = self.homeo.axes[i].backing_component.clone() else {
+                continue; // an axis with no backing substance is not fed by matter
+            };
+            let axis_id = self.homeo.axes[i].id;
+            let supply = self.material.volume(coord, &substance);
+            if supply <= Fixed::ZERO {
+                continue; // the cell holds none of this substance
+            }
+            // Size the bite from the being's own physiology and the room its reserve has left (immutable).
+            let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+                return gained;
+            };
+            let frac = laws::satisfaction(
+                supply,
+                w.physiology.assimilation(&substance),
+                w.physiology.requirement(&substance),
+            );
+            let cap = w.homeostasis.capacity(axis_id);
+            let room = cap - w.homeostasis.amount(axis_id);
+            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
+            if target_gain <= Fixed::ZERO {
+                continue; // the reserve is full: draw nothing, deplete nothing
+            }
+            let gross = if eta > Fixed::ZERO {
+                target_gain.checked_div(eta).unwrap_or(target_gain)
+            } else {
+                target_gain
+            };
+            // Take the gross bite from the cell and deposit the assimilated part in the reserve (each field
+            // mutated on its own, so the cell loses the bite and the being gains the bite times the
+            // efficiency, conservation-honest as the forage ingest is).
+            let taken = self.material.take(coord, &substance, gross);
+            let gain = taken.checked_mul(eta).unwrap_or(taken);
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                w.homeostasis.ingest(axis_id, gain);
+            }
+            gained += gain;
+            if taken > Fixed::ZERO {
+                eaten.insert(substance);
+            }
+        }
+        // The HARM-HALF (the symmetric completion of ingestion): the toxins in what was eaten harm the eater
+        // against its OWN inherited per-toxin-class tolerance, the same edibility harm side the exposure read
+        // applies, so eating a poison for its nutrient costs and a food that sickens ONE eater feeds another
+        // safely. Read only the classes the being carries a tolerance for (never the substance's mat.* axes),
+        // dose each from the eaten substance's registry concentration, and net_harm against the being's
+        // tolerance and Hill exponent, per consumer, no per-substance poison label (Principle 9). Applied to
+        // CONDITION (a no-op for a being with no CONDITION axis), so the felt harm feeds the existing
+        // harm-learning loop: a being can now learn "this food sickens me", not only "this place harms me".
+        let harm = match self.material_registry.as_ref() {
+            Some(reg) if !eaten.is_empty() => {
+                match self.walkers.iter().find(|w| w.id == walker_id) {
+                    Some(w) => {
+                        let mut classes: Vec<(Fixed, Option<Fixed>, u8)> = Vec::new();
+                        for class in w.physiology.tolerances.keys() {
+                            let mut dose = Fixed::ZERO;
+                            for substance in &eaten {
+                                if let Some(sub) = reg.substance(substance) {
+                                    dose = dose.saturating_add(
+                                        sub.vector.get(class).copied().unwrap_or(Fixed::ZERO),
+                                    );
+                                }
+                            }
+                            if dose > Fixed::ZERO {
+                                classes.push((
+                                    dose,
+                                    w.physiology.tolerance(class),
+                                    w.physiology.hill_exp(class),
+                                ));
+                            }
+                        }
+                        laws::net_harm(
+                            &classes,
+                            self.params.harm_caps.harm_cap,
+                            self.params.harm_caps.total_harm_cap,
+                        )
+                    }
+                    None => Fixed::ZERO,
+                }
+            }
+            _ => Fixed::ZERO,
+        };
+        if harm > Fixed::ZERO {
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                w.homeostasis.adjust(CONDITION, Fixed::ZERO - harm);
+            }
+        }
+        gained
+    }
+
+    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter
+    /// the being carries into a wielded tool. It consumes the reserved tool volume of the FIRST substance
+    /// the being carries enough of (canonical id order, a deterministic tie-break over a mixture, never a
+    /// per-substance preference) and wields a tool of that substance with the reserved working-edge area,
+    /// replacing any prior tool. So a being that has mined and carried stone can shape it into a point, and
+    /// the tool it makes is only as good as the stone it worked (a hard stone a hard tool, a soft stone a
+    /// soft one, the tool's function derived from its material and geometry by the crafting seam's cut read,
+    /// never a recipe catalog). Reads only the carried substance ids and the reserved geometry, no race,
+    /// kind, or role (Principles 8, 9). Returns true if a tool was made. Opt-in: an embodiment with no
+    /// crafting parameters, or a being carrying too little of any one substance, makes nothing.
+    pub fn craft_from_carried(&mut self, walker_id: StableId) -> bool {
+        let Some(params) = self.craft else {
+            return false;
+        };
+        // The first substance the being carries enough of to shape a tool, in canonical id order.
+        let Some(substance) = self
+            .walkers
+            .iter()
+            .find(|w| w.id == walker_id)
+            .and_then(|w| {
+                w.carried
+                    .substances()
+                    .find(|(_, &vol)| vol >= params.tool_volume)
+                    .map(|(s, _)| s.clone())
+            })
+        else {
+            return false; // not carrying enough of any one substance to make a tool
+        };
+        if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+            w.carried.take(&substance, params.tool_volume);
+            w.wielded = Some(WieldedTool {
+                contact_area: params.edge_area,
+                substance,
+            });
+        }
+        true
+    }
+
+    /// Enact a being's decided DIG (material-substrate arc, cascade item 5, modifiable terrain): excavate
+    /// the ground underfoot in the SAME extraction fracture contest ([`Embodiment::extract_underfoot`], the
+    /// fracture gate plus taking the spoil into the carried load) AND lower the column by the volume removed,
+    /// so a pit forms where matter left. This is the distinction from a bare extract: extract takes matter,
+    /// dig also reshapes the terrain, the earthwork delta being the elevation bookkeeping the physics will
+    /// read (a dug pit pools water). The column drops by the spoil volume (conservation of the ground, a unit
+    /// cell area), so what leaves the cell is both carried off and gone from the terrain's height. Reads only
+    /// the being's coordinate and the extraction contest, no race, kind, or role (Principle 9). Returns the
+    /// volume excavated. Opt-in: an embodiment with no extraction parameters digs nothing (the fracture
+    /// contest no-ops), so the earthwork stays empty and the run is byte-identical.
+    pub fn dig_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(column) = self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+            let c = w.coord();
+            Coord3::ground(c.x, c.y)
+        }) else {
+            return Fixed::ZERO;
+        };
+        let spoil = self.extract_underfoot(walker_id);
+        if spoil > Fixed::ZERO {
+            self.earthwork.adjust(column, Fixed::ZERO - spoil);
+        }
+        spoil
+    }
+
+    /// Enact a being's decided RELEASE (material-substrate arc, cascade item 5, modifiable terrain, the
+    /// deposit-and-mound half): set the carried load down onto the ground underfoot (the inverse of
+    /// [`Embodiment::grasp_underfoot`]) AND raise the column by the volume deposited, so a mound rises where
+    /// matter was set down. Each carried substance is deposited in canonical id order (a deterministic draw)
+    /// and the column is raised by the total, conservation-symmetric with [`Embodiment::dig_underfoot`]
+    /// lowering it: what a being digs from a pit here and carries to there raises a mound there, so terracing
+    /// EMERGES from the dig and release primitives with no mound verb. Reads only the being's carried load
+    /// and coordinate, no race, kind, or role (Principle 9). Returns the volume deposited. Opt-in: a being
+    /// carrying nothing sets nothing down and the terrain is unchanged.
+    pub fn release_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some((coord, column, substances)) =
+            self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+                let c = w.coord();
+                let subs: Vec<String> = w.carried.substances().map(|(s, _)| s.clone()).collect();
+                (c, Coord3::ground(c.x, c.y), subs)
+            })
+        else {
+            return Fixed::ZERO;
+        };
+        let mut deposited = Fixed::ZERO;
+        for substance in &substances {
+            let want = self
+                .walkers
+                .iter()
+                .find(|w| w.id == walker_id)
+                .map(|w| w.carried.volume(substance))
+                .unwrap_or(Fixed::ZERO);
+            deposited += self.put_down(walker_id, coord, substance, want);
+        }
+        if deposited > Fixed::ZERO {
+            self.earthwork.adjust(column, deposited);
+        }
+        deposited
+    }
+
+    /// Enact a being's decided SHELTER build (material-substrate arc, cascade item 7, the overhead-deposit
+    /// technique): set the carried load down into the cell directly ABOVE the being (its column, one z up),
+    /// so the matter it carried becomes a ROOF over its own cell. The upward sibling of
+    /// [`Embodiment::release_underfoot`] (which mounds the ground underfoot), it places matter overhead where
+    /// the body-to-field thermal exchange reads it as enclosing matter and attenuates through it (cascade item
+    /// 7 slice A, the shelter read). So a being SHELTERS ITSELF with matter it chose to carry and place: the
+    /// roof is one it built, and the shelter is the physics consequence of the placed matter, no shelter verb
+    /// (Principles 8, 9). Each carried substance is deposited in canonical id order at the overhead cell; no
+    /// earthwork column rises, because the matter is placed in the air above rather than mounded on the
+    /// ground. Reads only the being's carried load and coordinate, no race, kind, or role. Returns the volume
+    /// deposited overhead. Opt-in: a being carrying nothing sets nothing down and no roof rises.
+    pub fn deposit_overhead(&mut self, walker_id: StableId) -> Fixed {
+        let Some((overhead, substances)) =
+            self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+                let c = w.coord();
+                let subs: Vec<String> = w.carried.substances().map(|(s, _)| s.clone()).collect();
+                (Coord3::new(c.x, c.y, c.z + 1), subs)
+            })
+        else {
+            return Fixed::ZERO;
+        };
+        let mut deposited = Fixed::ZERO;
+        for substance in &substances {
+            let want = self
+                .walkers
+                .iter()
+                .find(|w| w.id == walker_id)
+                .map(|w| w.carried.volume(substance))
+                .unwrap_or(Fixed::ZERO);
+            deposited += self.put_down(walker_id, overhead, substance, want);
+        }
+        deposited
     }
 
     /// The per-tile resource field the beings perceive and ingest, for mutation (base-level liveliness
@@ -1042,6 +1644,24 @@ pub struct Runner {
     /// temperature-only paths are unchanged. Stepped inside [`Runner::step_field`], folded into
     /// `state_hash`.
     environ: Option<(EnvironFields, EnvironCalib)>,
+    /// The reserved calibrations of the combustion beat (material-substrate arc, cascade item 6, live fire),
+    /// armed opt-in. `None` on a runner without it, so no combustion runs and every existing scenario is
+    /// byte-identical; armed via [`Runner::set_combustion`], the beat then sources the embodiment's fire
+    /// field from the combustible matter hot enough to burn. Off the calibrated worldbuild path until a later
+    /// slice wires it, exactly like the extraction and craft params.
+    combustion: Option<CombustionCalib>,
+    /// The reserved calibration of shelter (material-substrate arc, cascade item 7), armed opt-in. `None` on
+    /// a runner without it, so no thermal-exchange attenuation runs and every existing scenario is
+    /// byte-identical; armed via [`Runner::set_shelter`], the body-exchange phase then attenuates each
+    /// being's coupling to the field by the insulating matter enclosing its cell. Off the calibrated
+    /// worldbuild path until a later slice wires it, exactly like the combustion calib.
+    shelter: Option<ShelterCalib>,
+    /// The reserved calibration of the matter cycle (material-substrate arc, cascade item 8), armed opt-in.
+    /// `None` on a runner without it, so no decomposition runs and every existing scenario is byte-identical;
+    /// armed via [`Runner::set_matter_cycle`], the field step then decomposes a cell's organic matter over
+    /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
+    /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
+    matter_cycle: Option<MatterCycleCalib>,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -1083,6 +1703,9 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            combustion: None,
+            shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1121,6 +1744,9 @@ impl Runner {
             embodiment: None,
             lifecycle: None,
             environ: None,
+            combustion: None,
+            shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1172,6 +1798,9 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            combustion: None,
+            shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1246,6 +1875,9 @@ impl Runner {
             embodiment: Some(embodiment),
             lifecycle: None,
             environ: None,
+            combustion: None,
+            shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1268,6 +1900,34 @@ impl Runner {
     /// Without it a runner is temperature-only, exactly as before.
     pub fn set_environ(&mut self, fields: EnvironFields, calib: EnvironCalib) {
         self.environ = Some((fields, calib));
+    }
+
+    /// Arm the combustion beat (material-substrate arc, cascade item 6, live fire): each tick, the
+    /// combustible matter a cell holds that stands at or above its ignition temperature burns, consuming a
+    /// bounded fraction of its fuel and lighting the embodiment's fire field. Opt-in: a runner left unarmed
+    /// runs no combustion, so every existing scenario is byte-identical. Reserved calibrations
+    /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    pub fn set_combustion(&mut self, calib: CombustionCalib) {
+        self.combustion = Some(calib);
+    }
+
+    /// Arm shelter (material-substrate arc, cascade item 7): each tick, the body-exchange phase attenuates a
+    /// being's thermal coupling to the ambient field by the insulating matter enclosing its cell (the matter
+    /// in the air cells above it), so a being under a roof of insulating matter is buffered from a harsh
+    /// field. Opt-in: a runner left unarmed attenuates nothing, so every existing scenario is byte-identical.
+    /// Reserved calibration ([`ShelterCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    pub fn set_shelter(&mut self, calib: ShelterCalib) {
+        self.shelter = Some(calib);
+    }
+
+    /// Arm the matter cycle (material-substrate arc, cascade item 8): each tick, a cell's organic matter
+    /// (a substance carrying a biological composition) at or above the decomposition barrier breaks down at
+    /// the reserved rate, its lost mass exactly conserved in the embodiment's decomposed-mass sink (matter
+    /// dispersed to the environment). Opt-in: a runner left unarmed decomposes nothing, so every existing
+    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated worldbuild
+    /// path until a later slice wires it.
+    pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
+        self.matter_cycle = Some(calib);
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -1337,6 +1997,12 @@ impl Runner {
         self.embodiment.as_ref()
     }
 
+    /// The embodiment for mutation (a caller driving a matter action directly, or a test): the runner owns
+    /// it, so this is the write handle beside the read [`Runner::embodiment`].
+    pub fn embodiment_mut(&mut self) -> Option<&mut Embodiment> {
+        self.embodiment.as_mut()
+    }
+
     /// One canonical tick, in a pinned within-tick order: step the field, let each located being
     /// exchange heat with its cell (Newton convective coupling toward the local field temperature,
     /// beings walked in canonical id order), run the embodiment coupling sub-phase (comfort-band map to
@@ -1372,6 +2038,13 @@ impl Runner {
         self.field.step(&self.calib);
         if let Some((env, calib)) = self.environ.as_mut() {
             let calib = *calib;
+            // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
+            // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
+            // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
+            // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
+            if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
+                env.set_fertility_from(emb.soil(), mc.fertility_scale);
+            }
             env.step(&self.field, &calib);
         }
         // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
@@ -1384,6 +2057,311 @@ impl Runner {
                 env.regrow_supply(emb.resources_mut(), calib);
             }
         }
+        self.step_combustion();
+        self.step_matter_cycle();
+    }
+
+    /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
+    /// over time and enriches the ground where it rots. For each cell substance carrying a biological
+    /// composition (a `bio.mineral_ash_fraction`, the mark of organic matter) whose cell temperature is at or
+    /// above the substance's own decomposition barrier, a per-substance fraction of its volume breaks down
+    /// this tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split by the
+    /// substance's own composition (the mineral-ash share to a mineral class, the remainder to an organic
+    /// class). Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
+    /// against the settled temperature identically. A pure deterministic fold in canonical cell-and-substance
+    /// order (Principle 3); the outcome keys off the substance's own composition physics and the cell
+    /// temperature, no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no
+    /// material registry, or no organic matter warm enough decomposes nothing, so the soil store stays empty
+    /// and the run is byte-identical.
+    ///
+    /// The decomposition is EXACTLY mass-conserving: the mass a cell loses (the material field's own rounded
+    /// mass decrease for the taken volume) enters the soil store bit for bit (the mineral share plus the
+    /// organic remainder equals the loss exactly, mass-valued so no volume-quantisation rounding), so
+    /// `sum(cell masses) + soil store total` is invariant, the hard conservation the
+    /// [`crate::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
+    /// the cell's productivity; volatilising the organic share to the air (a gas the decomposition vents) is
+    /// a follow-on refinement of the split.
+    fn step_matter_cycle(&mut self) {
+        let Some(calib) = self.matter_cycle else {
+            return;
+        };
+        // Read phase: over every cell of organic matter warm enough to decompose, compute the volume that
+        // breaks down, the exact mass it carries off, and the substance's mineral-ash fraction (the split the
+        // deposit routes by). Snapshotted so the take below does not alias the read.
+        let decomp: Vec<(Coord3, String, Fixed, Fixed, Fixed)> = {
+            let Some(emb) = self.embodiment.as_ref() else {
+                return;
+            };
+            let Some(reg) = emb.material_registry.as_ref() else {
+                return;
+            };
+            let mut out = Vec::new();
+            for (cell, mix) in emb.material.cells() {
+                let temperature = self.field.at(cell.x, cell.y);
+                for (substance, &volume) in mix.substances() {
+                    let Some(def) = reg.substance(substance) else {
+                        continue;
+                    };
+                    // Organic matter carries a biological composition (an ash fraction); inorganic matter
+                    // (rock, soil, metal) does not and is skipped. This is the substance's own physics, not a
+                    // tag: what decomposes is what has a biological make-up (Principles 8, 11). The ash
+                    // fraction also routes the deposit: the mineral share of the decomposed mass.
+                    let Some(ash_fraction) = def.vector.get("bio.mineral_ash_fraction").copied()
+                    else {
+                        continue;
+                    };
+                    // The decomposition BARRIER is the substance's own thermal gate (its tissue-water
+                    // freezing point), read per-substance from its floor axis: at or below it a frozen
+                    // remains is preserved. A substance carrying no barrier axis does not decompose (the
+                    // barrier is its physical gate, so there is no global fallback for it).
+                    let Some(barrier) = def.vector.get("bio.decomposition_barrier").copied() else {
+                        continue;
+                    };
+                    if temperature < barrier {
+                        continue; // frozen: a preserved remains does not decompose
+                    }
+                    let density = def
+                        .vector
+                        .get("mat.density")
+                        .copied()
+                        .unwrap_or(Fixed::ZERO);
+                    if density <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The decomposition RATE is the substance's own per-tick fraction, read from its floor
+                    // axis, falling back to the global reserved rate for a substance that does not yet
+                    // declare its own.
+                    let rate = def
+                        .vector
+                        .get("bio.decomposition_rate")
+                        .copied()
+                        .unwrap_or(calib.decomposition_rate);
+                    let decomposed = volume.checked_mul(rate).unwrap_or(Fixed::ZERO);
+                    if decomposed <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The exact mass the take will remove: the substance's mass contribution before minus
+                    // after, each the material field's own `volume * density` (the weighted-sum term), so the
+                    // difference is bit-identical to the cell's mass decrease the take produces.
+                    let m_before = volume.checked_mul(density).unwrap_or(Fixed::MAX);
+                    let m_after = (volume - decomposed)
+                        .checked_mul(density)
+                        .unwrap_or(Fixed::MAX);
+                    let mass_lost = m_before - m_after;
+                    if mass_lost <= Fixed::ZERO {
+                        continue;
+                    }
+                    out.push((
+                        *cell,
+                        substance.clone(),
+                        decomposed,
+                        mass_lost,
+                        ash_fraction,
+                    ));
+                }
+            }
+            out
+        };
+        // Apply phase: remove the decomposed volume and re-materialise its exact mass into the cell's soil
+        // nutrient store, split by the substance's own composition. The mineral share is the ash fraction of
+        // the loss; the organic share is the REMAINDER (loss minus mineral), so mineral plus organic equals
+        // the loss bit for bit whatever the mineral multiply rounds to, and the deposit conserves mass
+        // exactly (mass-valued, so no volume-quantisation rounding). Located at the cell where the matter
+        // rots, so the ground is enriched rather than the mass sitting in a placeless scalar.
+        let Some(emb) = self.embodiment.as_mut() else {
+            return;
+        };
+        for (cell, substance, decomposed, mass_lost, ash_fraction) in decomp {
+            emb.material.take(cell, &substance, decomposed);
+            let mineral = mass_lost.checked_mul(ash_fraction).unwrap_or(Fixed::ZERO);
+            let mineral = mineral.min(mass_lost);
+            let organic = mass_lost - mineral;
+            emb.soil.deposit(cell, "bio.mineral_ash_fraction", mineral);
+            emb.soil.deposit(cell, "bio.organic_residue", organic);
+        }
+    }
+
+    /// The combustion beat (material-substrate arc, cascade item 6, live fire): the combustible matter each
+    /// cell holds that stands at or above its ignition temperature burns through the resolved combustion law,
+    /// consuming a bounded fraction of its fuel from the material field and lighting the fire field with the
+    /// released energy. Run inside [`Runner::step_field`] after the temperature advances, so both tick orders
+    /// (pinned and scheduled) source the fire from the settled temperature identically. A pure deterministic
+    /// fold in canonical cell-and-substance order (Principle 3); the outcome keys off the substance's own
+    /// combustion axes (fuel value, ignition temperature, oxidiser demand) and the cell temperature, no race,
+    /// kind, or role (Principles 8, 9). Opt-in: a runner with no combustion calib, no material registry, or no
+    /// combustible substance hot enough burns nothing, so the fire field stays empty and folds no bytes.
+    ///
+    /// The fire field is rebuilt from empty each tick, so a cell that runs out of fuel or cools below its
+    /// ignition temperature drops out. The released energy also raises the burning cell's temperature (the
+    /// reserved heat-retention fraction of it, over the cell's own heat capacity derived from its matter's
+    /// density and specific heat), so the heat spreads through the ordinary temperature diffusion and a
+    /// neighbour whose fuel crosses its ignition gate catches: fire SPREADS and EXTINGUISHES with no coded
+    /// spread rule, both emergent from the physics. The combustion also gates on the OXIDISER the cell's
+    /// medium supplies (the reserved supply times the medium's respirable content): a self-oxidising fuel
+    /// burns on temperature alone, while an oxygen-demanding fuel needs air, so it burns in the open and
+    /// starves in a sealed or anoxic cell. A cell with no medium field reads open atmosphere.
+    fn step_combustion(&mut self) {
+        let Some(calib) = self.combustion else {
+            return;
+        };
+        // Read phase: over every cell of combustible matter, compute this tick's burn (consumed fuel volume
+        // and released energy) against the settled temperature, and the cell's heat capacity (for the
+        // temperature rise the release drives). Snapshotted so the material take below does not alias the
+        // read. Borrows the embodiment and the field immutably (disjoint fields of the runner).
+        let mut heat_caps: BTreeMap<Coord3, Fixed> = BTreeMap::new();
+        let burns: Vec<(Coord3, String, Fixed, Fixed)> = {
+            let Some(emb) = self.embodiment.as_ref() else {
+                return;
+            };
+            let Some(reg) = emb.material_registry.as_ref() else {
+                return;
+            };
+            let axis = |substance: &str, id: &str| -> Option<Fixed> {
+                reg.substance(substance)
+                    .and_then(|s| s.vector.get(id).copied())
+            };
+            // The ambient medium supplying the fire's oxidiser, if a medium field is installed; without one
+            // the atmosphere is open (full respirable concentration), so a fire has air unless a medium says
+            // otherwise (a sealed or submerged cell).
+            let medium = emb.physiology.as_ref().map(|p| &p.medium);
+            let mut out = Vec::new();
+            for (cell, mix) in emb.material.cells() {
+                let temperature = self.field.at(cell.x, cell.y);
+                // The oxidiser mass the cell's medium supplies this tick (the reserved supply times the
+                // respirable content), the term that makes an oxygen-demanding fuel need air. Open air (no
+                // medium) reads full concentration; a near-anoxic medium reads almost none and starves the fire.
+                let respirable = match medium {
+                    Some(m) => m.respirable_at(cell.x, cell.y),
+                    None => Fixed::ONE,
+                };
+                let oxidiser_mass = respirable
+                    .checked_mul(calib.oxidiser_supply)
+                    .unwrap_or(Fixed::ZERO);
+                // The cell's heat capacity (kJ/K), the volume-weighted sum of each substance's mass times its
+                // specific heat (J/(kg*K), the /1000 converting to kJ to match the fuel value's kJ energy). A
+                // substance carrying no specific heat is thermally transparent here (contributes nothing). The
+                // burning cell's temperature rise divides the released energy by this, so a massive cell heats
+                // slower than a thin one from the same fire.
+                let mut cap = Fixed::ZERO;
+                for (s, &v) in mix.substances() {
+                    let d = axis(s, "mat.density").unwrap_or(Fixed::ZERO);
+                    let sh = axis(s, "therm.specific_heat").unwrap_or(Fixed::ZERO);
+                    if d <= Fixed::ZERO || sh <= Fixed::ZERO {
+                        continue;
+                    }
+                    if let Some(mass) = v.checked_mul(d) {
+                        if let Some(hc_j) = mass.checked_mul(sh) {
+                            if let Some(hc_kj) = hc_j.checked_div(Fixed::from_int(1000)) {
+                                cap = cap.saturating_add(hc_kj);
+                            }
+                        }
+                    }
+                }
+                heat_caps.insert(*cell, cap);
+                for (substance, &volume) in mix.substances() {
+                    // Only a substance carrying a fuel value is combustible; others (rock, soil) are skipped.
+                    let Some(fuel_value) = axis(substance, "therm.fuel_value") else {
+                        continue;
+                    };
+                    if fuel_value <= Fixed::ZERO {
+                        continue;
+                    }
+                    let ignition =
+                        axis(substance, "therm.ignition_temperature").unwrap_or(Fixed::ZERO);
+                    let oxidiser_demand =
+                        axis(substance, "therm.oxidiser_demand").unwrap_or(Fixed::ZERO);
+                    let density = axis(substance, "mat.density").unwrap_or(Fixed::ZERO);
+                    if density <= Fixed::ZERO {
+                        continue; // no mass conversion without a density
+                    }
+                    // The fuel mass present, and the bounded fraction that can combust this tick (the reserved
+                    // burn rate: a fuel burns down over a timescale, not instantly).
+                    let fuel_mass = match volume.checked_mul(density) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    let burnable = fuel_mass
+                        .checked_mul(calib.burn_rate)
+                        .unwrap_or(Fixed::ZERO);
+                    if burnable <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The resolved combustion law gates on the ignition crossing and the oxidiser: a
+                    // self-oxidising fuel (zero demand) burns on temperature alone, while an oxygen-demanding
+                    // fuel needs the medium's oxidiser, so it burns in open air and starves in a sealed or
+                    // anoxic cell (the burn goes oxidiser-limited to nothing).
+                    let c = laws::combustion(
+                        fuel_value,
+                        oxidiser_demand,
+                        ignition,
+                        burnable,
+                        oxidiser_mass,
+                        temperature,
+                        calib.energy_cap,
+                    );
+                    if !c.ignited || c.energy <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The burned mass follows from the released energy over the fuel value (the law's own
+                    // relation, exact below the energy cap); the consumed volume converts it back through the
+                    // substance density.
+                    let burned_mass = c.energy.checked_div(fuel_value).unwrap_or(Fixed::ZERO);
+                    let burned_volume = burned_mass.checked_div(density).unwrap_or(Fixed::ZERO);
+                    if burned_volume <= Fixed::ZERO {
+                        continue;
+                    }
+                    out.push((*cell, substance.clone(), burned_volume, c.energy));
+                }
+            }
+            out
+        };
+        // Apply phase: consume the burned fuel and rebuild the fire field with this tick's released energy per
+        // cell (a cell with two combustible substances sums their release). Borrows the embodiment mutably.
+        let mut per_cell: BTreeMap<Coord3, Fixed> = BTreeMap::new();
+        {
+            let Some(emb) = self.embodiment.as_mut() else {
+                return;
+            };
+            for (cell, substance, burned_volume, energy) in burns {
+                emb.material.take(cell, &substance, burned_volume);
+                let entry = per_cell.entry(cell).or_insert(Fixed::ZERO);
+                *entry = entry.saturating_add(energy);
+            }
+            let mut fire = FireField::new();
+            for (cell, energy) in &per_cell {
+                fire.set(*cell, *energy);
+            }
+            emb.fire = fire;
+        }
+        // Heat phase: raise each burning cell's temperature by the reserved heat-retention fraction of its
+        // released energy over its heat capacity, so the fire warms the field and, through the ordinary
+        // diffusion, its neighbours (fire spreads). The embodiment borrow has ended, so the field is borrowed
+        // disjointly. A cell with no heat capacity (no substance carrying a specific heat) burns without
+        // heating, the honest degrade.
+        for (cell, energy) in per_cell {
+            let cap = heat_caps.get(&cell).copied().unwrap_or(Fixed::ZERO);
+            if cap <= Fixed::ZERO {
+                continue;
+            }
+            let rise = energy
+                .checked_div(cap)
+                .and_then(|q| q.checked_mul(calib.heat_fraction))
+                .unwrap_or(Fixed::ZERO);
+            self.field.add_heat(cell.x, cell.y, rise);
+        }
+    }
+
+    /// Recouple the hydrology routing to the terrain this tick's digging reshaped (material-substrate item
+    /// 5): after the embodiment step has moved matter and adjusted the earthwork, rebuild the environmental
+    /// stack's downhill targets from the effective elevation, so next tick's hydrology and salinity route
+    /// water and salt into a dug pit and off a mound. A pure deterministic fold ([`EnvironFields::recouple_terrain`]),
+    /// worker-count independent, run identically after the embodiment phase in the pinned and scheduled
+    /// orders. Opt-in and crucible-safe: the recompute is skipped on an empty earthwork, so a run in which
+    /// nothing digs keeps the seeded worldgen routing and stays byte-identical.
+    fn recouple_hydrology(&mut self) {
+        if let (Some((env, _)), Some(emb)) = (self.environ.as_mut(), self.embodiment.as_ref()) {
+            env.recouple_terrain(emb.earthwork());
+        }
     }
 
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
@@ -1392,6 +2370,7 @@ impl Runner {
         if self.embodiment.is_some() {
             self.step_embodiment();
         }
+        self.recouple_hydrology();
         // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
         // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
@@ -1581,7 +2560,51 @@ impl Runner {
     /// The body-thermal exchange phase: every located being pulls its core temperature toward its
     /// cell's field temperature (the discrete Newton-cooling coupling), beings walked in canonical id
     /// order. Reads the field and the located index, writes the body temperatures.
+    ///
+    /// SHELTER (material-substrate arc, cascade item 7): when shelter is armed and a being's cell is enclosed
+    /// by insulating matter (the matter in the air cells above it), its coupling to the field is attenuated by
+    /// that matter's thermal resistance, so a being under a roof of a low-conductivity material is buffered
+    /// from a harsh field and holds its temperature nearer its setpoint. Opt-in: with no shelter armed or no
+    /// enclosing matter the attenuation is one and every existing scenario is byte-identical, and the
+    /// attenuation keys off the substance's own conductivity, no shelter tag (Principles 8, 9, 11).
     fn phase_body_exchange(&mut self) {
+        // The per-column enclosing-matter thermal RESISTANCE (the overhead matter's volume over its
+        // conductivity, summed), read only when shelter is armed with a material registry present. Empty
+        // otherwise, so a being reads no insulation and its exchange is unattenuated.
+        let coupling = self
+            .shelter
+            .map(|c| c.insulation_coupling)
+            .unwrap_or(Fixed::ZERO);
+        let insulation: BTreeMap<(i32, i32), Fixed> = match (self.shelter, self.embodiment.as_ref())
+        {
+            (Some(_), Some(emb)) => match emb.material_registry.as_ref() {
+                Some(reg) => {
+                    let mut map: BTreeMap<(i32, i32), Fixed> = BTreeMap::new();
+                    for (cell, mix) in emb.material.cells() {
+                        if cell.z < 1 {
+                            continue; // only matter ABOVE the ground (a roof or wall) shelters
+                        }
+                        let mut resistance = Fixed::ZERO;
+                        for (s, &v) in mix.substances() {
+                            let cond = reg
+                                .substance(s)
+                                .and_then(|x| x.vector.get("therm.conductivity").copied())
+                                .unwrap_or(Fixed::ZERO);
+                            if cond > Fixed::ZERO {
+                                if let Some(r) = v.checked_div(cond) {
+                                    resistance = resistance.saturating_add(r);
+                                }
+                            }
+                        }
+                        let e = map.entry((cell.x, cell.y)).or_insert(Fixed::ZERO);
+                        *e = e.saturating_add(resistance);
+                    }
+                    map
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
         for id in ids {
             if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
@@ -1594,7 +2617,21 @@ impl Runner {
                     .get(&id)
                     .copied()
                     .unwrap_or(self.calib.exchange);
-                let next = bt + rate.mul(env - bt);
+                // Shelter attenuation: the enclosing matter's resistance times the reserved coupling divides
+                // the exchange rate (the series-resistance form). No enclosing matter reads zero resistance,
+                // so the rate is unchanged (the opt-in identity).
+                let resistance = insulation
+                    .get(&(coord.x, coord.y))
+                    .copied()
+                    .unwrap_or(Fixed::ZERO);
+                let eff_rate = if resistance > Fixed::ZERO {
+                    let denom =
+                        Fixed::ONE + resistance.checked_mul(coupling).unwrap_or(Fixed::ZERO);
+                    rate.checked_div(denom).unwrap_or(rate)
+                } else {
+                    rate
+                };
+                let next = bt + eff_rate.mul(env - bt);
                 self.body_temp.insert(id, next);
             }
         }
@@ -1612,9 +2649,10 @@ impl Runner {
     /// The runner's tick phases declared as deterministic-scheduler systems over the resources they
     /// touch (design Part 57): the field step writes the field; the body-thermal exchange reads the
     /// field and the located index and writes the body temperatures; the embodiment coupling reads the
-    /// field and writes the body temperatures, the index, and the union being population; the cognition
-    /// world reads and writes the world and the union being population. Only the phases this runner
-    /// actually runs are declared, so a field-only runner declares two systems and a fully composed one
+    /// field and writes the body temperatures, the index, the union being population, and the field
+    /// (it recouples the hydrology routing to this tick's digging, material-substrate item 5); the
+    /// cognition world reads and writes the world and the union being population. Only the phases this
+    /// runner runs are declared, so a field-only runner declares two systems and a fully composed one
     /// declares four.
     ///
     /// The embodiment coupling and the cognition world both write [`RES_BEING`] (real-world
@@ -1632,7 +2670,7 @@ impl Runner {
         if self.embodiment.is_some() {
             sys.insert(
                 SYS_EMBODIMENT,
-                access(&[RES_FIELD], &[RES_BODY, RES_INDEX, RES_BEING]),
+                access(&[RES_FIELD], &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING]),
             );
         }
         if self.world.is_some() {
@@ -1652,6 +2690,11 @@ impl Runner {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
             self.step_embodiment();
+            // Recouple the hydrology to this tick's digging, exactly as step_inner does after
+            // step_embodiment (material-substrate item 5): a pure fold touching only the environmental
+            // downhill routing, which no other phase reads this tick, so the placement is order-safe and
+            // the scheduled and pinned orders stay bit-identical.
+            self.recouple_hydrology();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
@@ -1866,6 +2909,43 @@ impl Runner {
         // gradient-following on the signed bit climbs toward comfort from either side; one that has not
         // explores or, wired for one side only, walks into danger on the other. The per-being derived
         // drain (when a physiology is installed) is applied through metabolize_derived inside the step.
+        // Material-substrate item 3: the per-being carried-load speed penalty. A load factor (>= 1)
+        // divides a laden being's ground speed (`1 + load_penalty * carried_weight / carry_capacity`),
+        // so a being near its strength limit moves slowest. Empty unless the embodiment declares a
+        // material registry and a being carries a load, so an opted-out run inserts no factor and every
+        // existing scenario is byte-identical.
+        let load_factors: BTreeMap<StableId, Fixed> =
+            match (&emb.material_registry, &emb.physiology) {
+                (Some(reg), Some(phys)) => emb
+                    .walkers
+                    .iter()
+                    .filter_map(|w| {
+                        if w.carried.is_empty() {
+                            return None;
+                        }
+                        let capacity = being_muscle_force(w, phys);
+                        if capacity <= Fixed::ZERO {
+                            return None;
+                        }
+                        let weight = w.carried.weight(reg, standard_gravity(), FORCE_CEILING);
+                        let ratio = weight.checked_div(capacity).unwrap_or(Fixed::ZERO);
+                        let factor = Fixed::ONE
+                            + emb
+                                .params
+                                .load_penalty
+                                .checked_mul(ratio)
+                                .unwrap_or(Fixed::ZERO);
+                        Some((w.id, factor))
+                    })
+                    .collect(),
+                _ => BTreeMap::new(),
+            };
+        // Material-substrate items 3 and 4, the drivers: the per-being matter decisions this step records,
+        // keyed by id, each the decided affordance (GRASP or EXTRACT) and its evolved activation for a being
+        // whose controller chose to act on the matter underfoot. Empty unless such an output wins a being's
+        // decision, so an opted-out run (no grasp or extract affordance, no such weight) records nothing and
+        // enacts nothing.
+        let mut deferred_actions: BTreeMap<StableId, (AffordanceId, Fixed)> = BTreeMap::new();
         locomotion::step_with_field_dirs(
             &mut emb.walkers,
             &emb.homeo,
@@ -1881,7 +2961,44 @@ impl Runner {
             &field_signed,
             &drains,
             &emb.percepts,
+            &load_factors,
+            &mut deferred_actions,
         );
+        // (2b) Behaviour to matter: enact the matter decisions in id order (the map is id-keyed, so the
+        // draw off the shared cell is deterministic), dispatched by the decided affordance: GRASP lifts the
+        // loose matter underfoot bounded by strength (item 3, the driver), EXTRACT breaks bonded matter
+        // loose in a fracture contest and takes it (item 4). A being that decided neither, or an embodiment
+        // with no material registry, moves no matter, so an opted-out run is byte-identical through here.
+        // The being did not move this tick (its matter action won its decision over MOVE), so its cell is
+        // where it stood when it decided.
+        for (&id, &(affordance, activation)) in deferred_actions.iter() {
+            if activation > Fixed::ZERO {
+                match affordance {
+                    GRASP => {
+                        emb.grasp_underfoot(id);
+                    }
+                    EXTRACT => {
+                        emb.extract_underfoot(id);
+                    }
+                    GEOPHAGE => {
+                        emb.geophage(id);
+                    }
+                    CRAFT => {
+                        emb.craft_from_carried(id);
+                    }
+                    DIG => {
+                        emb.dig_underfoot(id);
+                    }
+                    RELEASE => {
+                        emb.release_underfoot(id);
+                    }
+                    SHELTER => {
+                        emb.deposit_overhead(id);
+                    }
+                    _ => {}
+                }
+            }
+        }
         // (3) Behaviour to physics: the beings' new coordinates re-sync the located index, so next
         // tick's thermal exchange reads where they moved.
         for w in emb.walkers.iter() {
@@ -2113,6 +3230,27 @@ impl Runner {
             // level liveliness step 3): dynamic state that must fold, or a divergence in the regrow-and-
             // graze loop would pass replay while hiding. Walks canonical (coordinate, class) order.
             emb.resources.hash_into(&mut h);
+            // The located material substrate (material-substrate arc, cascade item 1): the per-cell
+            // substance mixture the world is made of, folded beside the resource field in canonical
+            // (Coord3, substance-id, volume) order. Empty for every scenario that declares no material
+            // layer, so folding it writes no bytes and the run is byte-identical (the opt-in default).
+            emb.material.hash_into(&mut h);
+            // The earthwork delta (material-substrate arc, cascade item 5): the per-column elevation change
+            // digging has made, folded after the material layer in canonical (column, delta) order. Empty
+            // for every scenario where nothing digs, so it folds no bytes and the run is byte-identical.
+            emb.earthwork.hash_into(&mut h);
+            // The fire field (material-substrate arc, cascade item 6): the per-cell combustion energy released
+            // this tick, folded after the earthwork in canonical (cell, intensity) order. Empty for every
+            // scenario with no combustion armed or nothing burning, so it folds no bytes and the run is
+            // byte-identical (the opt-in empty-default).
+            emb.fire.hash_into(&mut h);
+            // The soil nutrient store (material-substrate arc, cascade item 8, slice C): the decomposed matter
+            // the matter cycle has re-materialised into the ground, folded in canonical (cell, class, mass)
+            // order and only when non-empty, so a scenario with no matter cycle armed folds no bytes and the
+            // run is byte-identical (the opt-in empty-default, the sibling of the fire field above).
+            if !emb.soil.is_empty() {
+                emb.soil.hash_into(&mut h);
+            }
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {
@@ -2133,6 +3271,19 @@ impl Runner {
                     for axis in &emb.homeo.axes {
                         h.write_fixed(w.reserve_memory.prev_level(axis.id));
                     }
+                }
+                // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
+                // per-being dynamic state folded after the reserve memory in canonical (substance-id,
+                // volume) order. Empty for a being carrying nothing, so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.carried.is_empty() {
+                    w.carried.hash_into(&mut h);
+                }
+                // The wielded tool (material-substrate arc, cascade item 4, crafting): the worked object a
+                // being bears, folded after the carried matter. `None` for a being wielding nothing, so it
+                // folds nothing and leaves an opted-out run's hash unchanged.
+                if let Some(tool) = &w.wielded {
+                    tool.hash_into(&mut h);
                 }
             }
         }

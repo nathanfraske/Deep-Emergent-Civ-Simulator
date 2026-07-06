@@ -604,6 +604,34 @@ impl PhysicsRegistry {
         Self::from_toml_str(&text)
     }
 
+    /// The world material registry: the mechanical floor plus the ground-material substances a world's
+    /// z-column is made of (`ground_floor.toml`), built from the crate's EMBEDDED floor data so a caller
+    /// (the sim's world-build) needs no filesystem path. The material substrate reads a cell's substance
+    /// mixture against this to derive its bulk density and, where a contest reads them, its mechanical
+    /// properties (the material-substrate arc, cascade item 1). The ground floor EXTENDS the mechanical
+    /// floor rather than editing it, so the mechanical floor's identity and its tests are untouched.
+    pub fn ground() -> Result<Self, PhysicsError> {
+        let mut reg =
+            PhysicsRegistry::from_toml_str(include_str!("../data/mechanical_floor.toml"))?;
+        // The reactive floors (material-substrate arc, cascade item 8, the matter cycle): the fluids,
+        // chemistry, and biology floors carry the transform physics a cell's matter reads to decompose,
+        // corrode, or burn (the corrosion electrode potentials and susceptibility, the combustion products'
+        // ash fraction, the ambient fluids). Loaded in the wave order (each extends the prior), so a
+        // substance can carry its own reaction, corrosion, and decomposition data and the matter cycle
+        // reads it straight from the floor (the north-star "dissolve into the floor"). Additive: the
+        // material-substrate derivations read specific axes by id, so a fuller registry leaves them
+        // unchanged, and worldgen fills the z-column from the ground floor's strata alone.
+        reg.extend_from_toml_str(include_str!("../data/fluids_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/chem_optics_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/em_floor.toml"))?;
+        reg.extend_from_toml_str(include_str!("../data/biology_floor.toml"))?;
+        // The ground floor loads LAST, so its z-column substances can carry cross-domain axes the reactive
+        // floors define (the matter cycle's decomposable "carrion" carries `bio.mineral_ash_fraction`). Its
+        // substances and axes are order-independent for the material derivations (a registry lookup by id).
+        reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
+        Ok(reg)
+    }
+
     /// Extend this registry with another floor file's axes, laws, and substances, then revalidate the
     /// whole. A wave loads onto the previous floor rather than duplicating the shared axes it reads:
     /// the wave-2 fluids, chemistry, and optics floor references the wave-1 mechanical and material

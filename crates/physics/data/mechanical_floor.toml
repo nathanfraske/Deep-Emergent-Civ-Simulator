@@ -733,11 +733,14 @@ values = [
 [[substance]]
 id = "oak"
 participates_in = ["law.cut_penetrate", "law.bend_stress", "law.shear", "law.combustion"]
-real = "Wood Handbook FPL-GTR-190; wood-energy literature"
+real = "Wood Handbook FPL-GTR-190; wood-energy literature; CRC Handbook specific-heat tables (oven-dry wood ~1700); Incropera and DeWitt / CRC thermal-conductivity tables (oven-dry wood across the grain ~0.15 to 0.17); Turns, An Introduction to Combustion, stoichiometry (wood oxidiser-to-fuel mass ratio ~1.2)"
 values = [
   { axis = "mat.density", value = "700" },
   { axis = "mat.ultimate_tensile_strength", value = "90" },
   { axis = "mat.shear_strength", value = "12" },
   { axis = "therm.fuel_value", value = "15000" },
   { axis = "therm.ignition_temperature", value = "570" },
+  { axis = "therm.specific_heat", value = "1700" },
+  { axis = "therm.conductivity", value = "0.17" },
+  { axis = "therm.oxidiser_demand", value = "1.2" },
 ]

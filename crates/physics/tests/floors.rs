@@ -83,8 +83,8 @@ fn the_biology_floor_loads_with_its_axes_and_three_laws() {
     let reg = biology();
     assert_eq!(
         reg.axis_count(),
-        20,
-        "the composition, toxin, and consumer axes, the respiratory-surface and convective-surface axes, plus the two derived score axes"
+        22,
+        "the composition, toxin, and consumer axes, the respiratory-surface and convective-surface axes, the two matter-cycle decomposition axes, plus the two derived score axes"
     );
     assert_eq!(reg.law_count(), 3, "net nutrition, harm, and edibility");
     // edibility reads the produced net-nutrition and net-harm scores, so it derives one tier
@@ -179,6 +179,54 @@ fn a_real_substance_value_reads_exactly() {
         iron.vector.get("mat.density"),
         Some(&Fixed::from_int(7870)),
         "the cited iron density reads back exactly"
+    );
+}
+
+#[test]
+fn the_ground_floor_extends_the_mechanical_floor_with_cited_ground_substances() {
+    use civsim_core::Fixed;
+    // The world material registry is the mechanical floor plus the ground substances, built from the
+    // crate's embedded data (no filesystem path), so the sim's world-build can obtain it directly.
+    let reg = PhysicsRegistry::ground()
+        .expect("the ground registry loads and every cross-reference resolves");
+    // The mechanical floor's own substances survive the extension (the ground floor extends, not
+    // replaces).
+    assert!(
+        reg.substance("iron").is_some(),
+        "the mechanical floor's iron survives the ground extension"
+    );
+    // The ground substances load, each carrying its cited bulk density (the datum a carry weighs).
+    for (id, density) in [
+        ("granite", 2700),
+        ("loam", 1400),
+        ("clay", 1900),
+        ("hematite", 5260),
+        ("halite", 2170),
+    ] {
+        let s = reg
+            .substance(id)
+            .unwrap_or_else(|| panic!("{id} is a ground substance"));
+        assert_eq!(
+            s.vector.get("mat.density"),
+            Some(&Fixed::from_int(density)),
+            "the cited {id} density reads back exactly"
+        );
+    }
+    // Granite carries the rock-mechanics axes the extraction contest reads (the fracture-gating
+    // strength the gate flagged for item 4), so mining rock has a real target when it is wired.
+    let granite = reg.substance("granite").unwrap();
+    assert_eq!(
+        granite.vector.get("mat.fracture_strength"),
+        Some(&Fixed::from_int(15))
+    );
+    assert_eq!(
+        granite.vector.get("mat.compressive_strength"),
+        Some(&Fixed::from_int(200))
+    );
+    // The embedded build is deterministic across calls (the sorted-walk content hash).
+    assert_eq!(
+        reg.content_id(),
+        PhysicsRegistry::ground().unwrap().content_id()
     );
 }
 

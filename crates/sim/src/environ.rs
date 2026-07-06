@@ -47,6 +47,7 @@ use civsim_world::{Coord3, TileMap};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
+use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
 use crate::stocks::Stock;
@@ -246,14 +247,29 @@ pub struct EnvironFields {
     /// where fresh water flows through, written as the `bio.salinity` toxin class.
     salt: ScalarField,
     /// Static per-cell worldgen inputs (row-major): the moisture the precipitation reads and the
-    /// latitude light the productivity reads. The frozen elevation feeds the precomputed `downhill`
-    /// target and is not stored past construction.
+    /// latitude light the productivity reads. The frozen worldgen elevation is kept too (base level per
+    /// cell), so the downhill routing can be recomputed against the terrain a being has dug or mounded
+    /// (material-substrate item 5); with no earthwork it is the same base that seeded `downhill`, so the
+    /// routing is unchanged and the run is byte-identical.
     moisture: Vec<Fixed>,
     light: Vec<Fixed>,
-    /// The precomputed downhill target index of each cell: the lowest-elevation of its four neighbours
-    /// (ties broken in the fixed order up, down, left, right), or the cell itself when no neighbour is
-    /// strictly lower (a basin, which retains its water). Static, since elevation is frozen.
+    elevation: Vec<Fixed>,
+    /// The downhill target index of each cell: the lowest-elevation of its four neighbours (ties broken
+    /// in the fixed order up, down, left, right), or the cell itself when no neighbour is strictly lower
+    /// (a basin, which retains its water). Seeded from the frozen worldgen elevation and recomputed from
+    /// the effective elevation (base plus earthwork delta) whenever digging has reshaped the terrain
+    /// ([`Self::recouple_terrain`]), so a dug pit becomes a basin that pools its water and salt.
     downhill: Vec<usize>,
+    /// The per-cell SOIL FERTILITY supply (material-substrate arc, cascade item 8, slice C2): the extra
+    /// soil-nutrient supply, over the uniform `soil_baseline`, that the matter cycle's deposited nutrient
+    /// mass contributes to a cell's productivity soil factor. Derived each tick from the embodiment's soil
+    /// nutrient store by [`Self::set_fertility_from`] and read by [`Self::step_productivity`], so a cell
+    /// where a carcass rotted grows more where soil is the limiting factor (the matter cycle closes into
+    /// the food web). All-zero until the matter cycle deposits and the runner fills it, so a scenario with
+    /// no matter cycle armed reads the plain baseline and the productivity (and its hash) is unchanged. Not
+    /// folded into `state_hash`: it is a pure derived read of the embodiment's soil store (which folds
+    /// itself), and its effect enters the hash through the `capacity` it shifts.
+    fertility: Vec<Fixed>,
 }
 
 impl EnvironFields {
@@ -287,7 +303,9 @@ impl EnvironFields {
             salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture,
             light,
+            elevation,
             downhill,
+            fertility: vec![Fixed::ZERO; n],
         }
     }
 
@@ -311,6 +329,42 @@ impl EnvironFields {
     /// The field extent.
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
+    }
+
+    /// Whether a cell is a basin: it routes its water to itself because no neighbour is strictly lower, so
+    /// it retains what flows in (a natural bowl or a dug pit). A pure read of the downhill routing, for the
+    /// hydrology reader and to observe the terrain coupling (material-substrate item 5): a being that digs a
+    /// deep enough pit turns its cell into a basin here, and a mound can lift a cell out of one.
+    pub fn is_basin(&self, x: i32, y: i32) -> bool {
+        let i = self.idx(x, y);
+        self.downhill[i] == i
+    }
+
+    /// Recompute the downhill water routing against the terrain a being has reshaped (material-substrate
+    /// item 5, the hydrology coupling): the effective elevation is the frozen worldgen base plus the
+    /// per-column earthwork delta digging and mounding have accumulated, and the routing is rebuilt from
+    /// it by the same pure fold that seeded it ([`compute_downhill`]). So a dug pit that drops a cell below
+    /// its neighbours becomes a basin that routes to itself and pools its water and salt, and a mound that
+    /// lifts a cell sheds them, the terrain change feeding the physics with no water verb. Opt-in and
+    /// crucible-safe: an empty earthwork leaves the base elevation and so the seeded routing untouched
+    /// (the fold is pure, base plus zero equals base), so a run in which nothing digs never recomputes and
+    /// stays byte-identical; only a reshaped column pays the rebuild. Keyed off the physical elevation, no
+    /// label (Principles 3, 8, 9).
+    pub fn recouple_terrain(&mut self, earthwork: &EarthworkField) {
+        if earthwork.is_empty() {
+            return;
+        }
+        let mut effective = self.elevation.clone();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let delta = earthwork.delta(Coord3::ground(x, y));
+                if delta != Fixed::ZERO {
+                    let i = self.idx(x, y);
+                    effective[i] = effective[i].saturating_add(delta);
+                }
+            }
+        }
+        self.downhill = compute_downhill(&effective, self.width, self.height);
     }
 
     /// One canonical step of the environmental stack (base-level liveliness step 2): advance the
@@ -465,21 +519,48 @@ impl EnvironFields {
         self.water.cells = next;
     }
 
+    /// Fill the per-cell soil fertility supply from the matter cycle's soil nutrient store (material-
+    /// substrate arc, cascade item 8, slice C2), scaled by the reserved fertility scale (the soil supply
+    /// gained per unit deposited nutrient mass). Called by the runner before [`Self::step_productivity`]
+    /// when the matter cycle is armed, so a cell where a carcass rotted contributes its nutrient mass to
+    /// its productivity soil factor. The store is sparse (only decomposed cells carry nutrient); the
+    /// fertility vector is reset to zero and refilled each tick, so a cell that loses its nutrient (or a
+    /// scenario that disarms the matter cycle) reads no bonus. Multiple z-levels at a cell column sum into
+    /// the same 2D productivity cell. A pure deterministic fold in canonical (cell) order (Principle 3).
+    pub fn set_fertility_from(&mut self, soil: &SoilNutrientField, scale: Fixed) {
+        for f in self.fertility.iter_mut() {
+            *f = Fixed::ZERO;
+        }
+        for (cell, total) in soil.cell_totals() {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            let supply = total.checked_mul(scale).unwrap_or(Fixed::MAX);
+            self.fertility[i] = self.fertility[i].saturating_add(supply);
+        }
+    }
+
     /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
     /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
     /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
     /// cutoff (Principle 8). This is the ceiling; [`Self::regrow_supply`] regrows the standing stock
-    /// toward it and grazing depletes it (base-level liveliness step 3).
+    /// toward it and grazing depletes it (base-level liveliness step 3). The soil supply is the uniform
+    /// `soil_baseline` plus the per-cell fertility the matter cycle has deposited ([`Self::set_fertility_from`]),
+    /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
+    /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
+    /// baseline, so the productivity (and its hash) is unchanged.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
+                let soil = calib.soil_baseline.saturating_add(self.fertility[i]);
                 self.capacity.cells[i] = biomass_from(
                     self.water.cells[i],
                     self.light[i],
                     temp.at(x, y),
-                    calib.soil_baseline,
+                    soil,
                     calib,
                 );
             }
@@ -652,7 +733,9 @@ mod tests {
             salt: ScalarField::uniform(w, h, Fixed::ZERO),
             moisture: vec![moisture; elev_tenths.len()],
             light: vec![Fixed::ONE; elev_tenths.len()],
+            elevation,
             downhill,
+            fertility: vec![Fixed::ZERO; elev_tenths.len()],
         }
     }
 
@@ -774,6 +857,67 @@ mod tests {
     }
 
     #[test]
+    fn a_dug_pit_becomes_a_basin_that_pools_its_water() {
+        // Material-substrate item 5, the hydrology coupling. On a plane sloping down to the right, every
+        // interior cell routes to its lower-x neighbour, so nothing ponds in the middle. Dig the centre a
+        // full unit below the plane and recouple the routing to the reshaped terrain: the centre becomes a
+        // basin its four neighbours drain into, so water placed on the rim pools in the pit where before it
+        // ran off to the right. The terrain change feeds the physics with no water verb.
+        let elev = [3, 2, 1, 3, 2, 1, 3, 2, 1]; // sloping down to the right (lower x-elevation eastward)
+        let mut s = stack_of(3, 3, &elev, Fixed::ZERO);
+        let centre = s.idx(1, 1);
+        assert!(
+            !s.is_basin(1, 1),
+            "on the bare slope the interior routes east, it is no basin"
+        );
+
+        // Dig the centre a full unit below the plane (its elevation was 0.2; now -0.8, below every
+        // neighbour) and recouple the hydrology to the new terrain.
+        let mut ew = EarthworkField::new();
+        ew.adjust(Coord3::ground(1, 1), Fixed::ZERO - Fixed::ONE);
+        s.recouple_terrain(&ew);
+        assert!(
+            s.is_basin(1, 1),
+            "the dug pit routes to itself, it retains its water"
+        );
+        for &(x, y) in &[(1, 0), (1, 2), (0, 1), (2, 1)] {
+            let i = s.idx(x, y);
+            assert_eq!(
+                s.downhill[i], centre,
+                "the neighbour at ({x},{y}) now drains into the dug pit"
+            );
+        }
+
+        // Route water: a unit on each of the four neighbours, one routing-only step, and it flows into the
+        // pit, which before the dig would have run east off the map.
+        for &(x, y) in &[(1, 0), (1, 2), (0, 1), (2, 1)] {
+            let i = s.idx(x, y);
+            s.water.cells[i] = Fixed::ONE;
+        }
+        let temp = Field::new(3, 3, vec![Fixed::ZERO; 9]);
+        s.step_hydrology(&temp, &routing_only());
+        assert!(
+            s.water.cells[centre] > Fixed::ZERO,
+            "water pooled in the dug pit: {:?}",
+            s.water.cells[centre]
+        );
+    }
+
+    #[test]
+    fn an_empty_earthwork_leaves_the_routing_byte_identical() {
+        // The crucible-safety guarantee: with nothing dug, recoupling the terrain is a no-op, so the seeded
+        // worldgen routing is unchanged. A run in which no being reshapes the ground never recomputes the
+        // routing and cannot diverge, so every existing scenario stays byte-identical.
+        let mut s = stack_of(3, 3, &[3, 2, 1, 3, 2, 1, 3, 2, 1], Fixed::ZERO);
+        let before = s.downhill.clone();
+        s.recouple_terrain(&EarthworkField::new());
+        assert_eq!(
+            s.downhill, before,
+            "an empty earthwork changes no routing (the opt-in no-op)"
+        );
+    }
+
+    #[test]
     fn salt_concentrates_in_an_endorheic_basin() {
         // Base-level liveliness step 4: a 3x3 bowl whose centre is an endorheic basin (routes to itself)
         // and whose rim routes downhill toward it. Weathering salts every cell; the basin retains all its
@@ -885,6 +1029,70 @@ mod tests {
                 "the productive cell supplies energy the grazers read"
             );
         }
+    }
+
+    #[test]
+    fn decomposed_soil_fertility_lifts_productivity_where_soil_is_the_limiting_factor() {
+        // Material-substrate item 8 slice C2 (the matter cycle closes into the food web): the nutrient the
+        // matter cycle deposits into the soil raises a cell's productivity where soil is the limiting Liebig
+        // factor. Under a soil-limited calibration (no uniform soil baseline), a wet, lit, warm cell still
+        // carries no capacity because soil starves it; fertilising that one cell lifts its capacity above
+        // zero, while an equally-viable unfertilised cell stays barren, so the lift is LOCAL to where the
+        // matter rotted (no coded fertility rule, just the deposited nutrient relaxing the soil factor).
+        let map = a_map(0x5EED);
+        let temp = Field::from_map(&map);
+        // Soil is the only starved factor: no uniform soil baseline, the other requirements the fixture's.
+        let calib = EnvironCalib {
+            soil_baseline: Fixed::ZERO,
+            ..EnvironCalib::dev_fixture()
+        };
+        let mut e = EnvironFields::from_map(&map);
+        // Accumulate water so some cells are wet (soil the only starved factor there).
+        for _ in 0..40 {
+            e.step(&temp, &calib);
+        }
+        let (w, h) = e.dims();
+        // With no soil supply, every cell is soil-limited to zero capacity.
+        let total_capacity: Fixed = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| e.capacity_at(x, y))
+            .fold(Fixed::ZERO, |a, b| a + b);
+        assert_eq!(
+            total_capacity,
+            Fixed::ZERO,
+            "with no soil supply every cell is soil-limited to zero productivity"
+        );
+        // Viable interior cells (wet, warm, off the dark poles), so only soil limits them: one to fertilise,
+        // one an unfertilised control.
+        let viable: Vec<(i32, i32)> = (1..h - 1)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| e.water_at(x, y) > Fixed::ZERO && temp.at(x, y) > Fixed::ZERO)
+            .collect();
+        assert!(
+            viable.len() >= 2,
+            "the wet world offers at least two viable cells to compare"
+        );
+        let (fx, fy) = viable[0];
+        let (ux, uy) = viable[1];
+        // Deposit soil nutrient at the fertilised cell (as the matter cycle would) and fill the fertility;
+        // a unit scale and a unit mass raise its soil supply to the requirement, so soil no longer starves.
+        let mut soil = SoilNutrientField::new();
+        soil.deposit(
+            Coord3::ground(fx, fy),
+            "bio.mineral_ash_fraction",
+            Fixed::from_int(1),
+        );
+        e.set_fertility_from(&soil, Fixed::ONE);
+        e.step(&temp, &calib);
+        assert!(
+            e.capacity_at(fx, fy) > Fixed::ZERO,
+            "the fertilised cell now carries productivity (the deposited nutrient relaxed the soil factor)"
+        );
+        assert_eq!(
+            e.capacity_at(ux, uy),
+            Fixed::ZERO,
+            "an equally-viable unfertilised cell stays barren (the lift is local to the deposit)"
+        );
     }
 
     #[test]

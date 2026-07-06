@@ -600,6 +600,161 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a matter-carrying world: move, ingest, and grasp (material-substrate arc,
+    /// cascade item 3, the driver). Kept distinct from [`AffordanceRegistry::dev_default`] so the foraging
+    /// behaviour tests keep their two-affordance layout; a carrier's controller layout carries the extra
+    /// grasp output and can evolve to use it, the emergent decision to pick matter up. Grasp is a scalar
+    /// operation (taking the matter underfoot, no aim) and, like ingest, is unconditional (`requires:
+    /// None`): any body may attempt to lift, and the physical gating is the strength-versus-weight bound the
+    /// enactment applies ([`crate::runner::Embodiment::pick_up`]), never a capability label. A world that
+    /// wires a manipulator capability adds a `requires` here as data, the way item 4's extraction contest
+    /// will gate on contact pressure.
+    pub fn dev_carrier() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: GRASP,
+            name: "grasp".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a matter-mining world: move, ingest, and extract (material-substrate arc,
+    /// cascade item 4, the extraction contest). Kept distinct from [`AffordanceRegistry::dev_default`] so
+    /// the foraging tests keep their two-affordance layout; a miner's controller layout carries the extra
+    /// extract output and can evolve to use it, the emergent decision to break bonded matter loose. Extract
+    /// is a scalar operation (working the matter underfoot, no aim) and, like ingest and grasp, is
+    /// unconditional (`requires: None`): any body may attempt to break matter, and the physical gating is
+    /// the fracture contest the enactment applies (the being's contact pressure against the cell's
+    /// fracture-gating hardness, [`crate::runner::Embodiment::extract_underfoot`]), never a capability
+    /// label. A world that wires a mining-tool capability adds a `requires` here as data.
+    pub fn dev_miner() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: EXTRACT,
+            name: "extract".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a mineral-eating world: move, ingest, and geophage (material-substrate
+    /// arc, cascade item 4, the force-and-manipulation extension, INGEST-FOR-COMPOSITION). Kept distinct
+    /// from [`AffordanceRegistry::dev_default`] so the foraging tests keep their two-affordance layout; a
+    /// geophage's controller layout carries the extra geophage output and can evolve to use it, the emergent
+    /// decision to eat the matter underfoot for a reserve that needs it (a mineral, salt, grit). Geophage is
+    /// a scalar operation (eating the matter underfoot, no aim) and, like ingest, is unconditional
+    /// (`requires: None`): any body may attempt to eat matter, and what it gains is its own physiology's
+    /// assimilation of the substance against its reserve's need ([`crate::runner::Embodiment::geophage`]),
+    /// never a capability label. This is the need-side complement to harm-learning: the same cell
+    /// composition a being learns to AVOID for a harm, another being SEEKS for a nutrient it lacks.
+    pub fn dev_geophage() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: GEOPHAGE,
+            name: "geophage".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a tool-making world: move, ingest, extract, and craft (material-substrate
+    /// arc, cascade item 4, the knapping that shapes a tool from mined stone). A toolmaker can mine stone
+    /// (EXTRACT) and shape its carried stone into a wielded tool (CRAFT), the two halves of the recursive
+    /// tool loop: mine harder rock with a made tool, made from the rock it mined. Craft is a scalar
+    /// operation (working the carried matter, no aim) and, like the other matter actions, is unconditional
+    /// (`requires: None`): any body may attempt to shape what it carries, and what results is a tool whose
+    /// function the crafting seam's cut read derives from its geometry and material
+    /// ([`crate::runner::Embodiment::craft_from_carried`]), never a recipe catalog.
+    pub fn dev_toolmaker() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: EXTRACT,
+            name: "extract".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg.affordances.push(AffordanceDef {
+            id: CRAFT,
+            name: "craft".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a terrain-shaping world: move, ingest, and dig (material-substrate arc,
+    /// cascade item 5, modifiable terrain). A digger excavates the ground underfoot in the same fracture
+    /// contest the extraction uses, but the removed matter LOWERS the column (a pit) as well as loading the
+    /// carrier, so digging reshapes the terrain rather than only mining it. Dig is a scalar operation
+    /// (working the ground underfoot, no aim) and, like the other matter actions, is unconditional
+    /// (`requires: None`): any body may attempt to dig, and the physical gating is the fracture contest the
+    /// enactment applies ([`crate::runner::Embodiment::dig_underfoot`]), never a capability label.
+    pub fn dev_digger() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: DIG,
+            name: "dig".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a terrain-shaping world: move, ingest, dig, and release (material-substrate
+    /// arc, cascade item 5, modifiable terrain, the deposit-and-mound half). An earthmover can dig a pit
+    /// (DIG lowers a column and loads the carrier) and set the spoil down elsewhere (RELEASE deposits the
+    /// carried load and raises that column), so terracing, a mound beside a pit, EMERGES from sequencing the
+    /// two primitives, no MOUND verb. Release is the inverse of grasp, a scalar operation (setting the load
+    /// down underfoot, no aim), unconditional (`requires: None`): any body may open its grasp, and the
+    /// consequence is the deposited matter and the raised column ([`crate::runner::Embodiment::release_underfoot`]).
+    pub fn dev_earthmover() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: DIG,
+            name: "dig".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg.affordances.push(AffordanceDef {
+            id: RELEASE,
+            name: "release".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a shelter-building world: move, ingest, and shelter (material-substrate arc,
+    /// cascade item 7, the overhead-deposit technique). A builder can set the matter it carries down into the
+    /// cell directly overhead, so the roof it raises attenuates its own body-to-field thermal exchange (item
+    /// 7 slice A reads the overhead matter). So a being's SHELTER is one it chose to build, the physics
+    /// consequence of the placed matter, no shelter verb. Shelter is the upward sibling of release, a scalar
+    /// operation (setting the load down overhead, no aim), unconditional (`requires: None`): any body that can
+    /// carry can raise a roof over itself ([`crate::runner::Embodiment::deposit_overhead`]).
+    pub fn dev_builder() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: SHELTER,
+            name: "shelter".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -659,6 +814,29 @@ pub const MOVE: AffordanceId = AffordanceId(0);
 pub const INGEST: AffordanceId = AffordanceId(1);
 /// The strike affordance (a natural-weapon attack), in the combat fixture only.
 pub const STRIKE: AffordanceId = AffordanceId(2);
+/// The grasp affordance (picking the matter underfoot up into the carried load), in the carrier fixture
+/// only (material-substrate arc, cascade item 3, the driver).
+pub const GRASP: AffordanceId = AffordanceId(3);
+/// The extract affordance (breaking bonded matter underfoot loose in a fracture contest and taking it), in
+/// the miner fixture only (material-substrate arc, cascade item 4, the extraction contest).
+pub const EXTRACT: AffordanceId = AffordanceId(4);
+/// The geophage affordance (eating the matter underfoot for a reserve backed by that substance), in the
+/// geophage fixture only (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION).
+pub const GEOPHAGE: AffordanceId = AffordanceId(5);
+/// The craft affordance (shaping the carried matter into a wielded tool), in the toolmaker fixture only
+/// (material-substrate arc, cascade item 4, crafting, the knapping that makes a tool from mined stone).
+pub const CRAFT: AffordanceId = AffordanceId(6);
+/// The dig affordance (excavating the ground underfoot: a fracture contest that lowers the column and
+/// yields spoil), in the digger fixture only (material-substrate arc, cascade item 5, modifiable terrain).
+pub const DIG: AffordanceId = AffordanceId(7);
+/// The release affordance (setting the carried load down underfoot, the inverse of grasp: it deposits the
+/// matter and raises the column), in the earthmover fixture only (material-substrate arc, cascade item 5).
+pub const RELEASE: AffordanceId = AffordanceId(8);
+/// The shelter affordance (setting the carried load down into the cell directly overhead, so the matter
+/// becomes a roof the body-to-field thermal exchange reads as enclosing matter), in the builder fixture
+/// only (material-substrate arc, cascade item 7, the overhead-deposit technique). The upward sibling of
+/// RELEASE: a being SHELTERS ITSELF with matter it chose to carry and place.
+pub const SHELTER: AffordanceId = AffordanceId(9);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
