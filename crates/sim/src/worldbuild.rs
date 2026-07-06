@@ -579,6 +579,19 @@ fn assemble_dawn_embodiment(
                 None => Physiology::dev_for_registry(&genesis.homeostatic),
             };
             let mut walker = Walker::new(id, coord, body, homeostasis, physiology, controller);
+            // The founder's heritable EXPLORATION and DELIBERATION propensities, expressed from its own
+            // genome through the two unit evolve-channels (the ideation activation). A founder carries the
+            // channels' unseeded loci, so it expresses to zero (founder-zero) and the propensities stay
+            // dormant until mutation drifts a descendant off zero and the discovery loop is armed; a race
+            // whose pool never carried the channels expresses zero too (the express is inert unseeded).
+            if let Some(genome) = world.genome_of(id) {
+                walker.exploration = race
+                    .genes
+                    .express_unit(genome, crate::genome::Channel::Exploration);
+                walker.deliberation = race
+                    .genes
+                    .express_unit(genome, crate::genome::Channel::Deliberation);
+            }
             if let Some(s) = structure {
                 walker = walker.with_structure(s);
             }

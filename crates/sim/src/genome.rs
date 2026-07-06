@@ -192,6 +192,22 @@ pub enum Channel {
     /// than being drawn from a catalog (Principle 8). The variant is the fixed engine interface; the
     /// growth program's parameter count and what each parameter means are data ([`crate::morphogen`]).
     Morphogen(MorphogenParamId),
+    /// A heritable EXPLORATION propensity (ideation / experiential-discovery arc, the activation follow-on):
+    /// the rate at which a being ENACTS a novel action it proposed rather than only acting on what its
+    /// controller decides, the value `crate::locomotion::Walker::exploration` is expressed from. A UNIT
+    /// channel (one scalar, no parameter id, like [`Channel::SexDetermination`]). FOUNDER-ZERO: a founder
+    /// carries an unseeded locus for it (frequency one half, effect zero), so it expresses to zero until
+    /// mutation drifts it off, and exploration EMERGES by selection rather than being switched on (Principle
+    /// 9). The variant is the fixed engine interface; which gene feeds it, and with what effect, is data,
+    /// exactly like every other channel, and it drifts through the existing additive mutation machinery.
+    Exploration,
+    /// A heritable DELIBERATION propensity (ideation / experiential-discovery arc, the activation follow-on):
+    /// the rate at which a being ACTS on the believed-best action its planner recalled toward a goal, the
+    /// value `crate::locomotion::Walker::deliberation` is expressed from. A UNIT channel, the deliberation
+    /// twin of [`Channel::Exploration`]: where exploration tries the untried, deliberation exploits the
+    /// best-believed, two independent heritable drives. FOUNDER-ZERO by the same unseeded-locus mechanism,
+    /// so goal-directed pursuit emerges by selection, never a coded default (Principle 9).
+    Deliberation,
 }
 
 /// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
@@ -397,6 +413,18 @@ impl GeneSet {
         }
         total
     }
+
+    /// Express a UNIT channel clamped to the `[0, 1]` propensity range (the ideation activation's
+    /// evolve-channels, [`Channel::Exploration`] and [`Channel::Deliberation`]): the genome's expressed
+    /// value for the channel, floored at zero and capped at one, the value a heritable propensity in `[0, 1]`
+    /// reads. A gene set with no gene feeding the channel expresses zero (the founder-zero default of
+    /// [`GeneSet::express`]), so a founder (unseeded, or a race that never carried the channel) reads zero
+    /// and only a drifted mutant reads a positive clamped propensity. Inert where the evolve-channels are not
+    /// seeded, so the birth path can call it unconditionally.
+    pub fn express_unit(&self, genome: &Genome, channel: Channel) -> Fixed {
+        self.express(genome, channel, Fixed::ZERO)
+            .clamp(Fixed::ZERO, Fixed::ONE)
+    }
 }
 
 /// Append a full founding controller gene block to a gene set and its parallel pool spine (base-level
@@ -488,6 +516,32 @@ pub fn append_morphogen_block(
             }
         }
     }
+}
+
+/// Append one UNSEEDED locus feeding a UNIT channel to a founder gene set and its parallel pool spine (the
+/// ideation activation's evolve-channels, [`Channel::Exploration`] and [`Channel::Deliberation`]). One gene
+/// with a unit-weight effect on the channel, at a balanced frequency and additive effect ZERO, so the
+/// founder EXPRESSES TO ZERO (founder-zero) and the existing additive mutation drifts the effect off zero
+/// over generations, exactly like an unseeded weight in [`append_controller_block`]. The three parallel
+/// vectors stay index-aligned (locus = gene index). No per-channel code and no reserved seed magnitude: the
+/// founder-zero base is a structural zero, not a fabricated value, and the drift reuses the standing additive
+/// mutation step (Principle 9, Principle 11). Reads no race id.
+pub fn append_scalar_channel(
+    genes: &mut Vec<GeneDef>,
+    freqs: &mut Vec<Fixed>,
+    effects: &mut Vec<Fixed>,
+    channel: Channel,
+) {
+    genes.push(GeneDef {
+        id: GeneId(genes.len() as u32),
+        effects: vec![GeneEffect {
+            channel,
+            weight: Fixed::ONE,
+        }],
+        dominance: DominanceMode::additive(),
+    });
+    freqs.push(Fixed::from_ratio(1, 2));
+    effects.push(Fixed::ZERO);
 }
 
 /// The weight with which a gene feeds a channel, summing across its effects so a gene that
@@ -1334,6 +1388,63 @@ mod tests {
         );
         // locus 1: (3+1)*1 = 4; locus 2: (2+2)*2 = 8; total 12.
         assert_eq!(genes.express(&g, ACUITY, Fixed::ZERO), Fixed::from_int(12));
+    }
+
+    #[test]
+    fn an_unseeded_evolve_channel_locus_is_founder_zero_and_drifts_off_zero() {
+        // The ideation activation's evolve-channels (Channel::Exploration / Deliberation): an unseeded scalar
+        // locus expresses to zero for a founder (founder-zero) and off zero once the additive mutation
+        // machinery drifts its effect, so exploration and deliberation EMERGE by selection, never a coded
+        // default. The two loci drift independently.
+        let mut genes: Vec<GeneDef> = Vec::new();
+        let mut freqs: Vec<Fixed> = Vec::new();
+        let mut effects: Vec<Fixed> = Vec::new();
+        append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
+        append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
+        // The append keeps the three vectors aligned, at a balanced frequency and a ZERO founder effect.
+        assert_eq!(genes.len(), 2);
+        assert_eq!(
+            freqs,
+            vec![Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2)]
+        );
+        assert_eq!(effects, vec![Fixed::ZERO, Fixed::ZERO]);
+
+        let gene_set = GeneSet { genes };
+        // A FOUNDER: both loci carry zero-additive alleles (the pool effect is zero), so both channels
+        // express to zero. Locus 0 is exploration, locus 1 deliberation.
+        let founder = diploid(
+            [Allele::additive(Fixed::ZERO), Allele::additive(Fixed::ZERO)],
+            [Allele::additive(Fixed::ZERO), Allele::additive(Fixed::ZERO)],
+        );
+        assert_eq!(
+            gene_set.express(&founder, Channel::Exploration, Fixed::ZERO),
+            Fixed::ZERO,
+            "a founder expresses zero exploration (founder-zero)"
+        );
+        assert_eq!(
+            gene_set.express(&founder, Channel::Deliberation, Fixed::ZERO),
+            Fixed::ZERO,
+            "a founder expresses zero deliberation (founder-zero)"
+        );
+
+        // A MUTANT whose exploration locus drifted off zero expresses positive exploration, while its
+        // untouched deliberation locus stays zero.
+        let mutant = diploid(
+            [
+                Allele::additive(Fixed::from_ratio(1, 4)),
+                Allele::additive(Fixed::from_ratio(1, 4)),
+            ],
+            [Allele::additive(Fixed::ZERO), Allele::additive(Fixed::ZERO)],
+        );
+        assert!(
+            gene_set.express(&mutant, Channel::Exploration, Fixed::ZERO) > Fixed::ZERO,
+            "a mutant whose exploration locus drifted expresses positive exploration"
+        );
+        assert_eq!(
+            gene_set.express(&mutant, Channel::Deliberation, Fixed::ZERO),
+            Fixed::ZERO,
+            "the untouched deliberation locus stays founder-zero"
+        );
     }
 
     #[test]

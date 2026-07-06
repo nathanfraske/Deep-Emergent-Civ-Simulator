@@ -3585,6 +3585,20 @@ impl Runner {
                     let exchange_rate = walker_exchange_rate(&body, &structure, phys);
                     let mut walker =
                         Walker::new(id, coord, body, homeostasis, physiology, controller);
+                    // The newborn's heritable EXPLORATION and DELIBERATION propensities, expressed from its
+                    // OWN genome through the two unit evolve-channels (the ideation activation), the same as
+                    // the founder path. Expressing for newborns AND founders is what lets a propensity that
+                    // drifted off zero in a parent take hold in the lineage; a founder-only express would
+                    // leave every born being at zero and the drive could never spread. Founder-zero and
+                    // inert unseeded (a genome with no evolve-channel locus expresses zero).
+                    if let Some(genome) = world.genome_of(id) {
+                        walker.exploration = race
+                            .genes
+                            .express_unit(genome, crate::genome::Channel::Exploration);
+                        walker.deliberation = race
+                            .genes
+                            .express_unit(genome, crate::genome::Channel::Deliberation);
+                    }
                     if let Some(s) = structure {
                         walker = walker.with_structure(s);
                     }

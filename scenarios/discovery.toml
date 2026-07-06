@@ -1,0 +1,28 @@
+# Discovery: the opt-in scenario that ARMS the ideation / experiential-discovery loop in a free world
+# (ideation activation arc, slice 2). Run with `cargo run --release --example run_world -- --scenario
+# discovery`. It is the ONE run that arms the loop; every other scenario and the baseline leave it unarmed
+# and byte-identical.
+#
+# The run harness reads this scenario's NAME to arm the loop (run_world.rs), and its postures to size the
+# world like any other scenario. The arming itself is environment plus sensory capacity plus the fixed
+# mechanism, never authored behaviour: an inert fracturable ground (granite) so beings have matter to
+# perceive and act on, the affordance-percept registry so they sense its fracture-potential, and the
+# discovery and reward learners, with the two heritable evolve-channels (exploration, deliberation) seeded
+# founder-zero at genesis so a free population evolves them off zero under selection. A being proposes a
+# candidate action each tick and, as its exploration weight drifts off founder-zero over generations,
+# enacts one; which action it enacts emerges from selection, never a coded choice.
+#
+# NO payoff is authored here: breaking granite feeds no reserve, so no rewarded technique emerges, and that
+# is correct. A world where a discovered action pays off (a fracturable substance whose extraction or
+# ingestion feeds reserves through the existing edibility and metabolic path) is the viability scenario,
+# the owner's to design. Slice 3 adds the discovery-emergence reader.
+
+[scenario]
+id = "discovery"
+name = "Discovery"
+summary = "The opt-in scenario that arms the ideation / experiential-discovery loop in a free world: an inert fracturable ground, the affordance-percept registry, and the discovery and reward learners, with the exploration and deliberation evolve-channels seeded founder-zero. Beings propose and, as exploration drifts off zero under selection, enact candidate actions. No payoff is authored; the viability world is a separate design."
+grounding = "real"
+
+[races]
+count = "several"    # a handful of founding peoples, enough for drift and divergence to run
+diversity = "low"    # a calm free world to watch the loop lift off founder-zero, not a stressed one

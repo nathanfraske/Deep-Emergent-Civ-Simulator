@@ -33,10 +33,10 @@ use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, append_morphogen_block, build_dawn_runner, express_program, grow,
-    taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs, Channel,
-    CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
+    append_controller_block, append_morphogen_block, append_scalar_channel, build_dawn_runner,
+    express_program, grow, taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec,
+    BreedingSystem, BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs,
+    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
     EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef, GeneEffect,
     GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, MorphogenParamId,
     MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
@@ -958,6 +958,24 @@ fn the_dawn_runner_embodies_each_founder_as_a_mind_and_a_body() {
             "founder {id:?} is at once a mind and a located body"
         );
     }
+    // The birth-path evolve-channel expression is INERT on a genome that carries no exploration or
+    // deliberation locus (this founder pool is unseeded): the express block reads the genome, sums over zero
+    // matching loci, and leaves the walker founder-zero, so slice 1b adds no world content and every existing
+    // scenario replays bit for bit. A scenario that ARMS the discovery loop (a later slice) seeds the loci, and
+    // a drifted descendant is the first to express a propensity. The primed-wiring test below proves the same
+    // block expresses a seeded locus onto the walker.
+    for w in runner.embodiment().unwrap().walkers() {
+        assert_eq!(
+            w.exploration,
+            Fixed::ZERO,
+            "an unseeded founder expresses zero exploration (the birth-path expression is inert)"
+        );
+        assert_eq!(
+            w.deliberation,
+            Fixed::ZERO,
+            "an unseeded founder expresses zero deliberation (the birth-path expression is inert)"
+        );
+    }
 
     // Tick: the composite advances (cognition world plus the body-thermal coupling), and the founders
     // remain located bodies.
@@ -1031,6 +1049,106 @@ fn the_dawn_runner_embodies_each_founder_as_a_mind_and_a_body() {
             pinned.state_hash(),
             scheduled.state_hash(),
             "the scheduled order stays bit-identical with the embodiment coupled"
+        );
+    }
+}
+
+#[test]
+fn a_founder_expresses_a_primed_evolve_channel_at_the_birth_path() {
+    // Slice 1b's WIRE claim, proven with a PRIMED value. On every shipped scenario the evolve-channel loci are
+    // unseeded (founder-zero), so the birth-path expression is inert and the run replays bit for bit; that
+    // inertness cannot show the block actually READS the genome. Here one founder pool PRIMES the exploration
+    // locus (homozygous, a positive additive effect: a drifted descendant's state stood up at the dawn) and
+    // leaves deliberation unseeded, so the birth path expresses a POSITIVE exploration propensity and a ZERO
+    // deliberation one onto the walker. This proves the express block reads the RIGHT channel off the genome
+    // (a coded default could not tell exploration from deliberation), so a drifted locus reaches the body.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    // A mobile race carrying the taxis controller block and both evolve-channels, with EXPLORATION primed
+    // (frequency one, a positive additive effect) and DELIBERATION left at the unseeded founder-zero append.
+    let mut race = a_sexed_race(0).with_body_plan(mobile_body());
+    let layout = ControllerLayout::new(
+        &HomeostaticRegistry::dev_thermal(),
+        &AffordanceRegistry::dev_default(),
+        0,
+    );
+    let seeds = taxis_move_weights(&layout, 0, 0, Fixed::ONE, Fixed::ONE);
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    append_controller_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        layout.weight_count(),
+        &seeds,
+    );
+    let expl = effects.len();
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
+    // Force the exploration locus homozygous with a positive additive effect, so every founder expresses it;
+    // the deliberation locus keeps its founder-zero balanced frequency and zero effect.
+    freqs[expl] = Fixed::ONE;
+    effects[expl] = Fixed::from_ratio(1, 10);
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), race);
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    let peoples = DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+    };
+
+    let runner = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &resolution,
+        &map,
+        &peoples,
+        0x0B0D1,
+    )
+    .expect("a primed embodied dawn assembles");
+    let embodiment = runner.embodiment().unwrap();
+    assert_eq!(
+        embodiment.walkers().len(),
+        8,
+        "the primed band embodied its eight founders"
+    );
+    for w in embodiment.walkers() {
+        assert!(
+            w.exploration > Fixed::ZERO,
+            "a founder of the primed pool expresses a positive exploration propensity (the birth path read the genome)"
+        );
+        assert_eq!(
+            w.deliberation,
+            Fixed::ZERO,
+            "the unseeded deliberation locus stays founder-zero (the block reads the right channel, not a default)"
         );
     }
 }
