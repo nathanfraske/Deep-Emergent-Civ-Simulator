@@ -253,6 +253,14 @@ impl Mind {
             .collect()
     }
 
+    /// Iterate this mind's belief frames, each a `(subject, attr)` question and the inference frame over
+    /// it, in canonical `(subject, attr)` order (the `BTreeMap` order). Lets the deliberative planner
+    /// (ideation arc, piece 4) walk the belief store to rank what the being believes toward a goal, and any
+    /// reader needing a frame's confidence or support, without owning a copy or exposing the map itself.
+    pub fn frames(&self) -> impl Iterator<Item = ((StableId, AttrKindId), &InferenceFrame)> {
+        self.beliefs.iter().map(|(&q, f)| (q, f))
+    }
+
     /// This mind's committed belief on one question as a shareable belief, or `None` if it
     /// has not concluded. The answer a being gives when asked.
     pub fn shared_belief(

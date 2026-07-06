@@ -2182,6 +2182,18 @@ value = ""
 unit = "lift_ratio"
 source = "ideation arc piece 3 slice 3b; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
 
+# --- ideation / experiential-discovery arc, piece 4, slice 4a (the belief-graph planner): a being ranks
+# what it believes pays off toward a goal, bounded by a cognition budget. Read by planning::plan_toward
+# (crates/sim/src/planning.rs) when a caller plans; a parameter until slice 4b wires deliberation. ---
+
+[[reserved]]
+id = "planning.depth_cap"
+basis = "the maximum number of beliefs a being's deliberative plan considers toward a goal (planning::plan_toward): a per-tick cognition budget, the depth beyond which the marginal gain of a longer plan falls below the belief-confidence noise, so a being pursues its few surest bets rather than enumerating its whole belief store every tick. A performance-and-resolution bound, not a realism one: set against the per-tick planning budget and the confidence gap at which the next-ranked belief is no better than noise. Larger lets a being weigh more of what it believes (more deliberate, costlier), smaller keeps it to its top guesses; surfaced for the owner and left unset until the planner is wired and profiled (slice 4b)"
+status = "reserved"
+value = ""
+unit = "count"
+source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
+
 # --- ideation / experiential-discovery arc, piece 2, slice 2c-2 (the exploration-enactment gate,
 # Walker::exploration, the ENACT-phase draw): NO NEW reserved scalar, on grounding. The gate resolved this
 # gate as FOUNDER-ZERO (Principle 9: exploration EMERGES by selection, never switched on), so the founder

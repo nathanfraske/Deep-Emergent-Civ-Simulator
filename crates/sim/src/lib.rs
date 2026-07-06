@@ -100,6 +100,7 @@ pub mod morphogen;
 pub mod percept;
 pub mod personality;
 pub mod physiology;
+pub mod planning;
 pub mod primes;
 pub mod race;
 pub mod runner;
