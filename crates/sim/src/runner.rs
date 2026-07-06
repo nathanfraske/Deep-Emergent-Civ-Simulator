@@ -93,8 +93,9 @@ use crate::homeostasis::{
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    avoidance_gradient, feature_observations, sequence_subject, HarmLearningCalib,
-    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, avoidance_gradient, feature_observations, sequence_subject,
+    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL,
+    REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -892,6 +893,13 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
+    /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
+    /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
+    /// which rebuilds the layout to feed the block) to let a being act on its reward beliefs. When true, the
+    /// runner writes each being's [`crate::learn::appetitive_salience`] into the block each tick, and only a
+    /// heritable weight lifted off founder-zero by selection turns it into repetition (Principle 9).
+    appetitive: bool,
     /// The located material substrate the world is made of (material-substrate arc, cascade item 1):
     /// a per-cell mixture of physics substances by volume. EMPTY by default, so a scenario that
     /// declares no material layer folds nothing into `state_hash` and replays bit-for-bit (the opt-in
@@ -984,6 +992,7 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            appetitive: false,
             material: MaterialField::new(),
             material_registry: None,
             extraction: None,
@@ -1011,13 +1020,34 @@ impl Embodiment {
     /// channels), so the percept has no behavioural effect until selection lifts a weight, the emergent
     /// pattern.
     pub fn set_percepts(&mut self, percepts: PerceptRegistry) {
-        self.layout = ControllerLayout::with_percepts(
+        self.percepts = percepts;
+        self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the APPETITIVE belief block in the controller layout, so a being can act on its
+    /// reward beliefs and REPEAT a rewarded action (ideation / experiential-discovery arc, piece 1, the
+    /// belief-to-behaviour feedback). Set BEFORE the embodiment's beings are built, exactly like
+    /// [`set_percepts`], because the beings' controllers are expressed against [`Embodiment::layout`], so a
+    /// block added after they exist would leave their weight vectors the wrong length. FALSE (the default)
+    /// leaves the layout and every run hash unchanged (opt-in). The new appetitive weights a founder then
+    /// expresses are zero (unseeded channels), so a reward belief moves no behaviour until selection lifts a
+    /// weight, the emergent pattern the feature block established.
+    pub fn set_appetitive(&mut self, enabled: bool) {
+        self.appetitive = enabled;
+        self.rebuild_layout();
+    }
+
+    /// Rebuild the controller layout from the current percept registry and appetitive flag (both opt-in,
+    /// both feeding an input block the founder weights ignore until selection lifts them). Called by
+    /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
+    fn rebuild_layout(&mut self) {
+        self.layout = ControllerLayout::with_percepts_and_appetitive(
             &self.homeo,
             &self.afford,
-            &percepts,
+            &self.percepts,
+            self.appetitive,
             self.layout.hidden(),
         );
-        self.percepts = percepts;
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -2898,6 +2928,31 @@ impl Runner {
                     .collect(),
                 None => return,
             };
+        // (0b') Belief to percept, the APPETITIVE feedback (ideation / experiential-discovery arc, piece 1,
+        // the belief-to-behaviour half): each being's committed reward-belief signal over its affordances,
+        // in the layout's canonical affordance order, written into the controller's appetitive input block so
+        // it senses "which of my actions do I believe pay off". Present only when the embodiment opts into
+        // reward repetition ([`Embodiment::set_appetitive`]) and the world carries the being's mind. A being
+        // that believes nothing reads all zeros, and the evolved appetitive weights (founding-zero) must be
+        // lifted by selection before the signal moves the decision, so repetition emerges (Principle 9). Read
+        // before the mutable embodiment borrow, drawing no RNG, the exact discipline the avoidance gradient
+        // uses one axis over.
+        let appetitive: BTreeMap<StableId, Vec<Fixed>> = match self.embodiment.as_ref() {
+            Some(emb) if emb.appetitive => match self.world.as_ref() {
+                Some(world) => {
+                    let ids = emb.layout.affordance_ids();
+                    emb.walkers
+                        .iter()
+                        .filter_map(|w| {
+                            let mind = world.mind(w.id)?;
+                            Some((w.id, appetitive_salience(mind, &ids, world.belief_params())))
+                        })
+                        .collect()
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
         // (0c) Physics to physiology, the anatomy-derived metabolism (R-METABOLIZE): when a physiology
         // is installed, build each being's per-axis DERIVED drain so its survival follows its body plan,
         // mass, tissue, medium, and temperature rather than the axis defs' authored scalars. The
@@ -3047,6 +3102,7 @@ impl Runner {
             &drains,
             &emb.percepts,
             &load_factors,
+            &appetitive,
             &mut deferred_actions,
         );
         // (2b) Behaviour to matter: enact the matter decisions in id order (the map is id-keyed, so the
@@ -4289,6 +4345,232 @@ source = "test"
             run(false),
             Some(REWARDS),
             "with the reward learner unarmed, no REWARDS belief forms: the belief tracks the routed reward"
+        );
+    }
+
+    #[test]
+    fn a_being_that_learns_its_ingest_pays_off_repeats_it_past_the_point_a_naive_being_stops() {
+        // Ideation arc, piece 1, the belief-to-behaviour milestone (the WIRE acceptance): a being REPEATS a
+        // rewarded action. Two beings run the IDENTICAL hunger-driven controller, which ingests while hungry
+        // and moves once fed (its INGEST activation falls as ENERGY rises, so a sated being stops eating), and
+        // both carry the SAME primed appetitive weight from the INGEST appetitive channel to the INGEST
+        // output. The ONLY difference is whether the reward learner is armed. The armed being learns that its
+        // INGEST pays off, its appetitive channel lights, the primed weight lifts its INGEST activation, and it
+        // keeps ingesting past the point hunger alone would stop; the unarmed being never forms the belief, its
+        // appetitive channel stays dark, and it stops eating once fed. So the reward BELIEF, routed through the
+        // appetitive percept and an evolved weight, changes the behaviour, and removing the reward signal
+        // removes the repetition, the appetitive twin of the harm falsifier. No authored preference: the two
+        // beings are identical but for the felt reward.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::Controller;
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
+        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, SequenceStep};
+        use crate::physiology::ENERGY_DENSITY;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let food_physiology = || Physiology {
+            requirements: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            assimilation: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: INGEST.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run the being with the reward learner armed or not, returning how many of the ticks it decided
+        // INGEST (the repetition count) and whether it committed the ingest-pays-off belief.
+        let run = |reward_armed: bool| -> (usize, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            // Opt into reward repetition: the layout grows an appetitive belief block the runner fills each
+            // tick from the being's reward beliefs. Set before the being is built, so its controller expresses
+            // against the appetitive-enabled layout.
+            emb.set_appetitive(true);
+            let layout = emb.layout().clone();
+            let n_in = layout.n_in();
+            let energy_base = layout.axis_input_base(ENERGY).unwrap();
+            let ingest_channel = layout.appetitive_input_base()
+                + layout
+                    .affordance_ids()
+                    .iter()
+                    .position(|a| *a == INGEST)
+                    .unwrap();
+            // The hunger-driven controller (identical for the armed and unarmed being): MOVE activation is a
+            // constant half from the bias, INGEST activation is one from the bias MINUS the ENERGY level, so a
+            // hungry being (low ENERGY) ingests and a fed one (high ENERGY, INGEST below the half) moves. The
+            // PRIMED appetitive weight adds a half to INGEST when the being believes its ingest pays off, so a
+            // committed belief keeps INGEST winning past satiety. MOVE act is output 0, INGEST act output 3.
+            // MOVE's activation is output 0 (its heading dx, dy are outputs 1, 2); INGEST's activation is the
+            // scalar output 3 (the dev_default layout, as the slice-1c test uses).
+            let move_act = 0usize;
+            let ingest_act = 3usize;
+            let mut wts = vec![Fixed::ZERO; layout.weight_count()];
+            wts[move_act * n_in + (n_in - 1)] = Fixed::from_ratio(1, 2);
+            wts[ingest_act * n_in + (n_in - 1)] = Fixed::ONE;
+            wts[ingest_act * n_in + energy_base] = Fixed::ZERO - Fixed::ONE;
+            wts[ingest_act * n_in + ingest_channel] = Fixed::from_ratio(1, 2);
+            let controller = Controller::from_weights(n_in, layout.n_out(), 0, wts);
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: metabolise its ENERGY well down first, so it starts on the ingesting side.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..400 {
+                homeostasis.metabolize(&reg, Fixed::ZERO);
+            }
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body.clone(),
+                    homeostasis,
+                    food_physiology(),
+                    controller,
+                ),
+                band(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            if reward_armed {
+                runner.set_reward_learning(RewardLearningCalib::dev_default());
+            }
+            let mut ingests = 0usize;
+            let mut ever_committed = false;
+            for _ in 0..30 {
+                // Replenish an abundant energy-dense food on WHATEVER tile the being now stands on, so a being
+                // that walks (MOVE) still finds food underfoot and the only thing that changes its intake is
+                // its own decision to ingest, not the geography.
+                if let Some(emb) = runner.embodiment_mut() {
+                    let coord = emb.walkers().iter().find(|w| w.id == id).map(|w| w.coord());
+                    if let Some(coord) = coord {
+                        let mut nutrients = BTreeMap::new();
+                        nutrients.insert(ENERGY_DENSITY.to_string(), Fixed::from_int(4));
+                        emb.resources_mut().set(
+                            coord,
+                            Composition {
+                                nutrients,
+                                toxins: BTreeMap::new(),
+                            },
+                        );
+                    }
+                }
+                runner.step();
+                if let Some(emb) = runner.embodiment() {
+                    if let Some(w) = emb.walkers().iter().find(|w| w.id == id) {
+                        if w.decided_affordance == Some(INGEST) {
+                            ingests += 1;
+                        }
+                    }
+                }
+                // The belief the appetitive channel reads is transient by design: it commits while the being
+                // climbs (each ingest a felt reward) and fades once the being is full (ingesting at satiety
+                // wins no reserve, so the evidence turns neutral). Record whether it was ever held, the window
+                // in which the appetitive channel lifts INGEST and the repetition shows.
+                if runner
+                    .world()
+                    .and_then(|w| w.mind(id))
+                    .and_then(|m| m.belief(ingest_subject, REWARD_ATTR, &bp))
+                    == Some(REWARDS)
+                {
+                    ever_committed = true;
+                }
+            }
+            (ingests, ever_committed)
+        };
+
+        let (armed_ingests, armed_committed) = run(true);
+        let (naive_ingests, naive_committed) = run(false);
+
+        // The armed being formed the belief at some point in the run; the unarmed one never did (no reward
+        // routed, no trace, so its appetitive channel is dark the whole run).
+        assert!(
+            armed_committed,
+            "the reward-armed being commits the ingest-pays-off belief through the runner"
+        );
+        assert!(
+            !naive_committed,
+            "the unarmed being forms no reward belief, so its appetitive channel stays dark"
+        );
+        // The behavioural payoff: the being that believes its ingest pays off REPEATS it strictly more than
+        // the identical being that never learned, because the lit appetitive channel and its evolved weight
+        // keep INGEST winning past the point hunger alone would hand the tick to MOVE.
+        assert!(
+            armed_ingests > naive_ingests,
+            "the being that learned its ingest pays off repeats it more than the naive control \
+             (armed {armed_ingests} ingests vs naive {naive_ingests})"
         );
     }
 

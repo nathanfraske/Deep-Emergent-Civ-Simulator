@@ -710,6 +710,9 @@ pub fn step<T: Terrain>(
         &PerceptRegistry::empty(),
         // No carried-load penalty on the field-less fixture path (nothing picks matter up here).
         &BTreeMap::new(),
+        // No appetitive belief percept on the field-less fixture path (the layout carries no appetitive
+        // block here), so the controller's appetitive input, if any, reads zero.
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -755,6 +758,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
     percepts: &PerceptRegistry,
     load_factors: &BTreeMap<StableId, Fixed>,
+    appetitive: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -824,8 +828,21 @@ pub fn step_with_field_dirs<T: Terrain>(
         // before the feature substrate existed. A pure physical read of what is here, no threshold and
         // no label (Principles 8, 9).
         let features = percepts.perceive(resources.composition(here));
-        let input =
-            layout.build_input_with_features(&w.homeostasis, &here_axes, &dirs, signed, &features);
+        // The being's APPETITIVE belief percept for this tick (ideation arc, piece 1, the belief-to-behaviour
+        // feedback): its committed reward-belief signal over its affordances, computed by the runner from its
+        // own beliefs and written into the controller's appetitive block. Empty when the world does not opt
+        // into reward repetition (the layout carries no appetitive block), so the input is byte-identical to
+        // before the block existed. Only an evolved appetitive weight turns the signal into repetition.
+        let empty_appetitive: Vec<Fixed> = Vec::new();
+        let appetite = appetitive.get(&w.id).unwrap_or(&empty_appetitive);
+        let input = layout.build_input_with_features_and_appetitive(
+            &w.homeostasis,
+            &here_axes,
+            &dirs,
+            signed,
+            &features,
+            appetite,
+        );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
         // A grown body reads its affordances from its own structure's physics directly; a catalog body
@@ -1621,6 +1638,7 @@ mod tests {
                     &BTreeMap::new(),
                     &PerceptRegistry::empty(),
                     &load_factors,
+                    &BTreeMap::new(), // no appetitive block on the fixture path
                     &mut BTreeMap::new(),
                 );
             }
@@ -1697,6 +1715,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -1783,6 +1802,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2024,6 +2044,7 @@ mod tests {
             &empty_drains,
             &crate::percept::PerceptRegistry::empty(),
             &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -2143,6 +2164,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -2258,6 +2280,7 @@ mod tests {
                     &empty_drains,
                     &percepts,
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2352,6 +2375,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
