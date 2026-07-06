@@ -2132,6 +2132,14 @@ unit = "probability"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
 
 [[reserved]]
+id = "reward.eligibility_decay"
+basis = "the temporal-difference lambda the reward eligibility trace decays by each tick (learn::EligibilityTrace::decay), so a reserve rise felt some ticks after an action still credits the sequence that produced it. Set at the interoceptive lag between an action and its felt reserve rise the physiology implies, bounded by the retention window the belief system already forgets on, so credit reaches back only as far as the substrate remembers. In (0, 1): nearer one credits a longer-lagged action, nearer zero credits only the immediately-preceding one. It enters through the existing observation weight, so it fabricates no new engine constant"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
 status = "reserved"

@@ -35,8 +35,9 @@
 //! the being's own reserve falling, the subject from a raw quantized percept, and "this feature harms
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
-use civsim_core::{Fixed, StableId};
+use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::Coord3;
+use std::collections::BTreeMap;
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -93,6 +94,67 @@ const FEATURE_BUCKET_MASK: u64 = 0xFFFF_FFFF;
 pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
     let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
     StableId(FEATURE_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
+}
+
+/// The reserved base of the per-SEQUENCE belief-subject band (ideation / experiential-discovery arc, piece
+/// 1, slice 1b): a discovered ACTION is a wildcard template over a primitive sequence, and this band mints
+/// the belief subject it is keyed on, the sibling of [`feature_subject`]'s per-feature band. It sets bit 61
+/// as well as bit 62, so a sequence subject is DISJOINT from every feature subject (whose payload stays in
+/// the low 48 bits, leaving bit 61 clear) and from every being id, and stays below `1 << 63` (below the
+/// reserved-high landmark ids), exactly as the feature band does. So two beings that execute the SAME
+/// affordance-typed sequence mint the IDENTICAL subject, and a gossiped belief about it does not diverge.
+const SEQUENCE_SUBJECT_BASE: u64 = (1 << 62) | (1 << 61);
+/// The most sequence steps packed into one subject. A longer sequence truncates to its first steps (the
+/// honest first-cut bound; a wider or hashed key is the refinement if discovered actions grow past this).
+const SEQ_MAX_STEPS: usize = 4;
+/// The bit width of each packed step field (the primitive id, the target-affordance bucket, the param
+/// bucket). A field value wider than this clamps to the field maximum (the honest bound; the reserved
+/// quantization keeps the buckets small, so the clamp does not bite in practice).
+const SEQ_FIELD_BITS: u32 = 4;
+/// The bit width of one packed step (its three fields).
+const SEQ_STEP_BITS: u32 = SEQ_FIELD_BITS * 3;
+/// The mask for one packed field.
+const SEQ_FIELD_MASK: u64 = (1 << SEQ_FIELD_BITS) - 1;
+
+/// One step of an executed primitive sequence (ideation arc, piece 1, slice 1b): the PRIMITIVE the being
+/// enacted (an affordance id), the quantized TARGET-AFFORDANCE bucket of the matter it acted on (the raw
+/// derived affordance scalar bucketed like a feature, which slice 2a supplies), and the quantized action
+/// PARAM bucket (a force or aim level bucketed the same way). All three are small quantized ids, so a step
+/// is a wildcard predicate `primitive(target-kind, param-kind)` a template can match, never an object id or
+/// a coded primitive pair (Principles 8, 9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SequenceStep {
+    /// The affordance id of the primitive enacted (grasp, extract, ...).
+    pub primitive: u16,
+    /// The quantized target-affordance bucket (the kind of thing acted on).
+    pub target_bucket: i64,
+    /// The quantized action-parameter bucket (the kind of how: a force or aim level).
+    pub param_bucket: i64,
+}
+
+/// Mint the belief subject for an executed primitive SEQUENCE (ideation arc, piece 1, slice 1b): a
+/// canonical, RNG-free bit-pack of up to [`SEQ_MAX_STEPS`] steps into the reserved sequence-subject band,
+/// the sibling of [`feature_subject`]. Two beings that execute the SAME sequence of primitives against the
+/// SAME affordance-and-param kinds mint the IDENTICAL subject (so a belief that "grasp(sharp),
+/// actuate(fracturable) pays off" generalises across matter of the same kind and gossips without
+/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. Each field
+/// is clamped into [`SEQ_FIELD_BITS`] and the sequence into [`SEQ_MAX_STEPS`] (the honest bounds), so the
+/// pack never overflows the band, and the step COUNT is packed above the steps so a prefix is not confused
+/// with the full sequence.
+pub fn sequence_subject(steps: &[SequenceStep]) -> StableId {
+    let n = steps.len().min(SEQ_MAX_STEPS);
+    let mut payload: u64 = 0;
+    for (i, step) in steps.iter().take(SEQ_MAX_STEPS).enumerate() {
+        let primitive = (step.primitive as u64).min(SEQ_FIELD_MASK);
+        let target = (step.target_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
+        let param = (step.param_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
+        let packed_step = primitive | (target << SEQ_FIELD_BITS) | (param << (SEQ_FIELD_BITS * 2));
+        payload |= packed_step << (i as u32 * SEQ_STEP_BITS);
+    }
+    // The step count, packed above the four step fields (bits 48..), so a 2-step prefix of a 3-step
+    // sequence mints a different subject than the 3-step sequence itself.
+    payload |= (n as u64) << (SEQ_MAX_STEPS as u32 * SEQ_STEP_BITS);
+    StableId(SEQUENCE_SUBJECT_BASE | payload)
 }
 
 /// The reserved calibrations of the associative learner (Principle 11): the numbers that set when a
@@ -204,6 +266,13 @@ pub struct RewardLearningCalib {
     /// log-odds clamp (`evidence.log_odds_clamp`), set equal to it (and to the harm learner's) so a single
     /// correlation observation cannot exceed the engine's maximum admissible certainty.
     pub certainty_clamp: Fixed,
+    /// The eligibility decay, the temporal-difference lambda the [`EligibilityTrace`] falls by each tick
+    /// (slice 1b). RESERVED. Basis: the interoceptive lag between an action and its felt reserve rise the
+    /// physiology implies, bounded by the retention window the belief system already forgets on, so credit
+    /// reaches back only as far as the substrate remembers. In `(0, 1)`: nearer one credits a longer-lagged
+    /// action, nearer zero credits only the immediately-preceding one. It enters through the existing
+    /// observation `weight`, so it fabricates no new engine constant.
+    pub eligibility_decay: Fixed,
 }
 
 impl RewardLearningCalib {
@@ -218,6 +287,7 @@ impl RewardLearningCalib {
             p_reward_given_rewards: m.require_fixed("reward.p_reward_given_rewards")?,
             p_reward_given_neutral: m.require_fixed("reward.p_reward_given_neutral")?,
             certainty_clamp: m.require_fixed("evidence.log_odds_clamp")?,
+            eligibility_decay: m.require_fixed("reward.eligibility_decay")?,
         })
     }
 
@@ -234,6 +304,7 @@ impl RewardLearningCalib {
             p_reward_given_rewards: Fixed::from_ratio(9, 10),
             p_reward_given_neutral: Fixed::from_ratio(1, 10),
             certainty_clamp: Fixed::from_int(50),
+            eligibility_decay: Fixed::from_ratio(1, 2),
         }
     }
 
@@ -248,6 +319,76 @@ impl RewardLearningCalib {
             self.p_reward_given_neutral,
             self.certainty_clamp,
         )
+    }
+}
+
+/// The per-being ELIGIBILITY TRACE (ideation / experiential-discovery arc, piece 1, slice 1b): a short
+/// memory of the primitive SEQUENCES a being recently executed, each with a recency-decayed eligibility in
+/// `(0, 1]`, so a reserve rise felt some ticks after an action can still credit the sequence that produced
+/// it (temporal-difference credit assignment). The head sequence (just executed) carries full eligibility;
+/// each tick every trace decays by the reserved [`RewardLearningCalib::eligibility_decay`] (the TD lambda)
+/// and a trace that underflows to zero is pruned, so the memory reaches back only as far as the lag allows.
+///
+/// This is new per-being DYNAMIC state, the sibling of [`crate::homeostasis::ReserveMemory`]: it folds into
+/// `state_hash` in canonical (sequence-subject, eligibility) order, draws no randomness (a run stays
+/// bit-identical across worker widths), and is EMPTY-BY-DEFAULT, so a being that has executed no sequence
+/// folds nothing and a scenario that does not opt in replays bit-for-bit. Slice 1c populates it on the run
+/// path and reads it to route delayed credit through the shipped `consider` path.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EligibilityTrace {
+    /// The recently-executed sequences keyed by their [`sequence_subject`], each with its current
+    /// eligibility factor. Canonical `BTreeMap` order, so the fold and the credit walk are reproducible.
+    traces: BTreeMap<StableId, Fixed>,
+}
+
+impl EligibilityTrace {
+    /// An empty trace: no sequence remembered, so nothing folds into the hash until the first record.
+    pub fn new() -> EligibilityTrace {
+        EligibilityTrace::default()
+    }
+
+    /// Whether no sequence is remembered (an empty trace folds nothing into the hash, the opt-out state).
+    pub fn is_empty(&self) -> bool {
+        self.traces.is_empty()
+    }
+
+    /// Record a just-executed sequence at FULL eligibility (one), the head of the trace: it earns full
+    /// credit for a reserve rise felt this tick and decays from there. Re-executing a sequence refreshes it
+    /// to full.
+    pub fn record(&mut self, subject: StableId) {
+        self.traces.insert(subject, Fixed::ONE);
+    }
+
+    /// Decay every trace by the eligibility lambda and prune those that underflow to zero, so a sequence's
+    /// eligibility for delayed credit falls with the ticks since it was executed. With a lambda in `(0, 1)`
+    /// each trace shrinks and eventually leaves the memory, keeping it bounded and empty-neutral. A pure
+    /// deterministic fold in canonical key order.
+    pub fn decay(&mut self, lambda: Fixed) {
+        self.traces.retain(|_, e| {
+            *e = e.checked_mul(lambda).unwrap_or(Fixed::ZERO);
+            *e > Fixed::ZERO
+        });
+    }
+
+    /// The current eligibility of a sequence (how much delayed credit it still earns), zero if it was not
+    /// recently executed. Slice 1c scales the reward observation's weight by this.
+    pub fn eligibility(&self, subject: StableId) -> Fixed {
+        self.traces.get(&subject).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The remembered sequences with their eligibilities, in canonical order (the credit walk slice 1c runs).
+    pub fn entries(&self) -> impl Iterator<Item = (&StableId, &Fixed)> {
+        self.traces.iter()
+    }
+
+    /// Fold the trace into a hash in canonical (sequence-subject, eligibility) order, beside the reserve
+    /// memory. An empty trace folds nothing, so an opted-out run is byte-identical. The `BTreeMap` walks in
+    /// canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (subject, eligibility) in &self.traces {
+            h.write_u64(subject.0);
+            h.write_fixed(*eligibility);
+        }
     }
 }
 
@@ -600,6 +741,122 @@ mod tests {
             mind.belief(subject, HARM_ATTR, &params()),
             Some(HARMS),
             "the harm belief commits on its own attr, on the same subject, without collision"
+        );
+    }
+
+    #[test]
+    fn a_sequence_subject_is_canonical_and_disjoint_from_feature_subjects_and_beings() {
+        // Slice 1b: a primitive-sequence belief subject is a canonical function of the executed steps, minted
+        // in a band disjoint from the feature band and from being ids, below the reserved-high landmarks.
+        let step = |p: u16, t: i64, q: i64| SequenceStep {
+            primitive: p,
+            target_bucket: t,
+            param_bucket: q,
+        };
+        let seq = [step(3, 1, 0), step(4, 2, 1)]; // grasp(kind 1), extract(kind 2, param 1)
+        let s = sequence_subject(&seq);
+        // Above every being id (minted from zero) and below the reserved-high landmark ids.
+        assert!(s.0 >= SEQUENCE_SUBJECT_BASE);
+        assert!(s.0 < u64::MAX - 1);
+        // Canonical: the same steps mint the same subject; a different primitive, target, param, or ORDER is
+        // a different subject.
+        assert_eq!(sequence_subject(&seq), s);
+        assert_ne!(sequence_subject(&[step(3, 1, 0), step(5, 2, 1)]), s); // different primitive
+        assert_ne!(sequence_subject(&[step(3, 9, 0), step(4, 2, 1)]), s); // different target kind
+        assert_ne!(sequence_subject(&[step(4, 2, 1), step(3, 1, 0)]), s); // reversed order
+        assert_ne!(sequence_subject(&[step(3, 1, 0)]), s); // a prefix is not the whole sequence
+                                                           // Disjoint from the feature band: a sequence subject (bit 61 set) never equals a feature subject
+                                                           // (bit 61 clear), whatever the low bits, so a reward belief about an ACTION never aliases a belief
+                                                           // about a standing-on FEATURE.
+        assert_eq!(
+            SEQUENCE_SUBJECT_BASE & FEATURE_SUBJECT_BASE,
+            FEATURE_SUBJECT_BASE
+        );
+        assert_ne!(sequence_subject(&seq).0, feature_subject(0, 0).0);
+        for ch in 0..4u16 {
+            for bk in 0..8i64 {
+                assert_ne!(s.0, feature_subject(ch, bk).0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_eligibility_trace_records_decays_prunes_and_folds_empty_neutral() {
+        // Slice 1b: the eligibility trace remembers a just-executed sequence at full eligibility, decays it by
+        // the TD lambda each tick, prunes it when it underflows, and folds empty-neutral (opt-in).
+        let seq = [SequenceStep {
+            primitive: 3,
+            target_bucket: 1,
+            param_bucket: 0,
+        }];
+        let subject = sequence_subject(&seq);
+        let lambda = Fixed::from_ratio(1, 2);
+
+        let mut trace = EligibilityTrace::new();
+        assert!(trace.is_empty(), "a fresh trace remembers nothing");
+        assert_eq!(
+            trace.eligibility(subject),
+            Fixed::ZERO,
+            "an unrecorded sequence earns no delayed credit"
+        );
+
+        // Recording puts the sequence at full eligibility, the head of the trace.
+        trace.record(subject);
+        assert_eq!(trace.eligibility(subject), Fixed::ONE);
+        assert!(!trace.is_empty());
+
+        // Each decay halves the eligibility (the TD lambda), so a later-felt reward credits it less.
+        trace.decay(lambda);
+        assert_eq!(trace.eligibility(subject), Fixed::from_ratio(1, 2));
+        trace.decay(lambda);
+        assert_eq!(trace.eligibility(subject), Fixed::from_ratio(1, 4));
+
+        // Enough decays underflow it to zero and prune it, so the memory reaches back only as far as the lag
+        // allows and returns to empty (byte-neutral again).
+        for _ in 0..64 {
+            trace.decay(lambda);
+        }
+        assert!(
+            trace.is_empty(),
+            "a long-past sequence is pruned and the trace returns to empty"
+        );
+
+        // The fold is empty-neutral (an empty trace folds nothing: it leaves the hash identical to one no
+        // trace ever touched) and canonical (independent of record order).
+        let empty = EligibilityTrace::new();
+        let mut h_empty = StateHasher::new();
+        empty.hash_into(&mut h_empty);
+        assert_eq!(
+            h_empty.finish(),
+            StateHasher::new().finish(),
+            "an empty trace folds nothing"
+        );
+
+        let sa = sequence_subject(&[SequenceStep {
+            primitive: 1,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let sb = sequence_subject(&[SequenceStep {
+            primitive: 2,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let mut ta = EligibilityTrace::new();
+        ta.record(sa);
+        ta.record(sb);
+        let mut tb = EligibilityTrace::new();
+        tb.record(sb);
+        ta.record(sa); // re-record is idempotent to full; order differs from tb
+        tb.record(sa);
+        let mut ha = StateHasher::new();
+        ta.hash_into(&mut ha);
+        let mut hb = StateHasher::new();
+        tb.hash_into(&mut hb);
+        assert_eq!(
+            ha.finish(),
+            hb.finish(),
+            "the canonical BTreeMap fold is independent of record order"
         );
     }
 
