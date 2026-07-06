@@ -2154,6 +2154,14 @@ unit = "MPa"
 source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/sim/src/material.rs"
 
 [[reserved]]
+id = "discovery.exploration_floor"
+basis = "the baseline probability of trying a non-top-belief binding, so a being still explores when it already has a rewarded habit (the discovery sampler, discovery::sample_candidate): the relative weight of a candidate the being does NOT yet believe pays off against the unit weight of one it does, a bounded exploration-versus-exploitation floor. In [0, 1]: at zero the being only proposes actions it already believes pay off (pure exploit, no discovery), at one every candidate is equally likely (pure explore, the belief no longer biases). Set at the baseline exploration rate the ecology needs to keep discovering without abandoning a working technique; larger explores more, smaller exploits a known habit harder"
+status = "reserved"
+value = ""
+unit = "weight_ratio"
+source = "ideation arc piece 2 slice 2b; crates/sim/src/discovery.rs; crates/core/src/keys.rs"
+
+[[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
 status = "reserved"
