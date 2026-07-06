@@ -409,6 +409,36 @@ impl ShelterCalib {
     }
 }
 
+/// The reserved parameters of the matter cycle (material-substrate arc, cascade item 8): how a cell's
+/// organic matter decomposes over time. The mechanism that reads them is fixed Rust; these numbers are the
+/// owner's to set, surfaced with a basis, never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatterCycleCalib {
+    /// The temperature at or above which organic matter decomposes; below it a frozen remains is preserved
+    /// (the thermal gate the resolved reaction kernel reads). RESERVED. Basis: the freezing point of the
+    /// organic matter's water (~273 K), below which microbial and enzymatic decomposition halts, so a frozen
+    /// carcass is preserved and a warm one rots; a physical-chemistry datum. A per-substance decomposition
+    /// onset is a refinement.
+    pub decomposition_barrier: Fixed,
+    /// The fraction of a decomposing substance's volume that breaks down per tick, the decomposition rate.
+    /// RESERVED. Basis: the characteristic decomposition timescale of the organic matter over the base tick
+    /// (a carcass rots over a timescale, not instantly); a decomposition-ecology datum. A larger fraction
+    /// rots matter faster.
+    pub decomposition_rate: Fixed,
+}
+
+impl MatterCycleCalib {
+    /// A labelled DEVELOPMENT FIXTURE: a freezing-point decomposition barrier and a rate that exercises the
+    /// mechanism (a warm carcass visibly rots over several ticks) without standing for a calibrated rate.
+    /// Not owner canon.
+    pub fn dev_fixture() -> MatterCycleCalib {
+        MatterCycleCalib {
+            decomposition_barrier: Fixed::from_int(273),
+            decomposition_rate: Fixed::from_ratio(1, 10),
+        }
+    }
+}
+
 /// A worked object a being wields as a tool (material-substrate arc, cascade item 4, crafting). This is the
 /// CONTEST INTERFACE of a tool, the two things an extraction or cut reads: its working GEOMETRY (the
 /// contact area its edge or point presses over) and its MATERIAL (the substance it is made of, whose

@@ -2211,6 +2211,103 @@ fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
 }
 
 #[test]
+fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
+    // Material-substrate arc item 8, THE MATTER CYCLE: a cell's organic matter (carrion, which carries a
+    // biological composition) decomposes over time when it is warm enough, its lost mass leaving the located
+    // matter for the environment; a frozen cell preserves it. The decomposition is EXACTLY mass-conserving:
+    // what a cell loses enters the decomposed-mass sink bit for bit, so the total is invariant, the hard
+    // conservation the ConservationRegistry guards. Keyed off the substance's own composition physics and
+    // the cell temperature, no race, kind, or role (Principles 8, 9).
+    use civsim_sim::conservation::ConservationRegistry;
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+    let reg = civsim_physics::PhysicsRegistry::ground().unwrap();
+
+    let build = |field_temp: i32| -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "carrion", flesh0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+        r
+    };
+
+    let flesh =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "carrion") };
+    // The total matter mass the conservation guard watches: the located matter plus the decomposed sink.
+    let total_mass = move |r: &Runner| -> i128 {
+        let m = r.embodiment().unwrap().material().mass(cell, &reg);
+        let sink = r.embodiment().unwrap().decomposed_mass();
+        (m + sink).to_bits() as i128
+    };
+
+    // A warm cell (300 K, above the 273 K decomposition barrier): the carrion rots, its mass moving into the
+    // sink, and the ConservationRegistry sees the total unchanged (exact conservation).
+    let mut warm = build(300);
+    let mut conservation: ConservationRegistry<Runner> = ConservationRegistry::new();
+    conservation.register("matter_mass", total_mass);
+    let baseline = conservation.snapshot(&warm);
+    warm.step();
+    assert!(flesh(&warm) < flesh0, "warm carrion decomposes");
+    assert!(
+        warm.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the decomposed mass moved into the sink"
+    );
+    conservation
+        .check_against(&baseline, &warm)
+        .expect("the matter cycle conserves mass exactly (cell matter plus sink is invariant)");
+
+    // Many ticks keep conserving as the carrion rots down.
+    for _ in 0..10 {
+        warm.step();
+    }
+    conservation
+        .check_against(&baseline, &warm)
+        .expect("mass stays conserved as the carrion rots over many ticks");
+    assert!(
+        flesh(&warm) < flesh0.checked_div(Fixed::from_int(2)).unwrap(),
+        "the carrion has rotted well down"
+    );
+
+    // A frozen cell (250 K, below the barrier): the carrion is preserved and nothing decomposes.
+    let mut frozen = build(250);
+    frozen.step();
+    assert_eq!(flesh(&frozen), flesh0, "frozen carrion is preserved");
+    assert_eq!(
+        frozen.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing decomposed in the cold"
+    );
+
+    // The scheduled tick order decomposes bit-identically to the pinned order.
+    let mut pinned = build(300);
+    pinned.step();
+    let mut scheduled = build(300);
+    scheduled.step_scheduled(&[]);
+    assert_eq!(
+        scheduled.embodiment().unwrap().decomposed_mass(),
+        pinned.embodiment().unwrap().decomposed_mass(),
+        "the scheduled and pinned orders decompose identically"
+    );
+}
+
+#[test]
 fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
     // Material-substrate arc item 7, SHELTER: a being whose cell is enclosed by insulating matter (a roof of
     // oak in the air cells above it) is buffered from a harsh field, its body temperature holding nearer its

@@ -99,7 +99,7 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    ShelterCalib, WieldedTool,
+    MatterCycleCalib, ShelterCalib, WieldedTool,
 };
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
@@ -923,6 +923,13 @@ pub struct Embodiment {
     /// folds no bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Recomputed each
     /// tick from the fuel present and the cell temperature, so it always reflects the current combustion.
     fire: FireField,
+    /// The running total MASS the matter cycle has removed from the located matter and dispersed to the
+    /// environment (material-substrate arc, cascade item 8): the decomposed matter that has left a cell (its
+    /// gases dispersing, its minerals leaching) but is not yet re-materialised as a soil or air substance.
+    /// It is the SINK that makes decomposition exactly mass-conserving: what leaves a cell exactly enters
+    /// here, so `sum(cell masses) + this` is invariant. ZERO by default, folded into `state_hash` only when
+    /// non-zero, so a scenario with no matter cycle armed stays byte-identical.
+    decomposed_mass: Fixed,
 }
 
 impl Embodiment {
@@ -976,6 +983,7 @@ impl Embodiment {
             craft: None,
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
+            decomposed_mass: Fixed::ZERO,
         }
     }
 
@@ -1051,6 +1059,13 @@ impl Embodiment {
     /// item 6): the per-cell combustion energy released this tick, sourced by the runner's combustion beat.
     pub fn fire(&self) -> &FireField {
         &self.fire
+    }
+
+    /// The total mass the matter cycle has decomposed and dispersed to the environment (material-substrate
+    /// arc, cascade item 8): the sink that closes decomposition's mass balance, for the conservation guard
+    /// and the reader.
+    pub fn decomposed_mass(&self) -> Fixed {
+        self.decomposed_mass
     }
 
     /// Install the world material registry a carried load's weight is derived against (material-substrate
@@ -1598,6 +1613,12 @@ pub struct Runner {
     /// being's coupling to the field by the insulating matter enclosing its cell. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion calib.
     shelter: Option<ShelterCalib>,
+    /// The reserved calibration of the matter cycle (material-substrate arc, cascade item 8), armed opt-in.
+    /// `None` on a runner without it, so no decomposition runs and every existing scenario is byte-identical;
+    /// armed via [`Runner::set_matter_cycle`], the field step then decomposes a cell's organic matter over
+    /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
+    /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
+    matter_cycle: Option<MatterCycleCalib>,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -1641,6 +1662,7 @@ impl Runner {
             environ: None,
             combustion: None,
             shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1681,6 +1703,7 @@ impl Runner {
             environ: None,
             combustion: None,
             shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1734,6 +1757,7 @@ impl Runner {
             environ: None,
             combustion: None,
             shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1810,6 +1834,7 @@ impl Runner {
             environ: None,
             combustion: None,
             shelter: None,
+            matter_cycle: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1850,6 +1875,16 @@ impl Runner {
     /// Reserved calibration ([`ShelterCalib`]); off the calibrated worldbuild path until a later slice wires it.
     pub fn set_shelter(&mut self, calib: ShelterCalib) {
         self.shelter = Some(calib);
+    }
+
+    /// Arm the matter cycle (material-substrate arc, cascade item 8): each tick, a cell's organic matter
+    /// (a substance carrying a biological composition) at or above the decomposition barrier breaks down at
+    /// the reserved rate, its lost mass exactly conserved in the embodiment's decomposed-mass sink (matter
+    /// dispersed to the environment). Opt-in: a runner left unarmed decomposes nothing, so every existing
+    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated worldbuild
+    /// path until a later slice wires it.
+    pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
+        self.matter_cycle = Some(calib);
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -1973,6 +2008,92 @@ impl Runner {
             }
         }
         self.step_combustion();
+        self.step_matter_cycle();
+    }
+
+    /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
+    /// over time. For each cell substance carrying a biological composition (a `bio.mineral_ash_fraction`, the
+    /// mark of organic matter) whose cell temperature is at or above the decomposition barrier, a reserved
+    /// fraction of its volume breaks down this tick and its EXACT mass leaves the located matter for the
+    /// decomposed-mass sink (its gases dispersing, its minerals leaching to the environment). Run inside
+    /// [`Runner::step_field`] after the temperature advances, so both tick orders decompose against the
+    /// settled temperature identically. A pure deterministic fold in canonical cell-and-substance order
+    /// (Principle 3); the outcome keys off the substance's own composition physics and the cell temperature,
+    /// no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no material
+    /// registry, or no organic matter warm enough decomposes nothing, so the sink stays zero and the run is
+    /// byte-identical.
+    ///
+    /// The decomposition is EXACTLY mass-conserving: the mass a cell loses (the material field's own rounded
+    /// mass decrease for the taken volume) is added, bit for bit, to the sink, so `sum(cell masses) + sink`
+    /// is invariant, the hard conservation the [`crate::conservation::ConservationRegistry`] guards. Slice C
+    /// re-materialises the sink into soil and air substances (the ash fraction to a mineral residue, the
+    /// volatile to the air), the split its own follow-on.
+    fn step_matter_cycle(&mut self) {
+        let Some(calib) = self.matter_cycle else {
+            return;
+        };
+        // Read phase: over every cell of organic matter warm enough to decompose, compute the volume that
+        // breaks down and the exact mass it carries off. Snapshotted so the take below does not alias the read.
+        let decomp: Vec<(Coord3, String, Fixed, Fixed)> = {
+            let Some(emb) = self.embodiment.as_ref() else {
+                return;
+            };
+            let Some(reg) = emb.material_registry.as_ref() else {
+                return;
+            };
+            let mut out = Vec::new();
+            for (cell, mix) in emb.material.cells() {
+                let temperature = self.field.at(cell.x, cell.y);
+                if temperature < calib.decomposition_barrier {
+                    continue; // frozen: a preserved remains does not decompose
+                }
+                for (substance, &volume) in mix.substances() {
+                    // Organic matter carries a biological composition (an ash fraction); inorganic matter
+                    // (rock, soil, metal) does not and is skipped. This is the substance's own physics, not a
+                    // tag: what decomposes is what has a biological make-up (Principles 8, 11).
+                    let Some(_ash) = reg
+                        .substance(substance)
+                        .and_then(|s| s.vector.get("bio.mineral_ash_fraction").copied())
+                    else {
+                        continue;
+                    };
+                    let density = reg
+                        .substance(substance)
+                        .and_then(|s| s.vector.get("mat.density").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    if density <= Fixed::ZERO {
+                        continue;
+                    }
+                    let decomposed = volume
+                        .checked_mul(calib.decomposition_rate)
+                        .unwrap_or(Fixed::ZERO);
+                    if decomposed <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The exact mass the take will remove: the substance's mass contribution before minus
+                    // after, each the material field's own `volume * density` (the weighted-sum term), so the
+                    // difference is bit-identical to the cell's mass decrease the take produces.
+                    let m_before = volume.checked_mul(density).unwrap_or(Fixed::MAX);
+                    let m_after = (volume - decomposed)
+                        .checked_mul(density)
+                        .unwrap_or(Fixed::MAX);
+                    let mass_lost = m_before - m_after;
+                    if mass_lost <= Fixed::ZERO {
+                        continue;
+                    }
+                    out.push((*cell, substance.clone(), decomposed, mass_lost));
+                }
+            }
+            out
+        };
+        // Apply phase: remove the decomposed volume and move its exact mass into the sink.
+        let Some(emb) = self.embodiment.as_mut() else {
+            return;
+        };
+        for (cell, substance, decomposed, mass_lost) in decomp {
+            emb.material.take(cell, &substance, decomposed);
+            emb.decomposed_mass = emb.decomposed_mass.saturating_add(mass_lost);
+        }
     }
 
     /// The combustion beat (material-substrate arc, cascade item 6, live fire): the combustible matter each
@@ -3035,6 +3156,12 @@ impl Runner {
             // scenario with no combustion armed or nothing burning, so it folds no bytes and the run is
             // byte-identical (the opt-in empty-default).
             emb.fire.hash_into(&mut h);
+            // The decomposed-mass sink (material-substrate arc, cascade item 8): the matter the matter cycle
+            // has dispersed to the environment, folded only when non-zero so a scenario with no matter cycle
+            // armed folds no bytes and the run is byte-identical (the opt-in default).
+            if emb.decomposed_mass != Fixed::ZERO {
+                h.write_fixed(emb.decomposed_mass);
+            }
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {

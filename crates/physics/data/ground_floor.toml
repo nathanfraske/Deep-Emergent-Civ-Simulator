@@ -51,3 +51,12 @@ real = "CRC Handbook of Chemistry and Physics (halite, rock salt NaCl, density 2
 values = [
   { axis = "mat.density", value = "2170" },
 ]
+
+[[substance]]
+id = "carrion"
+participates_in = []
+real = "USDA / Greenfield and Southgate food-composition data (mammalian soft tissue density ~1000 to 1050 kg/m^3; whole-carcass mineral ash mass fraction ~0.05 including bone)"
+values = [
+  { axis = "mat.density", value = "1000" },
+  { axis = "bio.mineral_ash_fraction", value = "0.05" },
+]

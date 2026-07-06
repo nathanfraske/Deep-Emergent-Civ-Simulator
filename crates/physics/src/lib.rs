@@ -613,7 +613,6 @@ impl PhysicsRegistry {
     pub fn ground() -> Result<Self, PhysicsError> {
         let mut reg =
             PhysicsRegistry::from_toml_str(include_str!("../data/mechanical_floor.toml"))?;
-        reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
         // The reactive floors (material-substrate arc, cascade item 8, the matter cycle): the fluids,
         // chemistry, and biology floors carry the transform physics a cell's matter reads to decompose,
         // corrode, or burn (the corrosion electrode potentials and susceptibility, the combustion products'
@@ -626,6 +625,10 @@ impl PhysicsRegistry {
         reg.extend_from_toml_str(include_str!("../data/chem_optics_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/em_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/biology_floor.toml"))?;
+        // The ground floor loads LAST, so its z-column substances can carry cross-domain axes the reactive
+        // floors define (the matter cycle's decomposable "carrion" carries `bio.mineral_ash_fraction`). Its
+        // substances and axes are order-independent for the material derivations (a registry lookup by id).
+        reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
         Ok(reg)
     }
 
