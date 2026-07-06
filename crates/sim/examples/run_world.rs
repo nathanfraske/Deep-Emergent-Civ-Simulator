@@ -41,16 +41,22 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use civsim_core::{Fixed, GaussApprox, StableId};
+use civsim_physics::PhysicsRegistry;
+use civsim_sim::affordance_percept::{
+    AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticRegistry, ENERGY, TEMPERATURE, WATER,
 };
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
-use civsim_sim::learn::{HARMS, HARM_ATTR};
+use civsim_sim::learn::{RewardLearningCalib, HARMS, HARM_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
+use civsim_sim::material::MaterialField;
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::runner::Runner;
@@ -58,13 +64,14 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, build_dawn_runner, forage_taxis_weights, nsm_gloss, Articulation,
-    Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry,
-    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
-    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
-    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
-    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
-    SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
+    append_controller_block, append_scalar_channel, build_dawn_runner, forage_taxis_weights,
+    nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
+    BreedingSystemRegistry, Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples,
+    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
+    ForageGains, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
+    LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
+    SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
+    World,
 };
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
@@ -180,6 +187,11 @@ struct Config {
     pool_ne: u32,
     /// The ambient medium name, if the scenario selects one the dev-fixtures manifest carries.
     medium: Option<String>,
+    /// Whether the dedicated opt-in `discovery` scenario is selected (`--scenario discovery`): the only
+    /// run that ARMS the ideation / experiential-discovery loop (the evolve-channel loci seeded at
+    /// genesis, an inert fracturable material field, the affordance-percept registry, and the discovery
+    /// and reward learners). Every other run leaves the loop unarmed and unseeded and stays byte-identical.
+    discovery: bool,
 }
 
 /// Parse the arguments simply, with sane defaults, then fold in any named scenario's postures.
@@ -251,6 +263,10 @@ fn parse_config() -> Config {
         None => (None, 1, 20, None),
     };
 
+    // The dedicated `discovery` scenario is the ONE opt-in that arms the ideation loop; every other
+    // scenario and the baseline leave it unarmed (byte-identical), so the flag keys off the name alone.
+    let discovery = scenario.as_deref() == Some("discovery");
+
     Config {
         seed: seed.unwrap_or(1),
         races: races.or(posture_races).unwrap_or(3).max(1),
@@ -260,6 +276,7 @@ fn parse_config() -> Config {
         diversity_step,
         pool_ne,
         medium,
+        discovery,
     }
 }
 
@@ -371,6 +388,16 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         layout.weight_count(),
         &seeds,
     );
+    // Ideation activation slice 2: the dedicated `discovery` scenario SEEDS the two evolve-channel loci at
+    // genesis, so a free population evolves exploration and deliberation off founder-zero (the drift reuses
+    // the standing additive mutation). Opt-in: ONLY this scenario grows the genome, a deliberately different
+    // world with its own re-baseline (the B2b opt-in norm); every other run leaves the genome untouched and
+    // byte-identical. Founder-zero, so a founder expresses zero and the drive EMERGES by selection, never a
+    // coded switch (Principle 9). The birth path (worldbuild/runner) expresses these loci onto each walker.
+    if cfg.discovery {
+        append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
+        append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
+    }
     // The stamped integer-Gaussian approximation the additive spine draws through (the labelled
     // SumOfUniforms{k=12} default of design 25.10; a canonical build reads genome.gauss_approx). The
     // seeded loci sit at frequency one, so their within-locus deviation is zero and the draw is scaled
@@ -1332,6 +1359,48 @@ fn main() {
         for id in w.being_ids() {
             w.set_age(id, 20);
         }
+    }
+
+    // Ideation activation slice 2: the dedicated `discovery` scenario ARMS the experiential-discovery loop
+    // in the free world (opt-in; every other run leaves it unarmed and byte-identical). The arming is
+    // ENVIRONMENT plus SENSORY CAPACITY plus the fixed MECHANISM, never authored behaviour: an INERT
+    // fracturable ground (granite on every cell, authored physics, Principle 9) so beings have matter to
+    // perceive and act on; the affordance-percept registry so they SENSE its fracture-potential; and the
+    // discovery and reward learners so a being PROPOSES a candidate action each tick and, as its
+    // founder-zero exploration weight drifts off zero over generations, ENACTS one. WHICH action a being
+    // enacts still emerges from the exploration weight lifting under selection, never a coded choice.
+    //
+    // NO PAYOFF is authored: breaking granite feeds no reserve, so no rewarded technique emerges here, and
+    // that is correct. A world where a discovered action PAYS OFF (a fracturable substance whose extraction
+    // or ingestion feeds reserves through the existing edibility and metabolic path) is the VIABILITY
+    // scenario, the owner's to design. The evolve-channel loci were seeded at genesis (full_race) under the
+    // same flag. Slice 3 adds the discovery-emergence reader that shows the proposals and enactions.
+    if cfg.discovery {
+        let material_registry =
+            PhysicsRegistry::ground().expect("the embedded ground physics floor loads");
+        let mut material = MaterialField::new();
+        for y in 0..WORLD_H {
+            for x in 0..WORLD_W {
+                material.deposit(Coord3::ground(x, y), "granite", Fixed::from_int(4));
+            }
+        }
+        if let Some(emb) = runner.embodiment_mut() {
+            emb.set_material(material);
+            emb.set_material_registry(material_registry);
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+        }
+        runner.set_discovery(DiscoveryCalib::dev_default());
+        runner.set_reward_learning(RewardLearningCalib::dev_default());
+        println!(
+            "  DISCOVERY SCENARIO ARMED (opt-in): {} ground cells seeded with fracturable granite; \
+             affordance-percept, discovery, and reward learners installed; evolve-channels seeded \
+             founder-zero. No payoff authored (breaking granite feeds no reserve); the viability world \
+             is the owner's to design.\n",
+            WORLD_CELLS,
+        );
     }
 
     let founders: BTreeSet<StableId> = runner.world().unwrap().being_ids().into_iter().collect();
