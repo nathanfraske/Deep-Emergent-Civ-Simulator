@@ -84,15 +84,32 @@ pub struct DiscoveryCalib {
     /// at the baseline exploration rate the ecology needs to keep discovering without abandoning a working
     /// technique. Surfaced with its basis, never fabricated.
     pub exploration_floor: Fixed,
+    /// RESERVED. The prediction-error threshold above which a being's surprise MODULATES its exploration
+    /// (ideation arc, piece 3, slice 3b): a predicted-versus-felt reward mismatch below this is not read as
+    /// surprise, so ordinary interoceptive noise does not lift exploration. Basis: the interoceptive noise
+    /// floor already defined for reward and harm, so a sub-resolution mismatch is not surprise (a
+    /// performance-and-resolution bound, not a realism one). Surfaced with its basis, never fabricated.
+    pub surprise_threshold: Fixed,
+    /// RESERVED. The exploration variance gain, how much a being's surprise LIFTS its effective exploration
+    /// propensity above its heritable base (ideation arc, piece 3, slice 3b): the effective enact rate is
+    /// `base * (1 + surprise_gain * surprise)`, so a surprised being enacts its proposals more and a
+    /// well-predicting one stays at its base. MULTIPLICATIVE, so a founder (zero base) never explores however
+    /// surprised (founder-zero holds). Basis: the existing EXPLORE heading-noise scale and the sensorium
+    /// just-noticeable difference, set so a unit surprise lifts exploration by a proportionate step rather
+    /// than swamping the heritable base. Surfaced with its basis, never fabricated.
+    pub surprise_gain: Fixed,
 }
 
 impl DiscoveryCalib {
     /// A labelled dev fixture for the unit tests and the pre-wire scenarios: a modest exploration floor, so
-    /// a believed-good action is preferred but an unproven one is still tried a fraction of the time. The
-    /// manifest value is reserved; this is only the fixture, never the canonical number.
+    /// a believed-good action is preferred but an unproven one is still tried a fraction of the time, and a
+    /// surprise threshold and gain that let a mispredicted action lift exploration. The manifest values are
+    /// reserved; this is only the fixture, never the canonical number.
     pub fn dev_default() -> DiscoveryCalib {
         DiscoveryCalib {
             exploration_floor: Fixed::from_ratio(1, 4),
+            surprise_threshold: Fixed::from_ratio(1, 2),
+            surprise_gain: Fixed::ONE,
         }
     }
 }
@@ -274,6 +291,7 @@ mod tests {
         // alone, never a coded preference.
         let exploit = DiscoveryCalib {
             exploration_floor: Fixed::ZERO,
+            ..DiscoveryCalib::dev_default()
         };
         for tick in 0..8 {
             assert_eq!(

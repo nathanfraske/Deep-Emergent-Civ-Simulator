@@ -2507,11 +2507,17 @@ impl Runner {
         // conflict with the read.
         let harm_learn = self.harm_learning;
         let reward_learn = self.reward_learning;
+        let discovery = self.discovery;
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
         // Per-being stress (the lower of its energy and condition margins) and its cell, for the
         // arc-scoped promotion policy: a being whose stress is high is in a survival arc.
         let mut stress: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        // Per-being SURPRISE (ideation arc, piece 3, slice 3b): the magnitude of the prediction error on the
+        // action the being enacted last tick, scored against the reward it felt this tick (the one-tick lag).
+        // Computed here where the mind is readable and applied to the walker below (a being that enacted
+        // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
+        let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -2612,6 +2618,31 @@ impl Runner {
                             },
                         });
                     }
+                    // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
+                    // prediction of its last-enacted action against the reward it felt, and remember the
+                    // prediction-error magnitude. Only when the discovery loop is armed (piece 2 supplies the
+                    // enacted action) and the being enacted something last tick. The prediction reads the SAME
+                    // primitive subject the credit above records (the eligibility trace keys the belief on the
+                    // primitive), so the surprise measures how far the reward defied what the being believed
+                    // about the action it took. Read here where the mind is in scope; applied to the walker
+                    // in the mutable pass below.
+                    if discovery.is_some() {
+                        if let Some(affordance) = w.decided_affordance {
+                            if let Some((mind, params)) = self.world.as_ref().and_then(|world| {
+                                world.mind(w.id).map(|m| (m, world.belief_params()))
+                            }) {
+                                let step = SequenceStep {
+                                    primitive: affordance.0,
+                                    target_bucket: 0,
+                                    param_bucket: 0,
+                                };
+                                let felt = if reward { Fixed::ONE } else { Fixed::ZERO };
+                                let predicted =
+                                    crate::forward_model::predicted_reward(mind, &step, params);
+                                surprise.insert(w.id, (felt - predicted).abs());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2631,6 +2662,13 @@ impl Runner {
                             target_bucket: 0,
                             param_bucket: 0,
                         }]));
+                    }
+                    // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that
+                    // enacted an action last tick carries its prediction-error magnitude; one that enacted
+                    // nothing resets to zero (surprise is about the last action). Only when discovery is
+                    // armed, so an unarmed run never touches `surprise` (zero-by-default, byte-identical).
+                    if discovery.is_some() {
+                        w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
                     }
                 }
             }
@@ -3211,7 +3249,7 @@ impl Runner {
         // after the locomotion step, folded into `state_hash`, the hypothesis the being will test (slice 2c's
         // enactment executes it). A being absent from the map proposed nothing, so its record clears to
         // `None`; an unarmed run leaves every record `None` and folds nothing (byte-identical).
-        if self.discovery.is_some() {
+        if let Some(calib) = self.discovery {
             let seed = emb.seed;
             let tick = self.clock;
             for w in emb.walkers.iter_mut() {
@@ -3231,10 +3269,29 @@ impl Runner {
                 // locomotion step, so it is not re-injected here.
                 if let Some(proposal) = proposal {
                     if w.exploration > Fixed::ZERO {
+                        // (3b) The SURPRISE-MODULATED effective propensity (ideation arc, piece 3): a being
+                        // enacts its proposals at its heritable base rate, LIFTED when its recent prediction
+                        // error (surprise) clears the reserved threshold, so it explores more where the world
+                        // defied its forward model and settles to the base as its predictions come true. The
+                        // lift is MULTIPLICATIVE on the base (`base * (1 + gain * surprise)`), so a founder
+                        // (zero base, already excluded by the guard above) never explores however surprised:
+                        // founder-zero holds, and surprise only ever AMPLIFIES an already-heritable drive
+                        // (Principle 9). The draw is the same counter-keyed ENACT draw; only its threshold
+                        // moves, so a being with zero surprise is byte-identical to the pre-3b gate.
+                        let effective = if w.surprise > calib.surprise_threshold {
+                            let lift = Fixed::ONE
+                                + calib
+                                    .surprise_gain
+                                    .checked_mul(w.surprise)
+                                    .unwrap_or(Fixed::ZERO);
+                            w.exploration.checked_mul(lift).unwrap_or(w.exploration)
+                        } else {
+                            w.exploration
+                        };
                         let fired = DrawKey::entity(w.id.0, tick, Phase::ENACT)
                             .rng(seed)
                             .unit_fixed(0)
-                            < w.exploration;
+                            < effective;
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
@@ -3577,6 +3634,13 @@ impl Runner {
                 // a positive propensity folds it.
                 if w.exploration > Fixed::ZERO {
                     h.write_fixed(w.exploration);
+                }
+                // The being's surprise (ideation arc, piece 3, slice 3b): its recent prediction-error
+                // magnitude, dynamic state folded after the propensity it modulates. Zero for a being with
+                // no discovery loop armed or nothing enacted yet, so it folds nothing and leaves an opted-out
+                // run's hash unchanged; only a being carrying a live surprise folds it.
+                if w.surprise > Fixed::ZERO {
+                    h.write_fixed(w.surprise);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -5121,6 +5185,214 @@ values = [
         assert_ne!(
             primed.2, founder.2,
             "the exploration propensity folds into state_hash, so it is canonical state; a founder folds none"
+        );
+    }
+
+    #[test]
+    fn surprise_lifts_a_beings_exploration_multiplicatively_and_never_lifts_a_founder() {
+        // Ideation arc, piece 3, slice 3b (surprise-modulated exploration): a being's recent prediction error
+        // (surprise) LIFTS its heritable exploration propensity at the enact gate, so it enacts its proposals
+        // more where the world defied its forward model, and settles to its base as its predictions come true.
+        // The lift is MULTIPLICATIVE on the heritable base, so a founder (zero propensity) never explores
+        // however surprised: founder-zero holds, and surprise only ever amplifies an already-heritable drive
+        // (Principle 9). Proven with a PRIMED surprise (a test fixture): the surprise UPDATE rides the reward
+        // learner (piece 1), so arming discovery WITHOUT the reward learner leaves a primed surprise untouched
+        // across ticks, isolating the enact-gate modulation the way the 2c-2 test isolates the gate itself.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, GRASP,
+            TEMPERATURE,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+        const TICKS: u64 = 48;
+
+        // Count how many of `TICKS` ticks the being enacts its proposed grasp (the gate fires and records the
+        // decided affordance), with its exploration propensity and its surprise PRIMED. Discovery is armed but
+        // the reward learner is NOT, so the primed surprise is never overwritten and the run isolates the
+        // enact-gate modulation. A strong surprise gain is used so the modulation is unmistakable.
+        let enactments = |exploration: Fixed, surprise: Fixed| -> usize {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            walker.surprise = surprise;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            material.deposit(tile, "granite", Fixed::from_int(4));
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            // A strong surprise gain so a primed surprise lifts a moderate base propensity to certainty; the
+            // reward learner is left UNARMED so the primed surprise persists across ticks.
+            runner.set_discovery(DiscoveryCalib {
+                surprise_gain: Fixed::from_int(4),
+                ..DiscoveryCalib::dev_default()
+            });
+            let mut fired = 0;
+            for _ in 0..TICKS {
+                runner.step();
+                let enacted = runner
+                    .embodiment()
+                    .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                    .map(|w| w.decided_affordance == Some(GRASP))
+                    .unwrap_or(false);
+                if enacted {
+                    fired += 1;
+                }
+            }
+            fired
+        };
+
+        let base = Fixed::from_ratio(1, 4);
+        let calm = enactments(base, Fixed::ZERO);
+        let surprised = enactments(base, Fixed::ONE);
+        let founder = enactments(Fixed::ZERO, Fixed::ONE);
+
+        // The being that is SURPRISED enacts its proposals strictly more than the identical being that is not:
+        // its surprise clears the threshold and lifts its effective enact rate above its base (base * (1 +
+        // gain * surprise)), so it tries the untried harder where the world defied its prediction.
+        assert!(
+            surprised > calm,
+            "surprise lifts the being's exploration above its base (surprised {surprised} enactments vs \
+             calm {calm} over {TICKS} ticks)"
+        );
+        // The calm being still enacts at its base rate (the modulation is a lift, not a gate): a positive
+        // base with sub-threshold surprise enacts on some ticks, so the surprised gain is a lift off a live
+        // base, not the difference between acting and not.
+        assert!(
+            calm > 0,
+            "the calm being still enacts at its heritable base rate ({calm} enactments)"
+        );
+        // FOUNDER-ZERO under surprise: a being with zero heritable propensity never enacts however surprised,
+        // because the lift is MULTIPLICATIVE (zero base times any lift is zero). Surprise amplifies an evolved
+        // drive; it never authors one into a founder.
+        assert_eq!(
+            founder, 0,
+            "a founder with zero propensity never explores however surprised (multiplicative, founder-zero)"
         );
     }
 

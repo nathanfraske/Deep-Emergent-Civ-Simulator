@@ -438,6 +438,16 @@ pub struct Walker {
     /// the enactment gate with a PRIMED value, exactly as the appetitive weight was proved primed. Folds
     /// into `state_hash` when positive.
     pub exploration: Fixed,
+    /// The being's recent PREDICTION-ERROR magnitude, its surprise (ideation arc, piece 3, slice 3b): how far
+    /// the outcome of its last enacted action defied its forward-model prediction, in `[0, 1]`. It MODULATES
+    /// the exploration gate multiplicatively (a surprised being enacts its proposals more, a well-predicting
+    /// one less), so exploration rises where the world is least understood and falls as predictions come
+    /// true. Dynamic state, not heritable, updated each tick from `forward_model::prediction_error` on the
+    /// last-enacted action at the one-tick interoceptive lag and decayed otherwise; ZERO by default (no
+    /// discovery loop, or nothing enacted yet), so it folds nothing and an opted-out run is byte-identical.
+    /// Because the modulation is MULTIPLICATIVE on the heritable propensity, a founder (zero propensity) never
+    /// explores however surprised, so founder-zero holds. Folds into `state_hash` when positive.
+    pub surprise: Fixed,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -472,6 +482,7 @@ impl Walker {
             decided_affordance: None,
             proposed_action: None,
             exploration: Fixed::ZERO,
+            surprise: Fixed::ZERO,
             alive: true,
         }
     }
