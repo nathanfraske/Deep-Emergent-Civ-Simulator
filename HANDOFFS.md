@@ -7,6 +7,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-06 (later still): PILLAR 1 COMPLETE (1c signed off); pillar-2 trace C1 (material percept) + C2 (SENSE + LEARN) LANDED and reported; C3 (attraction gradient) is next, gated on the C2 sign-off
+
+Continued the lifetime/demography keystone on PR #97, slice by slice, each gate-gated on byte-neutrality and the emergence line.
+
+PILLAR 1 CLOSED. Slice 1c (`28d9e94`, SIGNED OFF): the overlapping-generations demonstration. `overlapping_generations_stagger_the_dawn_and_sustain_a_mixed_age_population` (reproduction.rs) runs a dozen cadences from a staggered founder dawn with per-tick birth AND mortality armed, asserting the population sustains, TRUE turnover (new births AND founder deaths, not the initial stagger frozen), offspring credited to the census, the living spanning multiple age classes crossing a full cadence, and bit-for-bit replay. Test-only, byte-neutral by construction. So pillar 1 (1a mortality, 1b birth, 1c demo) is done: individual lifespan is decoupled from the cadence, a knower can outlive to teach.
+
+PILLAR 2 TRACE, seam B (the percept mismatch) ruled OPTION 1 by the gate and WIDENED beyond the hull (it also unblocks the nutrition `feature_subject` path and material granularity, from the gate's granite-beside-oilseed experiment). Built as C1 + C2:
+- C1 (`16be89f`, SIGNED OFF): a new module `material_percept.rs`, the `MaterialField` sibling of the biology-class feature percept: `MaterialPerceptRegistry::perceive(cell)` reads each declared substance's opaque raw volume, EMPTY by default (hash-neutral), unit-proven (granite/oilseed/spent_hull distinguishable).
+- C2 (`f190632`, reported, awaiting the gate's C2 gate): the SENSE half (`ControllerLayout` grows a material-feature block after the appetitive block; `Embodiment::set_material_percepts`; `step_with_field_dirs` threads the material registry+field, extends the snapshot gate, feeds the percept into the controller input) and the LEARN half (`couple_conversation` routes `reward_observations` onto the run path, feature-keyed on the material composition with `REWARD_ATTR`). Both sub-seams RULED: sub-seam 1 (disjoint channel base) taken now via a `channel_base` param on `reward_observations` + `MATERIAL_FEATURE_CHANNEL_BASE = 1<<15`; sub-seam 2 (the reward-attraction gradient mirrors `avoidance_gradient`, so the behaviour is its own slice C3). Run-path proof `a_being_re_earns_a_material_trace_reward_belief_from_its_own_felt_reward` (a primed being re-earns the belief from felt reward; founder-zero forms none) plus the layout + channel-base tests, all opt-in and hash-neutral (crucible `254bc17c`, default `run_world` `a465919e` unchanged, 672 lib tests green).
+
+STOPPED: C2 pushed and reported; holding for the gate's C2 sign-off before wiring C3 (the gate said "gate at C2 and again at C3"). NEXT: C3, the reward-ATTRACTION gradient, the positive mirror of `avoidance_gradient` (feature-keyed on material composition, a REWARDS belief produces an inverse-distance attraction vector toward the believed-rewarding neighbour cell, evolved-weighted, founder-zero, sign flipped from harm repulsion); ground it against `avoidance_gradient` for an exact mirror, re-flag if it cannot be. Then trace slice D: arm the matter cycle so the hull weathers + the combined free-run demonstration (a technique persists past its maker into later generations that re-earn it), which closes the arc. R-OVERLAP-NE stays flagged (census untouched). EMERGENCE LINE HELD throughout: the trace is physical and re-earned, the percept exposes only the opaque substance signature with meaning earned by reward correlation, heritable drives stay founder-zero.
+
+---
+
 ## 2026-07-06 (later): LIFETIME / DEMOGRAPHY keystone building on PR #97; the gate corrected BOTH seams and signed off four slices; pillar-1 staggering (1a mortality, 1b birth) and pillar-2 trace (A substance, B deposit) all LANDED, hash-neutral
 
 The gate's rulings reshaped both seams and the build proceeded slice by slice, each gated on byte-neutrality and the emergence line.
