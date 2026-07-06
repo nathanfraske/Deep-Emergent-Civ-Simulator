@@ -95,9 +95,9 @@ use crate::homeostasis::{
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, avoidance_gradient, feature_observations, sequence_subject,
-    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL,
-    REWARDS, REWARD_ATTR,
+    appetitive_salience, avoidance_gradient, feature_observations, reward_observations,
+    sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS,
+    HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -105,6 +105,7 @@ use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
     MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
 };
+use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -161,6 +162,11 @@ const LEARN_ORDINAL_BASE: u32 = 1_000_000;
 /// sequence in a being's trace, disjoint from and above [`LEARN_ORDINAL_BASE`] so a reward observation and a
 /// harm observation for the same being in the same tick never collide on the mind-then-ordinal sort.
 const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
+/// The base tick-input ordinal a MATERIAL-feature reward credit carries (the lifetime/demography keystone,
+/// pillar 2, trace slice C), one per present material feature the being senses underfoot, disjoint from and
+/// above [`REWARD_LEARN_ORDINAL_BASE`] so a material-feature reward observation never collides with a
+/// sequence reward or a harm observation for the same being in the same tick on the mind-then-ordinal sort.
+const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -896,6 +902,13 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// The MATERIAL-percept registry the beings sense in the cell's matter (the lifetime/demography keystone,
+    /// pillar 2, physical-trace persistence, trace slice C). EMPTY by default, so the controller layout
+    /// carries no material-feature block and every run hash is unchanged; the world-build installs a
+    /// non-empty registry ([`Embodiment::set_material_percepts`], which rebuilds the layout to feed the
+    /// material block) to opt a world into sensing the substances underfoot (the spent-hull trace and its
+    /// siblings). The membership is the material-floor's data, so a new sensible substance is a data edit.
+    material_percepts: MaterialPerceptRegistry,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1020,6 +1033,7 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            material_percepts: MaterialPerceptRegistry::empty(),
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1040,6 +1054,19 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the MATERIAL-percept registry and REBUILD the controller layout to feed its material-feature
+    /// block (the lifetime/demography keystone, pillar 2, trace slice C). Set BEFORE the embodiment's beings
+    /// are built, exactly like [`set_percepts`]: the beings' controllers are expressed against
+    /// [`Embodiment::layout`], so a material percept added after they exist would leave their weight vectors
+    /// the wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
+    /// unchanged (opt-in). The new material-feature weights a founder then expresses are zero (unseeded
+    /// channels), so sensing the matter underfoot moves no behaviour until selection lifts a weight, the
+    /// emergent pattern the feature block established.
+    pub fn set_material_percepts(&mut self, material_percepts: MaterialPerceptRegistry) {
+        self.material_percepts = material_percepts;
+        self.rebuild_layout();
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -1086,11 +1113,12 @@ impl Embodiment {
     /// both feeding an input block the founder weights ignore until selection lifts them). Called by
     /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_and_appetitive(
+        self.layout = ControllerLayout::with_percepts_appetitive_and_material(
             &self.homeo,
             &self.afford,
             &self.percepts,
             self.appetitive,
+            &self.material_percepts,
             self.layout.hidden(),
         );
     }
@@ -2793,6 +2821,41 @@ impl Runner {
                             },
                         });
                     }
+                    // MATERIAL-feature reward credit (the lifetime/demography keystone, pillar 2, physical-trace
+                    // persistence, trace slice C, the LEARN half): the being re-earns "eating where this material
+                    // lies pays off" from its OWN felt reward, feature-keyed on the composition of the matter it
+                    // stands on exactly as the harm learner keys felt harm to a biology ground-feature. For each
+                    // present material feature it contributes one piece of evidence toward REWARDS (a reward tick)
+                    // or NEUTRAL (otherwise) on the disjoint REWARD_ATTR, keyed on a material feature subject
+                    // offset into its own channel band (MATERIAL_FEATURE_CHANNEL_BASE) so it never aliases a
+                    // biology feature. Nothing is handed: the sign is the reserve rising, the subject a raw
+                    // quantized material percept, so "this residue marks a place that pays off" emerges from the
+                    // being's own correlation (Principles 8, 9). Inert where the world declares no material
+                    // percepts (an empty vector yields no observation), so an opted-out run is byte-identical.
+                    let material = emb.material_percepts.perceive(emb.material.cell(c));
+                    for (k, obs) in reward_observations(
+                        reward,
+                        &material,
+                        plasticity,
+                        &reward_learn,
+                        MATERIAL_FEATURE_CHANNEL_BASE,
+                    )
+                    .into_iter()
+                    .enumerate()
+                    {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: obs.subject,
+                                attr: REWARD_ATTR,
+                                hyps: vec![REWARDS, NEUTRAL],
+                                toward: obs.toward,
+                                weight: obs.weight,
+                                from: w.id,
+                            },
+                        });
+                    }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
                     // prediction of its last-enacted action against the reward it felt, and remember the
                     // prediction-error magnitude. Only when the discovery loop is armed (piece 2 supplies the
@@ -3434,6 +3497,8 @@ impl Runner {
             &field_signed,
             &drains,
             &emb.percepts,
+            &emb.material_percepts,
+            &emb.material,
             &load_factors,
             &appetitive,
             &mut deferred_actions,
@@ -5641,6 +5706,198 @@ values = [
             run(Fixed::ZERO),
             Some(REWARDS),
             "a founder-zero being never enacts, so it never eats and forms no reward belief (founder-zero)"
+        );
+    }
+
+    #[test]
+    fn a_being_re_earns_a_material_trace_reward_belief_from_its_own_felt_reward() {
+        // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice C (the LEARN
+        // half, the run-path proof): a being re-earns "eating where this residue lies pays off" by correlating
+        // the OPAQUE material signature underfoot (a spent_hull, the durable trace) with its OWN felt reward,
+        // through the same associative loop the harm learner runs over a biology ground-feature, keyed on a
+        // material feature subject on the disjoint REWARD_ATTR. Nothing is handed: the sign is the being's
+        // reserve rising as it eats, the subject a raw quantized material percept, so the belief tracks the
+        // felt reward, not the mere presence of the hull. The falsifier is founder-zero: an otherwise
+        // identical being whose exploration propensity is off never enacts, so it never eats, no reserve
+        // rises, and no material reward belief forms. This mirrors the viability loop above, adding the
+        // material percept and a persistent inedible hull marker beside the eaten oilseed.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief the loop should re-earn: standing where a spent_hull of this quantized amount lies pays
+        // off. The material channel is offset into its disjoint band so it never aliases a biology feature.
+        let hull_amount = Fixed::ONE;
+        let material_subject = feature_subject(
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            feature_bucket(
+                hull_amount,
+                RewardLearningCalib::dev_default().feature_granularity,
+            ),
+        );
+
+        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            // Arm the material percept BEFORE the controller is expressed, so the grown layout carries the
+            // material-feature block and the being can sense the hull (the SENSE half of slice C).
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            let mut committed = None;
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The eaten seed (the reward source), plus the durable INEDIBLE hull marker beside it: the
+                    // hull backs no reserve, so geophage never consumes it and it persists in the cell for the
+                    // being to perceive while it eats (the trace's role, isolated here from the slice-B deposit).
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "spent_hull", hull_amount);
+                    emb.set_material(material);
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(material_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Primed: the being enacts geophage, eats the oilseed, feels its reserve rise, and re-earns the belief
+        // that the hull-marked place pays off, feature-keyed on the opaque material signature, through the
+        // runner, with no injection. The trace's meaning is earned from felt reward, never handed.
+        assert_eq!(
+            run(Fixed::ONE),
+            Some(REWARDS),
+            "a primed being re-earns the material-trace reward belief from its own felt reward"
+        );
+        // Founder-zero (the emergence falsifier): an off-propensity being never enacts, never eats, feels no
+        // reward, and forms no material reward belief however long the hull lies underfoot.
+        assert_ne!(
+            run(Fixed::ZERO),
+            Some(REWARDS),
+            "a founder-zero being never enacts, so it never eats and re-earns no material reward belief"
         );
     }
 

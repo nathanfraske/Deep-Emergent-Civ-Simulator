@@ -86,6 +86,16 @@ const FEATURE_CHANNEL_SHIFT: u32 = 32;
 /// The mask for the 32-bit bucket field.
 const FEATURE_BUCKET_MASK: u64 = 0xFFFF_FFFF;
 
+/// The channel base the MATERIAL-feature reward learner offsets its channels by (the lifetime/demography
+/// keystone, pillar 2, trace slice C), so a material-feature belief subject never aliases a biology-feature
+/// one even under the same belief attribute. Biology feature channels run from zero (harm keys them under
+/// `HARM_ATTR`); material feature channels run from this base (the trace reward keys them under
+/// `REWARD_ATTR`). The two are disjoint by attribute today, so this is a defensive future-proofing (the gate
+/// asked for it): a later slice that keyed reward on biology features too would otherwise collide with the
+/// material reward channels on the same subject. The high base leaves ample room below it for biology
+/// channels (a handful) and above it for material ones (up to the `u16` ceiling).
+pub const MATERIAL_FEATURE_CHANNEL_BASE: u16 = 1 << 15;
+
 /// Mint the belief subject for a perceived feature: the `(channel, bucket)` pair packed into the
 /// reserved feature-subject band. Two cells whose feature amount lands in the same bucket mint the SAME
 /// subject, so a belief learned on one ground applies to another of the same perceived kind (the
@@ -448,14 +458,18 @@ pub fn feature_observations(
 /// (whether any reserve ROSE beyond the noise floor, [`crate::homeostasis::is_reward_tick`]), the feature is
 /// the same raw percept, and the produced [`FeatureObservation`]s are fed into the `(subject, REWARD_ATTR)`
 /// frame (disjoint from the harm frame on the same subject), so the reward belief emerges from correlation
-/// with nothing read but the raw feature and the felt sign (Principles 8, 9). Slice 1b will re-key the
-/// subject from the standing-on feature to the executed primitive SEQUENCE; this single-tick form is the
-/// mirror the harm learner already proved.
+/// with nothing read but the raw feature and the felt sign (Principles 8, 9). The `channel_base` offsets the
+/// feature channel into a disjoint band ([`MATERIAL_FEATURE_CHANNEL_BASE`] for the physical-trace material
+/// percept, the lifetime/demography keystone pillar 2), so a material-feature reward subject never aliases a
+/// biology-feature one; pass zero to key channels from the base. The run path uses this to re-earn "eating
+/// where this residue lies pays off" from the material composition underfoot, feature-keyed exactly as the
+/// harm learner keys felt harm to a ground feature.
 pub fn reward_observations(
     reward: bool,
     features: &[Fixed],
     plasticity: Fixed,
     calib: &RewardLearningCalib,
+    channel_base: u16,
 ) -> Vec<FeatureObservation> {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
@@ -467,7 +481,7 @@ pub fn reward_observations(
         .map(|(channel, &amount)| {
             let bucket = feature_bucket(amount, calib.feature_granularity);
             FeatureObservation {
-                subject: feature_subject(channel as u16, bucket),
+                subject: feature_subject(channel_base + channel as u16, bucket),
                 toward,
                 weight,
             }
@@ -675,7 +689,7 @@ mod tests {
         // tick points it toward REWARDS and a non-reward tick toward NEUTRAL, on the same subject key.
         let calib = RewardLearningCalib::dev_default();
         let features = vec![Fixed::ZERO, Fixed::from_int(2)];
-        let reward = reward_observations(true, &features, Fixed::ONE, &calib);
+        let reward = reward_observations(true, &features, Fixed::ONE, &calib, 0);
         assert_eq!(
             reward.len(),
             1,
@@ -697,11 +711,41 @@ mod tests {
             "the observation carries positive evidence"
         );
         // A non-reward tick on the same cell points the same subject toward NEUTRAL.
-        let neutral = reward_observations(false, &features, Fixed::ONE, &calib);
+        let neutral = reward_observations(false, &features, Fixed::ONE, &calib, 0);
         assert_eq!(neutral[0].toward, NEUTRAL);
         assert_eq!(neutral[0].subject, reward[0].subject);
         // A cell with no present feature yields nothing to correlate.
-        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib, 0).is_empty());
+    }
+
+    #[test]
+    fn a_channel_base_offsets_the_material_reward_subject_disjoint_from_a_biology_feature() {
+        // The lifetime/demography keystone, pillar 2, trace slice C, sub-seam 1 (the gate's disjoint-channel
+        // requirement): a material-feature reward observation offsets its channel by the channel base, so its
+        // subject can never alias a biology-feature subject on the same channel index even under the same
+        // belief attribute. The same present feature at base zero and at the material base mint DIFFERENT
+        // subjects; the material one equals the feature subject at the offset channel.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let at_zero = reward_observations(true, &features, Fixed::ONE, &calib, 0);
+        let at_material = reward_observations(
+            true,
+            &features,
+            Fixed::ONE,
+            &calib,
+            MATERIAL_FEATURE_CHANNEL_BASE,
+        );
+        assert_ne!(
+            at_zero[0].subject, at_material[0].subject,
+            "the material reward subject is disjoint from the base-zero (biology) subject"
+        );
+        let bucket = feature_bucket(Fixed::from_int(2), calib.feature_granularity);
+        assert_eq!(at_zero[0].subject, feature_subject(0, bucket));
+        assert_eq!(
+            at_material[0].subject,
+            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, bucket),
+            "the material channel is offset by the base"
+        );
     }
 
     #[test]
@@ -718,7 +762,7 @@ mod tests {
         let mut mind = Mind::new(StableId(1), Fixed::ONE);
         assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), None);
         for _ in 0..3 {
-            for obs in reward_observations(true, &features, Fixed::ONE, &calib) {
+            for obs in reward_observations(true, &features, Fixed::ONE, &calib, 0) {
                 mind.consider(
                     obs.subject,
                     REWARD_ATTR,
@@ -752,7 +796,7 @@ mod tests {
         );
         let mut mind = Mind::new(StableId(3), Fixed::ONE);
         for _ in 0..3 {
-            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib) {
+            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib, 0) {
                 mind.consider(
                     obs.subject,
                     REWARD_ATTR,

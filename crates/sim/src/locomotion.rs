@@ -76,7 +76,8 @@ use crate::homeostasis::{
     MOVE, RELEASE, SHELTER,
 };
 use crate::learn::{EligibilityTrace, SequenceStep};
-use crate::material::{SubstanceMix, WieldedTool};
+use crate::material::{MaterialField, SubstanceMix, WieldedTool};
+use crate::material_percept::MaterialPerceptRegistry;
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
 
@@ -745,6 +746,10 @@ pub fn step<T: Terrain>(
         // The field-less scoring/fixture path senses no features (the evolve proxy and movement tests
         // run without the percept substrate), so the controller feature block, if any, reads zero.
         &PerceptRegistry::empty(),
+        // The field-less fixture path senses no material either (it carries no material field), so the
+        // material-feature block, if any, reads zero.
+        &MaterialPerceptRegistry::empty(),
+        &MaterialField::new(),
         // No carried-load penalty on the field-less fixture path (nothing picks matter up here).
         &BTreeMap::new(),
         // No appetitive belief percept on the field-less fixture path (the layout carries no appetitive
@@ -794,6 +799,8 @@ pub fn step_with_field_dirs<T: Terrain>(
     field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
     percepts: &PerceptRegistry,
+    material_percepts: &MaterialPerceptRegistry,
+    material_field: &MaterialField,
     load_factors: &BTreeMap<StableId, Fixed>,
     appetitive: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
@@ -814,7 +821,8 @@ pub fn step_with_field_dirs<T: Terrain>(
         // the reward learner is armed. Opt-in on both sides: a run that declares no percepts and arms no
         // reward learner carries an empty trace, takes no snapshot, and folds an empty memory into
         // state_hash, so it stays bit-identical. A pure canonical-order snapshot drawing no randomness.
-        if !percepts.is_empty() || !w.eligibility_trace.is_empty() {
+        if !percepts.is_empty() || !material_percepts.is_empty() || !w.eligibility_trace.is_empty()
+        {
             w.reserve_memory.snapshot(homeo, &w.homeostasis);
         }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
@@ -872,13 +880,20 @@ pub fn step_with_field_dirs<T: Terrain>(
         // before the block existed. Only an evolved appetitive weight turns the signal into repetition.
         let empty_appetitive: Vec<Fixed> = Vec::new();
         let appetite = appetitive.get(&w.id).unwrap_or(&empty_appetitive);
-        let input = layout.build_input_with_features_and_appetitive(
+        // The raw MATERIAL-feature vector for the cell the being stands on (the lifetime/demography keystone,
+        // pillar 2, trace slice C): the amount of each declared substance in the cell's matter, in registry
+        // order. Empty when the world declares no material percepts, so the material block is absent and the
+        // input is byte-identical to before the material substrate existed. A pure physical read of the matter
+        // here, the opaque signature (no label), the mirror of the biology feature read above (Principles 8, 9).
+        let material = material_percepts.perceive(material_field.cell(here));
+        let input = layout.build_input_with_features_appetitive_and_material(
             &w.homeostasis,
             &here_axes,
             &dirs,
             signed,
             &features,
             appetite,
+            &material,
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
@@ -1674,6 +1689,8 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &PerceptRegistry::empty(),
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &load_factors,
                     &BTreeMap::new(), // no appetitive block on the fixture path
                     &mut BTreeMap::new(),
@@ -1751,6 +1768,8 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
@@ -1838,6 +1857,8 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
@@ -2080,6 +2101,8 @@ mod tests {
             &empty_signed,
             &empty_drains,
             &crate::percept::PerceptRegistry::empty(),
+            &crate::material_percept::MaterialPerceptRegistry::empty(),
+            &crate::material::MaterialField::new(),
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &mut std::collections::BTreeMap::new(),
@@ -2200,6 +2223,8 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
@@ -2316,6 +2341,8 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &percepts,
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
@@ -2411,6 +2438,8 @@ mod tests {
                     &empty_signed,
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
+                    &crate::material_percept::MaterialPerceptRegistry::empty(),
+                    &crate::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
