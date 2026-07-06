@@ -939,6 +939,20 @@ pub struct Embodiment {
     /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
     /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
     craft: Option<CraftParams>,
+    /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
+    /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
+    /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
+    /// [`Embodiment::geophage`] eats a substance carried in this map, it deposits that fraction of the eaten
+    /// volume as the byproduct substance underfoot, the durable located record that the technique happened
+    /// here (the spent hull a cracked oilseed leaves). EMPTY by default, so an embodiment that declares no
+    /// byproducts deposits nothing, the material field stays empty, and every existing scenario is
+    /// byte-identical (the opt-in empty-default). Populated by the world-build ([`Embodiment::set_byproducts`]).
+    /// The deposit reads only the eaten substance id and the map, never a belief, race, or kind (Principle 9):
+    /// the bite marks the ground whether or not the eater understands why, so the trace is a physical fact
+    /// a later being re-earns a belief from (trace slice C), never a handed conclusion. The fraction is a real
+    /// physical ratio (the shell-to-kernel mass a cracked oilseed leaves, converted through the two
+    /// substances' densities), surfaced reserved-with-basis rather than fabricated.
+    byproducts: BTreeMap<String, (String, Fixed)>,
     /// The per-column earthwork delta a being's digging has made to the terrain (material-substrate arc,
     /// cascade item 5, modifiable terrain). EMPTY by default, so a scenario where nothing digs folds no
     /// bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Digging lowers a column
@@ -1013,6 +1027,7 @@ impl Embodiment {
             material_registry: None,
             extraction: None,
             craft: None,
+            byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
             soil: SoilNutrientField::new(),
@@ -1164,6 +1179,18 @@ impl Embodiment {
     /// unchanged.
     pub fn set_craft_params(&mut self, params: CraftParams) {
         self.craft = Some(params);
+    }
+
+    /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
+    /// substrate, the lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance
+    /// id to the (byproduct substance id, deposit fraction) it leaves behind. Opt-in, like
+    /// [`set_extraction_params`] and [`set_craft_params`]: an empty map (the default) deposits nothing, so the
+    /// material field stays empty and every existing scenario is byte-identical. The membership is world data
+    /// (Principle 11); a world opts a technique into leaving a physical trace by mapping its eaten substance to
+    /// a residue. The deposit fraction is a real physical mass ratio surfaced reserved-with-basis, not a code
+    /// default.
+    pub fn set_byproducts(&mut self, byproducts: BTreeMap<String, (String, Fixed)>) {
+        self.byproducts = byproducts;
     }
 
     /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
@@ -1382,6 +1409,11 @@ impl Embodiment {
         // The substances the being eats this bite, for the toxin harm below (a set so a substance that feeds
         // two reserves is not counted twice against its own toxicity).
         let mut eaten: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        // The eaten VOLUME per substance, accumulated across the reserve loop (a substance that feeds two
+        // reserves is eaten twice, and the byproduct trace deposits against the total), for the byproduct
+        // deposit below (trace slice B). Empty when nothing is eaten, so an unarmed embodiment deposits
+        // nothing.
+        let mut eaten_volume: BTreeMap<String, Fixed> = BTreeMap::new();
         for i in 0..self.homeo.axes.len() {
             let Some(substance) = self.homeo.axes[i].backing_component.clone() else {
                 continue; // an axis with no backing substance is not fed by matter
@@ -1438,6 +1470,8 @@ impl Embodiment {
             }
             gained += gain;
             if taken > Fixed::ZERO {
+                let acc = eaten_volume.entry(substance.clone()).or_insert(Fixed::ZERO);
+                *acc = acc.saturating_add(taken);
                 eaten.insert(substance);
             }
         }
@@ -1485,6 +1519,26 @@ impl Embodiment {
         if harm > Fixed::ZERO {
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.adjust(CONDITION, Fixed::ZERO - harm);
+            }
+        }
+        // The BYPRODUCT DEPOSIT (the physical-trace cultural-persistence substrate, pillar 2, trace slice B):
+        // the enact leaves a durable located residue of what it ate. For each eaten substance the byproduct
+        // map keys, deposit that fraction of the eaten volume as the mapped byproduct substance into the cell
+        // underfoot, so a technique marks the ground it was practised on and a being that comes later can
+        // perceive the mark. Walks the accumulation in canonical substance-id order (a `BTreeMap`) so the
+        // deposit is reproducible and thread-invariant. An empty map deposits nothing, the opt-in default that
+        // keeps every existing scenario byte-identical (the material field stays empty and folds no bytes).
+        // Reads only the eaten substance id and the data map, never a belief, race, or kind (Principle 9): the
+        // mark is a physical fact whether or not the eater understands it, and re-earning "eating here pays
+        // off" from perceiving it is the later being's own reward learning (trace slice C), never authored
+        // here.
+        if !self.byproducts.is_empty() {
+            for (substance, volume) in &eaten_volume {
+                if let Some((byproduct, fraction)) = self.byproducts.get(substance) {
+                    let byproduct = byproduct.clone();
+                    let deposit = volume.checked_mul(*fraction).unwrap_or(*volume);
+                    self.material.deposit(coord, &byproduct, deposit);
+                }
             }
         }
         gained

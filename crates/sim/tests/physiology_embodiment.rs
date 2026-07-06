@@ -1496,6 +1496,135 @@ fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
 }
 
 #[test]
+fn the_geophage_enact_deposits_a_spent_hull_trace_and_is_inert_unarmed() {
+    // The physical-trace cultural-persistence substrate (the lifetime/demography keystone, pillar 2, trace
+    // slice B, the WIRE slice): an enacted extract-and-eat bite leaves a durable located residue of what it
+    // ate. Armed with a byproduct map (oilseed -> spent_hull), the geophage deposits a fraction of the eaten
+    // oilseed volume as spent_hull into the cell underfoot: the world's own physical record that the technique
+    // happened here, the mark a later being re-earns a belief from (trace slice C), never a handed conclusion.
+    // It is opt-in: with NO byproduct map the identical bite deposits nothing, so the material field stays empty
+    // and the run is byte-identical. The deposit reads only the eaten substance id and the data map, never a
+    // belief, race, or kind (Principle 9): the mark is a physical fact whether or not the eater understands it.
+    use civsim_sim::material::{MaterialField, SubstanceMix};
+
+    // The same extract-then-eat fixture the reserve-feeding test uses: an ENERGY reserve backed by oilseed, the
+    // being carrying the extracted oilseed, the cell holding none.
+    let cell = Coord3::ground(1, 1);
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "seed-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("oilseed", Fixed::ONE)]),
+    });
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "energy".to_string(),
+                backing_component: Some("oilseed".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+
+    // A factory so the armed and unarmed runs start from bit-identical state (only the byproduct map differs).
+    let build = || {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0115EED,
+        );
+        let blank = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            blank,
+        );
+        walker
+            .homeostasis
+            .set_level(ENERGY, Fixed::from_ratio(1, 2));
+        let mut carried = SubstanceMix::new();
+        carried.add("oilseed", Fixed::from_int(1000));
+        walker.carried = carried;
+        emb.add(walker, band(1));
+        emb.set_material(MaterialField::new());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+        );
+        emb
+    };
+
+    // UNARMED: no byproduct map. The bite feeds the reserve exactly as before and deposits NOTHING, so the
+    // material field stays empty (the opt-in default that keeps every existing scenario byte-identical).
+    let mut bare = build();
+    let bare_gain = bare.geophage(StableId(1));
+    assert!(bare_gain > Fixed::ZERO, "the unarmed bite still eats");
+    assert!(
+        bare.material().is_empty(),
+        "an unarmed embodiment deposits no trace: the material field stays empty and folds no bytes"
+    );
+
+    // ARMED: map oilseed -> spent_hull. The deposit fraction is a dev value here; the reserved basis is the
+    // shell-to-kernel mass ratio of an oil nut converted through the two substances' densities (surfaced
+    // reserved-with-basis, not fabricated), and it lives as world data, never a code constant.
+    let fraction = Fixed::from_ratio(2, 5);
+    let mut armed = build();
+    let mut byproducts = std::collections::BTreeMap::new();
+    byproducts.insert("oilseed".to_string(), ("spent_hull".to_string(), fraction));
+    armed.set_byproducts(byproducts);
+
+    let coord = armed.walkers()[0].coord();
+    let held = armed.walkers()[0].carried.volume("oilseed");
+    let armed_gain = armed.geophage(StableId(1));
+
+    // The trace is a byproduct, not a tax on the bite: the being gains exactly what the unarmed run gained.
+    assert_eq!(
+        armed_gain, bare_gain,
+        "arming the byproduct deposits a trace without changing what the being gains from the bite"
+    );
+
+    // What left the inventory is what was eaten (the cell held no oilseed), and the deposit is that fraction of
+    // it as spent_hull underfoot: the technique marked the ground it was practised on.
+    let eaten = held - armed.walkers()[0].carried.volume("oilseed");
+    assert!(
+        eaten > Fixed::ZERO,
+        "the bite ate oilseed to leave a trace of"
+    );
+    let deposited = armed.material().volume(coord, "spent_hull");
+    assert_eq!(
+        deposited,
+        eaten
+            .checked_mul(fraction)
+            .expect("the fraction is bounded"),
+        "the enact deposits the byproduct fraction of the eaten volume as spent_hull underfoot"
+    );
+    assert!(
+        deposited > Fixed::ZERO && deposited < eaten,
+        "the trace is present and is a residue (a fraction of the eaten mass, not the whole of it), so a being \
+         that comes later can perceive it (trace slice C)"
+    );
+}
+
+#[test]
 fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
     // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
     // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A
