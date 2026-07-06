@@ -413,6 +413,18 @@ impl GeneSet {
         }
         total
     }
+
+    /// Express a UNIT channel clamped to the `[0, 1]` propensity range (the ideation activation's
+    /// evolve-channels, [`Channel::Exploration`] and [`Channel::Deliberation`]): the genome's expressed
+    /// value for the channel, floored at zero and capped at one, the value a heritable propensity in `[0, 1]`
+    /// reads. A gene set with no gene feeding the channel expresses zero (the founder-zero default of
+    /// [`GeneSet::express`]), so a founder (unseeded, or a race that never carried the channel) reads zero
+    /// and only a drifted mutant reads a positive clamped propensity. Inert where the evolve-channels are not
+    /// seeded, so the birth path can call it unconditionally.
+    pub fn express_unit(&self, genome: &Genome, channel: Channel) -> Fixed {
+        self.express(genome, channel, Fixed::ZERO)
+            .clamp(Fixed::ZERO, Fixed::ONE)
+    }
 }
 
 /// Append a full founding controller gene block to a gene set and its parallel pool spine (base-level

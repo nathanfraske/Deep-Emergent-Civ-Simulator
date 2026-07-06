@@ -33,10 +33,10 @@ use civsim_sim::scenario::Scenario;
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, append_morphogen_block, build_dawn_runner, express_program, grow,
-    taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs, Channel,
-    CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
+    append_controller_block, append_morphogen_block, append_scalar_channel, build_dawn_runner,
+    express_program, grow, taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec,
+    BreedingSystem, BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs,
+    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
     EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef, GeneEffect,
     GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, MorphogenParamId,
     MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
@@ -819,6 +819,12 @@ fn moving_race() -> Race {
         layout.weight_count(),
         &seeds,
     );
+    // The ideation activation's evolve-channels: one unseeded (founder-zero) locus each for exploration and
+    // deliberation, so an embodied founder carries them at zero and the crucible exercises the birth-path
+    // expression. Behaviourally inert (founders express zero, the propensities are read only by the unarmed
+    // discovery gates), but the genome grows two loci, so the crucible hash legitimately re-baselines.
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
     race.genes = GeneSet { genes };
     race.pool = GenePool::new(SchemeId(0), 20, freqs)
         .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
@@ -956,6 +962,22 @@ fn the_dawn_runner_embodies_each_founder_as_a_mind_and_a_body() {
         assert!(
             runner.body_temp(id).is_some(),
             "founder {id:?} is at once a mind and a located body"
+        );
+    }
+    // The ideation activation's evolve-channels are seeded on the founder pool (founder-zero): every founder
+    // EXPRESSES ZERO exploration and deliberation, so the re-baseline (the genome grew two unseeded loci) is
+    // BEHAVIOURALLY INERT, the discovery gates never fire on a founder, and the run outcome is unchanged with
+    // only the genome hash moved. A drifted descendant, not a founder, is the first to express a propensity.
+    for w in runner.embodiment().unwrap().walkers() {
+        assert_eq!(
+            w.exploration,
+            Fixed::ZERO,
+            "a founder expresses zero exploration (founder-zero, the re-baseline is inert)"
+        );
+        assert_eq!(
+            w.deliberation,
+            Fixed::ZERO,
+            "a founder expresses zero deliberation (founder-zero)"
         );
     }
 
@@ -1320,6 +1342,12 @@ fn morphogen_race(limbed: bool) -> Race {
         layout.weight_count(),
         &seeds,
     );
+    // The ideation activation's evolve-channels: one unseeded (founder-zero) locus each for exploration and
+    // deliberation, so an embodied founder carries them at zero and the crucible exercises the birth-path
+    // expression. Behaviourally inert (founders express zero, the propensities are read only by the unarmed
+    // discovery gates), but the genome grows two loci, so the crucible hash legitimately re-baselines.
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
+    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
     // The morphogen block, appended after the controller block (its loci take the next gene indices), so a
     // founder's body grows from its own genome exactly as its controller expresses from it. A limbed founder
     // seeds a real section modulus, arm length, and bony yield with a blunt tip; a rooted one seeds nothing.
