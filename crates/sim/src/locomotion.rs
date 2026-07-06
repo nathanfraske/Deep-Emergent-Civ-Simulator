@@ -75,6 +75,7 @@ use crate::homeostasis::{
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
     MOVE, RELEASE, SHELTER,
 };
+use crate::learn::EligibilityTrace;
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
@@ -411,6 +412,18 @@ pub struct Walker {
     /// supplies a smaller contact area and its own material to the extraction and cut contests, so a
     /// crafted point breaks harder rock than a bare limb (the tool multiplies the affordance).
     pub wielded: Option<WieldedTool>,
+    /// The being's ELIGIBILITY TRACE (ideation / experiential-discovery arc, piece 1, slice 1c): the short,
+    /// recency-decayed memory of the primitive sequences it recently executed, so a reserve rise felt after
+    /// an action can credit the sequence that produced it ([`crate::learn::EligibilityTrace`]). EMPTY by
+    /// default, so a being in a world with no reward learning armed folds nothing into `state_hash` (the
+    /// reward trace is opt-in, hash-neutral by default). Populated, decayed, and credited only where the
+    /// runner arms the reward learner.
+    pub eligibility_trace: EligibilityTrace,
+    /// The affordance the being ACTED on this tick, the head of the sequence its eligibility trace records
+    /// (ideation arc, piece 1, slice 1c). Set each tick from the being's own decision and `None` on a tick
+    /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
+    /// source the reward-credit pass reads to record what the being just did.
+    pub decided_affordance: Option<AffordanceId>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -441,6 +454,8 @@ impl Walker {
             reserve_memory: ReserveMemory::new(),
             carried: SubstanceMix::new(),
             wielded: None,
+            eligibility_trace: EligibilityTrace::new(),
+            decided_affordance: None,
             alive: true,
         }
     }
@@ -749,13 +764,16 @@ pub fn step_with_field_dirs<T: Terrain>(
             continue;
         }
         // Snapshot the reserves at the START of the tick, so this tick's interoceptive delta
-        // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes: the
-        // associative learner (harm-learning arc slice b) reads it after metabolism to get "my
-        // CONDITION fell this tick" (harm), the raw signal it correlates with the feature underfoot.
-        // Opt-in: only where the world declares percepts, so a world without the feature substrate
-        // carries an empty memory that folds nothing into `state_hash` and stays bit-identical. A pure
-        // canonical-order snapshot drawing no randomness.
-        if !percepts.is_empty() {
+        // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes, the raw
+        // signal both experiential learners read after metabolism. The harm learner (harm-learning arc
+        // slice b) keys it to the FEATURE underfoot ("my CONDITION fell on this ground"), so it needs
+        // the snapshot wherever the world declares percepts. The reward learner (ideation arc slice 1c)
+        // keys it to the ACTION the being executed, carried in its eligibility trace ("this action I did
+        // pays off"), so it needs the snapshot wherever that trace is populated, which happens only when
+        // the reward learner is armed. Opt-in on both sides: a run that declares no percepts and arms no
+        // reward learner carries an empty trace, takes no snapshot, and folds an empty memory into
+        // state_hash, so it stays bit-identical. A pure canonical-order snapshot drawing no randomness.
+        if !percepts.is_empty() || !w.eligibility_trace.is_empty() {
             w.reserve_memory.snapshot(homeo, &w.homeostasis);
         }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
@@ -817,6 +835,13 @@ pub fn step_with_field_dirs<T: Terrain>(
             None => afford.afforded(&w.body, organs, &p.capability_refs, &p.capability_caps),
         };
         let decision = layout.decide(&out, &afforded);
+        // Record the affordance the being acted on this tick, the head of the sequence its reward eligibility
+        // trace credits (ideation arc, piece 1, slice 1c). `None` on a tick it took no action; a pure read of
+        // its own decision, folded into no hash here (the runner's reward-credit pass reads it).
+        w.decided_affordance = decision
+            .as_ref()
+            .filter(|d| d.activation > Fixed::ZERO)
+            .map(|d| d.affordance);
 
         let mut exertion = Fixed::ZERO;
         if let Some(d) = decision {

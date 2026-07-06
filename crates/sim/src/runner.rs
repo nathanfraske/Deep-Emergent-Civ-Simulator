@@ -88,12 +88,13 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
-    is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
-    RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
+    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE,
+    GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
+    avoidance_gradient, feature_observations, sequence_subject, HarmLearningCalib,
+    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -152,6 +153,10 @@ const CELL_PLACE_BASE: u32 = 1_000_000;
 /// mind (determinism: the tick sorts inputs by mind then ordinal). Replaces the retired hazard ordinal:
 /// the being now observes the raw features it senses rather than a single injected hazard.
 const LEARN_ORDINAL_BASE: u32 = 1_000_000;
+/// The base tick-input ordinal a reward credit carries (ideation arc, piece 1, slice 1c), one per eligible
+/// sequence in a being's trace, disjoint from and above [`LEARN_ORDINAL_BASE`] so a reward observation and a
+/// harm observation for the same being in the same tick never collide on the mind-then-ordinal sort.
+const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -1686,6 +1691,12 @@ pub struct Runner {
     /// retired `hazard_dose_threshold`/`hazard_weight`, which authored the belief a being now forms for
     /// itself.
     harm_learning: HarmLearningCalib,
+    /// The APPETITIVE reward learner's calibration (ideation / experiential-discovery arc, piece 1, slice
+    /// 1c), armed OPT-IN. `None` by default, so a runner with no reward learner never populates, decays, or
+    /// credits any being's eligibility trace, the trace stays empty and folds nothing, and every existing
+    /// scenario replays bit-for-bit. Armed via [`Runner::set_reward_learning`]; the credit is emitted through
+    /// the same `Observe` path the harm learner uses, on the disjoint `REWARD_ATTR`.
+    reward_learning: Option<RewardLearningCalib>,
 }
 
 impl Runner {
@@ -1710,6 +1721,7 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
         }
     }
 
@@ -1751,6 +1763,7 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
         }
     }
 
@@ -1805,6 +1818,7 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
         }
     }
 
@@ -1882,6 +1896,7 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
         }
     }
 
@@ -1944,6 +1959,17 @@ impl Runner {
     /// harness paths are unchanged.
     pub fn set_harm_learning(&mut self, calib: HarmLearningCalib) {
         self.harm_learning = calib;
+    }
+
+    /// Arm the APPETITIVE reward learner (ideation / experiential-discovery arc, piece 1, slice 1c), the
+    /// reward complement of [`Runner::set_harm_learning`]. OPT-IN: unarmed (the default), a being's
+    /// eligibility trace is never populated, decayed, or credited, so it stays empty and the run is
+    /// byte-identical; armed, the runner records each being's decided affordance into its trace, decays it by
+    /// the reserved TD lambda, and on a felt reserve rise credits the eligible sequences toward REWARDS
+    /// through the same `Observe` path the harm learner uses. The dawn build reads the calib fail-loud from
+    /// the manifest (Principle 11).
+    pub fn set_reward_learning(&mut self, calib: RewardLearningCalib) {
+        self.reward_learning = Some(calib);
     }
 
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
@@ -2400,6 +2426,7 @@ impl Runner {
         // The learner calibrations (Copy), read once so the borrow of the embodiment below does not
         // conflict with the read.
         let harm_learn = self.harm_learning;
+        let reward_learn = self.reward_learning;
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
         // Per-being stress (the lower of its energy and condition margins) and its cell, for the
@@ -2467,6 +2494,64 @@ impl Runner {
                             from: w.id,
                         },
                     });
+                }
+                // Appetitive reward credit (ideation / experiential-discovery arc, piece 1, slice 1c): the
+                // being learns which ACTION pays off. It felt reward this tick if any reserve ROSE beyond the
+                // recovery noise floor (its own interoceptive delta, the sign complement of the harm bit).
+                // For each sequence still eligible in its trace (an action it recently executed) it
+                // contributes one piece of evidence toward REWARDS (a reward tick) or NEUTRAL (otherwise),
+                // keyed on the sequence subject and scaled by the eligibility factor and its own belief
+                // plasticity, through the SAME Observe path the harm learner uses on the disjoint REWARD_ATTR.
+                // Only when the reward learner is armed; unarmed, no trace is ever populated, so this is inert
+                // and the run is byte-identical.
+                if let Some(reward_learn) = reward_learn {
+                    let reward = emb.homeo.axes.iter().any(|axis| {
+                        is_reward_tick(
+                            w.reserve_memory.delta(axis.id, &w.homeostasis),
+                            reward_learn.reward_noise_floor,
+                        )
+                    });
+                    let toward = if reward { REWARDS } else { NEUTRAL };
+                    let base = reward_learn.observation_weight();
+                    for (k, (subject, elig)) in w.eligibility_trace.entries().enumerate() {
+                        let weight = base
+                            .checked_mul(*elig)
+                            .unwrap_or(base)
+                            .checked_mul(plasticity)
+                            .unwrap_or(base);
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: REWARD_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: *subject,
+                                attr: REWARD_ATTR,
+                                hyps: vec![REWARDS, NEUTRAL],
+                                toward,
+                                weight,
+                                from: w.id,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        // Advance each being's eligibility trace for next tick (ideation arc, piece 1, slice 1c): decay every
+        // remembered sequence by the reserved TD lambda (pruning those that underflow) and record the
+        // affordance the being acted on this tick at full eligibility, so a reserve rise felt next tick
+        // credits it. Runs AFTER the credit read above, so this tick's reward credits the sequences executed
+        // on prior ticks (the interoceptive lag), in canonical walker order, drawing no randomness. Only when
+        // the reward learner is armed; unarmed, no trace is touched and the run stays byte-identical.
+        if let Some(reward_learn) = reward_learn {
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(affordance) = w.decided_affordance {
+                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
+                            primitive: affordance.0,
+                            target_bucket: 0,
+                            param_bucket: 0,
+                        }]));
+                    }
                 }
             }
         }
@@ -3272,6 +3357,13 @@ impl Runner {
                         h.write_fixed(w.reserve_memory.prev_level(axis.id));
                     }
                 }
+                // The reward eligibility trace (ideation arc, piece 1, slice 1c): new per-being dynamic
+                // state, folded after the reserve memory in canonical (sequence-subject, eligibility) order.
+                // Empty for a being with no reward learner armed (never recorded), so it folds nothing and
+                // leaves an opted-out run's hash unchanged.
+                if !w.eligibility_trace.is_empty() {
+                    w.eligibility_trace.hash_into(&mut h);
+                }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
                 // volume) order. Empty for a being carrying nothing, so it folds nothing and leaves an
@@ -4011,6 +4103,192 @@ source = "test"
             run(Fixed::from_int(5)),
             Some(HARMS),
             "remove the harm (full salt tolerance) and no HARMS belief forms: the belief tracks harm"
+        );
+    }
+
+    #[test]
+    fn a_being_forms_the_reward_belief_that_its_action_pays_off_through_the_runner() {
+        // Ideation arc, piece 1, slice 1c, the run-level acceptance of the appetitive FORMATION loop through
+        // the actual Runner tick: a hungry being that INGESTS the energy-dense food underfoot feels its own
+        // ENERGY rise, and COMMITS the belief that the sequence it executed (its ingest) PAYS OFF for itself,
+        // with no injected observation and no coded reward table. The falsifier is the opt-in itself: the
+        // same being with the reward learner UNARMED never populates a trace and forms no such belief, so the
+        // belief tracks the felt reward routed through the eligibility trace, not the mere taking of an
+        // action. This ties the reward-credit path end to end through couple_conversation.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::Controller;
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::physiology::ENERGY_DENSITY;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A registry with a non-draining TEMPERATURE and a draining ENERGY reserve backed by the
+        // energy-density food class, so a hungry being that ingests the food underfoot restores ENERGY and
+        // feels the rise as its own interoceptive reward signal.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let food_physiology = || Physiology {
+            requirements: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            assimilation: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief subject the being should form: the single-step sequence of its INGEST primitive (target
+        // and param buckets zero until slice 2 supplies percept-derived context).
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: INGEST.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run a being that ingests the food each tick (an INGEST-biased controller), with the reward learner
+        // armed or not, and report whether it committed the REWARDS belief about its ingest.
+        let run = |reward_armed: bool| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            // Bias the INGEST activation (output index 3: move act,dx,dy = 0..2, ingest act = 3), so the
+            // being decides INGEST each tick and acts on the food underfoot.
+            let n_in = emb.layout().n_in();
+            let mut wts = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wts[3 * n_in + (n_in - 1)] = Fixed::ONE;
+            let controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, wts);
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: metabolise its ENERGY well down first, so ingesting the food produces a clear
+            // supra-recovery rise (the reward signal), not a saturated no-op.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..400 {
+                homeostasis.metabolize(&reg, Fixed::ZERO);
+            }
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body.clone(),
+                    homeostasis,
+                    food_physiology(),
+                    controller,
+                ),
+                band(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            if reward_armed {
+                runner.set_reward_learning(RewardLearningCalib::dev_default());
+            }
+            let mut committed = None;
+            for _ in 0..15 {
+                // Replenish a MODEST standing supply of the energy-dense food on the being's tile each tick,
+                // so the hungry being takes a small supply-limited bite every tick and its ENERGY climbs
+                // gradually (a felt reward each tick, its interoceptive rise beyond the metabolic-drain floor)
+                // rather than gorging in one bite and then plateauing (a single early rise the still-empty
+                // eligibility trace never credits). The supply is below the being's per-class requirement, so
+                // the satisfaction measure caps the bite and the reserve fills over many ticks.
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut nutrients = BTreeMap::new();
+                    nutrients.insert(ENERGY_DENSITY.to_string(), Fixed::from_ratio(1, 2));
+                    emb.resources_mut().set(
+                        tile,
+                        Composition {
+                            nutrients,
+                            toxins: BTreeMap::new(),
+                        },
+                    );
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(ingest_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Reward armed: the being that ingests the food feels ENERGY rise and forms the REWARDS belief that
+        // its ingest pays off, for itself, through the runner.
+        assert_eq!(
+            run(true),
+            Some(REWARDS),
+            "a being that ingests reserve-raising food forms the REWARDS belief that its action pays off"
+        );
+        // The falsifier (the opt-in): with the reward learner unarmed, no eligibility trace is populated and
+        // no reward belief forms, however much the being ingests.
+        assert_ne!(
+            run(false),
+            Some(REWARDS),
+            "with the reward learner unarmed, no REWARDS belief forms: the belief tracks the routed reward"
         );
     }
 
