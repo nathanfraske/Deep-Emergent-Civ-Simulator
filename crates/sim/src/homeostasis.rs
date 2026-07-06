@@ -736,6 +736,25 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a shelter-building world: move, ingest, and shelter (material-substrate arc,
+    /// cascade item 7, the overhead-deposit technique). A builder can set the matter it carries down into the
+    /// cell directly overhead, so the roof it raises attenuates its own body-to-field thermal exchange (item
+    /// 7 slice A reads the overhead matter). So a being's SHELTER is one it chose to build, the physics
+    /// consequence of the placed matter, no shelter verb. Shelter is the upward sibling of release, a scalar
+    /// operation (setting the load down overhead, no aim), unconditional (`requires: None`): any body that can
+    /// carry can raise a roof over itself ([`crate::runner::Embodiment::deposit_overhead`]).
+    pub fn dev_builder() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: SHELTER,
+            name: "shelter".to_string(),
+            requires: None,
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -813,6 +832,11 @@ pub const DIG: AffordanceId = AffordanceId(7);
 /// The release affordance (setting the carried load down underfoot, the inverse of grasp: it deposits the
 /// matter and raises the column), in the earthmover fixture only (material-substrate arc, cascade item 5).
 pub const RELEASE: AffordanceId = AffordanceId(8);
+/// The shelter affordance (setting the carried load down into the cell directly overhead, so the matter
+/// becomes a roof the body-to-field thermal exchange reads as enclosing matter), in the builder fixture
+/// only (material-substrate arc, cascade item 7, the overhead-deposit technique). The upward sibling of
+/// RELEASE: a being SHELTERS ITSELF with matter it chose to carry and place.
+pub const SHELTER: AffordanceId = AffordanceId(9);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race

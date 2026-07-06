@@ -2412,6 +2412,112 @@ fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
 }
 
 #[test]
+fn a_being_builds_its_own_roof_overhead_and_that_self_built_roof_shelters_it() {
+    // Material-substrate arc item 7, the OVERHEAD-DEPOSIT TECHNIQUE (the deferred emergent build the shelter
+    // primitive was waiting for): a being sets the insulating matter it carries down into the cell directly
+    // ABOVE it, so the roof it raises is one it CHOSE to build (the SHELTER affordance won its decision), and
+    // that self-built roof then attenuates its own body-to-field thermal exchange (item 7 slice A reads the
+    // overhead matter). So shelter EMERGES from need plus the deposit affordance plus carried matter, no
+    // shelter verb: the being that builds holds its warmth, the identical being carrying the same oak but not
+    // building stays exposed and cools. A blank founder holding the same load never builds.
+    use civsim_sim::material::{ShelterCalib, SubstanceMix};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let overhead = Coord3::new(2, 2, 1);
+    let load = Fixed::from_int(10);
+    let (organs, fat) = energy_registry();
+    let reg = energy_thermal_registry();
+
+    let build = |shelter_weight: bool| -> Runner {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_builder(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0F00,
+        );
+        // Outputs: move [act,dx,dy] 0..2, ingest [act] 3, shelter [act] 4.
+        assert_eq!(
+            emb.layout().n_out(),
+            5,
+            "builder layout: move(3) + ingest(1) + shelter(1)"
+        );
+        let n_in = emb.layout().n_in();
+        let controller = if shelter_weight {
+            let mut wts = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wts[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> shelter activation
+            Controller::from_weights(n_in, emb.layout().n_out(), 0, wts)
+        } else {
+            Controller::zeros(emb.layout())
+        };
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(fat, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        // The being carries a load of oak (a low-conductivity insulator) it could raise as a roof.
+        let mut carried = SubstanceMix::new();
+        carried.add("oak", load);
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_material(civsim_sim::material::MaterialField::new());
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A harsh cold field (280 K, below the being's 310 K start), so an exposed body loses heat to it.
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(280)), calib(), emb);
+        r.set_shelter(ShelterCalib::dev_fixture());
+        r
+    };
+
+    let carried_now =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.total_volume() };
+    let roof = |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(overhead, "oak") };
+
+    // The deciding being sets its load overhead: the cell above it gains the oak (a roof), and it carries
+    // nothing more. The build happened only through its evolved SHELTER decision.
+    let mut builder = build(true);
+    builder.step();
+    assert_eq!(
+        roof(&builder),
+        load,
+        "the being raised a roof of oak overhead"
+    );
+    assert_eq!(
+        carried_now(&builder),
+        Fixed::ZERO,
+        "the being set its whole load overhead"
+    );
+
+    // The blank founder never builds: it holds its load and no roof rises.
+    let mut founder = build(false);
+    founder.step();
+    assert_eq!(roof(&founder), Fixed::ZERO, "no roof rose over the founder");
+    assert_eq!(
+        carried_now(&founder),
+        load,
+        "the blank founder holds its load"
+    );
+
+    // The self-built roof SHELTERS the builder: over the cold field it holds more of its warmth than the
+    // identical founder that carried the same oak but never raised it, which stays exposed and cools. The
+    // shelter is the physics consequence of the matter the being chose to place overhead.
+    for _ in 0..15 {
+        builder.step();
+        founder.step();
+    }
+    let sheltered = builder.body_temp(StableId(1)).unwrap();
+    let exposed = founder.body_temp(StableId(1)).unwrap();
+    assert!(
+        sheltered > exposed,
+        "the being under the roof it built held more warmth than the one that did not build: {sheltered:?} vs {exposed:?}"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the

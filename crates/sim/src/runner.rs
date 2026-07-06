@@ -90,7 +90,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
-    RELEASE, RESPIRATION, TEMPERATURE,
+    RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
     avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
@@ -1501,6 +1501,40 @@ impl Embodiment {
         }
         if deposited > Fixed::ZERO {
             self.earthwork.adjust(column, deposited);
+        }
+        deposited
+    }
+
+    /// Enact a being's decided SHELTER build (material-substrate arc, cascade item 7, the overhead-deposit
+    /// technique): set the carried load down into the cell directly ABOVE the being (its column, one z up),
+    /// so the matter it carried becomes a ROOF over its own cell. The upward sibling of
+    /// [`Embodiment::release_underfoot`] (which mounds the ground underfoot), it places matter overhead where
+    /// the body-to-field thermal exchange reads it as enclosing matter and attenuates through it (cascade item
+    /// 7 slice A, the shelter read). So a being SHELTERS ITSELF with matter it chose to carry and place: the
+    /// roof is one it built, and the shelter is the physics consequence of the placed matter, no shelter verb
+    /// (Principles 8, 9). Each carried substance is deposited in canonical id order at the overhead cell; no
+    /// earthwork column rises, because the matter is placed in the air above rather than mounded on the
+    /// ground. Reads only the being's carried load and coordinate, no race, kind, or role. Returns the volume
+    /// deposited overhead. Opt-in: a being carrying nothing sets nothing down and no roof rises.
+    pub fn deposit_overhead(&mut self, walker_id: StableId) -> Fixed {
+        let Some((overhead, substances)) =
+            self.walkers.iter().find(|w| w.id == walker_id).map(|w| {
+                let c = w.coord();
+                let subs: Vec<String> = w.carried.substances().map(|(s, _)| s.clone()).collect();
+                (Coord3::new(c.x, c.y, c.z + 1), subs)
+            })
+        else {
+            return Fixed::ZERO;
+        };
+        let mut deposited = Fixed::ZERO;
+        for substance in &substances {
+            let want = self
+                .walkers
+                .iter()
+                .find(|w| w.id == walker_id)
+                .map(|w| w.carried.volume(substance))
+                .unwrap_or(Fixed::ZERO);
+            deposited += self.put_down(walker_id, overhead, substance, want);
         }
         deposited
     }
@@ -2957,6 +2991,9 @@ impl Runner {
                     }
                     RELEASE => {
                         emb.release_underfoot(id);
+                    }
+                    SHELTER => {
+                        emb.deposit_overhead(id);
                     }
                     _ => {}
                 }

@@ -73,7 +73,7 @@ use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
-    MOVE, RELEASE,
+    MOVE, RELEASE, SHELTER,
 };
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
@@ -909,12 +909,14 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // whether or not the being ingests, so exposure harms a being that only passes
                         // through a toxic cell.
                     }
-                    GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE => {
+                    GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER => {
                         // The evolved decision to act on matter (material-substrate arc): GRASP picks loose
                         // matter up (item 3, the driver), EXTRACT breaks bonded matter loose in a fracture
                         // contest and takes it (item 4), GEOPHAGE eats the matter underfoot for a reserve that
                         // needs it (item 4, INGEST-FOR-COMPOSITION), CRAFT shapes the carried matter into a
-                        // wielded tool (item 4, knapping). Each records its decided affordance and activation
+                        // wielded tool (item 4, knapping), DIG and RELEASE lower and raise the terrain (item 5),
+                        // SHELTER sets the carried load down overhead as a roof (item 7, the overhead-deposit
+                        // technique). Each records its decided affordance and activation
                         // for the embodiment's post-step enactment pass, which owns the material field, the
                         // carried load, and the registry this function cannot reach
                         // ([`crate::runner::Embodiment::grasp_underfoot`],
