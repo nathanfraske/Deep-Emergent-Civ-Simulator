@@ -7,6 +7,20 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-06: material-substrate item 8 PROPER slice A (the world registry carries the transform physics), on branch claude/material-substrate, PR #93
+
+Item 8 proper (the matter cycle) begins: its foundational slice A, the registry integration that makes the transform physics available in the world material registry. The gate green-lit item 8 proper (agreed the read-substance-physics direction, no transform-kinds file). Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 8 PROPER SLICE A paragraph). Commit `bfd6022`.
+
+WHAT LANDED: `crates/physics/src/lib.rs` `PhysicsRegistry::ground()` now loads the full physics floor stack (fluids, chemistry/optics, electromagnetism, biology) onto the mechanical and ground floors, so a cell's substances carry the transform physics: corrosion electrode potentials and susceptibility (`chem.standard_potential`, `chem.corrosion_susceptibility`, `chem.acidity`), the combustion products' ash fraction (`bio.mineral_ash_fraction`), and the ambient fluids (`air`). The matter cycle reads a transform's parameters straight from the substance's own floor axes (the "dissolve into the floor" direction), not a transform-kinds file.
+
+ADDITIVE / neutral: the material derivations read specific axes by id, so a fuller registry leaves them unchanged, and worldgen fills the z-column from the ground floor's strata alone. Verified byte-identical (physiology_embodiment 23, world_build 16, world_determinism 3, full sim suite 817, crucible unchanged; 84 physics tests green with the composed stack, no id conflicts). fmt and clippy (`--all-targets -D warnings`) clean, no new reserved value.
+
+KEY GROUNDING for slice B (the transform application, the matter cycle's first observable): the biology and chem floors define transform AXES and LAWS but no SUBSTANCES (substances live in the mechanical and ground floors), and critically the transform PRODUCTS (what matter becomes) are a substance-to-substance relation, NOT a Fixed axis. DECOMPOSITION resolves this cleanly and is the right first transform: its products EMERGE from the substance's own composition physics (the `bio.mineral_ash_fraction` stays as a mineral residue, the organic fractions volatilize to the `air` substance), so it honors read-substance-physics for both params AND products, and it conserves TOTAL mass by splitting (no environmental inflow). It needs a new organic substance with cited composition, a decomposition rate/barrier (reserved-with-basis or a substance thermal axis), the beat, the composition-derived product routing, and `ConservationRegistry` mass balance. CORROSION is the harder sibling (its oxide product is a substance-to-substance mapping not derivable from a Fixed axis, and it gains environmental oxygen so it conserves the metal ELEMENT, not total mass), a follow-on.
+
+STOPPED: slice A pushed (`bfd6022`). NEXT: slice B (the decomposition transform application, per the grounded design above), then the deferred overhead-deposit technique (a being builds a roof) and the force-and-manipulation primitive-completeness check. Open emergence debts unchanged. Acceptance is a BLIND concept-verification on a run log. Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-06: material-substrate item 8 slice 1 (harden DecayLaw to the data-defined TransformKind), on branch claude/material-substrate, PR #93
 
 Item 8 (the matter cycle) has its first slice, the owner-ruled seam hardening, built hash-neutral. The gate signed off item 6 slice B first, completing item 6 (live fire) end to end (A burns, B needs air, C spreads and burns out). Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 8 SLICE 1 paragraph). Commit `5577d07`.
