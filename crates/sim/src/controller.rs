@@ -138,7 +138,18 @@ pub struct ControllerLayout {
     /// stands on ([`crate::percept::PerceptRegistry`]), a percept the evolved weights may learn to act
     /// on, sitting between the per-axis blocks and the bias.
     n_features: usize,
-    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + 1` for the bias).
+    /// The number of APPETITIVE belief channels (the width of the appetitive input block; ideation /
+    /// experiential-discovery arc, piece 1, the belief-to-behaviour feedback). Zero unless the world opts
+    /// into reward repetition, in which case it is one channel per affordance (canonical id order, aligned
+    /// to the output slots), each carrying the being's committed reward-belief signal about that
+    /// affordance's single-primitive sequence ([`crate::learn::appetitive_salience`]). Zero yields an input
+    /// vector, weight count, and genome expression identical to a world without the appetitive block, so it
+    /// is OPT-IN and hash-neutral by default, the same discipline as the feature block. The block sits
+    /// AFTER the feature block and before the bias, so the per-axis bases, the feature base, and the
+    /// bias-as-last convention all hold unchanged. Only a heritable weight lifted off founder-zero by
+    /// selection turns a channel into repetition, so acting on a reward belief emerges (Principle 9).
+    n_appetitive: usize,
+    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -177,11 +188,36 @@ impl ControllerLayout {
         percept: &PerceptRegistry,
         hidden: usize,
     ) -> ControllerLayout {
+        ControllerLayout::with_percepts_and_appetitive(homeo, afford, percept, false, hidden)
+    }
+
+    /// Build a layout that also feeds an APPETITIVE belief block, one channel per affordance in canonical
+    /// id order (ideation / experiential-discovery arc, piece 1, the belief-to-behaviour feedback). The
+    /// block sits AFTER the feature block and before the bias, so the per-axis input bases
+    /// ([`axis_input_base`]), the feature base ([`feature_input_base`]), and the bias-as-last convention
+    /// all hold unchanged; `appetitive = false` yields exactly [`ControllerLayout::with_percepts`]'s layout
+    /// (`n_appetitive` zero), so the block is opt-in and a world that does not enable reward repetition is
+    /// bit-identical. Each channel carries the being's committed reward-belief signal about that
+    /// affordance's single-primitive sequence, written by the runner from
+    /// [`crate::learn::appetitive_salience`]; the channels grow `n_in`, so the weight count and the genome
+    /// expression grow with them, and a founder expresses zero for the new appetitive weights (unseeded
+    /// channels), so a reward belief moves no behaviour until selection lifts a weight off zero (Principle
+    /// 8, the emergent pattern the feature block established).
+    pub fn with_percepts_and_appetitive(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        appetitive: bool,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
         let n_features = percept.len();
-        let n_in = INPUTS_PER_AXIS * axes.len() + n_features + 1;
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
+        // One appetitive channel per affordance (aligned to the output slots below), or none when the
+        // world does not opt into reward repetition.
+        let n_appetitive = if appetitive { defs.len() } else { 0 };
+        let n_in = INPUTS_PER_AXIS * axes.len() + n_features + n_appetitive + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
         for d in defs {
@@ -197,6 +233,7 @@ impl ControllerLayout {
             axes,
             outputs,
             n_features,
+            n_appetitive,
             n_in,
             n_out,
             hidden,
@@ -243,6 +280,27 @@ impl ControllerLayout {
         INPUTS_PER_AXIS * self.axes.len()
     }
 
+    /// The number of appetitive belief channels this layout feeds (zero unless the world opts into reward
+    /// repetition; ideation arc, piece 1). When positive it is one channel per affordance, in the same
+    /// canonical id order as [`affordance_ids`] and the output slots.
+    pub fn n_appetitive(&self) -> usize {
+        self.n_appetitive
+    }
+
+    /// The input-vector index where the appetitive block begins: after the per-axis blocks and the feature
+    /// block, before the bias. A caller writing the appetitive vector reads this so it never hardcodes the
+    /// block's position, which the axis count and feature width set.
+    pub fn appetitive_input_base(&self) -> usize {
+        INPUTS_PER_AXIS * self.axes.len() + self.n_features
+    }
+
+    /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
+    /// in canonical id order. The runner reads this to align an [`crate::learn::appetitive_salience`] vector
+    /// to the appetitive block, so neither hardcodes the affordance order, which the registry sets.
+    pub fn affordance_ids(&self) -> Vec<AffordanceId> {
+        self.outputs.iter().map(|o| o.affordance).collect()
+    }
+
     /// The number of heritable weights this layout's controller carries, which is the number of
     /// [`ControllerParamId`]s a genome must reach to express a full controller. For a reaction norm
     /// this is `n_out * n_in`; for a recurrent network it adds the input-to-hidden, hidden-to-hidden,
@@ -285,6 +343,34 @@ impl ControllerLayout {
         signed: &BTreeMap<HomeostaticAxisId, Fixed>,
         features: &[Fixed],
     ) -> Vec<Fixed> {
+        self.build_input_with_features_and_appetitive(
+            homeo,
+            here,
+            source_dirs,
+            signed,
+            features,
+            &[],
+        )
+    }
+
+    /// Build the input vector including both the raw perceived-feature block and the APPETITIVE belief block
+    /// (ideation arc, piece 1, the belief-to-behaviour feedback): the per-axis blocks, feature block, and
+    /// bias exactly as [`build_input_with_features`], plus each appetitive channel's belief signal written
+    /// into the appetitive block ([`appetitive_input_base`] onward, in canonical affordance order).
+    /// `appetitive` is the [`crate::learn::appetitive_salience`] read over this being's reward beliefs; a
+    /// shorter slice leaves the unfilled channels zero (clean degrade), and an empty slice with `n_appetitive`
+    /// zero is byte-identical to [`build_input_with_features`] before the appetitive block existed, so an
+    /// opted-out world is unchanged. A pure read of physiology, earned knowledge, the feature underfoot, and
+    /// the being's own reward beliefs (Principles 9, 10).
+    pub fn build_input_with_features_and_appetitive(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+        appetitive: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -302,6 +388,10 @@ impl ControllerLayout {
         let fbase = self.feature_input_base();
         for (k, &f) in features.iter().enumerate().take(self.n_features) {
             v[fbase + k] = f;
+        }
+        let abase = self.appetitive_input_base();
+        for (k, &a) in appetitive.iter().enumerate().take(self.n_appetitive) {
+            v[abase + k] = a;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
@@ -645,6 +735,79 @@ mod tests {
             &AffordanceRegistry::dev_default(),
             hidden,
         )
+    }
+
+    #[test]
+    fn the_appetitive_block_is_opt_in_byte_identical_and_founder_inert() {
+        // Ideation arc, piece 1, the belief-to-behaviour feedback (WIRE substrate): the appetitive input
+        // block is opt-in and hash-neutral by default, one channel per affordance when enabled, and inert
+        // for a founder whose weights are all zero, so acting on a reward belief emerges (Principle 8) and
+        // an opted-out world is bit-identical.
+        let homeo = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let percept = PerceptRegistry::empty();
+
+        // Opt-out: the appetitive-disabled layout is byte-identical to the plain percept layout.
+        let off =
+            ControllerLayout::with_percepts_and_appetitive(&homeo, &afford, &percept, false, 0);
+        let plain = ControllerLayout::with_percepts(&homeo, &afford, &percept, 0);
+        assert_eq!(off, plain, "the appetitive-off layout is byte-identical");
+        assert_eq!(off.n_appetitive(), 0);
+
+        // Opt-in: n_in grows by exactly one channel per affordance, the block sits after the features and
+        // before the bias, and the channels align to the canonical affordance order.
+        let on = ControllerLayout::with_percepts_and_appetitive(&homeo, &afford, &percept, true, 0);
+        let n_afford = on.affordance_ids().len();
+        assert_eq!(on.n_appetitive(), n_afford);
+        assert_eq!(on.n_in(), plain.n_in() + n_afford);
+        assert_eq!(on.appetitive_input_base(), plain.n_in() - 1); // just past features, before the bias
+        assert_eq!(on.weight_count(), on.n_out() * on.n_in());
+
+        // The builder writes the appetitive vector into the block and keeps the bias last.
+        let here = BTreeSet::new();
+        let dirs = BTreeMap::new();
+        let signed = BTreeMap::new();
+        let homeostasis = Homeostasis::from_mass(&homeo, Fixed::ONE);
+        let appetitive: Vec<Fixed> = (0..n_afford).map(|_| Fixed::ONE).collect();
+        let input = on.build_input_with_features_and_appetitive(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &appetitive,
+        );
+        let abase = on.appetitive_input_base();
+        for k in 0..n_afford {
+            assert_eq!(
+                input[abase + k],
+                Fixed::ONE,
+                "appetitive channel {k} is written"
+            );
+        }
+        assert_eq!(
+            input[on.n_in() - 1],
+            Fixed::ONE,
+            "the bias is still the last slot"
+        );
+
+        // A founder (all-zero weights) issues the identical output whether or not the appetitive block is
+        // lit, so a reward belief moves no behaviour until selection lifts an appetitive weight off zero.
+        let founder = Controller::zeros(&on);
+        let dark = on.build_input_with_features_and_appetitive(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &vec![Fixed::ZERO; n_afford],
+        );
+        let (lit_out, _) = founder.evaluate(&input, &[]);
+        let (dark_out, _) = founder.evaluate(&dark, &[]);
+        assert_eq!(
+            lit_out, dark_out,
+            "a founder's behaviour is unmoved by the appetitive percept (emergent, not authored)"
+        );
     }
 
     #[test]

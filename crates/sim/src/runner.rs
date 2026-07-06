@@ -82,18 +82,22 @@
 //! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
 //! deliberative tier is properly built on the evolved substrate.
 
+use crate::affordance_percept::{AffordancePerceptRefs, AffordancePerceptRegistry};
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
-    is_harm_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
-    HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY,
-    RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
+    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE,
+    GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    avoidance_gradient, feature_observations, HarmLearningCalib, BENIGN, HARMS, HARM_ATTR,
+    appetitive_salience, avoidance_gradient, feature_observations, sequence_subject,
+    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL,
+    REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -108,11 +112,12 @@ use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, MetabolicAnchors,
 };
+use crate::planning::plan_toward;
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
-use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
@@ -152,6 +157,10 @@ const CELL_PLACE_BASE: u32 = 1_000_000;
 /// mind (determinism: the tick sorts inputs by mind then ordinal). Replaces the retired hazard ordinal:
 /// the being now observes the raw features it senses rather than a single injected hazard.
 const LEARN_ORDINAL_BASE: u32 = 1_000_000;
+/// The base tick-input ordinal a reward credit carries (ideation arc, piece 1, slice 1c), one per eligible
+/// sequence in a being's trace, disjoint from and above [`LEARN_ORDINAL_BASE`] so a reward observation and a
+/// harm observation for the same being in the same tick never collide on the mind-then-ordinal sort.
+const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -887,6 +896,24 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
+    /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
+    /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
+    /// which rebuilds the layout to feed the block) to let a being act on its reward beliefs. When true, the
+    /// runner writes each being's [`crate::learn::appetitive_salience`] into the block each tick, and only a
+    /// heritable weight lifted off founder-zero by selection turns it into repetition (Principle 9).
+    appetitive: bool,
+    /// The affordance-percept registry the discovery loop reads (ideation / experiential-discovery arc,
+    /// piece 2): the physics-derived affordance scalars a being senses over nearby matter and its own tool
+    /// ([`crate::affordance_percept`]). EMPTY by default, so a world that declares none proposes no
+    /// candidate bindings and the discovery loop is inert (byte-identical). Installed with its reserved
+    /// references by the world-build ([`Embodiment::set_affordance_percepts`]) to opt a world into
+    /// action-as-hypothesis.
+    affordance_percepts: AffordancePerceptRegistry,
+    /// The reserved reference levels the affordance-percept derivations read, present when the registry is
+    /// installed. `None` leaves the discovery loop inert (the percepts read nothing without their
+    /// references), so the loop is opt-in on both the registry and the references.
+    affordance_refs: Option<AffordancePerceptRefs>,
     /// The located material substrate the world is made of (material-substrate arc, cascade item 1):
     /// a per-cell mixture of physics substances by volume. EMPTY by default, so a scenario that
     /// declares no material layer folds nothing into `state_hash` and replays bit-for-bit (the opt-in
@@ -979,6 +1006,9 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            appetitive: false,
+            affordance_percepts: AffordancePerceptRegistry::empty(),
+            affordance_refs: None,
             material: MaterialField::new(),
             material_registry: None,
             extraction: None,
@@ -1006,13 +1036,48 @@ impl Embodiment {
     /// channels), so the percept has no behavioural effect until selection lifts a weight, the emergent
     /// pattern.
     pub fn set_percepts(&mut self, percepts: PerceptRegistry) {
-        self.layout = ControllerLayout::with_percepts(
+        self.percepts = percepts;
+        self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the APPETITIVE belief block in the controller layout, so a being can act on its
+    /// reward beliefs and REPEAT a rewarded action (ideation / experiential-discovery arc, piece 1, the
+    /// belief-to-behaviour feedback). Set BEFORE the embodiment's beings are built, exactly like
+    /// [`set_percepts`], because the beings' controllers are expressed against [`Embodiment::layout`], so a
+    /// block added after they exist would leave their weight vectors the wrong length. FALSE (the default)
+    /// leaves the layout and every run hash unchanged (opt-in). The new appetitive weights a founder then
+    /// expresses are zero (unseeded channels), so a reward belief moves no behaviour until selection lifts a
+    /// weight, the emergent pattern the feature block established.
+    pub fn set_appetitive(&mut self, enabled: bool) {
+        self.appetitive = enabled;
+        self.rebuild_layout();
+    }
+
+    /// Install the affordance-percept registry and its reserved references (ideation / experiential-discovery
+    /// arc, piece 2, slice 2c), so the discovery loop can perceive the affordances of nearby matter and the
+    /// being's tool and propose candidate actions over them. Opt-in: with an empty registry (or no reserved
+    /// references, or no reward learner armed on the runner) the loop proposes nothing and every run hash is
+    /// unchanged. The membership is the physics-floor's data, so a new affordance percept is a data edit.
+    pub fn set_affordance_percepts(
+        &mut self,
+        registry: AffordancePerceptRegistry,
+        refs: AffordancePerceptRefs,
+    ) {
+        self.affordance_percepts = registry;
+        self.affordance_refs = Some(refs);
+    }
+
+    /// Rebuild the controller layout from the current percept registry and appetitive flag (both opt-in,
+    /// both feeding an input block the founder weights ignore until selection lifts them). Called by
+    /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
+    fn rebuild_layout(&mut self) {
+        self.layout = ControllerLayout::with_percepts_and_appetitive(
             &self.homeo,
             &self.afford,
-            &percepts,
+            &self.percepts,
+            self.appetitive,
             self.layout.hidden(),
         );
-        self.percepts = percepts;
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -1686,6 +1751,18 @@ pub struct Runner {
     /// retired `hazard_dose_threshold`/`hazard_weight`, which authored the belief a being now forms for
     /// itself.
     harm_learning: HarmLearningCalib,
+    /// The APPETITIVE reward learner's calibration (ideation / experiential-discovery arc, piece 1, slice
+    /// 1c), armed OPT-IN. `None` by default, so a runner with no reward learner never populates, decays, or
+    /// credits any being's eligibility trace, the trace stays empty and folds nothing, and every existing
+    /// scenario replays bit-for-bit. Armed via [`Runner::set_reward_learning`]; the credit is emitted through
+    /// the same `Observe` path the harm learner uses, on the disjoint `REWARD_ATTR`.
+    reward_learning: Option<RewardLearningCalib>,
+    /// The DISCOVERY loop's calibration (ideation / experiential-discovery arc, piece 2, slice 2c), armed
+    /// OPT-IN. `None` by default, so a runner with no discovery loop proposes no candidate action for any
+    /// being, the per-being proposed action stays `None` and folds nothing, and every existing scenario
+    /// replays bit-for-bit. Armed via [`Runner::set_discovery`]; a proposal is sampled each tick from the
+    /// being's binding graph, biased by its own reward beliefs, under the counter-keyed `HYPOTHESIZE` phase.
+    discovery: Option<DiscoveryCalib>,
 }
 
 impl Runner {
@@ -1710,6 +1787,8 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
+            discovery: None,
         }
     }
 
@@ -1751,6 +1830,8 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
+            discovery: None,
         }
     }
 
@@ -1805,6 +1886,8 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
+            discovery: None,
         }
     }
 
@@ -1882,6 +1965,8 @@ impl Runner {
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
             harm_learning: HarmLearningCalib::dev_default(),
+            reward_learning: None,
+            discovery: None,
         }
     }
 
@@ -1944,6 +2029,28 @@ impl Runner {
     /// harness paths are unchanged.
     pub fn set_harm_learning(&mut self, calib: HarmLearningCalib) {
         self.harm_learning = calib;
+    }
+
+    /// Arm the APPETITIVE reward learner (ideation / experiential-discovery arc, piece 1, slice 1c), the
+    /// reward complement of [`Runner::set_harm_learning`]. OPT-IN: unarmed (the default), a being's
+    /// eligibility trace is never populated, decayed, or credited, so it stays empty and the run is
+    /// byte-identical; armed, the runner records each being's decided affordance into its trace, decays it by
+    /// the reserved TD lambda, and on a felt reserve rise credits the eligible sequences toward REWARDS
+    /// through the same `Observe` path the harm learner uses. The dawn build reads the calib fail-loud from
+    /// the manifest (Principle 11).
+    pub fn set_reward_learning(&mut self, calib: RewardLearningCalib) {
+        self.reward_learning = Some(calib);
+    }
+
+    /// Arm the DISCOVERY loop (ideation / experiential-discovery arc, piece 2, slice 2c), so a being
+    /// PROPOSES a candidate action each tick from its binding graph, biased by its own reward beliefs.
+    /// OPT-IN: unarmed (the default), no being proposes anything, its proposed action stays `None` and folds
+    /// nothing, so the run is byte-identical. Armed (and with the embodiment's affordance-percept registry
+    /// installed), the runner perceives each being's affordances, enumerates the generic candidate bindings,
+    /// and samples one under the counter-keyed `HYPOTHESIZE` phase. The dawn build reads the calib fail-loud
+    /// from the manifest (Principle 11).
+    pub fn set_discovery(&mut self, calib: DiscoveryCalib) {
+        self.discovery = Some(calib);
     }
 
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
@@ -2400,11 +2507,18 @@ impl Runner {
         // The learner calibrations (Copy), read once so the borrow of the embodiment below does not
         // conflict with the read.
         let harm_learn = self.harm_learning;
+        let reward_learn = self.reward_learning;
+        let discovery = self.discovery;
         let mut cells: BTreeMap<StableId, PlaceId> = BTreeMap::new();
         let mut env_inputs: Vec<TickInput> = Vec::new();
         // Per-being stress (the lower of its energy and condition margins) and its cell, for the
         // arc-scoped promotion policy: a being whose stress is high is in a survival arc.
         let mut stress: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        // Per-being SURPRISE (ideation arc, piece 3, slice 3b): the magnitude of the prediction error on the
+        // action the being enacted last tick, scored against the reward it felt this tick (the one-tick lag).
+        // Computed here where the mind is readable and applied to the walker below (a being that enacted
+        // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
+        let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -2467,6 +2581,96 @@ impl Runner {
                             from: w.id,
                         },
                     });
+                }
+                // Appetitive reward credit (ideation / experiential-discovery arc, piece 1, slice 1c): the
+                // being learns which ACTION pays off. It felt reward this tick if any reserve ROSE beyond the
+                // recovery noise floor (its own interoceptive delta, the sign complement of the harm bit).
+                // For each sequence still eligible in its trace (an action it recently executed) it
+                // contributes one piece of evidence toward REWARDS (a reward tick) or NEUTRAL (otherwise),
+                // keyed on the sequence subject and scaled by the eligibility factor and its own belief
+                // plasticity, through the SAME Observe path the harm learner uses on the disjoint REWARD_ATTR.
+                // Only when the reward learner is armed; unarmed, no trace is ever populated, so this is inert
+                // and the run is byte-identical.
+                if let Some(reward_learn) = reward_learn {
+                    let reward = emb.homeo.axes.iter().any(|axis| {
+                        is_reward_tick(
+                            w.reserve_memory.delta(axis.id, &w.homeostasis),
+                            reward_learn.reward_noise_floor,
+                        )
+                    });
+                    let toward = if reward { REWARDS } else { NEUTRAL };
+                    let base = reward_learn.observation_weight();
+                    for (k, (subject, elig)) in w.eligibility_trace.entries().enumerate() {
+                        let weight = base
+                            .checked_mul(*elig)
+                            .unwrap_or(base)
+                            .checked_mul(plasticity)
+                            .unwrap_or(base);
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: REWARD_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: *subject,
+                                attr: REWARD_ATTR,
+                                hyps: vec![REWARDS, NEUTRAL],
+                                toward,
+                                weight,
+                                from: w.id,
+                            },
+                        });
+                    }
+                    // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
+                    // prediction of its last-enacted action against the reward it felt, and remember the
+                    // prediction-error magnitude. Only when the discovery loop is armed (piece 2 supplies the
+                    // enacted action) and the being enacted something last tick. The prediction reads the SAME
+                    // primitive subject the credit above records (the eligibility trace keys the belief on the
+                    // primitive), so the surprise measures how far the reward defied what the being believed
+                    // about the action it took. Read here where the mind is in scope; applied to the walker
+                    // in the mutable pass below.
+                    if discovery.is_some() {
+                        if let Some(affordance) = w.decided_affordance {
+                            if let Some((mind, params)) = self.world.as_ref().and_then(|world| {
+                                world.mind(w.id).map(|m| (m, world.belief_params()))
+                            }) {
+                                let step = SequenceStep {
+                                    primitive: affordance.0,
+                                    target_bucket: 0,
+                                    param_bucket: 0,
+                                };
+                                let felt = if reward { Fixed::ONE } else { Fixed::ZERO };
+                                let predicted =
+                                    crate::forward_model::predicted_reward(mind, &step, params);
+                                surprise.insert(w.id, (felt - predicted).abs());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Advance each being's eligibility trace for next tick (ideation arc, piece 1, slice 1c): decay every
+        // remembered sequence by the reserved TD lambda (pruning those that underflow) and record the
+        // affordance the being acted on this tick at full eligibility, so a reserve rise felt next tick
+        // credits it. Runs AFTER the credit read above, so this tick's reward credits the sequences executed
+        // on prior ticks (the interoceptive lag), in canonical walker order, drawing no randomness. Only when
+        // the reward learner is armed; unarmed, no trace is touched and the run stays byte-identical.
+        if let Some(reward_learn) = reward_learn {
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(affordance) = w.decided_affordance {
+                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
+                            primitive: affordance.0,
+                            target_bucket: 0,
+                            param_bucket: 0,
+                        }]));
+                    }
+                    // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that
+                    // enacted an action last tick carries its prediction-error magnitude; one that enacted
+                    // nothing resets to zero (surprise is about the last action). Only when discovery is
+                    // armed, so an unarmed run never touches `surprise` (zero-by-default, byte-identical).
+                    if discovery.is_some() {
+                        w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
+                    }
                 }
             }
         }
@@ -2813,6 +3017,115 @@ impl Runner {
                     .collect(),
                 None => return,
             };
+        // (0b') Belief to percept, the APPETITIVE feedback (ideation / experiential-discovery arc, piece 1,
+        // the belief-to-behaviour half): each being's committed reward-belief signal over its affordances,
+        // in the layout's canonical affordance order, written into the controller's appetitive input block so
+        // it senses "which of my actions do I believe pay off". Present only when the embodiment opts into
+        // reward repetition ([`Embodiment::set_appetitive`]) and the world carries the being's mind. A being
+        // that believes nothing reads all zeros, and the evolved appetitive weights (founding-zero) must be
+        // lifted by selection before the signal moves the decision, so repetition emerges (Principle 9). Read
+        // before the mutable embodiment borrow, drawing no RNG, the exact discipline the avoidance gradient
+        // uses one axis over.
+        let appetitive: BTreeMap<StableId, Vec<Fixed>> = match self.embodiment.as_ref() {
+            Some(emb) if emb.appetitive => match self.world.as_ref() {
+                Some(world) => {
+                    let ids = emb.layout.affordance_ids();
+                    emb.walkers
+                        .iter()
+                        .filter_map(|w| {
+                            let mind = world.mind(w.id)?;
+                            Some((w.id, appetitive_salience(mind, &ids, world.belief_params())))
+                        })
+                        .collect()
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
+        // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
+        // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
+        // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
+        // the tool in hand, biased by its own reward beliefs. Present only when the runner arms the discovery
+        // loop AND the embodiment installs the affordance-percept registry, its references, and the material
+        // registry; a being that perceives no affordance or affords no primitive proposes nothing. The draw is
+        // counter-keyed under the HYPOTHESIZE phase (keyed on the being and the tick), so a proposal replays
+        // bit-for-bit. Read before the mutable embodiment borrow; the only new RNG on the run path, disjoint
+        // from every other phase.
+        // Each being's two discovery choices this tick: the EXPLORED proposal (a belief-weighted sample of
+        // its binding graph, piece 2) and the DELIBERATED action (the believed-best GROUNDED action its
+        // planner recalls, piece 4, the highest-plan-confidence candidate present in its current binding
+        // graph, or `None` where it believes nothing it can currently do pays off). Both read before the
+        // mutable borrow, drawing the sample's RNG only; the plan is a pure ranked read.
+        #[allow(clippy::type_complexity)]
+        let discovery_choices: BTreeMap<StableId, (SequenceStep, Option<SequenceStep>)> = match (
+            self.discovery,
+            self.embodiment.as_ref(),
+            self.world.as_ref(),
+        ) {
+            (Some(calib), Some(emb), Some(world))
+                if emb.affordance_refs.is_some() && emb.material_registry.is_some() =>
+            {
+                let refs = emb.affordance_refs.as_ref().unwrap();
+                let reg = emb.material_registry.as_ref().unwrap();
+                let params = world.belief_params();
+                let tick = self.clock;
+                let seed = emb.seed;
+                emb.walkers
+                    .iter()
+                    .filter_map(|w| {
+                        let mind = world.mind(w.id)?;
+                        let matter = emb.material.cell(w.coord());
+                        let percepts =
+                            emb.affordance_percepts
+                                .perceive(matter, w.wielded.as_ref(), reg, refs);
+                        let afforded = match &w.structure {
+                            Some(s) => emb.afford.afforded_structure(
+                                s,
+                                &emb.params.capability_refs,
+                                &emb.params.capability_caps,
+                            ),
+                            None => emb.afford.afforded(
+                                &w.body,
+                                &emb.organs,
+                                &emb.params.capability_refs,
+                                &emb.params.capability_caps,
+                            ),
+                        };
+                        let candidates = candidate_bindings(&afforded, &percepts);
+                        let proposal =
+                            sample_candidate(&candidates, mind, &calib, params, w.id, tick, seed)?;
+                        // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
+                        // (plan_toward over the reward goal), then take the highest-confidence plan step whose
+                        // action is a candidate PRESENT in its current binding graph. This is the grounding
+                        // gate: a recalled belief becomes actable only where the being's own senses currently
+                        // afford and perceive it, so a plan with no matching percept is inert. The candidate's
+                        // PRIMITIVE subject is matched (the subject the reward credit records and the plan
+                        // ranks), so the deliberated choice is the believed-best action the being can do now.
+                        let plan =
+                            plan_toward(mind, REWARD_ATTR, REWARDS, params, calib.plan_depth_cap);
+                        let deliberated = plan.iter().find_map(|step| {
+                            candidates.iter().copied().find(|c| {
+                                sequence_subject(&[SequenceStep {
+                                    primitive: c.primitive,
+                                    target_bucket: 0,
+                                    param_bucket: 0,
+                                }]) == step.subject
+                            })
+                        });
+                        Some((w.id, (proposal, deliberated)))
+                    })
+                    .collect()
+            }
+            _ => BTreeMap::new(),
+        };
+        let proposals: BTreeMap<StableId, SequenceStep> = discovery_choices
+            .iter()
+            .map(|(&id, &(proposal, _))| (id, proposal))
+            .collect();
+        let deliberations: BTreeMap<StableId, SequenceStep> = discovery_choices
+            .iter()
+            .filter_map(|(&id, &(_, deliberated))| deliberated.map(|d| (id, d)))
+            .collect();
         // (0c) Physics to physiology, the anatomy-derived metabolism (R-METABOLIZE): when a physiology
         // is installed, build each being's per-axis DERIVED drain so its survival follows its body plan,
         // mass, tissue, medium, and temperature rather than the axis defs' authored scalars. The
@@ -2962,8 +3275,98 @@ impl Runner {
             &drains,
             &emb.percepts,
             &load_factors,
+            &appetitive,
             &mut deferred_actions,
         );
+        // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
+        // action it sampled this tick, or `None` where it proposed nothing (or the loop is unarmed). Written
+        // after the locomotion step, folded into `state_hash`, the hypothesis the being will test (slice 2c's
+        // enactment executes it). A being absent from the map proposed nothing, so its record clears to
+        // `None`; an unarmed run leaves every record `None` and folds nothing (byte-identical).
+        if let Some(calib) = self.discovery {
+            let seed = emb.seed;
+            let tick = self.clock;
+            for w in emb.walkers.iter_mut() {
+                let proposal = proposals.get(&w.id).copied();
+                w.proposed_action = proposal;
+                // (4b) The DELIBERATION gate (ideation arc, piece 4): BEFORE exploring, a being ACTS on the
+                // believed-best action its planner recalled toward a goal (the grounded deliberated action)
+                // when its own heritable DELIBERATION weight fires, a counter-keyed draw under the DELIBERATE
+                // phase (disjoint from ENACT). FOUNDER-ZERO: a founder (zero weight) never deliberates, so
+                // goal-directed pursuit EMERGES by selection, never a coded "when idle, plan" (Principle 9).
+                // The deliberated action is already GROUNDED (a candidate in the being's current binding
+                // graph, so its affordance is perceived and afforded now), and deliberation takes PRECEDENCE
+                // over exploration: a being that acts on its plan does not also explore this tick, so it
+                // exploits its best grounded belief when it has one and falls through to exploring otherwise.
+                let mut acted = false;
+                if w.deliberation > Fixed::ZERO {
+                    if let Some(action) = deliberations.get(&w.id).copied() {
+                        let fired = DrawKey::entity(w.id.0, tick, Phase::DELIBERATE)
+                            .rng(seed)
+                            .unit_fixed(0)
+                            < w.deliberation;
+                        let primitive = AffordanceId(action.primitive);
+                        let matter_primitive = matches!(
+                            primitive,
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                        );
+                        if fired && matter_primitive {
+                            deferred_actions.insert(w.id, (primitive, Fixed::ONE));
+                            w.decided_affordance = Some(primitive);
+                            acted = true;
+                        }
+                    }
+                }
+                // (2a'') The EXPLORATION gate (ideation arc, piece 2, slice 2c-2): a being ACTS on its
+                // proposed action only when its own heritable exploration propensity fires, a counter-keyed
+                // draw under the ENACT phase (a uniform draw below the propensity). FOUNDER-ZERO: a being
+                // with zero propensity never draws below it, so it never enacts a proposal and stays
+                // byte-identical; only a being whose propensity is lifted off zero (by mutation, a follow-on;
+                // primed here) tries the untried, so exploration EMERGES rather than being switched on
+                // (Principle 9). When it fires on a proposed MATTER primitive (one the deferred-action pass
+                // enacts), the proposal is injected into `deferred_actions` and recorded as the decided
+                // affordance, so the SAME enactment the controller uses executes it and the reward learner
+                // credits the sequence through the eligibility trace, closing the loop: propose, enact, feel,
+                // credit. A proposed MOVE or INGEST is the controller's own, already enacted in the
+                // locomotion step, so it is not re-injected here.
+                if let Some(proposal) = proposal {
+                    if !acted && w.exploration > Fixed::ZERO {
+                        // (3b) The SURPRISE-MODULATED effective propensity (ideation arc, piece 3): a being
+                        // enacts its proposals at its heritable base rate, LIFTED when its recent prediction
+                        // error (surprise) clears the reserved threshold, so it explores more where the world
+                        // defied its forward model and settles to the base as its predictions come true. The
+                        // lift is MULTIPLICATIVE on the base (`base * (1 + gain * surprise)`), so a founder
+                        // (zero base, already excluded by the guard above) never explores however surprised:
+                        // founder-zero holds, and surprise only ever AMPLIFIES an already-heritable drive
+                        // (Principle 9). The draw is the same counter-keyed ENACT draw; only its threshold
+                        // moves, so a being with zero surprise is byte-identical to the pre-3b gate.
+                        let effective = if w.surprise > calib.surprise_threshold {
+                            let lift = Fixed::ONE
+                                + calib
+                                    .surprise_gain
+                                    .checked_mul(w.surprise)
+                                    .unwrap_or(Fixed::ZERO);
+                            w.exploration.checked_mul(lift).unwrap_or(w.exploration)
+                        } else {
+                            w.exploration
+                        };
+                        let fired = DrawKey::entity(w.id.0, tick, Phase::ENACT)
+                            .rng(seed)
+                            .unit_fixed(0)
+                            < effective;
+                        let primitive = AffordanceId(proposal.primitive);
+                        let matter_primitive = matches!(
+                            primitive,
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                        );
+                        if fired && matter_primitive {
+                            deferred_actions.insert(w.id, (primitive, Fixed::ONE));
+                            w.decided_affordance = Some(primitive);
+                        }
+                    }
+                }
+            }
+        }
         // (2b) Behaviour to matter: enact the matter decisions in id order (the map is id-keyed, so the
         // draw off the shared cell is deterministic), dispatched by the decided affordance: GRASP lifts the
         // loose matter underfoot bounded by strength (item 3, the driver), EXTRACT breaks bonded matter
@@ -3271,6 +3674,42 @@ impl Runner {
                     for axis in &emb.homeo.axes {
                         h.write_fixed(w.reserve_memory.prev_level(axis.id));
                     }
+                }
+                // The reward eligibility trace (ideation arc, piece 1, slice 1c): new per-being dynamic
+                // state, folded after the reserve memory in canonical (sequence-subject, eligibility) order.
+                // Empty for a being with no reward learner armed (never recorded), so it folds nothing and
+                // leaves an opted-out run's hash unchanged.
+                if !w.eligibility_trace.is_empty() {
+                    w.eligibility_trace.hash_into(&mut h);
+                }
+                // The discovery proposal (ideation arc, piece 2, slice 2c): the candidate action the being is
+                // about to test, folded as its canonical sequence subject after the eligibility trace. `None`
+                // for a being with no discovery loop armed, so it folds nothing and leaves an opted-out run's
+                // hash unchanged.
+                if let Some(step) = w.proposed_action {
+                    h.write_u64(sequence_subject(&[step]).0);
+                }
+                // The heritable exploration propensity (ideation arc, piece 2, slice 2c-2): the rate at which
+                // a being enacts its proposal, folded after the proposal it gates. FOUNDER-ZERO: zero for a
+                // being that never had its propensity lifted off zero, so it folds nothing and leaves an
+                // opted-out (and every founder-only) run's hash unchanged; only a primed or mutant being with
+                // a positive propensity folds it.
+                if w.exploration > Fixed::ZERO {
+                    h.write_fixed(w.exploration);
+                }
+                // The being's surprise (ideation arc, piece 3, slice 3b): its recent prediction-error
+                // magnitude, dynamic state folded after the propensity it modulates. Zero for a being with
+                // no discovery loop armed or nothing enacted yet, so it folds nothing and leaves an opted-out
+                // run's hash unchanged; only a being carrying a live surprise folds it.
+                if w.surprise > Fixed::ZERO {
+                    h.write_fixed(w.surprise);
+                }
+                // The heritable deliberation weight (ideation arc, piece 4, slice 4b): the rate at which a
+                // being acts on its recalled plan, folded after the surprise. FOUNDER-ZERO: zero for a being
+                // whose weight was never lifted off zero, so it folds nothing and leaves an opted-out (and
+                // every founder-only) run's hash unchanged; only a primed or mutant being folds it.
+                if w.deliberation > Fixed::ZERO {
+                    h.write_fixed(w.deliberation);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -4011,6 +4450,1242 @@ source = "test"
             run(Fixed::from_int(5)),
             Some(HARMS),
             "remove the harm (full salt tolerance) and no HARMS belief forms: the belief tracks harm"
+        );
+    }
+
+    #[test]
+    fn a_being_forms_the_reward_belief_that_its_action_pays_off_through_the_runner() {
+        // Ideation arc, piece 1, slice 1c, the run-level acceptance of the appetitive FORMATION loop through
+        // the actual Runner tick: a hungry being that INGESTS the energy-dense food underfoot feels its own
+        // ENERGY rise, and COMMITS the belief that the sequence it executed (its ingest) PAYS OFF for itself,
+        // with no injected observation and no coded reward table. The falsifier is the opt-in itself: the
+        // same being with the reward learner UNARMED never populates a trace and forms no such belief, so the
+        // belief tracks the felt reward routed through the eligibility trace, not the mere taking of an
+        // action. This ties the reward-credit path end to end through couple_conversation.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::Controller;
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::physiology::ENERGY_DENSITY;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A registry with a non-draining TEMPERATURE and a draining ENERGY reserve backed by the
+        // energy-density food class, so a hungry being that ingests the food underfoot restores ENERGY and
+        // feels the rise as its own interoceptive reward signal.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let food_physiology = || Physiology {
+            requirements: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            assimilation: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief subject the being should form: the single-step sequence of its INGEST primitive (target
+        // and param buckets zero until slice 2 supplies percept-derived context).
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: INGEST.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run a being that ingests the food each tick (an INGEST-biased controller), with the reward learner
+        // armed or not, and report whether it committed the REWARDS belief about its ingest.
+        let run = |reward_armed: bool| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            // Bias the INGEST activation (output index 3: move act,dx,dy = 0..2, ingest act = 3), so the
+            // being decides INGEST each tick and acts on the food underfoot.
+            let n_in = emb.layout().n_in();
+            let mut wts = vec![Fixed::ZERO; emb.layout().weight_count()];
+            wts[3 * n_in + (n_in - 1)] = Fixed::ONE;
+            let controller = Controller::from_weights(n_in, emb.layout().n_out(), 0, wts);
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: metabolise its ENERGY well down first, so ingesting the food produces a clear
+            // supra-recovery rise (the reward signal), not a saturated no-op.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..400 {
+                homeostasis.metabolize(&reg, Fixed::ZERO);
+            }
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body.clone(),
+                    homeostasis,
+                    food_physiology(),
+                    controller,
+                ),
+                band(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            if reward_armed {
+                runner.set_reward_learning(RewardLearningCalib::dev_default());
+            }
+            let mut committed = None;
+            for _ in 0..15 {
+                // Replenish a MODEST standing supply of the energy-dense food on the being's tile each tick,
+                // so the hungry being takes a small supply-limited bite every tick and its ENERGY climbs
+                // gradually (a felt reward each tick, its interoceptive rise beyond the metabolic-drain floor)
+                // rather than gorging in one bite and then plateauing (a single early rise the still-empty
+                // eligibility trace never credits). The supply is below the being's per-class requirement, so
+                // the satisfaction measure caps the bite and the reserve fills over many ticks.
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut nutrients = BTreeMap::new();
+                    nutrients.insert(ENERGY_DENSITY.to_string(), Fixed::from_ratio(1, 2));
+                    emb.resources_mut().set(
+                        tile,
+                        Composition {
+                            nutrients,
+                            toxins: BTreeMap::new(),
+                        },
+                    );
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(ingest_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Reward armed: the being that ingests the food feels ENERGY rise and forms the REWARDS belief that
+        // its ingest pays off, for itself, through the runner.
+        assert_eq!(
+            run(true),
+            Some(REWARDS),
+            "a being that ingests reserve-raising food forms the REWARDS belief that its action pays off"
+        );
+        // The falsifier (the opt-in): with the reward learner unarmed, no eligibility trace is populated and
+        // no reward belief forms, however much the being ingests.
+        assert_ne!(
+            run(false),
+            Some(REWARDS),
+            "with the reward learner unarmed, no REWARDS belief forms: the belief tracks the routed reward"
+        );
+    }
+
+    #[test]
+    fn a_being_that_learns_its_ingest_pays_off_repeats_it_past_the_point_a_naive_being_stops() {
+        // Ideation arc, piece 1, the belief-to-behaviour milestone (the WIRE acceptance): a being REPEATS a
+        // rewarded action. Two beings run the IDENTICAL hunger-driven controller, which ingests while hungry
+        // and moves once fed (its INGEST activation falls as ENERGY rises, so a sated being stops eating), and
+        // both carry the SAME primed appetitive weight from the INGEST appetitive channel to the INGEST
+        // output. The ONLY difference is whether the reward learner is armed. The armed being learns that its
+        // INGEST pays off, its appetitive channel lights, the primed weight lifts its INGEST activation, and it
+        // keeps ingesting past the point hunger alone would stop; the unarmed being never forms the belief, its
+        // appetitive channel stays dark, and it stops eating once fed. So the reward BELIEF, routed through the
+        // appetitive percept and an evolved weight, changes the behaviour, and removing the reward signal
+        // removes the repetition, the appetitive twin of the harm falsifier. No authored preference: the two
+        // beings are identical but for the felt reward.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::controller::Controller;
+        use crate::edibility::{Composition, Physiology};
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
+        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, SequenceStep};
+        use crate::physiology::ENERGY_DENSITY;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let food_physiology = || Physiology {
+            requirements: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            assimilation: [(ENERGY_DENSITY.to_string(), Fixed::ONE)]
+                .into_iter()
+                .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: INGEST.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run the being with the reward learner armed or not, returning how many of the ticks it decided
+        // INGEST (the repetition count) and whether it committed the ingest-pays-off belief.
+        let run = |reward_armed: bool| -> (usize, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            // Opt into reward repetition: the layout grows an appetitive belief block the runner fills each
+            // tick from the being's reward beliefs. Set before the being is built, so its controller expresses
+            // against the appetitive-enabled layout.
+            emb.set_appetitive(true);
+            let layout = emb.layout().clone();
+            let n_in = layout.n_in();
+            let energy_base = layout.axis_input_base(ENERGY).unwrap();
+            let ingest_channel = layout.appetitive_input_base()
+                + layout
+                    .affordance_ids()
+                    .iter()
+                    .position(|a| *a == INGEST)
+                    .unwrap();
+            // The hunger-driven controller (identical for the armed and unarmed being): MOVE activation is a
+            // constant half from the bias, INGEST activation is one from the bias MINUS the ENERGY level, so a
+            // hungry being (low ENERGY) ingests and a fed one (high ENERGY, INGEST below the half) moves. The
+            // PRIMED appetitive weight adds a half to INGEST when the being believes its ingest pays off, so a
+            // committed belief keeps INGEST winning past satiety. MOVE act is output 0, INGEST act output 3.
+            // MOVE's activation is output 0 (its heading dx, dy are outputs 1, 2); INGEST's activation is the
+            // scalar output 3 (the dev_default layout, as the slice-1c test uses).
+            let move_act = 0usize;
+            let ingest_act = 3usize;
+            let mut wts = vec![Fixed::ZERO; layout.weight_count()];
+            wts[move_act * n_in + (n_in - 1)] = Fixed::from_ratio(1, 2);
+            wts[ingest_act * n_in + (n_in - 1)] = Fixed::ONE;
+            wts[ingest_act * n_in + energy_base] = Fixed::ZERO - Fixed::ONE;
+            wts[ingest_act * n_in + ingest_channel] = Fixed::from_ratio(1, 2);
+            let controller = Controller::from_weights(n_in, layout.n_out(), 0, wts);
+            let tile = Coord3::ground(4, 4);
+            // A hungry being: metabolise its ENERGY well down first, so it starts on the ingesting side.
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            for _ in 0..400 {
+                homeostasis.metabolize(&reg, Fixed::ZERO);
+            }
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body.clone(),
+                    homeostasis,
+                    food_physiology(),
+                    controller,
+                ),
+                band(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            if reward_armed {
+                runner.set_reward_learning(RewardLearningCalib::dev_default());
+            }
+            let mut ingests = 0usize;
+            let mut ever_committed = false;
+            for _ in 0..30 {
+                // Replenish an abundant energy-dense food on WHATEVER tile the being now stands on, so a being
+                // that walks (MOVE) still finds food underfoot and the only thing that changes its intake is
+                // its own decision to ingest, not the geography.
+                if let Some(emb) = runner.embodiment_mut() {
+                    let coord = emb.walkers().iter().find(|w| w.id == id).map(|w| w.coord());
+                    if let Some(coord) = coord {
+                        let mut nutrients = BTreeMap::new();
+                        nutrients.insert(ENERGY_DENSITY.to_string(), Fixed::from_int(4));
+                        emb.resources_mut().set(
+                            coord,
+                            Composition {
+                                nutrients,
+                                toxins: BTreeMap::new(),
+                            },
+                        );
+                    }
+                }
+                runner.step();
+                if let Some(emb) = runner.embodiment() {
+                    if let Some(w) = emb.walkers().iter().find(|w| w.id == id) {
+                        if w.decided_affordance == Some(INGEST) {
+                            ingests += 1;
+                        }
+                    }
+                }
+                // The belief the appetitive channel reads is transient by design: it commits while the being
+                // climbs (each ingest a felt reward) and fades once the being is full (ingesting at satiety
+                // wins no reserve, so the evidence turns neutral). Record whether it was ever held, the window
+                // in which the appetitive channel lifts INGEST and the repetition shows.
+                if runner
+                    .world()
+                    .and_then(|w| w.mind(id))
+                    .and_then(|m| m.belief(ingest_subject, REWARD_ATTR, &bp))
+                    == Some(REWARDS)
+                {
+                    ever_committed = true;
+                }
+            }
+            (ingests, ever_committed)
+        };
+
+        let (armed_ingests, armed_committed) = run(true);
+        let (naive_ingests, naive_committed) = run(false);
+
+        // The armed being formed the belief at some point in the run; the unarmed one never did (no reward
+        // routed, no trace, so its appetitive channel is dark the whole run).
+        assert!(
+            armed_committed,
+            "the reward-armed being commits the ingest-pays-off belief through the runner"
+        );
+        assert!(
+            !naive_committed,
+            "the unarmed being forms no reward belief, so its appetitive channel stays dark"
+        );
+        // The behavioural payoff: the being that believes its ingest pays off REPEATS it strictly more than
+        // the identical being that never learned, because the lit appetitive channel and its evolved weight
+        // keep INGEST winning past the point hunger alone would hand the tick to MOVE.
+        assert!(
+            armed_ingests > naive_ingests,
+            "the being that learned its ingest pays off repeats it more than the naive control \
+             (armed {armed_ingests} ingests vs naive {naive_ingests})"
+        );
+    }
+
+    #[test]
+    fn a_being_proposes_a_candidate_action_from_what_it_perceives_and_the_proposal_folds() {
+        // Ideation arc, piece 2, slice 2c (the WIRE): the discovery loop RUNS on the run path. A being
+        // standing on fracturable matter, with the affordance-percept registry installed and the discovery
+        // loop armed, perceives the fracture-potential underfoot, enumerates the generic candidate bindings
+        // over its afforded primitives, and SAMPLES one, recorded as its proposed action and folded into
+        // state_hash. Opt-in: an unarmed being proposes nothing and its run is byte-identical; the proposal
+        // replays bit-for-bit, and folding it changes the hash (so the discovery loop is canonical state).
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, TEMPERATURE};
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        // A minimal material floor: a fracture axis and a granite substance the being can sense as
+        // fracturable underfoot.
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+
+        let run = |armed: bool| -> (Option<SequenceStep>, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_default(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            emb.add(
+                Walker::new(
+                    id,
+                    tile,
+                    body.clone(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    empty_physiology(),
+                    controller,
+                ),
+                band(),
+            );
+            // Fracturable matter underfoot, and the physics registry it is sensed against.
+            let mut material = MaterialField::new();
+            material.deposit(tile, "granite", Fixed::from_int(4));
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            if armed {
+                runner.set_discovery(DiscoveryCalib::dev_default());
+            }
+            runner.step();
+            let proposal = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                .and_then(|w| w.proposed_action);
+            (proposal, runner.state_hash())
+        };
+
+        let (armed_proposal, armed_hash) = run(true);
+        let (armed_proposal2, armed_hash2) = run(true);
+        let (naive_proposal, naive_hash) = run(false);
+
+        // The armed being proposes a candidate action from its own afforded primitives and the fracture it
+        // perceives, deterministic across replays.
+        assert!(
+            armed_proposal.is_some(),
+            "the armed being proposes a candidate action from what it perceives"
+        );
+        assert_eq!(
+            armed_proposal, armed_proposal2,
+            "the proposal is a reproducible function of the being, tick, and seed"
+        );
+        assert_eq!(armed_hash, armed_hash2, "the armed run is replay-identical");
+        // The falsifier and the opt-in: an unarmed being proposes nothing, and folding the proposal into the
+        // hash makes the armed run's canonical state differ from the byte-identical unarmed run.
+        assert_eq!(
+            naive_proposal, None,
+            "an unarmed being proposes nothing (opt-in)"
+        );
+        assert_ne!(
+            armed_hash, naive_hash,
+            "the proposal folds into state_hash, so the discovery loop is canonical state"
+        );
+    }
+
+    #[test]
+    fn a_primed_being_enacts_its_proposal_while_a_founder_only_proposes_it() {
+        // Ideation arc, piece 2, slice 2c-2 (the enactment gate): a being ACTS on the action it proposed
+        // only when its own heritable exploration propensity fires. FOUNDER-ZERO: a being whose propensity
+        // is zero (every founder) proposes its hypothesis but never enacts it, so it takes no action and its
+        // run is byte-identical to the pre-gate discovery run; a being whose propensity is PRIMED to one (a
+        // mutant, or this proof's fixture) enacts its proposal through the SAME deferred-action path the
+        // controller uses, so the grasp is routed and recorded as its decided affordance, the action the
+        // reward learner can then credit. Exploration EMERGES by selection (Principle 9), proven here with a
+        // primed value exactly as the appetitive weight and the avoidance weight were proved primed. The
+        // physical grasp itself (matter into the load, bounded by strength) is material-substrate item 3's,
+        // exercised and proven there against a muscled body; this test isolates the GATE, whether a proposed
+        // action becomes a tried one, read off the being's decided affordance rather than re-running item 3.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
+            GRASP, TEMPERATURE,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        // The same minimal material floor as the 2c-1 proposal test: a fracture axis and a granite substance
+        // the being senses as fracturable underfoot.
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        // A GRASP-only affordance registry, so the sampled proposal is always the grasp matter primitive
+        // (one the deferred-action pass enacts). Grasp is unconditional (`requires: None`), so any body
+        // affords it; with it the sole afforded primitive the being cannot propose a MOVE or INGEST the
+        // controller would already own, so the gate's enactment is the only path from proposal to action.
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+
+        // Run one tick of an armed discovery loop with the being's exploration propensity PRIMED to
+        // `exploration`, returning its proposed action, the affordance it decided (the gate's observable),
+        // and the canonical state hash.
+        let run = |exploration: Fixed| -> (Option<SequenceStep>, Option<AffordanceId>, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            // Prime the heritable exploration propensity, standing in for the follow-on's Channel::Exploration
+            // expression: zero is a founder (never enacts), one is a being whose propensity is fully lifted.
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            material.deposit(tile, "granite", Fixed::from_int(4));
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.step();
+            let w = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id).cloned());
+            let proposal = w.as_ref().and_then(|w| w.proposed_action);
+            let decided = w.as_ref().and_then(|w| w.decided_affordance);
+            (proposal, decided, runner.state_hash())
+        };
+
+        let primed = run(Fixed::ONE);
+        let primed2 = run(Fixed::ONE);
+        let founder = run(Fixed::ZERO);
+
+        // The proposal is a reproducible function of the being, tick, seed, and beliefs, under the HYPOTHESIZE
+        // phase; the exploration gate draws under the disjoint ENACT phase, so whether a being enacts does NOT
+        // change WHAT it proposes: the primed and founder beings propose the SAME grasp candidate.
+        assert!(
+            primed.0.is_some(),
+            "the armed being proposes a grasp candidate from what it perceives"
+        );
+        assert_eq!(
+            primed.0, founder.0,
+            "the proposal does not depend on the exploration propensity (a disjoint phase)"
+        );
+        // The gate: the primed being enacts its proposed grasp, recorded as its decided affordance (the same
+        // enactment path the controller's own decisions take); the founder-zero being proposes the identical
+        // grasp but never enacts it, so with its zeros controller deciding nothing it takes no action at all.
+        assert_eq!(
+            primed.1,
+            Some(GRASP),
+            "the primed being enacts its proposed grasp, so the gate routed it to the decided affordance"
+        );
+        assert_eq!(
+            founder.1, None,
+            "the founder-zero being proposes but never enacts (founder-zero: exploration is off)"
+        );
+        // Determinism and canonical state: the primed run replays bit-for-bit, and its hash differs from the
+        // founder's because the exploration propensity is canonical state (it folds when positive) while the
+        // founder folds nothing, so a founder's run is byte-identical to the pre-gate discovery run.
+        assert_eq!(primed, primed2, "the primed run replays bit-for-bit");
+        assert_ne!(
+            primed.2, founder.2,
+            "the exploration propensity folds into state_hash, so it is canonical state; a founder folds none"
+        );
+    }
+
+    #[test]
+    fn surprise_lifts_a_beings_exploration_multiplicatively_and_never_lifts_a_founder() {
+        // Ideation arc, piece 3, slice 3b (surprise-modulated exploration): a being's recent prediction error
+        // (surprise) LIFTS its heritable exploration propensity at the enact gate, so it enacts its proposals
+        // more where the world defied its forward model, and settles to its base as its predictions come true.
+        // The lift is MULTIPLICATIVE on the heritable base, so a founder (zero propensity) never explores
+        // however surprised: founder-zero holds, and surprise only ever amplifies an already-heritable drive
+        // (Principle 9). Proven with a PRIMED surprise (a test fixture): the surprise UPDATE rides the reward
+        // learner (piece 1), so arming discovery WITHOUT the reward learner leaves a primed surprise untouched
+        // across ticks, isolating the enact-gate modulation the way the 2c-2 test isolates the gate itself.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, GRASP,
+            TEMPERATURE,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+        const TICKS: u64 = 48;
+
+        // Count how many of `TICKS` ticks the being enacts its proposed grasp (the gate fires and records the
+        // decided affordance), with its exploration propensity and its surprise PRIMED. Discovery is armed but
+        // the reward learner is NOT, so the primed surprise is never overwritten and the run isolates the
+        // enact-gate modulation. A strong surprise gain is used so the modulation is unmistakable.
+        let enactments = |exploration: Fixed, surprise: Fixed| -> usize {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            walker.surprise = surprise;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            material.deposit(tile, "granite", Fixed::from_int(4));
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            // A strong surprise gain so a primed surprise lifts a moderate base propensity to certainty; the
+            // reward learner is left UNARMED so the primed surprise persists across ticks.
+            runner.set_discovery(DiscoveryCalib {
+                surprise_gain: Fixed::from_int(4),
+                ..DiscoveryCalib::dev_default()
+            });
+            let mut fired = 0;
+            for _ in 0..TICKS {
+                runner.step();
+                let enacted = runner
+                    .embodiment()
+                    .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                    .map(|w| w.decided_affordance == Some(GRASP))
+                    .unwrap_or(false);
+                if enacted {
+                    fired += 1;
+                }
+            }
+            fired
+        };
+
+        let base = Fixed::from_ratio(1, 4);
+        let calm = enactments(base, Fixed::ZERO);
+        let surprised = enactments(base, Fixed::ONE);
+        let founder = enactments(Fixed::ZERO, Fixed::ONE);
+
+        // The being that is SURPRISED enacts its proposals strictly more than the identical being that is not:
+        // its surprise clears the threshold and lifts its effective enact rate above its base (base * (1 +
+        // gain * surprise)), so it tries the untried harder where the world defied its prediction.
+        assert!(
+            surprised > calm,
+            "surprise lifts the being's exploration above its base (surprised {surprised} enactments vs \
+             calm {calm} over {TICKS} ticks)"
+        );
+        // The calm being still enacts at its base rate (the modulation is a lift, not a gate): a positive
+        // base with sub-threshold surprise enacts on some ticks, so the surprised gain is a lift off a live
+        // base, not the difference between acting and not.
+        assert!(
+            calm > 0,
+            "the calm being still enacts at its heritable base rate ({calm} enactments)"
+        );
+        // FOUNDER-ZERO under surprise: a being with zero heritable propensity never enacts however surprised,
+        // because the lift is MULTIPLICATIVE (zero base times any lift is zero). Surprise amplifies an evolved
+        // drive; it never authors one into a founder.
+        assert_eq!(
+            founder, 0,
+            "a founder with zero propensity never explores however surprised (multiplicative, founder-zero)"
+        );
+    }
+
+    #[test]
+    fn a_being_deliberates_onto_its_believed_best_grounded_action_and_a_founder_never_does() {
+        // Ideation arc, piece 4, slice 4b (the deliberation enactment gate): a being ACTS on the
+        // believed-best action its planner recalled toward a goal, through its own heritable DELIBERATION
+        // weight, and only where its senses currently ground it. FOUNDER-ZERO: a founder (zero weight) never
+        // deliberates, so goal-directed pursuit EMERGES by selection, never a coded "when idle, plan"
+        // (Principle 9). GROUNDING: a recalled belief is actable only where the being's own binding graph
+        // affords and perceives it, so a plan with no matching percept is inert. Proven with a PRIMED
+        // deliberation weight and a PRIMED reward belief (the belief the reward learner would form), exactly
+        // as the exploration gate was proved primed; the belief is committed through the associative engine's
+        // own path, not injected.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
+            GRASP, TEMPERATURE,
+        };
+        use crate::learn::{sequence_subject, SequenceStep, NEUTRAL, REWARDS, REWARD_ATTR};
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+        // The subject the reward credit records for a grasp and the planner ranks (the primitive subject).
+        let grasp_subject = sequence_subject(&[SequenceStep {
+            primitive: GRASP.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run one tick with the being's DELIBERATION weight primed to `deliberation` and a committed REWARDS
+        // belief about grasp, on granite when `grounded` (so grasp is a candidate in its binding graph) or a
+        // void cell otherwise (so no candidate grounds the recalled belief). Discovery is armed, the reward
+        // learner is not, and exploration is zero, so only the deliberation gate can enact.
+        let run = |deliberation: Fixed, grounded: bool| -> (Option<AffordanceId>, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+            // Commit the being's REWARDS belief about grasp through the associative engine's own path.
+            if let Some(mind) = world.mind_mut(id) {
+                for _ in 0..12 {
+                    mind.consider(
+                        grasp_subject,
+                        REWARD_ATTR,
+                        [REWARDS, NEUTRAL],
+                        REWARDS,
+                        Fixed::ONE,
+                        id,
+                    );
+                }
+            }
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            walker.deliberation = deliberation;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            if grounded {
+                material.deposit(tile, "granite", Fixed::from_int(4));
+            }
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.step();
+            let decided = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                .and_then(|w| w.decided_affordance);
+            (decided, runner.state_hash())
+        };
+
+        let deliberate = run(Fixed::ONE, true);
+        let deliberate2 = run(Fixed::ONE, true);
+        let founder = run(Fixed::ZERO, true);
+        let ungrounded = run(Fixed::ONE, false);
+
+        // A being with a primed deliberation weight and a believed-good GROUNDED action enacts it: the
+        // planner recalled that grasp pays off, the binding graph grounds it, and the deliberation gate fires.
+        assert_eq!(
+            deliberate.0,
+            Some(GRASP),
+            "the being deliberates onto its believed-best grounded action and enacts it"
+        );
+        assert_eq!(
+            deliberate, deliberate2,
+            "the deliberation run replays bit-for-bit"
+        );
+        // FOUNDER-ZERO: a being with zero deliberation weight never acts on its plan, however sure and
+        // grounded, so goal-directed pursuit is a heritable drive selection lifts, never a default.
+        assert_eq!(
+            founder.0, None,
+            "a founder with zero deliberation weight never deliberates (founder-zero)"
+        );
+        // GROUNDING: the same believed-good being on a void cell (no granite, so grasp is not a current
+        // binding-graph candidate) enacts nothing, so a recalled belief is inert until the senses bind it.
+        assert_eq!(
+            ungrounded.0, None,
+            "a recalled belief with no matching percept is inert (the grounding gate)"
+        );
+        // The deliberation weight is canonical state, so the deliberating run's hash differs from the
+        // founder's (which folds no weight and enacts nothing through the gate).
+        assert_ne!(
+            deliberate.1, founder.1,
+            "the deliberation weight folds into state_hash, so it is canonical state"
         );
     }
 

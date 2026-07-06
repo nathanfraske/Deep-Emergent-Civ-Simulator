@@ -35,12 +35,14 @@
 //! the being's own reserve falling, the subject from a raw quantized percept, and "this feature harms
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
-use civsim_core::{Fixed, StableId};
+use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::Coord3;
+use std::collections::BTreeMap;
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
+use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
 use crate::percept::{feature_bucket, PerceptRegistry};
 
@@ -55,6 +57,22 @@ pub const HARMS: ValueId = 1;
 /// The value meaning "this feature is benign": the competing hypothesis, reinforced on harm-free ticks
 /// so the belief is defeasible for free (a feature that stops harming is un-learned).
 pub const BENIGN: ValueId = 0;
+
+/// The generic attribute every experientially-learned REWARD belief is ABOUT: "does the action a being took
+/// in this context pay off" (ideation / experiential-discovery arc, piece 1, the appetitive learner). One
+/// attribute for all sequences (the sequence identity lives in the subject), a reserved-high id disjoint
+/// from [`HARM_ATTR`] (`u32::MAX - 2`) so a reward belief never aliases a harm belief on the same subject: a
+/// being can hold both "this ground harms me" and "this action pays off" about the same percept key without
+/// collision.
+pub const REWARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 3);
+
+/// The value meaning "this action pays off": the belief a being forms when a felt reserve RISE correlates
+/// with the action it took, the appetitive mirror of [`HARMS`].
+pub const REWARDS: ValueId = 1;
+/// The value meaning "this action is neutral": the competing hypothesis, reinforced on non-reward ticks so
+/// the reward belief is defeasible for free (an action that stops paying off is un-learned), the mirror of
+/// [`BENIGN`].
+pub const NEUTRAL: ValueId = 0;
 
 /// The reserved base of the per-feature belief-subject band. A feature subject is minted at or above
 /// this base, packed with the feature channel and its quantized bucket, so "salinity-bucket-2 ground
@@ -77,6 +95,67 @@ const FEATURE_BUCKET_MASK: u64 = 0xFFFF_FFFF;
 pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
     let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
     StableId(FEATURE_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
+}
+
+/// The reserved base of the per-SEQUENCE belief-subject band (ideation / experiential-discovery arc, piece
+/// 1, slice 1b): a discovered ACTION is a wildcard template over a primitive sequence, and this band mints
+/// the belief subject it is keyed on, the sibling of [`feature_subject`]'s per-feature band. It sets bit 61
+/// as well as bit 62, so a sequence subject is DISJOINT from every feature subject (whose payload stays in
+/// the low 48 bits, leaving bit 61 clear) and from every being id, and stays below `1 << 63` (below the
+/// reserved-high landmark ids), exactly as the feature band does. So two beings that execute the SAME
+/// affordance-typed sequence mint the IDENTICAL subject, and a gossiped belief about it does not diverge.
+const SEQUENCE_SUBJECT_BASE: u64 = (1 << 62) | (1 << 61);
+/// The most sequence steps packed into one subject. A longer sequence truncates to its first steps (the
+/// honest first-cut bound; a wider or hashed key is the refinement if discovered actions grow past this).
+const SEQ_MAX_STEPS: usize = 4;
+/// The bit width of each packed step field (the primitive id, the target-affordance bucket, the param
+/// bucket). A field value wider than this clamps to the field maximum (the honest bound; the reserved
+/// quantization keeps the buckets small, so the clamp does not bite in practice).
+const SEQ_FIELD_BITS: u32 = 4;
+/// The bit width of one packed step (its three fields).
+const SEQ_STEP_BITS: u32 = SEQ_FIELD_BITS * 3;
+/// The mask for one packed field.
+const SEQ_FIELD_MASK: u64 = (1 << SEQ_FIELD_BITS) - 1;
+
+/// One step of an executed primitive sequence (ideation arc, piece 1, slice 1b): the PRIMITIVE the being
+/// enacted (an affordance id), the quantized TARGET-AFFORDANCE bucket of the matter it acted on (the raw
+/// derived affordance scalar bucketed like a feature, which slice 2a supplies), and the quantized action
+/// PARAM bucket (a force or aim level bucketed the same way). All three are small quantized ids, so a step
+/// is a wildcard predicate `primitive(target-kind, param-kind)` a template can match, never an object id or
+/// a coded primitive pair (Principles 8, 9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SequenceStep {
+    /// The affordance id of the primitive enacted (grasp, extract, ...).
+    pub primitive: u16,
+    /// The quantized target-affordance bucket (the kind of thing acted on).
+    pub target_bucket: i64,
+    /// The quantized action-parameter bucket (the kind of how: a force or aim level).
+    pub param_bucket: i64,
+}
+
+/// Mint the belief subject for an executed primitive SEQUENCE (ideation arc, piece 1, slice 1b): a
+/// canonical, RNG-free bit-pack of up to [`SEQ_MAX_STEPS`] steps into the reserved sequence-subject band,
+/// the sibling of [`feature_subject`]. Two beings that execute the SAME sequence of primitives against the
+/// SAME affordance-and-param kinds mint the IDENTICAL subject (so a belief that "grasp(sharp),
+/// actuate(fracturable) pays off" generalises across matter of the same kind and gossips without
+/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. Each field
+/// is clamped into [`SEQ_FIELD_BITS`] and the sequence into [`SEQ_MAX_STEPS`] (the honest bounds), so the
+/// pack never overflows the band, and the step COUNT is packed above the steps so a prefix is not confused
+/// with the full sequence.
+pub fn sequence_subject(steps: &[SequenceStep]) -> StableId {
+    let n = steps.len().min(SEQ_MAX_STEPS);
+    let mut payload: u64 = 0;
+    for (i, step) in steps.iter().take(SEQ_MAX_STEPS).enumerate() {
+        let primitive = (step.primitive as u64).min(SEQ_FIELD_MASK);
+        let target = (step.target_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
+        let param = (step.param_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
+        let packed_step = primitive | (target << SEQ_FIELD_BITS) | (param << (SEQ_FIELD_BITS * 2));
+        payload |= packed_step << (i as u32 * SEQ_STEP_BITS);
+    }
+    // The step count, packed above the four step fields (bits 48..), so a 2-step prefix of a 3-step
+    // sequence mints a different subject than the 3-step sequence itself.
+    payload |= (n as u64) << (SEQ_MAX_STEPS as u32 * SEQ_STEP_BITS);
+    StableId(SEQUENCE_SUBJECT_BASE | payload)
 }
 
 /// The reserved calibrations of the associative learner (Principle 11): the numbers that set when a
@@ -155,6 +234,165 @@ impl HarmLearningCalib {
     }
 }
 
+/// The reserved constants the APPETITIVE reward learner reads (ideation / experiential-discovery arc, piece
+/// 1), the exact mirror of [`HarmLearningCalib`]: fail-loud from the manifest under a Calibrated run or a
+/// labelled dev fixture in a test, every value reserved-with-basis (Principle 11). The mechanism is fixed
+/// Rust; these numbers are the owner's. They are the reward complement of the harm calib, keyed on a felt
+/// reserve RISE instead of a fall, and the certainty clamp reads the SAME `evidence.log_odds_clamp` the harm
+/// learner and the inference engine use, so a single reward observation cannot exceed the engine ceiling.
+#[derive(Clone, Copy, Debug)]
+pub struct RewardLearningCalib {
+    /// The reward-noise floor: a per-tick reserve rise no larger than this is ordinary metabolic recovery,
+    /// not reward ([`crate::homeostasis::is_reward_tick`]). RESERVED. Basis: the largest per-tick reserve
+    /// RISE a resting body's recovery incurs (the resting recovery rate scaled to the tick), the sign-mirror
+    /// of the harm-noise floor, so only a supra-recovery rise registers as reward.
+    pub reward_noise_floor: Fixed,
+    /// The feature granularity: the quantization step that buckets a raw feature amount into a perceived kind
+    /// ([`crate::percept::feature_bucket`]), the key a per-feature belief subject is minted from. RESERVED.
+    /// Basis: the sensorium's per-class just-noticeable difference for the sensed feature, the same acuity
+    /// the harm learner buckets on, so a reward belief generalises over the same feature kinds a harm belief
+    /// does.
+    pub feature_granularity: Fixed,
+    /// P(the reward signal fires | this action pays off): the base rate of a felt reserve rise on a truly
+    /// beneficial action. RESERVED. Basis: the fraction of ticks a naive being that took a beneficial action
+    /// feels a supra-recovery rise, the reward mirror of `p_harm_given_harms`, set as the harm arc sets its
+    /// likelihoods.
+    pub p_reward_given_rewards: Fixed,
+    /// P(the reward signal fires | this action is neutral): the base rate of a spurious felt rise on a
+    /// neutral action. RESERVED. Basis: the false-attribution rate of a transient reserve rise unrelated to
+    /// the action, the reward mirror of `p_harm_given_benign`; low, so a neutral action rarely earns reward
+    /// evidence.
+    pub p_reward_given_neutral: Fixed,
+    /// The certainty clamp the per-observation weight is bounded to. RESERVED. Basis: the evidence engine's
+    /// log-odds clamp (`evidence.log_odds_clamp`), set equal to it (and to the harm learner's) so a single
+    /// correlation observation cannot exceed the engine's maximum admissible certainty.
+    pub certainty_clamp: Fixed,
+    /// The eligibility decay, the temporal-difference lambda the [`EligibilityTrace`] falls by each tick
+    /// (slice 1b). RESERVED. Basis: the interoceptive lag between an action and its felt reserve rise the
+    /// physiology implies, bounded by the retention window the belief system already forgets on, so credit
+    /// reaches back only as far as the substrate remembers. In `(0, 1)`: nearer one credits a longer-lagged
+    /// action, nearer zero credits only the immediately-preceding one. It enters through the existing
+    /// observation `weight`, so it fabricates no new engine constant.
+    pub eligibility_decay: Fixed,
+}
+
+impl RewardLearningCalib {
+    /// Read the reward-learner calibrations fail-loud from the manifest (Principle 11): a reserved value left
+    /// unset refuses to build rather than running on a fabricated default. The certainty clamp reads the same
+    /// `evidence.log_odds_clamp` the inference engine and the harm learner use, so the three agree by
+    /// construction.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<RewardLearningCalib, CalibrationError> {
+        Ok(RewardLearningCalib {
+            reward_noise_floor: m.require_fixed("reward.noise_floor")?,
+            feature_granularity: m.require_fixed("reward.feature_granularity")?,
+            p_reward_given_rewards: m.require_fixed("reward.p_reward_given_rewards")?,
+            p_reward_given_neutral: m.require_fixed("reward.p_reward_given_neutral")?,
+            certainty_clamp: m.require_fixed("evidence.log_odds_clamp")?,
+            eligibility_decay: m.require_fixed("reward.eligibility_decay")?,
+        })
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE standing up the same magnitudes the manifest would carry, for the test
+    /// and harness paths that build without a manifest, the reward mirror of [`HarmLearningCalib::dev_default`]:
+    /// a noise floor of a hundredth (above the recovery base rate, below a real reserve gain), a unit
+    /// granularity, likelihoods of nine-tenths and a tenth (so a single reward observation carries ln(9) of
+    /// evidence and a naive being commits in a couple of reward ticks), and the engine's fifty-nat log-odds
+    /// clamp. Not owner canon.
+    pub fn dev_default() -> RewardLearningCalib {
+        RewardLearningCalib {
+            reward_noise_floor: Fixed::from_ratio(1, 100),
+            feature_granularity: Fixed::ONE,
+            p_reward_given_rewards: Fixed::from_ratio(9, 10),
+            p_reward_given_neutral: Fixed::from_ratio(1, 10),
+            certainty_clamp: Fixed::from_int(50),
+            eligibility_decay: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// The unsigned per-observation weight a single reward correlation carries: the I.J. Good weight of
+    /// evidence of the two reserved likelihoods, `ln(P(reward|rewards) / P(reward|neutral))`, clamped to the
+    /// certainty bound. General over the two probabilities, reading no kind, race, or action (the action
+    /// identity is in the subject, not the weight). The reward mirror of
+    /// [`HarmLearningCalib::observation_weight`].
+    pub fn observation_weight(&self) -> Fixed {
+        good_weight(
+            self.p_reward_given_rewards,
+            self.p_reward_given_neutral,
+            self.certainty_clamp,
+        )
+    }
+}
+
+/// The per-being ELIGIBILITY TRACE (ideation / experiential-discovery arc, piece 1, slice 1b): a short
+/// memory of the primitive SEQUENCES a being recently executed, each with a recency-decayed eligibility in
+/// `(0, 1]`, so a reserve rise felt some ticks after an action can still credit the sequence that produced
+/// it (temporal-difference credit assignment). The head sequence (just executed) carries full eligibility;
+/// each tick every trace decays by the reserved [`RewardLearningCalib::eligibility_decay`] (the TD lambda)
+/// and a trace that underflows to zero is pruned, so the memory reaches back only as far as the lag allows.
+///
+/// This is new per-being DYNAMIC state, the sibling of [`crate::homeostasis::ReserveMemory`]: it folds into
+/// `state_hash` in canonical (sequence-subject, eligibility) order, draws no randomness (a run stays
+/// bit-identical across worker widths), and is EMPTY-BY-DEFAULT, so a being that has executed no sequence
+/// folds nothing and a scenario that does not opt in replays bit-for-bit. Slice 1c populates it on the run
+/// path and reads it to route delayed credit through the shipped `consider` path.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EligibilityTrace {
+    /// The recently-executed sequences keyed by their [`sequence_subject`], each with its current
+    /// eligibility factor. Canonical `BTreeMap` order, so the fold and the credit walk are reproducible.
+    traces: BTreeMap<StableId, Fixed>,
+}
+
+impl EligibilityTrace {
+    /// An empty trace: no sequence remembered, so nothing folds into the hash until the first record.
+    pub fn new() -> EligibilityTrace {
+        EligibilityTrace::default()
+    }
+
+    /// Whether no sequence is remembered (an empty trace folds nothing into the hash, the opt-out state).
+    pub fn is_empty(&self) -> bool {
+        self.traces.is_empty()
+    }
+
+    /// Record a just-executed sequence at FULL eligibility (one), the head of the trace: it earns full
+    /// credit for a reserve rise felt this tick and decays from there. Re-executing a sequence refreshes it
+    /// to full.
+    pub fn record(&mut self, subject: StableId) {
+        self.traces.insert(subject, Fixed::ONE);
+    }
+
+    /// Decay every trace by the eligibility lambda and prune those that underflow to zero, so a sequence's
+    /// eligibility for delayed credit falls with the ticks since it was executed. With a lambda in `(0, 1)`
+    /// each trace shrinks and eventually leaves the memory, keeping it bounded and empty-neutral. A pure
+    /// deterministic fold in canonical key order.
+    pub fn decay(&mut self, lambda: Fixed) {
+        self.traces.retain(|_, e| {
+            *e = e.checked_mul(lambda).unwrap_or(Fixed::ZERO);
+            *e > Fixed::ZERO
+        });
+    }
+
+    /// The current eligibility of a sequence (how much delayed credit it still earns), zero if it was not
+    /// recently executed. Slice 1c scales the reward observation's weight by this.
+    pub fn eligibility(&self, subject: StableId) -> Fixed {
+        self.traces.get(&subject).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The remembered sequences with their eligibilities, in canonical order (the credit walk slice 1c runs).
+    pub fn entries(&self) -> impl Iterator<Item = (&StableId, &Fixed)> {
+        self.traces.iter()
+    }
+
+    /// Fold the trace into a hash in canonical (sequence-subject, eligibility) order, beside the reserve
+    /// memory. An empty trace folds nothing, so an opted-out run is byte-identical. The `BTreeMap` walks in
+    /// canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (subject, eligibility) in &self.traces {
+            h.write_u64(subject.0);
+            h.write_fixed(*eligibility);
+        }
+    }
+}
+
 /// One piece of evidence a being contributes this tick: the per-feature subject to key it on, the value
 /// it points toward (`HARMS` on a harm tick, `BENIGN` otherwise), and the signed weight. Fed straight
 /// into [`crate::agent::Mind::consider`] (which scales it by the mind's acuity and accumulates it into
@@ -186,6 +424,42 @@ pub fn feature_observations(
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
     let toward = if harm { HARMS } else { BENIGN };
+    features
+        .iter()
+        .enumerate()
+        .filter(|(_, &amount)| amount > Fixed::ZERO)
+        .map(|(channel, &amount)| {
+            let bucket = feature_bucket(amount, calib.feature_granularity);
+            FeatureObservation {
+                subject: feature_subject(channel as u16, bucket),
+                toward,
+                weight,
+            }
+        })
+        .collect()
+}
+
+/// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
+/// in its degenerate single-tick form): one per PRESENT feature of the cell it stands on (a channel whose
+/// amount is positive), toward `REWARDS` if it felt a supra-recovery reserve RISE this tick and `NEUTRAL`
+/// otherwise, each weighted by the reserved observation weight scaled by the being's belief plasticity (its
+/// heritable learning rate, `Mind::plasticity`, neutral at one). A near-verbatim clone of
+/// [`feature_observations`] with the sign flipped: the reward bit is the being's OWN interoceptive signal
+/// (whether any reserve ROSE beyond the noise floor, [`crate::homeostasis::is_reward_tick`]), the feature is
+/// the same raw percept, and the produced [`FeatureObservation`]s are fed into the `(subject, REWARD_ATTR)`
+/// frame (disjoint from the harm frame on the same subject), so the reward belief emerges from correlation
+/// with nothing read but the raw feature and the felt sign (Principles 8, 9). Slice 1b will re-key the
+/// subject from the standing-on feature to the executed primitive SEQUENCE; this single-tick form is the
+/// mirror the harm learner already proved.
+pub fn reward_observations(
+    reward: bool,
+    features: &[Fixed],
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> Vec<FeatureObservation> {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    let toward = if reward { REWARDS } else { NEUTRAL };
     features
         .iter()
         .enumerate()
@@ -258,6 +532,46 @@ pub fn avoidance_gradient(
         }
     }
     (ax, ay)
+}
+
+/// The belief-derived APPETITIVE salience over a being's affordances (ideation / experiential-discovery
+/// arc, piece 1, the belief-to-behaviour feedback, the appetitive mirror of [`avoidance_gradient`]): for
+/// each affordance in the caller's canonical order, ONE when the being holds a committed REWARDS belief
+/// about that affordance's single-primitive sequence, ZERO otherwise. It is the exact mirror of the
+/// avoidance gradient's committed-belief test (`mind.belief(...) == Some(HARMS)`), read per AFFORDANCE
+/// rather than per CELL, because the reward belief is keyed on the ACTION the being took rather than the
+/// ground it stands on, so there is no spatial distance to weight by: a believed-rewarding action reads a
+/// full unit signal, every other reads zero.
+///
+/// This is a PERCEPT, not a decision. The runner writes each channel into the controller's appetitive
+/// input block (canonical affordance order), and ONLY a heritable weight lifted off founder-zero by
+/// selection turns "I believe this action pays off" into "issue it again", so REPETITION emerges rather
+/// than being authored (Principle 9): the mechanism never adds a reward term to an affordance's activation
+/// directly, and the afforded-set gate in [`crate::controller::ControllerLayout::decide`] still bounds
+/// which action can win, so a believed-rewarding action the body cannot currently perform is never forced.
+/// Reads only the being's own reward beliefs and the affordance ids, never an affordance's authored valence
+/// or a race id (Principle 8). Pure and RNG-free; the single-primitive subject matches exactly what the
+/// slice-1c credit pass commits, so the belief this reads is the belief that pass formed.
+pub fn appetitive_salience(
+    mind: &Mind,
+    affordances: &[AffordanceId],
+    params: &InferenceParams,
+) -> Vec<Fixed> {
+    affordances
+        .iter()
+        .map(|a| {
+            let subject = sequence_subject(&[SequenceStep {
+                primitive: a.0,
+                target_bucket: 0,
+                param_bucket: 0,
+            }]);
+            if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
+                Fixed::ONE
+            } else {
+                Fixed::ZERO
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -352,6 +666,294 @@ mod tests {
             mind.belief(subject, HARM_ATTR, &params()),
             Some(HARMS),
             "the being forms the HARMS belief about the feature from its own repeated harm"
+        );
+    }
+
+    #[test]
+    fn only_present_features_earn_a_reward_observation_pointed_by_the_reward_bit() {
+        // The reward mirror of the harm observation: only a present feature earns an observation, a reward
+        // tick points it toward REWARDS and a non-reward tick toward NEUTRAL, on the same subject key.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::ZERO, Fixed::from_int(2)];
+        let reward = reward_observations(true, &features, Fixed::ONE, &calib);
+        assert_eq!(
+            reward.len(),
+            1,
+            "only the present feature earns an observation"
+        );
+        assert_eq!(
+            reward[0].toward, REWARDS,
+            "a reward tick points toward REWARDS"
+        );
+        assert_eq!(
+            reward[0].subject,
+            feature_subject(
+                1,
+                feature_bucket(Fixed::from_int(2), calib.feature_granularity)
+            )
+        );
+        assert!(
+            reward[0].weight > Fixed::ZERO,
+            "the observation carries positive evidence"
+        );
+        // A non-reward tick on the same cell points the same subject toward NEUTRAL.
+        let neutral = reward_observations(false, &features, Fixed::ONE, &calib);
+        assert_eq!(neutral[0].toward, NEUTRAL);
+        assert_eq!(neutral[0].subject, reward[0].subject);
+        // A cell with no present feature yields nothing to correlate.
+        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+    }
+
+    #[test]
+    fn a_being_repeatedly_rewarded_on_a_feature_commits_rewards_on_its_own() {
+        // The appetitive milestone core (slice 1a single-tick form): a mind fed repeated reward-while-on-the-
+        // feature commits a REWARDS belief about that feature-kind, purely from correlation, the exact mirror
+        // of the harm learner forming HARMS.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let subject = feature_subject(
+            0,
+            feature_bucket(Fixed::from_int(2), calib.feature_granularity),
+        );
+        let mut mind = Mind::new(StableId(1), Fixed::ONE);
+        assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), None);
+        for _ in 0..3 {
+            for obs in reward_observations(true, &features, Fixed::ONE, &calib) {
+                mind.consider(
+                    obs.subject,
+                    REWARD_ATTR,
+                    [REWARDS, NEUTRAL],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+        }
+        assert_eq!(
+            mind.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the being forms the REWARDS belief about the feature from its own repeated reward"
+        );
+    }
+
+    #[test]
+    fn a_reward_belief_and_a_harm_belief_coexist_on_one_subject_via_disjoint_attrs() {
+        // The disjointness guarantee: REWARD_ATTR (u32::MAX - 3) and HARM_ATTR (u32::MAX - 2) never alias, so
+        // a being can hold "this action pays off" and "this ground harms me" about the SAME feature subject
+        // at once without collision. The reward and harm frames are independent (the appetitive and aversive
+        // halves of one interoceptive signal split at zero).
+        assert_ne!(REWARD_ATTR, HARM_ATTR);
+        let rcalib = RewardLearningCalib::dev_default();
+        let hcalib = HarmLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let subject = feature_subject(
+            0,
+            feature_bucket(Fixed::from_int(2), rcalib.feature_granularity),
+        );
+        let mut mind = Mind::new(StableId(3), Fixed::ONE);
+        for _ in 0..3 {
+            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib) {
+                mind.consider(
+                    obs.subject,
+                    REWARD_ATTR,
+                    [REWARDS, NEUTRAL],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+            for obs in feature_observations(true, &features, Fixed::ONE, &hcalib) {
+                mind.consider(
+                    obs.subject,
+                    HARM_ATTR,
+                    [HARMS, BENIGN],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+        }
+        assert_eq!(
+            mind.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the reward belief commits on its own attr"
+        );
+        assert_eq!(
+            mind.belief(subject, HARM_ATTR, &params()),
+            Some(HARMS),
+            "the harm belief commits on its own attr, on the same subject, without collision"
+        );
+    }
+
+    #[test]
+    fn a_sequence_subject_is_canonical_and_disjoint_from_feature_subjects_and_beings() {
+        // Slice 1b: a primitive-sequence belief subject is a canonical function of the executed steps, minted
+        // in a band disjoint from the feature band and from being ids, below the reserved-high landmarks.
+        let step = |p: u16, t: i64, q: i64| SequenceStep {
+            primitive: p,
+            target_bucket: t,
+            param_bucket: q,
+        };
+        let seq = [step(3, 1, 0), step(4, 2, 1)]; // grasp(kind 1), extract(kind 2, param 1)
+        let s = sequence_subject(&seq);
+        // Above every being id (minted from zero) and below the reserved-high landmark ids.
+        assert!(s.0 >= SEQUENCE_SUBJECT_BASE);
+        assert!(s.0 < u64::MAX - 1);
+        // Canonical: the same steps mint the same subject; a different primitive, target, param, or ORDER is
+        // a different subject.
+        assert_eq!(sequence_subject(&seq), s);
+        assert_ne!(sequence_subject(&[step(3, 1, 0), step(5, 2, 1)]), s); // different primitive
+        assert_ne!(sequence_subject(&[step(3, 9, 0), step(4, 2, 1)]), s); // different target kind
+        assert_ne!(sequence_subject(&[step(4, 2, 1), step(3, 1, 0)]), s); // reversed order
+        assert_ne!(sequence_subject(&[step(3, 1, 0)]), s); // a prefix is not the whole sequence
+                                                           // Disjoint from the feature band: a sequence subject (bit 61 set) never equals a feature subject
+                                                           // (bit 61 clear), whatever the low bits, so a reward belief about an ACTION never aliases a belief
+                                                           // about a standing-on FEATURE.
+        assert_eq!(
+            SEQUENCE_SUBJECT_BASE & FEATURE_SUBJECT_BASE,
+            FEATURE_SUBJECT_BASE
+        );
+        assert_ne!(sequence_subject(&seq).0, feature_subject(0, 0).0);
+        for ch in 0..4u16 {
+            for bk in 0..8i64 {
+                assert_ne!(s.0, feature_subject(ch, bk).0);
+            }
+        }
+    }
+
+    #[test]
+    fn appetitive_salience_lights_only_the_affordance_the_being_believes_pays_off() {
+        // Slice 1d (READ): the belief-to-behaviour feedback PERCEPT, the appetitive mirror of the avoidance
+        // gradient. A being that has committed the REWARDS belief about ONE affordance's sequence reads a unit
+        // appetitive signal on that affordance's channel and zero on the others; a being that believes nothing
+        // reads all zeros, so a founder's percept is inert until a belief forms and an evolved weight lifts it.
+        let ingest = AffordanceId(1);
+        let grasp = AffordanceId(3);
+        let extract = AffordanceId(4);
+        let affordances = [ingest, grasp, extract];
+
+        let calib = RewardLearningCalib::dev_default();
+        let ingest_subject = sequence_subject(&[SequenceStep {
+            primitive: ingest.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let mut mind = Mind::new(StableId(7), Fixed::ONE);
+        // A being that has learned nothing reads a flat-zero appetitive percept (no signal to act on).
+        assert_eq!(
+            appetitive_salience(&mind, &affordances, &params()),
+            vec![Fixed::ZERO; 3],
+            "a being with no reward belief reads no appetitive signal on any affordance"
+        );
+        // Teach it that its INGEST pays off (the belief slice 1c's credit pass forms).
+        for _ in 0..3 {
+            mind.consider(
+                ingest_subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                calib.observation_weight(),
+                mind.id,
+            );
+        }
+        assert_eq!(
+            mind.belief(ingest_subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the being has committed the ingest-pays-off belief"
+        );
+        // The appetitive percept now lights ONLY the ingest channel, in the caller's canonical order, and the
+        // channels for the actions it holds no belief about stay dark.
+        assert_eq!(
+            appetitive_salience(&mind, &affordances, &params()),
+            vec![Fixed::ONE, Fixed::ZERO, Fixed::ZERO],
+            "the appetitive percept lights only the affordance the being believes pays off"
+        );
+        // The salience aligns to the caller's affordance order, not a fixed index: reorder the inputs and the
+        // lit channel moves with ingest.
+        assert_eq!(
+            appetitive_salience(&mind, &[grasp, ingest], &params()),
+            vec![Fixed::ZERO, Fixed::ONE],
+            "the salience aligns to the caller's canonical affordance order"
+        );
+    }
+
+    #[test]
+    fn the_eligibility_trace_records_decays_prunes_and_folds_empty_neutral() {
+        // Slice 1b: the eligibility trace remembers a just-executed sequence at full eligibility, decays it by
+        // the TD lambda each tick, prunes it when it underflows, and folds empty-neutral (opt-in).
+        let seq = [SequenceStep {
+            primitive: 3,
+            target_bucket: 1,
+            param_bucket: 0,
+        }];
+        let subject = sequence_subject(&seq);
+        let lambda = Fixed::from_ratio(1, 2);
+
+        let mut trace = EligibilityTrace::new();
+        assert!(trace.is_empty(), "a fresh trace remembers nothing");
+        assert_eq!(
+            trace.eligibility(subject),
+            Fixed::ZERO,
+            "an unrecorded sequence earns no delayed credit"
+        );
+
+        // Recording puts the sequence at full eligibility, the head of the trace.
+        trace.record(subject);
+        assert_eq!(trace.eligibility(subject), Fixed::ONE);
+        assert!(!trace.is_empty());
+
+        // Each decay halves the eligibility (the TD lambda), so a later-felt reward credits it less.
+        trace.decay(lambda);
+        assert_eq!(trace.eligibility(subject), Fixed::from_ratio(1, 2));
+        trace.decay(lambda);
+        assert_eq!(trace.eligibility(subject), Fixed::from_ratio(1, 4));
+
+        // Enough decays underflow it to zero and prune it, so the memory reaches back only as far as the lag
+        // allows and returns to empty (byte-neutral again).
+        for _ in 0..64 {
+            trace.decay(lambda);
+        }
+        assert!(
+            trace.is_empty(),
+            "a long-past sequence is pruned and the trace returns to empty"
+        );
+
+        // The fold is empty-neutral (an empty trace folds nothing: it leaves the hash identical to one no
+        // trace ever touched) and canonical (independent of record order).
+        let empty = EligibilityTrace::new();
+        let mut h_empty = StateHasher::new();
+        empty.hash_into(&mut h_empty);
+        assert_eq!(
+            h_empty.finish(),
+            StateHasher::new().finish(),
+            "an empty trace folds nothing"
+        );
+
+        let sa = sequence_subject(&[SequenceStep {
+            primitive: 1,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let sb = sequence_subject(&[SequenceStep {
+            primitive: 2,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+        let mut ta = EligibilityTrace::new();
+        ta.record(sa);
+        ta.record(sb);
+        let mut tb = EligibilityTrace::new();
+        tb.record(sb);
+        ta.record(sa); // re-record is idempotent to full; order differs from tb
+        tb.record(sa);
+        let mut ha = StateHasher::new();
+        ta.hash_into(&mut ha);
+        let mut hb = StateHasher::new();
+        tb.hash_into(&mut hb);
+        assert_eq!(
+            ha.finish(),
+            hb.finish(),
+            "the canonical BTreeMap fold is independent of record order"
         );
     }
 

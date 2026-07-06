@@ -2092,6 +2092,131 @@ value = ""
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
 
+# --- ideation / experiential-discovery arc, piece 1 (the appetitive reward learner): the sign complement
+# of the harm-learning constants above, read fail-loud by RewardLearningCalib::from_manifest
+# (crates/sim/src/learn.rs) when the reward learner is wired onto the run path. Each is the reward mirror of
+# a harm value: the reward learner keys on a felt reserve RISE (learn::reward_observations through
+# homeostasis::is_reward_tick) instead of a fall, so the same associative engine forms an appetitive belief
+# ("this action pays off") beside the aversive one, never a per-affordance reward table (Principle 11). ---
+
+[[reserved]]
+id = "reward.noise_floor"
+basis = "the per-tick reserve RISE below which a change is ordinary metabolic recovery, not reward (the reward learner, through learn::is_reward_tick). Set at the largest per-tick reserve rise a resting, recovering body incurs (the resting recovery rate scaled to the tick), the sign-mirror of harm.noise_floor, so only a supra-recovery rise registers as the interoceptive reward signal the belief keys off. Larger ignores milder benefit, smaller reads ordinary recovery as reward"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "reward.feature_granularity"
+basis = "the quantization step that buckets a raw feature amount into a perceived kind (learn::feature_bucket), the key a reward belief subject is minted from, the reward twin of harm.feature_granularity. Set at the sensorium's per-class just-noticeable difference for the sensed feature, the same acuity the harm learner buckets on, so a reward belief generalises over the same feature kinds a harm belief does. Larger merges distinct contexts, smaller splits one into a continuum the belief cannot generalise over"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/percept.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_rewards"
+basis = "P(the interoceptive reward signal fires | this action truly pays off), the first of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_harms. Set at the fraction of ticks a naive being that took a beneficial action feels a supra-recovery rise, the dose-and-physiology benefit rate the floor implies, the way the harm arc sets its likelihoods. Together with p_reward_given_neutral it sets how strong a single correlation observation is (ln of their ratio)"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_neutral"
+basis = "P(the interoceptive reward signal fires | this action is neutral), the second of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_benign. Set at the false-attribution rate of a transient reserve rise unrelated to the action; low, so a neutral action rarely earns reward evidence. Larger weakens each observation, smaller strengthens it"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+
+[[reserved]]
+id = "reward.eligibility_decay"
+basis = "the temporal-difference lambda the reward eligibility trace decays by each tick (learn::EligibilityTrace::decay), so a reserve rise felt some ticks after an action still credits the sequence that produced it. Set at the interoceptive lag between an action and its felt reserve rise the physiology implies, bounded by the retention window the belief system already forgets on, so credit reaches back only as far as the substrate remembers. In (0, 1): nearer one credits a longer-lagged action, nearer zero credits only the immediately-preceding one. It enters through the existing observation weight, so it fabricates no new engine constant"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
+
+# --- ideation / experiential-discovery arc, piece 2 (action-as-hypothesis): the affordance-percept
+# derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
+# when the affordance-percept block is wired onto the run path. Each is a physics reference scale, not a
+# per-affordance table: an affordance scalar is DERIVED from the matter's own axes against these
+# references (Principle 8/9), so a new sensible affordance percept is a data edit. ---
+
+[[reserved]]
+id = "affordance_percept.reference_stress"
+basis = "the reference actionable contact stress the fracture-potential percept is measured against (AffordancePerceptKind::FracturePotential): the contact stress an ORDINARY being delivers to matter it works, the extraction contest's reference force over a reference contact area (crates/sim/src/material.rs ExtractionParams), so the percept reads 'how breakable is this to an ordinary actor' and discriminates soft matter from hard rock. Set at that typical delivered stress, NOT the fracture axis's theoretical maximum, which would read every ordinary material as equally, trivially breakable. Larger reads more matter as breakable, smaller reserves the percept for the softest"
+status = "reserved"
+value = ""
+unit = "MPa"
+source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/sim/src/material.rs"
+
+[[reserved]]
+id = "discovery.exploration_floor"
+basis = "the baseline probability of trying a non-top-belief binding, so a being still explores when it already has a rewarded habit (the discovery sampler, discovery::sample_candidate): the relative weight of a candidate the being does NOT yet believe pays off against the unit weight of one it does, a bounded exploration-versus-exploitation floor. In [0, 1]: at zero the being only proposes actions it already believes pay off (pure exploit, no discovery), at one every candidate is equally likely (pure explore, the belief no longer biases). Set at the baseline exploration rate the ecology needs to keep discovering without abandoning a working technique; larger explores more, smaller exploits a known habit harder"
+status = "reserved"
+value = ""
+unit = "weight_ratio"
+source = "ideation arc piece 2 slice 2b; crates/sim/src/discovery.rs; crates/core/src/keys.rs"
+
+# --- ideation / experiential-discovery arc, piece 3, slice 3b (surprise-modulated exploration): the
+# being's forward-model prediction error (surprise) LIFTS its heritable exploration propensity
+# multiplicatively at the enact gate, so it explores more where the world defied its prediction. Read by
+# the DiscoveryCalib (crates/sim/src/discovery.rs) when the discovery loop is armed. ---
+
+[[reserved]]
+id = "discovery.surprise_threshold"
+basis = "the prediction-error threshold above which a being's surprise modulates its exploration (the enact-gate modulation, discovery::DiscoveryCalib): a predicted-versus-felt reward mismatch below this is not read as surprise, so ordinary interoceptive noise does not lift exploration. In [0, 1]. Set at the interoceptive noise floor already defined for reward and harm (reward.noise_floor), so a sub-resolution mismatch is not surprise, a performance-and-resolution bound rather than a realism one. Larger reserves the exploration lift for the most surprising mispredictions, smaller lets finer surprises lift it. NOTE: the slice-3a prediction error is CATEGORICAL ({-1, 0, +1}) because the belief carries a category not a learned magnitude, so any threshold in [0, 1) makes a unit surprise count and zero not; the threshold graduates to a graded gate once the forward model learns a reward magnitude"
+status = "reserved"
+value = ""
+unit = "reward_scale"
+source = "ideation arc piece 3 slice 3b; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "discovery.surprise_gain"
+basis = "the exploration variance gain, how much a unit of surprise LIFTS a being's effective exploration propensity above its heritable base (the enact-gate modulation, discovery::DiscoveryCalib): the effective enact rate is base * (1 + surprise_gain * surprise), MULTIPLICATIVE so a founder (zero base) never explores however surprised (founder-zero holds). Set against the existing EXPLORE heading-noise scale and the sensorium just-noticeable difference, so a unit surprise lifts exploration by a proportionate step rather than swamping the heritable base. Larger makes a surprised being explore much harder above its base, smaller keeps the lift gentle; a zero gain retires the surprise modulation and leaves the bare 2c-2 gate"
+status = "reserved"
+value = ""
+unit = "lift_ratio"
+source = "ideation arc piece 3 slice 3b; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
+
+# --- ideation / experiential-discovery arc, piece 4, slice 4a (the belief-graph planner): a being ranks
+# what it believes pays off toward a goal, bounded by a cognition budget. Read by planning::plan_toward
+# (crates/sim/src/planning.rs) when a caller plans; a parameter until slice 4b wires deliberation. ---
+
+[[reserved]]
+id = "planning.depth_cap"
+basis = "the maximum number of beliefs a being's deliberative plan considers toward a goal (planning::plan_toward): a per-tick cognition budget, the depth beyond which the marginal gain of a longer plan falls below the belief-confidence noise, so a being pursues its few surest bets rather than enumerating its whole belief store every tick. A performance-and-resolution bound, not a realism one: set against the per-tick planning budget and the confidence gap at which the next-ranked belief is no better than noise. Larger lets a being weigh more of what it believes (more deliberate, costlier), smaller keeps it to its top guesses; surfaced for the owner and left unset until the planner is wired and profiled (slice 4b)"
+status = "reserved"
+value = ""
+unit = "count"
+source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
+
+# --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
+# Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.
+# The deliberation weight is FOUNDER-ZERO (Principle 9: goal-directed pursuit emerges by selection, never a
+# coded "when idle, plan"), so the founder base is a structural zero, not a number to set. The follow-on that
+# makes deliberation heritable expresses it from a Channel (sibling to Channel::Exploration) at the birth
+# path and mutates it through the existing genome.additive_mutation_step, adding a genome.loci_per_channel
+# data row, no fresh dial; the expression to a [0, 1] rate is the genome-encoded reaction norm and the clamp
+# is structural (a probability). The planner's depth is planning.depth_cap (above), wired here as
+# DiscoveryCalib.plan_depth_cap. This slice proves the gate with a PRIMED Walker::deliberation (a test
+# fixture, not a manifest value), so no calibration entry is owed here.
+
+# --- ideation / experiential-discovery arc, piece 2, slice 2c-2 (the exploration-enactment gate,
+# Walker::exploration, the ENACT-phase draw): NO NEW reserved scalar, on grounding. The gate resolved this
+# gate as FOUNDER-ZERO (Principle 9: exploration EMERGES by selection, never switched on), so the founder
+# propensity is a structural zero, not a number to set. The follow-on that makes exploration heritable adds
+# a Channel::Exploration data row to the existing genome.loci_per_channel map (above) and mutates it through
+# the existing genome.additive_mutation_step (above), the standing per-locus additive step every quantitative
+# allele already drifts at, reused for consistency rather than a fresh dial. The expression to a [0, 1]
+# enact rate is the genome-encoded reaction norm (the loci ARE the substrate, as for Channel::Controller),
+# not a manifest scalar, and the [0, 1] clamp is structural (a probability). This slice proves the gate
+# mechanism with a PRIMED Walker::exploration (a test fixture, not a manifest value), so no calibration entry
+# is owed here. Recorded so the manifest documents WHY there is no 2c-2 entry rather than leaving a silent gap.
+
 [[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"

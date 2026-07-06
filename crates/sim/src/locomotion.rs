@@ -75,6 +75,7 @@ use crate::homeostasis::{
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
     MOVE, RELEASE, SHELTER,
 };
+use crate::learn::{EligibilityTrace, SequenceStep};
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
@@ -411,6 +412,51 @@ pub struct Walker {
     /// supplies a smaller contact area and its own material to the extraction and cut contests, so a
     /// crafted point breaks harder rock than a bare limb (the tool multiplies the affordance).
     pub wielded: Option<WieldedTool>,
+    /// The being's ELIGIBILITY TRACE (ideation / experiential-discovery arc, piece 1, slice 1c): the short,
+    /// recency-decayed memory of the primitive sequences it recently executed, so a reserve rise felt after
+    /// an action can credit the sequence that produced it ([`crate::learn::EligibilityTrace`]). EMPTY by
+    /// default, so a being in a world with no reward learning armed folds nothing into `state_hash` (the
+    /// reward trace is opt-in, hash-neutral by default). Populated, decayed, and credited only where the
+    /// runner arms the reward learner.
+    pub eligibility_trace: EligibilityTrace,
+    /// The affordance the being ACTED on this tick, the head of the sequence its eligibility trace records
+    /// (ideation arc, piece 1, slice 1c). Set each tick from the being's own decision and `None` on a tick
+    /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
+    /// source the reward-credit pass reads to record what the being just did.
+    pub decided_affordance: Option<AffordanceId>,
+    /// The candidate action the being PROPOSES this tick, sampled from its binding graph by the discovery
+    /// loop (ideation arc, piece 2, slice 2c). `None` unless the runner arms the discovery loop and the world
+    /// installs the affordance-percept registry, so it stays `None` and folds nothing by default (opt-in,
+    /// byte-identical). Set by the runner's discovery pass each tick and folded into `state_hash`, the
+    /// hypothesis a being is about to test.
+    pub proposed_action: Option<SequenceStep>,
+    /// The being's heritable EXPLORATION propensity (ideation arc, piece 2, slice 2c-2): the rate in
+    /// `[0, 1]` at which it ACTS on the action it proposed. FOUNDER-ZERO: a founder reads zero and never
+    /// enacts a proposal, so it is byte-identical, and only a mutant whose propensity is lifted off zero
+    /// tries the untried, so exploration EMERGES by selection rather than being switched on (Principle 9).
+    /// Expressed from a heritable `Channel::Exploration` at the birth path in a follow-on; this slice proves
+    /// the enactment gate with a PRIMED value, exactly as the appetitive weight was proved primed. Folds
+    /// into `state_hash` when positive.
+    pub exploration: Fixed,
+    /// The being's recent PREDICTION-ERROR magnitude, its surprise (ideation arc, piece 3, slice 3b): how far
+    /// the outcome of its last enacted action defied its forward-model prediction, in `[0, 1]`. It MODULATES
+    /// the exploration gate multiplicatively (a surprised being enacts its proposals more, a well-predicting
+    /// one less), so exploration rises where the world is least understood and falls as predictions come
+    /// true. Dynamic state, not heritable, updated each tick from `forward_model::prediction_error` on the
+    /// last-enacted action at the one-tick interoceptive lag and decayed otherwise; ZERO by default (no
+    /// discovery loop, or nothing enacted yet), so it folds nothing and an opted-out run is byte-identical.
+    /// Because the modulation is MULTIPLICATIVE on the heritable propensity, a founder (zero propensity) never
+    /// explores however surprised, so founder-zero holds. Folds into `state_hash` when positive.
+    pub surprise: Fixed,
+    /// The being's heritable DELIBERATION weight (ideation arc, piece 4, slice 4b): the rate in `[0, 1]` at
+    /// which it ACTS on the believed-best action its planner recalled toward a goal, rather than only on what
+    /// it perceives underfoot. FOUNDER-ZERO: a founder reads zero and never deliberates, so goal-directed
+    /// pursuit EMERGES by selection rather than being switched on (Principle 9), never a coded "when idle,
+    /// plan". The deliberation analogue of `exploration`: where exploration tries the untried, deliberation
+    /// exploits the best-believed, and the two are independent heritable drives. Proved with a PRIMED value
+    /// here, expressed from a heritable channel at the birth path in a follow-on. Folds into `state_hash`
+    /// when positive.
+    pub deliberation: Fixed,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -441,6 +487,12 @@ impl Walker {
             reserve_memory: ReserveMemory::new(),
             carried: SubstanceMix::new(),
             wielded: None,
+            eligibility_trace: EligibilityTrace::new(),
+            decided_affordance: None,
+            proposed_action: None,
+            exploration: Fixed::ZERO,
+            surprise: Fixed::ZERO,
+            deliberation: Fixed::ZERO,
             alive: true,
         }
     }
@@ -695,6 +747,9 @@ pub fn step<T: Terrain>(
         &PerceptRegistry::empty(),
         // No carried-load penalty on the field-less fixture path (nothing picks matter up here).
         &BTreeMap::new(),
+        // No appetitive belief percept on the field-less fixture path (the layout carries no appetitive
+        // block here), so the controller's appetitive input, if any, reads zero.
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -740,6 +795,7 @@ pub fn step_with_field_dirs<T: Terrain>(
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
     percepts: &PerceptRegistry,
     load_factors: &BTreeMap<StableId, Fixed>,
+    appetitive: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -749,13 +805,16 @@ pub fn step_with_field_dirs<T: Terrain>(
             continue;
         }
         // Snapshot the reserves at the START of the tick, so this tick's interoceptive delta
-        // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes: the
-        // associative learner (harm-learning arc slice b) reads it after metabolism to get "my
-        // CONDITION fell this tick" (harm), the raw signal it correlates with the feature underfoot.
-        // Opt-in: only where the world declares percepts, so a world without the feature substrate
-        // carries an empty memory that folds nothing into `state_hash` and stays bit-identical. A pure
-        // canonical-order snapshot drawing no randomness.
-        if !percepts.is_empty() {
+        // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes, the raw
+        // signal both experiential learners read after metabolism. The harm learner (harm-learning arc
+        // slice b) keys it to the FEATURE underfoot ("my CONDITION fell on this ground"), so it needs
+        // the snapshot wherever the world declares percepts. The reward learner (ideation arc slice 1c)
+        // keys it to the ACTION the being executed, carried in its eligibility trace ("this action I did
+        // pays off"), so it needs the snapshot wherever that trace is populated, which happens only when
+        // the reward learner is armed. Opt-in on both sides: a run that declares no percepts and arms no
+        // reward learner carries an empty trace, takes no snapshot, and folds an empty memory into
+        // state_hash, so it stays bit-identical. A pure canonical-order snapshot drawing no randomness.
+        if !percepts.is_empty() || !w.eligibility_trace.is_empty() {
             w.reserve_memory.snapshot(homeo, &w.homeostasis);
         }
         // Perceive first, so knowledge gained this tick is available to this tick's decision.
@@ -806,8 +865,21 @@ pub fn step_with_field_dirs<T: Terrain>(
         // before the feature substrate existed. A pure physical read of what is here, no threshold and
         // no label (Principles 8, 9).
         let features = percepts.perceive(resources.composition(here));
-        let input =
-            layout.build_input_with_features(&w.homeostasis, &here_axes, &dirs, signed, &features);
+        // The being's APPETITIVE belief percept for this tick (ideation arc, piece 1, the belief-to-behaviour
+        // feedback): its committed reward-belief signal over its affordances, computed by the runner from its
+        // own beliefs and written into the controller's appetitive block. Empty when the world does not opt
+        // into reward repetition (the layout carries no appetitive block), so the input is byte-identical to
+        // before the block existed. Only an evolved appetitive weight turns the signal into repetition.
+        let empty_appetitive: Vec<Fixed> = Vec::new();
+        let appetite = appetitive.get(&w.id).unwrap_or(&empty_appetitive);
+        let input = layout.build_input_with_features_and_appetitive(
+            &w.homeostasis,
+            &here_axes,
+            &dirs,
+            signed,
+            &features,
+            appetite,
+        );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
         // A grown body reads its affordances from its own structure's physics directly; a catalog body
@@ -817,6 +889,13 @@ pub fn step_with_field_dirs<T: Terrain>(
             None => afford.afforded(&w.body, organs, &p.capability_refs, &p.capability_caps),
         };
         let decision = layout.decide(&out, &afforded);
+        // Record the affordance the being acted on this tick, the head of the sequence its reward eligibility
+        // trace credits (ideation arc, piece 1, slice 1c). `None` on a tick it took no action; a pure read of
+        // its own decision, folded into no hash here (the runner's reward-credit pass reads it).
+        w.decided_affordance = decision
+            .as_ref()
+            .filter(|d| d.activation > Fixed::ZERO)
+            .map(|d| d.affordance);
 
         let mut exertion = Fixed::ZERO;
         if let Some(d) = decision {
@@ -1596,6 +1675,7 @@ mod tests {
                     &BTreeMap::new(),
                     &PerceptRegistry::empty(),
                     &load_factors,
+                    &BTreeMap::new(), // no appetitive block on the fixture path
                     &mut BTreeMap::new(),
                 );
             }
@@ -1672,6 +1752,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -1758,6 +1839,7 @@ mod tests {
                     &BTreeMap::new(),
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -1999,6 +2081,7 @@ mod tests {
             &empty_drains,
             &crate::percept::PerceptRegistry::empty(),
             &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -2118,6 +2201,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -2233,6 +2317,7 @@ mod tests {
                     &empty_drains,
                     &percepts,
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2327,6 +2412,7 @@ mod tests {
                     &empty_drains,
                     &crate::percept::PerceptRegistry::empty(),
                     &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }

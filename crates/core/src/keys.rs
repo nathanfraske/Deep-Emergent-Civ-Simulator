@@ -156,6 +156,28 @@ impl Phase {
     /// of the genome, the seed, and the being id, blind to any race, kind, or niche (Principle 9), and the
     /// grown structure folds into `state_hash` in canonical segment order.
     pub const MORPHOGEN: Phase = Phase(0x1B);
+    /// A hypothesis-sampling draw (the ideation / experiential-discovery arc, piece 2, slice 2b): choosing
+    /// which candidate action a being PROPOSES this tick from the binding graph, the belief-and-need-weighted
+    /// roulette over the primitive-times-affordance candidates it could try. Keyed on the being and the tick
+    /// (or sequence step), so a proposed hypothesis is a reproducible function of the seed, the being, and
+    /// the tick, never of the camera: a being explores the action space by trying things, it does not read
+    /// the answer like a god. Distinct from EXPLORE (a movement heading) so the two draws never collide on a
+    /// shared counter.
+    pub const HYPOTHESIZE: Phase = Phase(0x1C);
+    /// An exploration-enact draw (the ideation / experiential-discovery arc, piece 2, slice 2c-2): whether a
+    /// being ACTS on the candidate action it proposed this tick, gated by its own heritable exploration
+    /// propensity, founder-zero. Keyed on the being and the tick, so whether a being tries its hypothesis is
+    /// a reproducible function of the seed, the being, and the tick, never the camera. Distinct from
+    /// HYPOTHESIZE (which candidate it proposes) so the propose and the enact draws never collide on a
+    /// counter: a being that proposes an action still enacts it only when its exploration fires.
+    pub const ENACT: Phase = Phase(0x1D);
+    /// A deliberation-enact draw (the ideation / experiential-discovery arc, piece 4, slice 4b): whether a
+    /// being ACTS on the believed-best action its planner recalled toward a goal this tick, gated by its own
+    /// heritable DELIBERATION weight, founder-zero. Keyed on the being and the tick. Distinct from ENACT
+    /// (whether it acts on an EXPLORED novel proposal) so the deliberate and the explore draws never collide
+    /// on a counter: exploration tries the untried, deliberation exploits the best-believed, and a being's
+    /// two heritable drives are drawn independently so selection can tune each.
+    pub const DELIBERATE: Phase = Phase(0x1E);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An
