@@ -637,3 +637,117 @@ fn per_tick_birth_staggers_births_within_the_cadence_and_replays() {
         "the staggered birth trajectory replays bit for bit"
     );
 }
+
+#[test]
+fn overlapping_generations_stagger_the_dawn_and_sustain_a_mixed_age_population() {
+    // The lifetime/demography keystone, pillar 1 slice 1c (closes pillar 1): with BOTH staggered beats armed
+    // (per-tick birth AND per-tick mortality) AND the founding cohort STAGGERED in age at the dawn, individual
+    // lifespan decouples from the generational cadence. Births and deaths flow continuously, so at any moment
+    // the living hold a SPREAD of ages (overlapping generations, an old being and a young being alive at once)
+    // rather than one synchronous cohort born and dying together. This is the condition the whole keystone
+    // exists for: a knower can outlive long enough to be perceived by, and to teach, a younger being (the
+    // persistence pillar). Labelled fixtures throughout, never an owner value.
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), sex_determined_race(0, 80, 18));
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 60,
+    }];
+    let cadence = 6u64;
+    let build = |seed: u64, stagger_dawn: bool| {
+        let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(seed);
+        w.set_breeding_systems(registry());
+        let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+        // STAGGER THE DAWN: spread the founders across the mature span (ages 18..37) instead of one shared age,
+        // so the founding cohort is not a single synchronous age class that would born-and-die together. A
+        // labelled dev spread; without it every founder ages and faces the hazard in lockstep.
+        for (i, &id) in founders.iter().enumerate() {
+            let age = if stagger_dawn {
+                18 + (i as u32 % 20)
+            } else {
+                18
+            };
+            w.set_age(id, age);
+        }
+        w.set_life_cadence(cadence);
+        w.set_reproduction(reproduction());
+        // A gentle raw-age hazard (labelled balance knob): negligible for the young, a modest per-cadence
+        // chance through the mature years, certain by the lifespan, so deaths flow without collapsing the
+        // population while births replace them.
+        w.set_mortality_hazard(Curve::new([
+            (Fixed::ZERO, Fixed::ZERO),
+            (Fixed::from_int(40), Fixed::from_ratio(1, 6)),
+            (Fixed::from_int(80), Fixed::ONE),
+        ]));
+        w.arm_per_tick_birth();
+        w.arm_per_tick_mortality();
+        (w, founders)
+    };
+
+    let (mut a, founders) = build(0x0125EED, true);
+    let start = a.population();
+    assert!(start > 0, "the dawn seeds a founding population");
+    // Run a dozen cadences of the free lifecycle: birth, drift, and mortality all flowing per tick.
+    for _ in 0..(cadence * 12) {
+        a.tick(&[]);
+    }
+    // SUSTAINED: the flow of births replaced the flow of deaths across a dozen cadences, so the population did
+    // not collapse to nothing or to a lone survivor (overlapping generations, not a cohort wipe).
+    assert!(
+        a.population() > 1,
+        "the mixed-age population sustains across a dozen cadences: {} alive",
+        a.population()
+    );
+    // TURNOVER, not a frozen cohort: new beings were born after the dawn AND some founders have died, so the
+    // living are genuinely a mix of generations, not the staggered founding cohort aging in lockstep. Without
+    // both flows the age spread below could be an artifact of the initial stagger alone.
+    let living = a.being_ids();
+    let surviving_founders = living.iter().filter(|id| founders.contains(id)).count();
+    let born_after_dawn = living.iter().filter(|id| !founders.contains(id)).count();
+    assert!(
+        born_after_dawn > 0,
+        "new generations were born into the living population ({born_after_dawn} non-founders alive)"
+    );
+    assert!(
+        surviving_founders < founders.len(),
+        "some of the founding cohort has died (turnover): {surviving_founders} of {} founders remain",
+        founders.len()
+    );
+    assert!(
+        a.census().total_offspring() > 0,
+        "offspring were credited to the census over the run"
+    );
+    // OVERLAPPING AGES: at this snapshot the living hold more than one distinct age class at once (young born
+    // recently, old carried over), the coexistence a knower needs to outlive and be learned from.
+    let ages: std::collections::BTreeSet<u32> = a
+        .being_ids()
+        .into_iter()
+        .filter_map(|id| a.age_of(id))
+        .collect();
+    assert!(
+        ages.len() > 1,
+        "overlapping generations: the living span multiple age classes at once, not one synchronous cohort \
+         ({} distinct ages)",
+        ages.len()
+    );
+    let youngest = *ages.iter().next().expect("at least one living age");
+    let oldest = *ages.iter().next_back().expect("at least one living age");
+    assert!(
+        oldest - youngest >= cadence as u32,
+        "the age spread crosses at least a full cadence (young and old truly coexist): youngest {youngest}, \
+         oldest {oldest}"
+    );
+
+    // The whole staggered free run replays bit for bit (every per-tick birth and death keys on the being and
+    // the tick), so overlapping generations do not cost determinism.
+    let (mut a2, _) = build(0x0125EED, true);
+    for _ in 0..(cadence * 12) {
+        a2.tick(&[]);
+    }
+    assert_eq!(
+        a.state_hash(),
+        a2.state_hash(),
+        "the overlapping-generation free run replays bit for bit"
+    );
+}
