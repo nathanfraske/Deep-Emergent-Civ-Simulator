@@ -741,4 +741,5 @@ values = [
   { axis = "therm.fuel_value", value = "15000" },
   { axis = "therm.ignition_temperature", value = "570" },
   { axis = "therm.specific_heat", value = "1700" },
+  { axis = "therm.conductivity", value = "0.17" },
 ]

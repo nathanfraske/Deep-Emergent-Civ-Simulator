@@ -370,6 +370,34 @@ impl CombustionCalib {
     }
 }
 
+/// The reserved parameter of shelter (material-substrate arc, cascade item 7): how strongly the insulating
+/// matter enclosing a being attenuates its thermal exchange with the ambient field. The mechanism that reads
+/// it is fixed Rust (the being's exchange rate divided by one plus the enclosing matter's thermal resistance
+/// times this coupling); the number is the owner's to set, surfaced with a basis, never fabricated
+/// (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShelterCalib {
+    /// The coupling from the enclosing matter's derived thermal RESISTANCE (its volume over its conductivity,
+    /// the barrier R-value per unit cell area) to the dimensionless attenuation of the being's convective
+    /// exchange rate. RESERVED. Basis: the ratio of the barrier's conductive resistance to the being's
+    /// convective (surface) resistance, the series-thermal-resistance form, so a roof of a given material and
+    /// thickness slows the body-to-air coupling in proportion to how much better an insulator it is than open
+    /// air; a heat-transfer datum set from the conduction-versus-convection balance. A larger coupling makes a
+    /// given shelter buffer more. A physics-and-coupling bound, surfaced for the owner, never invented.
+    pub insulation_coupling: Fixed,
+}
+
+impl ShelterCalib {
+    /// A labelled DEVELOPMENT FIXTURE: an insulation coupling that exercises the mechanism (a roof of a
+    /// low-conductivity material visibly buffers a being from a harsh field) without standing for a
+    /// calibrated heat-transfer ratio. Not owner canon.
+    pub fn dev_fixture() -> ShelterCalib {
+        ShelterCalib {
+            insulation_coupling: Fixed::from_ratio(1, 10),
+        }
+    }
+}
+
 /// A worked object a being wields as a tool (material-substrate arc, cascade item 4, crafting). This is the
 /// CONTEST INTERFACE of a tool, the two things an extraction or cut reads: its working GEOMETRY (the
 /// contact area its edge or point presses over) and its MATERIAL (the substance it is made of, whose

@@ -99,7 +99,7 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    WieldedTool,
+    ShelterCalib, WieldedTool,
 };
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
@@ -1592,6 +1592,12 @@ pub struct Runner {
     /// field from the combustible matter hot enough to burn. Off the calibrated worldbuild path until a later
     /// slice wires it, exactly like the extraction and craft params.
     combustion: Option<CombustionCalib>,
+    /// The reserved calibration of shelter (material-substrate arc, cascade item 7), armed opt-in. `None` on
+    /// a runner without it, so no thermal-exchange attenuation runs and every existing scenario is
+    /// byte-identical; armed via [`Runner::set_shelter`], the body-exchange phase then attenuates each
+    /// being's coupling to the field by the insulating matter enclosing its cell. Off the calibrated
+    /// worldbuild path until a later slice wires it, exactly like the combustion calib.
+    shelter: Option<ShelterCalib>,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -1634,6 +1640,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             combustion: None,
+            shelter: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1673,6 +1680,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             combustion: None,
+            shelter: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1725,6 +1733,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             combustion: None,
+            shelter: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1800,6 +1809,7 @@ impl Runner {
             lifecycle: None,
             environ: None,
             combustion: None,
+            shelter: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1831,6 +1841,15 @@ impl Runner {
     /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
     pub fn set_combustion(&mut self, calib: CombustionCalib) {
         self.combustion = Some(calib);
+    }
+
+    /// Arm shelter (material-substrate arc, cascade item 7): each tick, the body-exchange phase attenuates a
+    /// being's thermal coupling to the ambient field by the insulating matter enclosing its cell (the matter
+    /// in the air cells above it), so a being under a roof of insulating matter is buffered from a harsh
+    /// field. Opt-in: a runner left unarmed attenuates nothing, so every existing scenario is byte-identical.
+    /// Reserved calibration ([`ShelterCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    pub fn set_shelter(&mut self, calib: ShelterCalib) {
+        self.shelter = Some(calib);
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -2319,7 +2338,51 @@ impl Runner {
     /// The body-thermal exchange phase: every located being pulls its core temperature toward its
     /// cell's field temperature (the discrete Newton-cooling coupling), beings walked in canonical id
     /// order. Reads the field and the located index, writes the body temperatures.
+    ///
+    /// SHELTER (material-substrate arc, cascade item 7): when shelter is armed and a being's cell is enclosed
+    /// by insulating matter (the matter in the air cells above it), its coupling to the field is attenuated by
+    /// that matter's thermal resistance, so a being under a roof of a low-conductivity material is buffered
+    /// from a harsh field and holds its temperature nearer its setpoint. Opt-in: with no shelter armed or no
+    /// enclosing matter the attenuation is one and every existing scenario is byte-identical, and the
+    /// attenuation keys off the substance's own conductivity, no shelter tag (Principles 8, 9, 11).
     fn phase_body_exchange(&mut self) {
+        // The per-column enclosing-matter thermal RESISTANCE (the overhead matter's volume over its
+        // conductivity, summed), read only when shelter is armed with a material registry present. Empty
+        // otherwise, so a being reads no insulation and its exchange is unattenuated.
+        let coupling = self
+            .shelter
+            .map(|c| c.insulation_coupling)
+            .unwrap_or(Fixed::ZERO);
+        let insulation: BTreeMap<(i32, i32), Fixed> = match (self.shelter, self.embodiment.as_ref())
+        {
+            (Some(_), Some(emb)) => match emb.material_registry.as_ref() {
+                Some(reg) => {
+                    let mut map: BTreeMap<(i32, i32), Fixed> = BTreeMap::new();
+                    for (cell, mix) in emb.material.cells() {
+                        if cell.z < 1 {
+                            continue; // only matter ABOVE the ground (a roof or wall) shelters
+                        }
+                        let mut resistance = Fixed::ZERO;
+                        for (s, &v) in mix.substances() {
+                            let cond = reg
+                                .substance(s)
+                                .and_then(|x| x.vector.get("therm.conductivity").copied())
+                                .unwrap_or(Fixed::ZERO);
+                            if cond > Fixed::ZERO {
+                                if let Some(r) = v.checked_div(cond) {
+                                    resistance = resistance.saturating_add(r);
+                                }
+                            }
+                        }
+                        let e = map.entry((cell.x, cell.y)).or_insert(Fixed::ZERO);
+                        *e = e.saturating_add(resistance);
+                    }
+                    map
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
         for id in ids {
             if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
@@ -2332,7 +2395,21 @@ impl Runner {
                     .get(&id)
                     .copied()
                     .unwrap_or(self.calib.exchange);
-                let next = bt + rate.mul(env - bt);
+                // Shelter attenuation: the enclosing matter's resistance times the reserved coupling divides
+                // the exchange rate (the series-resistance form). No enclosing matter reads zero resistance,
+                // so the rate is unchanged (the opt-in identity).
+                let resistance = insulation
+                    .get(&(coord.x, coord.y))
+                    .copied()
+                    .unwrap_or(Fixed::ZERO);
+                let eff_rate = if resistance > Fixed::ZERO {
+                    let denom =
+                        Fixed::ONE + resistance.checked_mul(coupling).unwrap_or(Fixed::ZERO);
+                    rate.checked_div(denom).unwrap_or(rate)
+                } else {
+                    rate
+                };
+                let next = bt + eff_rate.mul(env - bt);
                 self.body_temp.insert(id, next);
             }
         }

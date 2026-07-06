@@ -2148,6 +2148,78 @@ fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
 }
 
 #[test]
+fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
+    // Material-substrate arc item 7, SHELTER: a being whose cell is enclosed by insulating matter (a roof of
+    // oak in the air cells above it) is buffered from a harsh field, its body temperature holding nearer its
+    // warm start while an identical exposed being tracks the cold field. The buffering is the enclosing
+    // matter's own thermal resistance (its volume over its conductivity) attenuating the body-to-field
+    // coupling, no shelter tag: it keys off the substance's conductivity (Principles 8, 9, 11). Building the
+    // roof is the deferred emergent technique; this proves the primitive that makes a built roof matter.
+    use civsim_sim::material::{MaterialField, ShelterCalib};
+
+    let (w, h) = (8, 8);
+    let sheltered = Coord3::ground(2, 2);
+    let exposed = Coord3::ground(5, 5);
+
+    let build = || -> Runner {
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x50F7,
+        );
+        // A roof of oak (a low-conductivity insulator) in the air cells above the sheltered cell; nothing
+        // above the exposed cell.
+        let mut field = MaterialField::new();
+        for z in 1..=3 {
+            field.deposit(Coord3::new(2, 2, z), "oak", Fixed::from_int(10));
+        }
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        // A harsh cold field (280 K, below the beings' 310 K start), so an exposed body loses heat to it.
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(280)), calib(), emb);
+        r.set_shelter(ShelterCalib::dev_fixture());
+        // Two beings starting warm (310 K), one under the roof, one in the open.
+        r.place_being(StableId(1), sheltered, Fixed::from_int(310));
+        r.place_being(StableId(2), exposed, Fixed::from_int(310));
+        r
+    };
+
+    let mut r = build();
+    for _ in 0..15 {
+        r.step();
+    }
+    let warm = r.body_temp(StableId(1)).unwrap();
+    let cold = r.body_temp(StableId(2)).unwrap();
+    assert!(
+        warm > cold,
+        "the sheltered being held more of its warmth than the exposed one: {warm:?} vs {cold:?}"
+    );
+    assert!(
+        warm < Fixed::from_int(310) && cold < Fixed::from_int(310),
+        "both beings lost some heat to the cold field (shelter slows the loss, it does not stop it)"
+    );
+    assert!(
+        cold < Fixed::from_int(285),
+        "the exposed being cooled close to the field temperature"
+    );
+
+    // The scheduled tick order attenuates the exchange identically to the pinned order.
+    let mut scheduled = build();
+    for _ in 0..15 {
+        scheduled.step_scheduled(&[]);
+    }
+    assert_eq!(
+        scheduled.body_temp(StableId(1)).unwrap(),
+        warm,
+        "the scheduled order shelters the being bit-identically to the pinned order"
+    );
+}
+
+#[test]
 fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
     // The respiration sub-phase, through the runner: a body with a respiratory surface breathes its
     // ambient medium each tick. In a rich medium it replenishes what metabolism spends and survives; the
