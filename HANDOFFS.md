@@ -7,6 +7,24 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-06: material-substrate item 8 PROPER slice B (the matter cycle, decomposition, mass conserved exactly), on branch claude/material-substrate, PR #93
+
+Item 8 proper's first observable, built exactly mass-conserving: a cell's organic matter decomposes over time when warm, and the total mass is invariant. The gate signed off slice A ("Keep building ahead: slice B and the rest of item 8"), and the standing build-ahead is in force. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 8 PROPER SLICE B paragraph). Commit `07e065b`.
+
+WHAT LANDED: `crates/sim/src/runner.rs` gains `Runner::step_matter_cycle`, a beat inside `step_field` (so the pinned and scheduled tick orders both decompose against the settled temperature identically). For each cell whose substance carries `bio.mineral_ash_fraction` (the mark of organic matter, read from the substance's OWN composition physics, no tag and no race, Principles 8/9/11) with the cell temperature at or above the reserved decomposition barrier, the beat removes a reserved rate-fraction of that substance's volume and moves its EXACT per-substance mass decrease (the `MaterialField`'s own rounded `mass` reads, so their difference is exact) into a scalar `decomposed_mass: Fixed` sink on the `Embodiment`, matter dispersed to the environment. `Runner::set_matter_cycle` arms it opt-in; `Embodiment.decomposed_mass` and its accessor are new; the sink folds into `state_hash` only when non-zero.
+
+DATA and RESERVED: `crates/physics/src/lib.rs` `ground()` now loads the ground floor LAST (after biology) so a z-column substance can carry cross-domain axes; a cited "carrion" substance (`mat.density`, `bio.mineral_ash_fraction`, USDA / food-composition data) is added to `ground_floor.toml` as the decomposable organic matter; `crates/sim/src/material.rs` `MatterCycleCalib` carries the reserved decomposition barrier (basis: the freezing point of biological water near 273 K, below which decomposition halts) and rate (basis: the decomposition timescale), surfaced-with-basis, dev-fixture only. No value invented.
+
+CONSERVATION is EXACT by construction: the conserved projection is `sum(cell masses) + sink`, and what leaves a cell (the rounded per-substance mass decrease) exactly enters the sink, so there is no product-volume rounding. The `ConservationRegistry` (register `matter_mass = sum(cell masses) + sink`) sees the total invariant across many ticks in the test.
+
+OPT-IN and hash-neutral: the beat runs only when the matter cycle is armed, so a scenario with none armed is byte-identical (crucible `254bc17c`, world_build 16 and world_determinism 3 replay-identical). Proven end to end (`physiology_embodiment.rs` `organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass`): warm carrion rots down while a frozen cell is preserved, the `ConservationRegistry` sees the total mass invariant, and the scheduled order matches the pinned. 818 sim tests plus 84 physics tests green, fmt and clippy (`--all-targets -D warnings`) clean, prose customs clean.
+
+HONEST LIMIT: the decomposed mass disperses to a scalar sink (its gases and leached minerals leave the cell); re-materialising it into soil and air substances (the ash fraction to a mineral residue, the volatile to the `air` substance, which reintroduces the volume-rounding and needs a residual-mass mechanism) is slice C.
+
+STOPPED: slice B pushed (`07e065b`), docs recorded. NEXT: slice C (the product re-materialization into soil and air), then corrosion (the harder sibling: its oxide product is a substance-to-substance mapping and it conserves the metal element not total mass), the deferred overhead-deposit technique (a being builds a roof), and the force-and-manipulation primitive-completeness check. Acceptance is a BLIND concept-verification on a run log at the matter-cycle milestone. Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-06: material-substrate item 8 PROPER slice A (the world registry carries the transform physics), on branch claude/material-substrate, PR #93
 
 Item 8 proper (the matter cycle) begins: its foundational slice A, the registry integration that makes the transform physics available in the world material registry. The gate green-lit item 8 proper (agreed the read-substance-physics direction, no transform-kinds file). Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 8 PROPER SLICE A paragraph). Commit `bfd6022`.
