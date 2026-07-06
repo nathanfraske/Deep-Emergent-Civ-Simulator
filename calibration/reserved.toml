@@ -2092,6 +2092,45 @@ value = ""
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
 
+# --- ideation / experiential-discovery arc, piece 1 (the appetitive reward learner): the sign complement
+# of the harm-learning constants above, read fail-loud by RewardLearningCalib::from_manifest
+# (crates/sim/src/learn.rs) when the reward learner is wired onto the run path. Each is the reward mirror of
+# a harm value: the reward learner keys on a felt reserve RISE (learn::reward_observations through
+# homeostasis::is_reward_tick) instead of a fall, so the same associative engine forms an appetitive belief
+# ("this action pays off") beside the aversive one, never a per-affordance reward table (Principle 11). ---
+
+[[reserved]]
+id = "reward.noise_floor"
+basis = "the per-tick reserve RISE below which a change is ordinary metabolic recovery, not reward (the reward learner, through learn::is_reward_tick). Set at the largest per-tick reserve rise a resting, recovering body incurs (the resting recovery rate scaled to the tick), the sign-mirror of harm.noise_floor, so only a supra-recovery rise registers as the interoceptive reward signal the belief keys off. Larger ignores milder benefit, smaller reads ordinary recovery as reward"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
+
+[[reserved]]
+id = "reward.feature_granularity"
+basis = "the quantization step that buckets a raw feature amount into a perceived kind (learn::feature_bucket), the key a reward belief subject is minted from, the reward twin of harm.feature_granularity. Set at the sensorium's per-class just-noticeable difference for the sensed feature, the same acuity the harm learner buckets on, so a reward belief generalises over the same feature kinds a harm belief does. Larger merges distinct contexts, smaller splits one into a continuum the belief cannot generalise over"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/percept.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_rewards"
+basis = "P(the interoceptive reward signal fires | this action truly pays off), the first of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_harms. Set at the fraction of ticks a naive being that took a beneficial action feels a supra-recovery rise, the dose-and-physiology benefit rate the floor implies, the way the harm arc sets its likelihoods. Together with p_reward_given_neutral it sets how strong a single correlation observation is (ln of their ratio)"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_neutral"
+basis = "P(the interoceptive reward signal fires | this action is neutral), the second of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_benign. Set at the false-attribution rate of a transient reserve rise unrelated to the action; low, so a neutral action rarely earns reward evidence. Larger weakens each observation, smaller strengthens it"
+status = "reserved"
+value = ""
+unit = "probability"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+
 [[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"

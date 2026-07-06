@@ -56,6 +56,22 @@ pub const HARMS: ValueId = 1;
 /// so the belief is defeasible for free (a feature that stops harming is un-learned).
 pub const BENIGN: ValueId = 0;
 
+/// The generic attribute every experientially-learned REWARD belief is ABOUT: "does the action a being took
+/// in this context pay off" (ideation / experiential-discovery arc, piece 1, the appetitive learner). One
+/// attribute for all sequences (the sequence identity lives in the subject), a reserved-high id disjoint
+/// from [`HARM_ATTR`] (`u32::MAX - 2`) so a reward belief never aliases a harm belief on the same subject: a
+/// being can hold both "this ground harms me" and "this action pays off" about the same percept key without
+/// collision.
+pub const REWARD_ATTR: AttrKindId = AttrKindId(u32::MAX - 3);
+
+/// The value meaning "this action pays off": the belief a being forms when a felt reserve RISE correlates
+/// with the action it took, the appetitive mirror of [`HARMS`].
+pub const REWARDS: ValueId = 1;
+/// The value meaning "this action is neutral": the competing hypothesis, reinforced on non-reward ticks so
+/// the reward belief is defeasible for free (an action that stops paying off is un-learned), the mirror of
+/// [`BENIGN`].
+pub const NEUTRAL: ValueId = 0;
+
 /// The reserved base of the per-feature belief-subject band. A feature subject is minted at or above
 /// this base, packed with the feature channel and its quantized bucket, so "salinity-bucket-2 ground
 /// harms me" is a belief about a FEATURE-KIND and can never alias a belief about a being (being ids are
@@ -155,6 +171,86 @@ impl HarmLearningCalib {
     }
 }
 
+/// The reserved constants the APPETITIVE reward learner reads (ideation / experiential-discovery arc, piece
+/// 1), the exact mirror of [`HarmLearningCalib`]: fail-loud from the manifest under a Calibrated run or a
+/// labelled dev fixture in a test, every value reserved-with-basis (Principle 11). The mechanism is fixed
+/// Rust; these numbers are the owner's. They are the reward complement of the harm calib, keyed on a felt
+/// reserve RISE instead of a fall, and the certainty clamp reads the SAME `evidence.log_odds_clamp` the harm
+/// learner and the inference engine use, so a single reward observation cannot exceed the engine ceiling.
+#[derive(Clone, Copy, Debug)]
+pub struct RewardLearningCalib {
+    /// The reward-noise floor: a per-tick reserve rise no larger than this is ordinary metabolic recovery,
+    /// not reward ([`crate::homeostasis::is_reward_tick`]). RESERVED. Basis: the largest per-tick reserve
+    /// RISE a resting body's recovery incurs (the resting recovery rate scaled to the tick), the sign-mirror
+    /// of the harm-noise floor, so only a supra-recovery rise registers as reward.
+    pub reward_noise_floor: Fixed,
+    /// The feature granularity: the quantization step that buckets a raw feature amount into a perceived kind
+    /// ([`crate::percept::feature_bucket`]), the key a per-feature belief subject is minted from. RESERVED.
+    /// Basis: the sensorium's per-class just-noticeable difference for the sensed feature, the same acuity
+    /// the harm learner buckets on, so a reward belief generalises over the same feature kinds a harm belief
+    /// does.
+    pub feature_granularity: Fixed,
+    /// P(the reward signal fires | this action pays off): the base rate of a felt reserve rise on a truly
+    /// beneficial action. RESERVED. Basis: the fraction of ticks a naive being that took a beneficial action
+    /// feels a supra-recovery rise, the reward mirror of `p_harm_given_harms`, set as the harm arc sets its
+    /// likelihoods.
+    pub p_reward_given_rewards: Fixed,
+    /// P(the reward signal fires | this action is neutral): the base rate of a spurious felt rise on a
+    /// neutral action. RESERVED. Basis: the false-attribution rate of a transient reserve rise unrelated to
+    /// the action, the reward mirror of `p_harm_given_benign`; low, so a neutral action rarely earns reward
+    /// evidence.
+    pub p_reward_given_neutral: Fixed,
+    /// The certainty clamp the per-observation weight is bounded to. RESERVED. Basis: the evidence engine's
+    /// log-odds clamp (`evidence.log_odds_clamp`), set equal to it (and to the harm learner's) so a single
+    /// correlation observation cannot exceed the engine's maximum admissible certainty.
+    pub certainty_clamp: Fixed,
+}
+
+impl RewardLearningCalib {
+    /// Read the reward-learner calibrations fail-loud from the manifest (Principle 11): a reserved value left
+    /// unset refuses to build rather than running on a fabricated default. The certainty clamp reads the same
+    /// `evidence.log_odds_clamp` the inference engine and the harm learner use, so the three agree by
+    /// construction.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<RewardLearningCalib, CalibrationError> {
+        Ok(RewardLearningCalib {
+            reward_noise_floor: m.require_fixed("reward.noise_floor")?,
+            feature_granularity: m.require_fixed("reward.feature_granularity")?,
+            p_reward_given_rewards: m.require_fixed("reward.p_reward_given_rewards")?,
+            p_reward_given_neutral: m.require_fixed("reward.p_reward_given_neutral")?,
+            certainty_clamp: m.require_fixed("evidence.log_odds_clamp")?,
+        })
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE standing up the same magnitudes the manifest would carry, for the test
+    /// and harness paths that build without a manifest, the reward mirror of [`HarmLearningCalib::dev_default`]:
+    /// a noise floor of a hundredth (above the recovery base rate, below a real reserve gain), a unit
+    /// granularity, likelihoods of nine-tenths and a tenth (so a single reward observation carries ln(9) of
+    /// evidence and a naive being commits in a couple of reward ticks), and the engine's fifty-nat log-odds
+    /// clamp. Not owner canon.
+    pub fn dev_default() -> RewardLearningCalib {
+        RewardLearningCalib {
+            reward_noise_floor: Fixed::from_ratio(1, 100),
+            feature_granularity: Fixed::ONE,
+            p_reward_given_rewards: Fixed::from_ratio(9, 10),
+            p_reward_given_neutral: Fixed::from_ratio(1, 10),
+            certainty_clamp: Fixed::from_int(50),
+        }
+    }
+
+    /// The unsigned per-observation weight a single reward correlation carries: the I.J. Good weight of
+    /// evidence of the two reserved likelihoods, `ln(P(reward|rewards) / P(reward|neutral))`, clamped to the
+    /// certainty bound. General over the two probabilities, reading no kind, race, or action (the action
+    /// identity is in the subject, not the weight). The reward mirror of
+    /// [`HarmLearningCalib::observation_weight`].
+    pub fn observation_weight(&self) -> Fixed {
+        good_weight(
+            self.p_reward_given_rewards,
+            self.p_reward_given_neutral,
+            self.certainty_clamp,
+        )
+    }
+}
+
 /// One piece of evidence a being contributes this tick: the per-feature subject to key it on, the value
 /// it points toward (`HARMS` on a harm tick, `BENIGN` otherwise), and the signed weight. Fed straight
 /// into [`crate::agent::Mind::consider`] (which scales it by the mind's acuity and accumulates it into
@@ -186,6 +282,42 @@ pub fn feature_observations(
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
     let toward = if harm { HARMS } else { BENIGN };
+    features
+        .iter()
+        .enumerate()
+        .filter(|(_, &amount)| amount > Fixed::ZERO)
+        .map(|(channel, &amount)| {
+            let bucket = feature_bucket(amount, calib.feature_granularity);
+            FeatureObservation {
+                subject: feature_subject(channel as u16, bucket),
+                toward,
+                weight,
+            }
+        })
+        .collect()
+}
+
+/// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
+/// in its degenerate single-tick form): one per PRESENT feature of the cell it stands on (a channel whose
+/// amount is positive), toward `REWARDS` if it felt a supra-recovery reserve RISE this tick and `NEUTRAL`
+/// otherwise, each weighted by the reserved observation weight scaled by the being's belief plasticity (its
+/// heritable learning rate, `Mind::plasticity`, neutral at one). A near-verbatim clone of
+/// [`feature_observations`] with the sign flipped: the reward bit is the being's OWN interoceptive signal
+/// (whether any reserve ROSE beyond the noise floor, [`crate::homeostasis::is_reward_tick`]), the feature is
+/// the same raw percept, and the produced [`FeatureObservation`]s are fed into the `(subject, REWARD_ATTR)`
+/// frame (disjoint from the harm frame on the same subject), so the reward belief emerges from correlation
+/// with nothing read but the raw feature and the felt sign (Principles 8, 9). Slice 1b will re-key the
+/// subject from the standing-on feature to the executed primitive SEQUENCE; this single-tick form is the
+/// mirror the harm learner already proved.
+pub fn reward_observations(
+    reward: bool,
+    features: &[Fixed],
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> Vec<FeatureObservation> {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    let toward = if reward { REWARDS } else { NEUTRAL };
     features
         .iter()
         .enumerate()
@@ -352,6 +484,122 @@ mod tests {
             mind.belief(subject, HARM_ATTR, &params()),
             Some(HARMS),
             "the being forms the HARMS belief about the feature from its own repeated harm"
+        );
+    }
+
+    #[test]
+    fn only_present_features_earn_a_reward_observation_pointed_by_the_reward_bit() {
+        // The reward mirror of the harm observation: only a present feature earns an observation, a reward
+        // tick points it toward REWARDS and a non-reward tick toward NEUTRAL, on the same subject key.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::ZERO, Fixed::from_int(2)];
+        let reward = reward_observations(true, &features, Fixed::ONE, &calib);
+        assert_eq!(
+            reward.len(),
+            1,
+            "only the present feature earns an observation"
+        );
+        assert_eq!(
+            reward[0].toward, REWARDS,
+            "a reward tick points toward REWARDS"
+        );
+        assert_eq!(
+            reward[0].subject,
+            feature_subject(
+                1,
+                feature_bucket(Fixed::from_int(2), calib.feature_granularity)
+            )
+        );
+        assert!(
+            reward[0].weight > Fixed::ZERO,
+            "the observation carries positive evidence"
+        );
+        // A non-reward tick on the same cell points the same subject toward NEUTRAL.
+        let neutral = reward_observations(false, &features, Fixed::ONE, &calib);
+        assert_eq!(neutral[0].toward, NEUTRAL);
+        assert_eq!(neutral[0].subject, reward[0].subject);
+        // A cell with no present feature yields nothing to correlate.
+        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+    }
+
+    #[test]
+    fn a_being_repeatedly_rewarded_on_a_feature_commits_rewards_on_its_own() {
+        // The appetitive milestone core (slice 1a single-tick form): a mind fed repeated reward-while-on-the-
+        // feature commits a REWARDS belief about that feature-kind, purely from correlation, the exact mirror
+        // of the harm learner forming HARMS.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let subject = feature_subject(
+            0,
+            feature_bucket(Fixed::from_int(2), calib.feature_granularity),
+        );
+        let mut mind = Mind::new(StableId(1), Fixed::ONE);
+        assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), None);
+        for _ in 0..3 {
+            for obs in reward_observations(true, &features, Fixed::ONE, &calib) {
+                mind.consider(
+                    obs.subject,
+                    REWARD_ATTR,
+                    [REWARDS, NEUTRAL],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+        }
+        assert_eq!(
+            mind.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the being forms the REWARDS belief about the feature from its own repeated reward"
+        );
+    }
+
+    #[test]
+    fn a_reward_belief_and_a_harm_belief_coexist_on_one_subject_via_disjoint_attrs() {
+        // The disjointness guarantee: REWARD_ATTR (u32::MAX - 3) and HARM_ATTR (u32::MAX - 2) never alias, so
+        // a being can hold "this action pays off" and "this ground harms me" about the SAME feature subject
+        // at once without collision. The reward and harm frames are independent (the appetitive and aversive
+        // halves of one interoceptive signal split at zero).
+        assert_ne!(REWARD_ATTR, HARM_ATTR);
+        let rcalib = RewardLearningCalib::dev_default();
+        let hcalib = HarmLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let subject = feature_subject(
+            0,
+            feature_bucket(Fixed::from_int(2), rcalib.feature_granularity),
+        );
+        let mut mind = Mind::new(StableId(3), Fixed::ONE);
+        for _ in 0..3 {
+            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib) {
+                mind.consider(
+                    obs.subject,
+                    REWARD_ATTR,
+                    [REWARDS, NEUTRAL],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+            for obs in feature_observations(true, &features, Fixed::ONE, &hcalib) {
+                mind.consider(
+                    obs.subject,
+                    HARM_ATTR,
+                    [HARMS, BENIGN],
+                    obs.toward,
+                    obs.weight,
+                    mind.id,
+                );
+            }
+        }
+        assert_eq!(
+            mind.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "the reward belief commits on its own attr"
+        );
+        assert_eq!(
+            mind.belief(subject, HARM_ATTR, &params()),
+            Some(HARMS),
+            "the harm belief commits on its own attr, on the same subject, without collision"
         );
     }
 

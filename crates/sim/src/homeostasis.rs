@@ -985,6 +985,22 @@ pub fn is_harm_tick(delta: Fixed, harm_noise_floor: Fixed) -> bool {
     delta < Fixed::ZERO && delta.abs() > harm_noise_floor
 }
 
+/// Whether this tick's interoceptive `delta` counts as REWARD: a reserve RISING (a positive delta) whose
+/// magnitude exceeds the reward-noise floor, so ordinary metabolic recovery and measurement jitter are not
+/// read as reward. The exact SIGN COMPLEMENT of [`is_harm_tick`] (ideation / experiential-discovery arc,
+/// piece 1, the appetitive learner): where harm keys on a supra-drain fall, reward keys on a supra-recovery
+/// rise, so the two split a single signed signal at zero and never both fire on one tick. Pure and RNG-free;
+/// the reward learner calls it to decide whether the sequence a being just executed earns evidence toward
+/// "this action pays off" this tick, the appetitive mirror of the aversive harm belief.
+///
+/// RESERVED: the reward-noise floor. Basis: the largest per-tick reserve RISE ordinary metabolism and
+/// recovery produce (the resting recovery rate scaled to the tick), the sign-mirror of the harm-noise
+/// floor's basis, so only a supra-recovery rise registers as reward. Surfaced for the owner, never
+/// fabricated.
+pub fn is_reward_tick(delta: Fixed, reward_noise_floor: Fixed) -> bool {
+    delta > Fixed::ZERO && delta > reward_noise_floor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1104,26 @@ mod tests {
         assert!(!is_harm_tick(Fixed::from_ratio(1, 2), floor));
         // Exactly at the floor magnitude is not harm (strict).
         assert!(!is_harm_tick(Fixed::ZERO - floor, floor));
+    }
+
+    #[test]
+    fn a_reward_tick_is_a_rise_beyond_the_noise_floor_only_the_sign_complement() {
+        let floor = Fixed::from_ratio(1, 100);
+        // A rise bigger than the floor is reward.
+        assert!(is_reward_tick(Fixed::from_ratio(1, 10), floor));
+        // A rise smaller than the floor (ordinary recovery) is not.
+        assert!(!is_reward_tick(Fixed::from_ratio(1, 1000), floor));
+        // A fall (harm) is never reward however large.
+        assert!(!is_reward_tick(
+            Fixed::ZERO - Fixed::from_ratio(1, 2),
+            floor
+        ));
+        // Exactly at the floor is not reward (strict).
+        assert!(!is_reward_tick(floor, floor));
+        // The two never both fire on one tick: reward and harm split the signal at zero.
+        let d = Fixed::from_ratio(1, 10);
+        assert!(is_reward_tick(d, floor) && !is_harm_tick(d, floor));
+        assert!(is_harm_tick(Fixed::ZERO - d, floor) && !is_reward_tick(Fixed::ZERO - d, floor));
     }
 
     #[test]
