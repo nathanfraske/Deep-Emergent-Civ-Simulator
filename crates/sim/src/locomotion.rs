@@ -75,7 +75,7 @@ use crate::homeostasis::{
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
     MOVE, RELEASE, SHELTER,
 };
-use crate::learn::EligibilityTrace;
+use crate::learn::{EligibilityTrace, SequenceStep};
 use crate::material::{SubstanceMix, WieldedTool};
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
@@ -424,6 +424,12 @@ pub struct Walker {
     /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
     /// source the reward-credit pass reads to record what the being just did.
     pub decided_affordance: Option<AffordanceId>,
+    /// The candidate action the being PROPOSES this tick, sampled from its binding graph by the discovery
+    /// loop (ideation arc, piece 2, slice 2c). `None` unless the runner arms the discovery loop and the world
+    /// installs the affordance-percept registry, so it stays `None` and folds nothing by default (opt-in,
+    /// byte-identical). Set by the runner's discovery pass each tick and folded into `state_hash`, the
+    /// hypothesis a being is about to test.
+    pub proposed_action: Option<SequenceStep>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -456,6 +462,7 @@ impl Walker {
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
             decided_affordance: None,
+            proposed_action: None,
             alive: true,
         }
     }
