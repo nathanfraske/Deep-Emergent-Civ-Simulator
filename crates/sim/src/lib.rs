@@ -74,6 +74,7 @@ pub mod controller;
 pub mod decision;
 pub mod demography;
 pub mod dialogue;
+pub mod discovery;
 pub mod edibility;
 pub mod environ;
 pub mod epoch;
