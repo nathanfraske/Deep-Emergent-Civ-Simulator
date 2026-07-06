@@ -45,13 +45,15 @@ use civsim_physics::PhysicsRegistry;
 use civsim_sim::affordance_percept::{
     AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
-use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
+use civsim_sim::anatomy::{
+    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
+};
 use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::homeostasis::{
-    AffordanceRegistry, HomeostaticRegistry, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE, GRASP, RELEASE,
-    SHELTER, TEMPERATURE, WATER,
+    AffordanceRegistry, HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, CRAFT, DIG,
+    ENERGY, EXTRACT, GEOPHAGE, GRASP, RELEASE, SHELTER, TEMPERATURE, WATER,
 };
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
@@ -157,10 +159,22 @@ fn env_variance() -> Fixed {
 /// time. Sizing the seed against a layout WITHOUT the feature block would misplace every forage weight
 /// (a founder would read a feature slot as its move bias and never forage), so this must carry the same
 /// percepts the run does.
-fn dawn_layout() -> ControllerLayout {
+fn dawn_layout(cfg: &Config) -> ControllerLayout {
+    // The layout MUST match the registries the embodiment genesis installs, or the seeded forage weights
+    // land in the wrong slots and the founders never forage. The viability embodiment adds the seed-energy
+    // axis and the geophage affordance, so its layout is wider; sizing the forage seed against the default
+    // layout there misplaces every weight and starves the population by the second generation.
+    let (homeostatic, affordances) = if cfg.viability {
+        (viability_homeostatic(), AffordanceRegistry::dev_geophage())
+    } else {
+        (
+            HomeostaticRegistry::dev_grazer(),
+            AffordanceRegistry::dev_default(),
+        )
+    };
     ControllerLayout::with_percepts(
-        &HomeostaticRegistry::dev_grazer(),
-        &AffordanceRegistry::dev_default(),
+        &homeostatic,
+        &affordances,
         &PerceptRegistry::from_tolerances(&ToleranceRegistry::dev_salinity()),
         0,
     )
@@ -194,6 +208,22 @@ struct Config {
     /// genesis, an inert fracturable material field, the affordance-percept registry, and the discovery
     /// and reward learners). Every other run leaves the loop unarmed and unseeded and stays byte-identical.
     discovery: bool,
+    /// Whether the dedicated opt-in `viability` scenario is selected (`--scenario viability`): the discovery
+    /// loop armed over a world where a discovered action PAYS OFF. It arms the loop exactly as `discovery`
+    /// does, but deposits the nutritive `oilseed` (not inert granite), gives the founders a seed-energy
+    /// reserve backed by oilseed and a seed-storing tissue, and affords GEOPHAGE, so extracting and eating
+    /// the seed feeds a reserve rise the reward learner credits and "extract and eat this seed" can emerge
+    /// as a rewarded belief under selection. Every other run stays byte-identical.
+    viability: bool,
+}
+
+impl Config {
+    /// Whether this run ARMS the experiential-discovery loop (the `discovery` or `viability` scenario): the
+    /// evolve-channel loci are seeded at genesis, matter is deposited, and the loop and reward learner are
+    /// installed. Every other run leaves the loop unarmed and byte-identical.
+    fn armed(&self) -> bool {
+        self.discovery || self.viability
+    }
 }
 
 /// Parse the arguments simply, with sane defaults, then fold in any named scenario's postures.
@@ -265,9 +295,10 @@ fn parse_config() -> Config {
         None => (None, 1, 20, None),
     };
 
-    // The dedicated `discovery` scenario is the ONE opt-in that arms the ideation loop; every other
-    // scenario and the baseline leave it unarmed (byte-identical), so the flag keys off the name alone.
+    // The dedicated `discovery` and `viability` scenarios are the opt-ins that arm the ideation loop; every
+    // other scenario and the baseline leave it unarmed (byte-identical), so the flags key off the name.
     let discovery = scenario.as_deref() == Some("discovery");
+    let viability = scenario.as_deref() == Some("viability");
 
     Config {
         seed: seed.unwrap_or(1),
@@ -279,6 +310,7 @@ fn parse_config() -> Config {
         pool_ne,
         medium,
         discovery,
+        viability,
     }
 }
 
@@ -358,7 +390,7 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     // a magic constant. The full controller substrate is seeded (a gene per weight), with the taxis
     // magnitudes carried in the pool additive spine; every other weight starts at zero and can mutate on.
     // Reads no race id: the seeds are the same for every race (Principle 9).
-    let layout = dawn_layout();
+    let layout = dawn_layout(cfg);
     let energy_base = layout
         .axis_input_base(ENERGY)
         .expect("the dev-grazer layout carries an energy axis");
@@ -390,13 +422,13 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         layout.weight_count(),
         &seeds,
     );
-    // Ideation activation slice 2: the dedicated `discovery` scenario SEEDS the two evolve-channel loci at
-    // genesis, so a free population evolves exploration and deliberation off founder-zero (the drift reuses
-    // the standing additive mutation). Opt-in: ONLY this scenario grows the genome, a deliberately different
-    // world with its own re-baseline (the B2b opt-in norm); every other run leaves the genome untouched and
-    // byte-identical. Founder-zero, so a founder expresses zero and the drive EMERGES by selection, never a
-    // coded switch (Principle 9). The birth path (worldbuild/runner) expresses these loci onto each walker.
-    if cfg.discovery {
+    // Ideation activation slice 2: the ARMED scenarios (`discovery`, `viability`) SEED the two evolve-channel
+    // loci at genesis, so a free population evolves exploration and deliberation off founder-zero (the drift
+    // reuses the standing additive mutation). Opt-in: ONLY an armed scenario grows the genome, a deliberately
+    // different world with its own re-baseline (the B2b opt-in norm); every other run leaves the genome
+    // untouched and byte-identical. Founder-zero, so a founder expresses zero and the drive EMERGES by
+    // selection, never a coded switch (Principle 9). The birth path expresses these loci onto each walker.
+    if cfg.armed() {
         append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
         append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
     }
@@ -466,7 +498,11 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         vocal_tract_scale: tract,
         hearing_resolution: Fixed::from_int(20),
     })
-    .with_body_plan(mobile_body())
+    .with_body_plan(if cfg.viability {
+        viability_body()
+    } else {
+        mobile_body()
+    })
 }
 
 /// Clamp an integer count of tenths into the interior band `[0.3, 0.9]` and return it as a `Fixed`,
@@ -513,6 +549,78 @@ fn mobile_body() -> BodyPlan {
     }
 }
 
+/// The homeostatic axis id for the viability world's SEED-ENERGY reserve, backed by the oilseed substance
+/// so eating oilseed refills it. Distinct from the grazer axes (energy 0, water 1, temperature 3, condition
+/// 5), a leaf id not special-cased in the mechanism.
+const SEED_ENERGY: HomeostaticAxisId = HomeostaticAxisId(10);
+
+/// DEV FIXTURE (a viability BALANCE KNOB, surfaced for the owner): the seed-energy reserve's per-tick base
+/// drain, set MODEST so the reserve opens a little room each tick and eating oilseed keeps paying off,
+/// without starving a being that has not found the seed (the reserve is non-lethal). The owner tunes this,
+/// the oilseed's nutritive value, and its accessibility to taste; it is NOT tuned to force the technique to
+/// spread. Basis: a small fraction of the reserve per generation, comparable to the labelled energy drain.
+fn seed_energy_drain() -> Fixed {
+    Fixed::from_ratio(1, 400)
+}
+
+/// The seed-store organ's kind id in the viability organ registry: the next kind after the dev organs, so
+/// the viability body and the viability organ registry agree on it (both derive it from the dev default).
+fn seed_store_kind() -> u16 {
+    BodyPlanRegistry::dev_default().organs.len() as u16
+}
+
+/// The viability world's organ registry: the dev organs plus a SEED-STORE organ whose tissue is composed of
+/// the oilseed substance, so the seed-energy reserve (backed by oilseed) has capacity to eat into (a
+/// geophage-fed reserve's capacity is summed from tissue carrying its backing axis). Labelled fixture.
+fn viability_organs() -> BodyPlanRegistry {
+    let mut organs = BodyPlanRegistry::dev_default();
+    organs.organs.push(OrganKindDef {
+        id: seed_store_kind(),
+        name: "seed-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("oilseed", Fixed::ONE)]),
+    });
+    organs
+}
+
+/// The viability founder body: the grazer body plus a SMALL SEED-STORE organ, so the founder's seed-energy
+/// reserve has capacity (an organ-less reserve would be zero-capacity, so eating oilseed would feed nothing
+/// and the loop could not close). The organ is deliberately SMALL so its mass adds a negligible metabolic
+/// drain: a half-sized store starves the population by the second generation (the extra mass tips the
+/// energy balance), so the seed reserve is a small bonus store, not a body-remaking cost. Labelled fixture.
+fn viability_body() -> BodyPlan {
+    let mut body = mobile_body();
+    body.organs.push(Part {
+        kind: seed_store_kind(),
+        development: Fixed::from_ratio(1, 20),
+    });
+    body
+}
+
+/// The viability world's homeostatic registry: the grazer axes plus a SEED-ENERGY reserve BACKED BY the
+/// oilseed substance, so eating oilseed lifts it (the felt reward the learner credits). Non-lethal
+/// (death_floor zero), so a being that has not found the seed is never killed by it, leaving the technique
+/// room to emerge; a modest base drain opens room so eating keeps paying off (a balance knob). Labelled
+/// fixture.
+fn viability_homeostatic() -> HomeostaticRegistry {
+    let mut reg = HomeostaticRegistry::dev_grazer();
+    reg.axes.push(HomeostaticAxisDef {
+        id: SEED_ENERGY,
+        name: "seed-energy".to_string(),
+        backing_component: Some("oilseed".to_string()),
+        capacity_per_mass: Fixed::ONE,
+        base_drain: seed_energy_drain(),
+        exertion_drain: Fixed::ZERO,
+        // NON-LETHAL: a death floor well below any reachable level, so a being that has not found the seed
+        // is never killed by an empty seed-energy reserve (the reserve is a bonus food drive, not a
+        // survival axis), leaving the discovered technique room to emerge under selection rather than
+        // wiping the founders before exploration can drift off zero. `death_floor` is a die-at threshold,
+        // so zero would kill at an empty reserve; this puts it out of reach.
+        death_floor: Fixed::from_int(-1000),
+    });
+    reg
+}
+
 /// A one-axis personality profile maturing toward a positive target, so the life-cadence personality
 /// beat has something to drift. Labelled fixture.
 fn a_personality() -> PersonalityProfile {
@@ -550,13 +658,28 @@ fn language_genesis() -> LanguageGenesis {
 }
 
 /// The embodiment genesis: the shared substrate registries a founder's body reads against. Labelled
-/// fixture (mirrors the world-build test genesis).
-fn embodiment_genesis() -> EmbodimentGenesis {
+/// fixture (mirrors the world-build test genesis). The VIABILITY scenario swaps in an oilseed-backed
+/// seed-energy reserve, the organ registry that stores it, and the geophage affordance so a being can EAT
+/// what it extracts; every other run keeps the dev-grazer genesis (byte-identical).
+fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
+    let (homeostatic, affordances, organs) = if cfg.viability {
+        (
+            viability_homeostatic(),
+            AffordanceRegistry::dev_geophage(),
+            viability_organs(),
+        )
+    } else {
+        (
+            HomeostaticRegistry::dev_grazer(),
+            AffordanceRegistry::dev_default(),
+            BodyPlanRegistry::dev_default(),
+        )
+    };
     EmbodimentGenesis {
-        homeostatic: HomeostaticRegistry::dev_grazer(),
-        affordances: AffordanceRegistry::dev_default(),
+        homeostatic,
+        affordances,
         locomotion: LocomotionParams::dev_default(),
-        organs: BodyPlanRegistry::dev_default(),
+        organs,
         // The heritable salinity-tolerance class (base-level liveliness step 4), so a founder carries a
         // salt resistance expressed from its genome and a lineage near a salt flat adapts by selection.
         tolerances: ToleranceRegistry::dev_salinity(),
@@ -612,7 +735,7 @@ fn assemble_peoples(cfg: &Config) -> DawnPeoples {
         personality,
         mortality_hazard,
         language: Some(language_genesis()),
-        embodiment: Some(embodiment_genesis()),
+        embodiment: Some(embodiment_genesis(cfg)),
     }
 }
 
@@ -1197,9 +1320,10 @@ fn snapshot(
         None => println!("  migration: no located population"),
     }
 
-    // The discovery-emergence signal (ideation activation slice 3): what the population is DISCOVERING in
-    // the armed `discovery` scenario. Printed only when the loop is armed, so every other run is unchanged.
-    if cfg.discovery {
+    // The discovery-emergence signal (ideation activation slice 3): what the population is DISCOVERING in an
+    // armed scenario (`discovery` or `viability`). Printed only when the loop is armed, so every other run
+    // is unchanged. In `viability` the reward-belief count rises off zero as extract-and-eat pays off.
+    if cfg.armed() {
         discovery_signal(runner);
     }
 
@@ -1434,27 +1558,37 @@ fn main() {
         }
     }
 
-    // Ideation activation slice 2: the dedicated `discovery` scenario ARMS the experiential-discovery loop
-    // in the free world (opt-in; every other run leaves it unarmed and byte-identical). The arming is
-    // ENVIRONMENT plus SENSORY CAPACITY plus the fixed MECHANISM, never authored behaviour: an INERT
-    // fracturable ground (granite on every cell, authored physics, Principle 9) so beings have matter to
+    // Ideation activation slice 2 + viability arc slice C: the ARMED scenarios (`discovery`, `viability`)
+    // ARM the experiential-discovery loop in the free world (opt-in; every other run leaves it unarmed and
+    // byte-identical). The arming is ENVIRONMENT plus SENSORY CAPACITY plus the fixed MECHANISM, never
+    // authored behaviour: matter on every cell (authored physics, Principle 9) so beings have something to
     // perceive and act on; the affordance-percept registry so they SENSE its fracture-potential; and the
     // discovery and reward learners so a being PROPOSES a candidate action each tick and, as its
-    // founder-zero exploration weight drifts off zero over generations, ENACTS one. WHICH action a being
-    // enacts still emerges from the exploration weight lifting under selection, never a coded choice.
+    // founder-zero exploration weight drifts off zero under selection, ENACTS one. WHICH action a being
+    // enacts still emerges from the exploration weight lifting, never a coded choice.
     //
-    // NO PAYOFF is authored: breaking granite feeds no reserve, so no rewarded technique emerges here, and
-    // that is correct. A world where a discovered action PAYS OFF (a fracturable substance whose extraction
-    // or ingestion feeds reserves through the existing edibility and metabolic path) is the VIABILITY
-    // scenario, the owner's to design. The evolve-channel loci were seeded at genesis (full_race) under the
-    // same flag. Slice 3 adds the discovery-emergence reader that shows the proposals and enactions.
-    if cfg.discovery {
+    // `discovery` deposits INERT granite: breaking it feeds no reserve, so no rewarded technique emerges,
+    // correct. `viability` deposits the nutritive `oilseed`, and its founders carry an oilseed-backed
+    // seed-energy reserve (the viability embodiment) and afford GEOPHAGE, so extracting-and-eating the seed
+    // feeds a reserve RISE the reward learner credits, and "extract and eat this seed" can emerge as a
+    // rewarded belief under selection. NO payoff is authored: the energy is the seed's own physics drawn
+    // through the runtime edibility laws, and no belief or exploration weight is pre-set. The evolve-channel
+    // loci were seeded founder-zero at genesis (full_race) under the same flag.
+    if cfg.armed() {
         let material_registry =
             PhysicsRegistry::ground().expect("the embedded ground physics floor loads");
+        // The viability oilseed is deposited generously (an accessibility balance knob, the owner's to
+        // tune), so a being that discovers extract-and-eat has a real food; inert granite's amount is
+        // immaterial.
+        let (substance, volume) = if cfg.viability {
+            ("oilseed", Fixed::from_int(100))
+        } else {
+            ("granite", Fixed::from_int(4))
+        };
         let mut material = MaterialField::new();
         for y in 0..WORLD_H {
             for x in 0..WORLD_W {
-                material.deposit(Coord3::ground(x, y), "granite", Fixed::from_int(4));
+                material.deposit(Coord3::ground(x, y), substance, volume);
             }
         }
         if let Some(emb) = runner.embodiment_mut() {
@@ -1467,13 +1601,26 @@ fn main() {
         }
         runner.set_discovery(DiscoveryCalib::dev_default());
         runner.set_reward_learning(RewardLearningCalib::dev_default());
-        println!(
-            "  DISCOVERY SCENARIO ARMED (opt-in): {} ground cells seeded with fracturable granite; \
-             affordance-percept, discovery, and reward learners installed; evolve-channels seeded \
-             founder-zero. No payoff authored (breaking granite feeds no reserve); the viability world \
-             is the owner's to design.\n",
-            WORLD_CELLS,
-        );
+        if cfg.viability {
+            println!(
+                "  VIABILITY SCENARIO ARMED (opt-in): {} ground cells seeded with fracturable, energy-dense \
+                 oilseed; founders carry an oilseed-backed seed-energy reserve and afford geophage; \
+                 affordance-percept, discovery, and reward learners installed; evolve-channels seeded \
+                 founder-zero. NO payoff authored (the energy is the seed's own physics through the \
+                 edibility laws); extract-and-eat can emerge as a rewarded belief under selection. Balance \
+                 knobs for the owner: the oilseed's nutritive value (bio.energy_density 25 kJ/g), the \
+                 seed-energy drain, and accessibility.\n",
+                WORLD_CELLS,
+            );
+        } else {
+            println!(
+                "  DISCOVERY SCENARIO ARMED (opt-in): {} ground cells seeded with fracturable granite; \
+                 affordance-percept, discovery, and reward learners installed; evolve-channels seeded \
+                 founder-zero. No payoff authored (breaking granite feeds no reserve); the `viability` \
+                 scenario closes the loop.\n",
+                WORLD_CELLS,
+            );
+        }
     }
 
     let founders: BTreeSet<StableId> = runner.world().unwrap().being_ids().into_iter().collect();

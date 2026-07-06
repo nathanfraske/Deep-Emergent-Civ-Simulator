@@ -1,0 +1,28 @@
+# Viability: the opt-in scenario that CLOSES the ideation / experiential-discovery loop (ideation viability
+# arc). Run with `cargo run --release --example run_world -- --scenario viability`. It arms the loop exactly
+# as `discovery` does, but over a world where a discovered action PAYS OFF, so a rewarded technique can
+# emerge under selection. Every other scenario and the baseline leave the loop unarmed and byte-identical.
+#
+# The world: the ground is seeded with `oilseed`, an oil-rich hard-shelled seed that is at once FRACTURABLE
+# (a forager can crack it, so its FracturePotential reads positive and the loop proposes acting on it) and
+# ENERGY-DENSE (bio.energy_density, the kernel's assimilable energy). The founders carry a seed-energy
+# reserve backed by oilseed and a seed-storing tissue that sizes it, and they afford geophage. So a being
+# that EXTRACTS the seed into its inventory and EATS it feeds a reserve rise, the felt reward the appetitive
+# learner credits into a REWARDS belief on the enacted sequence, drawn through the runtime edibility laws.
+#
+# The emergence line holds: the substance's physics is authored environment (Principle 9), but the technique
+# is DISCOVERED. No pre-formed reward belief, no pre-set exploration weight, no hardcoded payoff; the energy
+# is the seed's own physics, and "extract and eat this seed" emerges because the founder-zero exploration
+# weight lifts under selection where it pays off. The balance knobs (the oilseed's nutritive value, the
+# seed-energy reserve's drain, and accessibility) are set to a sensible viable world and left for the owner
+# to tune to taste, never tuned to force the technique to spread.
+
+[scenario]
+id = "viability"
+name = "Viability"
+summary = "The opt-in scenario that closes the discovery loop: a world seeded with the nutritive oilseed, founders carrying an oilseed-backed reserve and affording geophage, so extracting and eating the seed feeds a reserve rise the reward learner credits and a rewarded technique can emerge under selection. No payoff, belief, or weight is authored; the energy is the seed's own physics."
+grounding = "real"
+
+[races]
+count = "several"    # a handful of founding peoples, enough for drift and divergence to run
+diversity = "low"    # a calm viable world to watch the loop close on its own, not a stressed one
