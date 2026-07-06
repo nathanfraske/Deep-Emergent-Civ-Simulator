@@ -728,6 +728,101 @@ impl FireField {
     }
 }
 
+/// The per-cell SOIL NUTRIENT store the matter cycle deposits decomposed matter into (material-substrate
+/// arc, cascade item 8, slice C, the re-materialisation). When a cell's organic matter decomposes, its lost
+/// mass does not vanish to a scalar sink: it re-materialises HERE, located at the cell and split into
+/// nutrient CLASSES by the decomposing substance's own composition (its mineral-ash fraction to a mineral
+/// class, the remainder to an organic class), so the ground where a carcass rots is enriched. Mass-valued
+/// (not volume), so a deposit is EXACT: no volume-quantisation rounding, and the split conserves the
+/// decomposed mass bit for bit, because the organic share is the remainder after the mineral share (mineral
+/// plus organic equals the loss exactly, whatever the mineral multiply rounds to). The productivity
+/// derivation reads a cell's total nutrient mass as its soil fertility (slice C2), closing the matter cycle
+/// into the food web. Off the run path until the matter cycle deposits into it, so declaring it leaves every
+/// scenario byte-identical (the opt-in empty-default pattern, the sibling of [`FireField`]).
+#[derive(Clone, Debug, Default)]
+pub struct SoilNutrientField {
+    /// The accumulated nutrient mass at each cell, keyed by [`Coord3`] then by nutrient-class id (the source
+    /// composition axis for the mineral share, a residual id for the organic share). A cell or class not
+    /// present holds no nutrient (the absence convention).
+    cells: BTreeMap<Coord3, BTreeMap<String, Fixed>>,
+}
+
+impl SoilNutrientField {
+    /// A barren store: no cell holds any deposited nutrient.
+    pub fn new() -> SoilNutrientField {
+        SoilNutrientField::default()
+    }
+
+    /// Whether nothing has been deposited anywhere (the opt-out state a scenario with no matter cycle stays
+    /// in, so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Deposit nutrient mass of a class at a cell, accumulating with what is already there. A non-positive
+    /// mass is a no-op, so no empty entry is created and an unused store stays empty.
+    pub fn deposit(&mut self, cell: Coord3, class: &str, mass: Fixed) {
+        if mass <= Fixed::ZERO {
+            return;
+        }
+        let entry = self
+            .cells
+            .entry(cell)
+            .or_default()
+            .entry(class.to_string())
+            .or_insert(Fixed::ZERO);
+        *entry = entry.saturating_add(mass);
+    }
+
+    /// The nutrient mass of a class at a cell; an unenriched cell or an absent class reads zero.
+    pub fn mass(&self, cell: Coord3, class: &str) -> Fixed {
+        self.cells
+            .get(&cell)
+            .and_then(|m| m.get(class))
+            .copied()
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The total nutrient mass at a cell, summed over its classes (the soil fertility the productivity
+    /// derivation reads). An unenriched cell reads zero. Saturating, so an over-enriched cell caps rather
+    /// than wrapping.
+    pub fn cell_total(&self, cell: Coord3) -> Fixed {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.values()
+                    .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v))
+            })
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The total deposited nutrient mass over every cell and class (the matter the decomposition has moved
+    /// out of located substances and into the soil, the sink side of the conservation the
+    /// [`crate::conservation::ConservationRegistry`] guards). Saturating.
+    pub fn total(&self) -> Fixed {
+        self.cells.values().fold(Fixed::ZERO, |acc, m| {
+            m.values().fold(acc, |a, v| a.saturating_add(*v))
+        })
+    }
+
+    /// Fold the soil store into a hash in canonical (cell, class, mass) order, beside
+    /// [`FireField::hash_into`]. An empty store folds nothing, so an opted-out run is unchanged. The
+    /// `BTreeMap`s walk in canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (cell, classes) in &self.cells {
+            for (class, mass) in classes {
+                h.write_i64(cell.x as i64);
+                h.write_i64(cell.y as i64);
+                h.write_i64(cell.z as i64);
+                for b in class.as_bytes() {
+                    h.write_u32(*b as u32);
+                }
+                h.write_fixed(*mass);
+            }
+        }
+    }
+}
+
 /// One horizontal stratum of a ground profile: a substance filling every cell in an inclusive z-band
 /// at a fixed volume. The membership is data (a substance id and a z-band), so a world's stratigraphy
 /// is data-defined, never a `Rock`/`Soil`/`Ore` enum (Principle 8 and 11): a new stratum is a data

@@ -99,7 +99,7 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    MatterCycleCalib, ShelterCalib, WieldedTool,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
 };
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
@@ -923,13 +923,15 @@ pub struct Embodiment {
     /// folds no bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Recomputed each
     /// tick from the fuel present and the cell temperature, so it always reflects the current combustion.
     fire: FireField,
-    /// The running total MASS the matter cycle has removed from the located matter and dispersed to the
-    /// environment (material-substrate arc, cascade item 8): the decomposed matter that has left a cell (its
-    /// gases dispersing, its minerals leaching) but is not yet re-materialised as a soil or air substance.
-    /// It is the SINK that makes decomposition exactly mass-conserving: what leaves a cell exactly enters
-    /// here, so `sum(cell masses) + this` is invariant. ZERO by default, folded into `state_hash` only when
-    /// non-zero, so a scenario with no matter cycle armed stays byte-identical.
-    decomposed_mass: Fixed,
+    /// The per-cell SOIL NUTRIENT store the matter cycle deposits decomposed matter into (material-substrate
+    /// arc, cascade item 8, slice C): when a cell's organic matter decomposes, its lost mass re-materialises
+    /// HERE, located at the cell and split into nutrient classes by the substance's own composition (mineral
+    /// ash and organic residue), so the ground where a carcass rots is enriched rather than the mass sitting
+    /// in a placeless scalar. It is the mass-valued SINK that makes decomposition exactly mass-conserving:
+    /// what leaves a cell exactly enters here (the split conserves the loss bit for bit), so `sum(cell
+    /// masses) + this total` is invariant. Empty by default, folded into `state_hash` only when non-empty, so
+    /// a scenario with no matter cycle armed stays byte-identical.
+    soil: SoilNutrientField,
 }
 
 impl Embodiment {
@@ -983,7 +985,7 @@ impl Embodiment {
             craft: None,
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
-            decomposed_mass: Fixed::ZERO,
+            soil: SoilNutrientField::new(),
         }
     }
 
@@ -1061,11 +1063,18 @@ impl Embodiment {
         &self.fire
     }
 
-    /// The total mass the matter cycle has decomposed and dispersed to the environment (material-substrate
-    /// arc, cascade item 8): the sink that closes decomposition's mass balance, for the conservation guard
-    /// and the reader.
+    /// The per-cell soil nutrient store the matter cycle deposits decomposed matter into (material-substrate
+    /// arc, cascade item 8, slice C): where a carcass rots, enriched by nutrient class, for the productivity
+    /// fertility read and the reader.
+    pub fn soil(&self) -> &SoilNutrientField {
+        &self.soil
+    }
+
+    /// The total mass the matter cycle has decomposed into the soil store (material-substrate arc, cascade
+    /// item 8): the sink side that closes decomposition's mass balance (`sum(cell masses) + this` is
+    /// invariant), summed over the soil store's cells and classes for the conservation guard and the reader.
     pub fn decomposed_mass(&self) -> Fixed {
-        self.decomposed_mass
+        self.soil.total()
     }
 
     /// Install the world material registry a carried load's weight is derived against (material-substrate
@@ -2012,29 +2021,33 @@ impl Runner {
     }
 
     /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
-    /// over time. For each cell substance carrying a biological composition (a `bio.mineral_ash_fraction`, the
-    /// mark of organic matter) whose cell temperature is at or above the decomposition barrier, a reserved
-    /// fraction of its volume breaks down this tick and its EXACT mass leaves the located matter for the
-    /// decomposed-mass sink (its gases dispersing, its minerals leaching to the environment). Run inside
-    /// [`Runner::step_field`] after the temperature advances, so both tick orders decompose against the
-    /// settled temperature identically. A pure deterministic fold in canonical cell-and-substance order
-    /// (Principle 3); the outcome keys off the substance's own composition physics and the cell temperature,
-    /// no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no material
-    /// registry, or no organic matter warm enough decomposes nothing, so the sink stays zero and the run is
-    /// byte-identical.
+    /// over time and enriches the ground where it rots. For each cell substance carrying a biological
+    /// composition (a `bio.mineral_ash_fraction`, the mark of organic matter) whose cell temperature is at or
+    /// above the substance's own decomposition barrier, a per-substance fraction of its volume breaks down
+    /// this tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split by the
+    /// substance's own composition (the mineral-ash share to a mineral class, the remainder to an organic
+    /// class). Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
+    /// against the settled temperature identically. A pure deterministic fold in canonical cell-and-substance
+    /// order (Principle 3); the outcome keys off the substance's own composition physics and the cell
+    /// temperature, no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no
+    /// material registry, or no organic matter warm enough decomposes nothing, so the soil store stays empty
+    /// and the run is byte-identical.
     ///
     /// The decomposition is EXACTLY mass-conserving: the mass a cell loses (the material field's own rounded
-    /// mass decrease for the taken volume) is added, bit for bit, to the sink, so `sum(cell masses) + sink`
-    /// is invariant, the hard conservation the [`crate::conservation::ConservationRegistry`] guards. Slice C
-    /// re-materialises the sink into soil and air substances (the ash fraction to a mineral residue, the
-    /// volatile to the air), the split its own follow-on.
+    /// mass decrease for the taken volume) enters the soil store bit for bit (the mineral share plus the
+    /// organic remainder equals the loss exactly, mass-valued so no volume-quantisation rounding), so
+    /// `sum(cell masses) + soil store total` is invariant, the hard conservation the
+    /// [`crate::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
+    /// the cell's productivity; volatilising the organic share to the air (a gas the decomposition vents) is
+    /// a follow-on refinement of the split.
     fn step_matter_cycle(&mut self) {
         let Some(calib) = self.matter_cycle else {
             return;
         };
         // Read phase: over every cell of organic matter warm enough to decompose, compute the volume that
-        // breaks down and the exact mass it carries off. Snapshotted so the take below does not alias the read.
-        let decomp: Vec<(Coord3, String, Fixed, Fixed)> = {
+        // breaks down, the exact mass it carries off, and the substance's mineral-ash fraction (the split the
+        // deposit routes by). Snapshotted so the take below does not alias the read.
+        let decomp: Vec<(Coord3, String, Fixed, Fixed, Fixed)> = {
             let Some(emb) = self.embodiment.as_ref() else {
                 return;
             };
@@ -2050,10 +2063,12 @@ impl Runner {
                     };
                     // Organic matter carries a biological composition (an ash fraction); inorganic matter
                     // (rock, soil, metal) does not and is skipped. This is the substance's own physics, not a
-                    // tag: what decomposes is what has a biological make-up (Principles 8, 11).
-                    if !def.vector.contains_key("bio.mineral_ash_fraction") {
+                    // tag: what decomposes is what has a biological make-up (Principles 8, 11). The ash
+                    // fraction also routes the deposit: the mineral share of the decomposed mass.
+                    let Some(ash_fraction) = def.vector.get("bio.mineral_ash_fraction").copied()
+                    else {
                         continue;
-                    }
+                    };
                     // The decomposition BARRIER is the substance's own thermal gate (its tissue-water
                     // freezing point), read per-substance from its floor axis: at or below it a frozen
                     // remains is preserved. A substance carrying no barrier axis does not decompose (the
@@ -2095,18 +2110,33 @@ impl Runner {
                     if mass_lost <= Fixed::ZERO {
                         continue;
                     }
-                    out.push((*cell, substance.clone(), decomposed, mass_lost));
+                    out.push((
+                        *cell,
+                        substance.clone(),
+                        decomposed,
+                        mass_lost,
+                        ash_fraction,
+                    ));
                 }
             }
             out
         };
-        // Apply phase: remove the decomposed volume and move its exact mass into the sink.
+        // Apply phase: remove the decomposed volume and re-materialise its exact mass into the cell's soil
+        // nutrient store, split by the substance's own composition. The mineral share is the ash fraction of
+        // the loss; the organic share is the REMAINDER (loss minus mineral), so mineral plus organic equals
+        // the loss bit for bit whatever the mineral multiply rounds to, and the deposit conserves mass
+        // exactly (mass-valued, so no volume-quantisation rounding). Located at the cell where the matter
+        // rots, so the ground is enriched rather than the mass sitting in a placeless scalar.
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
-        for (cell, substance, decomposed, mass_lost) in decomp {
+        for (cell, substance, decomposed, mass_lost, ash_fraction) in decomp {
             emb.material.take(cell, &substance, decomposed);
-            emb.decomposed_mass = emb.decomposed_mass.saturating_add(mass_lost);
+            let mineral = mass_lost.checked_mul(ash_fraction).unwrap_or(Fixed::ZERO);
+            let mineral = mineral.min(mass_lost);
+            let organic = mass_lost - mineral;
+            emb.soil.deposit(cell, "bio.mineral_ash_fraction", mineral);
+            emb.soil.deposit(cell, "bio.organic_residue", organic);
         }
     }
 
@@ -3170,11 +3200,12 @@ impl Runner {
             // scenario with no combustion armed or nothing burning, so it folds no bytes and the run is
             // byte-identical (the opt-in empty-default).
             emb.fire.hash_into(&mut h);
-            // The decomposed-mass sink (material-substrate arc, cascade item 8): the matter the matter cycle
-            // has dispersed to the environment, folded only when non-zero so a scenario with no matter cycle
-            // armed folds no bytes and the run is byte-identical (the opt-in default).
-            if emb.decomposed_mass != Fixed::ZERO {
-                h.write_fixed(emb.decomposed_mass);
+            // The soil nutrient store (material-substrate arc, cascade item 8, slice C): the decomposed matter
+            // the matter cycle has re-materialised into the ground, folded in canonical (cell, class, mass)
+            // order and only when non-empty, so a scenario with no matter cycle armed folds no bytes and the
+            // run is byte-identical (the opt-in empty-default, the sibling of the fire field above).
+            if !emb.soil.is_empty() {
+                emb.soil.hash_into(&mut h);
             }
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);

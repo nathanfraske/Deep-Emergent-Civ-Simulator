@@ -2285,6 +2285,35 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
         "the carrion has rotted well down"
     );
 
+    // Slice C: the decomposed mass re-materialised into the cell's SOIL nutrient store (not a placeless
+    // scalar), LOCATED where the carrion rotted and SPLIT by the substance's own composition into a mineral
+    // class (the ash fraction) and an organic class (the remainder). The split is exact and complete.
+    let soil = warm.embodiment().unwrap().soil();
+    let mineral = soil.mass(cell, "bio.mineral_ash_fraction");
+    let organic = soil.mass(cell, "bio.organic_residue");
+    assert!(mineral > Fixed::ZERO, "the mineral ash enriched the soil");
+    assert!(organic > Fixed::ZERO, "the organic residue enriched the soil");
+    assert_eq!(
+        mineral + organic,
+        warm.embodiment().unwrap().decomposed_mass(),
+        "the mineral and organic shares are the whole decomposed mass (the split is complete)"
+    );
+    assert_eq!(
+        soil.cell_total(cell),
+        warm.embodiment().unwrap().decomposed_mass(),
+        "all the nutrient is located at the cell where the carrion rotted"
+    );
+    assert_eq!(
+        soil.cell_total(Coord3::ground(0, 0)),
+        Fixed::ZERO,
+        "a cell where nothing rotted is not enriched"
+    );
+    // Carrion's mineral-ash fraction (0.05) is small, so the organic residue is the larger share.
+    assert!(
+        organic > mineral,
+        "the organic residue outweighs the mineral ash (carrion is mostly soft tissue)"
+    );
+
     // A frozen cell (250 K, below the barrier): the carrion is preserved and nothing decomposes.
     let mut frozen = build(250);
     frozen.step();
