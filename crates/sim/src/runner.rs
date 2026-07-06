@@ -2536,6 +2536,30 @@ impl Runner {
         // Computed here where the mind is readable and applied to the walker below (a being that enacted
         // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
         let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
+        // Advance each being's eligibility trace BEFORE the reward credit reads it (ideation arc, piece 1,
+        // slice 1c, the record-before-credit ordering, the standard TD-lambda order): decay every remembered
+        // sequence by the reserved TD lambda (pruning those that underflow), then record the affordance the
+        // being acted on THIS tick at full eligibility, so a reserve rise felt this same tick credits the
+        // action that CAUSED it. Geophage and ingest refill the reserve on the tick they are enacted, so the
+        // felt rise is immediate; recording first gives the just-enacted action full eligibility for it, the
+        // way the standard trace credits the action that produced the reward, while a genuinely lagged reward
+        // still rides the decayed trace of earlier actions. Runs in canonical walker order, drawing no
+        // randomness. Only when the reward learner is armed; unarmed, no trace is ever populated, so this is
+        // inert and the run stays byte-identical.
+        if let Some(reward_learn) = reward_learn {
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(affordance) = w.decided_affordance {
+                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
+                            primitive: affordance.0,
+                            target_bucket: 0,
+                            param_bucket: 0,
+                        }]));
+                    }
+                }
+            }
+        }
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -2664,30 +2688,16 @@ impl Runner {
                 }
             }
         }
-        // Advance each being's eligibility trace for next tick (ideation arc, piece 1, slice 1c): decay every
-        // remembered sequence by the reserved TD lambda (pruning those that underflow) and record the
-        // affordance the being acted on this tick at full eligibility, so a reserve rise felt next tick
-        // credits it. Runs AFTER the credit read above, so this tick's reward credits the sequences executed
-        // on prior ticks (the interoceptive lag), in canonical walker order, drawing no randomness. Only when
-        // the reward learner is armed; unarmed, no trace is touched and the run stays byte-identical.
-        if let Some(reward_learn) = reward_learn {
+        // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that enacted an action
+        // this tick carries its prediction-error magnitude; one that enacted nothing resets to zero (surprise
+        // is about the last action). The eligibility trace was already decayed and this tick's action recorded
+        // BEFORE the credit read above (the record-before-credit order), so nothing advances the trace here.
+        // Only when discovery is armed, so an unarmed run never touches `surprise` (zero-by-default,
+        // byte-identical).
+        if reward_learn.is_some() && discovery.is_some() {
             if let Some(emb) = self.embodiment.as_mut() {
                 for w in emb.walkers.iter_mut() {
-                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
-                    if let Some(affordance) = w.decided_affordance {
-                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
-                            primitive: affordance.0,
-                            target_bucket: 0,
-                            param_bucket: 0,
-                        }]));
-                    }
-                    // Apply the surprise scored above (ideation arc, piece 3, slice 3b): a being that
-                    // enacted an action last tick carries its prediction-error magnitude; one that enacted
-                    // nothing resets to zero (surprise is about the last action). Only when discovery is
-                    // armed, so an unarmed run never touches `surprise` (zero-by-default, byte-identical).
-                    if discovery.is_some() {
-                        w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
-                    }
+                    w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
                 }
             }
         }
