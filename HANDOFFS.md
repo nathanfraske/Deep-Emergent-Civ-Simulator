@@ -7,6 +7,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-05: material-substrate item 7 slice A (shelter: insulating matter buffers a being), on branch claude/material-substrate, PR #93
+
+Item 7 (shelter) has its first slice, the fourth increment of this turn. A being under a roof of insulating matter is now buffered from a harsh field. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 7 SLICE A SHELTER paragraph). Commit `46bcaca`.
+
+WHAT LANDED: `phase_body_exchange` (`crates/sim/src/runner.rs`) reads the matter in the air cells above a being (z >= 1 in its column), derives that matter's thermal RESISTANCE (volume over conductivity, summed), and divides the being's exchange rate by one plus that resistance times the reserved coupling (the series-thermal-resistance form), keyed off the substance's own conductivity with no shelter tag. Oak gained its cited `therm.conductivity` (0.17), and a `ShelterCalib` carries the reserved `insulation_coupling` (basis: the conduction-versus-convection resistance ratio; dev-fixture one-tenth), armed opt-in via `Runner::set_shelter`.
+
+OPT-IN / hash-neutral: attenuation runs only when shelter is armed with enclosing matter present, so a scenario with no shelter or no overhead matter is byte-identical (crucible `254bc17c`, world_build 16 and world_determinism 3 replay-identical). Proven end to end (`a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field`): a being under an oak roof holds more of its warmth in a cold field than an exposed one, scheduled order bit-identical to pinned. 815 sim tests plus 84 physics tests green, fmt and clippy (`--all-targets -D warnings`) clean.
+
+HONEST LIMIT: building the roof (a being placing matter overhead) is the deferred emergent technique; this proves the primitive. STOPPED: item 7 slice A pushed (`46bcaca`). THIS TURN built FOUR increments (item 5 hydrology coupling, item 6 slice A live fire, item 6 slice C heat-injection/spread, item 7 slice A shelter), each gate-quality, committed, pushed, documented; the gate signed off item 5 hydrology, item 6 slice A, and item 6 (complete, slice C). NEXT, building ahead: item 8 (the matter cycle, IMPLEMENT the owner-ruled data-defined `TransformKindRegistry` keyed to physics kernels by id: general oxidation / phase-change / biological-reduction laws, NEVER named-transform arms), then the deferred slices (item 6 slice B the medium-oxygen gate so fire needs air; the overhead-deposit technique that lets a being build the roof), and the force-and-manipulation extension as a primitive-completeness check. Open emergence debts unchanged. Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-05: material-substrate item 6 slice C (fire spreads and burns out), on branch claude/material-substrate, PR #93
 
 The emergent payoff of live fire, the slice the gate steered to after signing off slice A. Fire now SPREADS cell to cell and EXTINGUISHES when fuel runs out, both emergent. Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 6 SLICE C HEAT INJECTION paragraph). Commit `973b8b2`.
