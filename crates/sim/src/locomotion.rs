@@ -448,6 +448,15 @@ pub struct Walker {
     /// Because the modulation is MULTIPLICATIVE on the heritable propensity, a founder (zero propensity) never
     /// explores however surprised, so founder-zero holds. Folds into `state_hash` when positive.
     pub surprise: Fixed,
+    /// The being's heritable DELIBERATION weight (ideation arc, piece 4, slice 4b): the rate in `[0, 1]` at
+    /// which it ACTS on the believed-best action its planner recalled toward a goal, rather than only on what
+    /// it perceives underfoot. FOUNDER-ZERO: a founder reads zero and never deliberates, so goal-directed
+    /// pursuit EMERGES by selection rather than being switched on (Principle 9), never a coded "when idle,
+    /// plan". The deliberation analogue of `exploration`: where exploration tries the untried, deliberation
+    /// exploits the best-believed, and the two are independent heritable drives. Proved with a PRIMED value
+    /// here, expressed from a heritable channel at the birth path in a follow-on. Folds into `state_hash`
+    /// when positive.
+    pub deliberation: Fixed,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -483,6 +492,7 @@ impl Walker {
             proposed_action: None,
             exploration: Fixed::ZERO,
             surprise: Fixed::ZERO,
+            deliberation: Fixed::ZERO,
             alive: true,
         }
     }

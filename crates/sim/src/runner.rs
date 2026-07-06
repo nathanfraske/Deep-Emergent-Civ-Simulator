@@ -112,6 +112,7 @@ use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, MetabolicAnchors,
 };
+use crate::planning::plan_toward;
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_compose::FunctionLawRegistry;
@@ -3050,7 +3051,13 @@ impl Runner {
         // counter-keyed under the HYPOTHESIZE phase (keyed on the being and the tick), so a proposal replays
         // bit-for-bit. Read before the mutable embodiment borrow; the only new RNG on the run path, disjoint
         // from every other phase.
-        let proposals: BTreeMap<StableId, SequenceStep> = match (
+        // Each being's two discovery choices this tick: the EXPLORED proposal (a belief-weighted sample of
+        // its binding graph, piece 2) and the DELIBERATED action (the believed-best GROUNDED action its
+        // planner recalls, piece 4, the highest-plan-confidence candidate present in its current binding
+        // graph, or `None` where it believes nothing it can currently do pays off). Both read before the
+        // mutable borrow, drawing the sample's RNG only; the plan is a pure ranked read.
+        #[allow(clippy::type_complexity)]
+        let discovery_choices: BTreeMap<StableId, (SequenceStep, Option<SequenceStep>)> = match (
             self.discovery,
             self.embodiment.as_ref(),
             self.world.as_ref(),
@@ -3085,13 +3092,40 @@ impl Runner {
                             ),
                         };
                         let candidates = candidate_bindings(&afforded, &percepts);
-                        sample_candidate(&candidates, mind, &calib, params, w.id, tick, seed)
-                            .map(|p| (w.id, p))
+                        let proposal =
+                            sample_candidate(&candidates, mind, &calib, params, w.id, tick, seed)?;
+                        // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
+                        // (plan_toward over the reward goal), then take the highest-confidence plan step whose
+                        // action is a candidate PRESENT in its current binding graph. This is the grounding
+                        // gate: a recalled belief becomes actable only where the being's own senses currently
+                        // afford and perceive it, so a plan with no matching percept is inert. The candidate's
+                        // PRIMITIVE subject is matched (the subject the reward credit records and the plan
+                        // ranks), so the deliberated choice is the believed-best action the being can do now.
+                        let plan =
+                            plan_toward(mind, REWARD_ATTR, REWARDS, params, calib.plan_depth_cap);
+                        let deliberated = plan.iter().find_map(|step| {
+                            candidates.iter().copied().find(|c| {
+                                sequence_subject(&[SequenceStep {
+                                    primitive: c.primitive,
+                                    target_bucket: 0,
+                                    param_bucket: 0,
+                                }]) == step.subject
+                            })
+                        });
+                        Some((w.id, (proposal, deliberated)))
                     })
                     .collect()
             }
             _ => BTreeMap::new(),
         };
+        let proposals: BTreeMap<StableId, SequenceStep> = discovery_choices
+            .iter()
+            .map(|(&id, &(proposal, _))| (id, proposal))
+            .collect();
+        let deliberations: BTreeMap<StableId, SequenceStep> = discovery_choices
+            .iter()
+            .filter_map(|(&id, &(_, deliberated))| deliberated.map(|d| (id, d)))
+            .collect();
         // (0c) Physics to physiology, the anatomy-derived metabolism (R-METABOLIZE): when a physiology
         // is installed, build each being's per-axis DERIVED drain so its survival follows its body plan,
         // mass, tissue, medium, and temperature rather than the axis defs' authored scalars. The
@@ -3255,6 +3289,34 @@ impl Runner {
             for w in emb.walkers.iter_mut() {
                 let proposal = proposals.get(&w.id).copied();
                 w.proposed_action = proposal;
+                // (4b) The DELIBERATION gate (ideation arc, piece 4): BEFORE exploring, a being ACTS on the
+                // believed-best action its planner recalled toward a goal (the grounded deliberated action)
+                // when its own heritable DELIBERATION weight fires, a counter-keyed draw under the DELIBERATE
+                // phase (disjoint from ENACT). FOUNDER-ZERO: a founder (zero weight) never deliberates, so
+                // goal-directed pursuit EMERGES by selection, never a coded "when idle, plan" (Principle 9).
+                // The deliberated action is already GROUNDED (a candidate in the being's current binding
+                // graph, so its affordance is perceived and afforded now), and deliberation takes PRECEDENCE
+                // over exploration: a being that acts on its plan does not also explore this tick, so it
+                // exploits its best grounded belief when it has one and falls through to exploring otherwise.
+                let mut acted = false;
+                if w.deliberation > Fixed::ZERO {
+                    if let Some(action) = deliberations.get(&w.id).copied() {
+                        let fired = DrawKey::entity(w.id.0, tick, Phase::DELIBERATE)
+                            .rng(seed)
+                            .unit_fixed(0)
+                            < w.deliberation;
+                        let primitive = AffordanceId(action.primitive);
+                        let matter_primitive = matches!(
+                            primitive,
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                        );
+                        if fired && matter_primitive {
+                            deferred_actions.insert(w.id, (primitive, Fixed::ONE));
+                            w.decided_affordance = Some(primitive);
+                            acted = true;
+                        }
+                    }
+                }
                 // (2a'') The EXPLORATION gate (ideation arc, piece 2, slice 2c-2): a being ACTS on its
                 // proposed action only when its own heritable exploration propensity fires, a counter-keyed
                 // draw under the ENACT phase (a uniform draw below the propensity). FOUNDER-ZERO: a being
@@ -3268,7 +3330,7 @@ impl Runner {
                 // credit. A proposed MOVE or INGEST is the controller's own, already enacted in the
                 // locomotion step, so it is not re-injected here.
                 if let Some(proposal) = proposal {
-                    if w.exploration > Fixed::ZERO {
+                    if !acted && w.exploration > Fixed::ZERO {
                         // (3b) The SURPRISE-MODULATED effective propensity (ideation arc, piece 3): a being
                         // enacts its proposals at its heritable base rate, LIFTED when its recent prediction
                         // error (surprise) clears the reserved threshold, so it explores more where the world
@@ -3641,6 +3703,13 @@ impl Runner {
                 // run's hash unchanged; only a being carrying a live surprise folds it.
                 if w.surprise > Fixed::ZERO {
                     h.write_fixed(w.surprise);
+                }
+                // The heritable deliberation weight (ideation arc, piece 4, slice 4b): the rate at which a
+                // being acts on its recalled plan, folded after the surprise. FOUNDER-ZERO: zero for a being
+                // whose weight was never lifted off zero, so it folds nothing and leaves an opted-out (and
+                // every founder-only) run's hash unchanged; only a primed or mutant being folds it.
+                if w.deliberation > Fixed::ZERO {
+                    h.write_fixed(w.deliberation);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -5393,6 +5462,230 @@ values = [
         assert_eq!(
             founder, 0,
             "a founder with zero propensity never explores however surprised (multiplicative, founder-zero)"
+        );
+    }
+
+    #[test]
+    fn a_being_deliberates_onto_its_believed_best_grounded_action_and_a_founder_never_does() {
+        // Ideation arc, piece 4, slice 4b (the deliberation enactment gate): a being ACTS on the
+        // believed-best action its planner recalled toward a goal, through its own heritable DELIBERATION
+        // weight, and only where its senses currently ground it. FOUNDER-ZERO: a founder (zero weight) never
+        // deliberates, so goal-directed pursuit EMERGES by selection, never a coded "when idle, plan"
+        // (Principle 9). GROUNDING: a recalled belief is actable only where the being's own binding graph
+        // affords and perceives it, so a plan with no matching percept is inert. Proven with a PRIMED
+        // deliberation weight and a PRIMED reward belief (the belief the reward learner would form), exactly
+        // as the exploration gate was proved primed; the belief is committed through the associative engine's
+        // own path, not injected.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
+            GRASP, TEMPERATURE,
+        };
+        use crate::learn::{sequence_subject, SequenceStep, NEUTRAL, REWARDS, REWARD_ATTR};
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+        // The subject the reward credit records for a grasp and the planner ranks (the primitive subject).
+        let grasp_subject = sequence_subject(&[SequenceStep {
+            primitive: GRASP.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Run one tick with the being's DELIBERATION weight primed to `deliberation` and a committed REWARDS
+        // belief about grasp, on granite when `grounded` (so grasp is a candidate in its binding graph) or a
+        // void cell otherwise (so no candidate grounds the recalled belief). Discovery is armed, the reward
+        // learner is not, and exploration is zero, so only the deliberation gate can enact.
+        let run = |deliberation: Fixed, grounded: bool| -> (Option<AffordanceId>, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+            // Commit the being's REWARDS belief about grasp through the associative engine's own path.
+            if let Some(mind) = world.mind_mut(id) {
+                for _ in 0..12 {
+                    mind.consider(
+                        grasp_subject,
+                        REWARD_ATTR,
+                        [REWARDS, NEUTRAL],
+                        REWARDS,
+                        Fixed::ONE,
+                        id,
+                    );
+                }
+            }
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            walker.deliberation = deliberation;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            if grounded {
+                material.deposit(tile, "granite", Fixed::from_int(4));
+            }
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.step();
+            let decided = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                .and_then(|w| w.decided_affordance);
+            (decided, runner.state_hash())
+        };
+
+        let deliberate = run(Fixed::ONE, true);
+        let deliberate2 = run(Fixed::ONE, true);
+        let founder = run(Fixed::ZERO, true);
+        let ungrounded = run(Fixed::ONE, false);
+
+        // A being with a primed deliberation weight and a believed-good GROUNDED action enacts it: the
+        // planner recalled that grasp pays off, the binding graph grounds it, and the deliberation gate fires.
+        assert_eq!(
+            deliberate.0,
+            Some(GRASP),
+            "the being deliberates onto its believed-best grounded action and enacts it"
+        );
+        assert_eq!(
+            deliberate, deliberate2,
+            "the deliberation run replays bit-for-bit"
+        );
+        // FOUNDER-ZERO: a being with zero deliberation weight never acts on its plan, however sure and
+        // grounded, so goal-directed pursuit is a heritable drive selection lifts, never a default.
+        assert_eq!(
+            founder.0, None,
+            "a founder with zero deliberation weight never deliberates (founder-zero)"
+        );
+        // GROUNDING: the same believed-good being on a void cell (no granite, so grasp is not a current
+        // binding-graph candidate) enacts nothing, so a recalled belief is inert until the senses bind it.
+        assert_eq!(
+            ungrounded.0, None,
+            "a recalled belief with no matching percept is inert (the grounding gate)"
+        );
+        // The deliberation weight is canonical state, so the deliberating run's hash differs from the
+        // founder's (which folds no weight and enacts nothing through the gate).
+        assert_ne!(
+            deliberate.1, founder.1,
+            "the deliberation weight folds into state_hash, so it is canonical state"
         );
     }
 

@@ -1295,6 +1295,13 @@ impl World {
         self.minds.get(&id)
     }
 
+    /// A mind by id, mutably, for a caller that seeds or updates a being's beliefs directly (a scenario
+    /// setup or a test priming a belief the way the reward learner would form it). The run path forms
+    /// beliefs through the tick's stimulus inputs, not this accessor.
+    pub fn mind_mut(&mut self, id: StableId) -> Option<&mut Mind> {
+        self.minds.get_mut(&id)
+    }
+
     /// A being's genome by id, for inspection (populated at the dawn).
     pub fn genome_of(&self, id: StableId) -> Option<&Genome> {
         self.genomes.get(&id)

@@ -171,6 +171,13 @@ impl Phase {
     /// HYPOTHESIZE (which candidate it proposes) so the propose and the enact draws never collide on a
     /// counter: a being that proposes an action still enacts it only when its exploration fires.
     pub const ENACT: Phase = Phase(0x1D);
+    /// A deliberation-enact draw (the ideation / experiential-discovery arc, piece 4, slice 4b): whether a
+    /// being ACTS on the believed-best action its planner recalled toward a goal this tick, gated by its own
+    /// heritable DELIBERATION weight, founder-zero. Keyed on the being and the tick. Distinct from ENACT
+    /// (whether it acts on an EXPLORED novel proposal) so the deliberate and the explore draws never collide
+    /// on a counter: exploration tries the untried, deliberation exploits the best-believed, and a being's
+    /// two heritable drives are drawn independently so selection can tune each.
+    pub const DELIBERATE: Phase = Phase(0x1E);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

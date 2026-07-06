@@ -2194,6 +2194,17 @@ value = ""
 unit = "count"
 source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
 
+# --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
+# Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.
+# The deliberation weight is FOUNDER-ZERO (Principle 9: goal-directed pursuit emerges by selection, never a
+# coded "when idle, plan"), so the founder base is a structural zero, not a number to set. The follow-on that
+# makes deliberation heritable expresses it from a Channel (sibling to Channel::Exploration) at the birth
+# path and mutates it through the existing genome.additive_mutation_step, adding a genome.loci_per_channel
+# data row, no fresh dial; the expression to a [0, 1] rate is the genome-encoded reaction norm and the clamp
+# is structural (a probability). The planner's depth is planning.depth_cap (above), wired here as
+# DiscoveryCalib.plan_depth_cap. This slice proves the gate with a PRIMED Walker::deliberation (a test
+# fixture, not a manifest value), so no calibration entry is owed here.
+
 # --- ideation / experiential-discovery arc, piece 2, slice 2c-2 (the exploration-enactment gate,
 # Walker::exploration, the ENACT-phase draw): NO NEW reserved scalar, on grounding. The gate resolved this
 # gate as FOUNDER-ZERO (Principle 9: exploration EMERGES by selection, never switched on), so the founder

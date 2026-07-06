@@ -98,6 +98,12 @@ pub struct DiscoveryCalib {
     /// just-noticeable difference, set so a unit surprise lifts exploration by a proportionate step rather
     /// than swamping the heritable base. Surfaced with its basis, never fabricated.
     pub surprise_gain: Fixed,
+    /// RESERVED. The deliberation depth cap: how many of its believed-good actions a being ranks when it
+    /// PLANS toward a goal (ideation arc, piece 4, the planner's cognition budget, `planning.depth_cap`
+    /// wired here). A being deliberates over its top few beliefs, not its whole store, so a longer plan
+    /// past the confidence noise is not worth the per-tick cost. Basis: the per-tick cognition budget and
+    /// the depth beyond which the next-ranked belief is no better than noise. Surfaced with its basis.
+    pub plan_depth_cap: usize,
 }
 
 impl DiscoveryCalib {
@@ -110,6 +116,7 @@ impl DiscoveryCalib {
             exploration_floor: Fixed::from_ratio(1, 4),
             surprise_threshold: Fixed::from_ratio(1, 2),
             surprise_gain: Fixed::ONE,
+            plan_depth_cap: 8,
         }
     }
 }
