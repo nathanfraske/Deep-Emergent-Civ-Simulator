@@ -164,6 +164,13 @@ impl Phase {
     /// the answer like a god. Distinct from EXPLORE (a movement heading) so the two draws never collide on a
     /// shared counter.
     pub const HYPOTHESIZE: Phase = Phase(0x1C);
+    /// An exploration-enact draw (the ideation / experiential-discovery arc, piece 2, slice 2c-2): whether a
+    /// being ACTS on the candidate action it proposed this tick, gated by its own heritable exploration
+    /// propensity, founder-zero. Keyed on the being and the tick, so whether a being tries its hypothesis is
+    /// a reproducible function of the seed, the being, and the tick, never the camera. Distinct from
+    /// HYPOTHESIZE (which candidate it proposes) so the propose and the enact draws never collide on a
+    /// counter: a being that proposes an action still enacts it only when its exploration fires.
+    pub const ENACT: Phase = Phase(0x1D);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

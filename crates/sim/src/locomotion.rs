@@ -430,6 +430,14 @@ pub struct Walker {
     /// byte-identical). Set by the runner's discovery pass each tick and folded into `state_hash`, the
     /// hypothesis a being is about to test.
     pub proposed_action: Option<SequenceStep>,
+    /// The being's heritable EXPLORATION propensity (ideation arc, piece 2, slice 2c-2): the rate in
+    /// `[0, 1]` at which it ACTS on the action it proposed. FOUNDER-ZERO: a founder reads zero and never
+    /// enacts a proposal, so it is byte-identical, and only a mutant whose propensity is lifted off zero
+    /// tries the untried, so exploration EMERGES by selection rather than being switched on (Principle 9).
+    /// Expressed from a heritable `Channel::Exploration` at the birth path in a follow-on; this slice proves
+    /// the enactment gate with a PRIMED value, exactly as the appetitive weight was proved primed. Folds
+    /// into `state_hash` when positive.
+    pub exploration: Fixed,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -463,6 +471,7 @@ impl Walker {
             eligibility_trace: EligibilityTrace::new(),
             decided_affordance: None,
             proposed_action: None,
+            exploration: Fixed::ZERO,
             alive: true,
         }
     }

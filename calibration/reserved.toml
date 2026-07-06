@@ -2161,6 +2161,18 @@ value = ""
 unit = "weight_ratio"
 source = "ideation arc piece 2 slice 2b; crates/sim/src/discovery.rs; crates/core/src/keys.rs"
 
+# --- ideation / experiential-discovery arc, piece 2, slice 2c-2 (the exploration-enactment gate,
+# Walker::exploration, the ENACT-phase draw): NO NEW reserved scalar, on grounding. The gate resolved this
+# gate as FOUNDER-ZERO (Principle 9: exploration EMERGES by selection, never switched on), so the founder
+# propensity is a structural zero, not a number to set. The follow-on that makes exploration heritable adds
+# a Channel::Exploration data row to the existing genome.loci_per_channel map (above) and mutates it through
+# the existing genome.additive_mutation_step (above), the standing per-locus additive step every quantitative
+# allele already drifts at, reused for consistency rather than a fresh dial. The expression to a [0, 1]
+# enact rate is the genome-encoded reaction norm (the loci ARE the substrate, as for Channel::Controller),
+# not a manifest scalar, and the [0, 1] clamp is structural (a probability). This slice proves the gate
+# mechanism with a PRIMED Walker::exploration (a test fixture, not a manifest value), so no calibration entry
+# is owed here. Recorded so the manifest documents WHY there is no 2c-2 entry rather than leaving a silent gap.
+
 [[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"

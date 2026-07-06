@@ -116,7 +116,7 @@ use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
-use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
@@ -3212,8 +3212,40 @@ impl Runner {
         // enactment executes it). A being absent from the map proposed nothing, so its record clears to
         // `None`; an unarmed run leaves every record `None` and folds nothing (byte-identical).
         if self.discovery.is_some() {
+            let seed = emb.seed;
+            let tick = self.clock;
             for w in emb.walkers.iter_mut() {
-                w.proposed_action = proposals.get(&w.id).copied();
+                let proposal = proposals.get(&w.id).copied();
+                w.proposed_action = proposal;
+                // (2a'') The EXPLORATION gate (ideation arc, piece 2, slice 2c-2): a being ACTS on its
+                // proposed action only when its own heritable exploration propensity fires, a counter-keyed
+                // draw under the ENACT phase (a uniform draw below the propensity). FOUNDER-ZERO: a being
+                // with zero propensity never draws below it, so it never enacts a proposal and stays
+                // byte-identical; only a being whose propensity is lifted off zero (by mutation, a follow-on;
+                // primed here) tries the untried, so exploration EMERGES rather than being switched on
+                // (Principle 9). When it fires on a proposed MATTER primitive (one the deferred-action pass
+                // enacts), the proposal is injected into `deferred_actions` and recorded as the decided
+                // affordance, so the SAME enactment the controller uses executes it and the reward learner
+                // credits the sequence through the eligibility trace, closing the loop: propose, enact, feel,
+                // credit. A proposed MOVE or INGEST is the controller's own, already enacted in the
+                // locomotion step, so it is not re-injected here.
+                if let Some(proposal) = proposal {
+                    if w.exploration > Fixed::ZERO {
+                        let fired = DrawKey::entity(w.id.0, tick, Phase::ENACT)
+                            .rng(seed)
+                            .unit_fixed(0)
+                            < w.exploration;
+                        let primitive = AffordanceId(proposal.primitive);
+                        let matter_primitive = matches!(
+                            primitive,
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                        );
+                        if fired && matter_primitive {
+                            deferred_actions.insert(w.id, (primitive, Fixed::ONE));
+                            w.decided_affordance = Some(primitive);
+                        }
+                    }
+                }
             }
         }
         // (2b) Behaviour to matter: enact the matter decisions in id order (the map is id-keyed, so the
@@ -3537,6 +3569,14 @@ impl Runner {
                 // hash unchanged.
                 if let Some(step) = w.proposed_action {
                     h.write_u64(sequence_subject(&[step]).0);
+                }
+                // The heritable exploration propensity (ideation arc, piece 2, slice 2c-2): the rate at which
+                // a being enacts its proposal, folded after the proposal it gates. FOUNDER-ZERO: zero for a
+                // being that never had its propensity lifted off zero, so it folds nothing and leaves an
+                // opted-out (and every founder-only) run's hash unchanged; only a primed or mutant being with
+                // a positive propensity folds it.
+                if w.exploration > Fixed::ZERO {
+                    h.write_fixed(w.exploration);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -4868,6 +4908,219 @@ values = [
         assert_ne!(
             armed_hash, naive_hash,
             "the proposal folds into state_hash, so the discovery loop is canonical state"
+        );
+    }
+
+    #[test]
+    fn a_primed_being_enacts_its_proposal_while_a_founder_only_proposes_it() {
+        // Ideation arc, piece 2, slice 2c-2 (the enactment gate): a being ACTS on the action it proposed
+        // only when its own heritable exploration propensity fires. FOUNDER-ZERO: a being whose propensity
+        // is zero (every founder) proposes its hypothesis but never enacts it, so it takes no action and its
+        // run is byte-identical to the pre-gate discovery run; a being whose propensity is PRIMED to one (a
+        // mutant, or this proof's fixture) enacts its proposal through the SAME deferred-action path the
+        // controller uses, so the grasp is routed and recorded as its decided affordance, the action the
+        // reward learner can then credit. Exploration EMERGES by selection (Principle 9), proven here with a
+        // primed value exactly as the appetitive weight and the avoidance weight were proved primed. The
+        // physical grasp itself (matter into the load, bounded by strength) is material-substrate item 3's,
+        // exercised and proven there against a muscled body; this test isolates the GATE, whether a proposed
+        // action becomes a tried one, read off the being's decided affordance rather than re-running item 3.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
+            GRASP, TEMPERATURE,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        // The same minimal material floor as the 2c-1 proposal test: a fracture axis and a granite substance
+        // the being senses as fracturable underfoot.
+        const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "mass per unit volume"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "20" },
+]
+"#;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        // A GRASP-only affordance registry, so the sampled proposal is always the grasp matter primitive
+        // (one the deferred-action pass enacts). Grasp is unconditional (`requires: None`), so any body
+        // affords it; with it the sole afforded primitive the being cannot propose a MOVE or INGEST the
+        // controller would already own, so the gate's enactment is the only path from proposal to action.
+        let grasp_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GRASP,
+                name: "grasp".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let empty_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let tile = Coord3::ground(4, 4);
+
+        // Run one tick of an armed discovery loop with the being's exploration propensity PRIMED to
+        // `exploration`, returning its proposed action, the affordance it decided (the gate's observable),
+        // and the canonical state hash.
+        let run = |exploration: Fixed| -> (Option<SequenceStep>, Option<AffordanceId>, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                grasp_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0EA7,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                empty_physiology(),
+                controller,
+            );
+            // Prime the heritable exploration propensity, standing in for the follow-on's Channel::Exploration
+            // expression: zero is a founder (never enacts), one is a being whose propensity is fully lifted.
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            let mut material = MaterialField::new();
+            material.deposit(tile, "granite", Fixed::from_int(4));
+            emb.set_material(material);
+            emb.set_material_registry(PhysicsRegistry::from_toml_str(FLOOR).expect("floor parses"));
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.step();
+            let w = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id).cloned());
+            let proposal = w.as_ref().and_then(|w| w.proposed_action);
+            let decided = w.as_ref().and_then(|w| w.decided_affordance);
+            (proposal, decided, runner.state_hash())
+        };
+
+        let primed = run(Fixed::ONE);
+        let primed2 = run(Fixed::ONE);
+        let founder = run(Fixed::ZERO);
+
+        // The proposal is a reproducible function of the being, tick, seed, and beliefs, under the HYPOTHESIZE
+        // phase; the exploration gate draws under the disjoint ENACT phase, so whether a being enacts does NOT
+        // change WHAT it proposes: the primed and founder beings propose the SAME grasp candidate.
+        assert!(
+            primed.0.is_some(),
+            "the armed being proposes a grasp candidate from what it perceives"
+        );
+        assert_eq!(
+            primed.0, founder.0,
+            "the proposal does not depend on the exploration propensity (a disjoint phase)"
+        );
+        // The gate: the primed being enacts its proposed grasp, recorded as its decided affordance (the same
+        // enactment path the controller's own decisions take); the founder-zero being proposes the identical
+        // grasp but never enacts it, so with its zeros controller deciding nothing it takes no action at all.
+        assert_eq!(
+            primed.1,
+            Some(GRASP),
+            "the primed being enacts its proposed grasp, so the gate routed it to the decided affordance"
+        );
+        assert_eq!(
+            founder.1, None,
+            "the founder-zero being proposes but never enacts (founder-zero: exploration is off)"
+        );
+        // Determinism and canonical state: the primed run replays bit-for-bit, and its hash differs from the
+        // founder's because the exploration propensity is canonical state (it folds when positive) while the
+        // founder folds nothing, so a founder's run is byte-identical to the pre-gate discovery run.
+        assert_eq!(primed, primed2, "the primed run replays bit-for-bit");
+        assert_ne!(
+            primed.2, founder.2,
+            "the exploration propensity folds into state_hash, so it is canonical state; a founder folds none"
         );
     }
 
