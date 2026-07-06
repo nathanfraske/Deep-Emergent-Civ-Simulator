@@ -230,8 +230,8 @@ pub use tom::{
     EvidenceOrder, NestedFrame, ProjectionRejected,
 };
 pub use trace::{
-    corroding_salience, mortality_implication_weight, organic_salience, DecayLaw,
-    TraceImplicationSpec, TraceKindDef, TraceKindId, TraceKindRegistry,
+    corroding_salience, mortality_implication_weight, organic_salience, TraceImplicationSpec,
+    TraceKindDef, TraceKindId, TraceKindRegistry, TransformKernelId, TransformKind,
 };
 pub use transmission::{
     copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
