@@ -1387,14 +1387,20 @@ impl Embodiment {
                 continue; // an axis with no backing substance is not fed by matter
             };
             let axis_id = self.homeo.axes[i].id;
-            let supply = self.material.volume(coord, &substance);
-            if supply <= Fixed::ZERO {
-                continue; // the cell holds none of this substance
-            }
+            // Supply is the loose matter the being can eat NOW: the cell underfoot PLUS what it CARRIES, so a
+            // being that EXTRACTED a bonded food into its inventory can eat it (the join that closes the
+            // discovery loop's extract-then-eat, ideation viability arc). Carried matter that backs no
+            // reserve, an ordinary carried rock, reads zero here, so an existing scenario whose beings never
+            // carry a backing substance is byte-identical.
+            let cell_supply = self.material.volume(coord, &substance);
             // Size the bite from the being's own physiology and the room its reserve has left (immutable).
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return gained;
             };
+            let supply = cell_supply + w.carried.volume(&substance);
+            if supply <= Fixed::ZERO {
+                continue; // neither the cell nor the being's inventory holds this substance
+            }
             let frac = laws::satisfaction(
                 supply,
                 w.physiology.assimilation(&substance),
@@ -1411,10 +1417,21 @@ impl Embodiment {
             } else {
                 target_gain
             };
-            // Take the gross bite from the cell and deposit the assimilated part in the reserve (each field
-            // mutated on its own, so the cell loses the bite and the being gains the bite times the
-            // efficiency, conservation-honest as the forage ingest is).
-            let taken = self.material.take(coord, &substance, gross);
+            // Take the gross bite from the cell first, then from what the being carries, and deposit the
+            // assimilated part in the reserve (each field mutated on its own, conservation-honest as the
+            // forage ingest is): the cell loses what it held, the inventory the rest, and the being gains the
+            // total times the efficiency.
+            let from_cell = self.material.take(coord, &substance, gross);
+            let remaining = gross - from_cell;
+            let from_carried = if remaining > Fixed::ZERO {
+                match self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                    Some(w) => w.carried.take(&substance, remaining),
+                    None => Fixed::ZERO,
+                }
+            } else {
+                Fixed::ZERO
+            };
+            let taken = from_cell + from_carried;
             let gain = taken.checked_mul(eta).unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);
