@@ -58,14 +58,13 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, append_scalar_channel, build_dawn_runner, forage_taxis_weights,
-    nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
-    BreedingSystemRegistry, Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples,
-    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
-    ForageGains, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
-    LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
-    World,
+    append_controller_block, build_dawn_runner, forage_taxis_weights, nsm_gloss, Articulation,
+    Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry,
+    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, Direction, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, ForageGains, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
+    PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode, SchemeId,
+    SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile, World,
 };
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
@@ -372,11 +371,6 @@ fn full_race(index: usize, cfg: &Config) -> Race {
         layout.weight_count(),
         &seeds,
     );
-    // The ideation activation's evolve-channels: one unseeded locus each for exploration and deliberation,
-    // so every founder carries them at zero (founder-zero) and a free population evolves them off zero as
-    // mutation drifts the effects. The propensities stay dormant until the discovery loop is armed.
-    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Exploration);
-    append_scalar_channel(&mut genes, &mut freqs, &mut effects, Channel::Deliberation);
     // The stamped integer-Gaussian approximation the additive spine draws through (the labelled
     // SumOfUniforms{k=12} default of design 25.10; a canonical build reads genome.gauss_approx). The
     // seeded loci sit at frequency one, so their within-locus deviation is zero and the draw is scaled
