@@ -2292,7 +2292,10 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
     let mineral = soil.mass(cell, "bio.mineral_ash_fraction");
     let organic = soil.mass(cell, "bio.organic_residue");
     assert!(mineral > Fixed::ZERO, "the mineral ash enriched the soil");
-    assert!(organic > Fixed::ZERO, "the organic residue enriched the soil");
+    assert!(
+        organic > Fixed::ZERO,
+        "the organic residue enriched the soil"
+    );
     assert_eq!(
         mineral + organic,
         warm.embodiment().unwrap().decomposed_mass(),
