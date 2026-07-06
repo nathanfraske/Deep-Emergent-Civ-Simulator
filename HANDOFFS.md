@@ -7,6 +7,18 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-06: material-substrate item 8 slice 1 (harden DecayLaw to the data-defined TransformKind), on branch claude/material-substrate, PR #93
+
+Item 8 (the matter cycle) has its first slice, the owner-ruled seam hardening, built hash-neutral. The gate signed off item 6 slice B first, completing item 6 (live fire) end to end (A burns, B needs air, C spreads and burns out). Granular landing in `docs/working/CONSENSUS_ROADMAP.md` (the ITEM 8 SLICE 1 paragraph). Commit `5577d07`.
+
+WHAT LANDED: `crates/sim/src/trace.rs` replaces the closed `DecayLaw` enum (Organic / Corroding / Static arms) with a data-defined `TransformKind`: a general `TransformKernelId` (the FIXED kernel set, Reaction / Corrosion / Static, each a general physical law in `civsim_physics::laws`, never a named transform) plus a params map keyed by name (the reserved values as data). A new transform mode (combustion, cooking, smelting) is now a new DATA ROW binding an existing kernel, never a new enum arm, sibling to the value/semantic/institution substrates (Principle 11). The two consumers (`organic_salience`, `corroding_salience`) dispatch by kernel id and read named params. `lib.rs` export updated (`TransformKind`, `TransformKernelId` replace `DecayLaw`). Note: `DecayLaw` is unrelated to `language::SalienceDecayLaw`, which is untouched.
+
+HASH-NEUTRAL: `dev_default` and the tests build the same three transforms, so the salience is byte-identical (trace tests, world_build 16 and world_determinism 3 all replay-identical). The north star (owner ruling) is recorded in the type doc: the dispatch dissolves into the floor once transforms emerge from a substance's own physics. Proven (`a_new_transform_mode_is_a_data_row_over_the_fixed_kernel_not_a_new_arm`): an organic-decomposition row and a hotter combustion-like row both bind the one fixed Reaction kernel, differing only in data. 817 sim tests plus 84 physics tests green, fmt and clippy (`--all-targets -D warnings`) clean, no new reserved value.
+
+STOPPED: item 8 slice 1 pushed (`5577d07`). NEXT: item 8 proper, the MATTER CYCLE, apply the transform kinds to a cell's MaterialField substances over time (decomposition / corrosion / combustion as data rows over the general kernels), conserving mass in the `ConservationRegistry` (every removal/deposit/burn/decay balances; combustion's volatile fraction sinked to an air class, the guard a feature). Then the deferred overhead-deposit technique (a being builds a roof) and the force-and-manipulation primitive-completeness check. Open emergence debts unchanged. Acceptance is a BLIND concept-verification on a run log (Section B verbatim code). Merge PR #93 to main only at the very end on the gate's sign-off of the whole arc.
+
+---
+
 ## 2026-07-06: material-substrate item 6 slice B (oxygen gate, item 6 COMPLETE) + item-8 owner-call RULED, on branch claude/material-substrate, PR #93
 
 Item 6 (live fire) is now COMPLETE end to end, and the item-8 owner-call was surfaced, praised, and RULED. Roadmap landings: the ITEM 6 SLICE B OXYGEN GATE and ITEM 8 OWNER-CALL RULED paragraphs.
