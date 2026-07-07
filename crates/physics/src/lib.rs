@@ -305,6 +305,41 @@ pub struct QuantityAxis {
     pub provenance: Provenance,
 }
 
+impl QuantityAxis {
+    /// The numeric multiplier the axis's STORED value is scaled by, recovered from the declared
+    /// `scale_unit`. A `scale_unit` of the form `x<factor>` (the sole scaled-storage convention, whose
+    /// canonical instance is the Archard wear coefficient's `x1e6`: a true coefficient of 1e-9 to 1e-3
+    /// underflows or loses precision in Q32.32 unless the data stores it multiplied up) returns the
+    /// factor, so a kernel divides it back out to recover the true value. Every plain unit label (MPa,
+    /// ratio, m, ...) carries no rescale and returns one. This keeps the storage scale a physics-data
+    /// property, read off the axis rather than fabricated at a call site (Principles 9, 11). A malformed
+    /// `x` form falls back to one; the canonical axes are covered by a test so a parse regression is caught.
+    pub fn storage_scale(&self) -> Fixed {
+        match self.scale_unit.strip_prefix('x') {
+            Some(factor) => parse_scale_factor(factor).unwrap_or(Fixed::ONE),
+            None => Fixed::ONE,
+        }
+    }
+}
+
+/// Parse a scaled-storage factor, either a plain decimal (`1000000`) or the `<mantissa>e<exponent>`
+/// scientific form the data writes (`1e6`), into a `Fixed`. `None` if it is neither well-formed nor
+/// representable. Kept beside [`QuantityAxis::storage_scale`], the only caller.
+fn parse_scale_factor(s: &str) -> Option<Fixed> {
+    let split = s.split_once('e').or_else(|| s.split_once('E'));
+    match split {
+        Some((mantissa, exponent)) => {
+            let mut f = Fixed::from_decimal_str(mantissa).ok()?;
+            let e: u32 = exponent.parse().ok()?;
+            for _ in 0..e {
+                f = f.checked_mul(Fixed::from_int(10))?;
+            }
+            Some(f)
+        }
+        None => Fixed::from_decimal_str(s).ok(),
+    }
+}
+
 /// One class's envelope in a per-class-scale axis: the class id and its declared decimal bounds. The
 /// catalogue registers one quantity per entry so each class carries its own per-quantity scale
 /// (R-UNITS-PIN, the `bio.consumer.reference_tolerance` case), keyed off the same declared decimal
@@ -1473,6 +1508,53 @@ values = [
         let mut twin = iron.clone();
         twin.id = "wrought_iron".to_string();
         assert_eq!(iron.content_id(), twin.content_id());
+    }
+
+    #[test]
+    fn a_scaled_storage_axis_reports_its_factor_and_a_plain_unit_reports_one() {
+        // The Archard wear coefficient is the sole scaled-storage axis (`scale = "x1e6"`): its stored value
+        // is the true coefficient times a million, and `storage_scale` recovers the million so a kernel can
+        // divide it back out. A plain unit label (MPa, kg/m^3) carries no rescale and reports one. This is
+        // how the wear step sources its `coefficient_scale` from the axis data rather than a hardcoded
+        // constant, so a world that declares a different storage scale is honoured.
+        let toml = r#"
+[[axis]]
+id = "mat.wear_coefficient"
+measures = "the Archard dimensionless wear coefficient, stored at scale x1e6"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "x1e6"
+tier = 0
+range_lo = "0.001"
+range_hi = "1000"
+real = "Archard 1953"
+
+[[axis]]
+id = "mech.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "CRC"
+"#;
+        let reg = PhysicsRegistry::from_toml_str(toml).unwrap();
+        assert_eq!(
+            reg.axis("mat.wear_coefficient").unwrap().storage_scale(),
+            Fixed::from_int(1_000_000),
+            "the x1e6 storage scale is recovered as one million"
+        );
+        assert_eq!(
+            reg.axis("mech.density").unwrap().storage_scale(),
+            Fixed::ONE,
+            "a plain unit label carries no rescale"
+        );
+        // The parser handles a plain-decimal factor and rejects a malformed one (falling back to one).
+        assert_eq!(parse_scale_factor("1000000"), Some(Fixed::from_int(1_000_000)));
+        assert_eq!(parse_scale_factor("2e3"), Some(Fixed::from_int(2000)));
+        assert_eq!(parse_scale_factor("nonsense"), None);
     }
 
     #[test]

@@ -325,6 +325,35 @@ impl CraftParams {
     }
 }
 
+/// The reserved parameters of tool WEAR (the made-world arc, tool-use, Section D). The mechanism (the Archard
+/// wear law [`civsim_physics::laws::wear`] over the tool's own volume, its coefficient the tool material's
+/// `mat.wear_coefficient` axis) is fixed Rust; these are the owner's numbers, surfaced with a basis, never
+/// fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WearParams {
+    /// The characteristic sliding DISTANCE (m) of one tool stroke, the length the working edge slides against
+    /// the matter it works in a single use. RESERVED. Basis: the reach of one hand stroke a being makes with a
+    /// hand tool (a knife draw, a scrape, a mining blow's slide), a kinematics datum set from the being's reach
+    /// scale; the Archard wear volume is proportional to it. Surfaced for the owner, never invented.
+    pub stroke_distance: Fixed,
+    /// The physics worn-volume ceiling the wear law saturates at per use, a representability cap (not a
+    /// behavioural quantity) that bounds a single stroke's material loss to the fixed-point range, mirroring
+    /// the extraction and combustion ceilings.
+    pub wear_max: Fixed,
+}
+
+impl WearParams {
+    /// A labelled DEVELOPMENT FIXTURE: a hand-stroke sliding distance and the representability ceiling. Not
+    /// owner canon; a stand-in so the wear step can run until the owner sets the stroke distance against its
+    /// basis.
+    pub fn dev_fixture() -> WearParams {
+        WearParams {
+            stroke_distance: Fixed::from_ratio(1, 10),
+            wear_max: Fixed::from_int(1_000_000),
+        }
+    }
+}
+
 /// The reserved parameters of the combustion contest (material-substrate arc, cascade item 6, live fire). The
 /// mechanism that reads them is fixed Rust (the resolved combustion law over the fuel a cell holds); these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11).

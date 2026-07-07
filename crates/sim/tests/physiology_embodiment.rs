@@ -1272,6 +1272,205 @@ values = [
 }
 
 #[test]
+fn a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool_is_immortal() {
+    // The made-world arc, tool-use, Section D: a wielded tool that works matter loses volume by the Archard
+    // wear law ([`laws::wear`]), its coefficient the tool material's own `mat.wear_coefficient`, so it wears
+    // gradually and, once worn below the minimum viable tool volume (the craft threshold), is a spent nub and
+    // is unwielded, so it must be remade. The wear is DERIVED (force over stroke distance over the tool's own
+    // hardness, no authored durability count) and OPT-IN (a world that never arms the wear params keeps every
+    // tool immortal, byte-identical to before). This proves both: an armed tool wears down over several uses
+    // and spends out, and the same tool on an unarmed world never wears.
+    use civsim_sim::material::{CraftParams, MaterialField, WearParams, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A flesh cell (fracture 1, so a keen edge frees it) and a flint edge that carries a wear coefficient. The
+    // coefficient is a large test value so each use saturates the worn volume to the ceiling, making the
+    // spend-out countable; a real world sets a real Archard coefficient reserved-with-basis.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.wear_coefficient"
+measures = "the dimensionless Archard wear coefficient"
+unit = "1"
+dimension = "0,0,0,0"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "2000000000"
+real = "test fixture"
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.wear_coefficient", value = "66666666" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // A tool with five units of volume: enough that the craft threshold (one unit) is reached only after
+    // several worn units, so the spend-out is gradual, not a single saturating use.
+    let tool_volume0 = Fixed::from_int(5);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: tool_volume0,
+        substance: "flint".to_string(),
+    };
+
+    let build = |arm_wear: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C08,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool());
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "flesh", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        // The craft threshold (the minimum viable tool volume) below which a worn tool is a spent nub.
+        emb.set_craft_params(CraftParams::dev_fixture());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        if arm_wear {
+            // The stroke distance is the dev fixture; with the flint coefficient each use abrades roughly half
+            // a unit, so the five-unit tool crosses the one-unit craft floor after several uses (a gradual
+            // spend-out, not an instant break). The ceiling is a non-binding representability cap.
+            emb.set_wear(WearParams {
+                stroke_distance: Fixed::from_ratio(1, 10),
+                wear_max: Fixed::from_int(1000),
+            });
+        }
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let tool_volume_of = |e: &Embodiment| -> Option<Fixed> {
+        e.walkers()[0].wielded.as_ref().map(|t| t.volume)
+    };
+
+    // ARMED: the tool wears gradually. After the first wear it is still wielded and has LESS volume (not spent
+    // in one use), and after repeated wear it spends out (its wielded slot empties). Count the uses to prove
+    // it is a gradual accumulation, not an instant break.
+    let mut armed = build(true);
+    let emb = armed.embodiment_mut().unwrap();
+    let start = tool_volume_of(emb);
+    assert_eq!(start, Some(tool_volume0), "the tool starts at its full volume");
+    emb.wear_tool(StableId(1));
+    let after_one = tool_volume_of(emb);
+    assert!(
+        matches!(after_one, Some(v) if v < tool_volume0 && v > Fixed::ZERO),
+        "one use wears the tool DOWN but does not spend it out: gradual, not instant (was {after_one:?})"
+    );
+    let mut uses = 1u32;
+    while tool_volume_of(emb).is_some() {
+        emb.wear_tool(StableId(1));
+        uses += 1;
+        assert!(uses < 10_000, "the tool must spend out in a bounded number of uses");
+    }
+    assert!(
+        uses > 1,
+        "the tool spends out only after SEVERAL uses (it took {uses}), proving gradual wear"
+    );
+
+    // OPT-OUT: an unarmed world never wears the tool. The same number of `wear_tool` calls leaves the tool
+    // wielded at its full volume: the wear step is a no-op without the params, so every existing scenario is
+    // byte-identical.
+    let mut unarmed = build(false);
+    let emb2 = unarmed.embodiment_mut().unwrap();
+    for _ in 0..uses {
+        emb2.wear_tool(StableId(1));
+    }
+    assert_eq!(
+        tool_volume_of(emb2),
+        Some(tool_volume0),
+        "an unarmed world never wears the tool: it stays wielded at full volume (byte-neutral opt-in)"
+    );
+
+    // WIRED TO WORK: the dispatch wears only on a positive-work use. A real cut that frees flesh, followed by
+    // the wear the dispatch applies, reduces the tool's volume: wear rides on work, it is not a free tax.
+    let mut worker = build(true);
+    let emb3 = worker.embodiment_mut().unwrap();
+    let before = tool_volume_of(emb3);
+    if emb3.cut_underfoot(StableId(1)) > Fixed::ZERO {
+        emb3.wear_tool(StableId(1));
+    }
+    let after = tool_volume_of(emb3);
+    assert!(
+        matches!((before, after), (Some(b), Some(a)) if a < b),
+        "a cut that frees matter wears the wielded tool (before {before:?}, after {after:?})"
+    );
+}
+
+#[test]
 fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
     // Material-substrate arc item 4, INGEST-FOR-COMPOSITION, the mining payoff and emergence-closer: a
     // mineral in the ground is worth something because a being whose reserve needs it eats it and survives,

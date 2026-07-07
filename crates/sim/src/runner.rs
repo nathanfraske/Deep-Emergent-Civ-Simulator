@@ -105,7 +105,7 @@ use crate::learn::{
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
-    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
+    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField, WearParams,
     MatterCycleCalib, ShelterCalib, SoilNutrientField, SubstanceMix, WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
@@ -1021,6 +1021,13 @@ pub struct Embodiment {
     /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
     /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
     craft: Option<CraftParams>,
+    /// The reserved parameters of tool WEAR (the made-world arc, tool-use, Section D): the sliding distance of
+    /// one tool stroke and the worn-volume ceiling. `None` by default, so an embodiment that declares no wear
+    /// parameters never wears a tool (a tool is immortal) and every existing scenario is unchanged. Opt-in via
+    /// [`Embodiment::set_wear`]. When armed, a tool that WORKS matter (a successful cut or extract) loses volume
+    /// by the Archard wear law over the tool material's own `mat.wear_coefficient`, so a tool spends out and
+    /// must be remade, closing the make-use-wear-remake lifecycle.
+    wear: Option<WearParams>,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1116,6 +1123,7 @@ impl Embodiment {
             material_registry: None,
             extraction: None,
             craft: None,
+            wear: None,
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -1392,6 +1400,76 @@ impl Embodiment {
     /// unchanged.
     pub fn set_craft_params(&mut self, params: CraftParams) {
         self.craft = Some(params);
+    }
+
+    /// Install the reserved tool-WEAR parameters (the made-world arc, tool-use, Section D): the sliding stroke
+    /// distance and the worn-volume ceiling ([`WearParams`]). Opt-in; without it a tool never wears (it is
+    /// immortal) and every existing scenario is unchanged. When armed, a tool that works matter loses volume by
+    /// the Archard wear law and eventually spends out.
+    pub fn set_wear(&mut self, params: WearParams) {
+        self.wear = Some(params);
+    }
+
+    /// Wear a being's WIELDED tool by one use (the made-world arc, tool-use, Section D): a tool that just
+    /// worked matter (a cut or an extract that freed a positive volume) loses matter to abrasion by the Archard
+    /// wear law ([`laws::wear`]), its worn volume proportional to the being's force and the stroke distance and
+    /// inversely proportional to the tool's own hardness, the coefficient the tool material's own
+    /// `mat.wear_coefficient`. The tool's retained volume drops by the worn amount; a tool worn below the
+    /// minimum viable tool volume (the craft threshold) is a spent nub and is unwielded, so the tool must be
+    /// remade. No-op unless the wear params, the material registry, the physiology, and a crafting threshold
+    /// are all present and the tool material declares a wear coefficient and a hardness, so an opted-out world
+    /// is byte-identical. Reads only the tool's and being's own physics, no race, kind, or role (Principle 9).
+    pub fn wear_tool(&mut self, walker_id: StableId) {
+        let (Some(params), Some(craft)) = (self.wear, self.craft) else {
+            return;
+        };
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return;
+        };
+        let Some(tool) = w.wielded.as_ref() else {
+            return;
+        };
+        let force = being_muscle_force(w, phys);
+        let sub = reg.substance(&tool.substance);
+        let k = sub
+            .and_then(|x| x.vector.get("mat.wear_coefficient").copied())
+            .unwrap_or(Fixed::ZERO);
+        let hardness = sub
+            .and_then(|x| x.vector.get("mat.indentation_hardness").copied())
+            .unwrap_or(Fixed::ZERO);
+        if k <= Fixed::ZERO || hardness <= Fixed::ZERO {
+            return; // no wear data on the tool material, no wear
+        }
+        // The Archard coefficient is stored SCALED (the canonical `mat.wear_coefficient` axis declares
+        // `x1e6`, since a true 1e-9 to 1e-3 coefficient loses precision unscaled in Q32.32); the wear kernel
+        // divides that storage scale back out. The scale is read off the axis data, not fabricated here, so a
+        // world that declares a different storage scale is honoured (Principles 9, 11). An axis absent from
+        // the registry reads no coefficient above, so the scale is moot and the fallback of one is inert.
+        let coefficient_scale = reg
+            .axis("mat.wear_coefficient")
+            .map(|a| a.storage_scale())
+            .unwrap_or(Fixed::ONE);
+        let worn = laws::wear(
+            k,
+            coefficient_scale,
+            force,
+            params.stroke_distance,
+            hardness,
+            params.wear_max,
+        );
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return;
+        };
+        if let Some(tool) = w.wielded.as_mut() {
+            tool.volume = (tool.volume - worn).max(Fixed::ZERO);
+            if tool.volume < craft.tool_volume {
+                w.wielded = None; // spent out: a worn-down nub is no longer a viable tool
+            }
+        }
     }
 
     /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
@@ -4129,7 +4207,12 @@ impl Runner {
                         emb.grasp_underfoot(id);
                     }
                     EXTRACT => {
-                        emb.extract_underfoot(id);
+                        // A wielded tool that breaks matter loose abrades against it: wear only on positive
+                        // work, and `wear_tool` no-ops for a bare-handed extract (no wielded tool to wear),
+                        // so the opted-out path is byte-identical.
+                        if emb.extract_underfoot(id) > Fixed::ZERO {
+                            emb.wear_tool(id);
+                        }
                     }
                     GEOPHAGE => {
                         emb.geophage(id);
@@ -4138,7 +4221,12 @@ impl Runner {
                         emb.craft_from_carried(id);
                     }
                     CUT => {
-                        emb.cut_underfoot(id);
+                        // The working edge slides against the matter it severs and abrades: wear on positive
+                        // work only. `wear_tool` no-ops unless the wear params are armed, so an opted-out
+                        // world is byte-identical.
+                        if emb.cut_underfoot(id) > Fixed::ZERO {
+                            emb.wear_tool(id);
+                        }
                     }
                     DIG => {
                         emb.dig_underfoot(id);
