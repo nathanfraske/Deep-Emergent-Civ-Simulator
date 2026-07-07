@@ -72,6 +72,7 @@ pub mod clock;
 pub mod conservation;
 pub mod controller;
 pub mod decision;
+pub mod decompose;
 pub mod demography;
 pub mod dialogue;
 pub mod discovery;
@@ -154,6 +155,9 @@ pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{
     forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
     ControllerLayout, ForageGains,
+};
+pub use decompose::{
+    DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId, DecomposerStockField,
 };
 pub use decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,

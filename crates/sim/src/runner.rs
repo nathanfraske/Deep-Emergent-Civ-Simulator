@@ -90,6 +90,7 @@ use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
+use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
@@ -2584,6 +2585,21 @@ pub struct Runner {
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
+    /// The decomposer-driver registry (decomposition-as-emergence, Principle 8), armed opt-in beside the
+    /// matter cycle. `None` on a runner without it, so the matter cycle (if armed) decays at the
+    /// substance's own unconditional rate exactly as before and every existing scenario is byte-identical.
+    /// Armed via [`Runner::set_decomposer`], the matter cycle and the organic-trace salience then multiply
+    /// their rate by the per-cell decomposition ACTIVITY this registry derives from the cell's decomposer
+    /// life and conditions, so a sterile, dry, or airless cell preserves its matter. Off the calibrated
+    /// worldbuild path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
+    decomposer: Option<DecomposerDriverRegistry>,
+    /// The per-cell standing decomposer-biomass field the Life kernel reads, armed opt-in beside the
+    /// decomposer registry. `None` (or empty) on a runner without it, so the Life kernel reads zero biomass
+    /// and a life-driven world's cells preserve until colonised; folded into `state_hash` only when
+    /// non-empty, so an unarmed or unseeded field folds no bytes and the run is byte-identical. Hand-seeded
+    /// by a test in this slice; the biosphere wiring that fills it from a generated decomposer species is
+    /// the deferred follow-on (task 21).
+    decomposer_stock: Option<DecomposerStockField>,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -2647,6 +2663,8 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2691,6 +2709,8 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2748,6 +2768,8 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2828,6 +2850,8 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2881,6 +2905,35 @@ impl Runner {
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
+    }
+
+    /// Arm the decomposer-driver registry (decomposition-as-emergence, Principle 8): the matter cycle and
+    /// the organic-trace salience then multiply their rate by the per-cell decomposition ACTIVITY this
+    /// registry derives, so a cell's matter breaks down only as fast as its own decomposer life and
+    /// conditions afford. Opt-in and orthogonal to [`Runner::set_matter_cycle`]: arming this alone changes
+    /// nothing (the matter cycle must be armed to decay at all), and arming the matter cycle without this
+    /// keeps its unconditional rate, so every existing scenario is byte-identical. The reserved parameters
+    /// are the owner's ([`crate::decompose::DecomposerDriver`]); off the calibrated worldbuild path until the
+    /// biosphere slice wires the stock field.
+    pub fn set_decomposer(&mut self, registry: DecomposerDriverRegistry) {
+        self.decomposer = Some(registry);
+    }
+
+    /// Arm (or seed) the per-cell standing decomposer-biomass field the Life kernel reads. Opt-in and folded
+    /// into `state_hash` only when non-empty, so an unseeded field leaves the run byte-identical. Hand-seeded
+    /// in this slice; the biosphere wiring that fills it from a generated decomposer species is the deferred
+    /// follow-on (task 21).
+    pub fn set_decomposer_stock(&mut self, stock: DecomposerStockField) {
+        self.decomposer_stock = Some(stock);
+    }
+
+    /// The standing decomposer biomass for a substance at a cell, the Life-kernel input; zero when no stock
+    /// field is armed or the cell is sterile (the absence convention).
+    fn life_stock_at(&self, cell: Coord3, substance: &str) -> Fixed {
+        self.decomposer_stock
+            .as_ref()
+            .map(|s| s.mass(cell, substance))
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -3123,7 +3176,36 @@ impl Runner {
                         .get("bio.decomposition_rate")
                         .copied()
                         .unwrap_or(calib.decomposition_rate);
-                    let decomposed = volume.checked_mul(rate).unwrap_or(Fixed::ZERO);
+                    // Decomposition-as-emergence (Principle 8): the substance's own rate is its MAXIMUM
+                    // decomposition susceptibility; the fraction of it a cell realises this tick is the
+                    // per-cell decomposer ACTIVITY, in [0, 1], derived from the cell's decomposer life
+                    // (the standing biomass) and its conditions (moisture, oxygen, warmth above the
+                    // barrier). Unarmed (no decomposer registry) the factor is one, the substance's
+                    // unconditional rate exactly as before (byte-identical); armed, a sterile, bone-dry,
+                    // or airless cell reads zero and preserves its matter though warm. The barrier gate
+                    // above is untouched, so this modulates only the rate ABOVE it and the conservation
+                    // math below is unchanged.
+                    let factor = match self.decomposer.as_ref() {
+                        Some(driver) => {
+                            let moisture = self
+                                .environ
+                                .as_ref()
+                                .map(|(env, _)| env.moisture_at(cell.x, cell.y))
+                                .unwrap_or(Fixed::ONE);
+                            let oxygen = emb
+                                .physiology
+                                .as_ref()
+                                .map(|p| p.medium.respirable_at(cell.x, cell.y))
+                                .unwrap_or(Fixed::ONE);
+                            let life_stock = self.life_stock_at(*cell, substance);
+                            driver.activity_at(temperature, barrier, moisture, oxygen, life_stock)
+                        }
+                        None => Fixed::ONE,
+                    };
+                    let decomposed = volume
+                        .checked_mul(rate)
+                        .and_then(|d| d.checked_mul(factor))
+                        .unwrap_or(Fixed::ZERO);
                     if decomposed <= Fixed::ZERO {
                         continue;
                     }
@@ -4896,6 +4978,15 @@ impl Runner {
             // run is byte-identical (the opt-in empty-default, the sibling of the fire field above).
             if !emb.soil.is_empty() {
                 emb.soil.hash_into(&mut h);
+            }
+            // The standing decomposer-biomass field (decomposition-as-emergence, the Life kernel's input),
+            // folded after the soil store in canonical (cell, substance, biomass) order and only when armed
+            // and non-empty, so a scenario with no decomposer life folds no bytes and the run is byte-
+            // identical (the opt-in empty-default, the sibling of the soil store above).
+            if let Some(stock) = &self.decomposer_stock {
+                if !stock.is_empty() {
+                    stock.hash_into(&mut h);
+                }
             }
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);

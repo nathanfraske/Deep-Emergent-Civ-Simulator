@@ -3877,6 +3877,150 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
 }
 
 #[test]
+fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
+    // DECOMPOSITION-AS-EMERGENCE (Principle 8), the whole point: the matter cycle no longer asserts that all
+    // warm matter rots. The substance's own rate is now its MAXIMUM susceptibility, and the fraction a cell
+    // realises this tick is a per-cell ACTIVITY the world derives from the cell's decomposer LIFE and its
+    // CONDITIONS. The decisive case (the one an abiotic proxy cannot express) is the sterile-but-favorable
+    // cell: warm, but with no decomposer life present, it does not rot. The physics barrier gate is untouched,
+    // so a frozen remains is still preserved, and an unarmed runner decays exactly as before (the opt-in flip).
+    use civsim_sim::decompose::{DecomposerDriver, DecomposerDriverRegistry, DecomposerStockField};
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+
+    // A runner with the matter cycle armed and, optionally, a decomposer registry and a standing-biomass
+    // stock. The carrion carries the mineral-ash and 273 K freezing barrier axes, so it is organic matter the
+    // cycle can act on; nothing else is armed, so moisture and oxygen have no field and default to full (the
+    // open-air convention), leaving the conditions kernel's WARMTH term the live gate here.
+    let build = |field_temp: i32,
+                 decomposer: Option<DecomposerDriverRegistry>,
+                 stock: Option<DecomposerStockField>|
+     -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "carrion", flesh0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r =
+            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(field_temp)), calib(), emb);
+        r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+        if let Some(d) = decomposer {
+            r.set_decomposer(d);
+        }
+        if let Some(s) = stock {
+            r.set_decomposer_stock(s);
+        }
+        r
+    };
+    let flesh =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "carrion") };
+    let life_only = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::life(Fixed::ONE));
+        d
+    };
+    let conditions_only = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::conditions(
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(100),
+        ));
+        d
+    };
+    let seeded = || {
+        let mut s = DecomposerStockField::new();
+        s.seed(cell, "carrion", Fixed::ONE);
+        s
+    };
+
+    // (1) THE CONTROL (the deliberate flip): the matter cycle armed but NO decomposer registry decays the warm
+    // carrion at its unconditional rate, today's behaviour. The defect cure is the owner's arming, not a
+    // silent engine default.
+    let mut control = build(300, None, None);
+    control.step();
+    assert!(
+        flesh(&control) < flesh0,
+        "unarmed: warm carrion rots at its unconditional rate (the pre-emergence control)"
+    );
+
+    // (2) THE STERILE-BUT-FAVORABLE CASE (the decisive one an abiotic proxy cannot express): a Life-only
+    // registry over a WARM cell with ZERO decomposer biomass decays NOTHING, because no decomposer life is
+    // present. Decay is driven by life, not by warmth.
+    let mut sterile = build(300, Some(life_only()), None);
+    sterile.step();
+    assert_eq!(
+        flesh(&sterile),
+        flesh0,
+        "sterile: warm carrion no decomposer life acts on is preserved"
+    );
+    assert_eq!(
+        sterile.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing decomposed with no decomposer life present, however warm"
+    );
+
+    // The SAME warm cell, once decomposer life stands in it (a hand-seeded stock, the biosphere's job later),
+    // now rots: decay emerges from the presence of life.
+    let mut colonised = build(300, Some(life_only()), Some(seeded()));
+    colonised.step();
+    assert!(
+        flesh(&colonised) < flesh0,
+        "colonised: the same warm cell rots once decomposer life stands in it"
+    );
+    assert!(
+        colonised.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the standing decomposer biomass drove the decay"
+    );
+
+    // (3) THE FROZEN PHYSICS GATE (untouched even when armed): a decomposer-armed, colonised cell BELOW the
+    // substance's own freezing barrier is preserved by the physics gate upstream of the activity factor, so
+    // falsifiability-by-physics survives: a frozen world does not rot however much decomposer life it carries.
+    let mut frozen = build(250, Some(life_only()), Some(seeded()));
+    frozen.step();
+    assert_eq!(
+        flesh(&frozen),
+        flesh0,
+        "frozen: preserved by the barrier gate even with decomposer life present"
+    );
+
+    // (4) THE CONDITIONS KERNEL, wired end-to-end: under a conditions-only registry a barely-thawed cell (one
+    // degree above the barrier) rots far SLOWER than a hot one, because the warmth term reads the cell
+    // temperature through to the realised rate. Both are warm, so both rot; the hotter rots more.
+    let mut barely = build(274, Some(conditions_only()), None);
+    let mut hot = build(373, Some(conditions_only()), None);
+    barely.step();
+    hot.step();
+    assert!(
+        flesh(&barely) < flesh0 && flesh(&hot) < flesh0,
+        "both warm cells rot under the conditions kernel"
+    );
+    assert!(
+        flesh(&hot) < flesh(&barely),
+        "the hotter cell rots faster: the conditions kernel reads the cell temperature end-to-end"
+    );
+
+    // (5) EXACT MASS CONSERVATION with the factor in the path: the activity multiplies the volume UPSTREAM of
+    // the unchanged mass-difference math, so the colonised cell's lost mass still lands in the soil store bit
+    // for bit (the conservation the ConservationRegistry guards).
+    assert_eq!(
+        colonised.embodiment().unwrap().soil().cell_total(cell),
+        colonised.embodiment().unwrap().decomposed_mass(),
+        "the decomposition conserves mass exactly with the activity factor in the path"
+    );
+}
+
+#[test]
 fn a_spent_hull_trace_weathers_slowly_when_warm_and_is_preserved_when_frozen() {
     // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice D (the WEATHERING
     // half): a spent_hull left in the world weathers by the SAME matter cycle carrion does, because it carries

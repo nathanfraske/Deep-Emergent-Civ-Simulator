@@ -319,6 +319,14 @@ impl EnvironFields {
         self.water.at(x, y)
     }
 
+    /// The static worldgen MOISTURE at a cell (the precipitation and soil-moisture proxy, not standing
+    /// water depth), a pure read over the frozen moisture input for the decomposition-activity kernel
+    /// ([`crate::decompose`]). Reads nothing dynamic and mutates nothing, so exposing it changes no state
+    /// and no hash. Bounds are the caller's responsibility, exactly as the reader's [`Self::water_at`].
+    pub fn moisture_at(&self, x: i32, y: i32) -> Fixed {
+        self.moisture[self.idx(x, y)]
+    }
+
     /// The producer-biomass CAPACITY (the primary productivity, the ceiling the standing food stock
     /// regrows toward) at a cell. The standing supply that feeds a grazer lives in the
     /// [`ResourceField`] this writes into; this is the productivity potential, for the field reader.
