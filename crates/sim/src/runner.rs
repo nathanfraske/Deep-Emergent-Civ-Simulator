@@ -105,8 +105,9 @@ use crate::learn::{
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
-    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField, WearParams,
-    MatterCycleCalib, ShelterCalib, SoilNutrientField, SubstanceMix, WieldedTool,
+    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix, WearParams,
+    WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
@@ -1048,6 +1049,13 @@ pub struct Embodiment {
     /// from the tool's and being's own physics, no reserved durability value (Principles 9, 11). Opt-in via
     /// [`Embodiment::set_breakage`].
     breakage: bool,
+    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass
+    /// payoff). `None` by default, so a being never strikes and every existing scenario is unchanged. When
+    /// armed, a being that decides STRIKE swings its WIELDED tool, delivering a kinetic energy (`1/2 m v^2`
+    /// over the tool's own MASS, the extensive datum the tool's retained volume and density supply) that
+    /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
+    /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
+    strike: Option<StrikeParams>,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1145,6 +1153,7 @@ impl Embodiment {
             craft: None,
             wear: None,
             breakage: false,
+            strike: None,
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -1503,6 +1512,14 @@ impl Embodiment {
     /// breaks (only wears, if wear is armed) and every existing scenario is byte-identical.
     pub fn set_breakage(&mut self, on: bool) {
         self.breakage = on;
+    }
+
+    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the swing
+    /// speed and the energy ceiling ([`StrikeParams`]). Opt-in; without it a being never strikes and every
+    /// existing scenario is byte-identical. When armed, a being that decides STRIKE swings its wielded tool and
+    /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
+    pub fn set_strike(&mut self, params: StrikeParams) {
+        self.strike = Some(params);
     }
 
     /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
@@ -1968,6 +1985,87 @@ impl Embodiment {
         };
         let mut freed = Fixed::ZERO;
         for s in &crushable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
+    }
+
+    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff):
+    /// swing the WIELDED tool and fracture the matter underfoot with the blow's kinetic energy. The tool's own
+    /// MASS (its retained volume times its substance density, [`WieldedTool::mass`], the extensive datum only
+    /// the carried tool supplies) carried at the reserved swing speed is a kinetic energy
+    /// ([`laws::kinetic_energy`], `1/2 m v^2`), and every cell constituent whose GRIFFITH energy over the
+    /// struck face (its `mat.fracture_energy` times the tool's contact area) that delivered energy exceeds is
+    /// fractured loose and taken (the energy limb of [`laws::fracture_onset`]). So a HEAVY tool shatters rock a
+    /// LIGHT one cannot, the payoff of carrying the tool's mass, and a CONCENTRATED blow (a small struck face)
+    /// fractures where a spread one does not, by physics not a per-tool table. The delivered energy is scaled
+    /// from the law's kilojoule output to the joule scale the Griffith energy is on. WHICH constituents
+    /// fracture and HOW MUCH are both derived: the fractured set is the cell's own constituents the blow beats
+    /// (no openable list), and the volume is the strength-bounded carry the grasp uses (no transmutation). A
+    /// constituent with no declared fracture energy offers no Griffith resistance and is shattered by any blow
+    /// (the target-absence convention, matching the cut). Requires the strike params, a wielded tool, the
+    /// material registry, and the physiology; a being with no tool never reaches here, so an opted-out world is
+    /// byte-identical. Reads only the tool's and matter's own physics, no race, kind, or role (Principles 8, 9,
+    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    pub fn strike_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(params) = self.strike else {
+            return Fixed::ZERO;
+        };
+        let (Some(reg), Some(_phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO; // a strike needs a tool to swing (a bare being does not afford it)
+        };
+        let mass = tool.mass(reg);
+        if mass <= Fixed::ZERO {
+            return Fixed::ZERO; // a massless tool (no density or no volume) delivers no blow
+        }
+        let crack_area = tool.contact_area; // the struck face, the area the blow lands over
+        // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
+        // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
+        // one scale. A swing beyond the representable range saturates to the ceiling.
+        let ke_kj = laws::kinetic_energy(mass, params.swing_velocity, params.energy_max);
+        let delivered_energy = ke_kj
+            .checked_mul(Fixed::from_int(1000))
+            .unwrap_or(params.energy_max);
+        // The cell's constituents the blow FRACTURES: each whose Griffith energy over the struck face the
+        // delivered energy exceeds, in canonical id order (snapshot before the mutable take). Uses the energy
+        // limb of `fracture_onset` (a zero applied stress, so only the Griffith energy criterion fires): a
+        // constituent fractures when the delivered energy beats its own `mat.fracture_energy` times the struck
+        // area.
+        let fracturable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let sub = reg.substance(s);
+                    let fracture_strength = sub
+                        .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    let fracture_energy = sub
+                        .and_then(|x| x.vector.get("mat.fracture_energy").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    let (_, energy_margin) = laws::fracture_onset(
+                        Fixed::ZERO,
+                        fracture_strength,
+                        fracture_energy,
+                        crack_area,
+                        delivered_energy,
+                        params.energy_max,
+                    );
+                    (energy_margin < Fixed::ZERO).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut freed = Fixed::ZERO;
+        for s in &fracturable {
             let want = self.material.volume(coord, s);
             freed += self.pick_up(walker_id, coord, s, want);
         }

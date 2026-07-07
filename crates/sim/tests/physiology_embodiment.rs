@@ -1478,6 +1478,167 @@ values = [
 }
 
 #[test]
+fn a_heavy_struck_tool_shatters_rock_a_light_one_of_the_same_shape_cannot_the_mass_payoff() {
+    // The made-world arc, tool-use, Section G, the MASS payoff: a percussion STRIKE swings the wielded tool,
+    // and its kinetic energy (1/2 m v^2 over the tool's own MASS = density times retained volume) fractures
+    // matter whose Griffith energy the blow exceeds. So a HEAVY tool shatters a brittle rock a LIGHT one of the
+    // IDENTICAL shape (same contact area, same volume, same swing) cannot, because it carries more mass into
+    // the same blow, the payoff of the tool carrying its own mass. The two tools differ ONLY in their material
+    // density, so the divergence is the mass, derived, never a per-tool table.
+    use civsim_sim::material::{MaterialField, StrikeParams, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A brittle rock: a Griffith fracture energy (1e6 J/m^2) that the heavy blow's delivered energy (400 J over
+    // the 1e-4 struck face, so 100 J of resistance) beats but the light blow's (40 J) does not. Two tool
+    // substances of identical everything but density: iron (dense) and pumice (light).
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_energy"
+measures = "the critical strain-energy release rate"
+unit = "J/m^2"
+dimension = "0,1,-2,0"
+scale = "J/m^2"
+tier = 0
+range_lo = "1"
+range_hi = "1000000"
+real = "test fixture"
+
+[[substance]]
+id = "rock"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "50" },
+  { axis = "mat.fracture_energy", value = "1000000" },
+]
+
+[[substance]]
+id = "iron"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "8000" },
+]
+
+[[substance]]
+id = "pumice"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "800" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // Both tools: identical shape (a 1e-4 struck face, a 1e-3 stock), differing ONLY in substance density. The
+    // iron tool's mass is 8 kg, the pumice tool's 0.8 kg; the same 10 m/s swing delivers 400 J vs 40 J, and the
+    // rock's 100 J Griffith resistance sits between them.
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 10_000),
+        volume: Fixed::from_ratio(1, 1_000),
+        length: Fixed::ONE,
+        substance: substance.to_string(),
+    };
+
+    let build = |substance: &str, arm_strike: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0C,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(substance));
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "rock", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        if arm_strike {
+            emb.set_strike(StrikeParams::dev_fixture());
+        }
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_rock =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume("rock") };
+
+    // The HEAVY (iron) tool shatters the rock: its blow's energy beats the rock's Griffith resistance.
+    let mut heavy = build("iron", true);
+    heavy.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    assert!(
+        carried_rock(&heavy) > Fixed::ZERO,
+        "a heavy tool's blow shatters the rock and frees it"
+    );
+
+    // The LIGHT (pumice) tool of the IDENTICAL shape and swing does NOT: it carries less mass into the same
+    // blow, so its energy falls below the rock's Griffith resistance. The ONLY difference is the mass.
+    let mut light = build("pumice", true);
+    light.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    assert_eq!(
+        carried_rock(&light),
+        Fixed::ZERO,
+        "a light tool of the same shape cannot shatter the rock: the difference is the mass"
+    );
+
+    // OPT-OUT: the same heavy tool on an unarmed world strikes nothing (byte-neutral opt-in).
+    let mut unarmed = build("iron", false);
+    unarmed.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    assert_eq!(
+        carried_rock(&unarmed),
+        Fixed::ZERO,
+        "an unarmed world never strikes (byte-neutral opt-in)"
+    );
+}
+
+#[test]
 fn a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool_is_immortal() {
     // The made-world arc, tool-use, Section D: a wielded tool that works matter loses volume by the Archard
     // wear law ([`laws::wear`]), its coefficient the tool material's own `mat.wear_coefficient`, so it wears

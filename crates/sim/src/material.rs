@@ -364,6 +364,34 @@ impl WearParams {
     }
 }
 
+/// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff).
+/// The mechanism is fixed Rust: a swung tool delivers a kinetic energy ([`civsim_physics::laws::kinetic_energy`],
+/// `1/2 m v^2` over the tool's own mass) that fractures matter whose Griffith energy the blow exceeds
+/// ([`civsim_physics::laws::fracture_onset`]'s energy limb). These are the owner's numbers, surfaced with a
+/// basis, never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StrikeParams {
+    /// The characteristic SWING SPEED (m/s) of one muscle-driven blow, the velocity the tool's mass carries
+    /// into the target. RESERVED. Basis: the tip speed a being reaches swinging a hand tool (a mining blow, a
+    /// knapping strike), a kinematics datum set from the being's limb-length and stroke rate; the kinetic
+    /// energy is proportional to its square. Surfaced for the owner, never invented.
+    pub swing_velocity: Fixed,
+    /// The physics energy ceiling the kinetic-energy law saturates at, a representability cap (not a
+    /// behavioural quantity) bounding a single blow's delivered energy to the fixed-point range.
+    pub energy_max: Fixed,
+}
+
+impl StrikeParams {
+    /// A labelled DEVELOPMENT FIXTURE: a hand-swing speed and the representability ceiling. Not owner canon; a
+    /// stand-in so the strike step can run until the owner sets the swing speed against its basis.
+    pub fn dev_fixture() -> StrikeParams {
+        StrikeParams {
+            swing_velocity: Fixed::from_int(10),
+            energy_max: Fixed::from_int(1_000_000),
+        }
+    }
+}
+
 /// The reserved parameters of the combustion contest (material-substrate arc, cascade item 6, live fire). The
 /// mechanism that reads them is fixed Rust (the resolved combustion law over the fuel a cell holds); these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11).
