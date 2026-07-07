@@ -236,6 +236,14 @@ impl ResourceField {
         self.matter.insert(coord, comp);
     }
 
+    /// A mutable handle to a tile's composition, inserting an empty one if the tile has none. The regrow
+    /// write-back updates a cell's food, water, and salinity through this, so a full-grid regrow reuses
+    /// each tile's entry and its already-interned keys rather than allocating a fresh composition, two
+    /// key strings, and two maps per cell every tick. One tree access per cell, no per-cell heap churn.
+    pub fn composition_mut(&mut self, coord: Coord3) -> &mut Composition {
+        self.matter.entry(coord).or_default()
+    }
+
     /// The matter composition on a tile, if any.
     pub fn composition(&self, coord: Coord3) -> Option<&Composition> {
         self.matter.get(&coord)

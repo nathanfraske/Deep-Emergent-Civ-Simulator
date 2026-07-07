@@ -148,6 +148,16 @@ const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
 const SYS_WORLD: SystemId = SystemId(3);
 
+/// The minimum items per Rayon job for the per-being parallel maps. Below this many walkers a
+/// `par_iter` runs as a single job (no split), so a small population pays no work-stealing overhead. This
+/// is a PERFORMANCE threshold only, not a canonical value: the parallel and serial results are
+/// bit-identical (each item writes a fixed position and draws RNG by id, never by thread), so this cannot
+/// move the `state_hash`. Its basis is the measured crossover: on this machine the per-being work is small
+/// enough that unconditional `par_iter` is a net LOSS below a few thousand beings (serial beats 18 threads
+/// by 19 to 75 percent at hundreds to low-thousands of founders, breaking even only near 8000), so the
+/// threshold serializes the realistic range and hands Rayon only populations large enough to amortize it.
+const PAR_MIN_LEN: usize = 4096;
+
 // Base-level liveliness step 5 (conversation liveliness): the movement coupling and an environment-
 // sourced belief. The runner republishes each being's live cell into the cognition world each tick so
 // gossip and converse cluster by where a being stands, and injects a first-order belief about the salt-
@@ -3130,30 +3140,45 @@ impl Runner {
     /// before the body and embodiment phases read them. The environment step is a pure deterministic fold
     /// (Principle 3); the supply write keys off the physical productivity, no label (Principles 8, 9).
     fn step_field(&mut self) {
-        self.field.step(&self.calib);
-        if let Some((env, calib)) = self.environ.as_mut() {
-            let calib = *calib;
-            // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
-            // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
-            // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
-            // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
-            if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
-                env.set_fertility_from(emb.soil(), mc.fertility_scale);
-            }
-            env.step(&self.field, &calib);
+        {
+            let _g = crate::profile::scope(crate::profile::P_FIELD);
+            self.field.step(&self.calib);
         }
-        // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
-        // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
-        // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
-        // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
-        // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
-        if let Some((env, calib)) = self.environ.as_ref() {
-            if let Some(emb) = self.embodiment.as_mut() {
-                env.regrow_supply(emb.resources_mut(), calib);
+        {
+            let _g = crate::profile::scope(crate::profile::P_ENV);
+            if let Some((env, calib)) = self.environ.as_mut() {
+                let calib = *calib;
+                // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
+                // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
+                // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
+                // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
+                if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
+                    env.set_fertility_from(emb.soil(), mc.fertility_scale);
+                }
+                env.step(&self.field, &calib);
             }
         }
-        self.step_combustion();
-        self.step_matter_cycle();
+        {
+            let _g = crate::profile::scope(crate::profile::P_REGROW);
+            // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
+            // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
+            // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
+            // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
+            // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
+            if let Some((env, calib)) = self.environ.as_ref() {
+                if let Some(emb) = self.embodiment.as_mut() {
+                    env.regrow_supply(emb.resources_mut(), calib);
+                }
+            }
+        }
+        {
+            let _g = crate::profile::scope(crate::profile::P_COMBUST);
+            self.step_combustion();
+        }
+        {
+            let _g = crate::profile::scope(crate::profile::P_MATTER);
+            self.step_matter_cycle();
+        }
     }
 
     /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
@@ -3527,8 +3552,12 @@ impl Runner {
 
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.step_field();
-        self.phase_body_exchange();
+        {
+            let _g = crate::profile::scope(crate::profile::P_BODY);
+            self.phase_body_exchange();
+        }
         if self.embodiment.is_some() {
+            let _g = crate::profile::scope(crate::profile::P_EMB);
             self.step_embodiment();
         }
         self.recouple_hydrology();
@@ -3536,17 +3565,20 @@ impl Runner {
         // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
         // trace identically even for a world-less embodiment runner.
         self.advance_eligibility_traces();
-        // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
-        // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
-        // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
-        // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
-        let inputs = self.couple_conversation(world_inputs);
-        // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
-        // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
-        // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
-        self.couple_reproductive_vigor();
-        if let Some(world) = self.world.as_mut() {
-            world.tick(&inputs);
+        {
+            let _g = crate::profile::scope(crate::profile::P_WORLD);
+            // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
+            // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
+            // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
+            // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
+            let inputs = self.couple_conversation(world_inputs);
+            // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
+            // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
+            // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
+            self.couple_reproductive_vigor();
+            if let Some(world) = self.world.as_mut() {
+                world.tick(&inputs);
+            }
         }
         self.reconcile_lifecycle();
         self.clock += 1;
@@ -4027,6 +4059,7 @@ impl Runner {
         // and the result is bit-identical at any thread count.
         let updates: Vec<(StableId, Fixed)> = ids
             .par_iter()
+            .with_min_len(PAR_MIN_LEN)
             .filter_map(|&id| {
                 let coord = self.index.coord_of(OccupantId::being(id))?;
                 let env = self.field.at(coord.x, coord.y);
@@ -4193,6 +4226,7 @@ impl Runner {
                     // bit-identical at any thread count.
                     emb.walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
                             let coord = w.coord();
                             let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
@@ -4241,6 +4275,7 @@ impl Runner {
                 Some(emb) => emb
                     .walkers
                     .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
                     .filter_map(|w| {
                         let bt = *self.body_temp.get(&w.id)?;
                         let band = emb.thermal.get(&w.id)?;
@@ -4282,6 +4317,7 @@ impl Runner {
                     // into a BTreeMap is order-free, so it is bit-identical at any thread count.
                     emb.walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .filter_map(|w| {
                             let mind = world.mind(w.id)?;
                             let candidates = if granular && refs_ready {
@@ -4336,6 +4372,7 @@ impl Runner {
             (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
                 .walkers
                 .par_iter()
+                .with_min_len(PAR_MIN_LEN)
                 .filter_map(|w| {
                     let mind = world.mind(w.id)?;
                     let raw = attraction_gradient(
@@ -4399,6 +4436,7 @@ impl Runner {
                 // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 emb.walkers
                     .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
                     .filter_map(|w| {
                         let mind = world.mind(w.id)?;
                         let matter = emb.material.cell(w.coord());
@@ -4491,6 +4529,7 @@ impl Runner {
                     Some(phys) => emb
                         .walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);

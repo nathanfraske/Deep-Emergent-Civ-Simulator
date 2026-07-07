@@ -45,7 +45,6 @@ use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
 use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
@@ -601,8 +600,21 @@ impl EnvironFields {
             for x in 0..w {
                 let coord = Coord3::ground(x, y);
                 let cap = self.capacity.at(x, y);
-                // The persistent standing food stock (post-graze), regrown toward the capacity.
-                let standing = resource.supply(coord, ENERGY_DENSITY);
+                // The drinkable water supply is the standing depth, clamped to a bounded [0, ONE] supply
+                // the satisfaction measure consumes; refreshed each tick, so drinking does not deplete it.
+                let water = self.water.at(x, y).min(Fixed::ONE);
+                // The salinity DOSE (base-level liveliness step 4): the concentration scaled, written as
+                // the bio.salinity toxin the harm sink reads against a being's heritable tolerance. A
+                // present dose on a dosed cell, absent on a fresh one (the substrate absence convention).
+                let salinity = self.salinity_dose(x, y, calib);
+                // Read the post-graze standing food, regrow it, and write food, water, and salinity back in
+                // ONE tree access, reusing the tile's entry and its already-interned key strings. This is
+                // the byte-identical replacement for rebuilding a Composition, two key strings, and two maps
+                // per cell every tick: an absent tile is created empty (standing reads zero, matching the
+                // old `supply`), and the only classes the field ever bears are these three, so the stored
+                // content and its state-hash fold are unchanged. At a large grid this is the whole cost.
+                let comp = resource.composition_mut(coord);
+                let standing = comp.nutrient(ENERGY_DENSITY);
                 let mut stock = Stock::new(standing, cap, calib.regen_rate);
                 if cap > Fixed::ZERO {
                     // Colonization: a viable-but-empty cell gets a propagule floor so logistic regrowth
@@ -613,30 +625,9 @@ impl EnvironFields {
                     }
                 }
                 stock.step(Fixed::ZERO); // logistic regrow toward capacity (grazing already applied)
-                let food = stock.amount();
-                // The drinkable water supply is the standing depth, clamped to a bounded [0, ONE] supply
-                // the satisfaction measure consumes; refreshed each tick, so drinking does not deplete it.
-                let water = self.water.at(x, y).min(Fixed::ONE);
-                // The salinity DOSE (base-level liveliness step 4): the concentration scaled, written as
-                // the bio.salinity toxin the harm sink reads against a being's heritable tolerance. A
-                // present dose on a dosed cell, absent on a fresh one (the substrate absence convention).
-                let salinity = self.salinity_dose(x, y, calib);
-                let mut toxins = std::collections::BTreeMap::new();
-                if salinity > Fixed::ZERO {
-                    toxins.insert(SALINITY.to_string(), salinity);
-                }
-                resource.set(
-                    coord,
-                    Composition {
-                        nutrients: [
-                            (ENERGY_DENSITY.to_string(), food),
-                            (WATER_FRACTION.to_string(), water),
-                        ]
-                        .into_iter()
-                        .collect(),
-                        toxins,
-                    },
-                );
+                comp.set_nutrient(ENERGY_DENSITY, stock.amount());
+                comp.set_nutrient(WATER_FRACTION, water);
+                comp.set_toxin(SALINITY, salinity);
             }
         }
     }
