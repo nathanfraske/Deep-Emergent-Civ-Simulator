@@ -96,3 +96,48 @@ conductivity, corrosion rate) added as data, the only authored place.
 One deep blind panel over the whole reworked tool substrate, with the standing physics-only seat, told
 to find any surviving authored decision and any physics law still left unused where a tool action should
 consume it. Verify every finding against source before acting.
+
+## Arc-CHECKPOINT audit (2026-07-07, on Sections A, B, C): verdict and applied fixes
+
+A two-agent blind panel (physics-only seat plus correctness; determinism plus crash) verified the
+reworked cut, craft, edge_area_at, and mass. Confirmed genuinely fixed: the cut_yields map is gone (the
+severable set derives from the cell's own constituents), the fixed edge_area is gone, edge_area_at is
+the exact algebraic inverse of contact_pressure with no crash, determinism and opt-in byte-neutrality
+both hold. Applied on their verified findings: mass now uses checked_mul with a saturating fallback (was
+an unchecked mul, a debug panic / release wrap and a cross-build hazard); the craft fitness now ranks
+stones by the derived cutting power min(fracture_strength, indentation_hardness) rather than by an
+argmax over the Pierce capability (which mis-ranked a cutter and, keyed to ID_PIERCE, authored "this is
+a piercer"; the power form is also precision-safe, sidestepping the tiny-area rounding cliff at the
+hard-material end); and the cut's pressure cap is now a fixed-point overflow guard (Fixed::MAX, never
+binding since a wielded tool has a positive area) rather than a pressure_max borrowed from
+ExtractionParams, so the cut reads no authored ceiling and is decoupled from the extraction subsystem.
+
+THREE physics refinements the checkpoint surfaced, real and NOT yet fixed (they need the deeper substrate
+sections, so they fold into B, D/G, and F rather than blocking A/B/C):
+
+- REFINEMENT R-EDGE-INTRINSIC (folds into B, HIGH): the crafted edge is derived from the CRAFTER's
+  forming force (edge_area = force / (fracture * bridge)), so at USE the same force cancels and the cut
+  pressure is identically the tool's own fracture strength, independent of how hard the wielder presses;
+  and across beings the cut power depends on the ratio of the wielder's force to the maker's, a
+  dependence on the maker with no physical basis at use time. The physically correct edge is an INTRINSIC
+  sharpness the material holds (a fracture-mode or grain LENGTH SCALE), derived from the material's own
+  axes and independent of crafter force, so force/area stays a real function of the wielder's current
+  force. This needs a material edge-length-scale axis (a new physics-substrate axis, the only authored
+  place, e.g. a grain size or a fracture-toughness that yields a critical-flaw length), then re-derive
+  contact_area from it. The current force-based edge is a working first cut; this is the correct form.
+- REFINEMENT R-CUT-DEPTH (folds into D/G, HIGH): the cut sizes the freed amount by the constituent's
+  whole cell volume, carry-bounded (pick_up), rather than by the depth of cut. cut_penetrate (built and
+  cited) sizes a stroke from the delivered energy over the material's specific cut energy and the swept
+  edge area; the correct form is depth times edge width times stroke length, then carry-bound the freed
+  portion. Needs a mat.specific_cut_energy axis and a stroke/reach quantity. The current carry-bounded
+  amount is a coarse stand-in.
+- REFINEMENT R-CUT-SHEAR (folds into F, MEDIUM): the sever gate compares a NORMAL contact pressure to
+  mat.fracture_strength, but cutting is a shear / new-surface-energy process; the correct resistance is a
+  shear strength or fracture toughness with an energy term. This needs a shear capability kernel (root
+  R1, Section F) so the cut gate reads a shear law rather than a normal-stress proxy. The current gate is
+  a crude but honest initiation proxy.
+
+These are recorded so the tool physics is not mistaken for complete: A/B/C purged the AUTHORING and
+stood up the tool-as-matter foundation, and the derivations are sound as far as they go, but the edge is
+force-derived rather than intrinsic, the cut amount is carry-bounded rather than depth-sized, and the
+sever gate is normal rather than shear. Each is folded into its section above.

@@ -481,7 +481,11 @@ impl WieldedTool {
             .substance(&self.substance)
             .and_then(|s| s.vector.get("mat.density").copied())
             .unwrap_or(Fixed::ZERO);
-        density.mul(self.volume)
+        // Checked, like every mechanics law: a dense stone times a large volume can overflow Q32.32, and an
+        // unchecked multiply would panic in debug and wrap in release, a cross-build determinism hazard. Both
+        // density and volume are non-negative physical quantities, so an overflowing mass saturates to the
+        // fixed-point maximum rather than wrapping.
+        density.checked_mul(self.volume).unwrap_or(Fixed::MAX)
     }
 
     /// Fold the tool into a hash, its geometry, its retained volume, then its substance id, in canonical order

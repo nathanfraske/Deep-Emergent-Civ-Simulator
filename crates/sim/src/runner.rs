@@ -1606,16 +1606,15 @@ impl Embodiment {
     /// fraction and no substance transmutation). The effective pressure is the extraction contest's: the being's
     /// grown muscle force over the tool's contact area ([`laws::contact_pressure`]), capped at the tool's own
     /// indentation hardness (a soft tool blunts before it bites). Requires a wielded edge (a bare being cannot
-    /// cut), the extraction params, the material registry, and the physiology; missing any it cuts nothing, and
-    /// a being with no tool never reaches here, so an opted-out world is byte-identical. Reads only substance
-    /// ids and the beings' and matter's own physics, no race, kind, role, or per-world table (Principles 8, 9,
-    /// 11). Returns the total volume freed. The id-ordered walk over the cell is a deterministic tie-break.
+    /// cut), the material registry, and the physiology; missing any it cuts nothing, and a being with no tool
+    /// never reaches here, so an opted-out world is byte-identical. The pressure cap is a fixed-point overflow
+    /// guard, not a behavioural ceiling: the cut reads no authored pressure_max and is decoupled from the
+    /// extraction subsystem. Reads only substance ids and the beings' and matter's own physics, no race, kind,
+    /// role, or per-world table (Principles 8, 9, 11). Returns the total volume freed. The id-ordered walk over
+    /// the cell is a deterministic tie-break.
     pub fn cut_underfoot(&mut self, walker_id: StableId) -> Fixed {
-        let (Some(params), Some(reg), Some(phys)) = (
-            self.extraction.as_ref(),
-            self.material_registry.as_ref(),
-            self.physiology.as_ref(),
-        ) else {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
             return Fixed::ZERO;
         };
         let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
@@ -1631,9 +1630,13 @@ impl Embodiment {
             .substance(&tool.substance)
             .and_then(|s| s.vector.get("mat.indentation_hardness").copied())
             .unwrap_or(Fixed::ZERO);
-        // The edge's effective pressure: force over the tool's working area (capped at pressure_max), blunted
-        // to the tool's own hardness. A soft tool cannot carry a pressure above the material it is made of.
-        let pressure = laws::contact_pressure(force, tool.contact_area, params.pressure_max);
+        // The edge's effective pressure: force over the tool's working area, blunted to the tool's OWN
+        // hardness (a soft tool cannot carry a pressure above the material it is made of). The pressure cap
+        // passed to `contact_pressure` is a fixed-point overflow GUARD ([`Fixed::MAX`], never binding since a
+        // wielded tool has a positive area), NOT a behavioural ceiling: the tool's own hardness is the only
+        // material limit, so the cut reads no authored pressure_max and is decoupled from the extraction
+        // subsystem it once borrowed one from.
+        let pressure = laws::contact_pressure(force, tool.contact_area, Fixed::MAX);
         let effective = pressure.min(tool_hardness);
         // The cell's constituents the edge can SEVER: each substance present whose OWN fracture strength the
         // edge beats, in canonical id order (snapshot before the mutable take). No per-world table: membership
@@ -1871,33 +1874,40 @@ impl Embodiment {
             return false;
         };
         let force = being_muscle_force(w, phys);
-        let refs = &self.params.capability_refs;
-        let caps = &self.params.capability_caps;
-        // The carried stone (with enough stock) that yields the best tool, derived: its finest edge from its
-        // fracture strength, its capability from that edge and its own hardness. The argmax, ties to lowest id
-        // (only a strictly greater capability replaces the incumbent, so the first-seen equal wins). A stone
-        // too crumbly to hold an edge (no positive fracture strength) is no tool stock and is skipped.
+        // The carried stone (with enough stock) that yields the best tool, derived. Its finest edge is the area
+        // at which the forming pressure reaches its fracture strength; used with the same force the wielded
+        // pressure equals that fracture strength (edge_area_at is the inverse of contact_pressure), capped at
+        // the stone's own hardness, so the tool DELIVERS `min(fracture, hardness)`. That is the fitness, read
+        // straight from the two axes: precision-safe (no tiny-area rounding cliff at the hard-material end) and
+        // exactly the tool's cutting power. The argmax, ties to lowest id (a strictly greater power replaces the
+        // incumbent, so the first-seen equal wins). A stone too crumbly to hold an edge (no positive fracture
+        // strength, so no positive area) is no tool stock and is skipped.
         let mut best: Option<(Fixed, WieldedTool)> = None;
         for (s, &vol) in w.carried.substances() {
             if vol < params.tool_volume {
                 continue;
             }
-            let fracture = reg
-                .substance(s)
-                .and_then(|sub| sub.vector.get("mat.fracture_strength").copied())
+            let sub = reg.substance(s);
+            let fracture = sub
+                .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+                .unwrap_or(Fixed::ZERO);
+            let hardness = sub
+                .and_then(|x| x.vector.get("mat.indentation_hardness").copied())
                 .unwrap_or(Fixed::ZERO);
             let area = laws::edge_area_at(force, fracture);
             if area <= Fixed::ZERO {
                 continue; // crumbly stock holds no edge
             }
-            let candidate = WieldedTool {
-                contact_area: area,
-                volume: params.tool_volume,
-                substance: s.clone(),
-            };
-            let cap = tool_capability(&candidate, reg, refs, caps, FunctionLawRegistry::ID_PIERCE);
-            if best.as_ref().is_none_or(|(bc, _)| cap > *bc) {
-                best = Some((cap, candidate));
+            let power = fracture.min(hardness);
+            if best.as_ref().is_none_or(|(bp, _)| power > *bp) {
+                best = Some((
+                    power,
+                    WieldedTool {
+                        contact_area: area,
+                        volume: params.tool_volume,
+                        substance: s.clone(),
+                    },
+                ));
             }
         }
         let Some((_, tool)) = best else {
