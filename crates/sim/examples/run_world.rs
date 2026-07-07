@@ -1782,6 +1782,16 @@ fn main() {
     // flat (Runner::couple_conversation, the associative learner), so the belief-spread reader shows an
     // EXPERIENTIALLY-formed idea riding gossip and migration outward rather than an injected discovery.
 
+    // GPU field offload, opt-in behind CIVSIM_GPU_FIELD (and only compiled under --features gpu). Arms the
+    // cross-tick stencil pipeline so the field diffusion runs on the device; bit-identical to the CPU path.
+    #[cfg(feature = "gpu")]
+    if std::env::var("CIVSIM_GPU_FIELD").is_ok() {
+        runner.arm_gpu_field(civsim_gpu::cuda_client());
+        println!(
+            "  GPU FIELD OFFLOAD ARMED (opt-in): the cross-tick field stencil runs on the device."
+        );
+    }
+
     let start = Instant::now();
     let mut prev = founders;
     for gen in 1..=cfg.generations {

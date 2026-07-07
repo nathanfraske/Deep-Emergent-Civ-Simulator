@@ -38,6 +38,9 @@
 
 use cubecl::cuda::CudaRuntime;
 use cubecl::prelude::*;
+use cubecl::server::Handle;
+use std::thread::ThreadId;
+use std::time::Duration;
 
 use crate::prim::q32_mul;
 
@@ -266,4 +269,127 @@ pub fn gpu_field_step(
     }
     let bytes = client.read_one_unchecked(f_h);
     i64::from_bytes(&bytes).to_vec()
+}
+
+/// Cross-tick resident context for the field stencil: the split form of [`gpu_field_step`] with
+/// `iters = 1` per dispatch. The baseline is uploaded once and held resident; [`dispatch`](Self::dispatch)
+/// uploads one temperature snapshot, launches [`field_step_kernel`] once, and returns WITHOUT reading
+/// back; [`readback`](Self::readback) is the single CUDA-event-fenced sync point. This is what licenses
+/// the cross-tick software pipeline (design `docs/working/GPU_BLUEPRINT.md`): tick N dispatches the frozen
+/// post-combustion field, tick N's remaining CPU tail runs concurrently with the GPU stencil, and tick
+/// N+1 reads the result at a fixed point. Determinism is unaffected by completion timing: the fence only
+/// changes how long the CPU parks, never which bytes it reads (the kernel is a pointwise fixed-point map,
+/// gated bit-identical to the CPU `Field::step`). All calls must issue from ONE thread, because the
+/// thread-local `StreamId` fixes device order; the owning thread is captured in [`new`](Self::new) and
+/// debug-asserted at each call so a dispatch and its readback can never split across two streams.
+pub struct FieldResident {
+    client: CudaClient,
+    /// The baseline forcing, uploaded once in `new` and held resident across every tick.
+    base_h: Handle,
+    width: u32,
+    height: u32,
+    n: usize,
+    /// `(input upload handle, output handle)` of a dispatched-but-unread step. BOTH are held until the
+    /// fence in `readback` proves the kernel finished, so the input device buffer cannot be freed under a
+    /// queued-but-not-yet-executed kernel.
+    pending: Option<(Handle, Handle)>,
+    /// Test-only artificial park before the readback fence (the timing-invariance injection). `None` in
+    /// production; it never affects which bytes are read, only how long the CPU waits.
+    readback_delay: Option<Duration>,
+    /// The single owning thread, captured at construction. `dispatch` and `readback` debug-assert against
+    /// it so the pair never splits across two thread-local streams.
+    owner: ThreadId,
+}
+
+impl FieldResident {
+    /// Upload the baseline once and capture the owning thread. `baseline` is row-major `i64` Q32.32 bits,
+    /// `width * height` long.
+    pub fn new(client: CudaClient, baseline: &[i64], width: u32, height: u32) -> FieldResident {
+        let n = (width as usize) * (height as usize);
+        assert_eq!(
+            baseline.len(),
+            n,
+            "FieldResident: baseline must cover width*height cells"
+        );
+        let base_h = client.create_from_slice(i64::as_bytes(baseline));
+        FieldResident {
+            client,
+            base_h,
+            width,
+            height,
+            n,
+            pending: None,
+            readback_delay: None,
+            owner: std::thread::current().id(),
+        }
+    }
+
+    /// Snapshot upload plus one async launch, no readback. `temp` is the frozen post-combustion field bits;
+    /// `diffusion`/`relaxation` are passed fresh from the caller's calib every tick (never cached, so a
+    /// future calib change cannot desync the device path). A no-op on an empty field.
+    pub fn dispatch(&mut self, temp: &[i64], diffusion: i64, relaxation: i64) {
+        debug_assert_eq!(
+            std::thread::current().id(),
+            self.owner,
+            "FieldResident::dispatch off the owning thread"
+        );
+        assert_eq!(
+            temp.len(),
+            self.n,
+            "FieldResident::dispatch: temp must cover width*height cells"
+        );
+        if self.n == 0 {
+            return;
+        }
+        let f_h = self.client.create_from_slice(i64::as_bytes(temp));
+        let g_h = self.client.empty(self.n * core::mem::size_of::<i64>());
+        let tile = 16u32;
+        let bx = self.width.div_ceil(tile);
+        let by = self.height.div_ceil(tile);
+        unsafe {
+            field_step_kernel::launch::<CudaRuntime>(
+                &self.client,
+                CubeCount::Static(bx, by, 1),
+                CubeDim::new_3d(tile, tile, 1),
+                ArrayArg::from_raw_parts(f_h.clone(), self.n),
+                ArrayArg::from_raw_parts(self.base_h.clone(), self.n),
+                ArrayArg::from_raw_parts(g_h.clone(), self.n),
+                self.width,
+                self.height,
+                diffusion,
+                relaxation,
+            );
+        }
+        // Hold BOTH handles until the fence: the input buffer must outlive the queued kernel.
+        self.pending = Some((f_h, g_h));
+    }
+
+    /// The single blocking sync point: a device-to-host copy plus a CUDA event wait. Returns `None` when
+    /// no dispatch is pending (the first tick, or an unarmed run), so the caller falls back to the CPU
+    /// step. The output is a fresh row-major `i64` Q32.32 field.
+    pub fn readback(&mut self) -> Option<Vec<i64>> {
+        debug_assert_eq!(
+            std::thread::current().id(),
+            self.owner,
+            "FieldResident::readback off the owning thread"
+        );
+        let (in_h, out_h) = self.pending.take()?;
+        if let Some(d) = self.readback_delay {
+            std::thread::sleep(d); // park BEFORE the fence: proves timing cannot move the hash
+        }
+        let bytes = self.client.read_one_unchecked(out_h); // the fence: waits kernel + copy
+        let v = i64::from_bytes(&bytes).to_vec();
+        drop(in_h); // safe now: the fence proved the kernel consumed the input buffer
+        Some(v)
+    }
+
+    /// Whether a dispatched step is awaiting readback.
+    pub fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Inject an artificial park before the readback fence (test-only, the timing-invariance sweep).
+    pub fn set_readback_delay(&mut self, d: Option<Duration>) {
+        self.readback_delay = d;
+    }
 }

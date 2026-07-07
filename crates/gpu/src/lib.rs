@@ -65,7 +65,7 @@ pub mod transcendental;
 pub mod worldgen;
 
 pub use being::{gpu_activate, gpu_body_thermal, gpu_metabolize, gpu_sat_mul};
-pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul};
+pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul, FieldResident};
 pub use perceive::gpu_notice;
 pub use stage0::{
     cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client, CpuClient, CudaClient, WgpuClient,

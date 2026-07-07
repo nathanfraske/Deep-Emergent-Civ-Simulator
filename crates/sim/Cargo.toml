@@ -36,6 +36,15 @@ toml = "0.8"
 # invariant under RAYON_NUM_THREADS (the arc-4 determinism contract; see docs/working/GPU_BLUEPRINT.md). A
 # mature, stable crate, not the fast-moving GPU/ECS stack.
 rayon = "1"
+# The GPU compute crate (CubeCL/CUDA), an OPTIONAL dependency behind the `gpu` feature. It is never
+# compiled by a default build, so `cargo build`/`test` stays device-free and byte-identical; the field
+# offload (the cross-tick stencil pipeline) is wired only under `--features gpu`, and even then arms only
+# on an explicit runtime toggle, so the default state hash is untouched (docs/working/GPU_BLUEPRINT.md).
+civsim-gpu = { path = "../gpu", optional = true }
+
+[features]
+# Wire the GPU field-stencil offload into the runner. Off by default; opt in with `--features gpu`.
+gpu = ["dep:civsim-gpu"]
 
 [dev-dependencies]
 # The spatial and worldgen layer, used by the dawn-world example to place a band on a
