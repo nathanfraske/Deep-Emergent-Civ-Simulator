@@ -468,6 +468,22 @@ pub struct Walker {
     /// here, expressed from a heritable channel at the birth path in a follow-on. Folds into `state_hash`
     /// when positive.
     pub deliberation: Fixed,
+    /// The being's heritable SOCIAL-LEARNING weight (social-learning arc, piece 2, observe-and-imitate): the
+    /// rate in `[0, 1]` at which its discovery proposal is BIASED toward an action it perceived a co-located
+    /// being enact (carried in `observed_actions`). FOUNDER-ZERO: a founder reads zero and ignores what it
+    /// sees, so imitation EMERGES by selection rather than being switched on (Principle 9). Expressed from
+    /// [`crate::genome::Channel::SocialLearning`] at the birth path exactly as `exploration` is; tests prime
+    /// it directly. Folds into `state_hash` when positive.
+    pub social_learning: Fixed,
+    /// The being's TRANSIENT observed-action prior (social-learning arc, piece 2): the set of primitive ids
+    /// of the actions co-located OTHER beings enacted-and-ate last tick, the valence-free ActionTrace this
+    /// being perceived. Read by the discovery sampler to tip the draw toward a demonstrated action (scaled by
+    /// `social_learning`), NEVER a belief: it biases what the being tries, and its own felt reward stays the
+    /// sole gate to a committed belief (copy-and-verify). Rebuilt each tick from co-located eating (empty
+    /// where a being saw no one eat), so it is a one-tick memory, not a store. Populated only when the world
+    /// arms observe-and-imitate; empty otherwise, so it folds nothing into `state_hash` (opt-in default) and
+    /// leaves an opted-out run byte-identical. Folded (in sorted id order) only when non-empty.
+    pub observed_actions: BTreeSet<u16>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -505,6 +521,8 @@ impl Walker {
             exploration: Fixed::ZERO,
             surprise: Fixed::ZERO,
             deliberation: Fixed::ZERO,
+            social_learning: Fixed::ZERO,
+            observed_actions: BTreeSet::new(),
             alive: true,
         }
     }

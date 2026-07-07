@@ -146,11 +146,20 @@ impl DiscoveryCalib {
 /// VALUE at the just-noticeable difference rather than the primitive alone, so "strike a HARD thing" and
 /// "strike a SOFT thing" diverge as distinct learned actions, is the deferred generalisation; until it
 /// lands the belief generalises over the primitive, consistently across the whole ideation loop.
+///
+/// The `social_prior` (social-learning arc, piece 2, observe-and-imitate) LIFTS the exploration floor of an
+/// UNBELIEVED candidate whose action the being just perceived a co-located neighbour enact, scaled by the
+/// being's founder-zero social-learning weight, so a demonstrated technique is tried more than an unseen one
+/// while a rewarded habit still exploits at full weight. It is zero for a founder (zero social weight), for
+/// an unobserved action, and for every run with observe-and-imitate unarmed, so the draw is unchanged there
+/// (opt-in, founder-zero). It only tips the PROPOSAL; the being's own felt reward stays the sole gate to a
+/// committed belief, so a copied action never becomes a belief until eating it pays off (copy-and-verify).
 fn candidate_weight(
     mind: &Mind,
     step: &SequenceStep,
     calib: &DiscoveryCalib,
     params: &InferenceParams,
+    social_prior: Fixed,
 ) -> Fixed {
     let subject = sequence_subject(&[SequenceStep {
         primitive: step.primitive,
@@ -160,7 +169,10 @@ fn candidate_weight(
     if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
         Fixed::ONE
     } else {
-        calib.exploration_floor
+        calib
+            .exploration_floor
+            .saturating_add(social_prior)
+            .min(Fixed::ONE)
     }
 }
 
@@ -174,6 +186,13 @@ fn candidate_weight(
 /// Returns `None` where the being can propose nothing (no candidates) or nothing carries any weight (a zero
 /// floor and no belief). Pure over `(candidates, mind, calib, params, being, tick, seed)`; the binding
 /// graph and the perception it reads stay RNG-free, this is the only draw.
+///
+/// `observed` and `social_weight` carry the observe-and-imitate bias (social-learning arc, piece 2): a
+/// candidate whose primitive is in `observed` (the actions co-located beings enacted last tick) has its
+/// exploration floor lifted by `social_weight`, so the being tries a demonstrated technique more. An empty
+/// `observed` set or a zero `social_weight` (a founder, or observe-and-imitate unarmed) leaves every weight
+/// at its pre-social value, so the draw is byte-identical.
+#[allow(clippy::too_many_arguments)]
 pub fn sample_candidate(
     candidates: &[SequenceStep],
     mind: &Mind,
@@ -182,13 +201,22 @@ pub fn sample_candidate(
     being: StableId,
     tick: u64,
     seed: u64,
+    observed: &std::collections::BTreeSet<u16>,
+    social_weight: Fixed,
 ) -> Option<SequenceStep> {
     if candidates.is_empty() {
         return None;
     }
     let weights: Vec<Fixed> = candidates
         .iter()
-        .map(|s| candidate_weight(mind, s, calib, params))
+        .map(|s| {
+            let social_prior = if observed.contains(&s.primitive) {
+                social_weight
+            } else {
+                Fixed::ZERO
+            };
+            candidate_weight(mind, s, calib, params, social_prior)
+        })
         .collect();
     let total = Fixed::saturating_sum(weights.iter().copied());
     if total <= Fixed::ZERO {
@@ -228,6 +256,12 @@ mod tests {
     }
 
     const SEED: u64 = 0x00D1_5C05;
+
+    // No observed actions and a zero social-learning weight: the pre-observe-and-imitate draw, unchanged, so
+    // these tests read the sampler's belief-and-floor behaviour with the social bias inert.
+    fn no_obs() -> std::collections::BTreeSet<u16> {
+        std::collections::BTreeSet::new()
+    }
 
     #[test]
     fn the_binding_graph_is_the_generic_cartesian_of_afforded_primitives_and_present_targets() {
@@ -336,6 +370,8 @@ mod tests {
                 StableId(1),
                 tick,
                 SEED,
+                &no_obs(),
+                Fixed::ZERO,
             );
             assert_eq!(
                 proposal.map(|p| p.primitive),
@@ -353,7 +389,9 @@ mod tests {
                 &params(),
                 StableId(2),
                 0,
-                SEED
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
             ),
             None,
             "a being that believes nothing and never explores proposes nothing"
@@ -368,10 +406,86 @@ mod tests {
                 &params(),
                 StableId(2),
                 0,
-                SEED
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
             )
             .is_some(),
             "with an exploration floor, an unproven action is still tried"
+        );
+    }
+
+    #[test]
+    fn an_observed_action_is_proposed_by_the_social_prior_and_a_founder_ignores_it() {
+        // Social-learning arc, piece 2 (observe-and-imitate): the social prior LIFTS an UNBELIEVED candidate
+        // whose action the being observed a co-located neighbour enact, scaled by its heritable
+        // social-learning weight. With a zero exploration floor an observed action carries weight ONLY
+        // through the social prior, so the effect is clean to read: a being with a positive social weight
+        // proposes the observed STRIKE every tick (it copies what it saw), a founder (zero social weight)
+        // ignores the observation and, with a zero floor, proposes nothing, so imitation emerges only with
+        // the heritable weight (founder-zero); and an action the being did NOT observe gets no lift, so only
+        // a demonstrated action is copied.
+        use std::collections::BTreeSet;
+        let candidates = candidate_bindings(&[STRIKE, GRASP], &[Fixed::ONE, Fixed::ONE]); // 4
+        let naive = Mind::new(StableId(3), Fixed::ONE);
+        let exploit = DiscoveryCalib {
+            exploration_floor: Fixed::ZERO,
+            ..DiscoveryCalib::dev_default()
+        };
+        let observed_strike: BTreeSet<u16> = [STRIKE.0].into_iter().collect();
+        // A positive social weight: the observed STRIKE carries weight (floor zero plus the social prior),
+        // so the being proposes it every tick, by imitation alone, never a coded preference.
+        for tick in 0..8 {
+            let proposal = sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                tick,
+                SEED,
+                &observed_strike,
+                Fixed::ONE,
+            );
+            assert_eq!(
+                proposal.map(|p| p.primitive),
+                Some(STRIKE.0),
+                "a being with a social weight copies the action it observed a neighbour enact"
+            );
+        }
+        // Founder-zero: a zero social weight ignores what it observed, and with a zero floor nothing carries
+        // weight, so imitation appears only once selection lifts the social-learning weight off zero.
+        assert_eq!(
+            sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                0,
+                SEED,
+                &observed_strike,
+                Fixed::ZERO,
+            ),
+            None,
+            "a founder ignores what it observed: imitation emerges only with the heritable weight"
+        );
+        // Nothing observed: the social weight lifts nothing, so only a demonstrated action is ever copied.
+        let observed_none: BTreeSet<u16> = BTreeSet::new();
+        assert_eq!(
+            sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                0,
+                SEED,
+                &observed_none,
+                Fixed::ONE,
+            ),
+            None,
+            "an action the being did not observe gets no social lift"
         );
     }
 
@@ -383,15 +497,45 @@ mod tests {
         let candidates = candidate_bindings(&[STRIKE, GRASP, EXTRACT], &[Fixed::ONE, Fixed::ONE]); // 6
         let naive = Mind::new(StableId(7), Fixed::ONE);
         let calib = DiscoveryCalib::dev_default();
-        let a = sample_candidate(&candidates, &naive, &calib, &params(), StableId(7), 3, SEED);
-        let b = sample_candidate(&candidates, &naive, &calib, &params(), StableId(7), 3, SEED);
+        let a = sample_candidate(
+            &candidates,
+            &naive,
+            &calib,
+            &params(),
+            StableId(7),
+            3,
+            SEED,
+            &no_obs(),
+            Fixed::ZERO,
+        );
+        let b = sample_candidate(
+            &candidates,
+            &naive,
+            &calib,
+            &params(),
+            StableId(7),
+            3,
+            SEED,
+            &no_obs(),
+            Fixed::ZERO,
+        );
         assert_eq!(
             a, b,
             "the proposal is reproducible for one being, tick, and seed"
         );
         assert!(a.is_some());
         assert_eq!(
-            sample_candidate(&[], &naive, &calib, &params(), StableId(7), 0, SEED),
+            sample_candidate(
+                &[],
+                &naive,
+                &calib,
+                &params(),
+                StableId(7),
+                0,
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
+            ),
             None,
             "no candidates, no proposal"
         );

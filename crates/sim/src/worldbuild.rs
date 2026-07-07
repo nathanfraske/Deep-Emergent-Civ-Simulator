@@ -591,6 +591,9 @@ fn assemble_dawn_embodiment(
                 walker.deliberation = race
                     .genes
                     .express_unit(genome, crate::genome::Channel::Deliberation);
+                walker.social_learning = race
+                    .genes
+                    .express_unit(genome, crate::genome::Channel::SocialLearning);
             }
             if let Some(s) = structure {
                 walker = walker.with_structure(s);

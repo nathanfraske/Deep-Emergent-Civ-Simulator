@@ -946,6 +946,16 @@ pub struct Embodiment {
     /// `state_hash`; the crucible and default world arm no reward learner, so this gate leaves them
     /// byte-identical whatever its value.
     place_reward_learning: bool,
+    /// Whether the being observes and imitates (social-learning arc, piece 2, observe-and-imitate). FALSE by
+    /// default, so no valence-free eating ActionTrace is emitted, no being's `observed_actions` is populated,
+    /// and every run hash is unchanged; the world-build opts in ([`Embodiment::set_observe_and_imitate`]) to
+    /// let a co-located being perceive that another ate and be BIASED toward trying it. When true, a pass in
+    /// `couple_conversation` rebuilds each being's `observed_actions` from the actions co-located OTHERS ate
+    /// this tick, and the discovery sampler tips the draw toward those actions scaled by the being's
+    /// founder-zero `social_learning` weight. It only biases the proposal; the being's own felt reward stays
+    /// the sole gate to a committed belief (copy-and-verify). The living sibling of the physical trace: where
+    /// the trace carries a dead maker's mark to a later being, this carries a live neighbour's present action.
+    observe_and_imitate: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1074,6 +1084,7 @@ impl Embodiment {
             attraction: false,
             nutrition_learning: false,
             place_reward_learning: true,
+            observe_and_imitate: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1144,6 +1155,18 @@ impl Embodiment {
     /// existing mechanism, so its default preserves the keystone's behaviour rather than opting a new one in.
     pub fn set_place_reward_learning(&mut self, enabled: bool) {
         self.place_reward_learning = enabled;
+    }
+
+    /// Enable (or disable) OBSERVE-AND-IMITATE (social-learning arc, piece 2): when true, a being perceives
+    /// the valence-free ActionTrace a co-located being leaves by eating and is BIASED toward trying that
+    /// action, scaled by its founder-zero `social_learning` weight. FALSE (the default) leaves each being's
+    /// `observed_actions` empty and the discovery draw unbiased, so every run hash is unchanged (opt-in). It
+    /// needs no layout rebuild (it biases the discovery sampler, not the controller input). The bias only
+    /// tips which action the being tries; its own felt reward stays the sole gate to a committed belief, so a
+    /// copied action a being is not rewarded for forms no belief (copy-and-verify). Meaningful only with the
+    /// discovery loop armed (there is a proposal to bias) and beings carrying a positive `social_learning`.
+    pub fn set_observe_and_imitate(&mut self, enabled: bool) {
+        self.observe_and_imitate = enabled;
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -3036,6 +3059,56 @@ impl Runner {
                 }
             }
         }
+        // Observe-and-imitate (social-learning arc, piece 2): rebuild each being's transient observed-action
+        // prior from the actions co-located OTHER beings ATE this tick (the valence-free ActionTrace eating
+        // leaves), so next tick's discovery proposal can be biased toward a demonstrated technique. A being
+        // reads only the primitive its neighbours enacted, never their reward or belief (the valence-free
+        // bias). It rebuilds every armed tick (empty where a being saw no one eat), a one-tick memory the
+        // discovery sampler consumes, never a store. Gated on the opt-in; unarmed, no `observed_actions` is
+        // ever populated, so an opted-out run folds nothing and stays byte-identical. Runs in canonical
+        // walker order, drawing no randomness.
+        let observe_and_imitate = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.observe_and_imitate)
+            .unwrap_or(false);
+        if observe_and_imitate {
+            if let Some(emb) = self.embodiment.as_mut() {
+                // Per place, the (eater id, enacted primitive) of every being that ate this tick, in
+                // canonical walker order (so the per-observer set is reproducible and thread-invariant).
+                let mut eaten_at: BTreeMap<PlaceId, Vec<(StableId, u16)>> = BTreeMap::new();
+                for w in emb.walkers.iter() {
+                    if !w.ate.is_empty() {
+                        if let (Some(&place), Some(aff)) = (cells.get(&w.id), w.decided_affordance)
+                        {
+                            eaten_at.entry(place).or_default().push((w.id, aff.0));
+                        }
+                    }
+                }
+                for w in emb.walkers.iter_mut() {
+                    let mut observed = BTreeSet::new();
+                    // Only a being that CAN imitate (a positive heritable social-learning weight) carries the
+                    // prior: a founder applies no bias whatever it saw, so leaving its prior empty is
+                    // behaviour-identical and keeps founder-zero at the HASH level too (a founder folds
+                    // nothing), so imitation emerges by selection at both the behavioural and the canonical
+                    // level, never switched on for a being that cannot act on it.
+                    if w.social_learning > Fixed::ZERO {
+                        if let Some(&place) = cells.get(&w.id) {
+                            if let Some(eaters) = eaten_at.get(&place) {
+                                for &(eater, primitive) in eaters {
+                                    // Observe OTHERS, not one's own bite: a being that ate already has the
+                                    // reward path to the belief; the prior is for copying a neighbour.
+                                    if eater != w.id {
+                                        observed.insert(primitive);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    w.observed_actions = observed;
+                }
+            }
+        }
         // The promoted set: every being sharing a cell that holds a being in a survival arc (the
         // talk-hole guard promotes whole co-located groups), capped at the generous budget by keeping the
         // most-stressed cells. A pure deterministic function of the reserves and the cells (no RNG).
@@ -3492,8 +3565,21 @@ impl Runner {
                             ),
                         };
                         let candidates = candidate_bindings(&afforded, &percepts);
-                        let proposal =
-                            sample_candidate(&candidates, mind, &calib, params, w.id, tick, seed)?;
+                        // The observe-and-imitate bias (social-learning arc, piece 2): the actions the being
+                        // perceived co-located neighbours enact, and its founder-zero social-learning weight,
+                        // tip the draw toward a demonstrated technique. Empty and zero for a founder or an
+                        // opted-out world, so the draw is byte-identical there.
+                        let proposal = sample_candidate(
+                            &candidates,
+                            mind,
+                            &calib,
+                            params,
+                            w.id,
+                            tick,
+                            seed,
+                            &w.observed_actions,
+                            w.social_learning,
+                        )?;
                         // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
                         // (plan_toward over the reward goal), then take the highest-confidence plan step whose
                         // action is a candidate PRESENT in its current binding graph. This is the grounding
@@ -4001,6 +4087,9 @@ impl Runner {
                         walker.deliberation = race
                             .genes
                             .express_unit(genome, crate::genome::Channel::Deliberation);
+                        walker.social_learning = race
+                            .genes
+                            .express_unit(genome, crate::genome::Channel::SocialLearning);
                     }
                     if let Some(s) = structure {
                         walker = walker.with_structure(s);
@@ -4127,6 +4216,22 @@ impl Runner {
                 // every founder-only) run's hash unchanged; only a primed or mutant being folds it.
                 if w.deliberation > Fixed::ZERO {
                     h.write_fixed(w.deliberation);
+                }
+                // The heritable social-learning weight (social-learning arc, piece 2, observe-and-imitate):
+                // the rate at which the being's proposal is biased toward an observed action, folded after
+                // the deliberation weight. FOUNDER-ZERO: zero for a being whose weight was never lifted off
+                // zero, so it folds nothing and leaves an opted-out (and every founder-only) run's hash
+                // unchanged; only a primed or mutant being folds it.
+                if w.social_learning > Fixed::ZERO {
+                    h.write_fixed(w.social_learning);
+                }
+                // The transient observed-action prior (social-learning arc, piece 2): the primitive ids of
+                // the actions co-located beings enacted last tick, folded in sorted order after the
+                // social-learning weight. EMPTY for a being that saw no one eat (and for every run with
+                // observe-and-imitate unarmed), so it folds nothing and leaves an opted-out run's hash
+                // unchanged; a being carrying a live observation folds its primitives.
+                for primitive in &w.observed_actions {
+                    h.write_u32(*primitive as u32);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -6285,6 +6390,231 @@ values = [
         assert!(
             !run(Fixed::ZERO, true).0,
             "a founder-zero being never enacts geophage, so it never eats and re-earns no nutrition belief"
+        );
+    }
+
+    #[test]
+    fn a_being_perceives_a_co_located_eater_into_a_transient_prior_and_forms_no_belief_from_watching(
+    ) {
+        // Social-learning arc, piece 2 (observe-and-imitate, the run-path proof): a being co-located with a
+        // neighbour that eats perceives the valence-free ActionTrace eating leaves (its `observed_actions`
+        // gains the neighbour's enacted primitive), the LIVING sibling of the physical trace. Two claims:
+        // (1) the observer perceives the eater's action (the emit-and-gather works, gated on the opt-in, so
+        // an opted-out observer perceives nothing); (2) merely watching forms NO reward belief, because the
+        // observer's own felt reward stays the sole gate (copy-and-verify): the observer here is kept well
+        // fed so it never eats, so however long it watches the eater it commits no "geophage pays off"
+        // belief. The bias the prior then applies to the observer's own proposal is proven deterministically
+        // in the discovery unit test; here the point is the perception and the belief gate.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The action the eater enacts and the observer perceives: a single-primitive geophage sequence.
+        let geophage_subject = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Returns (the observer perceived the eater's geophage, the observer committed a geophage reward
+        // belief, the final canonical state_hash). `observe` arms observe-and-imitate; off, the observer
+        // should perceive nothing. `scheduled` runs the deterministic-scheduler tick variant instead of the
+        // pinned order, so the two must fold identically (the observed-action prior is worker-invariant).
+        let run = |observe: bool, scheduled: bool| -> (bool, bool, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let eater_id = world.spawn(Fixed::ONE);
+            world.set_place(eater_id, 0);
+            let observer_id = world.spawn(Fixed::ONE);
+            world.set_place(observer_id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0B5E44E,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["oilseed"]));
+            let tile = Coord3::ground(4, 4);
+
+            // The eater: hungry and primed to explore, so it enacts geophage and eats the oilseed each tick.
+            let mut eater_h = Homeostasis::from_mass(&reg, Fixed::ONE);
+            eater_h.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut eater = Walker::new(
+                eater_id,
+                tile,
+                body.clone(),
+                eater_h,
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            eater.exploration = Fixed::ONE;
+            emb.add(eater, band());
+
+            // The observer: co-located, a positive social-learning weight, but kept FULL so it never eats
+            // (its bite has no room), so it only watches. It never enacts a proposal (exploration zero).
+            let mut observer_h = Homeostasis::from_mass(&reg, Fixed::ONE);
+            observer_h.set_level(ENERGY, observer_h.capacity(ENERGY));
+            let mut observer = Walker::new(
+                observer_id,
+                tile,
+                body.clone(),
+                observer_h,
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            observer.social_learning = Fixed::ONE;
+            observer.exploration = Fixed::ZERO;
+            emb.add(observer, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            emb.set_observe_and_imitate(observe);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..16 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                if scheduled {
+                    runner.step_scheduled(&[]);
+                } else {
+                    runner.step();
+                }
+            }
+            let perceived = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == observer_id))
+                .map(|w| w.observed_actions.contains(&GEOPHAGE.0))
+                .unwrap_or(false);
+            let observer_belief = runner
+                .world()
+                .and_then(|w| w.mind(observer_id))
+                .map(|m| m.belief(geophage_subject, REWARD_ATTR, &bp) == Some(REWARDS))
+                .unwrap_or(false);
+            (perceived, observer_belief, runner.state_hash())
+        };
+
+        // Armed: the observer perceives the co-located eater's geophage into its transient prior (the
+        // emit-and-gather), yet forms NO reward belief from watching, because it never ate and its own felt
+        // reward is the sole gate to a belief (copy-and-verify).
+        let (perceived, believed, hash_pinned) = run(true, false);
+        assert!(
+            perceived,
+            "an observer co-located with an eater perceives the eater's action into its transient prior"
+        );
+        assert!(
+            !believed,
+            "watching alone forms no belief: the observer's own felt reward is the sole gate (copy-and-verify)"
+        );
+        // Worker-invariance: the observed-action prior is folded per-being dynamic state built from the
+        // post-enact tick state with no fresh randomness, so the scheduled variant folds bit-identically to
+        // the pinned order (the prior is deterministic and order-invariant, not a hidden divergence).
+        let (_, _, hash_scheduled) = run(true, true);
+        assert_eq!(
+            hash_pinned, hash_scheduled,
+            "the observed-action prior folds identically in the pinned and scheduled tick orders"
+        );
+        // Opt-in falsifier: with observe-and-imitate off the observer perceives nothing, so the prior and its
+        // fold stay empty and the run is byte-identical.
+        let (perceived_off, _, _) = run(false, false);
+        assert!(
+            !perceived_off,
+            "with observe-and-imitate off the observer perceives no action (the opt-in falsifier)"
         );
     }
 

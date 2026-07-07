@@ -208,6 +208,16 @@ pub enum Channel {
     /// best-believed, two independent heritable drives. FOUNDER-ZERO by the same unseeded-locus mechanism,
     /// so goal-directed pursuit emerges by selection, never a coded default (Principle 9).
     Deliberation,
+    /// A heritable SOCIAL-LEARNING propensity (social-learning arc, piece 2, observe-and-imitate): the rate
+    /// at which a being's proposal is BIASED toward an action it perceived a co-located being enact (a
+    /// valence-free observed ActionTrace), the value `crate::locomotion::Walker::social_learning` is
+    /// expressed from. A UNIT channel, the observational sibling of [`Channel::Exploration`]: where
+    /// exploration tries the untried at a flat floor rate, social learning tries what it SAW others do,
+    /// tipping the discovery draw toward a demonstrated technique. FOUNDER-ZERO by the same unseeded-locus
+    /// mechanism, so imitation emerges by selection, never a coded default (Principle 9). It only BIASES
+    /// which action the being tries; the being's own felt reward stays the sole gate to a committed belief
+    /// (copy-and-verify), so a demonstrated action a being copies but is not rewarded for forms no belief.
+    SocialLearning,
 }
 
 /// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
