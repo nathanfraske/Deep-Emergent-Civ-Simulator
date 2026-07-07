@@ -93,6 +93,19 @@ pub enum CapabilityKernel {
     /// SHEAR measures the tangential parting a cut physically is, so a cut affordance gates on this rather than
     /// the pierce proxy.
     Shear,
+    /// CRUSH, the compressive-failure read (the made-world arc, tool-use, Section G): the second non-piercing
+    /// action, so a blunt strong tool can afford a crush a keen edge is not distinguished for. A part pressing
+    /// a reference force over its contact area imposes a compressive stress ([`laws::contact_pressure`]),
+    /// bounded by the part's OWN compressive strength (a part cannot deliver a compressive stress beyond what
+    /// it withstands before it crushes itself). If that effective stress clears a reference target's
+    /// compressive resistance the part can crush, graded over the reference. Reads `mech.contact_area` and
+    /// `mat.compressive_strength`; the reference force and the reference compressive resistance are reserved. A
+    /// part with no face (no contact area) or no compressive strength delivers nothing and reads zero. Where
+    /// SHEAR measures the tangential parting a cut is, CRUSH measures the compressive failure a hammer or a
+    /// mill is: a material weak in compression but tough in shear is crushed, not cut, and one weak in shear
+    /// but strong in compression is cut, not crushed, diverging on the target's own resistance axes by physics
+    /// not a tag.
+    Crush,
 }
 
 impl CapabilityKernel {
@@ -105,6 +118,7 @@ impl CapabilityKernel {
             CapabilityKernel::Locomote => &["mech.section_modulus", "mech.arm_length"],
             CapabilityKernel::Refract => &[],
             CapabilityKernel::Shear => &["mech.contact_area"],
+            CapabilityKernel::Crush => &["mech.contact_area"],
         }
     }
 
@@ -115,6 +129,7 @@ impl CapabilityKernel {
             CapabilityKernel::Locomote => &["mat.yield_strength"],
             CapabilityKernel::Refract => &["opt.refractive_index"],
             CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
+            CapabilityKernel::Crush => &["mat.compressive_strength"],
         }
     }
 
@@ -133,6 +148,7 @@ impl CapabilityKernel {
             CapabilityKernel::Locomote => locomote(geo, mat, refs, caps),
             CapabilityKernel::Refract => refract(mat, refs),
             CapabilityKernel::Shear => shear(geo, mat, refs, caps),
+            CapabilityKernel::Crush => crush(geo, mat, refs, caps),
         }
     }
 }
@@ -318,6 +334,40 @@ fn shear(
     )
 }
 
+/// The CRUSH read: is the part a compressive-failure tool, and how good a one, from its face geometry and
+/// compressive strength (the made-world arc, Section G, the second non-piercing action). The reference force
+/// over the face's contact area is a compressive stress ([`laws::contact_pressure`]), bounded by the part's
+/// OWN compressive strength (it crushes itself before it delivers more). The effective deliverable stress
+/// (the applied stress capped at the part's own strength) must clear the reserved reference compressive
+/// resistance to crush, graded above the threshold, the compressive sibling of the SHEAR read. A strong tool
+/// crushes; a weak one (self-limited low), a spread one (low stress), or a part with no face or no
+/// compressive strength reads zero.
+fn crush(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> Fixed {
+    let contact_area = geo("mech.contact_area");
+    if contact_area <= Fixed::ZERO {
+        return Fixed::ZERO; // no face, no contact: nothing to crush with
+    }
+    let compressive_strength = mat("mat.compressive_strength");
+    // The applied compressive stress the reference force imposes over the face, self-limited at the part's
+    // own compressive strength (a part that would carry more than it withstands crushes itself first). A part
+    // with no compressive strength (zero) delivers no crushing stress.
+    let applied = laws::contact_pressure(refs.reference_strike_force, contact_area, caps.pressure);
+    let effective = if compressive_strength > Fixed::ZERO {
+        applied.min(compressive_strength)
+    } else {
+        Fixed::ZERO
+    };
+    normalize(
+        sat_sub(effective, refs.reference_compressive_resistance),
+        refs.reference_compressive_resistance,
+    )
+}
+
 /// Normalize a raw physics reading to `[0, 1]` against a reserved reference level (the reading that
 /// counts as full capability). A non-positive reference reads zero (an unset reference offers no
 /// capability rather than a fabricated one); an overflow in the division reads full.
@@ -377,6 +427,12 @@ pub struct CapabilityRefs {
     /// capability is the edge's deliverable shear over this reference, clamped to one. Larger reads fewer
     /// edges as sever tools, smaller more; surfaced reserved-with-basis, never fabricated.
     pub reference_shear_resistance: Fixed,
+    /// The compressive resistance a crush tool must overcome to read as fully capable
+    /// (`capability.reference_compression`, MPa). Basis: the `mat.compressive_strength` of the reference
+    /// target a crush must fail (the compressive strength of the matter a hammer or a mill breaks), the
+    /// compressive sibling of `reference_shear_resistance`; the capability is the face's deliverable stress
+    /// over this reference, clamped to one. Surfaced reserved-with-basis, never fabricated.
+    pub reference_compressive_resistance: Fixed,
 }
 
 impl CapabilityRefs {
@@ -397,6 +453,7 @@ impl CapabilityRefs {
             optical_contrast_cap: dec("10"),    // the refractive-contrast ceiling
             reference_optical_contrast: dec("0.3"), // a lens-to-air index step that focuses (n~1.3)
             reference_shear_resistance: dec("3"), // MPa, soft-tissue/fibre shear strength a sever parts
+            reference_compressive_resistance: dec("5"), // MPa, the compressive strength a crush must fail
         }
     }
 }
@@ -465,6 +522,8 @@ impl FunctionLawRegistry {
     pub const ID_REFRACT: FunctionLawId = FunctionLawId(2);
     /// The stable id of the SHEAR law in [`Self::dev_seed`] (the first non-piercing action, root R1).
     pub const ID_SHEAR: FunctionLawId = FunctionLawId(3);
+    /// The stable id of the CRUSH law in [`Self::dev_seed`] (the second non-piercing action, compression).
+    pub const ID_CRUSH: FunctionLawId = FunctionLawId(4);
 
     /// An empty registry.
     pub fn new() -> Self {
@@ -523,6 +582,11 @@ impl FunctionLawRegistry {
             id: FunctionLawRegistry::ID_SHEAR,
             name: "shear".to_string(),
             kernel: CapabilityKernel::Shear,
+        });
+        reg.insert(FunctionLawDef {
+            id: FunctionLawRegistry::ID_CRUSH,
+            name: "crush".to_string(),
+            kernel: CapabilityKernel::Crush,
         });
         reg
     }
@@ -696,6 +760,53 @@ mod tests {
             "an edge with neither shear strength nor yield delivers no shear"
         );
         assert_eq!(no_edge, Fixed::ZERO, "no edge, no shear");
+    }
+
+    #[test]
+    fn a_strong_faced_tool_reads_a_crush_capability_a_weak_or_spread_or_strengthless_one_does_not() {
+        // The made-world arc, Section G, the second non-piercing action: the CRUSH kernel reads whether a part
+        // can fail matter in compression, from its face geometry and its own compressive strength. A face of a
+        // strong-compression material clears the reference and crushes; a too-weak material self-limits below
+        // the reference; a spread (large-area) face drives its stress below the reference; a part with no face
+        // or no compressive strength reads zero. The compressive sibling of the SHEAR sever threshold.
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs(); // reference force 100 N, reference compressive resistance 5 MPa
+        let caps = test_caps();
+        let keen = geo_of([("mech.contact_area", "0.00000005")].into_iter().collect());
+        let spread = geo_of([("mech.contact_area", "0.01")].into_iter().collect());
+        let strong = mat_of([("mat.compressive_strength", "200")].into_iter().collect());
+        let weak = mat_of([("mat.compressive_strength", "2")].into_iter().collect()); // below the 5 MPa ref
+        let strengthless = mat_of([("mat.density", "2500")].into_iter().collect()); // no compressive axis
+
+        let crush_of = |geo: &dyn Fn(&str) -> Fixed, mat: &dyn Fn(&str) -> Fixed| {
+            derive_capabilities(&fns, geo, mat, &refs, &caps).score(FunctionLawRegistry::ID_CRUSH)
+        };
+
+        assert!(
+            crush_of(&keen, &strong) > Fixed::ZERO,
+            "a strong-faced tool crushes: {:?}",
+            crush_of(&keen, &strong)
+        );
+        assert_eq!(
+            crush_of(&keen, &weak),
+            Fixed::ZERO,
+            "a material whose compressive strength is below the reference cannot fail it"
+        );
+        assert_eq!(
+            crush_of(&spread, &strong),
+            Fixed::ZERO,
+            "a spread face drives its compressive stress below the reference and crushes nothing"
+        );
+        assert_eq!(
+            crush_of(&keen, &strengthless),
+            Fixed::ZERO,
+            "a part with no compressive strength delivers no crush"
+        );
+        assert_eq!(
+            crush_of(&geo_of(BTreeMap::new()), &strong),
+            Fixed::ZERO,
+            "no face, no crush"
+        );
     }
 
     #[test]

@@ -1308,6 +1308,173 @@ values = [
 }
 
 #[test]
+fn a_crush_fails_compression_where_a_cut_parts_shear_the_same_tool_diverging_by_the_targets_axis() {
+    // The made-world arc, tool-use, Section G: CRUSH fails matter in COMPRESSION where CUT parts it in SHEAR,
+    // so the SAME tool with the SAME force frees opposite constituents depending on which resistance axis each
+    // target is weak in. A chalk (weak in compression, tough in shear) is crushed but not cut; a fibre (tough
+    // in compression, weak in shear) is cut but not crushed. The divergence is the target's own material axes,
+    // by physics, never a per-action table or an `IsChalk`/`IsFibre` tag.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.compressive_strength"
+measures = "the compressive stress a substance fails at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "chalk"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1500" },
+  { axis = "mat.compressive_strength", value = "2" },
+  { axis = "mat.shear_strength", value = "5000" },
+]
+
+[[substance]]
+id = "fibre"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1100" },
+  { axis = "mat.compressive_strength", value = "5000" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "tool"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.compressive_strength", value = "500" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let ration = Fixed::from_int(1000);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
+        substance: "tool".to_string(),
+    };
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_crusher(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0A,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "chalk", ration);
+        field.deposit(cell, "fibre", ration);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_of =
+        |r: &Runner, s: &str| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume(s) };
+
+    // The SAME tool CRUSHES the chalk (weak in compression, effective stress beats its 2 MPa) and leaves the
+    // fibre (tough in compression, 5000 MPa), by the target's compressive strength alone.
+    let mut crusher = build(Some(tool()));
+    crusher.embodiment_mut().unwrap().crush_underfoot(StableId(1));
+    assert!(
+        carried_of(&crusher, "chalk") > Fixed::ZERO,
+        "the face crushes the compression-weak chalk"
+    );
+    assert_eq!(
+        carried_of(&crusher, "fibre"),
+        Fixed::ZERO,
+        "the face leaves the compression-tough fibre: the crush gate is compression"
+    );
+
+    // The SAME tool CUTS the fibre (weak in shear) and leaves the chalk (tough in shear), the exact opposite
+    // outcome, from the same geometry and force: the ONLY difference is which resistance axis the target is
+    // weak in, so the two actions are distinct by physics, not a per-action table.
+    let mut cutter = build(Some(tool()));
+    cutter.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert!(
+        carried_of(&cutter, "fibre") > Fixed::ZERO,
+        "the edge parts the shear-weak fibre"
+    );
+    assert_eq!(
+        carried_of(&cutter, "chalk"),
+        Fixed::ZERO,
+        "the edge leaves the shear-tough chalk: the cut gate is shear"
+    );
+
+    // A bare being crushes nothing (a crush needs a wielded face), the byte-neutral gate.
+    let mut bare = build(None);
+    bare.embodiment_mut().unwrap().crush_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&bare, "chalk") + carried_of(&bare, "fibre"),
+        Fixed::ZERO,
+        "a bare being has no face and crushes nothing"
+    );
+}
+
+#[test]
 fn a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool_is_immortal() {
     // The made-world arc, tool-use, Section D: a wielded tool that works matter loses volume by the Archard
     // wear law ([`laws::wear`]), its coefficient the tool material's own `mat.wear_coefficient`, so it wears

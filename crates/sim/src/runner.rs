@@ -93,8 +93,8 @@ use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
-    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CUT, DIG, ENERGY, EXTRACT, GEOPHAGE,
-    GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
+    GEOPHAGE, GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
@@ -1873,6 +1873,73 @@ impl Embodiment {
         // Free each severed constituent into the carried load, strength-bounded, the same carry the grasp uses.
         let mut freed = Fixed::ZERO;
         for s in &severable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
+    }
+
+    /// Enact a being's decided CRUSH (the made-world arc, tool-use, Section G): with its WIELDED face, fail
+    /// the constituents of the matter the being stands on in COMPRESSION, freeing them into its carried load.
+    /// Where CUT parts matter by shear (a keen edge against `mat.shear_strength`), CRUSH fails it in
+    /// compression: the face drives a contact stress over its area ([`laws::contact_pressure`]), self-limited
+    /// at the tool's own `mat.compressive_strength` (a face cannot deliver a stress beyond what it withstands
+    /// before it crushes itself), and every constituent whose own `mat.compressive_strength` that effective
+    /// stress beats is failed loose and taken. So a material weak in compression but tough in shear is crushed
+    /// where a cut leaves it, and one weak in shear but strong in compression is cut where a crush leaves it,
+    /// the two diverging on the target's own resistance axes, by physics not a per-action table. The freed
+    /// substances are exactly the cell's own constituents the face beats (no transmutation: a crushed
+    /// constituent is the same matter, now loose and gatherable), and the volume is the strength-bounded carry
+    /// the grasp uses. Requires a wielded face, the material registry, and the physiology; a being with no
+    /// tool never reaches here, so an opted-out world is byte-identical. The stress cap is a fixed-point
+    /// overflow guard ([`STRESS_GUARD`]), not a behavioural ceiling. The tool-absence convention (no
+    /// compressive strength on the tool delivers zero stress) and the target-absence convention (a constituent
+    /// with no compressive strength offers zero resistance and is crushed) mirror the cut's, the Principle-8
+    /// no-hidden-tag rule. Reads only substance ids and the beings' and matter's own physics (Principles 8, 9,
+    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    pub fn crush_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO;
+        };
+        let force = being_muscle_force(w, phys);
+        // The face's effective compressive stress: the being's force over the tool's contact area, self-limited
+        // at the tool's own compressive strength (a face with no compressive strength delivers zero).
+        let tool_compressive = reg
+            .substance(&tool.substance)
+            .and_then(|s| s.vector.get("mat.compressive_strength").copied())
+            .unwrap_or(Fixed::ZERO);
+        let applied = laws::contact_pressure(force, tool.contact_area, STRESS_GUARD);
+        let effective = if tool_compressive > Fixed::ZERO {
+            applied.min(tool_compressive)
+        } else {
+            Fixed::ZERO
+        };
+        // The cell's constituents the face can CRUSH: each substance present whose OWN compressive strength the
+        // effective stress beats, in canonical id order. A constituent with no compressive strength offers zero
+        // resistance and is crushed (the target-absence convention, matching the cut and the extract).
+        let crushable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let resistance = reg
+                        .substance(s)
+                        .and_then(|sub| sub.vector.get("mat.compressive_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    (effective > resistance).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut freed = Fixed::ZERO;
+        for s in &crushable {
             let want = self.material.volume(coord, s);
             freed += self.pick_up(walker_id, coord, s, want);
         }
@@ -4266,7 +4333,7 @@ impl Runner {
                         let primitive = AffordanceId(action.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4318,7 +4385,7 @@ impl Runner {
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4364,6 +4431,13 @@ impl Runner {
                         // on positive work, first check breakage (sudden), then wear (gradual) only if it
                         // survived. Both no-op unless armed, so an opted-out world is byte-identical.
                         if emb.cut_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
+                    }
+                    CRUSH => {
+                        // The face presses the matter it crushes, carrying the reaction stress: on positive
+                        // work, breakage before wear, exactly as the cut. Both no-op unless armed.
+                        if emb.crush_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
                             emb.wear_tool(id);
                         }
                     }

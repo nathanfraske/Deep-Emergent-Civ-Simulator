@@ -99,10 +99,13 @@ process end to end: it AFFORDS via the SHEAR kernel (F) and ENACTS via the shear
 
 ### G. New tool actions derived from F + C. STATUS: SEVER done (R-CUT-SHEAR); the rest gated, see the gate-map below.
 - SEVER/divide: DONE (R-CUT-SHEAR, the shear cut, afford + enact).
-- CRUSH (compressive failure): BUILDABLE NOW, no substrate gap. The exact sibling of the shear cut but
-  gating per constituent on `mat.compressive_strength` (axis exists), with a Crush capability kernel
-  mirroring Shear; outcome the freed crushed constituent (no transmutation). Not yet built (the audit and
-  the deeper gates were prioritised); the next clean additive action.
+- CRUSH (compressive failure): DONE. `CapabilityKernel::Crush` (`ID_CRUSH`) + `crush_underfoot` gating per
+  constituent on `mat.compressive_strength`, the compressive sibling of the shear cut, afforded via
+  `dev_crusher` (`CRUSH` affordance id 11), wired into the dispatch with breakage-before-wear. Reserved:
+  `reference_compressive_resistance`. Falsifier
+  `a_crush_fails_compression_where_a_cut_parts_shear_the_same_tool_diverging_by_the_targets_axis`: the SAME
+  tool crushes a compression-weak constituent and cuts a shear-weak one, diverging by the target's own axes.
+  So the non-piercing action space now holds two kernels (shear + crush) and two enacts, byte-neutral.
 - STRIKE/percussion, LEVER/pry, ABRADE, BORE, and the depth-sizing of the cut (R-CUT-DEPTH): each needs a
   substrate expansion, listed in the gate-map below. Marked, not forced.
 

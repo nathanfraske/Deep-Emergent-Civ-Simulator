@@ -777,6 +777,22 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a tool-USING world that CRUSHES (the made-world arc, tool-use, Section G):
+    /// move, ingest, and CRUSH, the latter capability-gated on CRUSH (a compression-strong tool). A being
+    /// wielding a strong-faced tool affords a crush the barehanded body cannot, the compressive sibling of
+    /// [`AffordanceRegistry::dev_cutter`]. What the crush FAILS is the enact's compressive contest.
+    pub fn dev_crusher() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: CRUSH,
+            name: "crush".to_string(),
+            requires: Some(FunctionLawRegistry::ID_CRUSH),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -884,13 +900,22 @@ pub const RELEASE: AffordanceId = AffordanceId(8);
 /// RELEASE: a being SHELTERS ITSELF with matter it chose to carry and place.
 pub const SHELTER: AffordanceId = AffordanceId(9);
 /// The cut affordance (the made-world arc, tool-use, slice 1): the FIRST tool-CONTRIBUTED affordance, granted
-/// by a WIELDED keen EDGE rather than by the body. It is capability-gated on PIERCE (the keenness of an edge),
-/// which an ordinary foraging body does not read, so a barehanded forager does NOT afford it; a being wielding
-/// a keen-edged tool DOES, because the tool's own Pierce capability enters the afford derivation through
-/// [`AffordanceRegistry::tool_affordances`]. So matter the being holds EXTENDS what it can do: a sharp thing
-/// affords a cut the body alone cannot, derived by physics not an `IsAxe` tag (Principle 9). The id sits just
-/// past the ground-material alphabet (0 through 9), within the belief-subject packing bound.
+/// by a WIELDED keen EDGE rather than by the body. It is capability-gated on SHEAR (a cut is a shear-parting
+/// action, root R1), which an ordinary foraging body does not read, so a barehanded forager does NOT afford
+/// it; a being wielding a keen-edged tool of a material with a shear strength DOES, because the tool's own
+/// Shear capability enters the afford derivation through [`AffordanceRegistry::tool_affordances`]. So matter
+/// the being holds EXTENDS what it can do: a sharp thing affords a cut the body alone cannot, derived by
+/// physics not an `IsAxe` tag (Principle 9). The id sits just past the ground-material alphabet (0 through 9),
+/// within the belief-subject packing bound.
 pub const CUT: AffordanceId = AffordanceId(10);
+
+/// The crush affordance (the made-world arc, tool-use, Section G): a tool-CONTRIBUTED affordance granted by a
+/// WIELDED tool of a compression-STRONG material, capability-gated on CRUSH (compressive failure, the second
+/// non-piercing action). Distinct from CUT: where a cut parts matter by shear (a keen edge of a shear-strong
+/// material), a crush fails matter in compression (a strong face), so a material weak in compression but tough
+/// in shear is crushed where it is not cut, and the two diverge on the target's own resistance axes, by
+/// physics not a tag. The id sits just past CUT, within the belief-subject packing bound.
+pub const CRUSH: AffordanceId = AffordanceId(11);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
