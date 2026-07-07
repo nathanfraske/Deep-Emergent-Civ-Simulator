@@ -33,7 +33,10 @@
 //! graph (slice 2b) reads these scalars to sample candidate actions, and the WIRE (slice 2c) feeds them
 //! into the controller alongside the feature and appetitive blocks.
 
-use civsim_compose::{CapabilityCaps, CapabilityKernel, CapabilityRefs};
+use civsim_compose::{
+    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, FunctionLawId,
+    FunctionLawRegistry,
+};
 use civsim_core::Fixed;
 use civsim_physics::PhysicsRegistry;
 
@@ -174,6 +177,39 @@ impl AffordancePerceptKind {
             AffordancePerceptKind::Sharpness => AXIS_CONTACT_AREA,
         }
     }
+}
+
+/// The capability a WIELDED TOOL reads on one function law, derived from the tool's own working geometry (its
+/// contact area) and material (its substance's axes through the physics registry) on the SAME capability
+/// dispatch a body part is derived on ([`derive_capabilities`], the exact call [`crate::homeostasis`]'s
+/// `body_capability` uses). So a wielded tool enters the afford derivation exactly as an extra body part
+/// would: a keen hard edge reads PIERCE and thus can afford a cut, by physics, never an `IsAxe` tag
+/// (Principle 9). This is the same tool-edge physics the [`AffordancePerceptKind::Sharpness`] percept senses,
+/// generalised from Pierce to any law so the afford gate (the made-world arc, tool-contributed affordances)
+/// can read it. Reads the tool against the SAME `refs`/`caps` a body's capability uses, so the tool and the
+/// body are derived on one scale. Pure and RNG-free.
+pub fn tool_capability(
+    tool: &WieldedTool,
+    reg: &PhysicsRegistry,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+    law: FunctionLawId,
+) -> Fixed {
+    let fns = FunctionLawRegistry::dev_seed();
+    let contact_area = tool.contact_area;
+    let geo = |axis: &str| {
+        if axis == AXIS_CONTACT_AREA {
+            contact_area
+        } else {
+            Fixed::ZERO
+        }
+    };
+    let mat = |axis: &str| {
+        reg.substance(&tool.substance)
+            .and_then(|s| s.vector.get(axis).copied())
+            .unwrap_or(Fixed::ZERO)
+    };
+    derive_capabilities(&fns, &geo, &mat, refs, caps).score(law)
 }
 
 /// One declared affordance percept: its slot id and the physics kernel it reads.
@@ -434,6 +470,43 @@ values = [
         assert!(
             keen >= dull,
             "a concentrated edge is at least as sharp as a spread one, by the Pierce geometry"
+        );
+    }
+
+    #[test]
+    fn a_keen_edged_tool_reads_the_pierce_capability_a_body_lacks() {
+        // The made-world arc, tool-use, slice 1: a wielded tool's capability enters the SAME dispatch a body
+        // part's does, so the afford gate can read what a tool grants. A keen edge (a small working contact
+        // area concentrates force) reads a positive PIERCE the gate can grant a CUT on; a broad blunt face of
+        // the same substance spreads the force and reads no more, so the reading tracks the edge geometry, by
+        // physics not an `IsAxe` tag. What the tool's MATERIAL hardness distinguishes (a keen granite edge cuts
+        // where a soft point of the same geometry deforms) is not the AFFORD gate but the cut's EFFECTIVENESS,
+        // gated in the enact next slice: this Pierce kernel reads a tiny-area edge as maximally piercing
+        // whatever its hardness, so a tool that AFFORDS a cut is one with an edge, and whether the cut BITES is
+        // the enact's physics.
+        let reg = floor();
+        let refs = AffordancePerceptRefs::dev_refs();
+        let caps = CapabilityCaps::derive(&reg);
+        let pierce = |t: &WieldedTool| {
+            tool_capability(
+                t,
+                &reg,
+                &refs.capability,
+                &caps,
+                FunctionLawRegistry::ID_PIERCE,
+            )
+        };
+
+        let keen = tool("granite", Fixed::from_ratio(1, 1_000_000)); // a fine knapped edge
+        let blunt = tool("granite", Fixed::ONE); // a broad slab face
+
+        assert!(
+            pierce(&keen) > Fixed::ZERO,
+            "a keen edge reads a positive pierce the afford gate can grant a cut on"
+        );
+        assert!(
+            pierce(&keen) >= pierce(&blunt),
+            "a concentrated edge reads at least as much pierce as a spread blunt face, by geometry"
         );
     }
 

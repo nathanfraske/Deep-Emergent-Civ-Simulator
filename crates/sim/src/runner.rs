@@ -82,7 +82,9 @@
 //! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
 //! deliberative tier is properly built on the evolved substrate.
 
-use crate::affordance_percept::{AffordancePerceptRefs, AffordancePerceptRegistry};
+use crate::affordance_percept::{
+    tool_capability, AffordancePerceptRefs, AffordancePerceptRegistry,
+};
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
@@ -967,6 +969,15 @@ pub struct Embodiment {
     /// the planner match, the forward model) route through, so write and reads agree at the same grain and no
     /// belief is masked. Reads the reserved target-value granularity from the discovery calib.
     granular_beliefs: bool,
+    /// Whether a being's WIELDED TOOL contributes affordances (the made-world arc, tool-use, slice 1). FALSE by
+    /// default, so the afforded set is the body's alone and every run hash is unchanged; a tool-using world
+    /// opts in ([`Embodiment::set_tool_affordances`]) so a being wielding a keen-edged tool affords a CUT the
+    /// barehanded body cannot. The tool's own Pierce capability enters the same afford derivation a body part's
+    /// does ([`crate::homeostasis::AffordanceRegistry::tool_affordances`] over
+    /// [`crate::affordance_percept::tool_capability`]), so matter the being holds EXTENDS what it can do, by
+    /// physics not an `IsAxe` tag (Principle 9). Inert for a being with no tool, so an armed world with no tools
+    /// yet is byte-identical too.
+    tool_affordances: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1097,6 +1108,7 @@ impl Embodiment {
             place_reward_learning: true,
             observe_and_imitate: false,
             granular_beliefs: false,
+            tool_affordances: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1190,6 +1202,55 @@ impl Embodiment {
     /// grain the credit and every read share, so no belief is masked; needs no layout rebuild.
     pub fn set_granular_beliefs(&mut self, enabled: bool) {
         self.granular_beliefs = enabled;
+    }
+
+    /// Enable (or disable) TOOL-CONTRIBUTED affordances (the made-world arc, tool-use, slice 1): when true, a
+    /// being's afforded set is its body's UNION the affordances its WIELDED tool grants, so a being holding a
+    /// keen-edged tool affords a CUT the barehanded body cannot. The tool's own Pierce capability enters the
+    /// same afford derivation a body part's does, by physics not an `IsAxe` tag (Principle 9). FALSE (the
+    /// default) affords the body's set alone, so every run hash is unchanged (opt-in); even armed, a being with
+    /// no tool contributes nothing, so a tool world with no tools yet is byte-identical. Meaningful with the
+    /// material registry installed (the tool's substance physics is read there).
+    pub fn set_tool_affordances(&mut self, enabled: bool) {
+        self.tool_affordances = enabled;
+    }
+
+    /// The affordances a being can perform: its body's (or grown structure's) own affordances, UNION any its
+    /// WIELDED tool grants when tool affordances are armed (the made-world arc, tool-use). The tool's
+    /// capability enters the same afford derivation a body part's does, so a keen edge affords CUT
+    /// ([`crate::homeostasis::AffordanceRegistry::tool_affordances`] over
+    /// [`crate::affordance_percept::tool_capability`]). Off by default, and empty for a being with no tool or
+    /// no material registry, so the result is byte-identical to the body-only afford there. Deterministic: the
+    /// tool affordances are appended in the registry's canonical id order after the body's, deduplicated.
+    fn being_afforded(&self, w: &Walker) -> Vec<AffordanceId> {
+        let mut afforded = match &w.structure {
+            Some(s) => self.afford.afforded_structure(
+                s,
+                &self.params.capability_refs,
+                &self.params.capability_caps,
+            ),
+            None => self.afford.afforded(
+                &w.body,
+                &self.organs,
+                &self.params.capability_refs,
+                &self.params.capability_caps,
+            ),
+        };
+        if self.tool_affordances {
+            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
+                let refs = &self.params.capability_refs;
+                let caps = &self.params.capability_caps;
+                let granted = self
+                    .afford
+                    .tool_affordances(|law| tool_capability(tool, reg, refs, caps, law));
+                for id in granted {
+                    if !afforded.contains(&id) {
+                        afforded.push(id);
+                    }
+                }
+            }
+        }
+        afforded
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -3519,19 +3580,7 @@ impl Runner {
                                     reg,
                                     refs,
                                 );
-                                let afforded = match &w.structure {
-                                    Some(s) => emb.afford.afforded_structure(
-                                        s,
-                                        &emb.params.capability_refs,
-                                        &emb.params.capability_caps,
-                                    ),
-                                    None => emb.afford.afforded(
-                                        &w.body,
-                                        &emb.organs,
-                                        &emb.params.capability_refs,
-                                        &emb.params.capability_caps,
-                                    ),
-                                };
+                                let afforded = emb.being_afforded(w);
                                 candidate_bindings(&afforded, &percepts, true, value_gran)
                             } else {
                                 Vec::new()
@@ -3635,19 +3684,7 @@ impl Runner {
                         let percepts =
                             emb.affordance_percepts
                                 .perceive(matter, w.wielded.as_ref(), reg, refs);
-                        let afforded = match &w.structure {
-                            Some(s) => emb.afford.afforded_structure(
-                                s,
-                                &emb.params.capability_refs,
-                                &emb.params.capability_caps,
-                            ),
-                            None => emb.afford.afforded(
-                                &w.body,
-                                &emb.organs,
-                                &emb.params.capability_refs,
-                                &emb.params.capability_caps,
-                            ),
-                        };
+                        let afforded = emb.being_afforded(w);
                         let candidates = candidate_bindings(
                             &afforded,
                             &percepts,
