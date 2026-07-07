@@ -1028,6 +1028,16 @@ pub struct Embodiment {
     /// by the Archard wear law over the tool material's own `mat.wear_coefficient`, so a tool spends out and
     /// must be remade, closing the make-use-wear-remake lifecycle.
     wear: Option<WearParams>,
+    /// Whether a WIELDED tool can BREAK under the load it imposes (the made-world arc, tool-use, Section E).
+    /// `false` by default, so a tool never breaks and every existing scenario is unchanged. When armed, a tool
+    /// that works matter carries the reaction stress of its own working force over its edge, and if that stress
+    /// exceeds the tool material's own `mat.fracture_strength` the tool fractures (brittle chip or snap) by the
+    /// [`civsim_physics::laws::fracture_onset`] criterion and is unwielded. This is the SUDDEN failure mode that
+    /// complements WEAR's gradual one, and it is what makes the hardness-versus-fracture-strength material
+    /// tradeoff bite: a hard edge that imposes a high cutting stress must also survive that stress. Fully derived
+    /// from the tool's and being's own physics, no reserved durability value (Principles 9, 11). Opt-in via
+    /// [`Embodiment::set_breakage`].
+    breakage: bool,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1124,6 +1134,7 @@ impl Embodiment {
             extraction: None,
             craft: None,
             wear: None,
+            breakage: false,
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -1470,6 +1481,80 @@ impl Embodiment {
                 w.wielded = None; // spent out: a worn-down nub is no longer a viable tool
             }
         }
+    }
+
+    /// Arm tool BREAKAGE (the made-world arc, tool-use, Section E): when armed, a wielded tool that works
+    /// matter can fracture under the reaction stress of its own working force. Opt-in; without it a tool never
+    /// breaks (only wears, if wear is armed) and every existing scenario is byte-identical.
+    pub fn set_breakage(&mut self, on: bool) {
+        self.breakage = on;
+    }
+
+    /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
+    /// material's fracture strength (the made-world arc, tool-use, Section E). The tool's working edge carries
+    /// the same contact stress it imposes on the matter it works (Newton's third law: the edge feels what it
+    /// presses), a stress that is the being's grown force over the tool's edge area ([`laws::contact_pressure`]).
+    /// The brittle-fracture criterion ([`laws::fracture_onset`]) compares that stress to the tool material's own
+    /// `mat.fracture_strength`; if the stress exceeds it the tool chips or snaps and is unwielded (a broken
+    /// tool must be remade). So a hard edge that imposes a high cutting stress must ALSO survive that stress:
+    /// a brittle low-fracture-strength edge shatters under a load a tougher one bears, the hardness-versus-
+    /// fracture-strength material tradeoff biting by physics. Returns whether the tool broke.
+    ///
+    /// The energy (toughness) limb of `fracture_onset` rides inert here: the delivered fracture energy is
+    /// passed as zero, so only the quasi-static STRESS criterion fires. The energy criterion (a brittle edge
+    /// shattering under a high-energy blow its stress margin would survive) needs the stroke energy and the
+    /// tool's own crack cross-section, a tool-geometry extension folded into a later section; until then a
+    /// tool breaks on overstress alone. No-op unless breakage is armed, the material registry and physiology
+    /// are present, a tool is wielded, and the tool material declares a fracture strength (a material whose
+    /// failure physics is unspecified is not judged), so an opted-out world is byte-identical. Reads only the
+    /// tool's and being's own physics, no race, kind, or role (Principle 9), and fabricates no value.
+    pub fn break_check(&mut self, walker_id: StableId) -> bool {
+        if !self.breakage {
+            return false;
+        }
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return false;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        let Some(tool) = w.wielded.as_ref() else {
+            return false;
+        };
+        let force = being_muscle_force(w, phys);
+        let sub = reg.substance(&tool.substance);
+        let fracture_strength = sub
+            .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+            .unwrap_or(Fixed::ZERO);
+        if fracture_strength <= Fixed::ZERO {
+            return false; // the tool material declares no fracture strength: its failure is not judged
+        }
+        let fracture_energy = sub
+            .and_then(|x| x.vector.get("mat.fracture_energy").copied())
+            .unwrap_or(Fixed::ZERO);
+        // The reaction stress the edge carries: the being's force over the tool's edge area (the same contact
+        // pressure the edge imposes). The cap is a fixed-point overflow guard, never a behavioural ceiling.
+        let applied_stress = laws::contact_pressure(force, tool.contact_area, Fixed::MAX);
+        // The brittle-fracture criterion. The energy limb reads a delivered fracture energy of zero (the
+        // stroke energy and crack cross-section are a later geometry extension), so only the stress margin
+        // fires; the tool breaks when the reaction stress exceeds its own fracture strength.
+        let (stress_margin, _energy_margin) = laws::fracture_onset(
+            applied_stress,
+            fracture_strength,
+            fracture_energy,
+            tool.contact_area,
+            Fixed::ZERO,
+            Fixed::MAX,
+        );
+        if stress_margin >= Fixed::ZERO {
+            return false; // the tool survives the load it imposes
+        }
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        w.wielded = None; // fractured: a broken tool is no longer wielded and must be remade
+        true
     }
 
     /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
@@ -4207,10 +4292,11 @@ impl Runner {
                         emb.grasp_underfoot(id);
                     }
                     EXTRACT => {
-                        // A wielded tool that breaks matter loose abrades against it: wear only on positive
-                        // work, and `wear_tool` no-ops for a bare-handed extract (no wielded tool to wear),
-                        // so the opted-out path is byte-identical.
-                        if emb.extract_underfoot(id) > Fixed::ZERO {
+                        // A wielded tool that breaks matter loose carries the reaction stress and abrades: on
+                        // positive work, first check breakage (sudden failure), then wear (gradual) only if it
+                        // survived. Both no-op for a bare-handed extract and when unarmed, so the opted-out
+                        // path is byte-identical.
+                        if emb.extract_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
                             emb.wear_tool(id);
                         }
                     }
@@ -4221,10 +4307,10 @@ impl Runner {
                         emb.craft_from_carried(id);
                     }
                     CUT => {
-                        // The working edge slides against the matter it severs and abrades: wear on positive
-                        // work only. `wear_tool` no-ops unless the wear params are armed, so an opted-out
-                        // world is byte-identical.
-                        if emb.cut_underfoot(id) > Fixed::ZERO {
+                        // The working edge carries the reaction stress and slides against the matter it severs:
+                        // on positive work, first check breakage (sudden), then wear (gradual) only if it
+                        // survived. Both no-op unless armed, so an opted-out world is byte-identical.
+                        if emb.cut_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
                             emb.wear_tool(id);
                         }
                     }

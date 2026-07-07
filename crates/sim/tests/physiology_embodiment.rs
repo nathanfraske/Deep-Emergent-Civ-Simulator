@@ -1471,6 +1471,177 @@ values = [
 }
 
 #[test]
+fn a_brittle_tool_snaps_under_its_own_working_stress_where_a_tough_one_survives_and_an_unarmed_tool_never_breaks(
+) {
+    // The made-world arc, tool-use, Section E: a wielded tool carries the reaction stress of its own working
+    // force over its edge, and if that stress exceeds the tool material's own fracture strength the tool
+    // fractures ([`laws::fracture_onset`]) and is unwielded. So the hardness-versus-fracture-strength material
+    // tradeoff bites: two tools of IDENTICAL geometry, differing ONLY in fracture strength, meet the same
+    // working stress, and the brittle one snaps where the tough one bears it, by physics not a durability tag.
+    // Opt-in: an unarmed world never breaks a tool, byte-identical to before.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A cuttable flesh (so the tool does real work) and two edges of equal geometry: a brittle one (fracture
+    // strength 10, below the ~75 MPa reaction stress its own force imposes over the 1e-6 edge) and a tough one
+    // (fracture strength 1000, well above it). Both share the same indentation hardness, so they cut alike;
+    // only their fracture strength differs, isolating the failure to the material tradeoff.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+]
+
+[[substance]]
+id = "brittle_edge"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "10" },
+]
+
+[[substance]]
+id = "tough_edge"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::from_int(5),
+        substance: substance.to_string(),
+    };
+
+    let build = |substance: &str, arm_breakage: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C09,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(substance));
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "flesh", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb.set_breakage(arm_breakage);
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let is_wielded = |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+
+    // ARMED brittle: the reaction stress of its own force exceeds its fracture strength, so it snaps. The
+    // break_check reports the fracture and the tool is unwielded.
+    let mut brittle = build("brittle_edge", true);
+    let broke = brittle.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(broke, "a brittle edge fractures under the stress its own force imposes");
+    assert!(
+        !is_wielded(&brittle),
+        "the fractured tool is unwielded: it must be remade"
+    );
+
+    // ARMED tough: the same geometry and force, but a fracture strength well above the reaction stress, so it
+    // bears the load and stays wielded. The ONLY difference from the brittle case is the material.
+    let mut tough = build("tough_edge", true);
+    let survived = tough.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(!survived, "a tough edge bears the stress its force imposes and does not fracture");
+    assert!(is_wielded(&tough), "the surviving tool stays wielded");
+
+    // OPT-OUT: the SAME brittle edge on an unarmed world never breaks. The break_check is a no-op without the
+    // arm, so every existing scenario is byte-identical.
+    let mut unarmed = build("brittle_edge", false);
+    let broke_unarmed = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(!broke_unarmed, "an unarmed world never breaks a tool (byte-neutral opt-in)");
+    assert!(is_wielded(&unarmed), "the unarmed brittle tool stays wielded");
+
+    // WIRED TO WORK: a real cut frees flesh, then the dispatch's breakage check snaps the brittle edge. The
+    // cut still happened (the freed matter is taken) and the tool is spent by fracture, the make-use-break
+    // lifecycle in one stroke.
+    let mut worker = build("brittle_edge", true);
+    let emb = worker.embodiment_mut().unwrap();
+    let freed = emb.cut_underfoot(StableId(1));
+    let broke_on_use = if freed > Fixed::ZERO {
+        emb.break_check(StableId(1))
+    } else {
+        false
+    };
+    assert!(freed > Fixed::ZERO, "the brittle edge cut the flesh before it broke");
+    assert!(broke_on_use, "the reaction stress of the cutting stroke snapped the brittle edge");
+    assert!(!is_wielded(&worker), "after the breaking cut the being holds no tool");
+}
+
+#[test]
 fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
     // Material-substrate arc item 4, INGEST-FOR-COMPOSITION, the mining payoff and emergence-closer: a
     // mineral in the ground is worth something because a being whose reserve needs it eats it and survives,

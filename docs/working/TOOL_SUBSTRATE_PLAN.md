@@ -46,16 +46,34 @@ is recoverable (the struct comment already claims mass is derived; today it is n
 decrement it. Add the tool's characteristic LENGTH/geometry so the lever and bending laws have an arm to
 read. Update the hash fold and constructors. This is the enabling change for D, E, G-impact, and lever.
 
-### D. Tool wear (the `wear` law, listed but unwired). STATUS: planned, needs C.
-Each use widens the tool's contact area and removes volume by the `wear` law (contact pressure, sliding
-distance, tool-to-target hardness ratio), so a blunt tool cuts less and a spent tool must be reworked or
-replaced. Sharpening is `wear` applied to shrink the edge again. Derived, no durability constant.
+### D. Tool wear (the `wear` law, listed but unwired). STATUS: DONE (commit b16608a).
+Each use removes volume by the Archard `wear` law (the tool material's own `mat.wear_coefficient`, the
+being's force, the stroke distance, the tool's own indentation hardness), so a tool that works matter
+spends out and, once worn below the craft-minimum volume, is a nub and is unwielded. Wired into the CUT
+and EXTRACT dispatch gated on positive work; `wear_tool` no-ops for a bare-handed extract and when the
+wear params are unarmed, so an opted-out world is byte-identical. The coefficient's storage scale is
+derived from the axis (`QuantityAxis::storage_scale` over the canonical `x1e6` convention), not a
+constant. Reserved-with-basis: the stroke distance and the worn-volume ceiling (`WearParams`). Falsifier
+`a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool_is_immortal`.
+NOT yet done (folds into G, R-CUT-DEPTH): the wear widens the CONTACT AREA (blunting), and sharpening as
+`wear` applied to shrink the edge again. Today wear removes volume and spends the tool out; the
+area-blunting and re-sharpening cycle needs the edge-as-state carried on the tool (deeper, with I).
 
-### E. Tool breakage and failure (root laws on the tool's own body). STATUS: planned, needs C.
-The tool's own body carries reaction stress; `fracture_onset` (brittle chip or snap), `bend_stress`,
-`buckling`, `axial_stress`, and `shear` decide whether it survives the load it imposes. A brittle edge
-pried sideways or a slender haft overloaded fails, so the hardness-versus-toughness tradeoff (the central
-tool-material choice) finally bites. Derived from the tool material's own strength axes.
+### E. Tool breakage and failure (root laws on the tool's own body). STATUS: DONE (stress limb) (commit pending).
+The tool's own body carries the reaction stress of its working force over its edge
+([`laws::contact_pressure`]); the brittle-fracture criterion ([`laws::fracture_onset`]) snaps it when that
+stress exceeds the tool material's own `mat.fracture_strength`, so the hardness-versus-fracture-strength
+tradeoff bites: a hard edge that imposes a high cutting stress must survive it, and a brittle low-strength
+edge shatters where a tough one bears the load. Wired into the CUT and EXTRACT dispatch, checked before
+wear (sudden before gradual), opt-in via `set_breakage`, byte-identical unarmed. Fully derived, NO reserved
+value. Falsifier
+`a_brittle_tool_snaps_under_its_own_working_stress_where_a_tough_one_survives_and_an_unarmed_tool_never_breaks`.
+NOT yet done (folds into a tool-geometry extension): the ENERGY (toughness) limb of `fracture_onset` (a
+brittle edge shattering under a high-energy blow its stress margin would survive) rides inert (delivered
+fracture energy zero) because it needs the stroke energy and the tool's own crack cross-section, which the
+`WieldedTool` does not yet carry; the bend/buckle/shear failures (a slender haft overloaded, an edge pried
+sideways) likewise need the tool's length and section modulus. These land when the tool carries its body
+geometry (a deepening of C, alongside H).
 
 ### F. Capability-kernel expansion (root R1). STATUS: planned, compose-crate.
 Add the missing `CapabilityKernel` variants (shear, impact, lever, wear, bend, friction, crush) so an
