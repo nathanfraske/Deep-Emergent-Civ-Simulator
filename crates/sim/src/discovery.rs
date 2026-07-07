@@ -137,6 +137,17 @@ pub struct DiscoveryCalib {
     /// past the confidence noise is not worth the per-tick cost. Basis: the per-tick cognition budget and
     /// the depth beyond which the next-ranked belief is no better than noise. Surfaced with its basis.
     pub plan_depth_cap: usize,
+    /// RESERVED. The deliberation HOP cap: the longest inferential CHAIN a being follows when it plans through
+    /// its relational beliefs (relational-belief substrate, arc 2, `planning.hop_cap` wired here). A one-hop
+    /// plan is a direct reward belief; a multi-hop plan chains "A yields X" backward from a goal the being
+    /// cannot act on directly. This bounds the chain LENGTH (distinct from `plan_depth_cap`, which bounds how
+    /// many alternative plans are returned), so a being does not chase an ever-deeper chain of ever-weaker
+    /// inference. Read only where a being holds a relational belief ([`crate::agent::Mind::has_relations`]);
+    /// a mind with no relation never reads it and plans one-hop byte-identically. Basis: the per-tick cognition
+    /// budget and the chain depth beyond which the weakest-link confidence has decayed below the belief
+    /// commit margin (a plan no surer than a guess), a performance-and-resolution bound. Surfaced with its
+    /// basis, never fabricated.
+    pub plan_hop_cap: usize,
     /// RESERVED. The TARGET-VALUE granularity, the quantization step that buckets a candidate's perceived
     /// affordance VALUE into a coarse kind (social-learning arc, piece 3, material granularity), the
     /// just-noticeable difference at which "a hard thing" and "a soft thing" become distinct learned targets.
@@ -159,6 +170,7 @@ impl DiscoveryCalib {
             surprise_threshold: Fixed::from_ratio(1, 2),
             surprise_gain: Fixed::ONE,
             plan_depth_cap: 8,
+            plan_hop_cap: 4,
             target_value_granularity: Fixed::ONE,
         }
     }

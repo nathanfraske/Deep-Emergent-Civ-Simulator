@@ -2194,6 +2194,19 @@ value = ""
 unit = "count"
 source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
 
+# --- relational-belief substrate (arc 2, the multi-hop planner): a being chains relational beliefs
+# ("A yields X", "A causes B") backward from a goal, bounded by a chain-length budget. Read by
+# planning::plan_chain (crates/sim/src/planning.rs) only where a being holds a relational belief; a mind
+# with none plans one-hop and never reads it. ---
+
+[[reserved]]
+id = "planning.hop_cap"
+basis = "the longest inferential CHAIN a being follows when it plans through its relational beliefs (planning::plan_chain): the maximum number of STEPS in one plan (the goal step plus its antecedents), so a plan of k steps chains k-1 'A yields X' edges backward from a goal it cannot act on directly. Distinct from planning.depth_cap, which bounds how many alternative plans are returned; this bounds the step-length of each. A per-tick cognition budget and a resolution bound: the step count beyond which the weakest-link confidence (which each added edge can only lower) has decayed below the belief commit margin, so the plan is no surer than a guess and the deeper chain is not worth the per-tick cost. Larger lets a being reason through longer tool-use chains (more inventive, costlier, and riskier), smaller keeps it to short, sure chains; surfaced for the owner and left unset until the relational planner is wired and profiled"
+status = "reserved"
+value = ""
+unit = "count"
+source = "relational-belief substrate arc 2; crates/sim/src/planning.rs"
+
 # --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
 # Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.
 # The deliberation weight is FOUNDER-ZERO (Principle 9: goal-directed pursuit emerges by selection, never a

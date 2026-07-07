@@ -95,10 +95,10 @@ use crate::homeostasis::{
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, attraction_gradient, avoidance_gradient, feature_observations,
-    reward_observations, sequence_subject, step_belief_subject, HarmLearningCalib,
-    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
-    NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
+    feature_observations, reward_observations, sequence_subject, step_belief_subject,
+    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR,
+    MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -114,7 +114,7 @@ use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, MetabolicAnchors,
 };
-use crate::planning::plan_toward;
+use crate::planning::plan_chain;
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_compose::FunctionLawRegistry;
@@ -3623,6 +3623,10 @@ impl Runner {
                 // proposal, the deliberated match, and the credit RECORD on the same grain. False by default
                 // (primitive-only, byte-identical); true keys on the target's channel and value.
                 let granular = emb.granular_beliefs;
+                // The relation kinds the multi-hop planner may traverse as means-ends edges (relational-belief
+                // substrate, arc 2): the data-defined causal set, built once. A being with no relational belief
+                // never reaches the traversal, so this is inert on the current run path (byte-identical).
+                let reachable = builtin_reachable_relations();
                 emb.walkers
                     .iter()
                     .filter_map(|w| {
@@ -3666,24 +3670,35 @@ impl Runner {
                             w.social_learning,
                             granular,
                         )?;
-                        // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
-                        // (plan_toward over the reward goal), then take the highest-confidence plan step whose
-                        // action is a candidate PRESENT in its current binding graph. This is the grounding
-                        // gate: a recalled belief becomes actable only where the being's own senses currently
-                        // afford and perceive it, so a plan with no matching percept is inert. The candidate's
-                        // PRIMITIVE subject is matched (the subject the reward credit records and the plan
-                        // ranks), so the deliberated choice is the believed-best action the being can do now.
-                        let plan =
-                            plan_toward(mind, REWARD_ATTR, REWARDS, params, calib.plan_depth_cap);
-                        // Match a plan step to a PRESENT candidate at the belief GRANULARITY (piece 3): the
-                        // plan ranks the being's committed reward beliefs (keyed at the credit's grain), so the
-                        // candidate is matched on the SAME grain through `step_belief_subject`, or the granular
-                        // belief the plan surfaced would never match a primitive-only candidate reconstruction.
-                        let deliberated = plan.iter().find_map(|step| {
+                        // The DELIBERATED action (piece 4, slice 4b; relational-belief substrate, arc 2): rank
+                        // what the being believes pays off, now through the MULTI-HOP planner (plan_chain over
+                        // the reward goal), then take the highest-confidence plan whose ACTION STEP is a
+                        // candidate PRESENT in its current binding graph. A chain's action step is its deepest
+                        // antecedent, so a being that believes "cutting pays off" and "striking yields a sharp
+                        // thing" is grounded on STRIKING here, a goal one hop could not reach. This is the
+                        // grounding gate: a recalled plan becomes actable only where the being's own senses
+                        // currently afford and perceive its first action, so a plan with no matching percept is
+                        // inert. A being with no relational belief plans one-hop, so this is byte-identical to
+                        // the prior single-hop deliberation there.
+                        let plans = plan_chain(
+                            mind,
+                            REWARD_ATTR,
+                            REWARDS,
+                            params,
+                            calib.plan_depth_cap,
+                            calib.plan_hop_cap,
+                            &reachable,
+                        );
+                        // Match a plan's action step to a PRESENT candidate at the belief GRANULARITY (piece 3):
+                        // the plan ranks the being's committed reward beliefs (keyed at the credit's grain), so
+                        // the candidate is matched on the SAME grain through `step_belief_subject`, or the
+                        // granular belief the plan surfaced would never match a primitive-only candidate.
+                        let deliberated = plans.iter().find_map(|plan| {
+                            let act = plan.action_step();
                             candidates
                                 .iter()
                                 .copied()
-                                .find(|c| step_belief_subject(c, granular) == step.subject)
+                                .find(|c| step_belief_subject(c, granular) == act.subject)
                         });
                         Some((w.id, (proposal, deliberated)))
                     })

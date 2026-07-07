@@ -37,7 +37,7 @@
 
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::Coord3;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -75,6 +75,41 @@ pub const REWARDS: ValueId = 1;
 /// the reward belief is defeasible for free (an action that stops paying off is un-learned), the mirror of
 /// [`BENIGN`].
 pub const NEUTRAL: ValueId = 0;
+
+/// The value meaning a relational EDGE holds (relational-belief substrate, arc 2): "the head brings about the
+/// tail", the yes of "A yields X" or "A causes B". RELATES is to a relation frame what [`REWARDS`] is to a
+/// reward frame: a relation commits to it when the being's evidence that the edge holds clears the same
+/// threshold a first-order belief does, so a relational belief is inferred by the SAME engine, never authored.
+pub const RELATES: ValueId = 1;
+/// The value meaning a relational edge does NOT hold: the competing hypothesis, reinforced when the head fails
+/// to bring about the tail, so a relational belief is defeasible for free (the mirror of [`NEUTRAL`]).
+pub const UNRELATED: ValueId = 0;
+
+/// The first relational-belief KIND (relational-belief substrate, arc 2): the PRODUCTIVE / causal relation
+/// "doing the head brings about the tail" (A yields X, A causes B), a reserved-high attribute disjoint from
+/// [`HARM_ATTR`] (`u32::MAX - 2`), [`REWARD_ATTR`] (`u32::MAX - 3`), and every feature attribute, so a relation
+/// never aliases a first-order belief on the same subject. One relation kind exists today; the store and the
+/// multi-hop planner are GENERAL over the relation attribute (a being can hold relations of many kinds), and
+/// the planner traverses ANY relation's RELATES edge as a reachability edge because every relation kind is
+/// causal-productive so far. A later non-causal relation kind (a similarity, say) is default-off: it stays
+/// absent from the reachability set ([`builtin_reachable_relations`]) until declared causal, so no
+/// goal-to-action table is authored (Principle 9).
+pub const YIELDS: AttrKindId = AttrKindId(u32::MAX - 4);
+
+/// The relation KINDS the multi-hop planner may traverse as REACHABILITY edges: a kind in this set is
+/// causal-productive, so an edge `(head, kind, tail)` the being holds RELATES reads as "do the head to bring
+/// about the tail", and the planner is allowed to plan through it BACKWARD. A relation kind ABSENT from the
+/// set is INERT to the planner (default-off): a being may hold and hash it, but the planner never treats it as
+/// a means to an end. This is the data-defined hardening the planner needs so it authors no universal
+/// means-ends reading over all relations (Principle 9): the planner's traversal is fixed Rust, the MEMBERSHIP
+/// is data and grows with the world's relation vocabulary. Today the one built-in kind, [`YIELDS`], is
+/// causal, so it is the sole member; a later non-causal kind (a similarity) is simply not added, and a later
+/// data-defined relation registry supplies this set as a per-kind column rather than a code literal.
+pub fn builtin_reachable_relations() -> BTreeSet<AttrKindId> {
+    let mut kinds = BTreeSet::new();
+    kinds.insert(YIELDS);
+    kinds
+}
 
 /// The reserved base of the per-feature belief-subject band. A feature subject is minted at or above
 /// this base, packed with the feature channel and its quantized bucket, so "salinity-bucket-2 ground
