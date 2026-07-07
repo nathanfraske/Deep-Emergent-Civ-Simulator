@@ -1798,14 +1798,57 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
     // being carrying stone with a lifted craft weight wields a tool of that stone (its carried stock spent
     // by the tool volume); a blank founder carrying the same stone never crafts. Founder-zero, evolved
     // decision, the tool made of the stone worked (Principles 8, 9).
-    use civsim_sim::material::{CraftParams, SubstanceMix};
+    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A floor so the crafted edge derives from the worked granite's own fracture strength under the being's
+    // forming force (the craft is physics-derived now, so it needs the stone's physics and a muscle to knap).
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+]
+"#;
 
     let cell = Coord3::ground(2, 2);
-    let (organs, fat) = energy_registry();
-    let reg = energy_thermal_registry();
     let stock = Fixed::from_int(5);
 
     let build = |craft_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
         let mut emb = Embodiment::new(
             reg.clone(),
             AffordanceRegistry::dev_toolmaker(),
@@ -1831,7 +1874,7 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         let mut walker = resting_walker(
             1,
             cell,
-            body((1, 1), vec![organ(fat, (1, 1))]),
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
             &reg,
             &organs,
             controller,
@@ -1840,7 +1883,15 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         carried.add("granite", stock);
         walker.carried = carried;
         emb.add(walker, band(310));
-        emb.set_craft_params(CraftParams::dev_fixture()); // edge 1e-6 m^2, tool volume 1
+        emb.set_craft_params(CraftParams::dev_fixture()); // tool volume 1; the edge is derived
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_material(MaterialField::new());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
     };
 
@@ -1882,6 +1933,155 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         carried_granite(&founder),
         stock,
         "the founder's carried stone is untouched"
+    );
+}
+
+#[test]
+fn a_crafted_edge_is_derived_from_the_worked_stone_so_a_hard_stone_makes_a_sharper_tool() {
+    // The made-world arc, tool-use: the crafted edge is DERIVED from the worked stone's own fracture strength,
+    // not an authored constant. A hard stone (a high fracture strength) holds a finer edge (a smaller contact
+    // area) than a soft one under the same forming force, and a being carrying both shapes the fitter stone
+    // into its tool, the material chosen by physics rather than by id order.
+    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // Two workable stones: a hard obsidian (fracture 5000) and a soft sandstone (fracture 50). The ids sort
+    // obsidian before sandstone, so the fitness pick is proven distinct from the id-order pick only if a case
+    // also carries them so that the LOWER-id one would lose on fitness (see below, where sandstone is softer).
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "obsidian"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2400" },
+  { axis = "mat.indentation_hardness", value = "6000" },
+  { axis = "mat.fracture_strength", value = "5000" },
+]
+
+[[substance]]
+id = "sandstone"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2300" },
+  { axis = "mat.indentation_hardness", value = "80" },
+  { axis = "mat.fracture_strength", value = "50" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+
+    let build = |carried_stones: &[(&str, i32)]| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_toolmaker(),
+            LocomotionParams::dev_default(),
+            0,
+            0xC0DE,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        let mut carried = SubstanceMix::new();
+        for (s, v) in carried_stones {
+            carried.add(s, Fixed::from_int(*v));
+        }
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_craft_params(CraftParams::dev_fixture());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_material(MaterialField::new());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let wielded = |r: &Runner| -> Option<WieldedTool> {
+        r.embodiment().unwrap().walkers()[0].wielded.clone()
+    };
+
+    // Craft from obsidian alone, then from sandstone alone: the hard obsidian holds the finer edge.
+    let mut obs = build(&[("obsidian", 2)]);
+    obs.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    let mut sand = build(&[("sandstone", 2)]);
+    sand.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    let obs_tool = wielded(&obs).expect("obsidian holds an edge");
+    let sand_tool = wielded(&sand).expect("sandstone holds an edge");
+    assert_eq!(obs_tool.substance, "obsidian");
+    assert_eq!(sand_tool.substance, "sandstone");
+    assert!(
+        obs_tool.contact_area < sand_tool.contact_area,
+        "the harder stone holds a finer (smaller-area) edge under the same force: {} < {}",
+        obs_tool.contact_area,
+        sand_tool.contact_area
+    );
+
+    // Carrying BOTH, the being shapes the fitter stone (obsidian) into its tool, by capability not by id.
+    let mut both = build(&[("obsidian", 2), ("sandstone", 2)]);
+    both.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    assert_eq!(
+        wielded(&both).expect("a tool is made").substance,
+        "obsidian",
+        "carrying two stones, the being crafts the fitter one derived from physics, not the first by id"
     );
 }
 
@@ -1946,6 +2146,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "2600" },
   { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "100" },
 ]
 "#;
 

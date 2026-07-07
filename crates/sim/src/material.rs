@@ -306,25 +306,20 @@ impl ExtractionParams {
 /// never fabricated (Principle 11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CraftParams {
-    /// The working-edge contact AREA (m^2) a knapped tool presents, its intrinsic geometry, over which a
-    /// wielded tool concentrates a being's force ([`WieldedTool`]). RESERVED. Basis: the contact patch of
-    /// the working edge a shaping stroke produces (a knapped point or blade tip), a tool-geometry datum the
-    /// crafting-physics refinement will later derive from the fracture of the worked stone; a smaller edge
-    /// concentrates the same force into a higher pressure and works harder matter. A performance-and-realism
-    /// bound, surfaced for the owner, never invented.
-    pub edge_area: Fixed,
     /// The VOLUME of carried matter a tool consumes to make (m^3). RESERVED. Basis: the material a shaped
     /// tool of the working size embodies; a being that carries less than this cannot make the tool. A
-    /// geometry-and-scale datum, surfaced for the owner.
+    /// geometry-and-scale datum, surfaced for the owner. The working-edge AREA is no longer carried here: it
+    /// is DERIVED from the worked stone's own fracture strength under the being's forming force
+    /// ([`crate::runner::Embodiment::craft_from_carried`] over [`civsim_physics::laws::edge_area_at`]), so a
+    /// hard tough stone holds a fine edge and a soft one a blunt one, by physics not a reserved constant.
     pub tool_volume: Fixed,
 }
 
 impl CraftParams {
-    /// A labelled DEVELOPMENT FIXTURE: a small working edge and a modest tool volume. Not owner canon; a
-    /// stand-in so the crafting contest can run until the owner sets the values against their bases.
+    /// A labelled DEVELOPMENT FIXTURE: a modest tool volume. Not owner canon; a stand-in so the crafting
+    /// contest can run until the owner sets the value against its basis. The edge is derived, not fixtured.
     pub fn dev_fixture() -> CraftParams {
         CraftParams {
-            edge_area: Fixed::from_ratio(1, 1_000_000),
             tool_volume: Fixed::from_int(1),
         }
     }

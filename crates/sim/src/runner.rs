@@ -1841,40 +1841,70 @@ impl Embodiment {
         gained
     }
 
-    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter
-    /// the being carries into a wielded tool. It consumes the reserved tool volume of the FIRST substance
-    /// the being carries enough of (canonical id order, a deterministic tie-break over a mixture, never a
-    /// per-substance preference) and wields a tool of that substance with the reserved working-edge area,
-    /// replacing any prior tool. So a being that has mined and carried stone can shape it into a point, and
-    /// the tool it makes is only as good as the stone it worked (a hard stone a hard tool, a soft stone a
-    /// soft one, the tool's function derived from its material and geometry by the crafting seam's cut read,
-    /// never a recipe catalog). Reads only the carried substance ids and the reserved geometry, no race,
-    /// kind, or role (Principles 8, 9). Returns true if a tool was made. Opt-in: an embodiment with no
-    /// crafting parameters, or a being carrying too little of any one substance, makes nothing.
+    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter the
+    /// being carries into a wielded tool, its EDGE and its MATERIAL both DERIVED from the worked stone's own
+    /// physics, never an authored constant. The finest edge a stone holds is the contact area at which the
+    /// being's forming pressure reaches that stone's own fracture strength ([`laws::edge_area_at`], the inverse
+    /// of [`laws::contact_pressure`]): below that area the tip exceeds its fracture strength and crumbles, above
+    /// it the edge is needlessly blunt. So a hard, tough stone (a high fracture strength) resolves to a fine
+    /// small edge and a soft or crumbly one to a blunt large edge (or none), the sharpness of the tool falling
+    /// out of the material and the force, not a reserved number. When the being carries more than one workable
+    /// stone it shapes the one that yields the BEST tool, the argmax of the resulting Pierce capability
+    /// ([`tool_capability`], the edge and the stone's own hardness), canonical id order breaking a tie, so the
+    /// material chosen is the fittest by physics rather than the first by id. Consumes the reserved tool volume
+    /// of that stone and replaces any prior tool. Reads only the carried substance ids and the beings' and
+    /// stones' own physics, no race, kind, role, or recipe (Principles 8, 9, 11). Returns true if a tool was
+    /// made. Opt-in: an embodiment with no crafting params, material registry, or physiology, or a being
+    /// carrying too little of any stone that holds an edge, makes nothing.
     pub fn craft_from_carried(&mut self, walker_id: StableId) -> bool {
         let Some(params) = self.craft else {
             return false;
         };
-        // The first substance the being carries enough of to shape a tool, in canonical id order.
-        let Some(substance) = self
-            .walkers
-            .iter()
-            .find(|w| w.id == walker_id)
-            .and_then(|w| {
-                w.carried
-                    .substances()
-                    .find(|(_, &vol)| vol >= params.tool_volume)
-                    .map(|(s, _)| s.clone())
-            })
+        // The crafted edge is derived from the worked stone's fracture strength (the material registry) under
+        // the being's forming force (its physiology); a world with neither cannot derive an edge and crafts
+        // nothing.
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
         else {
-            return false; // not carrying enough of any one substance to make a tool
+            return false;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        let force = being_muscle_force(w, phys);
+        let refs = &self.params.capability_refs;
+        let caps = &self.params.capability_caps;
+        // The carried stone (with enough stock) that yields the best tool, derived: its finest edge from its
+        // fracture strength, its capability from that edge and its own hardness. The argmax, ties to lowest id
+        // (only a strictly greater capability replaces the incumbent, so the first-seen equal wins). A stone
+        // too crumbly to hold an edge (no positive fracture strength) is no tool stock and is skipped.
+        let mut best: Option<(Fixed, WieldedTool)> = None;
+        for (s, &vol) in w.carried.substances() {
+            if vol < params.tool_volume {
+                continue;
+            }
+            let fracture = reg
+                .substance(s)
+                .and_then(|sub| sub.vector.get("mat.fracture_strength").copied())
+                .unwrap_or(Fixed::ZERO);
+            let area = laws::edge_area_at(force, fracture);
+            if area <= Fixed::ZERO {
+                continue; // crumbly stock holds no edge
+            }
+            let candidate = WieldedTool {
+                contact_area: area,
+                substance: s.clone(),
+            };
+            let cap = tool_capability(&candidate, reg, refs, caps, FunctionLawRegistry::ID_PIERCE);
+            if best.as_ref().is_none_or(|(bc, _)| cap > *bc) {
+                best = Some((cap, candidate));
+            }
+        }
+        let Some((_, tool)) = best else {
+            return false; // no carried stock holds a viable edge
         };
         if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
-            w.carried.take(&substance, params.tool_volume);
-            w.wielded = Some(WieldedTool {
-                contact_area: params.edge_area,
-                substance,
-            });
+            w.carried.take(&tool.substance, params.tool_volume);
+            w.wielded = Some(tool);
         }
         true
     }
