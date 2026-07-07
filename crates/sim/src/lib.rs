@@ -157,7 +157,8 @@ pub use controller::{
     ControllerLayout, ForageGains,
 };
 pub use decompose::{
-    DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId, DecomposerStockField,
+    CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
+    DecomposerStockField,
 };
 pub use decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,

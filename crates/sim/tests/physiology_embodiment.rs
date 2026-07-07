@@ -4018,6 +4018,36 @@ fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
         colonised.embodiment().unwrap().decomposed_mass(),
         "the decomposition conserves mass exactly with the activity factor in the path"
     );
+
+    // (6) THE COMBINE MODE (a blind audit caught this): when a world arms BOTH a Life row and a favorable
+    // Conditions row, the default All combine GATES them, so a sterile warm-wet cell still preserves (the
+    // Life row's zero wins the minimum); the opt-in Any combine makes the Conditions row an independent
+    // driver, so the same sterile cell decays. The world chooses which regime through data, so the abiotic
+    // Conditions proxy cannot silently swallow the emergent Life signal.
+    use civsim_sim::decompose::CombineMode;
+    let both_all = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::conditions(
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(10),
+        ));
+        d.push(DecomposerDriver::life(Fixed::ONE));
+        d
+    };
+    let mut sterile_both_all = build(300, Some(both_all()), None);
+    sterile_both_all.step();
+    assert_eq!(
+        flesh(&sterile_both_all),
+        flesh0,
+        "All combine: a sterile warm-wet cell preserves even beside a favorable Conditions row (Life gates it)"
+    );
+    let mut sterile_both_any = build(300, Some(both_all().with_combine(CombineMode::Any)), None);
+    sterile_both_any.step();
+    assert!(
+        flesh(&sterile_both_any) < flesh0,
+        "Any combine: the same sterile cell decays through the Conditions row, the world's explicit choice"
+    );
 }
 
 #[test]

@@ -3187,6 +3187,13 @@ impl Runner {
                     // math below is unchanged.
                     let factor = match self.decomposer.as_ref() {
                         Some(driver) => {
+                            // An unmodelled conditions axis is NON-LIMITING: a world with no moisture field
+                            // or no medium makes no claim that a cell is dry or airless, so that axis reads
+                            // full (one) and does not gate decomposition, exactly the open-air convention the
+                            // combustion beat uses for its respirable read (`step_combustion`: no medium
+                            // reads full concentration). This one is the boundary of the saturating response,
+                            // a structural convention, not a tuned reserved value: to make moisture or oxygen
+                            // GATE decay a world arms the environ or medium field that carries it.
                             let moisture = self
                                 .environ
                                 .as_ref()
