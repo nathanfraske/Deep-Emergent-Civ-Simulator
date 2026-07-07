@@ -112,6 +112,7 @@ use crate::material::{
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
+use rayon::prelude::*;
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
@@ -478,21 +479,30 @@ impl Field {
     /// boundary is deterministic, so the step is bit-identical on every machine and thread count and
     /// ports unchanged to a CubeCL `#[cube]` kernel.
     pub fn step(&mut self, c: &FieldCalib) {
-        let (w, h) = (self.width, self.height);
+        let (w, h) = (self.width as usize, self.height as usize);
         let mut next = self.temp.clone();
-        for y in 0..h {
+        // DETERMINISTIC data-parallelism (arc 4): a genuine double buffer (read `self.temp`, write `next`), so
+        // there is no read-after-write hazard whatever the compute order. Each cell writes only its own
+        // `next[i]` (disjoint, indexed by row-major position), reads only the immutable neighbours plus its own
+        // baseline, and draws no RNG, so the result is bit-identical to the serial loop at any thread count.
+        // The row-major write POSITION is fixed, so the `state_hash` fold walks the same byte stream. The four
+        // clamped-Neumann neighbours are computed by direct index (mirroring `idx`) to keep the closure a pure
+        // read of the immutable snapshot.
+        let temp = &self.temp;
+        let baseline = &self.baseline;
+        next.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             for x in 0..w {
-                let i = self.idx(x, y);
-                let cur = self.temp[i];
-                let up = self.temp[self.idx(x, if y > 0 { y - 1 } else { y })];
-                let dn = self.temp[self.idx(x, if y < h - 1 { y + 1 } else { y })];
-                let lf = self.temp[self.idx(if x > 0 { x - 1 } else { x }, y)];
-                let rt = self.temp[self.idx(if x < w - 1 { x + 1 } else { x }, y)];
+                let i = y * w + x;
+                let cur = temp[i];
+                let up = temp[if y > 0 { i - w } else { i }];
+                let dn = temp[if y < h - 1 { i + w } else { i }];
+                let lf = temp[if x > 0 { i - 1 } else { i }];
+                let rt = temp[if x < w - 1 { i + 1 } else { i }];
                 let lap = up + dn + lf + rt - Fixed::from_int(4).mul(cur);
-                let relax = self.baseline[i] - cur;
-                next[i] = cur + c.diffusion.mul(lap) + c.relaxation.mul(relax);
+                let relax = baseline[i] - cur;
+                row[x] = cur + c.diffusion.mul(lap) + c.relaxation.mul(relax);
             }
-        }
+        });
         self.temp = next;
     }
 
@@ -3858,8 +3868,16 @@ impl Runner {
             _ => BTreeMap::new(),
         };
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
-        for id in ids {
-            if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
+        // DETERMINISTIC data-parallelism (arc 4), gather-then-apply: each being reads only immutable state
+        // (the located index, the field, its own exchange rate, its current body temperature, the pre-built
+        // insulation map) and computes one Newton-cooling value, writing NOTHING shared during the parallel
+        // gather. The updates are snapshotted into a Vec before any insert, so there is no read-after-write
+        // hazard; and each id is unique (the keys of `body_temp`), so the serial apply is order-independent,
+        // and the result is bit-identical at any thread count.
+        let updates: Vec<(StableId, Fixed)> = ids
+            .par_iter()
+            .filter_map(|&id| {
+                let coord = self.index.coord_of(OccupantId::being(id))?;
                 let env = self.field.at(coord.x, coord.y);
                 let bt = self.body_temp[&id];
                 // The being's own DERIVED coupling rate h*A/(m*c) when supplied, else the labelled
@@ -3883,9 +3901,11 @@ impl Runner {
                 } else {
                     rate
                 };
-                let next = bt + eff_rate.mul(env - bt);
-                self.body_temp.insert(id, next);
-            }
+                Some((id, bt + eff_rate.mul(env - bt)))
+            })
+            .collect();
+        for (id, next) in updates {
+            self.body_temp.insert(id, next);
         }
     }
 

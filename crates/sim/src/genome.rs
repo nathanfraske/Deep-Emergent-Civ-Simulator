@@ -62,6 +62,7 @@
 //! choices.
 
 use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StateHasher};
+use rayon::prelude::*;
 
 /// A data-defined gene identifier (Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -956,7 +957,11 @@ impl GenePool {
         if two_ne == 0 {
             return;
         }
-        for (locus, p) in self.freqs.iter_mut().enumerate() {
+        // DETERMINISTIC data-parallelism (arc 4): each locus is independent. It writes only its own frequency
+        // slot `*p` (disjoint, indexed) and derives its whole 2*Ne Bernoulli stream from
+        // `DrawKey::pair(pool_id, locus, generation, EVOLVE)`, so the LOCUS INDEX (not the executing thread)
+        // fully determines the RNG stream and the result is bit-identical at any thread count.
+        self.freqs.par_iter_mut().enumerate().for_each(|(locus, p)| {
             let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
             let mut count: u32 = 0;
             for k in 0..two_ne {
@@ -965,7 +970,7 @@ impl GenePool {
                 }
             }
             *p = Fixed::from_ratio(count as i64, two_ne as i64);
-        }
+        });
     }
 
     /// Directional selection by a per-locus selection coefficient (state 1's relative
@@ -1003,8 +1008,11 @@ impl GenePool {
         let freqs = if two_ne == 0 {
             self.freqs.clone()
         } else {
+            // DETERMINISTIC data-parallelism (arc 4): each locus's founder frequency is an independent draw
+            // keyed by `DrawKey::pair(founder_id, locus, generation, FOUND)`, so the locus index fixes the RNG
+            // stream; the indexed parallel collect preserves position, so the result is bit-identical.
             self.freqs
-                .iter()
+                .par_iter()
                 .enumerate()
                 .map(|(locus, &p)| {
                     let rng =
