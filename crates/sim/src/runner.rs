@@ -1506,7 +1506,8 @@ impl Embodiment {
     }
 
     /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
-    /// material's fracture strength (the made-world arc, tool-use, Section E). The tool's working edge carries
+    /// material's fracture strength, OR if the tool's slender body buckles under that axial force (the
+    /// made-world arc, tool-use, Section E, with the tool-geometry expansion). The tool's working edge carries
     /// the same contact stress it imposes on the matter it works (Newton's third law: the edge feels what it
     /// presses), a stress that is the being's grown force over the tool's edge area ([`laws::contact_pressure`]).
     /// The brittle-fracture criterion ([`laws::fracture_onset`]) compares that stress to the tool material's own
@@ -1569,13 +1570,40 @@ impl Embodiment {
             Fixed::ZERO,
             STRESS_GUARD,
         );
-        if stress_margin >= Fixed::ZERO {
-            return false; // the tool survives the load it imposes
+        let stress_fails = stress_margin < Fixed::ZERO;
+        // The BUCKLING criterion (the tool-geometry expansion, root R2): the tool's own body, loaded axially by
+        // the working force, buckles if that force exceeds its critical Euler load ([`laws::euler_buckle`]),
+        // derived from its elastic modulus, its body CROSS-SECTION (`volume / length`), and its length. So a
+        // SLENDER tool (a long thin body, a small cross-section) buckles under a load a STOUT one bears, the
+        // geometry tradeoff a tool's material choice trades against. Skipped when the tool declares no elastic
+        // modulus or carries no body geometry (a tool with no length has no cross-section to buckle), so a
+        // tool that carries no geometry is judged on stress alone (the absence convention).
+        let modulus = sub
+            .and_then(|x| x.vector.get("mat.elastic_modulus").copied())
+            .unwrap_or(Fixed::ZERO);
+        let cross_section = tool.cross_section();
+        let buckles = if modulus > Fixed::ZERO && tool.length > Fixed::ZERO && cross_section > Fixed::ZERO
+        {
+            // The area moment of the body's square section, `I = A^2 / 12` (A the cross-section), the section
+            // property that resists buckling. The pinned-pinned end condition (factor one) is the canonical
+            // Euler reference; a per-tool end condition is a reserved refinement.
+            let second_moment = cross_section
+                .checked_mul(cross_section)
+                .and_then(|a2| a2.checked_div(Fixed::from_int(12)))
+                .unwrap_or(Fixed::ZERO);
+            let critical =
+                laws::euler_buckle(modulus, second_moment, Fixed::ONE, tool.length, FORCE_CEILING);
+            force > critical
+        } else {
+            false
+        };
+        if !stress_fails && !buckles {
+            return false; // the tool survives both the stress it imposes and the buckling of its own body
         }
         let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
             return false;
         };
-        w.wielded = None; // fractured: a broken tool is no longer wielded and must be remade
+        w.wielded = None; // fractured or buckled: a broken tool is no longer wielded and must be remade
         true
     }
 
@@ -2194,6 +2222,7 @@ impl Embodiment {
                     WieldedTool {
                         contact_area: area,
                         volume: params.tool_volume,
+                        length: params.tool_length,
                         substance: s.clone(),
                     },
                 ));

@@ -389,6 +389,7 @@ values = [
         WieldedTool {
             contact_area,
             volume: Fixed::ONE,
+            length: Fixed::ONE,
             substance: substance.to_string(),
         }
     }

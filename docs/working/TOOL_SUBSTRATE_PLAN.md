@@ -115,15 +115,20 @@ work HITS the edge of the current substrate and cannot derive further without th
 axis, a law, or a piece of DERIVED tool/matter geometry. None is authored-behaviour; each is a substrate
 grow. Ordered by how much it unblocks.
 
-- GATE 1, TOOL BODY GEOMETRY (the load-bearing one, completes root R2). `WieldedTool` carries only
-  `{contact_area, volume, substance}`. It has no characteristic LENGTH and no CROSS-SECTION / section
-  modulus. Deriving these at craft from the shaped stock (a prism of the given volume with a reserved
-  aspect ratio, the shape a being knaps, surfaced reserved-with-basis) unblocks AT ONCE: E's toughness
-  (energy) limb of `fracture_onset` (which needs the tool's crack cross-section), E's bend/buckle failures
-  (a slender haft overloaded, an edge pried sideways, via `bend_stress`/`euler_buckle`, which need length +
-  section modulus), LEVER/pry (`laws::lever` needs the effort and load arms), and the energy criterion of
-  STRIKE. This is a deepening of C, sibling to H. The geometry AXES already exist in the mechanical floor
-  (`mech.section_modulus`, `mech.arm_length`); the grow is carrying the derived geometry on the tool.
+- GATE 1, TOOL BODY GEOMETRY (root R2): PARTLY DONE. `WieldedTool` now carries a characteristic LENGTH (a
+  reserved `CraftParams::tool_length`, set at craft), from which its body CROSS-SECTION derives as
+  `volume / length` (the prism relation, `WieldedTool::cross_section`, no cube root and no shape catalog).
+  Its first CONSUMER is landed: `break_check` now also BUCKLES a tool whose slender body cannot bear its own
+  axial working load (`laws::euler_buckle` over the elastic modulus, the derived cross-section's area moment
+  `A^2/12`, and the length; the pinned-pinned end factor is the Euler reference, a per-tool end condition a
+  reserved refinement). Falsifier
+  `a_slender_tool_buckles_under_its_working_load_where_a_stout_one_of_the_same_stock_bears_it`: two tools of
+  the SAME stock and material differing ONLY in length, the slender one buckles where the stout one bears the
+  load, the geometry tradeoff. STILL to read the geometry: E's toughness (energy) limb (a DYNAMIC strike's
+  crack cross-section, needs GATE 2's mass + swing), a bend failure (a sideways pry load), and LEVER/pry
+  (`laws::lever` over the length as the effort arm, plus a reserved load arm). The length also feeds STRIKE's
+  energy criterion. So the geometry is now CARRIED and one failure mode reads it; the rest land as their
+  actions do.
 - GATE 2, TOOL MASS IN THE CAPABILITY CLOSURE. The affordance capability closure exposes only
   `mech.contact_area` to a kernel; to afford a mass-driven action (STRIKE percussion, `kinetic_energy` over
   the tool mass = density x volume, both known) the closure must also expose the tool's volume/mass. A

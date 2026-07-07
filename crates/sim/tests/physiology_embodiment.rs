@@ -1016,6 +1016,7 @@ values = [
     let tool = |substance: &str| WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
         volume: Fixed::ONE,
+        length: Fixed::ONE,
         substance: substance.to_string(),
     };
     // A large bare working area, so the bare being cannot raise its pressure over granite's fracture
@@ -1206,6 +1207,7 @@ values = [
     let tool = || WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
         volume: Fixed::ONE,
+        length: Fixed::ONE,
         substance: "flint".to_string(),
     };
     let bare_area = Fixed::from_int(1000);
@@ -1387,6 +1389,7 @@ values = [
     let tool = || WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
         volume: Fixed::ONE,
+        length: Fixed::ONE,
         substance: "tool".to_string(),
     };
 
@@ -1574,6 +1577,7 @@ values = [
     let tool = || WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
         volume: tool_volume0,
+        length: Fixed::ONE,
         substance: "flint".to_string(),
     };
 
@@ -1784,6 +1788,7 @@ values = [
     let tool = |substance: &str| WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
         volume: Fixed::from_int(5),
+        length: Fixed::ONE,
         substance: substance.to_string(),
     };
 
@@ -1869,6 +1874,139 @@ values = [
     assert!(freed > Fixed::ZERO, "the brittle edge cut the flesh before it broke");
     assert!(broke_on_use, "the reaction stress of the cutting stroke snapped the brittle edge");
     assert!(!is_wielded(&worker), "after the breaking cut the being holds no tool");
+}
+
+#[test]
+fn a_slender_tool_buckles_under_its_working_load_where_a_stout_one_of_the_same_stock_bears_it() {
+    // The made-world arc, tool-use, the tool-geometry expansion (root R2): a tool now carries a characteristic
+    // LENGTH, from which its body CROSS-SECTION derives (`volume / length`). A wielded tool loaded axially by
+    // its own working force BUCKLES if that force exceeds its critical Euler load, so a SLENDER tool (a long
+    // thin body, a small cross-section) buckles where a STOUT one of the SAME stock (same volume, same
+    // material) bears the load. The two differ ONLY in length, so the failure is the geometry tradeoff a
+    // tool's material choice trades against, derived from `laws::euler_buckle` over the tool's own geometry
+    // and elastic modulus, no per-shape table. Opt-in: an unarmed world never buckles a tool.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // One wood: a modest elastic modulus and a high fracture strength (so the edge STRESS never breaks either
+    // tool, isolating the failure to BUCKLING). Both tools are this wood, differing only in length.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.elastic_modulus"
+measures = "Young's modulus"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "1500000"
+real = "test fixture"
+
+[[substance]]
+id = "wood"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "800" },
+  { axis = "mat.fracture_strength", value = "100" },
+  { axis = "mat.elastic_modulus", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // Both tools share the SAME stock (volume 1e-3) and a modest edge (contact area 1e-4, so the reaction
+    // stress ~0.75 MPa is far below the 100 MPa fracture strength and never breaks either by stress). They
+    // differ ONLY in length: the stout is short (0.1 m, a fat cross-section), the slender is long (10 m, a
+    // thin one), so the slender's critical buckling load falls far below the working force.
+    let tool = |length: Fixed| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 10_000),
+        volume: Fixed::from_ratio(1, 1_000),
+        length,
+        substance: "wood".to_string(),
+    };
+
+    let build = |length: Fixed, arm_breakage: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_cutter(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0B,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(length));
+        emb.add(walker, band(305));
+        emb.set_material(MaterialField::new());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb.set_breakage(arm_breakage);
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let is_wielded = |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+
+    // The STOUT tool (short, fat cross-section) has a high critical buckling load and bears the working force.
+    let mut stout = build(Fixed::from_ratio(1, 10), true);
+    let stout_broke = stout.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(!stout_broke, "a stout tool bears the axial working load without buckling");
+    assert!(is_wielded(&stout), "the stout tool stays wielded");
+
+    // The SLENDER tool (long, thin cross-section) of the SAME stock and material buckles under the same force:
+    // the ONLY difference is its length, so the failure is the geometry, not the material.
+    let mut slender = build(Fixed::from_int(10), true);
+    let slender_broke = slender.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(slender_broke, "a slender tool of the same stock buckles under the same working load");
+    assert!(!is_wielded(&slender), "the buckled tool is unwielded");
+
+    // OPT-OUT: the SAME slender tool on an unarmed world never buckles (byte-neutral opt-in).
+    let mut unarmed = build(Fixed::from_int(10), false);
+    let unarmed_broke = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(!unarmed_broke, "an unarmed world never buckles a tool");
+    assert!(is_wielded(&unarmed), "the unarmed slender tool stays wielded");
 }
 
 #[test]

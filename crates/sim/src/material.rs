@@ -313,14 +313,24 @@ pub struct CraftParams {
     /// ([`crate::runner::Embodiment::craft_from_carried`] over [`civsim_physics::laws::edge_area_at`]), so a
     /// hard tough stone holds a fine edge and a soft one a blunt one, by physics not a reserved constant.
     pub tool_volume: Fixed,
+    /// The characteristic LENGTH (m) of the shaped tool's body, the long dimension a being knaps (the
+    /// tool-geometry expansion, root R2). RESERVED. Basis: the reach-scale length of a hand tool (a blade, a
+    /// haft, a pick shaft), a geometry datum set from the being's reach scale like the wear stroke distance;
+    /// with the retained volume it fixes the tool's body CROSS-SECTION (`volume / length`), so it decides
+    /// whether the shaped tool is slender (weak in buckling and bending) or stout. Surfaced for the owner,
+    /// never invented. A tool crafted with a non-positive length carries no body geometry and its
+    /// geometry-reading failures are skipped.
+    pub tool_length: Fixed,
 }
 
 impl CraftParams {
-    /// A labelled DEVELOPMENT FIXTURE: a modest tool volume. Not owner canon; a stand-in so the crafting
-    /// contest can run until the owner sets the value against its basis. The edge is derived, not fixtured.
+    /// A labelled DEVELOPMENT FIXTURE: a modest tool volume and a hand-tool length. Not owner canon; a stand-in
+    /// so the crafting contest can run until the owner sets the values against their basis. The edge is
+    /// derived, not fixtured.
     pub fn dev_fixture() -> CraftParams {
         CraftParams {
             tool_volume: Fixed::from_int(1),
+            tool_length: Fixed::from_int(1),
         }
     }
 }
@@ -495,6 +505,15 @@ pub struct WieldedTool {
     /// swing reads) and is the stock a wear step decrements and a re-work reshapes, so a tool that loses matter
     /// grows blunt and eventually spends out. Without it the struct's own claim that mass is derived is empty.
     pub volume: Fixed,
+    /// The tool's characteristic LENGTH (m), the long dimension of its shaped body, set when it is shaped from
+    /// the stock (the made-world arc, tool-use, the tool-geometry expansion, root R2). It is the lever arm a
+    /// pry reads, the bending span a sideways load reads, and (with the retained volume) it fixes the tool's
+    /// BODY CROSS-SECTION ([`WieldedTool::cross_section`], `volume / length` for a prism), the area a
+    /// transverse crack runs through and the section that buckles under an axial load. So a long thin tool is
+    /// slender (a small cross-section, weak in buckling and bending) and a short thick one is stout, the
+    /// geometry tradeoff that the tool's material choice trades against. Zero-safe: a tool shaped with no
+    /// length carries no body geometry, so the geometry-reading failures skip it (the absence convention).
+    pub length: Fixed,
     /// The substance the tool is made of; its hardness (the pressure it sustains before it blunts) and its
     /// other properties are read from the [`PhysicsRegistry`] by this id.
     pub substance: String,
@@ -517,12 +536,26 @@ impl WieldedTool {
         density.checked_mul(self.volume).unwrap_or(Fixed::MAX)
     }
 
-    /// Fold the tool into a hash, its geometry, its retained volume, then its substance id, in canonical order
-    /// (the material fold discipline). Called by the runner's per-walker `state_hash` fold when a being wields
-    /// a tool; a being with no tool folds nothing, so the wielded slot is opt-in and hash-neutral by default.
+    /// The tool's BODY cross-section (m^2): the retained volume over the characteristic length, the prism
+    /// relation `A = V / L`. This is the area a transverse crack runs through and the section that resists an
+    /// axial or a buckling load, derived from the two extensive geometry data the tool carries, no cube root
+    /// and no shape catalog. Zero when the tool has no length (the absence convention: a tool with no body
+    /// geometry has no derivable cross-section, so the geometry-reading failures skip it).
+    pub fn cross_section(&self) -> Fixed {
+        if self.length <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        self.volume.checked_div(self.length).unwrap_or(Fixed::ZERO)
+    }
+
+    /// Fold the tool into a hash, its geometry, its retained volume and length, then its substance id, in
+    /// canonical order (the material fold discipline). Called by the runner's per-walker `state_hash` fold when
+    /// a being wields a tool; a being with no tool folds nothing, so the wielded slot is opt-in and hash-neutral
+    /// by default.
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_fixed(self.contact_area);
         h.write_fixed(self.volume);
+        h.write_fixed(self.length);
         for b in self.substance.as_bytes() {
             h.write_u32(*b as u32);
         }
@@ -1062,6 +1095,7 @@ values = [
         let tool = WieldedTool {
             contact_area: Fixed::from_ratio(1, 1000),
             volume: Fixed::from_int(2),
+            length: Fixed::ONE,
             substance: "granite".to_string(),
         };
         // granite density 2700 times retained volume 2 is 5400 kg.
@@ -1070,6 +1104,7 @@ values = [
         let void_tool = WieldedTool {
             contact_area: Fixed::from_ratio(1, 1000),
             volume: Fixed::from_int(2),
+            length: Fixed::ONE,
             substance: "nonexistent".to_string(),
         };
         assert_eq!(void_tool.mass(&reg), Fixed::ZERO);
