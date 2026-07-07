@@ -93,7 +93,7 @@ use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
-    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE,
+    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CUT, DIG, ENERGY, EXTRACT, GEOPHAGE,
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
@@ -1591,6 +1591,73 @@ impl Embodiment {
             return Fixed::ZERO;
         }
         self.grasp_underfoot(walker_id)
+    }
+
+    /// Enact a being's decided CUT (the made-world arc, tool-use): with its WIELDED edge, sever the
+    /// constituents of the composite matter the being stands on that the edge can beat, freeing them into its
+    /// carried load. Where EXTRACT gates on the cell's AGGREGATE resistance (its hardest constituent binds the
+    /// whole cell, so a being that cannot beat the rind takes nothing), CUT gates PER CONSTITUENT: the edge's
+    /// effective pressure is compared against EACH substance present in the cell's own `SubstanceMix`, and
+    /// every constituent whose own `mat.fracture_strength` the edge exceeds is severed loose and taken. So a
+    /// keen edge frees the soft flesh from a tough composite even when it cannot break the whole cell, the
+    /// distinct power of a cut over a bare press. WHICH substances a cut frees and HOW MUCH are both DERIVED,
+    /// never authored: the freed substances are exactly the cell's own constituents the edge beats (no
+    /// openable-versus-sealed list), and the volume is the strength-bounded carry the grasp uses (no release
+    /// fraction and no substance transmutation). The effective pressure is the extraction contest's: the being's
+    /// grown muscle force over the tool's contact area ([`laws::contact_pressure`]), capped at the tool's own
+    /// indentation hardness (a soft tool blunts before it bites). Requires a wielded edge (a bare being cannot
+    /// cut), the extraction params, the material registry, and the physiology; missing any it cuts nothing, and
+    /// a being with no tool never reaches here, so an opted-out world is byte-identical. Reads only substance
+    /// ids and the beings' and matter's own physics, no race, kind, role, or per-world table (Principles 8, 9,
+    /// 11). Returns the total volume freed. The id-ordered walk over the cell is a deterministic tie-break.
+    pub fn cut_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(params), Some(reg), Some(phys)) = (
+            self.extraction.as_ref(),
+            self.material_registry.as_ref(),
+            self.physiology.as_ref(),
+        ) else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        // A cut needs an edge: a bare being cannot cut (it does not afford CUT either).
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO;
+        };
+        let force = being_muscle_force(w, phys);
+        let tool_hardness = reg
+            .substance(&tool.substance)
+            .and_then(|s| s.vector.get("mat.indentation_hardness").copied())
+            .unwrap_or(Fixed::ZERO);
+        // The edge's effective pressure: force over the tool's working area (capped at pressure_max), blunted
+        // to the tool's own hardness. A soft tool cannot carry a pressure above the material it is made of.
+        let pressure = laws::contact_pressure(force, tool.contact_area, params.pressure_max);
+        let effective = pressure.min(tool_hardness);
+        // The cell's constituents the edge can SEVER: each substance present whose OWN fracture strength the
+        // edge beats, in canonical id order (snapshot before the mutable take). No per-world table: membership
+        // is derived from what is physically in the cell and whether the edge exceeds each part's resistance.
+        let severable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let resistance = reg
+                        .substance(s)
+                        .and_then(|sub| sub.vector.get("mat.fracture_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    (effective > resistance).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        // Free each severed constituent into the carried load, strength-bounded, the same carry the grasp uses.
+        let mut freed = Fixed::ZERO;
+        for s in &severable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -3936,7 +4003,7 @@ impl Runner {
                         let primitive = AffordanceId(action.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -3988,7 +4055,7 @@ impl Runner {
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4022,6 +4089,9 @@ impl Runner {
                     }
                     CRAFT => {
                         emb.craft_from_carried(id);
+                    }
+                    CUT => {
+                        emb.cut_underfoot(id);
                     }
                     DIG => {
                         emb.dig_underfoot(id);

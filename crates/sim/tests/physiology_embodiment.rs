@@ -1103,6 +1103,173 @@ values = [
 }
 
 #[test]
+fn a_cut_frees_the_soft_constituent_of_a_composite_a_bare_extract_cannot_and_authors_nothing() {
+    // The made-world arc, tool-use: a CUT gates PER CONSTITUENT of the cell's own composite, freeing every
+    // substance whose OWN fracture strength the edge beats, where EXTRACT gates on the AGGREGATE (the hardest
+    // constituent binds the whole cell). So a keen edge frees the soft flesh from a tough rind a bare press
+    // cannot break, and WHICH substances are freed is derived from the cell's own composition, never a table.
+    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A composite target: a tough rind (fracture 5000) binding a soft flesh (fracture 1), and a hard flint
+    // edge (hardness 1000, so the blunted pressure beats the flesh but not the rind). Kept in the test.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "rind"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1200" },
+  { axis = "mat.fracture_strength", value = "5000" },
+]
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let ration = Fixed::from_int(1000);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        substance: "flint".to_string(),
+    };
+    let bare_area = Fixed::from_int(1000);
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C07,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "rind", ration);
+        field.deposit(cell, "flesh", ration);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_extraction_params(ExtractionParams {
+            working_area: bare_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_of =
+        |r: &Runner, s: &str| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume(s) };
+
+    // A sharp flint edge CUTS: it frees the soft flesh (its own fracture strength is beaten) into the carried
+    // load, and frees NO rind (the edge blunts to 1000, below the rind's 5000). Both outcomes derived.
+    let mut cutter = build(Some(tool()));
+    cutter.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert!(
+        carried_of(&cutter, "flesh") > Fixed::ZERO,
+        "a keen edge frees the soft flesh by beating its own fracture strength"
+    );
+    assert_eq!(
+        carried_of(&cutter, "rind"),
+        Fixed::ZERO,
+        "the edge blunts below the rind's fracture strength, so it frees no rind: the cut is selective by physics"
+    );
+
+    // The SAME being with the SAME tool EXTRACTS nothing: extraction gates on the aggregate (the hardest
+    // constituent, the rind at 5000), which the edge cannot beat, so the whole cell holds. The cut's distinct
+    // power is reaching the soft part the aggregate press cannot.
+    let mut extractor = build(Some(tool()));
+    extractor
+        .embodiment_mut()
+        .unwrap()
+        .extract_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&extractor, "flesh") + carried_of(&extractor, "rind"),
+        Fixed::ZERO,
+        "extraction gates on the aggregate rind and frees nothing: only the per-constituent cut reaches the flesh"
+    );
+
+    // A BARE being cuts nothing: the cut needs an edge, so an opted-out being is inert (byte-neutral gate).
+    let mut bare = build(None);
+    bare.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&bare, "flesh") + carried_of(&bare, "rind"),
+        Fixed::ZERO,
+        "a bare being has no edge and cuts nothing"
+    );
+}
+
+#[test]
 fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
     // Material-substrate arc item 4, INGEST-FOR-COMPOSITION, the mining payoff and emergence-closer: a
     // mineral in the ground is worth something because a being whose reserve needs it eats it and survives,
