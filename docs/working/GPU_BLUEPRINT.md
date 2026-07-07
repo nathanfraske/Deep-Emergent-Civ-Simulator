@@ -92,3 +92,26 @@ The acceptance gate for each: `run_world` stays `a465919e`, the determinism harn
 hash is invariant under `RAYON_NUM_THREADS` (1 vs many), since the parallel result equals the serial one by
 construction. Because rayon is a workspace dependency the sim gains, the parallelism is on by default but
 determinism-neutral; a future toggle can pin the pool size for a fully reproducible wall-clock if wanted.
+
+## Heterogeneous cores (Intel P/E, AMD X3D): topology-agnostic by construction
+
+A standing question: can the Rayon on-ramp classify and exploit asymmetric cores (Intel Performance and
+Efficiency cores, AMD dual-CCD parts where one CCD carries the 3D V-Cache)? The answer for correctness is
+that it does not need to. Rayon is topology-agnostic: it spawns one work-stealing pool of N workers and does
+not pin them, so the OS scheduler (Intel Thread Director, the AMD CPPC driver) places threads and
+work-stealing absorbs the speed asymmetry dynamically (a slow E-core steals fewer chunks, a fast P-core
+steals more). Crucially, every parallel loop here draws RNG only through a `DrawKey` keyed by the item's id
+and writes to a fixed position, so the result is bit-identical whatever core runs whatever chunk: core
+placement can move the wall-clock, never the hash. The `RAYON_NUM_THREADS` 1-vs-many gate proves this on any
+topology, so no P/E or X3D box is needed to build or validate the engine.
+
+Classification is a later, optional PERFORMANCE tuning, not a correctness need. The two loop families have
+different appetites: the field and material grid steps (`Field::step`, `step_matter_cycle`) are cache-bound
+and would prefer the V-Cache CCD or the P-cores, while the genome and evolve fan-outs are compute-bound and
+run well anywhere including E-cores. Exploiting that would mean: detect topology portably (`hwlocality`, or
+read `/sys/devices/system/cpu/*/{type,cache}` plus CPUID for core kind), build two Rayon pools with
+`ThreadPoolBuilder::spawn_handler` plus the `core_affinity` crate (a cache pool pinned to V-Cache or P cores,
+a throughput pool spanning all cores), and route each phase with `pool.install(...)`. Pinning cannot change
+results, since nothing in the sim keys off thread identity, so it is a determinism-safe change to add when
+there is a real perf target and a machine to measure on. Recommendation: stay topology-agnostic until then;
+work-stealing covers the asymmetry and correctness is already hardware-invariant.
