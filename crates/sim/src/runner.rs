@@ -148,6 +148,16 @@ const SYS_BODY: SystemId = SystemId(1);
 const SYS_EMBODIMENT: SystemId = SystemId(2);
 const SYS_WORLD: SystemId = SystemId(3);
 
+/// The minimum items per Rayon job for the per-being parallel maps. Below this many walkers a
+/// `par_iter` runs as a single job (no split), so a small population pays no work-stealing overhead. This
+/// is a PERFORMANCE threshold only, not a canonical value: the parallel and serial results are
+/// bit-identical (each item writes a fixed position and draws RNG by id, never by thread), so this cannot
+/// move the `state_hash`. Its basis is the measured crossover: on this machine the per-being work is small
+/// enough that unconditional `par_iter` is a net LOSS below a few thousand beings (serial beats 18 threads
+/// by 19 to 75 percent at hundreds to low-thousands of founders, breaking even only near 8000), so the
+/// threshold serializes the realistic range and hands Rayon only populations large enough to amortize it.
+const PAR_MIN_LEN: usize = 4096;
+
 // Base-level liveliness step 5 (conversation liveliness): the movement coupling and an environment-
 // sourced belief. The runner republishes each being's live cell into the cognition world each tick so
 // gossip and converse cluster by where a being stands, and injects a first-order belief about the salt-
@@ -4049,6 +4059,7 @@ impl Runner {
         // and the result is bit-identical at any thread count.
         let updates: Vec<(StableId, Fixed)> = ids
             .par_iter()
+            .with_min_len(PAR_MIN_LEN)
             .filter_map(|&id| {
                 let coord = self.index.coord_of(OccupantId::being(id))?;
                 let env = self.field.at(coord.x, coord.y);
@@ -4215,6 +4226,7 @@ impl Runner {
                     // bit-identical at any thread count.
                     emb.walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
                             let coord = w.coord();
                             let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
@@ -4263,6 +4275,7 @@ impl Runner {
                 Some(emb) => emb
                     .walkers
                     .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
                     .filter_map(|w| {
                         let bt = *self.body_temp.get(&w.id)?;
                         let band = emb.thermal.get(&w.id)?;
@@ -4304,6 +4317,7 @@ impl Runner {
                     // into a BTreeMap is order-free, so it is bit-identical at any thread count.
                     emb.walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .filter_map(|w| {
                             let mind = world.mind(w.id)?;
                             let candidates = if granular && refs_ready {
@@ -4358,6 +4372,7 @@ impl Runner {
             (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
                 .walkers
                 .par_iter()
+                .with_min_len(PAR_MIN_LEN)
                 .filter_map(|w| {
                     let mind = world.mind(w.id)?;
                     let raw = attraction_gradient(
@@ -4421,6 +4436,7 @@ impl Runner {
                 // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 emb.walkers
                     .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
                     .filter_map(|w| {
                         let mind = world.mind(w.id)?;
                         let matter = emb.material.cell(w.coord());
@@ -4513,6 +4529,7 @@ impl Runner {
                     Some(phys) => emb
                         .walkers
                         .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
