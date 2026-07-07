@@ -6966,7 +6966,18 @@ values = [
 
         // One composed run, parameterized by the heir's exploration (ONE = primed, ZERO = the founder-zero
         // falsifier). Returns the demonstration's observations plus the final state hash for the replay check.
-        let run = |heir_exploration: Fixed| -> (bool, Option<u32>, Fixed, Fixed, bool, bool, u128) {
+        let run = |heir_exploration: Fixed| -> (
+            bool,
+            Option<u32>,
+            Fixed,
+            Fixed,
+            bool,
+            bool,
+            bool,
+            Fixed,
+            Fixed,
+            u128,
+        ) {
             let mut world = World::new(
                 bp,
                 bp,
@@ -7129,6 +7140,20 @@ values = [
                     .unwrap()
                     .add(heir_walker, band_at(field_temp));
             }
+            // The heir's ENERGY reserve, or zero if it has no body (a pure read).
+            let heir_energy = |r: &Runner| -> Fixed {
+                r.embodiment()
+                    .and_then(|e| e.walkers().iter().find(|w| w.id == heir))
+                    .map(|w| w.homeostasis.level(ENERGY))
+                    .unwrap_or(Fixed::ZERO)
+            };
+            // BEFORE the eating window: the heir holds no reward belief (it coexisted with the maker only as a
+            // bodiless mind, gossip off, so nothing was told to it), and this is its reserve at the window's
+            // start. Captured so the test asserts the belief forms DURING eating and that the reserve RISES,
+            // rather than leaving a reader to reconstruct it from the falsifier.
+            let heir_blank_before_eating = !holds_reward(&runner, heir);
+            let heir_energy_start = heir_energy(&runner);
+
             let mut heir_reearned = false;
             for _ in 0..24 {
                 ration(&mut runner);
@@ -7137,6 +7162,7 @@ values = [
                     heir_reearned = true;
                 }
             }
+            let heir_energy_end = heir_energy(&runner);
 
             (
                 maker_formed,
@@ -7145,12 +7171,26 @@ values = [
                 hull_after_weathering,
                 overlapped,
                 heir_reearned,
+                heir_blank_before_eating,
+                heir_energy_start,
+                heir_energy_end,
                 runner.state_hash(),
             )
         };
 
         // PRIMED heir: the whole loop closes across the maker's death.
-        let (m_formed, m_dead, h_death, h_weathered, overlapped, heir_re, hash1) = run(Fixed::ONE);
+        let (
+            m_formed,
+            m_dead,
+            h_death,
+            h_weathered,
+            overlapped,
+            heir_re,
+            heir_blank_before,
+            heir_energy_start,
+            heir_energy_end,
+            hash1,
+        ) = run(Fixed::ONE);
         assert!(
             m_formed,
             "the maker re-earns the reward belief from its own eating (it discovers the technique)"
@@ -7175,10 +7215,24 @@ values = [
             heir_re,
             "the heir re-earns the technique from its own felt reward at the hull the dead maker left, never taught (gossip off)"
         );
+        // TRANSMISSION IS OFF (made explicit, not left to the falsifier): the heir holds NO reward belief before
+        // its eating window opens, though it coexisted with the belief-holding maker as a bodiless mind through
+        // phase 1. So the belief provably forms DURING its own eating, never from an overlap-phase transmission.
+        assert!(
+            heir_blank_before,
+            "the heir holds no reward belief before its eating window, so the belief forms from its own eating and not from any overlap-phase gossip (gossip unarmed)"
+        );
+        // THE FELT REWARD IS VERIFIED (not inferred from the belief): the heir's ENERGY reserve is strictly
+        // higher at the end of the eating window than at its start, so it truly felt its reserve rise, which is
+        // the sign the reward learner keys the belief on.
+        assert!(
+            heir_energy_end > heir_energy_start,
+            "the heir's energy reserve rises across the eating window ({heir_energy_start:?} to {heir_energy_end:?}), so the felt reward is verified not inferred"
+        );
 
         // FOUNDER-ZERO (the emergence falsifier): an off-exploration heir never enacts, so it never eats and
         // re-earns nothing, even standing on the maker's hull. The belief is earned, not authored or gossiped.
-        let (_, _, _, _, _, heir_re0, _) = run(Fixed::ZERO);
+        let (_, _, _, _, _, heir_re0, _, _, _, _) = run(Fixed::ZERO);
         assert!(
             !heir_re0,
             "a founder-zero heir never eats, so it re-earns no belief from the trace (not authored, not transmitted)"
@@ -7186,7 +7240,7 @@ values = [
 
         // DETERMINISM: the whole composed capstone replays bit for bit (every draw keys on the being and the
         // tick), so the lifecycle, embodiment, and trace on one runner do not cost determinism.
-        let (_, _, _, _, _, _, hash2) = run(Fixed::ONE);
+        let (_, _, _, _, _, _, _, _, _, hash2) = run(Fixed::ONE);
         assert_eq!(hash1, hash2, "the composed capstone replays bit for bit");
     }
 
