@@ -75,10 +75,23 @@ fracture energy zero) because it needs the stroke energy and the tool's own crac
 sideways) likewise need the tool's length and section modulus. These land when the tool carries its body
 geometry (a deepening of C, alongside H).
 
-### F. Capability-kernel expansion (root R1). STATUS: planned, compose-crate.
-Add the missing `CapabilityKernel` variants (shear, impact, lever, wear, bend, friction, crush) so an
-`AffordanceDef` can require the law its action needs, opening the non-piercing action space. The kernel
-SET stays fixed Rust; which affordances a world declares is data.
+### F. Capability-kernel expansion (root R1). STATUS: OPENED (SHEAR kernel landed) (commit pending).
+The `CapabilityKernel` enum is no longer closed at Pierce: `CapabilityKernel::Shear` (the first non-piercing
+action) is landed in the compose crate, registered as `ID_SHEAR` in the dev seed, so an `AffordanceDef` can
+now require a shear law. The kernel reads `mech.contact_area`, `mat.shear_strength`, and `mat.yield_strength`:
+an edge drives the reference force over its contact area as a shear stress ([`laws::shear`]), self-limited at
+the part's own shear strength (von Mises from yield where the axis is silent), and if that effective shear
+clears the reserved reference resistance it severs, graded above the threshold. Reserved-with-basis:
+`reference_shear_resistance` (`CapabilityRefs`). Its CONSUMER: the CUT affordance now gates on `ID_SHEAR`
+rather than the earlier PIERCE (normal-penetration) proxy (`homeostasis::dev_cutter`), since a cut is a
+shear-parting action. Compose falsifier
+`a_keen_strong_edge_reads_a_shear_capability_a_blunt_or_weak_or_ductileless_one_does_not`.
+STILL PLANNED: the remaining kernels (impact/percussion, lever, crush, bend, friction) land as their actions
+(Section G) read them, one per consumer, the "capability lands when read" discipline. The kernel SET stays
+fixed Rust; which affordances a world declares is data.
+NOTE: the cut ENACT sever gate (R-CUT-SHEAR) still uses the normal-stress `fracture_strength` proxy; folding
+it onto the shear contest (each constituent's `mat.shear_strength`, and the tool's own) needs a floor rewrite
+that ripples the cut/wear/breakage enact falsifiers, so it is the next follow-on, tracked below.
 
 ### G. New tool actions derived from F + C. STATUS: planned, needs F and C.
 Sever/divide (shear through a cut depth), strike/percussion (the `impact` law over the tool's mass and

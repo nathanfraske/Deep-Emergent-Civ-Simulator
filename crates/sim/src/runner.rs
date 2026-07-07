@@ -972,7 +972,7 @@ pub struct Embodiment {
     /// Whether a being's WIELDED TOOL contributes affordances (the made-world arc, tool-use, slice 1). FALSE by
     /// default, so the afforded set is the body's alone and every run hash is unchanged; a tool-using world
     /// opts in ([`Embodiment::set_tool_affordances`]) so a being wielding a keen-edged tool affords a CUT the
-    /// barehanded body cannot. The tool's own Pierce capability enters the same afford derivation a body part's
+    /// barehanded body cannot. The tool's own SHEAR capability enters the same afford derivation a body part's
     /// does ([`crate::homeostasis::AffordanceRegistry::tool_affordances`] over
     /// [`crate::affordance_percept::tool_capability`]), so matter the being holds EXTENDS what it can do, by
     /// physics not an `IsAxe` tag (Principle 9). Inert for a being with no tool, so an armed world with no tools

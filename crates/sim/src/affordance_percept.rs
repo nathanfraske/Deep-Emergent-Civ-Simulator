@@ -109,9 +109,10 @@ pub enum AffordancePerceptKind {
     /// through the physics registry). A small hard edge scores high, a blunt or soft one low. Read over the
     /// SHAPED tool rather than the loose cell matter, because a keen edge is a property of geometry (which a
     /// knapped tool carries and a pile of matter does not), so a being with no tool, or one whose tool has
-    /// no edge, reads zero. This is the same Pierce read the tool's own extraction and cut capability is
-    /// derived from, so a being senses the sharpness of what it holds on the identical physics, never an
-    /// `IsAxe` tag (Principle 9).
+    /// no edge, reads zero. It senses the edge's geometric keenness (the Pierce concentration of force at a
+    /// small contact area), the same intrinsic geometry the tool's worked capability reads; whether that edge
+    /// affords a CUT is its SHEAR capability and whether the cut BITES is the enact's physics, so a being
+    /// senses the sharpness of what it holds on physics, never an `IsAxe` tag (Principle 9).
     Sharpness,
 }
 

@@ -80,6 +80,19 @@ pub enum CapabilityKernel {
     /// reads zero. The honest limit: this is the optical channel only; the acoustic, chemical, and field
     /// senses are their own kernels (a documented follow-on), so a non-optical sense reads zero here.
     Refract,
+    /// SHEAR, the sever read (the made-world arc, tool-use, root R1): the first NON-PIERCING action kernel,
+    /// so an affordance can require a shear law rather than only the pierce one, opening the sever/divide
+    /// action space. An edge pressing a reference force over its contact area imposes a shear stress
+    /// ([`laws::shear`]), bounded by the part's OWN shear strength (a part cannot deliver a shear beyond what
+    /// it withstands before it shears itself, an isotropic ductile part deriving that limit from its yield by
+    /// the von Mises ratio). If that effective shear clears a reference target's shear resistance the part can
+    /// sever, graded by the effective shear over the reference. Reads `mech.contact_area`, `mat.shear_strength`,
+    /// and `mat.yield_strength`; the reference force and the reference shear resistance are reserved. A part
+    /// with no edge (no contact area) or no shear strength (and no yield to derive one) delivers no shear and
+    /// reads zero: not a sever tool, by physics not a tag. Where PIERCE measures a normal-stress penetration,
+    /// SHEAR measures the tangential parting a cut physically is, so a cut affordance gates on this rather than
+    /// the pierce proxy.
+    Shear,
 }
 
 impl CapabilityKernel {
@@ -91,6 +104,7 @@ impl CapabilityKernel {
             CapabilityKernel::Pierce => &["mech.contact_area"],
             CapabilityKernel::Locomote => &["mech.section_modulus", "mech.arm_length"],
             CapabilityKernel::Refract => &[],
+            CapabilityKernel::Shear => &["mech.contact_area"],
         }
     }
 
@@ -100,6 +114,7 @@ impl CapabilityKernel {
             CapabilityKernel::Pierce => &["mat.indentation_hardness"],
             CapabilityKernel::Locomote => &["mat.yield_strength"],
             CapabilityKernel::Refract => &["opt.refractive_index"],
+            CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
         }
     }
 
@@ -117,6 +132,7 @@ impl CapabilityKernel {
             CapabilityKernel::Pierce => pierce(geo, mat, refs, caps),
             CapabilityKernel::Locomote => locomote(geo, mat, refs, caps),
             CapabilityKernel::Refract => refract(mat, refs),
+            CapabilityKernel::Shear => shear(geo, mat, refs, caps),
         }
     }
 }
@@ -252,6 +268,56 @@ pub fn cut_capability_against_target(
     normalize(depth, refs.reference_penetration_depth)
 }
 
+/// The SHEAR read: is the part a sever tool, and how good a one, from its edge geometry and shear
+/// strength (the made-world arc, root R1, the first non-piercing action). The reference force over the
+/// edge's contact area is a shear stress ([`laws::shear`]), bounded by the part's OWN shear strength
+/// (an independent shear strength if the material declares one, else the von Mises reduction of its
+/// yield): a part cannot deliver a shear beyond what it withstands before it shears itself. The
+/// effective deliverable shear (the applied shear capped at the part's own strength) over the reserved
+/// reference shear resistance is the capability. A keen strong edge delivers a high shear and reads high;
+/// a blunt one (large area, low stress) or a weak one (low shear strength, capped) reads low; a part with
+/// no edge or no shear strength reads zero.
+fn shear(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+    caps: &CapabilityCaps,
+) -> Fixed {
+    let contact_area = geo("mech.contact_area");
+    if contact_area <= Fixed::ZERO {
+        return Fixed::ZERO; // no edge, no contact: nothing to shear with
+    }
+    let shear_strength = mat("mat.shear_strength");
+    let yield_strength = mat("mat.yield_strength");
+    let independent = if shear_strength > Fixed::ZERO {
+        Some(shear_strength)
+    } else {
+        None // an isotropic ductile part derives its shear strength from yield (von Mises), inside the law
+    };
+    // The applied shear the reference force imposes over the edge, and the margin to the part's own shear
+    // strength. The part self-limits: it delivers at most its own shear strength before it shears itself, so
+    // the effective shear is the applied capped at that strength (applied + the margin where the margin is
+    // negative, i.e. where the applied exceeds the part's own strength). A part with neither an independent
+    // shear strength nor a yield reads a zero material strength, so its effective shear cancels to zero.
+    let (tau_applied, margin) = laws::shear(
+        refs.reference_strike_force,
+        contact_area,
+        independent,
+        yield_strength,
+        caps.pressure,
+    );
+    let effective = tau_applied + margin.min(Fixed::ZERO);
+    // The sever threshold: a part that cannot drive its effective shear PAST the reference target's shear
+    // resistance cannot part it and reads zero (the shear sibling of PIERCE's clear-the-target gate, so a
+    // weak sliver that self-limits below the reference is no sever tool). Above the threshold the capability
+    // grades by how far the effective shear exceeds the reference, over one reference of excess as a full
+    // parting, exactly the shape the REFRACT read uses for its own contrast-above-the-medium.
+    normalize(
+        sat_sub(effective, refs.reference_shear_resistance),
+        refs.reference_shear_resistance,
+    )
+}
+
 /// Normalize a raw physics reading to `[0, 1]` against a reserved reference level (the reading that
 /// counts as full capability). A non-positive reference reads zero (an unset reference offers no
 /// capability rather than a fabricated one); an overflow in the division reads full.
@@ -305,6 +371,12 @@ pub struct CapabilityRefs {
     /// (`capability.reference_optical_contrast`, dimensionless). Basis: the lens-to-medium index step a
     /// focusing eye needs; the capability is the achieved contrast above one, over this reference.
     pub reference_optical_contrast: Fixed,
+    /// The shear resistance a sever tool must overcome to read as fully capable (`capability.reference_shear`,
+    /// MPa). Basis: the `mat.shear_strength` of the reference target a cut parts (the soft-tissue or fibre
+    /// shear strength a sever must exceed), the sibling of `target_hardness` for the shear kernel; the
+    /// capability is the edge's deliverable shear over this reference, clamped to one. Larger reads fewer
+    /// edges as sever tools, smaller more; surfaced reserved-with-basis, never fabricated.
+    pub reference_shear_resistance: Fixed,
 }
 
 impl CapabilityRefs {
@@ -324,6 +396,7 @@ impl CapabilityRefs {
             medium_refractive_index: dec("1"),  // air/vacuum, the medium a lens focuses against
             optical_contrast_cap: dec("10"),    // the refractive-contrast ceiling
             reference_optical_contrast: dec("0.3"), // a lens-to-air index step that focuses (n~1.3)
+            reference_shear_resistance: dec("3"), // MPa, soft-tissue/fibre shear strength a sever parts
         }
     }
 }
@@ -390,6 +463,8 @@ impl FunctionLawRegistry {
     pub const ID_LOCOMOTE: FunctionLawId = FunctionLawId(1);
     /// The stable id of the REFRACT law in [`Self::dev_seed`].
     pub const ID_REFRACT: FunctionLawId = FunctionLawId(2);
+    /// The stable id of the SHEAR law in [`Self::dev_seed`] (the first non-piercing action, root R1).
+    pub const ID_SHEAR: FunctionLawId = FunctionLawId(3);
 
     /// An empty registry.
     pub fn new() -> Self {
@@ -443,6 +518,11 @@ impl FunctionLawRegistry {
             id: FunctionLawRegistry::ID_REFRACT,
             name: "refract".to_string(),
             kernel: CapabilityKernel::Refract,
+        });
+        reg.insert(FunctionLawDef {
+            id: FunctionLawRegistry::ID_SHEAR,
+            name: "shear".to_string(),
+            kernel: CapabilityKernel::Shear,
         });
         reg
     }
@@ -558,6 +638,64 @@ mod tests {
             Fixed::ZERO,
             "a soft blunt surface is not a weapon: it does not clear the target hardness"
         );
+    }
+
+    #[test]
+    fn a_keen_strong_edge_reads_a_shear_capability_a_blunt_or_weak_or_ductileless_one_does_not() {
+        // The made-world arc, root R1, the first non-piercing action: the SHEAR kernel reads whether a part
+        // can sever, from its edge geometry and its own shear strength, never a tag. A keen edge of a material
+        // whose shear strength clears the reference resistance parts it and reads a positive capability; a keen
+        // edge of a material too weak to reach the reference cannot part it and reads zero; a blunt edge of the
+        // strong material spreads the stress below the reference and reads zero; a part with no edge or with
+        // neither a shear strength nor a yield to derive one reads zero. A ductile material with only a yield
+        // reads a positive shear through the von Mises reduction, so the strength is derived where the axis is
+        // silent. This is the SEVER-threshold shape: the effective shear must clear the reference to sever.
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs(); // reference force 100 N, reference shear resistance 3 MPa
+        let caps = test_caps();
+        let keen = geo_of([("mech.contact_area", "0.00000005")].into_iter().collect());
+        let blunt = geo_of([("mech.contact_area", "0.01")].into_iter().collect());
+        let strong = mat_of([("mat.shear_strength", "200")].into_iter().collect());
+        let weak = mat_of([("mat.shear_strength", "2")].into_iter().collect()); // below the 3 MPa reference
+        let ductile = mat_of([("mat.yield_strength", "300")].into_iter().collect()); // no shear axis
+        let inert = mat_of([("mat.density", "2500")].into_iter().collect()); // neither shear nor yield
+
+        let shear_of = |geo: &dyn Fn(&str) -> Fixed, mat: &dyn Fn(&str) -> Fixed| {
+            derive_capabilities(&fns, geo, mat, &refs, &caps).score(FunctionLawRegistry::ID_SHEAR)
+        };
+
+        let keen_strong = shear_of(&keen, &strong);
+        let keen_weak = shear_of(&keen, &weak);
+        let blunt_strong = shear_of(&blunt, &strong);
+        let keen_ductile = shear_of(&keen, &ductile);
+        let keen_inert = shear_of(&keen, &inert);
+        let no_edge = shear_of(&geo_of(BTreeMap::new()), &strong);
+
+        assert!(keen_strong > Fixed::ZERO, "a keen strong edge severs: {keen_strong:?}");
+        assert!(
+            keen_strong > keen_weak,
+            "a strong-shear material severs where a too-weak one cannot ({keen_strong:?} vs {keen_weak:?})"
+        );
+        assert_eq!(
+            keen_weak,
+            Fixed::ZERO,
+            "a material whose shear strength is below the reference resistance cannot sever it"
+        );
+        assert_eq!(
+            blunt_strong,
+            Fixed::ZERO,
+            "a spread blunt edge drives its shear below the reference and severs nothing"
+        );
+        assert!(
+            keen_ductile > Fixed::ZERO,
+            "a ductile edge with only a yield reads a shear through the von Mises reduction: {keen_ductile:?}"
+        );
+        assert_eq!(
+            keen_inert,
+            Fixed::ZERO,
+            "an edge with neither shear strength nor yield delivers no shear"
+        );
+        assert_eq!(no_edge, Fixed::ZERO, "no edge, no shear");
     }
 
     #[test]

@@ -756,19 +756,21 @@ impl AffordanceRegistry {
     }
 
     /// A DEVELOPMENT FIXTURE for a tool-USING world (the made-world arc, tool-use, slice 1): move, ingest, and
-    /// CUT. Unlike every fixture above, CUT is capability-GATED (on PIERCE, a keen edge) rather than
-    /// unconditional, and the foraging body of [`AffordanceRegistry::dev_default`] reads no PIERCE, so a
-    /// BAREHANDED being in this world affords only move and ingest. A being WIELDING a keen-edged tool affords
-    /// CUT as well, because the tool's own Pierce capability enters the afford derivation through
-    /// [`AffordanceRegistry::tool_affordances`]. So this is the first world where matter the being HOLDS
-    /// changes what it can DO: a sharp thing affords a cut the body alone cannot, by physics not a recipe or an
-    /// `IsAxe` tag (Principle 9). What the cut CONSUMES and RELEASES is the enact seam wired in the next slice.
+    /// CUT. Unlike every fixture above, CUT is capability-GATED (on SHEAR, the first non-piercing action kernel,
+    /// root R1) rather than unconditional, and the foraging body of [`AffordanceRegistry::dev_default`] reads no
+    /// SHEAR, so a BAREHANDED being in this world affords only move and ingest. A being WIELDING a keen-edged
+    /// tool of a material with a shear strength affords CUT as well, because the tool's own SHEAR capability
+    /// enters the afford derivation through [`AffordanceRegistry::tool_affordances`]. A cut is a shear-parting
+    /// action, so gating it on the SHEAR kernel (can this edge deliver a parting shear) is the correct physics,
+    /// retiring the earlier PIERCE (normal-penetration) proxy. So this is the first world where matter the being
+    /// HOLDS changes what it can DO: a sharp thing affords a cut the body alone cannot, by physics not a recipe
+    /// or an `IsAxe` tag (Principle 9).
     pub fn dev_cutter() -> AffordanceRegistry {
         let mut reg = AffordanceRegistry::dev_default();
         reg.affordances.push(AffordanceDef {
             id: CUT,
             name: "cut".to_string(),
-            requires: Some(FunctionLawRegistry::ID_PIERCE),
+            requires: Some(FunctionLawRegistry::ID_SHEAR),
             min_capability: Fixed::ZERO,
             param: AffordanceParam::Scalar,
         });
@@ -1061,14 +1063,14 @@ mod tests {
     #[test]
     fn a_wielded_tool_grants_a_capability_gated_affordance_and_never_an_unconditional_one() {
         // The made-world arc, tool-use, slice 1: a wielded tool contributes an affordance the body lacks. The
-        // cutter world affords CUT only through the tool's PIERCE capability; a foraging body reads no PIERCE,
+        // cutter world affords CUT only through the tool's SHEAR capability; a foraging body reads no SHEAR,
         // so a barehanded being (which never calls this: the caller skips a toolless being) affords no CUT.
         let reg = AffordanceRegistry::dev_cutter();
 
-        // A keen tool reads a positive PIERCE, so it grants CUT. It reads no LOCOMOTE, so it does not grant
+        // A keen tool reads a positive SHEAR, so it grants CUT. It reads no LOCOMOTE, so it does not grant
         // MOVE; and it never grants INGEST, an unconditional affordance the body already has.
         let keen = reg.tool_affordances(|law| {
-            if law == FunctionLawRegistry::ID_PIERCE {
+            if law == FunctionLawRegistry::ID_SHEAR {
                 Fixed::from_int(5)
             } else {
                 Fixed::ZERO
@@ -1076,7 +1078,7 @@ mod tests {
         });
         assert!(
             keen.contains(&CUT),
-            "a tool that reads the required PIERCE capability grants the cut affordance"
+            "a tool that reads the required SHEAR capability grants the cut affordance"
         );
         assert!(
             !keen.contains(&MOVE),
