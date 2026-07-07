@@ -369,6 +369,12 @@ impl FieldResident {
                 relaxation,
             );
         }
+        // Flush the stream so the kernel BEGINS executing on the device now, concurrently with this tick's
+        // CPU tail, instead of sitting queued until the readback fence triggers it (the missing-overlap the
+        // audit flagged). `flush` submits the outstanding launch without waiting for its completion, so
+        // determinism is unchanged (the readback still fences on the same event); it only moves WHEN the
+        // device starts the work earlier, which is the whole point of the cross-tick pipeline.
+        let _ = self.client.flush();
         // Hold BOTH handles until the fence: the input buffer must outlive the queued kernel.
         self.pending = Some((f_h, g_h));
     }
