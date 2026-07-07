@@ -103,7 +103,7 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, SubstanceMix, WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
@@ -167,6 +167,15 @@ const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
 /// above [`REWARD_LEARN_ORDINAL_BASE`] so a material-feature reward observation never collides with a
 /// sequence reward or a harm observation for the same being in the same tick on the mind-then-ordinal sort.
 const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
+/// The base tick-input ordinal a NUTRITION reward credit carries (social-learning arc, piece 1), one per
+/// present substance in what the being ATE this tick, disjoint from and above
+/// [`MATERIAL_REWARD_LEARN_ORDINAL_BASE`] so an eaten-composition reward observation never collides with a
+/// ground-composition (trace) reward, a sequence reward, or a harm observation for the same being in the
+/// same tick on the mind-then-ordinal sort. The two material reward credits (ground-side and eaten-side)
+/// key their beliefs on the SAME material feature subject, so a being that both stands on and eats a
+/// substance accrues both observations toward one "this signature rewards" belief; the disjoint ordinal
+/// bands keep the two tick inputs from aliasing while the shared subject keeps the belief one fact.
+const NUTRITION_REWARD_LEARN_ORDINAL_BASE: u32 = 4_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -917,6 +926,26 @@ pub struct Embodiment {
     /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
     /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
     attraction: bool,
+    /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
+    /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
+    /// credit never fires and every run hash is unchanged; the world-build opts in
+    /// ([`Embodiment::set_nutrition_learning`]) to let a being learn which foods nourish it from its own felt
+    /// reward. When true (and the runner's reward learner is armed), the nutrition credit reads each eater's
+    /// [`crate::locomotion::Walker::ate`] through the material-percept registry and feeds it into the SAME
+    /// `(subject, REWARD_ATTR)` frame the ground-side trace credit uses, keyed on the eaten substance's opaque
+    /// signature. No layout block, so this needs no rebuild: it is a learning credit, not a controller input;
+    /// the behaviour rides the existing attraction gradient (a being seeks the food it believes rewards).
+    nutrition_learning: bool,
+    /// Whether the PLACE-side (trace) material reward credit fires: the ground-composition credit the
+    /// lifetime/demography keystone built, which re-earns "standing where this material lies pays off" from
+    /// the composition of the cell UNDERFOOT (the physical-trace persistence loop). TRUE by default, so every
+    /// existing scenario that arms the reward learner keeps this credit exactly as before (this is a gate on
+    /// an existing mechanism, not a new opt-in, so its default preserves the keystone's behaviour). A world
+    /// sets it FALSE to run the eaten-side [`nutrition_learning`] credit in isolation, so a being learns which
+    /// food nourishes it without also crediting every material it merely stands on. Never folded into
+    /// `state_hash`; the crucible and default world arm no reward learner, so this gate leaves them
+    /// byte-identical whatever its value.
+    place_reward_learning: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1043,6 +1072,8 @@ impl Embodiment {
             percepts: PerceptRegistry::empty(),
             material_percepts: MaterialPerceptRegistry::empty(),
             attraction: false,
+            nutrition_learning: false,
+            place_reward_learning: true,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1090,6 +1121,29 @@ impl Embodiment {
     pub fn set_attraction(&mut self, enabled: bool) {
         self.attraction = enabled;
         self.rebuild_layout();
+    }
+
+    /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
+    /// reward learner is armed, a being re-earns a reward belief from the perceived composition of what it
+    /// ATE this tick, so it learns which foods nourish it from its own felt reward rather than a handed
+    /// "this is food" percept. FALSE (the default) leaves the ingested-matter credit inert and every run
+    /// hash unchanged (opt-in). Unlike [`set_attraction`] and [`set_material_percepts`] this adds NO
+    /// controller block, so it needs no layout rebuild and may be set at any time: it is a learning credit
+    /// (the LEARN half), and the behaviour half (approaching a food believed to nourish) rides the existing
+    /// attraction gradient over the shared reward frame. The world still declares the food substances in the
+    /// material-percept registry, so the eaten composition is perceived as an opaque per-substance signature
+    /// (Principle 9), and the belief forms only from felt reward (the copy-and-verify gate), never handed.
+    pub fn set_nutrition_learning(&mut self, enabled: bool) {
+        self.nutrition_learning = enabled;
+    }
+
+    /// Enable (or disable) the PLACE-side (trace) material reward credit (the lifetime/demography keystone,
+    /// pillar 2). TRUE by default, so a world that arms the reward learner keeps the ground-composition credit
+    /// the keystone built; a world sets it FALSE to run the eaten-side [`set_nutrition_learning`] credit in
+    /// isolation (learning which food nourishes without crediting the material merely underfoot). A gate on an
+    /// existing mechanism, so its default preserves the keystone's behaviour rather than opting a new one in.
+    pub fn set_place_reward_learning(&mut self, enabled: bool) {
+        self.place_reward_learning = enabled;
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -1591,6 +1645,23 @@ impl Embodiment {
                     let deposit = volume.checked_mul(*fraction).unwrap_or(*volume);
                     self.material.deposit(coord, &byproduct, deposit);
                 }
+            }
+        }
+        // Record the INGESTED composition on the eater (social-learning arc, piece 1, nutrition learning): the
+        // per-substance volume this bite took into the being, so the nutrition reward credit can re-earn "this
+        // food nourishes me" from the perceived composition of what it ATE, keyed exactly as the ground-side
+        // trace credit keys the composition underfoot. Set from the same `eaten_volume` the byproduct deposit
+        // reads (a substance that fed two reserves counts its total), in canonical id order. A bite that ate
+        // nothing leaves it empty (the loop skipped every axis), so a full or foodless being records no
+        // ingestion. Never folded into `state_hash` (transient per-tick scratch); its only reach into canon is
+        // the belief the nutrition credit forms from it, and only when that credit is armed.
+        if !eaten_volume.is_empty() {
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                let mut ate = SubstanceMix::new();
+                for (substance, volume) in &eaten_volume {
+                    ate.add(substance, *volume);
+                }
+                w.ate = ate;
             }
         }
         gained
@@ -2856,29 +2927,73 @@ impl Runner {
                     // quantized material percept, so "this residue marks a place that pays off" emerges from the
                     // being's own correlation (Principles 8, 9). Inert where the world declares no material
                     // percepts (an empty vector yields no observation), so an opted-out run is byte-identical.
-                    let material = emb.material_percepts.perceive(emb.material.cell(c));
-                    for (k, obs) in reward_observations(
-                        reward,
-                        &material,
-                        plasticity,
-                        &reward_learn,
-                        MATERIAL_FEATURE_CHANNEL_BASE,
-                    )
-                    .into_iter()
-                    .enumerate()
-                    {
-                        env_inputs.push(TickInput {
-                            mind: w.id,
-                            ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
-                            stim: Stimulus::Observe {
-                                subject: obs.subject,
-                                attr: REWARD_ATTR,
-                                hyps: vec![REWARDS, NEUTRAL],
-                                toward: obs.toward,
-                                weight: obs.weight,
-                                from: w.id,
-                            },
-                        });
+                    // Gated on the place-side switch (TRUE by default so the keystone's behaviour is unchanged);
+                    // a world sets it false to run the eaten-side nutrition credit below in isolation.
+                    if emb.place_reward_learning {
+                        let material = emb.material_percepts.perceive(emb.material.cell(c));
+                        for (k, obs) in reward_observations(
+                            reward,
+                            &material,
+                            plasticity,
+                            &reward_learn,
+                            MATERIAL_FEATURE_CHANNEL_BASE,
+                        )
+                        .into_iter()
+                        .enumerate()
+                        {
+                            env_inputs.push(TickInput {
+                                mind: w.id,
+                                ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                stim: Stimulus::Observe {
+                                    subject: obs.subject,
+                                    attr: REWARD_ATTR,
+                                    hyps: vec![REWARDS, NEUTRAL],
+                                    toward: obs.toward,
+                                    weight: obs.weight,
+                                    from: w.id,
+                                },
+                            });
+                        }
+                    }
+                    // NUTRITION reward credit (social-learning arc, piece 1): the being re-earns "this food
+                    // nourishes me" from its OWN felt reward, feature-keyed on the composition of what it ATE
+                    // this tick rather than the ground it stands on. Where the trace credit above reads the cell
+                    // underfoot (learning a PLACE is marked), this reads `w.ate` (learning a FOOD nourishes), so
+                    // a being standing on inert matter it did not eat forms no reward belief about that matter,
+                    // and a being that ate a food learns it wherever the bite came from (ground or carried).
+                    // Perceived through the SAME material-percept registry and keyed under the SAME
+                    // MATERIAL_FEATURE_CHANNEL_BASE band as the ground-side trace credit, so the eaten-side and
+                    // ground-side evidence commit one "this signature rewards" belief the shared attraction
+                    // gradient then reads; the disjoint ordinal band keeps the two tick inputs from aliasing on
+                    // the mind-then-ordinal sort. Nothing is handed: the sign is the reserve rising, the subject
+                    // a raw quantized material signature, so "this food nourishes me" emerges from the being's
+                    // own correlation (Principles 8, 9). Gated on the opt-in `nutrition_learning`; off (the
+                    // default) `w.ate` is never read, so an opted-out run is byte-identical.
+                    if emb.nutrition_learning && !w.ate.is_empty() {
+                        let eaten = emb.material_percepts.perceive(Some(&w.ate));
+                        for (k, obs) in reward_observations(
+                            reward,
+                            &eaten,
+                            plasticity,
+                            &reward_learn,
+                            MATERIAL_FEATURE_CHANNEL_BASE,
+                        )
+                        .into_iter()
+                        .enumerate()
+                        {
+                            env_inputs.push(TickInput {
+                                mind: w.id,
+                                ordinal: NUTRITION_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                stim: Stimulus::Observe {
+                                    subject: obs.subject,
+                                    attr: REWARD_ATTR,
+                                    hyps: vec![REWARDS, NEUTRAL],
+                                    toward: obs.toward,
+                                    weight: obs.weight,
+                                    from: w.id,
+                                },
+                            });
+                        }
                     }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
                     // prediction of its last-enacted action against the reward it felt, and remember the
@@ -5961,6 +6076,215 @@ values = [
             run(Fixed::ZERO),
             Some(REWARDS),
             "a founder-zero being never enacts, so it never eats and re-earns no material reward belief"
+        );
+    }
+
+    #[test]
+    fn a_being_learns_which_food_nourishes_from_what_it_ate_not_the_ground_it_stood_on() {
+        // Social-learning arc, piece 1 (NUTRITION learning, the run-path proof): a being re-earns "this food
+        // nourishes me" by correlating the OPAQUE material signature of what it ATE with its OWN felt reward,
+        // through the same associative loop the harm learner runs over a ground-feature, keyed on a material
+        // feature subject on the disjoint REWARD_ATTR. It is the eaten-side sibling of the keystone's
+        // ground-side trace credit: where that learns a PLACE is marked, this learns a FOOD nourishes. The
+        // place-side credit is OFF here so the only material learning is the eaten-side one under test, which
+        // lets the test isolate the distinguishing claim: the being eats a bounded oilseed ration while
+        // standing on inert granite it never eats (granite backs no reserve, so geophage skips it), and it
+        // re-earns a reward belief about the OILSEED IT ATE and NONE about the GRANITE IT STOOD ON. Proven
+        // three ways, mirroring the trace proof above: a primed nutrition learner forms the food belief and
+        // not the ground belief (the eaten-keying); an opted-out being (nutrition off) forms none (the
+        // byte-neutral opt-in); a founder-zero being never enacts geophage, never eats, and forms none (the
+        // emergence falsifier). Nothing is handed: the sign is the reserve rising as it eats, the subject a
+        // raw quantized signature of what it ate, so "this food nourishes me" emerges from felt reward.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        // The being can sense BOTH the oilseed it eats and the granite it stands on: two declared per-substance
+        // material channels (channel 0 = oilseed, channel 1 = granite, in registry order). The eaten-side
+        // credit must learn channel 0 (the food) and never channel 1 (the inert ground it never ate).
+        let run = |exploration: Fixed, nutrition_on: bool| -> (bool, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&[
+                "oilseed", "granite",
+            ]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            // Arm the eaten-side nutrition credit under test, and turn the place-side (trace) credit OFF so the
+            // only material learning is the one keyed on what the being ATE (isolating the eaten-keying from
+            // the ground-keying the keystone built).
+            emb.set_nutrition_learning(nutrition_on);
+            emb.set_place_reward_learning(false);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The bounded oilseed RATION the being eats (the C2 convention: a per-tick ration below one
+                    // granularity step keeps the eaten volume in bucket 0, so the reward evidence accumulates on
+                    // one stable subject and commits), beside an inert GRANITE the being stands on but never
+                    // eats (granite backs no reserve, so geophage skips it while it eats the oilseed).
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "granite", Fixed::ONE);
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            // Whether any bucket on a material channel committed a REWARDS belief (robust to the exact eaten
+            // amount): channel 0 is the oilseed the being ate, channel 1 the granite it stood on.
+            let learned = |channel: u16| -> bool {
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => (0i64..=8).any(|bucket| {
+                        m.belief(
+                            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE + channel, bucket),
+                            REWARD_ATTR,
+                            &bp,
+                        ) == Some(REWARDS)
+                    }),
+                    None => false,
+                }
+            };
+            (learned(0), learned(1))
+        };
+
+        // Primed and nutrition-armed: the being enacts geophage, eats the oilseed ration, feels its reserve
+        // rise, and re-earns "the food I ate (oilseed) nourishes me" from its own felt reward, and re-earns
+        // NOTHING about the granite it stood on but never ate. This is the eaten-keying, the distinguishing
+        // claim of nutrition learning over the ground-keyed trace.
+        assert_eq!(
+            run(Fixed::ONE, true),
+            (true, false),
+            "a primed nutrition learner re-earns the reward belief about the food it ATE (oilseed) and none \
+             about the inert granite it merely stood on"
+        );
+        // Byte-neutral opt-in falsifier: with nutrition learning off (and the place credit off) the being eats
+        // the same oilseed but re-earns no material reward belief, so the eaten-side credit is the sole path.
+        assert!(
+            !run(Fixed::ONE, false).0,
+            "with nutrition learning off the being eats but re-earns no food belief (the opt-in falsifier)"
+        );
+        // Emergence falsifier: a founder-zero being never enacts geophage, so it never eats, no reserve rises,
+        // and no nutrition belief forms however long the food lies underfoot.
+        assert!(
+            !run(Fixed::ZERO, true).0,
+            "a founder-zero being never enacts geophage, so it never eats and re-earns no nutrition belief"
         );
     }
 

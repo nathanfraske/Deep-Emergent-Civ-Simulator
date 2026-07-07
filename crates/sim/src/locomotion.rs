@@ -425,6 +425,16 @@ pub struct Walker {
     /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
     /// source the reward-credit pass reads to record what the being just did.
     pub decided_affordance: Option<AffordanceId>,
+    /// The matter the being INGESTED this tick, the perceived composition of what it ate (social-learning
+    /// arc, piece 1, nutrition learning): the per-substance volume [`crate::runner::Embodiment::geophage`]
+    /// took into the being this tick, keyed by material-floor substance id. EMPTY on a tick it ate nothing.
+    /// Transient like [`decided_affordance`](Walker::decided_affordance): cleared at the top of the
+    /// embodiment step and re-derived by the bite, NEVER folded into `state_hash` (its only reach into canon
+    /// is the reward belief the nutrition credit re-earns from it, which folds through the mind, and only
+    /// when nutrition learning is armed). It is the eaten-side sibling of the ground-side material percept:
+    /// where the trace credit reads the composition of the cell UNDERFOOT, this reads the composition of
+    /// what was EATEN, so a being learns which foods nourish it rather than which place it stood on.
+    pub ate: SubstanceMix,
     /// The candidate action the being PROPOSES this tick, sampled from its binding graph by the discovery
     /// loop (ideation arc, piece 2, slice 2c). `None` unless the runner arms the discovery loop and the world
     /// installs the affordance-percept registry, so it stays `None` and folds nothing by default (opt-in,
@@ -490,6 +500,7 @@ impl Walker {
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
             decided_affordance: None,
+            ate: SubstanceMix::new(),
             proposed_action: None,
             exploration: Fixed::ZERO,
             surprise: Fixed::ZERO,
@@ -815,6 +826,11 @@ pub fn step_with_field_dirs<T: Terrain>(
         if !w.alive {
             continue;
         }
+        // Clear the per-tick INGESTED-matter scratch (social-learning arc, nutrition learning): a being
+        // that eats nothing this tick carries an empty `ate`, so the nutrition credit reads a clean slate
+        // and a stale bite from an earlier tick never re-earns a belief. The bite below refills it. Not
+        // folded into `state_hash` (transient scratch, like `decided_affordance`), so this is byte-neutral.
+        w.ate = SubstanceMix::new();
         // Snapshot the reserves at the START of the tick, so this tick's interoceptive delta
         // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes, the raw
         // signal both experiential learners read after metabolism. The harm learner (harm-learning arc
