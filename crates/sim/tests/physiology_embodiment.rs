@@ -1015,6 +1015,7 @@ values = [
     // A tool with a tiny contact area (a sharp point), of the given substance.
     let tool = |substance: &str| WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
         substance: substance.to_string(),
     };
     // A large bare working area, so the bare being cannot raise its pressure over granite's fracture
@@ -1178,6 +1179,7 @@ values = [
     let ration = Fixed::from_int(1000);
     let tool = || WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
         substance: "flint".to_string(),
     };
     let bare_area = Fixed::from_int(1000);

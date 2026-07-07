@@ -1892,6 +1892,7 @@ impl Embodiment {
             }
             let candidate = WieldedTool {
                 contact_area: area,
+                volume: params.tool_volume,
                 substance: s.clone(),
             };
             let cap = tool_capability(&candidate, reg, refs, caps, FunctionLawRegistry::ID_PIERCE);

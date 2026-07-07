@@ -460,17 +460,36 @@ pub struct WieldedTool {
     /// The contact area (m^2) the tool's working surface presses over, its intrinsic geometry: a smaller
     /// area concentrates the being's force into a higher pressure.
     pub contact_area: Fixed,
+    /// The VOLUME of matter the tool retains (m^3), the extensive quantity the registry's intensive axes
+    /// cannot supply, set when the tool is shaped from the stock it consumed. It makes the tool's MASS
+    /// recoverable ([`WieldedTool::mass`], `mat.density` times this volume, the extensive datum an impact or a
+    /// swing reads) and is the stock a wear step decrements and a re-work reshapes, so a tool that loses matter
+    /// grows blunt and eventually spends out. Without it the struct's own claim that mass is derived is empty.
+    pub volume: Fixed,
     /// The substance the tool is made of; its hardness (the pressure it sustains before it blunts) and its
     /// other properties are read from the [`PhysicsRegistry`] by this id.
     pub substance: String,
 }
 
 impl WieldedTool {
-    /// Fold the tool into a hash, its geometry then its substance id, in canonical order (the material fold
-    /// discipline). Called by the runner's per-walker `state_hash` fold when a being wields a tool; a being
-    /// with no tool folds nothing, so the wielded slot is opt-in and hash-neutral by default.
+    /// The tool's mass (kg): its substance's `mat.density` (an intensive axis in the registry) times its
+    /// retained [`WieldedTool::volume`] (the extensive quantity the registry cannot supply), the datum a swing
+    /// or an impact reads. Zero when the substance declares no density (the absence convention). Derived, never
+    /// stored (Principle 11).
+    pub fn mass(&self, reg: &PhysicsRegistry) -> Fixed {
+        let density = reg
+            .substance(&self.substance)
+            .and_then(|s| s.vector.get("mat.density").copied())
+            .unwrap_or(Fixed::ZERO);
+        density.mul(self.volume)
+    }
+
+    /// Fold the tool into a hash, its geometry, its retained volume, then its substance id, in canonical order
+    /// (the material fold discipline). Called by the runner's per-walker `state_hash` fold when a being wields
+    /// a tool; a being with no tool folds nothing, so the wielded slot is opt-in and hash-neutral by default.
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_fixed(self.contact_area);
+        h.write_fixed(self.volume);
         for b in self.substance.as_bytes() {
             h.write_u32(*b as u32);
         }
@@ -999,6 +1018,28 @@ values = [
             m.set(s, Fixed::from_int(*v));
         }
         m
+    }
+
+    #[test]
+    fn a_wielded_tools_mass_is_its_substance_density_times_its_retained_volume() {
+        // The tool as matter (the made-world arc, root R2): its mass is recoverable now that it retains its
+        // VOLUME (the extensive quantity the registry's intensive density cannot supply), density times volume,
+        // derived not stored. This is the datum a swing or an impact reads, and the stock a wear step decrements.
+        let reg = floor();
+        let tool = WieldedTool {
+            contact_area: Fixed::from_ratio(1, 1000),
+            volume: Fixed::from_int(2),
+            substance: "granite".to_string(),
+        };
+        // granite density 2700 times retained volume 2 is 5400 kg.
+        assert_eq!(tool.mass(&reg), Fixed::from_int(5400));
+        // A substance the registry does not carry (no density) reads zero mass, the absence convention.
+        let void_tool = WieldedTool {
+            contact_area: Fixed::from_ratio(1, 1000),
+            volume: Fixed::from_int(2),
+            substance: "nonexistent".to_string(),
+        };
+        assert_eq!(void_tool.mass(&reg), Fixed::ZERO);
     }
 
     #[test]

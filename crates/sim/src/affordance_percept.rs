@@ -387,6 +387,7 @@ values = [
     fn tool(substance: &str, contact_area: Fixed) -> WieldedTool {
         WieldedTool {
             contact_area,
+            volume: Fixed::ONE,
             substance: substance.to_string(),
         }
     }
