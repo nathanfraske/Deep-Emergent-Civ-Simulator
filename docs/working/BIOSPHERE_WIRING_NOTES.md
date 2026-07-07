@@ -44,3 +44,40 @@ authored universal decay".
 Reserved-value and steering discipline apply throughout: never fabricate a rate, surface it with basis;
 keep each mechanism byte-neutral opt-in until the flip; let the outcome emerge from generated life or
 conditions, never a coded category.
+
+---
+
+## THE FLIP NOTE (how to turn the biosphere seams on), updated 2026-07-07
+
+Both landed seams are byte-neutral opt-in and stay off on the canonical run (`run_world` `a465919e`). Each
+is one setter on the `Runner`, so a world flips it on when its worldgen is ready, with no engine default
+changed. The flips:
+
+**Decomposition as emergence (directive 3, `crates/sim/src/decompose.rs`).** The matter cycle no longer
+decays all warm matter unconditionally; the rate a cell realises is a per-cell ACTIVITY the world derives
+from decomposer life and conditions. To flip it on: arm the matter cycle (`runner.set_matter_cycle(calib)`)
+AND a decomposer registry (`runner.set_decomposer(DecomposerDriverRegistry)`), choosing the driver rows and
+the `CombineMode` the world means (Life-only for life-driven decay, a Conditions row for the abiotic proxy,
+both under `All` for life gated by conditions). The Life kernel reads a per-cell decomposer-biomass stock
+(`runner.set_decomposer_stock(...)`), hand-seeded today and filled from a generated decomposer species once
+that lands. Unarmed, the matter cycle keeps its old unconditional rate; with no matter cycle at all, nothing
+decays. Reserved values (moisture saturation, oxygen reference, warmth span, biomass reference) are surfaced
+with basis in `calibration/reserved.toml`, owner-set at the flip.
+
+**Organisms as usable material stuff (directive 2, first slice, `crates/sim/src/material.rs`
+`TissueField`).** A death can leave the being's body as located matter, a composition vector derived by a
+development-weighted fold over its own body plan (`physiology::whole_body_composition_vector`), never a
+minted substance or a species-to-substance map. To flip it on: `runner.set_corpse_matter(true)`. A death
+then deposits the corpse into the embodiment's tissue field where it fell, and the extraction contest reads
+its fracture hardness through the same axis as rock (a forager can work it). Off by default, so a death just
+retires the body. Reserved as data awaiting owner sign-off: the tissue density, ash fraction, and
+decomposition barrier on each organ/covering/weapon kind in `crates/sim/src/anatomy.rs` (today's dev
+fixtures carry only what the mechanism proof needs, so a corpse carries what its body declares and no more),
+and the corpse volume derivation (the body-size trait now, the physical mass-over-density once tissue
+density lands). Follow-on slices route cutting, the matter cycle, and eating (edibility reads a substance-id
+table, so eating tissue routes through the composition vector) onto the tissue field, and fill it from the
+generated biosphere rather than a death alone (task 21).
+
+The two seams COMPOSE: a corpse left by directive 2 is exactly the organic matter directive 3 decomposes,
+and a generated decomposer species is both the Life kernel's biomass source and an organism made of usable
+material stuff, so the biosphere's death, matter, and decay close one loop once worldgen fills the fields.

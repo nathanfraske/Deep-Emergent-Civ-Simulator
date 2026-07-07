@@ -952,6 +952,153 @@ impl SoilNutrientField {
     }
 }
 
+/// A TISSUE PARCEL: a quantity of an organism's own MATTER, deposited where it fell, carried as a raw
+/// COMPOSITION VECTOR (its value on each biology and mechanical floor axis, keyed by axis id) rather than a
+/// registered [`civsim_physics::Substance`] id. This is how a generated organism becomes located, usable
+/// matter without minting a per-species substance or authoring a species-to-substance map (Principle 8): the
+/// parcel's physics IS its own body's composition, derived by a development-weighted fold over its body plan
+/// ([`crate::physiology::whole_body_composition_vector`]), and every consumer reads a named axis off the
+/// vector exactly as it reads one off a substance, with the same absence-is-zero convention. The composition
+/// shares the string-keyed sorted-walk shape of [`crate::anatomy::TissueComposition`] and
+/// [`civsim_physics::Substance`]'s `vector`, so a consumer that reads `mat.fracture_strength` or
+/// `bio.decomposition_barrier` off a substance reads it off a parcel unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TissueParcel {
+    /// The located volume of this matter.
+    pub volume: Fixed,
+    /// The parcel's value on each floor axis it carries, keyed by axis id (an absent axis is zero).
+    pub composition: BTreeMap<String, Fixed>,
+}
+
+impl TissueParcel {
+    /// The parcel's value on a named floor axis; an axis it does not carry reads zero (the absence
+    /// convention the material substrate uses throughout).
+    pub fn axis(&self, id: &str) -> Fixed {
+        self.composition.get(id).copied().unwrap_or(Fixed::ZERO)
+    }
+}
+
+/// A parcel's CONTENT IDENTITY: its composition as sorted `(axis, value)` pairs. Two parcels share a key
+/// exactly when their compositions are byte-identical, so the key IS the content (collision-free), never a
+/// hash of it. Derived from an organism's own body, never authored, so two byte-identical corpses accumulate
+/// and any difference stays distinct.
+type TissueKey = Vec<(String, Fixed)>;
+
+/// The per-cell ORGANISM-TISSUE field: the located matter a dead organism leaves, keyed by [`Coord3`] then by
+/// content identity, with the accumulated volume as the value. A sibling of [`SoilNutrientField`] and
+/// [`crate::decompose::DecomposerStockField`] with the same empty-default-folds-nothing discipline, so an
+/// unarmed or unseeded field folds no bytes into `state_hash` and a scenario with no corpse matter is
+/// byte-identical. Reads (fracture hardness, per-axis presence) walk the parcels; the consumers
+/// (extraction, cutting, the matter cycle) union this with the located substance mixture, so an organism's
+/// matter is worked and rots by the SAME mechanisms and the SAME axes as any other matter.
+#[derive(Clone, Debug, Default)]
+pub struct TissueField {
+    cells: BTreeMap<Coord3, BTreeMap<TissueKey, Fixed>>,
+}
+
+impl TissueField {
+    /// A field holding no tissue anywhere.
+    pub fn new() -> TissueField {
+        TissueField::default()
+    }
+
+    /// Whether no tissue has been deposited anywhere (the opt-out state a scenario with no corpse matter
+    /// stays in, so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Deposit a parcel of an organism's matter at a cell: a non-positive volume is a no-op (no empty entry
+    /// is created), and a deposit whose composition is byte-identical to one already present accumulates its
+    /// volume onto that parcel (content identity).
+    pub fn deposit(&mut self, cell: Coord3, composition: BTreeMap<String, Fixed>, volume: Fixed) {
+        if volume <= Fixed::ZERO {
+            return;
+        }
+        // A BTreeMap iterates in sorted key order, so the collected pairs are canonical and the key is stable.
+        let key: TissueKey = composition.into_iter().collect();
+        let entry = self
+            .cells
+            .entry(cell)
+            .or_default()
+            .entry(key)
+            .or_insert(Fixed::ZERO);
+        *entry = entry.saturating_add(volume);
+    }
+
+    /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
+    /// yields nothing.
+    pub fn parcels(&self, cell: Coord3) -> Vec<TissueParcel> {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.iter()
+                    .map(|(key, &volume)| TissueParcel {
+                        volume,
+                        composition: key.iter().cloned().collect(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every cell holding tissue, in canonical [`Coord3`] order (for a reader or a consumer that walks the
+    /// deposited matter). An empty field yields nothing.
+    pub fn cells(&self) -> impl Iterator<Item = Coord3> + '_ {
+        self.cells.keys().copied()
+    }
+
+    /// The total tissue volume at a cell, summed over its parcels. A cell with no tissue reads zero.
+    /// Saturating, so an over-deposited cell caps rather than wrapping.
+    pub fn volume_at(&self, cell: Coord3) -> Fixed {
+        self.cells
+            .get(&cell)
+            .map(|m| m.values().fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v)))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The fracture hardness a being must overcome to work the tissue at a cell: the greatest
+    /// `mat.fracture_strength` any parcel there carries (an absent axis reads zero). A cell with no tissue
+    /// reads zero, so it contributes nothing to a consumer's `.max(...)` union with the located substance
+    /// mixture, and the run is byte-identical where no corpse lies.
+    pub fn fracture_hardness(&self, cell: Coord3) -> Fixed {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.keys().fold(Fixed::ZERO, |acc, key| {
+                    let strength = key
+                        .iter()
+                        .find(|(axis, _)| axis == "mat.fracture_strength")
+                        .map(|(_, v)| *v)
+                        .unwrap_or(Fixed::ZERO);
+                    acc.max(strength)
+                })
+            })
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Fold the tissue field into a hash in canonical (cell, composition pairs, volume) order, beside
+    /// [`SoilNutrientField::hash_into`]. An empty field folds nothing, so an opted-out run is unchanged. The
+    /// `BTreeMap`s walk in canonical key order (the `Coord3` then the sorted composition), so the fold is
+    /// reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (cell, parcels) in &self.cells {
+            for (key, volume) in parcels {
+                h.write_i64(cell.x as i64);
+                h.write_i64(cell.y as i64);
+                h.write_i64(cell.z as i64);
+                for (axis, value) in key {
+                    for b in axis.as_bytes() {
+                        h.write_u32(*b as u32);
+                    }
+                    h.write_fixed(*value);
+                }
+                h.write_fixed(*volume);
+            }
+        }
+    }
+}
+
 /// One horizontal stratum of a ground profile: a substance filling every cell in an inclusive z-band
 /// at a fixed volume. The membership is data (a substance id and a z-band), so a world's stratigraphy
 /// is data-defined, never a `Rock`/`Soil`/`Ore` enum (Principle 8 and 11): a new stratum is a data
@@ -1035,6 +1182,54 @@ impl GroundProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tissue_field_accumulates_by_content_and_folds_order_free() {
+        let cell = Coord3::ground(2, 3);
+        let mut field = TissueField::new();
+        assert!(field.is_empty());
+        // Two byte-identical compositions accumulate onto one parcel; a different one stays distinct.
+        let soft: BTreeMap<String, Fixed> = [
+            ("mat.fracture_strength".to_string(), Fixed::from_int(3)),
+            ("bio.energy_density".to_string(), Fixed::from_int(5)),
+        ]
+        .into_iter()
+        .collect();
+        let hard: BTreeMap<String, Fixed> =
+            [("mat.fracture_strength".to_string(), Fixed::from_int(30))]
+                .into_iter()
+                .collect();
+        field.deposit(cell, soft.clone(), Fixed::from_int(2));
+        field.deposit(cell, soft.clone(), Fixed::from_int(1)); // same content, accumulates
+        field.deposit(cell, hard.clone(), Fixed::from_int(4)); // distinct content, new parcel
+        field.deposit(cell, soft.clone(), Fixed::ZERO); // non-positive, a no-op
+        let parcels = field.parcels(cell);
+        assert_eq!(parcels.len(), 2, "two distinct compositions, the identical ones merged");
+        assert_eq!(
+            field.volume_at(cell),
+            Fixed::from_int(7),
+            "2 + 1 (merged) + 4 = 7 total volume"
+        );
+        // The fracture hardness a being must overcome is the greatest fracture strength present.
+        assert_eq!(
+            field.fracture_hardness(cell),
+            Fixed::from_int(30),
+            "the hardest parcel sets the fracture gate"
+        );
+        // A cell with no tissue reads zero, so it adds nothing to a consumer's max-union.
+        assert_eq!(field.fracture_hardness(Coord3::ground(0, 0)), Fixed::ZERO);
+
+        // The hash is order-free: depositing the same parcels in a different order folds identically.
+        let mut other = TissueField::new();
+        other.deposit(cell, hard, Fixed::from_int(4));
+        other.deposit(cell, soft.clone(), Fixed::from_int(1));
+        other.deposit(cell, soft, Fixed::from_int(2));
+        let mut h1 = StateHasher::new();
+        field.hash_into(&mut h1);
+        let mut h2 = StateHasher::new();
+        other.hash_into(&mut h2);
+        assert_eq!(h1.finish(), h2.finish(), "deposit order does not change the fold");
+    }
 
     /// A minimal mechanical floor: the two axes the material layer reads, and three substances that
     /// exercise the derivation (a hard dense rock, a soft light soil, and a fuel with no hardness axis

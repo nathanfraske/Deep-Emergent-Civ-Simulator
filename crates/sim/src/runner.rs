@@ -107,8 +107,8 @@ use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix, WearParams,
-    WieldedTool,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix, TissueField,
+    WearParams, WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
@@ -117,7 +117,7 @@ use rayon::prelude::*;
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
-    derive_exertion_coupling, MetabolicAnchors,
+    derive_exertion_coupling, whole_body_composition_vector, MetabolicAnchors,
 };
 use crate::planning::plan_chain;
 use crate::scenario::ScenarioResolution;
@@ -1101,6 +1101,14 @@ pub struct Embodiment {
     /// masses) + this total` is invariant. Empty by default, folded into `state_hash` only when non-empty, so
     /// a scenario with no matter cycle armed stays byte-identical.
     soil: SoilNutrientField,
+    /// The per-cell ORGANISM-TISSUE field (biosphere directive 2, organisms as usable material stuff): the
+    /// located matter a dead organism leaves, a composition vector derived from its own body plan rather than
+    /// a minted substance or an authored species-to-substance map (Principle 8). Empty by default and folded
+    /// into `state_hash` only when non-empty, so a scenario that deposits no corpse matter stays byte-
+    /// identical. Populated only by the opt-in corpse-matter death hook; the consumers (extraction here,
+    /// cutting and the matter cycle in later slices) union it with the located substance mixture, so a corpse
+    /// is worked and rots by the SAME mechanisms and axes as any other matter.
+    tissue: TissueField,
 }
 
 impl Embodiment {
@@ -1169,6 +1177,7 @@ impl Embodiment {
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
             soil: SoilNutrientField::new(),
+            tissue: TissueField::new(),
         }
     }
 
@@ -1410,6 +1419,18 @@ impl Embodiment {
     /// fertility read and the reader.
     pub fn soil(&self) -> &SoilNutrientField {
         &self.soil
+    }
+
+    /// The per-cell organism-tissue field (biosphere directive 2): the located matter dead organisms leave,
+    /// for the consumers (extraction, and cutting and the matter cycle in later slices) and the reader.
+    pub fn tissue(&self) -> &TissueField {
+        &self.tissue
+    }
+
+    /// Replace the organism-tissue field, the seam a test or worldgen uses to place corpse matter directly
+    /// (the death hook is the run-path path). Opt-in: an unset field stays empty and folds no bytes.
+    pub fn set_tissue(&mut self, tissue: TissueField) {
+        self.tissue = tissue;
     }
 
     /// The total mass the matter cycle has decomposed into the soil store (material-substrate arc, cascade
@@ -1813,7 +1834,14 @@ impl Embodiment {
             }
             None => (params.working_area, None),
         };
-        let fracture = self.material.fracture_hardness(coord, reg);
+        // The fracture-gating hardness is the greater of the located substance mixture's and any organism
+        // tissue lying at the cell (biosphere directive 2), so a being working a spot must clear the hardest
+        // matter there, be it rock or a carcass, read by the SAME contest through the SAME axis. An empty
+        // tissue field reads zero, so a cell with no corpse is byte-identical to before.
+        let fracture = self
+            .material
+            .fracture_hardness(coord, reg)
+            .max(self.tissue.fracture_hardness(coord));
         // The fracture gate: the being's contact pressure must clear the cell's fracture-gating hardness to
         // break any matter loose. A cell with no fracture resistance (loose soil, void) reads zero and any
         // positive pressure breaks it (Principle 8: physics, no bonded-versus-loose tag).
@@ -2600,6 +2628,14 @@ pub struct Runner {
     /// by a test in this slice; the biosphere wiring that fills it from a generated decomposer species is
     /// the deferred follow-on (task 21).
     decomposer_stock: Option<DecomposerStockField>,
+    /// Whether a death leaves the being's body as located matter (biosphere directive 2, organisms as usable
+    /// material stuff). `false` by default, so a death retires the body and nothing is deposited and every
+    /// existing scenario is byte-identical; armed via [`Runner::set_corpse_matter`], the lifecycle
+    /// reconciliation then derives the dying being's own composition vector from its body plan and deposits it
+    /// into the embodiment's tissue field where it fell, so the corpse becomes forageable and (in later
+    /// slices) decomposable matter. World-design and narrative choice (does a death leave a corpse), reserved
+    /// for the owner; off the canonical path.
+    corpse_matter: bool,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -2665,6 +2701,7 @@ impl Runner {
             matter_cycle: None,
             decomposer: None,
             decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2711,6 +2748,7 @@ impl Runner {
             matter_cycle: None,
             decomposer: None,
             decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2770,6 +2808,7 @@ impl Runner {
             matter_cycle: None,
             decomposer: None,
             decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2852,6 +2891,7 @@ impl Runner {
             matter_cycle: None,
             decomposer: None,
             decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2925,6 +2965,15 @@ impl Runner {
     /// follow-on (task 21).
     pub fn set_decomposer_stock(&mut self, stock: DecomposerStockField) {
         self.decomposer_stock = Some(stock);
+    }
+
+    /// Arm corpse matter (biosphere directive 2): a death then leaves the being's body as located matter,
+    /// its composition vector derived from its own body plan and deposited into the embodiment's tissue field
+    /// where it fell. Opt-in and default off, so an unarmed runner retires a body and deposits nothing, and
+    /// every existing scenario is byte-identical. Whether a death leaves a corpse is the owner's world-design
+    /// choice; off the calibrated worldbuild path until worldgen wires the biosphere.
+    pub fn set_corpse_matter(&mut self, on: bool) {
+        self.corpse_matter = on;
     }
 
     /// The standing decomposer biomass for a substance at a cell, the Life-kernel input; zero when no stock
@@ -4784,6 +4833,33 @@ impl Runner {
             .map(|w| w.id)
             .filter(|id| !live_minds.contains(id))
             .collect();
+        // (2') Corpse matter (biosphere directive 2, organisms as usable material stuff): before a retired
+        // body leaves, if corpse matter is armed, deposit the being's OWN body as located tissue where it
+        // fell, the composition vector derived by a development-weighted fold over its individual body plan
+        // (`whole_body_composition_vector`), never a species-to-substance map. Read before `retire_body`
+        // removes the walker and its located-index entry. Off by default, so an unarmed runner deposits
+        // nothing and the run is byte-identical.
+        if self.corpse_matter {
+            let deposits: Vec<(Coord3, BTreeMap<String, Fixed>, Fixed)> = {
+                let emb = self.embodiment.as_ref().unwrap();
+                retire
+                    .iter()
+                    .filter_map(|&id| {
+                        let coord = self.index.coord_of(OccupantId::being(id))?;
+                        let walker = emb.walkers.iter().find(|w| w.id == id)?;
+                        let composition = whole_body_composition_vector(&walker.body, &emb.organs);
+                        // The corpse volume is the being's own body-size trait, so a bigger organism leaves
+                        // more matter; the physical volume (mass over the tissue density) is a follow-on once
+                        // the tissue density reserved data lands.
+                        Some((coord, composition, walker.body.body_mass))
+                    })
+                    .collect()
+            };
+            let emb = self.embodiment.as_mut().unwrap();
+            for (coord, composition, volume) in deposits {
+                emb.tissue.deposit(coord, composition, volume);
+            }
+        }
         for id in retire {
             self.retire_body(id);
         }
@@ -4985,6 +5061,14 @@ impl Runner {
             // run is byte-identical (the opt-in empty-default, the sibling of the fire field above).
             if !emb.soil.is_empty() {
                 emb.soil.hash_into(&mut h);
+            }
+            // The organism-tissue field (biosphere directive 2, organisms as usable material stuff): the
+            // located matter dead organisms leave, folded after the soil store in canonical (cell,
+            // composition, volume) order and only when non-empty, so a scenario that deposits no corpse
+            // matter folds no bytes and the run is byte-identical (the opt-in empty-default, the sibling of
+            // the soil store above).
+            if !emb.tissue.is_empty() {
+                emb.tissue.hash_into(&mut h);
             }
             // The standing decomposer-biomass field (decomposition-as-emergence, the Life kernel's input),
             // folded after the soil store in canonical (cell, substance, biomass) order and only when armed
