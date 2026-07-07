@@ -4026,8 +4026,12 @@ impl Runner {
                     // axis's direction slot, so a being that has learned some ground harms it senses a
                     // unit direction away from it. Only where the registry carries CONDITION.
                     let condition_reg = emb.homeo.axis(CONDITION).is_some();
+                    // DETERMINISTIC data-parallelism (arc 4): each being's percept directions are pure reads of
+                    // immutable shared state (the field, the being's mind, the resources and percepts) keyed by
+                    // w.id, drawing no RNG; collecting into a BTreeMap is order-free, so the result is
+                    // bit-identical at any thread count.
                     emb.walkers
-                        .iter()
+                        .par_iter()
                         .map(|w| {
                             let coord = w.coord();
                             let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
@@ -4071,9 +4075,11 @@ impl Runner {
         // to act, and selection wires that. Read before the mutable embodiment borrow, drawing no RNG.
         let field_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> =
             match self.embodiment.as_ref() {
+                // Parallel (arc 4): pure reads of body_temp and the thermal band, keyed by w.id, no RNG; the
+                // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 Some(emb) => emb
                     .walkers
-                    .iter()
+                    .par_iter()
                     .filter_map(|w| {
                         let bt = *self.body_temp.get(&w.id)?;
                         let band = emb.thermal.get(&w.id)?;
@@ -4110,8 +4116,11 @@ impl Runner {
                         .unwrap_or(Fixed::ONE);
                     let refs_ready =
                         emb.affordance_refs.is_some() && emb.material_registry.is_some();
+                    // Parallel (arc 4): each entry is a pure read of the being's mind, the matter underfoot,
+                    // and its afforded primitives, keyed by w.id and drawing no RNG; the filter_map collect
+                    // into a BTreeMap is order-free, so it is bit-identical at any thread count.
                     emb.walkers
-                        .iter()
+                        .par_iter()
                         .filter_map(|w| {
                             let mind = world.mind(w.id)?;
                             let candidates = if granular && refs_ready {
@@ -4160,9 +4169,12 @@ impl Runner {
             self.world.as_ref(),
             self.reward_learning,
         ) {
+            // Parallel (arc 4): each direction is a pure read of the being's reward belief and the material
+            // trace it senses, keyed by w.id and drawing no RNG; the filter_map collect into a BTreeMap is
+            // order-free, so it is bit-identical at any thread count.
             (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
                 .walkers
-                .iter()
+                .par_iter()
                 .filter_map(|w| {
                     let mind = world.mind(w.id)?;
                     let raw = attraction_gradient(
@@ -4220,8 +4232,12 @@ impl Runner {
                 // substrate, arc 2): the data-defined causal set, built once. A being with no relational belief
                 // never reaches the traversal, so this is inert on the current run path (byte-identical).
                 let reachable = builtin_reachable_relations();
+                // Parallel (arc 4): each being's proposal draws only from its OWN counter-keyed RNG
+                // (`DrawKey::entity(w.id, tick, HYPOTHESIZE).rng(seed)`, independent of iteration order and
+                // mutating no shared stream) and its deliberation is a pure ranked read; keyed by w.id, the
+                // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 emb.walkers
-                    .iter()
+                    .par_iter()
                     .filter_map(|w| {
                         let mind = world.mind(w.id)?;
                         let matter = emb.material.cell(w.coord());
@@ -4308,9 +4324,12 @@ impl Runner {
         let drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
             match self.embodiment.as_ref() {
                 Some(emb) => match &emb.physiology {
+                    // Parallel (arc 4): each drain is a pure read of the being's body plan and its live core
+                    // temperature, keyed by w.id and drawing no RNG; the map collect into a BTreeMap is
+                    // order-free, so it is bit-identical at any thread count.
                     Some(phys) => emb
                         .walkers
-                        .iter()
+                        .par_iter()
                         .map(|w| {
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
