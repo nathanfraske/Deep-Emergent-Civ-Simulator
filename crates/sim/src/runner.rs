@@ -4111,6 +4111,11 @@ impl Runner {
             // them after step_embodiment, so the scheduled and pinned orders publish identical cells and
             // inject identical env observations.
             let inputs = self.couple_conversation(world_inputs);
+            // Feed the graded reproductive-vigor coupling into the world before its tick, in the SAME place
+            // step_inner does (after couple_conversation, before world.tick), so an armed vigor coupling
+            // ticks the world with the identical vigor map on both entry points. A no-op when unarmed, so the
+            // scheduled and pinned orders stay bit-identical on every existing scenario.
+            self.couple_reproductive_vigor();
             if let Some(world) = self.world.as_mut() {
                 world.tick(&inputs);
             }
