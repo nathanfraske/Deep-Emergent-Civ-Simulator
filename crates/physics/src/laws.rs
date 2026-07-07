@@ -231,27 +231,6 @@ pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixe
     }
 }
 
-/// The inverse of [`contact_pressure`]: the contact area at which `force` produces exactly `pressure`,
-/// `area = force / (pressure * bridge)`. Used to DERIVE the finest edge a material can be worked to, the area
-/// at which the forming pressure reaches the material's own fracture strength (below that area the edge tip
-/// exceeds its fracture strength and crumbles away, above it the edge is needlessly blunt). A higher target
-/// pressure, a harder material's fracture strength, resolves to a smaller area, a finer edge; so an edge's
-/// fineness falls out of the worked material's strength and the forming force, never an authored constant. A
-/// non-positive target pressure, a material that fractures at any load and so holds no edge, routes to zero
-/// (the caller reads zero as "no viable edge"); a force overflow routes to zero likewise.
-pub fn edge_area_at(force: Fixed, pressure: Fixed) -> Fixed {
-    if pressure <= ZERO {
-        return ZERO;
-    }
-    // Stage force/pressure BEFORE dividing by the bridge, so the large pressure*bridge product is never
-    // formed (the fixed-point overflow-avoidance the mechanics laws use); the result is the same area.
-    let ratio = match force.checked_div(pressure) {
-        Some(r) => r,
-        None => return ZERO,
-    };
-    ratio.checked_div(C_PA).unwrap_or(ZERO)
-}
-
 /// Cut or penetration depth, capped at the artifact reach. Gated on the contact pressure
 /// exceeding the target hardness, then the delivered work over the specific cutting
 /// energy and swept area, staged so the energy-per-depth product is never formed before

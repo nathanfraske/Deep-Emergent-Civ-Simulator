@@ -1846,19 +1846,18 @@ impl Embodiment {
 
     /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter the
     /// being carries into a wielded tool, its EDGE and its MATERIAL both DERIVED from the worked stone's own
-    /// physics, never an authored constant. The finest edge a stone holds is the contact area at which the
-    /// being's forming pressure reaches that stone's own fracture strength ([`laws::edge_area_at`], the inverse
-    /// of [`laws::contact_pressure`]): below that area the tip exceeds its fracture strength and crumbles, above
-    /// it the edge is needlessly blunt. So a hard, tough stone (a high fracture strength) resolves to a fine
-    /// small edge and a soft or crumbly one to a blunt large edge (or none), the sharpness of the tool falling
-    /// out of the material and the force, not a reserved number. When the being carries more than one workable
-    /// stone it shapes the one that yields the BEST tool, the argmax of the resulting Pierce capability
-    /// ([`tool_capability`], the edge and the stone's own hardness), canonical id order breaking a tie, so the
-    /// material chosen is the fittest by physics rather than the first by id. Consumes the reserved tool volume
-    /// of that stone and replaces any prior tool. Reads only the carried substance ids and the beings' and
-    /// stones' own physics, no race, kind, role, or recipe (Principles 8, 9, 11). Returns true if a tool was
-    /// made. Opt-in: an embodiment with no crafting params, material registry, or physiology, or a being
-    /// carrying too little of any stone that holds an edge, makes nothing.
+    /// physics, never an authored constant. The tool's edge is the INTRINSIC finest working edge the stone's
+    /// microstructure holds (`mat.edge_length_scale`), a material property independent of the forming force, so
+    /// a fine-grained stone gives a fine edge whoever knaps it and the cut pressure at USE stays a real function
+    /// of the WIELDER's force (the earlier force-derived edge cancelled the maker's force and left cutting
+    /// force-insensitive; the intrinsic edge fixes that, R-EDGE-INTRINSIC). The contact area is that edge length
+    /// squared. When the being carries more than one workable stone it shapes the one that yields the BEST tool
+    /// in ITS hand, the argmax of the cutting power `min(contact_pressure(force, edge_area), hardness)` the tool
+    /// would deliver, canonical id order breaking a tie, so the material chosen is fittest by physics not first
+    /// by id. Consumes the reserved tool volume and replaces any prior tool. Reads only the carried substance
+    /// ids and the beings' and stones' own physics, no race, kind, role, or recipe (Principles 8, 9, 11).
+    /// Returns true if a tool was made. Opt-in: an embodiment with no crafting params, material registry, or
+    /// physiology, or a being carrying too little of any stone that holds an edge, makes nothing.
     pub fn craft_from_carried(&mut self, walker_id: StableId) -> bool {
         let Some(params) = self.craft else {
             return false;
@@ -1874,31 +1873,38 @@ impl Embodiment {
             return false;
         };
         let force = being_muscle_force(w, phys);
-        // The carried stone (with enough stock) that yields the best tool, derived. Its finest edge is the area
-        // at which the forming pressure reaches its fracture strength; used with the same force the wielded
-        // pressure equals that fracture strength (edge_area_at is the inverse of contact_pressure), capped at
-        // the stone's own hardness, so the tool DELIVERS `min(fracture, hardness)`. That is the fitness, read
-        // straight from the two axes: precision-safe (no tiny-area rounding cliff at the hard-material end) and
-        // exactly the tool's cutting power. The argmax, ties to lowest id (a strictly greater power replaces the
-        // incumbent, so the first-seen equal wins). A stone too crumbly to hold an edge (no positive fracture
-        // strength, so no positive area) is no tool stock and is skipped.
+        // The carried stone (with enough stock) that yields the best tool, derived. The tool's EDGE is an
+        // INTRINSIC property of the stone, the finest working edge its microstructure holds
+        // (`mat.edge_length_scale`), NOT a function of the forming force: a fine-grained stone holds a fine edge
+        // whoever knaps it, so the cut pressure at USE stays a real function of the WIELDER's current force
+        // rather than cancelling the maker's. The contact area is that edge length squared. The fitness is the
+        // cutting power the tool would deliver in THIS being's hand, the contact pressure its edge concentrates
+        // the being's force into ([`laws::contact_pressure`], the cap a fixed-point overflow guard), blunted to
+        // the stone's own hardness (a soft stone blunts before it bites): `min(pressure, hardness)`. The argmax,
+        // ties to lowest id (a strictly greater power replaces the incumbent, so the first-seen equal wins). A
+        // stone with no working edge (no positive edge-length scale, or one finer than the fixed-point grid
+        // resolves as an area) is no tool stock and is skipped.
         let mut best: Option<(Fixed, WieldedTool)> = None;
         for (s, &vol) in w.carried.substances() {
             if vol < params.tool_volume {
                 continue;
             }
             let sub = reg.substance(s);
-            let fracture = sub
-                .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+            let edge_length = sub
+                .and_then(|x| x.vector.get("mat.edge_length_scale").copied())
                 .unwrap_or(Fixed::ZERO);
+            if edge_length <= Fixed::ZERO {
+                continue; // a stone that holds no working edge is no tool stock
+            }
             let hardness = sub
                 .and_then(|x| x.vector.get("mat.indentation_hardness").copied())
                 .unwrap_or(Fixed::ZERO);
-            let area = laws::edge_area_at(force, fracture);
-            if area <= Fixed::ZERO {
-                continue; // crumbly stock holds no edge
-            }
-            let power = fracture.min(hardness);
+            let area = match edge_length.checked_mul(edge_length) {
+                Some(a) if a > Fixed::ZERO => a,
+                _ => continue, // the edge is finer than the fixed-point grid resolves as an area
+            };
+            let pressure = laws::contact_pressure(force, area, Fixed::MAX);
+            let power = pressure.min(hardness);
             if best.as_ref().is_none_or(|(bp, _)| power > *bp) {
                 best = Some((
                     power,

@@ -1828,6 +1828,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
 [[substance]]
 id = "granite"
 participates_in = []
@@ -1835,6 +1846,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "2700" },
   { axis = "mat.fracture_strength", value = "15" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
 ]
 "#;
 
@@ -1940,16 +1952,17 @@ values = [
 
 #[test]
 fn a_crafted_edge_is_derived_from_the_worked_stone_so_a_hard_stone_makes_a_sharper_tool() {
-    // The made-world arc, tool-use: the crafted edge is DERIVED from the worked stone's own fracture strength,
-    // not an authored constant. A hard stone (a high fracture strength) holds a finer edge (a smaller contact
-    // area) than a soft one under the same forming force, and a being carrying both shapes the fitter stone
-    // into its tool, the material chosen by physics rather than by id order.
+    // The made-world arc, tool-use: the crafted edge is the INTRINSIC finest working edge the stone's
+    // microstructure holds (mat.edge_length_scale), DERIVED from the material not an authored constant and not
+    // the crafter's force (so cutting stays a real function of the wielder's force, R-EDGE-INTRINSIC). A
+    // fine-grained hard obsidian holds a finer edge (a smaller contact area) than a coarse soft sandstone, and
+    // a being carrying both shapes the fitter stone into its tool, the material chosen by physics not by id.
     use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
-    // Two workable stones: a hard obsidian (fracture 5000) and a soft sandstone (fracture 50). The ids sort
-    // obsidian before sandstone, so the fitness pick is proven distinct from the id-order pick only if a case
-    // also carries them so that the LOWER-id one would lose on fitness (see below, where sandstone is softer).
+    // Two workable stones: a fine hard obsidian (edge 1e-4 m, hardness 6000) and a coarse soft sandstone (edge
+    // 1e-3 m, hardness 80). The ids sort obsidian first; the fitness pick is proven distinct from id order
+    // because obsidian also wins the derived cutting power.
     const FLOOR: &str = r#"
 [[axis]]
 id = "mat.density"
@@ -1984,6 +1997,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
 [[substance]]
 id = "obsidian"
 participates_in = []
@@ -1992,6 +2016,7 @@ values = [
   { axis = "mat.density", value = "2400" },
   { axis = "mat.indentation_hardness", value = "6000" },
   { axis = "mat.fracture_strength", value = "5000" },
+  { axis = "mat.edge_length_scale", value = "0.0001" },
 ]
 
 [[substance]]
@@ -2002,6 +2027,7 @@ values = [
   { axis = "mat.density", value = "2300" },
   { axis = "mat.indentation_hardness", value = "80" },
   { axis = "mat.fracture_strength", value = "50" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
 ]
 "#;
 
@@ -2132,6 +2158,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
 [[substance]]
 id = "granite"
 participates_in = []
@@ -2149,6 +2186,7 @@ values = [
   { axis = "mat.density", value = "2600" },
   { axis = "mat.indentation_hardness", value = "1000" },
   { axis = "mat.fracture_strength", value = "100" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
 ]
 "#;
 
