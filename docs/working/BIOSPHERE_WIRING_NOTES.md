@@ -8,7 +8,7 @@ not canon; fold each item into the arc's slices as they land.
 
 Build each biosphere mechanism byte-neutral opt-in (the standing discipline), then deliver a REAL, runnable
 wired world (a worldgen path or example composing the pre-dawn biosphere epoch, then the dawn, then play) that
-genuinely populates a generated ecology, while leaving the canonical `run_world` (`a465919e`) and crucible
+truly populates a generated ecology, while leaving the canonical `run_world` (`a465919e`) and crucible
 (`254bc17c`) hashes intact so nothing regresses. Leave an EASILY-ACCESSIBLE note on how to flip the wiring
 into the main/default world (the owner's words: "that's the easy part"), so the owner can take the deliberate
 re-baseline (a new canonical hash) when ready. Do not detonate the byte-neutral invariant unilaterally.
