@@ -281,13 +281,22 @@ pub fn mortality_implication_weight(kind: &TraceKindDef, clamp: Fixed) -> Fixed 
 /// faster through this one function rather than a per-race branch. A non-organic kind has no
 /// organic decay and reads full salience.
 ///
+/// The `decomposer_activity` argument, in `[0, 1]`, scales the decay rate by what the world at the
+/// trace's cell affords decomposition
+/// ([`crate::decompose::DecomposerDriverRegistry::activity_at`]): a trace above the thermal barrier
+/// persists where no decomposer life or favorable conditions act on it (activity zero) and fades faster
+/// where they do (activity one is the unconditional rate). A caller with no decomposer substrate passes
+/// one, reproducing the barrier-gated exponential unchanged.
+///
 /// `temperature` is an explicit argument; the `PlaceId -> (x, y) -> temperature` wiring that would
-/// read it from the trace's location in the running world is a named follow-on.
+/// read it from the trace's location in the running world is a named follow-on, and the same wiring
+/// supplies the `decomposer_activity` from the cell's registry.
 pub fn organic_salience(
     elapsed: Fixed,
     temperature: Fixed,
     kind: &TraceKindDef,
     race: &RaceBaseRates,
+    decomposer_activity: Fixed,
 ) -> Fixed {
     if kind.decay.kernel != TransformKernelId::Reaction {
         return Fixed::ONE;
@@ -302,8 +311,16 @@ pub fn organic_salience(
         // Below the barrier decomposition halts: a preserved remains keeps full salience.
         return Fixed::ONE;
     }
-    // Effective decomposition rate: the kind's rate scaled by the race's own decay multiplier.
-    let rate = match decomposition_rate.checked_mul(race.decay_multiplier) {
+    // Effective decomposition rate: the kind's rate scaled by the race's own decay multiplier and by the
+    // per-cell DECOMPOSER ACTIVITY ([`crate::decompose::DecomposerDriverRegistry::activity_at`], in
+    // `[0, 1]`), so a trace above the thermal barrier persists where no decomposer life or favorable
+    // conditions act on it and fades faster where they do. The caller passes one for the unconditional
+    // rate (the matter cycle's own default before a decomposer registry is armed), so this is byte-
+    // identical to the prior behaviour there.
+    let rate = match decomposition_rate
+        .checked_mul(race.decay_multiplier)
+        .and_then(|r| r.checked_mul(decomposer_activity))
+    {
         Some(r) => r,
         // An unrepresentably large rate is effectively instantaneous decay: nothing remains.
         None => return Fixed::ZERO,
@@ -528,11 +545,12 @@ mod tests {
             decay: TransformKind::reaction(Fixed::from_int(10), Fixed::from_ratio(1, 10)),
         };
         let elapsed = Fixed::from_int(20);
-        // Below the barrier (frozen): preserved, full salience.
-        let cold = organic_salience(elapsed, Fixed::from_int(0), &kind, race);
+        // Below the barrier (frozen): preserved, full salience. Full decomposer activity (one), so the
+        // gate under test is the thermal barrier alone.
+        let cold = organic_salience(elapsed, Fixed::from_int(0), &kind, race, Fixed::ONE);
         assert_eq!(cold, Fixed::ONE, "below the barrier a remains is preserved");
         // Above the barrier (warm): decomposed, salience strictly below full.
-        let warm = organic_salience(elapsed, Fixed::from_int(30), &kind, race);
+        let warm = organic_salience(elapsed, Fixed::from_int(30), &kind, race, Fixed::ONE);
         assert!(
             warm < Fixed::ONE,
             "above the barrier a remains decomposes ({warm:?})"
@@ -540,6 +558,31 @@ mod tests {
         assert!(
             warm > Fixed::ZERO,
             "some salience remains after finite decay"
+        );
+    }
+
+    #[test]
+    fn decomposer_activity_gates_organic_salience_above_the_thermal_barrier() {
+        // The decomposition-as-emergence seam: a trace warm enough to be thermally active is preserved
+        // where no decomposer life or favorable conditions act on it (activity zero), and fades where they
+        // do (activity one). A partial activity fades slower than full. The thermal barrier is untouched, so
+        // this is a modulation of the rate ABOVE the gate, never a second gate.
+        let reg = RaceBaseRateRegistry::dev_default();
+        let race = reg.get(crate::base_rates::DEV_LONGLIVED).unwrap();
+        let kind = corpse(); // barrier 0, so the warm temperature below is thermally active
+        let elapsed = Fixed::from_int(50);
+        let temp = Fixed::from_int(20);
+        let inert = organic_salience(elapsed, temp, &kind, race, Fixed::ZERO);
+        let partial = organic_salience(elapsed, temp, &kind, race, Fixed::from_ratio(1, 2));
+        let full = organic_salience(elapsed, temp, &kind, race, Fixed::ONE);
+        assert_eq!(
+            inert,
+            Fixed::ONE,
+            "a warm trace no decomposer acts on keeps full salience: decay is driven, not automatic"
+        );
+        assert!(
+            partial < inert && full < partial,
+            "more decomposer activity fades the trace faster ({inert:?} > {partial:?} > {full:?})"
         );
     }
 
@@ -565,9 +608,9 @@ mod tests {
         // barrier) while the combustion row is still frozen below its high barrier: the same kernel, opposite
         // outcomes, from the data alone.
         corpse.decay = decompose;
-        let d = organic_salience(elapsed, Fixed::from_int(300), &corpse, race);
+        let d = organic_salience(elapsed, Fixed::from_int(300), &corpse, race, Fixed::ONE);
         corpse.decay = combust;
-        let c = organic_salience(elapsed, Fixed::from_int(300), &corpse, race);
+        let c = organic_salience(elapsed, Fixed::from_int(300), &corpse, race, Fixed::ONE);
         assert!(
             d < Fixed::ONE,
             "the decomposition row proceeds at 300 K ({d:?})"
@@ -587,8 +630,8 @@ mod tests {
         let kind = corpse(); // barrier 0, so any positive temperature is thermally active
         let elapsed = Fixed::from_int(50);
         let temp = Fixed::from_int(20);
-        let s_fast = organic_salience(elapsed, temp, &kind, &fast);
-        let s_slow = organic_salience(elapsed, temp, &kind, &slow);
+        let s_fast = organic_salience(elapsed, temp, &kind, &fast, Fixed::ONE);
+        let s_slow = organic_salience(elapsed, temp, &kind, &slow, Fixed::ONE);
         assert!(
             s_fast < s_slow,
             "the higher decay multiplier leaves less salience ({s_fast:?} < {s_slow:?})"
@@ -607,7 +650,13 @@ mod tests {
             decay: TransformKind::static_kind(),
         };
         assert_eq!(
-            organic_salience(Fixed::from_int(1000), Fixed::from_int(50), &kind, race),
+            organic_salience(
+                Fixed::from_int(1000),
+                Fixed::from_int(50),
+                &kind,
+                race,
+                Fixed::ONE
+            ),
             Fixed::ONE,
             "a static kind is not organic and reads full salience"
         );

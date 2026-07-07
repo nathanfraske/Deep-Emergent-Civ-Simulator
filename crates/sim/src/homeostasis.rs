@@ -755,6 +755,61 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a tool-USING world (the made-world arc, tool-use, slice 1): move, ingest, and
+    /// CUT. Unlike every fixture above, CUT is capability-GATED (on SHEAR, the first non-piercing action kernel,
+    /// root R1) rather than unconditional, and the foraging body of [`AffordanceRegistry::dev_default`] reads no
+    /// SHEAR, so a BAREHANDED being in this world affords only move and ingest. A being WIELDING a keen-edged
+    /// tool of a material with a shear strength affords CUT as well, because the tool's own SHEAR capability
+    /// enters the afford derivation through [`AffordanceRegistry::tool_affordances`]. A cut is a shear-parting
+    /// action, so gating it on the SHEAR kernel (can this edge deliver a parting shear) is the correct physics,
+    /// retiring the earlier PIERCE (normal-penetration) proxy. So this is the first world where matter the being
+    /// HOLDS changes what it can DO: a sharp thing affords a cut the body alone cannot, by physics not a recipe
+    /// or an `IsAxe` tag (Principle 9).
+    pub fn dev_cutter() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: CUT,
+            name: "cut".to_string(),
+            requires: Some(FunctionLawRegistry::ID_SHEAR),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a tool-USING world that CRUSHES (the made-world arc, tool-use, Section G):
+    /// move, ingest, and CRUSH, the latter capability-gated on CRUSH (a compression-strong tool). A being
+    /// wielding a strong-faced tool affords a crush the barehanded body cannot, the compressive sibling of
+    /// [`AffordanceRegistry::dev_cutter`]. What the crush FAILS is the enact's compressive contest.
+    pub fn dev_crusher() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: CRUSH,
+            name: "crush".to_string(),
+            requires: Some(FunctionLawRegistry::ID_CRUSH),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
+    /// A DEVELOPMENT FIXTURE for a tool-USING world that STRIKES (the made-world arc, tool-use, Section G, the
+    /// mass payoff): move, ingest, and STRIKE, the latter capability-gated on IMPACT (a heavy tool's percussion
+    /// blow). A being wielding a MASSIVE tool affords a strike the barehanded body cannot, the percussion
+    /// sibling of [`AffordanceRegistry::dev_cutter`] and [`AffordanceRegistry::dev_crusher`]. What the blow
+    /// fractures is the enact's Griffith-energy contest.
+    pub fn dev_striker() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: POUND,
+            name: "pound".to_string(),
+            requires: Some(FunctionLawRegistry::ID_IMPACT),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -806,6 +861,30 @@ impl AffordanceRegistry {
             .map(|a| a.id)
             .collect()
     }
+
+    /// The affordances a WIELDED TOOL grants its holder, in canonical id order (the made-world arc, tool-use):
+    /// an affordance whose required capability law the tool reads (through `tool_capability`) at or above the
+    /// threshold, derived on the SAME capability dispatch a body part's affordance is. So a keen tool edge
+    /// affords CUT the way a keen body part affords STRIKE, by physics not an `IsAxe` tag (Principle 9), and a
+    /// tool EXTENDS the being's afforded set: matter the being holds affords a use. Only capability-GATED
+    /// affordances are tool-granted; an UNCONDITIONAL one (`requires: None`) is the body's already, so a tool
+    /// never re-grants ingest or grasp. The `tool_capability` closure reads the tool's own capability on a law
+    /// (the caller supplies it, since the tool's material physics lives in the physics registry:
+    /// [`crate::affordance_percept::tool_capability`]). A being with no tool contributes nothing (the caller
+    /// skips this), so an existing world folds no tool affordance and is byte-identical.
+    pub fn tool_affordances(
+        &self,
+        tool_capability: impl Fn(FunctionLawId) -> Fixed,
+    ) -> Vec<AffordanceId> {
+        self.affordances
+            .iter()
+            .filter(|a| match a.requires {
+                Some(law) => tool_capability(law) >= a.min_capability.max(MIN_CAP),
+                None => false,
+            })
+            .map(|a| a.id)
+            .collect()
+    }
 }
 
 /// The move affordance of the development fixture.
@@ -837,6 +916,32 @@ pub const RELEASE: AffordanceId = AffordanceId(8);
 /// only (material-substrate arc, cascade item 7, the overhead-deposit technique). The upward sibling of
 /// RELEASE: a being SHELTERS ITSELF with matter it chose to carry and place.
 pub const SHELTER: AffordanceId = AffordanceId(9);
+/// The cut affordance (the made-world arc, tool-use, slice 1): the FIRST tool-CONTRIBUTED affordance, granted
+/// by a WIELDED keen EDGE rather than by the body. It is capability-gated on SHEAR (a cut is a shear-parting
+/// action, root R1), which an ordinary foraging body does not read, so a barehanded forager does NOT afford
+/// it; a being wielding a keen-edged tool of a material with a shear strength DOES, because the tool's own
+/// Shear capability enters the afford derivation through [`AffordanceRegistry::tool_affordances`]. So matter
+/// the being holds EXTENDS what it can do: a sharp thing affords a cut the body alone cannot, derived by
+/// physics not an `IsAxe` tag (Principle 9). The id sits just past the ground-material alphabet (0 through 9),
+/// within the belief-subject packing bound.
+pub const CUT: AffordanceId = AffordanceId(10);
+
+/// The crush affordance (the made-world arc, tool-use, Section G): a tool-CONTRIBUTED affordance granted by a
+/// WIELDED tool of a compression-STRONG material, capability-gated on CRUSH (compressive failure, the second
+/// non-piercing action). Distinct from CUT: where a cut parts matter by shear (a keen edge of a shear-strong
+/// material), a crush fails matter in compression (a strong face), so a material weak in compression but tough
+/// in shear is crushed where it is not cut, and the two diverge on the target's own resistance axes, by
+/// physics not a tag. The id sits just past CUT, within the belief-subject packing bound.
+pub const CRUSH: AffordanceId = AffordanceId(11);
+
+/// The pound affordance (the made-world arc, tool-use, Section G, the mass payoff): a tool-CONTRIBUTED
+/// affordance granted by a WIELDED tool with enough MASS, capability-gated on IMPACT (a percussion blow's
+/// kinetic energy). Named POUND to avoid the body-weapon [`STRIKE`] (id 2); this is the TOOL percussion, a
+/// hammering blow. Distinct from the contact actions (cut/crush/pierce): those read only geometry and stress,
+/// so they cannot tell a heavy tool from a light one of the same shape; IMPACT reads the tool's mass, so a
+/// HEAVY tool affords a pound a light one does not, the payoff of carrying the tool's mass. The id sits just
+/// past CRUSH, within the belief-subject packing bound.
+pub const POUND: AffordanceId = AffordanceId(12);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
@@ -1005,6 +1110,63 @@ pub fn is_reward_tick(delta: Fixed, reward_noise_floor: Fixed) -> bool {
 mod tests {
     use super::*;
     use crate::anatomy::{Part, Temperament};
+
+    #[test]
+    fn a_wielded_tool_grants_a_capability_gated_affordance_and_never_an_unconditional_one() {
+        // The made-world arc, tool-use, slice 1: a wielded tool contributes an affordance the body lacks. The
+        // cutter world affords CUT only through the tool's SHEAR capability; a foraging body reads no SHEAR,
+        // so a barehanded being (which never calls this: the caller skips a toolless being) affords no CUT.
+        let reg = AffordanceRegistry::dev_cutter();
+
+        // A keen tool reads a positive SHEAR, so it grants CUT. It reads no LOCOMOTE, so it does not grant
+        // MOVE; and it never grants INGEST, an unconditional affordance the body already has.
+        let keen = reg.tool_affordances(|law| {
+            if law == FunctionLawRegistry::ID_SHEAR {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        });
+        assert!(
+            keen.contains(&CUT),
+            "a tool that reads the required SHEAR capability grants the cut affordance"
+        );
+        assert!(
+            !keen.contains(&MOVE),
+            "a tool that reads no LOCOMOTE does not grant move"
+        );
+        assert!(
+            !keen.contains(&INGEST),
+            "an unconditional affordance (ingest) is never tool-granted: the body already affords it"
+        );
+
+        // A tool with no edge (reads no capability at all) grants nothing: holding a soft blob is not a use.
+        let dull = reg.tool_affordances(|_| Fixed::ZERO);
+        assert!(
+            dull.is_empty(),
+            "a tool that reads no capability grants no affordance"
+        );
+
+        // The percussion sibling (Section G, the mass payoff): a heavy tool reads a positive IMPACT and grants
+        // POUND through the dev_striker world, a strike the barehanded body cannot, by mass not a tag.
+        let striker = AffordanceRegistry::dev_striker();
+        let heavy = striker.tool_affordances(|law| {
+            if law == FunctionLawRegistry::ID_IMPACT {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        });
+        assert!(
+            heavy.contains(&POUND),
+            "a tool that reads the required IMPACT capability grants the pound affordance"
+        );
+        let light = striker.tool_affordances(|_| Fixed::ZERO);
+        assert!(
+            light.is_empty(),
+            "a tool that reads no impact grants no pound"
+        );
+    }
 
     fn body(mass: (i64, i64), locomotion: Vec<u16>) -> BodyPlan {
         BodyPlan {

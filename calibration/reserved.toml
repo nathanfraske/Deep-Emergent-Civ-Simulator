@@ -105,6 +105,34 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 # convention (a scale definition, not an authored biology value). Removed rather than left a
 # fail-loud sentinel for a value the engine no longer authors.
 
+# decompose.* (decomposition-as-emergence, Principle 8; crates/sim/src/decompose.rs, record deferred
+# to the design-doc consolidation): the authored "all warm matter rots" law is replaced by a per-cell
+# decomposition ACTIVITY (DecomposerDriverRegistry::activity_at) that a world derives from its own
+# decomposer LIFE and CONDITIONS, so the substance rate is now a maximum susceptibility and a sterile,
+# dry, or airless cell preserves its matter. Following the sibling matter-cycle and trace convention
+# above, the reserved parameters live as typed data on the DecomposerDriver rows (labelled dev
+# fixtures DecomposerDriverRegistry::dev_fixture), not as fail-loud manifest entries, because the
+# registry is constructed in code by the world-builder rather than loaded from this manifest; they are
+# surfaced here with their bases so the owner can set them when the biosphere slice wires worldgen.
+# The four reserved values and their bases:
+#   decompose.conditions.moisture_saturation: the per-cell moisture (EnvironFields moisture units) at or
+#     above which moisture no longer limits decomposition, the field-capacity moisture of soil-decay
+#     kinetics (a CENTURY/Rothamsted-style moisture response), owner-set per world.
+#   decompose.conditions.oxygen_reference: the respirable content (the same fluid.respirable_content
+#     units the combustion beat reads) at or above which decomposition is fully aerobic, naturally the
+#     open-air full concentration the medium substrate already treats as ONE, so only submerged or
+#     sealed cells throttle.
+#   decompose.conditions.warmth_span: the temperature span (K) above the substance's OWN thermal
+#     barrier over which activity rises from zero to full, a linear surrogate for the Q10 temperature
+#     sensitivity of microbial respiration; the zero-point is the substance's physics barrier, so only
+#     the span is reserved.
+#   decompose.life.biomass_reference: the per-cell standing decomposer biomass at which decomposition
+#     proceeds at the substance's full susceptibility rate (activity ONE), so the mechanism reduces to
+#     the unconditional rate at full colonisation and to zero at sterility; the reference standing crop
+#     of decomposition ecology, owner-set per world. Named biomass_reference, not half_saturation: the
+#     response reaches ONE at this biomass (a Michaelis-Menten half-saturation constant would only reach
+#     one half there and never saturate).
+
 [[reserved]]
 id = "absence.characteristic_lifespan_scan_ceiling"
 basis = "the age ceiling absence::characteristic_lifespan scans to (crates/sim/src/absence.rs ABSENCE_PROBE_MAX). Primarily a determinism-and-performance scan bound, but it carries a content-path role: for a race whose natural-mortality hazard never crosses the LIFESPAN_HAZARD_THRESHOLD within the scan, this ceiling becomes its characteristic lifespan and so the presumed-dead absence-window cap. Set well past any expected characteristic lifespan so it never truncates a real one; the engine default is 4096 age-cadences, raised per world for a very long-lived race so the presumed-dead ceiling is never a fabricated presumption. Deriving the ceiling from race hazard alone is impossible for a never-crossing hazard, so a finite scan bound is unavoidable and is reserved rather than hidden"
@@ -2116,6 +2144,14 @@ unit = "dose"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/percept.rs"
 
 [[reserved]]
+id = "discovery.target_value_granularity"
+basis = "the quantization step that buckets a candidate's perceived affordance VALUE into a coarse kind (social-learning arc, piece 3, material granularity), the just-noticeable difference at which a hard thing and a soft thing become distinct learned targets. Set at the sensorium per-class just-noticeable difference for the affordance scalar, the same basis harm.feature_granularity and reward.feature_granularity carry, so a discovered technique specialises over the same perceptual resolution a harm or reward belief generalises over. Read only when a world arms granular beliefs; unarmed the belief keys on the primitive alone and this is never read"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "social-learning arc piece 3 material granularity; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
+
+[[reserved]]
 id = "reward.p_reward_given_rewards"
 basis = "P(the interoceptive reward signal fires | this action truly pays off), the first of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_harms. Set at the fraction of ticks a naive being that took a beneficial action feels a supra-recovery rise, the dose-and-physiology benefit rate the floor implies, the way the harm arc sets its likelihoods. Together with p_reward_given_neutral it sets how strong a single correlation observation is (ln of their ratio)"
 status = "reserved"
@@ -2193,6 +2229,19 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
+
+# --- relational-belief substrate (arc 2, the multi-hop planner): a being chains relational beliefs
+# ("A yields X", "A causes B") backward from a goal, bounded by a chain-length budget. Read by
+# planning::plan_chain (crates/sim/src/planning.rs) only where a being holds a relational belief; a mind
+# with none plans one-hop and never reads it. ---
+
+[[reserved]]
+id = "planning.hop_cap"
+basis = "the longest inferential CHAIN a being follows when it plans through its relational beliefs (planning::plan_chain): the maximum number of STEPS in one plan (the goal step plus its antecedents), so a plan of k steps chains k-1 'A yields X' edges backward from a goal it cannot act on directly. Distinct from planning.depth_cap, which bounds how many alternative plans are returned; this bounds the step-length of each. A per-tick cognition budget and a resolution bound: the step count beyond which the weakest-link confidence (which each added edge can only lower) has decayed below the belief commit margin, so the plan is no surer than a guess and the deeper chain is not worth the per-tick cost. Larger lets a being reason through longer tool-use chains (more inventive, costlier, and riskier), smaller keeps it to short, sure chains; surfaced for the owner and left unset until the relational planner is wired and profiled"
+status = "reserved"
+value = ""
+unit = "count"
+source = "relational-belief substrate arc 2; crates/sim/src/planning.rs"
 
 # --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
 # Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.

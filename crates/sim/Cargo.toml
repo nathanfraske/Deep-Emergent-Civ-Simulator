@@ -28,6 +28,14 @@ civsim-world = { path = "../world" }
 # substrate definitions. No floating point reaches canonical state through them.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+# Rayon for DETERMINISTIC data-parallelism of the embarrassingly-parallel per-tick and worldgen loops (the
+# field stencil, the per-being pre-compute maps, the per-genome/locus/region evolution loops). Every
+# parallelized loop is order-free: it collects into an id-keyed BTreeMap, writes disjoint indexed slots, or
+# maps into an indexed Vec, and draws RNG only through a DrawKey keyed by the item's own id, never the
+# thread. So the result is bit-identical to the serial version at any thread count and the state_hash is
+# invariant under RAYON_NUM_THREADS (the arc-4 determinism contract; see docs/working/GPU_BLUEPRINT.md). A
+# mature, stable crate, not the fast-moving GPU/ECS stack.
+rayon = "1"
 
 [dev-dependencies]
 # The spatial and worldgen layer, used by the dawn-world example to place a band on a

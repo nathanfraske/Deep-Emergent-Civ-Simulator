@@ -62,6 +62,7 @@
 //! choices.
 
 use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StateHasher};
+use rayon::prelude::*;
 
 /// A data-defined gene identifier (Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -208,6 +209,16 @@ pub enum Channel {
     /// best-believed, two independent heritable drives. FOUNDER-ZERO by the same unseeded-locus mechanism,
     /// so goal-directed pursuit emerges by selection, never a coded default (Principle 9).
     Deliberation,
+    /// A heritable SOCIAL-LEARNING propensity (social-learning arc, piece 2, observe-and-imitate): the rate
+    /// at which a being's proposal is BIASED toward an action it perceived a co-located being enact (a
+    /// valence-free observed ActionTrace), the value `crate::locomotion::Walker::social_learning` is
+    /// expressed from. A UNIT channel, the observational sibling of [`Channel::Exploration`]: where
+    /// exploration tries the untried at a flat floor rate, social learning tries what it SAW others do,
+    /// tipping the discovery draw toward a demonstrated technique. FOUNDER-ZERO by the same unseeded-locus
+    /// mechanism, so imitation emerges by selection, never a coded default (Principle 9). It only BIASES
+    /// which action the being tries; the being's own felt reward stays the sole gate to a committed belief
+    /// (copy-and-verify), so a demonstrated action a being copies but is not rewarded for forms no belief.
+    SocialLearning,
 }
 
 /// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
@@ -946,16 +957,23 @@ impl GenePool {
         if two_ne == 0 {
             return;
         }
-        for (locus, p) in self.freqs.iter_mut().enumerate() {
-            let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
-            let mut count: u32 = 0;
-            for k in 0..two_ne {
-                if rng.unit_fixed(k as u64) < *p {
-                    count += 1;
+        // DETERMINISTIC data-parallelism (arc 4): each locus is independent. It writes only its own frequency
+        // slot `*p` (disjoint, indexed) and derives its whole 2*Ne Bernoulli stream from
+        // `DrawKey::pair(pool_id, locus, generation, EVOLVE)`, so the LOCUS INDEX (not the executing thread)
+        // fully determines the RNG stream and the result is bit-identical at any thread count.
+        self.freqs
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(locus, p)| {
+                let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
+                let mut count: u32 = 0;
+                for k in 0..two_ne {
+                    if rng.unit_fixed(k as u64) < *p {
+                        count += 1;
+                    }
                 }
-            }
-            *p = Fixed::from_ratio(count as i64, two_ne as i64);
-        }
+                *p = Fixed::from_ratio(count as i64, two_ne as i64);
+            });
     }
 
     /// Directional selection by a per-locus selection coefficient (state 1's relative
@@ -993,8 +1011,11 @@ impl GenePool {
         let freqs = if two_ne == 0 {
             self.freqs.clone()
         } else {
+            // DETERMINISTIC data-parallelism (arc 4): each locus's founder frequency is an independent draw
+            // keyed by `DrawKey::pair(founder_id, locus, generation, FOUND)`, so the locus index fixes the RNG
+            // stream; the indexed parallel collect preserves position, so the result is bit-identical.
             self.freqs
-                .iter()
+                .par_iter()
                 .enumerate()
                 .map(|(locus, &p)| {
                     let rng =

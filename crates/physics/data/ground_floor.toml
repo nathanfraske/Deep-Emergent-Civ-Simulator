@@ -99,3 +99,19 @@ values = [
   { axis = "bio.mineral_ash_fraction", value = "0.015" },
   { axis = "bio.decomposition_barrier", value = "273" },
 ]
+
+# A starch-rich tuber: a SOFT, energy-dense root a forager eats without cracking (unlike the hard-shelled
+# oilseed), the SECOND food a mixed-material world needs to make "several foods, some inert matter" real
+# (social-learning arc, the payoff world). Its low fracture strength is a DISTINCT hardness, so the granular
+# discovery loop tells eating a soft thing from cracking a hard one, and its own energy density is a distinct
+# nutrition signature. Its physics is authored environment (Principle 9); which foods nourish and how to get
+# them is DISCOVERED, never authored. Deposited nowhere by default, so every existing world is unchanged.
+[[substance]]
+id = "tuber"
+participates_in = ["law.fracture_onset", "law.contact_pressure"]
+real = "USDA FoodData Central (starchy tubers, cassava and potato dry-matter energy ~15 to 17 kJ/g, starch-dominated; potato flesh bulk density ~1080 kg/m^3). Alvarez and Canet (1998) and food-texture literature on tuber mechanics (raw potato flesh compressive fracture stress on the order of 1 to 2 MPa, far softer than a lignified nut shell)"
+values = [
+  { axis = "mat.density", value = "1080" },
+  { axis = "mat.fracture_strength", value = "2" },
+  { axis = "bio.energy_density", value = "17" },
+]

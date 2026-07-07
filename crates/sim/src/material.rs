@@ -306,26 +306,88 @@ impl ExtractionParams {
 /// never fabricated (Principle 11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CraftParams {
-    /// The working-edge contact AREA (m^2) a knapped tool presents, its intrinsic geometry, over which a
-    /// wielded tool concentrates a being's force ([`WieldedTool`]). RESERVED. Basis: the contact patch of
-    /// the working edge a shaping stroke produces (a knapped point or blade tip), a tool-geometry datum the
-    /// crafting-physics refinement will later derive from the fracture of the worked stone; a smaller edge
-    /// concentrates the same force into a higher pressure and works harder matter. A performance-and-realism
-    /// bound, surfaced for the owner, never invented.
-    pub edge_area: Fixed,
     /// The VOLUME of carried matter a tool consumes to make (m^3). RESERVED. Basis: the material a shaped
     /// tool of the working size embodies; a being that carries less than this cannot make the tool. A
-    /// geometry-and-scale datum, surfaced for the owner.
+    /// geometry-and-scale datum, surfaced for the owner. The working-edge AREA is no longer carried here: it
+    /// is DERIVED from the worked stone's own fracture strength under the being's forming force
+    /// ([`crate::runner::Embodiment::craft_from_carried`] over [`civsim_physics::laws::edge_area_at`]), so a
+    /// hard tough stone holds a fine edge and a soft one a blunt one, by physics not a reserved constant.
     pub tool_volume: Fixed,
+    /// The characteristic LENGTH (m) of the shaped tool's body, the long dimension a being knaps (the
+    /// tool-geometry expansion, root R2). RESERVED. Basis: the reach-scale length of a hand tool (a blade, a
+    /// haft, a pick shaft), a geometry datum set from the being's reach scale like the wear stroke distance;
+    /// with the retained volume it fixes the tool's body CROSS-SECTION (`volume / length`), so it decides
+    /// whether the shaped tool is slender (weak in buckling and bending) or stout. Surfaced for the owner,
+    /// never invented. A tool crafted with a non-positive length carries no body geometry and its
+    /// geometry-reading failures are skipped.
+    pub tool_length: Fixed,
 }
 
 impl CraftParams {
-    /// A labelled DEVELOPMENT FIXTURE: a small working edge and a modest tool volume. Not owner canon; a
-    /// stand-in so the crafting contest can run until the owner sets the values against their bases.
+    /// A labelled DEVELOPMENT FIXTURE: a modest tool volume and a hand-tool length. Not owner canon; a stand-in
+    /// so the crafting contest can run until the owner sets the values against their basis. The edge is
+    /// derived, not fixtured.
     pub fn dev_fixture() -> CraftParams {
         CraftParams {
-            edge_area: Fixed::from_ratio(1, 1_000_000),
             tool_volume: Fixed::from_int(1),
+            tool_length: Fixed::from_int(1),
+        }
+    }
+}
+
+/// The reserved parameters of tool WEAR (the made-world arc, tool-use, Section D). The mechanism (the Archard
+/// wear law [`civsim_physics::laws::wear`] over the tool's own volume, its coefficient the tool material's
+/// `mat.wear_coefficient` axis) is fixed Rust; these are the owner's numbers, surfaced with a basis, never
+/// fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WearParams {
+    /// The characteristic sliding DISTANCE (m) of one tool stroke, the length the working edge slides against
+    /// the matter it works in a single use. RESERVED. Basis: the reach of one hand stroke a being makes with a
+    /// hand tool (a knife draw, a scrape, a mining blow's slide), a kinematics datum set from the being's reach
+    /// scale; the Archard wear volume is proportional to it. Surfaced for the owner, never invented.
+    pub stroke_distance: Fixed,
+    /// The physics worn-volume ceiling the wear law saturates at per use, a representability cap (not a
+    /// behavioural quantity) that bounds a single stroke's material loss to the fixed-point range, mirroring
+    /// the extraction and combustion ceilings.
+    pub wear_max: Fixed,
+}
+
+impl WearParams {
+    /// A labelled DEVELOPMENT FIXTURE: a hand-stroke sliding distance and the representability ceiling. Not
+    /// owner canon; a stand-in so the wear step can run until the owner sets the stroke distance against its
+    /// basis.
+    pub fn dev_fixture() -> WearParams {
+        WearParams {
+            stroke_distance: Fixed::from_ratio(1, 10),
+            wear_max: Fixed::from_int(1_000_000),
+        }
+    }
+}
+
+/// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff).
+/// The mechanism is fixed Rust: a swung tool delivers a kinetic energy ([`civsim_physics::laws::kinetic_energy`],
+/// `1/2 m v^2` over the tool's own mass) that fractures matter whose Griffith energy the blow exceeds
+/// ([`civsim_physics::laws::fracture_onset`]'s energy limb). These are the owner's numbers, surfaced with a
+/// basis, never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StrikeParams {
+    /// The characteristic SWING SPEED (m/s) of one muscle-driven blow, the velocity the tool's mass carries
+    /// into the target. RESERVED. Basis: the tip speed a being reaches swinging a hand tool (a mining blow, a
+    /// knapping strike), a kinematics datum set from the being's limb-length and stroke rate; the kinetic
+    /// energy is proportional to its square. Surfaced for the owner, never invented.
+    pub swing_velocity: Fixed,
+    /// The physics energy ceiling the kinetic-energy law saturates at, a representability cap (not a
+    /// behavioural quantity) bounding a single blow's delivered energy to the fixed-point range.
+    pub energy_max: Fixed,
+}
+
+impl StrikeParams {
+    /// A labelled DEVELOPMENT FIXTURE: a hand-swing speed and the representability ceiling. Not owner canon; a
+    /// stand-in so the strike step can run until the owner sets the swing speed against its basis.
+    pub fn dev_fixture() -> StrikeParams {
+        StrikeParams {
+            swing_velocity: Fixed::from_int(10),
+            energy_max: Fixed::from_int(1_000_000),
         }
     }
 }
@@ -465,17 +527,63 @@ pub struct WieldedTool {
     /// The contact area (m^2) the tool's working surface presses over, its intrinsic geometry: a smaller
     /// area concentrates the being's force into a higher pressure.
     pub contact_area: Fixed,
+    /// The VOLUME of matter the tool retains (m^3), the extensive quantity the registry's intensive axes
+    /// cannot supply, set when the tool is shaped from the stock it consumed. It makes the tool's MASS
+    /// recoverable ([`WieldedTool::mass`], `mat.density` times this volume, the extensive datum an impact or a
+    /// swing reads) and is the stock a wear step decrements and a re-work reshapes, so a tool that loses matter
+    /// grows blunt and eventually spends out. Without it the struct's own claim that mass is derived is empty.
+    pub volume: Fixed,
+    /// The tool's characteristic LENGTH (m), the long dimension of its shaped body, set when it is shaped from
+    /// the stock (the made-world arc, tool-use, the tool-geometry expansion, root R2). It is the lever arm a
+    /// pry reads, the bending span a sideways load reads, and (with the retained volume) it fixes the tool's
+    /// BODY CROSS-SECTION ([`WieldedTool::cross_section`], `volume / length` for a prism), the area a
+    /// transverse crack runs through and the section that buckles under an axial load. So a long thin tool is
+    /// slender (a small cross-section, weak in buckling and bending) and a short thick one is stout, the
+    /// geometry tradeoff that the tool's material choice trades against. Zero-safe: a tool shaped with no
+    /// length carries no body geometry, so the geometry-reading failures skip it (the absence convention).
+    pub length: Fixed,
     /// The substance the tool is made of; its hardness (the pressure it sustains before it blunts) and its
     /// other properties are read from the [`PhysicsRegistry`] by this id.
     pub substance: String,
 }
 
 impl WieldedTool {
-    /// Fold the tool into a hash, its geometry then its substance id, in canonical order (the material fold
-    /// discipline). Called by the runner's per-walker `state_hash` fold when a being wields a tool; a being
-    /// with no tool folds nothing, so the wielded slot is opt-in and hash-neutral by default.
+    /// The tool's mass (kg): its substance's `mat.density` (an intensive axis in the registry) times its
+    /// retained [`WieldedTool::volume`] (the extensive quantity the registry cannot supply), the datum a swing
+    /// or an impact reads. Zero when the substance declares no density (the absence convention). Derived, never
+    /// stored (Principle 11).
+    pub fn mass(&self, reg: &PhysicsRegistry) -> Fixed {
+        let density = reg
+            .substance(&self.substance)
+            .and_then(|s| s.vector.get("mat.density").copied())
+            .unwrap_or(Fixed::ZERO);
+        // Checked, like every mechanics law: a dense stone times a large volume can overflow Q32.32, and an
+        // unchecked multiply would panic in debug and wrap in release, a cross-build determinism hazard. Both
+        // density and volume are non-negative physical quantities, so an overflowing mass saturates to the
+        // fixed-point maximum rather than wrapping.
+        density.checked_mul(self.volume).unwrap_or(Fixed::MAX)
+    }
+
+    /// The tool's BODY cross-section (m^2): the retained volume over the characteristic length, the prism
+    /// relation `A = V / L`. This is the area a transverse crack runs through and the section that resists an
+    /// axial or a buckling load, derived from the two extensive geometry data the tool carries, no cube root
+    /// and no shape catalog. Zero when the tool has no length (the absence convention: a tool with no body
+    /// geometry has no derivable cross-section, so the geometry-reading failures skip it).
+    pub fn cross_section(&self) -> Fixed {
+        if self.length <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        self.volume.checked_div(self.length).unwrap_or(Fixed::ZERO)
+    }
+
+    /// Fold the tool into a hash, its geometry, its retained volume and length, then its substance id, in
+    /// canonical order (the material fold discipline). Called by the runner's per-walker `state_hash` fold when
+    /// a being wields a tool; a being with no tool folds nothing, so the wielded slot is opt-in and hash-neutral
+    /// by default.
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_fixed(self.contact_area);
+        h.write_fixed(self.volume);
+        h.write_fixed(self.length);
         for b in self.substance.as_bytes() {
             h.write_u32(*b as u32);
         }
@@ -844,6 +952,156 @@ impl SoilNutrientField {
     }
 }
 
+/// A TISSUE PARCEL: a quantity of an organism's own MATTER, deposited where it fell, carried as a raw
+/// COMPOSITION VECTOR (its value on each biology and mechanical floor axis, keyed by axis id) rather than a
+/// registered [`civsim_physics::Substance`] id. This is how a generated organism becomes located, usable
+/// matter without minting a per-species substance or authoring a species-to-substance map (Principle 8): the
+/// parcel's physics IS its own body's composition, derived by a development-weighted fold over its body plan
+/// ([`crate::physiology::whole_body_composition_vector`]), and every consumer reads a named axis off the
+/// vector exactly as it reads one off a substance, with the same absence-is-zero convention. The composition
+/// shares the string-keyed sorted-walk shape of [`crate::anatomy::TissueComposition`] and
+/// [`civsim_physics::Substance`]'s `vector`, so a consumer that reads `mat.fracture_strength` or
+/// `bio.decomposition_barrier` off a substance reads it off a parcel unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TissueParcel {
+    /// The located volume of this matter.
+    pub volume: Fixed,
+    /// The parcel's value on each floor axis it carries, keyed by axis id (an absent axis is zero).
+    pub composition: BTreeMap<String, Fixed>,
+}
+
+impl TissueParcel {
+    /// The parcel's value on a named floor axis; an axis it does not carry reads zero (the absence
+    /// convention the material substrate uses throughout).
+    pub fn axis(&self, id: &str) -> Fixed {
+        self.composition.get(id).copied().unwrap_or(Fixed::ZERO)
+    }
+}
+
+/// A parcel's CONTENT IDENTITY: its composition as sorted `(axis, value)` pairs. Two parcels share a key
+/// exactly when their compositions are byte-identical, so the key IS the content (collision-free), never a
+/// hash of it. Derived from an organism's own body, never authored, so two byte-identical corpses accumulate
+/// and any difference stays distinct.
+type TissueKey = Vec<(String, Fixed)>;
+
+/// The per-cell ORGANISM-TISSUE field: the located matter a dead organism leaves, keyed by [`Coord3`] then by
+/// content identity, with the accumulated volume as the value. A sibling of [`SoilNutrientField`] and
+/// [`crate::decompose::DecomposerStockField`] with the same empty-default-folds-nothing discipline, so an
+/// unarmed or unseeded field folds no bytes into `state_hash` and a scenario with no corpse matter is
+/// byte-identical. Reads (fracture hardness, per-axis presence) walk the parcels; the consumers
+/// (extraction, cutting, the matter cycle) union this with the located substance mixture, so an organism's
+/// matter is worked and rots by the SAME mechanisms and the SAME axes as any other matter.
+#[derive(Clone, Debug, Default)]
+pub struct TissueField {
+    cells: BTreeMap<Coord3, BTreeMap<TissueKey, Fixed>>,
+}
+
+impl TissueField {
+    /// A field holding no tissue anywhere.
+    pub fn new() -> TissueField {
+        TissueField::default()
+    }
+
+    /// Whether no tissue has been deposited anywhere (the opt-out state a scenario with no corpse matter
+    /// stays in, so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Deposit a parcel of an organism's matter at a cell: a non-positive volume is a no-op (no empty entry
+    /// is created), and a deposit whose composition is byte-identical to one already present accumulates its
+    /// volume onto that parcel (content identity).
+    pub fn deposit(&mut self, cell: Coord3, composition: BTreeMap<String, Fixed>, volume: Fixed) {
+        if volume <= Fixed::ZERO {
+            return;
+        }
+        // A BTreeMap iterates in sorted key order, so the collected pairs are canonical and the key is stable.
+        let key: TissueKey = composition.into_iter().collect();
+        let entry = self
+            .cells
+            .entry(cell)
+            .or_default()
+            .entry(key)
+            .or_insert(Fixed::ZERO);
+        *entry = entry.saturating_add(volume);
+    }
+
+    /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
+    /// yields nothing.
+    pub fn parcels(&self, cell: Coord3) -> Vec<TissueParcel> {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.iter()
+                    .map(|(key, &volume)| TissueParcel {
+                        volume,
+                        composition: key.iter().cloned().collect(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every cell holding tissue, in canonical [`Coord3`] order (for a reader or a consumer that walks the
+    /// deposited matter). An empty field yields nothing.
+    pub fn cells(&self) -> impl Iterator<Item = Coord3> + '_ {
+        self.cells.keys().copied()
+    }
+
+    /// The total tissue volume at a cell, summed over its parcels. A cell with no tissue reads zero.
+    /// Saturating, so an over-deposited cell caps rather than wrapping.
+    pub fn volume_at(&self, cell: Coord3) -> Fixed {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.values()
+                    .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v))
+            })
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The fracture hardness a being must overcome to work the tissue at a cell: the greatest
+    /// `mat.fracture_strength` any parcel there carries (an absent axis reads zero). A cell with no tissue
+    /// reads zero, so it contributes nothing to a consumer's `.max(...)` union with the located substance
+    /// mixture, and the run is byte-identical where no corpse lies.
+    pub fn fracture_hardness(&self, cell: Coord3) -> Fixed {
+        self.cells
+            .get(&cell)
+            .map(|m| {
+                m.keys().fold(Fixed::ZERO, |acc, key| {
+                    let strength = key
+                        .iter()
+                        .find(|(axis, _)| axis == "mat.fracture_strength")
+                        .map(|(_, v)| *v)
+                        .unwrap_or(Fixed::ZERO);
+                    acc.max(strength)
+                })
+            })
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Fold the tissue field into a hash in canonical (cell, composition pairs, volume) order, beside
+    /// [`SoilNutrientField::hash_into`]. An empty field folds nothing, so an opted-out run is unchanged. The
+    /// `BTreeMap`s walk in canonical key order (the `Coord3` then the sorted composition), so the fold is
+    /// reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (cell, parcels) in &self.cells {
+            for (key, volume) in parcels {
+                h.write_i64(cell.x as i64);
+                h.write_i64(cell.y as i64);
+                h.write_i64(cell.z as i64);
+                for (axis, value) in key {
+                    for b in axis.as_bytes() {
+                        h.write_u32(*b as u32);
+                    }
+                    h.write_fixed(*value);
+                }
+                h.write_fixed(*volume);
+            }
+        }
+    }
+}
+
 /// One horizontal stratum of a ground profile: a substance filling every cell in an inclusive z-band
 /// at a fixed volume. The membership is data (a substance id and a z-band), so a world's stratigraphy
 /// is data-defined, never a `Rock`/`Soil`/`Ore` enum (Principle 8 and 11): a new stratum is a data
@@ -928,6 +1186,62 @@ impl GroundProfile {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_tissue_field_accumulates_by_content_and_folds_order_free() {
+        let cell = Coord3::ground(2, 3);
+        let mut field = TissueField::new();
+        assert!(field.is_empty());
+        // Two byte-identical compositions accumulate onto one parcel; a different one stays distinct.
+        let soft: BTreeMap<String, Fixed> = [
+            ("mat.fracture_strength".to_string(), Fixed::from_int(3)),
+            ("bio.energy_density".to_string(), Fixed::from_int(5)),
+        ]
+        .into_iter()
+        .collect();
+        let hard: BTreeMap<String, Fixed> =
+            [("mat.fracture_strength".to_string(), Fixed::from_int(30))]
+                .into_iter()
+                .collect();
+        field.deposit(cell, soft.clone(), Fixed::from_int(2));
+        field.deposit(cell, soft.clone(), Fixed::from_int(1)); // same content, accumulates
+        field.deposit(cell, hard.clone(), Fixed::from_int(4)); // distinct content, new parcel
+        field.deposit(cell, soft.clone(), Fixed::ZERO); // non-positive, a no-op
+        let parcels = field.parcels(cell);
+        assert_eq!(
+            parcels.len(),
+            2,
+            "two distinct compositions, the identical ones merged"
+        );
+        assert_eq!(
+            field.volume_at(cell),
+            Fixed::from_int(7),
+            "2 + 1 (merged) + 4 = 7 total volume"
+        );
+        // The fracture hardness a being must overcome is the greatest fracture strength present.
+        assert_eq!(
+            field.fracture_hardness(cell),
+            Fixed::from_int(30),
+            "the hardest parcel sets the fracture gate"
+        );
+        // A cell with no tissue reads zero, so it adds nothing to a consumer's max-union.
+        assert_eq!(field.fracture_hardness(Coord3::ground(0, 0)), Fixed::ZERO);
+
+        // The hash is order-free: depositing the same parcels in a different order folds identically.
+        let mut other = TissueField::new();
+        other.deposit(cell, hard, Fixed::from_int(4));
+        other.deposit(cell, soft.clone(), Fixed::from_int(1));
+        other.deposit(cell, soft, Fixed::from_int(2));
+        let mut h1 = StateHasher::new();
+        field.hash_into(&mut h1);
+        let mut h2 = StateHasher::new();
+        other.hash_into(&mut h2);
+        assert_eq!(
+            h1.finish(),
+            h2.finish(),
+            "deposit order does not change the fold"
+        );
+    }
+
     /// A minimal mechanical floor: the two axes the material layer reads, and three substances that
     /// exercise the derivation (a hard dense rock, a soft light soil, and a fuel with no hardness axis
     /// so the absence path is covered). Ranges and values are stand-in test data, not owner values.
@@ -1004,6 +1318,30 @@ values = [
             m.set(s, Fixed::from_int(*v));
         }
         m
+    }
+
+    #[test]
+    fn a_wielded_tools_mass_is_its_substance_density_times_its_retained_volume() {
+        // The tool as matter (the made-world arc, root R2): its mass is recoverable now that it retains its
+        // VOLUME (the extensive quantity the registry's intensive density cannot supply), density times volume,
+        // derived not stored. This is the datum a swing or an impact reads, and the stock a wear step decrements.
+        let reg = floor();
+        let tool = WieldedTool {
+            contact_area: Fixed::from_ratio(1, 1000),
+            volume: Fixed::from_int(2),
+            length: Fixed::ONE,
+            substance: "granite".to_string(),
+        };
+        // granite density 2700 times retained volume 2 is 5400 kg.
+        assert_eq!(tool.mass(&reg), Fixed::from_int(5400));
+        // A substance the registry does not carry (no density) reads zero mass, the absence convention.
+        let void_tool = WieldedTool {
+            contact_area: Fixed::from_ratio(1, 1000),
+            volume: Fixed::from_int(2),
+            length: Fixed::ONE,
+            substance: "nonexistent".to_string(),
+        };
+        assert_eq!(void_tool.mass(&reg), Fixed::ZERO);
     }
 
     #[test]

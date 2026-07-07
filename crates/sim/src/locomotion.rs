@@ -425,6 +425,26 @@ pub struct Walker {
     /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
     /// source the reward-credit pass reads to record what the being just did.
     pub decided_affordance: Option<AffordanceId>,
+    /// The full step the being ACTED on this tick (social-learning arc, piece 3, material granularity): the
+    /// primitive plus the target's affordance channel and quantized perceived value, when the action came
+    /// from a discovery proposal or a deliberated plan (which carry the target); a plain primitive with a
+    /// zero target when the base controller decided it (which names no target). `None` on a tick it took no
+    /// matter action. Transient like [`decided_affordance`](Walker::decided_affordance) (re-derived every
+    /// tick, never folded into `state_hash`); the granular reward credit keys the belief on this step's
+    /// grain through [`crate::learn::step_belief_subject`], so a technique specialises to the target it acted
+    /// on. Its `primitive` always equals `decided_affordance`; it carries the target the primitive alone
+    /// cannot.
+    pub decided_step: Option<SequenceStep>,
+    /// The matter the being INGESTED this tick, the perceived composition of what it ate (social-learning
+    /// arc, piece 1, nutrition learning): the per-substance volume [`crate::runner::Embodiment::geophage`]
+    /// took into the being this tick, keyed by material-floor substance id. EMPTY on a tick it ate nothing.
+    /// Transient like [`decided_affordance`](Walker::decided_affordance): cleared at the top of the
+    /// embodiment step and re-derived by the bite, NEVER folded into `state_hash` (its only reach into canon
+    /// is the reward belief the nutrition credit re-earns from it, which folds through the mind, and only
+    /// when nutrition learning is armed). It is the eaten-side sibling of the ground-side material percept:
+    /// where the trace credit reads the composition of the cell UNDERFOOT, this reads the composition of
+    /// what was EATEN, so a being learns which foods nourish it rather than which place it stood on.
+    pub ate: SubstanceMix,
     /// The candidate action the being PROPOSES this tick, sampled from its binding graph by the discovery
     /// loop (ideation arc, piece 2, slice 2c). `None` unless the runner arms the discovery loop and the world
     /// installs the affordance-percept registry, so it stays `None` and folds nothing by default (opt-in,
@@ -458,6 +478,22 @@ pub struct Walker {
     /// here, expressed from a heritable channel at the birth path in a follow-on. Folds into `state_hash`
     /// when positive.
     pub deliberation: Fixed,
+    /// The being's heritable SOCIAL-LEARNING weight (social-learning arc, piece 2, observe-and-imitate): the
+    /// rate in `[0, 1]` at which its discovery proposal is BIASED toward an action it perceived a co-located
+    /// being enact (carried in `observed_actions`). FOUNDER-ZERO: a founder reads zero and ignores what it
+    /// sees, so imitation EMERGES by selection rather than being switched on (Principle 9). Expressed from
+    /// [`crate::genome::Channel::SocialLearning`] at the birth path exactly as `exploration` is; tests prime
+    /// it directly. Folds into `state_hash` when positive.
+    pub social_learning: Fixed,
+    /// The being's TRANSIENT observed-action prior (social-learning arc, piece 2): the set of primitive ids
+    /// of the actions co-located OTHER beings enacted-and-ate last tick, the valence-free ActionTrace this
+    /// being perceived. Read by the discovery sampler to tip the draw toward a demonstrated action (scaled by
+    /// `social_learning`), NEVER a belief: it biases what the being tries, and its own felt reward stays the
+    /// sole gate to a committed belief (copy-and-verify). Rebuilt each tick from co-located eating (empty
+    /// where a being saw no one eat), so it is a one-tick memory, not a store. Populated only when the world
+    /// arms observe-and-imitate; empty otherwise, so it folds nothing into `state_hash` (opt-in default) and
+    /// leaves an opted-out run byte-identical. Folded (in sorted id order) only when non-empty.
+    pub observed_actions: BTreeSet<u16>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -490,10 +526,14 @@ impl Walker {
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
             decided_affordance: None,
+            decided_step: None,
+            ate: SubstanceMix::new(),
             proposed_action: None,
             exploration: Fixed::ZERO,
             surprise: Fixed::ZERO,
             deliberation: Fixed::ZERO,
+            social_learning: Fixed::ZERO,
+            observed_actions: BTreeSet::new(),
             alive: true,
         }
     }
@@ -815,6 +855,11 @@ pub fn step_with_field_dirs<T: Terrain>(
         if !w.alive {
             continue;
         }
+        // Clear the per-tick INGESTED-matter scratch (social-learning arc, nutrition learning): a being
+        // that eats nothing this tick carries an empty `ate`, so the nutrition credit reads a clean slate
+        // and a stale bite from an earlier tick never re-earns a belief. The bite below refills it. Not
+        // folded into `state_hash` (transient scratch, like `decided_affordance`), so this is byte-neutral.
+        w.ate = SubstanceMix::new();
         // Snapshot the reserves at the START of the tick, so this tick's interoceptive delta
         // (`delta(axis) = level_now - level_prev`) reads the NET change the tick then makes, the raw
         // signal both experiential learners read after metabolism. The harm learner (harm-learning arc
@@ -924,6 +969,15 @@ pub fn step_with_field_dirs<T: Terrain>(
             .as_ref()
             .filter(|d| d.activation > Fixed::ZERO)
             .map(|d| d.affordance);
+        // The full enacted step (social-learning arc, piece 3): the controller names an affordance but NO
+        // target, so its step carries a zero target channel and value; a discovery proposal or a deliberated
+        // plan below OVERWRITES this with the target it acted on when it enacts one. Set each tick alongside
+        // the primitive so the granular reward credit can key on the target the action was directed at.
+        w.decided_step = w.decided_affordance.map(|a| SequenceStep {
+            primitive: a.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        });
 
         let mut exertion = Fixed::ZERO;
         if let Some(d) = decision {

@@ -23,16 +23,18 @@
 //! and the affordance-typed targets the being perceives, with NO coded what-binds-to-what table: the being
 //! proposes "issue primitive P against a thing presenting affordance CHANNEL C" for the combinations, and
 //! the reward learner sorts which pay off. The candidate carries the affordance CHANNEL (the TYPE of thing,
-//! fracturable or sharp) as its target, so the being proposes a primitive against each present kind of
-//! thing, but the REWARD BELIEF the sampler weights by generalises over the PRIMITIVE alone: the credit
-//! pass, [`crate::learn::appetitive_salience`], the planner, and [`candidate_weight`] all key the belief on
-//! `target_bucket` zero, so a primitive a being learned pays off is preferred against every present target
-//! rather than re-learned per type. (Keying the belief on the channel index at the candidate site while the
-//! credit committed it on zero was a latent mismatch, masked in the single-channel viability world; keying
-//! it on the target's quantized perceived VALUE at the just-noticeable difference, so a hard and a soft
-//! target diverge as distinct learned actions, is the deferred generalisation.) This is the affordance-bound
-//! sampling the design calls for, kept emergent: there is no `if primitive == STRIKE { target = fracturable }`
-//! branch anywhere.
+//! fracturable or sharp) as its target. The GRAIN the belief keys on is a data-driven choice
+//! (social-learning arc, piece 3, material granularity), set by the world through
+//! [`crate::runner::Embodiment::set_granular_beliefs`] and routed through the one shared
+//! [`crate::learn::step_belief_subject`] every write and read call: by DEFAULT the belief keys on the
+//! PRIMITIVE ALONE (`target_bucket` and `param_bucket` zeroed), so a primitive a being learned pays off is
+//! preferred against every present target rather than re-learned per type; when a world arms GRANULAR
+//! beliefs, the belief keys on the primitive against the target's affordance channel AND its quantized
+//! perceived value, so "strike a hard thing" and "strike a soft thing" diverge as distinct learned actions.
+//! The credit, [`candidate_weight`], [`crate::learn::appetitive_salience`], the planner match, and the
+//! forward model all key through that one function, so write and read never disagree on the grain (no belief
+//! is masked). This is the affordance-bound sampling the design calls for, kept emergent: there is no
+//! `if primitive == STRIKE { target = fracturable }` branch anywhere.
 //!
 //! This slice is READ only: the enumeration is a pure, RNG-free function off the run path (nothing samples
 //! or enacts yet, and `state_hash` folds nothing), so every existing scenario replays bit-for-bit. Slice
@@ -45,7 +47,7 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId};
 use crate::agent::Mind;
 use crate::evidence::InferenceParams;
 use crate::homeostasis::AffordanceId;
-use crate::learn::{sequence_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
 
 /// The candidate single-step action bindings a being can propose this tick: the GENERIC cartesian of its
 /// afforded primitives and the affordance-typed targets it currently perceives, in a canonical order
@@ -62,15 +64,40 @@ use crate::learn::{sequence_subject, SequenceStep, REWARDS, REWARD_ATTR};
 /// candidate, so the proposal set is bounded by what is present in reach. `percepts` is the
 /// [`crate::affordance_percept::AffordancePerceptRegistry::perceive`] read, in its canonical channel order;
 /// `afforded` is the [`crate::homeostasis::AffordanceRegistry::afforded`] set, in canonical id order.
-pub fn candidate_bindings(afforded: &[AffordanceId], percepts: &[Fixed]) -> Vec<SequenceStep> {
+/// `granular` and `value_granularity` (social-learning arc, piece 3, material granularity): when `granular`
+/// is true, each candidate carries the target's quantized perceived VALUE in its `param_bucket`
+/// (`feature_bucket(value, value_granularity)`, the just-noticeable how-hard), so a primitive against a HARD
+/// target and against a SOFT target of the same channel are DISTINCT candidates the reward learner sorts
+/// separately. When false (the default), `param_bucket` is zero, so the candidate is value-blind exactly as
+/// before and the run is byte-identical.
+pub fn candidate_bindings(
+    afforded: &[AffordanceId],
+    percepts: &[Fixed],
+    granular: bool,
+    value_granularity: Fixed,
+) -> Vec<SequenceStep> {
     let mut out = Vec::with_capacity(afforded.len() * percepts.len());
     for &primitive in afforded {
         for (channel, &value) in percepts.iter().enumerate() {
             if value > Fixed::ZERO {
                 out.push(SequenceStep {
                     primitive: primitive.0,
-                    target_bucket: channel as i64,
-                    param_bucket: 0,
+                    // When granular, a real candidate's channel is 1-based, so `target_bucket == 0` is RESERVED
+                    // for the base controller's "no target" sentinel (a controller action names no target and
+                    // keys `(primitive, 0, 0)`); a real granular candidate never keys `(primitive, 0, 0)`, so
+                    // an untargeted controller belief and a channel-0 candidate belief cannot alias (the deep
+                    // audit's zero-triple finding). Non-granular keeps the raw channel: `target_bucket` never
+                    // reaches the primitive-only belief key there, so the run stays byte-identical.
+                    target_bucket: if granular {
+                        channel as i64 + 1
+                    } else {
+                        channel as i64
+                    },
+                    param_bucket: if granular {
+                        crate::percept::feature_bucket(value, value_granularity)
+                    } else {
+                        0
+                    },
                 });
             }
         }
@@ -110,6 +137,26 @@ pub struct DiscoveryCalib {
     /// past the confidence noise is not worth the per-tick cost. Basis: the per-tick cognition budget and
     /// the depth beyond which the next-ranked belief is no better than noise. Surfaced with its basis.
     pub plan_depth_cap: usize,
+    /// RESERVED. The deliberation HOP cap: the longest inferential CHAIN a being follows when it plans through
+    /// its relational beliefs (relational-belief substrate, arc 2, `planning.hop_cap` wired here). A one-hop
+    /// plan is a direct reward belief; a multi-hop plan chains "A yields X" backward from a goal the being
+    /// cannot act on directly. This bounds the chain LENGTH (distinct from `plan_depth_cap`, which bounds how
+    /// many alternative plans are returned), so a being does not chase an ever-deeper chain of ever-weaker
+    /// inference. Read only where a being holds a relational belief ([`crate::agent::Mind::has_relations`]);
+    /// a mind with no relation never reads it and plans one-hop byte-identically. Basis: the per-tick cognition
+    /// budget and the chain depth beyond which the weakest-link confidence has decayed below the belief
+    /// commit margin (a plan no surer than a guess), a performance-and-resolution bound. Surfaced with its
+    /// basis, never fabricated.
+    pub plan_hop_cap: usize,
+    /// RESERVED. The TARGET-VALUE granularity, the quantization step that buckets a candidate's perceived
+    /// affordance VALUE into a coarse kind (social-learning arc, piece 3, material granularity), the
+    /// just-noticeable difference at which "a hard thing" and "a soft thing" become distinct learned targets.
+    /// Read only when a world arms granular beliefs ([`crate::runner::Embodiment::set_granular_beliefs`]);
+    /// unarmed, the belief keys on the primitive alone and this is never read. Basis: the sensorium per-class
+    /// just-noticeable difference for the affordance scalar, the same basis `harm.feature_granularity` and
+    /// `reward.feature_granularity` carry, so a discovered technique specialises over the same perceptual
+    /// resolution a harm or reward belief generalises over. Surfaced with its basis, never fabricated.
+    pub target_value_granularity: Fixed,
 }
 
 impl DiscoveryCalib {
@@ -123,6 +170,8 @@ impl DiscoveryCalib {
             surprise_threshold: Fixed::from_ratio(1, 2),
             surprise_gain: Fixed::ONE,
             plan_depth_cap: 8,
+            plan_hop_cap: 4,
+            target_value_granularity: Fixed::ONE,
         }
     }
 }
@@ -133,34 +182,40 @@ impl DiscoveryCalib {
 /// discovery never stops). Reads only the being's own reward belief on the disjoint `REWARD_ATTR`, never a
 /// coded preference (Principle 9).
 ///
-/// The belief is looked up on the PRIMITIVE-ONLY subject (`target_bucket` zero), the exact key the reward
-/// learner's credit pass commits and [`crate::learn::appetitive_salience`], the planner
-/// ([`crate::planner::plan_toward`]), and the surprise read all use, so the belief this reads is the belief
-/// those form. The candidate itself is proposed per affordance CHANNEL (its `target_bucket` carries the
-/// target type, so the being still tries a primitive against each present kind of thing), but the reward
-/// belief GENERALISES over the primitive: a being that learned a primitive pays off proposes it against
-/// every present target, rather than having to re-learn it per target type. Keying the credit and this
-/// lookup on the channel index instead was a latent mismatch (the belief committed on `target_bucket`
-/// zero never matched a channel-keyed lookup except on channel zero, which masked it in the single-channel
-/// viability world). The principled refinement, keying the belief on the target's quantized perceived
-/// VALUE at the just-noticeable difference rather than the primitive alone, so "strike a HARD thing" and
-/// "strike a SOFT thing" diverge as distinct learned actions, is the deferred generalisation; until it
-/// lands the belief generalises over the primitive, consistently across the whole ideation loop.
+/// The belief is looked up through the shared [`crate::learn::step_belief_subject`] at the caller's
+/// `granular` grain, the exact key the reward learner's credit pass commits and
+/// [`crate::learn::appetitive_salience`], the planner match, and the surprise read all use at the SAME grain,
+/// so the belief this reads is the belief those form (no mask). By default the grain is the PRIMITIVE ALONE,
+/// so a being that learned a primitive pays off proposes it against every present target rather than
+/// re-learning it per type; when the world arms granular beliefs the grain includes the target's affordance
+/// channel and quantized value, so "strike a hard thing" and "strike a soft thing" become distinct learned
+/// actions (social-learning arc, piece 3, material granularity). The candidate always carries its affordance
+/// CHANNEL in `target_bucket` and, when granular, its quantized value in `param_bucket`; the grain decides
+/// which of those the belief keys on.
+///
+/// The `social_prior` (social-learning arc, piece 2, observe-and-imitate) LIFTS the exploration floor of an
+/// UNBELIEVED candidate whose action the being just perceived a co-located neighbour enact, scaled by the
+/// being's founder-zero social-learning weight, so a demonstrated technique is tried more than an unseen one
+/// while a rewarded habit still exploits at full weight. It is zero for a founder (zero social weight), for
+/// an unobserved action, and for every run with observe-and-imitate unarmed, so the draw is unchanged there
+/// (opt-in, founder-zero). It only tips the PROPOSAL; the being's own felt reward stays the sole gate to a
+/// committed belief, so a copied action never becomes a belief until eating it pays off (copy-and-verify).
 fn candidate_weight(
     mind: &Mind,
     step: &SequenceStep,
     calib: &DiscoveryCalib,
     params: &InferenceParams,
+    social_prior: Fixed,
+    granular: bool,
 ) -> Fixed {
-    let subject = sequence_subject(&[SequenceStep {
-        primitive: step.primitive,
-        target_bucket: 0,
-        param_bucket: 0,
-    }]);
+    let subject = step_belief_subject(step, granular);
     if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
         Fixed::ONE
     } else {
-        calib.exploration_floor
+        calib
+            .exploration_floor
+            .saturating_add(social_prior)
+            .min(Fixed::ONE)
     }
 }
 
@@ -174,6 +229,13 @@ fn candidate_weight(
 /// Returns `None` where the being can propose nothing (no candidates) or nothing carries any weight (a zero
 /// floor and no belief). Pure over `(candidates, mind, calib, params, being, tick, seed)`; the binding
 /// graph and the perception it reads stay RNG-free, this is the only draw.
+///
+/// `observed` and `social_weight` carry the observe-and-imitate bias (social-learning arc, piece 2): a
+/// candidate whose primitive is in `observed` (the actions co-located beings enacted last tick) has its
+/// exploration floor lifted by `social_weight`, so the being tries a demonstrated technique more. An empty
+/// `observed` set or a zero `social_weight` (a founder, or observe-and-imitate unarmed) leaves every weight
+/// at its pre-social value, so the draw is byte-identical.
+#[allow(clippy::too_many_arguments)]
 pub fn sample_candidate(
     candidates: &[SequenceStep],
     mind: &Mind,
@@ -182,13 +244,23 @@ pub fn sample_candidate(
     being: StableId,
     tick: u64,
     seed: u64,
+    observed: &std::collections::BTreeSet<u16>,
+    social_weight: Fixed,
+    granular: bool,
 ) -> Option<SequenceStep> {
     if candidates.is_empty() {
         return None;
     }
     let weights: Vec<Fixed> = candidates
         .iter()
-        .map(|s| candidate_weight(mind, s, calib, params))
+        .map(|s| {
+            let social_prior = if observed.contains(&s.primitive) {
+                social_weight
+            } else {
+                Fixed::ZERO
+            };
+            candidate_weight(mind, s, calib, params, social_prior, granular)
+        })
         .collect();
     let total = Fixed::saturating_sum(weights.iter().copied());
     if total <= Fixed::ZERO {
@@ -217,7 +289,7 @@ pub fn sample_candidate(
 mod tests {
     use super::*;
     use crate::homeostasis::{EXTRACT, GRASP, STRIKE};
-    use crate::learn::{RewardLearningCalib, NEUTRAL};
+    use crate::learn::{sequence_subject, RewardLearningCalib, NEUTRAL};
 
     fn params() -> InferenceParams {
         InferenceParams {
@@ -229,6 +301,55 @@ mod tests {
 
     const SEED: u64 = 0x00D1_5C05;
 
+    // No observed actions and a zero social-learning weight: the pre-observe-and-imitate draw, unchanged, so
+    // these tests read the sampler's belief-and-floor behaviour with the social bias inert.
+    fn no_obs() -> std::collections::BTreeSet<u16> {
+        std::collections::BTreeSet::new()
+    }
+
+    // Candidate bindings at the pre-granularity grain (primitive-only beliefs), so these tests read the
+    // binding-graph and sampling behaviour with piece 3's target-value keying inert (byte-identical).
+    fn bind(afforded: &[AffordanceId], percepts: &[Fixed]) -> Vec<SequenceStep> {
+        candidate_bindings(afforded, percepts, false, Fixed::ONE)
+    }
+
+    #[test]
+    fn granular_beliefs_split_a_hard_target_from_a_soft_one_and_the_default_keeps_them_one() {
+        // Social-learning arc, piece 3 (material granularity): with granular beliefs the SAME primitive against
+        // a HARD target and a SOFT target of the same affordance channel mints DISTINCT belief subjects, so
+        // "strike a hard thing" and "strike a soft thing" are learned separately; the default (primitive-only)
+        // mints the SAME subject for both, the byte-identical generalisation that keeps one flat "the primitive
+        // pays off." A value-blind candidate (granular off) carries a zero value, so its subject equals the
+        // primitive-only key regardless of the target's value.
+        let gran = Fixed::ONE;
+        // One affordance channel, two target values: a hard target (value 5) and a soft one (value 1), which
+        // bucket to distinct kinds at a unit just-noticeable difference.
+        let hard = candidate_bindings(&[STRIKE], &[Fixed::from_int(5)], true, gran);
+        let soft = candidate_bindings(&[STRIKE], &[Fixed::ONE], true, gran);
+        assert_ne!(
+            step_belief_subject(&hard[0], true),
+            step_belief_subject(&soft[0], true),
+            "granular beliefs split a hard target from a soft one of the same channel"
+        );
+        assert_eq!(
+            step_belief_subject(&hard[0], false),
+            step_belief_subject(&soft[0], false),
+            "the default keeps a hard and a soft target one belief (the generalising key)"
+        );
+        // A value-blind (granular-off) candidate carries a zero value, so its granular-off subject is the
+        // primitive-only key, identical to the soft target's default subject.
+        let flat = candidate_bindings(&[STRIKE], &[Fixed::from_int(5)], false, gran);
+        assert_eq!(
+            flat[0].param_bucket, 0,
+            "a value-blind candidate carries no value"
+        );
+        assert_eq!(
+            step_belief_subject(&flat[0], false),
+            step_belief_subject(&soft[0], false),
+            "a value-blind candidate keys the primitive-only subject regardless of the target value"
+        );
+    }
+
     #[test]
     fn the_binding_graph_is_the_generic_cartesian_of_afforded_primitives_and_present_targets() {
         // Slice 2b: every afforded primitive is proposed against every PRESENT affordance channel, with no
@@ -237,7 +358,7 @@ mod tests {
         // bindings, each keyed on the primitive and the affordance CHANNEL as its target.
         let afforded = [GRASP, STRIKE, EXTRACT];
         let percepts = [Fixed::from_ratio(8, 10), Fixed::from_ratio(9, 10)]; // both present
-        let candidates = candidate_bindings(&afforded, &percepts);
+        let candidates = bind(&afforded, &percepts);
         assert_eq!(
             candidates.len(),
             6,
@@ -251,15 +372,15 @@ mod tests {
         // The target is the CHANNEL, value-blind: two beings sensing different fracturability levels on the
         // same channel propose the SAME binding and mint the SAME sequence subject, so one template
         // generalises across instances (the value drives the sampler, not the identity).
-        let strong = candidate_bindings(&[STRIKE], &[Fixed::from_ratio(9, 10)]);
-        let weak = candidate_bindings(&[STRIKE], &[Fixed::from_ratio(2, 10)]);
+        let strong = bind(&[STRIKE], &[Fixed::from_ratio(9, 10)]);
+        let weak = bind(&[STRIKE], &[Fixed::from_ratio(2, 10)]);
         assert_eq!(
             sequence_subject(&[strong[0]]),
             sequence_subject(&[weak[0]]),
             "the same primitive on the same affordance channel is one template, value-blind"
         );
         // A different channel is a different template.
-        let sharp = candidate_bindings(&[STRIKE], &[Fixed::ZERO, Fixed::from_ratio(9, 10)]);
+        let sharp = bind(&[STRIKE], &[Fixed::ZERO, Fixed::from_ratio(9, 10)]);
         assert_ne!(
             sequence_subject(&[strong[0]]),
             sequence_subject(&[sharp[0]]),
@@ -272,8 +393,7 @@ mod tests {
         // A channel the being does not perceive (its percept zero) contributes no candidate, so the proposal
         // set is bounded by what is present in reach: a being sensing only channel 1 (sharp) proposes only
         // bindings against channel 1, never against the absent channel 0.
-        let candidates =
-            candidate_bindings(&[STRIKE, GRASP], &[Fixed::ZERO, Fixed::from_ratio(9, 10)]);
+        let candidates = bind(&[STRIKE, GRASP], &[Fixed::ZERO, Fixed::from_ratio(9, 10)]);
         assert_eq!(
             candidates.len(),
             2,
@@ -285,9 +405,9 @@ mod tests {
         );
         // No afforded primitive, or no perceived affordance, proposes nothing (a being that can do nothing,
         // or senses nothing to act on, has no hypothesis to test).
-        assert!(candidate_bindings(&[], &[Fixed::ONE]).is_empty());
-        assert!(candidate_bindings(&[STRIKE], &[]).is_empty());
-        assert!(candidate_bindings(&[STRIKE], &[Fixed::ZERO, Fixed::ZERO]).is_empty());
+        assert!(bind(&[], &[Fixed::ONE]).is_empty());
+        assert!(bind(&[STRIKE], &[]).is_empty());
+        assert!(bind(&[STRIKE], &[Fixed::ZERO, Fixed::ZERO]).is_empty());
     }
 
     // Commit a REWARDS belief on a mind about one candidate's sequence, so the sampler weights it full.
@@ -315,7 +435,7 @@ mod tests {
         // with a positive floor still proposes SOMETHING (it explores). The belief generalises over the
         // primitive (keyed on `target_bucket` zero, the same key the reward learner commits), so it lifts a
         // STRIKE against EITHER present target, rather than the channel the belief was first committed on.
-        let candidates = candidate_bindings(&[STRIKE, GRASP], &[Fixed::ONE, Fixed::ONE]); // 4 candidates
+        let candidates = bind(&[STRIKE, GRASP], &[Fixed::ONE, Fixed::ONE]); // 4 candidates
         let believed = candidates[0]; // STRIKE against channel 0
         let mut sage = Mind::new(StableId(1), Fixed::ONE);
         believe(&mut sage, &believed);
@@ -336,6 +456,9 @@ mod tests {
                 StableId(1),
                 tick,
                 SEED,
+                &no_obs(),
+                Fixed::ZERO,
+                false,
             );
             assert_eq!(
                 proposal.map(|p| p.primitive),
@@ -353,7 +476,10 @@ mod tests {
                 &params(),
                 StableId(2),
                 0,
-                SEED
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
+                false,
             ),
             None,
             "a being that believes nothing and never explores proposes nothing"
@@ -368,10 +494,90 @@ mod tests {
                 &params(),
                 StableId(2),
                 0,
-                SEED
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
+                false,
             )
             .is_some(),
             "with an exploration floor, an unproven action is still tried"
+        );
+    }
+
+    #[test]
+    fn an_observed_action_is_proposed_by_the_social_prior_and_a_founder_ignores_it() {
+        // Social-learning arc, piece 2 (observe-and-imitate): the social prior LIFTS an UNBELIEVED candidate
+        // whose action the being observed a co-located neighbour enact, scaled by its heritable
+        // social-learning weight. With a zero exploration floor an observed action carries weight ONLY
+        // through the social prior, so the effect is clean to read: a being with a positive social weight
+        // proposes the observed STRIKE every tick (it copies what it saw), a founder (zero social weight)
+        // ignores the observation and, with a zero floor, proposes nothing, so imitation emerges only with
+        // the heritable weight (founder-zero); and an action the being did NOT observe gets no lift, so only
+        // a demonstrated action is copied.
+        use std::collections::BTreeSet;
+        let candidates = bind(&[STRIKE, GRASP], &[Fixed::ONE, Fixed::ONE]); // 4
+        let naive = Mind::new(StableId(3), Fixed::ONE);
+        let exploit = DiscoveryCalib {
+            exploration_floor: Fixed::ZERO,
+            ..DiscoveryCalib::dev_default()
+        };
+        let observed_strike: BTreeSet<u16> = [STRIKE.0].into_iter().collect();
+        // A positive social weight: the observed STRIKE carries weight (floor zero plus the social prior),
+        // so the being proposes it every tick, by imitation alone, never a coded preference.
+        for tick in 0..8 {
+            let proposal = sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                tick,
+                SEED,
+                &observed_strike,
+                Fixed::ONE,
+                false,
+            );
+            assert_eq!(
+                proposal.map(|p| p.primitive),
+                Some(STRIKE.0),
+                "a being with a social weight copies the action it observed a neighbour enact"
+            );
+        }
+        // Founder-zero: a zero social weight ignores what it observed, and with a zero floor nothing carries
+        // weight, so imitation appears only once selection lifts the social-learning weight off zero.
+        assert_eq!(
+            sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                0,
+                SEED,
+                &observed_strike,
+                Fixed::ZERO,
+                false,
+            ),
+            None,
+            "a founder ignores what it observed: imitation emerges only with the heritable weight"
+        );
+        // Nothing observed: the social weight lifts nothing, so only a demonstrated action is ever copied.
+        let observed_none: BTreeSet<u16> = BTreeSet::new();
+        assert_eq!(
+            sample_candidate(
+                &candidates,
+                &naive,
+                &exploit,
+                &params(),
+                StableId(3),
+                0,
+                SEED,
+                &observed_none,
+                Fixed::ONE,
+                false,
+            ),
+            None,
+            "an action the being did not observe gets no social lift"
         );
     }
 
@@ -380,18 +586,51 @@ mod tests {
         // The draw is a reproducible function of the being, the tick, and the seed (counter-keyed under the
         // hypothesis phase), so a replayed run proposes the identical hypothesis, and an empty candidate set
         // proposes nothing.
-        let candidates = candidate_bindings(&[STRIKE, GRASP, EXTRACT], &[Fixed::ONE, Fixed::ONE]); // 6
+        let candidates = bind(&[STRIKE, GRASP, EXTRACT], &[Fixed::ONE, Fixed::ONE]); // 6
         let naive = Mind::new(StableId(7), Fixed::ONE);
         let calib = DiscoveryCalib::dev_default();
-        let a = sample_candidate(&candidates, &naive, &calib, &params(), StableId(7), 3, SEED);
-        let b = sample_candidate(&candidates, &naive, &calib, &params(), StableId(7), 3, SEED);
+        let a = sample_candidate(
+            &candidates,
+            &naive,
+            &calib,
+            &params(),
+            StableId(7),
+            3,
+            SEED,
+            &no_obs(),
+            Fixed::ZERO,
+            false,
+        );
+        let b = sample_candidate(
+            &candidates,
+            &naive,
+            &calib,
+            &params(),
+            StableId(7),
+            3,
+            SEED,
+            &no_obs(),
+            Fixed::ZERO,
+            false,
+        );
         assert_eq!(
             a, b,
             "the proposal is reproducible for one being, tick, and seed"
         );
         assert!(a.is_some());
         assert_eq!(
-            sample_candidate(&[], &naive, &calib, &params(), StableId(7), 0, SEED),
+            sample_candidate(
+                &[],
+                &naive,
+                &calib,
+                &params(),
+                StableId(7),
+                0,
+                SEED,
+                &no_obs(),
+                Fixed::ZERO,
+                false,
+            ),
             None,
             "no candidates, no proposal"
         );

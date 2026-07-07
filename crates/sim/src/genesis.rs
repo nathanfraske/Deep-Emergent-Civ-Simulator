@@ -35,6 +35,7 @@ use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::{
     BiomeSet, Coord3, FlatBounded, OrbitalElements, TileMap, TopologySpace, WorldgenParams,
 };
+use rayon::prelude::*;
 
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
@@ -424,9 +425,13 @@ impl WorldGenesis {
         if self.gen >= self.params.epoch.generations {
             return false;
         }
-        for sr in &mut self.regions {
+        // DETERMINISTIC data-parallelism (arc 4): each region owns a DISJOINT radiation (its own biosphere,
+        // species pools, and stocks); no region reads or writes another's state, so `par_iter_mut` hands each
+        // closure an exclusive `&mut` element, and every draw inside `step_once` keys through a DrawKey on the
+        // region/pool id (not the thread), so the result is bit-identical at any thread count.
+        self.regions.par_iter_mut().for_each(|sr| {
             sr.radiation.step_once();
-        }
+        });
         self.gen += 1;
         true
     }

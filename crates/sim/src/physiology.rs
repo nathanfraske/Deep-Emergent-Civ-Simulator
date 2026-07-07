@@ -54,6 +54,8 @@
 //! mean; the R-TIER-CONSIST reconciliation (carry a size-distribution moment into the pool-tier drain,
 //! or accept and document the gap) is the named follow-on, not resolved here.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use civsim_core::Fixed;
 use civsim_physics::laws;
 
@@ -268,6 +270,77 @@ pub fn whole_body_energy_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> 
         return Fixed::ZERO;
     }
     weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
+}
+
+/// A being's whole-body COMPOSITION VECTOR: its value on the UNION of every floor axis any of its parts
+/// declares, each a development-weighted mean over the parts that carry it, generalizing
+/// [`whole_body_energy_density`] and [`crate::medium::body_density`] from one named axis to all of them. This
+/// is the physics of the matter a body is made of: the vector a corpse deposits into the tissue field
+/// ([`crate::material::TissueField`]) so the world can forage, work, and decompose an organism's remains by
+/// the SAME axes and mechanisms as any other matter, with no minted per-species substance and no authored
+/// species-to-substance map (Principle 8). The organs read their [`crate::anatomy::TissueComposition`] via
+/// `organ_composition`; the covering and each weapon read their `KindDef::material` DIRECTLY, because
+/// `organ_composition` searches only the organ list and a covering or weapon kind id would otherwise alias
+/// onto an unrelated organ sharing that numeric id. Locomotion (a bare kind-id vector with no development
+/// scalar, `BodyPlan::locomotion`) is excluded here; its weighting is a reserved design choice. On an
+/// organs-only body its `mat.density` component equals [`crate::medium::body_density`] exactly (the
+/// special-case the generalization subsumes). Order-independent, no RNG; an axis no part carries is absent
+/// (the substrate's zero-for-absent convention), so a consumer that needs a floor for an axis (as
+/// `body_density` applies a water baseline) applies its own.
+pub fn whole_body_composition_vector(
+    plan: &BodyPlan,
+    registry: &BodyPlanRegistry,
+) -> BTreeMap<String, Fixed> {
+    // Each part's (development weight, its own axis map), gathered so the axis union and the per-axis
+    // weighted mean read the SAME source. Organs read their tissue composition; the covering and weapons
+    // read their material map directly (organ_composition would alias their kind id onto an organ).
+    let mut contributors: Vec<(Fixed, &BTreeMap<String, Fixed>)> = Vec::new();
+    for organ in &plan.organs {
+        if let Some(comp) = registry.organ_composition(organ.kind) {
+            contributors.push((organ.development, &comp.components));
+        }
+    }
+    if let Some(cov) = registry
+        .coverings
+        .iter()
+        .find(|k| k.id == plan.covering.kind)
+    {
+        contributors.push((plan.covering.development, &cov.material));
+    }
+    for weapon in &plan.weapons {
+        if let Some(kd) = registry.weapons.iter().find(|k| k.id == weapon.kind) {
+            contributors.push((weapon.development, &kd.material));
+        }
+    }
+    // The axis union over every contributor.
+    let mut axes: BTreeSet<&str> = BTreeSet::new();
+    for (_, map) in &contributors {
+        for key in map.keys() {
+            axes.insert(key.as_str());
+        }
+    }
+    // Per axis, the development-weighted mean over the contributors that carry it (value > 0), the same
+    // discipline body_density and whole_body_energy_density use; an axis no contributor carries is absent.
+    let mut vector: BTreeMap<String, Fixed> = BTreeMap::new();
+    for axis in axes {
+        let mut weighted = Fixed::ZERO;
+        let mut total_dev = Fixed::ZERO;
+        for (dev, map) in &contributors {
+            let v = map.get(axis).copied().unwrap_or(Fixed::ZERO);
+            if v > Fixed::ZERO {
+                let contribution = dev.checked_mul(v).unwrap_or(Fixed::ZERO);
+                weighted = weighted.saturating_add(contribution);
+                total_dev = total_dev.saturating_add(*dev);
+            }
+        }
+        if total_dev > Fixed::ZERO {
+            let mean = weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO);
+            if mean > Fixed::ZERO {
+                vector.insert(axis.to_string(), mean);
+            }
+        }
+    }
+    vector
 }
 
 /// The body's mass in kilograms: the normalized `body_mass` trait times the reserved kilogram bridge.
@@ -528,6 +601,61 @@ mod tests {
             composition: TissueComposition::from_pairs(&[(ENERGY_DENSITY, Fixed::ONE)]),
         });
         (reg, skin, flesh, fat)
+    }
+
+    #[test]
+    fn whole_body_composition_vector_generalizes_body_density_and_unions_axes() {
+        use crate::medium::body_density;
+        let (organs, _skin, flesh, fat) = registry();
+        // A body of flesh (density 1000, specific heat 3500) and an energy store (energy density 1), each at
+        // full development. The composition vector carries the UNION of every axis the parts declare.
+        let plan = body((1, 2), vec![organ(flesh, (1, 1)), organ(fat, (1, 1))]);
+        let vector = whole_body_composition_vector(&plan, &organs);
+        assert_eq!(
+            vector.get(TISSUE_DENSITY).copied(),
+            Some(Fixed::from_int(1000)),
+            "the flesh density enters the vector"
+        );
+        assert_eq!(
+            vector.get(ENERGY_DENSITY).copied(),
+            Some(Fixed::ONE),
+            "the energy store's energy density enters the vector (axis union, not one axis)"
+        );
+        assert_eq!(
+            vector.get(TISSUE_SPECIFIC_HEAT).copied(),
+            Some(Fixed::from_int(3500)),
+            "the flesh specific heat enters the vector too"
+        );
+        // The generalization subsumes the special case: the vector's mat.density EQUALS body_density on the
+        // same organs-only body.
+        assert_eq!(
+            vector.get(TISSUE_DENSITY).copied().unwrap(),
+            body_density(&plan, &organs),
+            "the vector's mat.density is exactly the special-case body_density"
+        );
+
+        // A hand-computed development-weighted mean over TWO density-bearing organs: flesh (density 1000, dev
+        // 1) and a bone organ (density 1900, dev 3) give (1*1000 + 3*1900) / (1+3) = 6700/4 = 1675.
+        let mut reg = organs;
+        let bone = reg.organs.len() as u16;
+        reg.organs.push(OrganKindDef {
+            id: bone,
+            name: "bone".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(TISSUE_DENSITY, Fixed::from_int(1900))]),
+        });
+        let mixed = body((1, 2), vec![organ(flesh, (1, 1)), organ(bone, (3, 1))]);
+        let mixed_vec = whole_body_composition_vector(&mixed, &reg);
+        assert_eq!(
+            mixed_vec.get(TISSUE_DENSITY).copied(),
+            Some(Fixed::from_int(1675)),
+            "the density is the development-weighted mean over both organs"
+        );
+        assert_eq!(
+            mixed_vec.get(TISSUE_DENSITY).copied().unwrap(),
+            body_density(&mixed, &reg),
+            "and it still equals body_density on the two-organ body"
+        );
     }
 
     #[test]

@@ -44,7 +44,9 @@
 //! a vacuous pass the guard now refuses.
 
 use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
+use civsim_sim::anatomy::{
+    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
+};
 use civsim_sim::controller::Controller;
 use civsim_sim::decision::Behaviour;
 use civsim_sim::dialogue::{
@@ -745,5 +747,147 @@ fn the_runner_tick_runs_through_the_scheduler_bit_identically() {
         sch[1].len(),
         1,
         "the field-reading body exchange serialises after"
+    );
+}
+
+/// A body plan bearing a single flesh organ that carries `mat.fracture_strength` (so a corpse of it is
+/// worked matter) and `bio.energy_density`, plus the matching organ registry. Labelled test fixture, not
+/// owner data: the corpse's physics is DERIVED from these axes, and the numbers are stand-ins.
+fn flesh_body_and_registry() -> (BodyPlan, BodyPlanRegistry) {
+    let mut registry = BodyPlanRegistry::dev_default();
+    let flesh = registry.organs.len() as u16;
+    registry.organs.push(OrganKindDef {
+        id: flesh,
+        name: "flesh".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[
+            ("mat.fracture_strength", Fixed::from_int(3)),
+            ("bio.energy_density", Fixed::from_int(5)),
+        ]),
+    });
+    let body = BodyPlan {
+        body_mass: Fixed::from_ratio(1, 2),
+        encephalization: Fixed::from_ratio(1, 2),
+        diet_breadth: Fixed::from_ratio(1, 2),
+        weapons: vec![],
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
+        senses: vec![],
+        locomotion: vec![1],
+        organs: vec![Part {
+            kind: flesh,
+            development: Fixed::ONE,
+        }],
+        temperament: Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(1, 2),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        },
+    };
+    (body, registry)
+}
+
+/// An embodiment whose walkers share the world ids and each carry the flesh body, with the matching organ
+/// registry armed so a death can derive the corpse composition from the body plan.
+fn fleshy_embodiment(ids: &[StableId], seed: u64) -> Embodiment {
+    let reg = HomeostaticRegistry::dev_thermal();
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        seed,
+    );
+    let (body, organs) = flesh_body_and_registry();
+    emb.set_organs(organs);
+    let blank = Controller::zeros(emb.layout());
+    for (k, &id) in ids.iter().enumerate() {
+        let coord = Coord3::ground((k as i32) % 8, (k as i32) % 6);
+        let walker = Walker::new(
+            id,
+            coord,
+            body.clone(),
+            Homeostasis::from_mass(&reg, Fixed::from_ratio(1, 2)),
+            Physiology::dev_for_registry(&reg),
+            blank.clone(),
+        );
+        emb.add(walker, thermal_band());
+    }
+    emb
+}
+
+#[test]
+fn a_culled_being_leaves_its_own_body_as_located_matter_when_corpse_matter_is_armed() {
+    // Biosphere directive 2, organisms as usable material stuff (the wired demo). With corpse matter armed,
+    // culling a mind retires its body AND leaves the body as located tissue where it fell, a composition
+    // vector DERIVED from the being's own body plan (its flesh's fracture strength), never a minted
+    // substance or an authored species-to-substance map (Principle 8). The corpse is then worked by the SAME
+    // extraction contest and the SAME axis (mat.fracture_strength) as any other matter, so a forager could
+    // break it down. With corpse matter OFF (the default) nothing is deposited, so the run is byte-identical,
+    // and the deposit is deterministic (two armed runs agree bit for bit).
+    let build = |armed: bool| -> Runner {
+        let (world, ids) = dawn_world(1, 1, 0x0C0F_5EED);
+        let emb = fleshy_embodiment(&ids, 0x00B0_D1E5);
+        let mut runner =
+            Runner::with_world_and_embodiment(field_fixture(), field_calib(), world, emb);
+        if armed {
+            runner.set_corpse_matter(true);
+        }
+        // Cull the one mind; the lifecycle reconciliation retires its body next tick.
+        let victim = ids[0];
+        runner.world_mut().unwrap().remove_being(victim);
+        runner
+    };
+
+    // ARMED: the culled being leaves located matter derived from its own flesh.
+    let mut armed = build(true);
+    assert!(
+        armed.embodiment().unwrap().tissue().is_empty(),
+        "no corpse matter before the tick"
+    );
+    armed.step();
+    let tissue = armed.embodiment().unwrap().tissue();
+    assert!(
+        !tissue.is_empty(),
+        "the culled being left its body as located matter"
+    );
+    let cell = tissue.cells().next().expect("a corpse cell exists");
+    // The corpse carries its OWN body's fracture strength (the flesh's 3), derived by the composition fold,
+    // so the death cell is now worked matter a forager must overcome, read through the same axis as rock.
+    assert_eq!(
+        tissue.fracture_hardness(cell),
+        Fixed::from_int(3),
+        "the corpse's fracture hardness is its own flesh's, derived not authored"
+    );
+    assert!(
+        tissue.volume_at(cell) > Fixed::ZERO,
+        "the corpse deposited a positive volume of its own matter"
+    );
+    // The body is retired in lockstep (no orphaned body), the referential-integrity invariant, so corpse
+    // matter rides alongside the retirement rather than blocking it.
+    assert!(
+        armed.embodiment().unwrap().walkers().is_empty(),
+        "the culled being's body was retired"
+    );
+
+    // OFF (default): the same cull deposits nothing, so the tissue field stays empty (byte-neutral opt-in).
+    let mut off = build(false);
+    off.step();
+    assert!(
+        off.embodiment().unwrap().tissue().is_empty(),
+        "with corpse matter off, a death leaves no located matter (the opt-in flip)"
+    );
+
+    // DETERMINISTIC: a second armed run reproduces the deposit and the whole state hash bit for bit.
+    let mut armed2 = build(true);
+    armed2.step();
+    assert_eq!(
+        armed.state_hash(),
+        armed2.state_hash(),
+        "the corpse deposit is deterministic (two armed runs agree bit for bit)"
     );
 }

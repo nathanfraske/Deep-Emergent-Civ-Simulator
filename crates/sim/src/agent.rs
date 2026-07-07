@@ -105,6 +105,18 @@ pub struct Mind {
     /// A question it wonders about but has not committed a belief on is an open question it
     /// will ask about; being asked seeds a question here, so curiosity spreads.
     wondering: BTreeSet<Question>,
+    /// The mind's RELATIONAL beliefs (relational-belief substrate, arc 2): a belief whose HEAD is
+    /// another belief's subject, an edge `(head, relation, tail)` the being holds with a confidence, so
+    /// "A yields X" and "A causes B" become first-class. Each entry is an inference frame over the
+    /// `{RELATES, UNRELATED}` hypotheses (does this edge hold?), keyed by the (head subject, relation
+    /// attribute, tail subject) triple, so the same head can relate to many tails and the store is a
+    /// directed graph over the belief substrate. EMPTY by default, so a mind that holds no relation folds
+    /// nothing into `state_hash` and the multi-hop planner degenerates to the one-hop lookup (opt-in,
+    /// byte-identical). It turns the single-hop planner into MULTI-HOP planning: a being that holds
+    /// "strike-this yields a sharp thing" and "a sharp thing pays off" can chain them to reach a goal a
+    /// single belief cannot, the seed of tool-reasoning (Principle 8: the chain emerges from the being's own
+    /// relational beliefs, never a coded goal-to-action table).
+    relations: BTreeMap<(StableId, AttrKindId, StableId), InferenceFrame>,
 }
 
 impl Mind {
@@ -121,6 +133,7 @@ impl Mind {
             beliefs: BTreeMap::new(),
             models: BTreeMap::new(),
             wondering: BTreeSet::new(),
+            relations: BTreeMap::new(),
         }
     }
 
@@ -156,6 +169,7 @@ impl Mind {
             beliefs: BTreeMap::new(),
             models: BTreeMap::new(),
             wondering: BTreeSet::new(),
+            relations: BTreeMap::new(),
         }
     }
 
@@ -301,6 +315,71 @@ impl Mind {
             .collect()
     }
 
+    /// Take in relational evidence: a signed weight toward one value of the edge `(head, relation, tail)`,
+    /// scaled by this mind's acuity, the relational mirror of [`Mind::consider`]. An edge is a first-class
+    /// belief over the `{UNRELATED, RELATES}` hypotheses ("does the head bring about the tail?"), inferred by
+    /// the SAME evidence engine as a first-order belief, so a being LEARNS "A yields X" or "A causes B" from
+    /// correlated evidence rather than being handed it (Principle 8). The head, the relation attribute, and the
+    /// tail are all data; the same head can relate to many tails, so the store is a directed graph over the
+    /// belief substrate. This is the substrate the multi-hop planner traverses, the seed of tool-reasoning.
+    #[allow(clippy::too_many_arguments)]
+    pub fn consider_relation(
+        &mut self,
+        head: StableId,
+        relation: AttrKindId,
+        tail: StableId,
+        hyps: impl IntoIterator<Item = ValueId>,
+        toward: ValueId,
+        weight: Fixed,
+        from: StableId,
+    ) {
+        let acuity = self.acuity;
+        let hyps: Vec<ValueId> = hyps.into_iter().collect();
+        let frame = self
+            .relations
+            .entry((head, relation, tail))
+            .or_insert_with(|| InferenceFrame::new(head, relation, hyps.iter().copied()));
+        frame.merge_hyps(hyps.iter().copied());
+        frame.add_evidence(toward, weight, acuity, from);
+    }
+
+    /// This mind's committed relational belief on an edge, or `None` if it has not concluded whether the edge
+    /// holds. `Some(RELATES)` means the being believes the head brings the tail about; `Some(UNRELATED)` that
+    /// it believes it does not.
+    pub fn relation(
+        &self,
+        head: StableId,
+        relation: AttrKindId,
+        tail: StableId,
+        params: &InferenceParams,
+    ) -> Option<ValueId> {
+        self.relations.get(&(head, relation, tail))?.commit(params)
+    }
+
+    /// Whether this mind holds any relational belief at all. The multi-hop planner's fast path: a mind with no
+    /// relation degenerates to the one-hop lookup, and [`Mind::state_hash`] folds no relation for it, so an
+    /// existing world that never forms one is byte-identical (the substrate is opt-in by being USED, never by a
+    /// flag).
+    pub fn has_relations(&self) -> bool {
+        !self.relations.is_empty()
+    }
+
+    /// The relational edges whose TAIL is `tail`, each as its `(head, relation, frame)`, in canonical
+    /// `(head, relation)` order (the sorted `relations` walk filtered on the tail). The multi-hop planner
+    /// walks these BACKWARD from a goal subject: an edge `(A, relation, tail)` the being believes RELATES is
+    /// an antecedent action A that brings the goal about, so a goal the being cannot act on directly is
+    /// reached by doing A first (insight as a traversed path). Yields the frame so the planner ranks an edge
+    /// by the same commit margin it ranks a first-order belief by, without a second copy or exposing the map.
+    pub fn relations_into(
+        &self,
+        tail: StableId,
+    ) -> impl Iterator<Item = (StableId, AttrKindId, &InferenceFrame)> {
+        self.relations
+            .iter()
+            .filter(move |((_, _, t), _)| *t == tail)
+            .map(|((head, relation, _), frame)| (*head, *relation, frame))
+    }
+
     /// What this mind believes a target mind believes about a question, or `None`.
     pub fn modeled_belief(
         &self,
@@ -365,6 +444,20 @@ impl Mind {
         for (subject, attr) in &self.wondering {
             h.write_stable(*subject);
             h.write_u32(attr.0);
+        }
+        // The relational beliefs, in canonical (head, relation, tail) order (the BTreeMap is already sorted).
+        // Read under `belief_params`, since a relation is a first-order belief about the world (an edge that
+        // holds or does not), the same calibrations its commit uses. Empty for a mind that holds no relation,
+        // so a world that never forms one folds nothing here and hashes exactly as before (byte-neutral).
+        for ((head, relation, tail), frame) in &self.relations {
+            h.write_stable(*head);
+            h.write_u32(relation.0);
+            h.write_stable(*tail);
+            for &v in frame.hyps() {
+                h.write_u32(v);
+                h.write_fixed(frame.clamped_total(v, belief_params).unwrap());
+            }
+            h.write_u32(frame.commit(belief_params).unwrap_or(u32::MAX));
         }
         h.finish()
     }
@@ -595,6 +688,129 @@ mod tests {
             LOCATION,
             [BASKET, BOX],
             BASKET,
+            Fixed::from_int(4),
+            StableId(5),
+        );
+
+        assert_eq!(a.state_hash(&p, &p), b.state_hash(&p, &p));
+    }
+
+    // --- relational-belief substrate, arc 2 ---
+
+    // The relation vocabulary lives in crate::learn; use a local mirror so the agent tests stay self-contained.
+    const YIELDS: AttrKindId = AttrKindId(u32::MAX - 4);
+    const RELATES: ValueId = 1;
+    const UNRELATED: ValueId = 0;
+
+    #[test]
+    fn a_mind_forms_and_reads_a_relational_belief() {
+        let strike = StableId(30);
+        let sharp = StableId(31);
+        let p = params();
+        let mut m = Mind::new(StableId(1), Fixed::ONE);
+        // No relation to start: the mind is empty and reads none.
+        assert!(!m.has_relations());
+        assert_eq!(m.relation(strike, YIELDS, sharp, &p), None);
+
+        // Reinforcing evidence that striking yields a sharp thing commits the edge to RELATES.
+        for _ in 0..6 {
+            m.consider_relation(
+                strike,
+                YIELDS,
+                sharp,
+                [RELATES, UNRELATED],
+                RELATES,
+                Fixed::ONE,
+                m.id,
+            );
+        }
+        assert!(m.has_relations());
+        assert_eq!(m.relation(strike, YIELDS, sharp, &p), Some(RELATES));
+
+        // The backward enumeration finds the head that yields the tail, and nothing for an unrelated tail.
+        let heads: Vec<StableId> = m.relations_into(sharp).map(|(h, _, _)| h).collect();
+        assert_eq!(heads, vec![strike]);
+        assert_eq!(m.relations_into(StableId(999)).count(), 0);
+    }
+
+    #[test]
+    fn an_empty_relation_store_hashes_identically_and_a_relation_changes_the_hash() {
+        // Byte-neutrality: a mind that forms only first-order beliefs (no relation) hashes exactly as it did
+        // before the relational substrate existed, because the empty relations map folds nothing.
+        let marble = StableId(99);
+        let p = params();
+        let mut base = Mind::new(StableId(1), Fixed::ONE);
+        base.consider(
+            marble,
+            LOCATION,
+            [BASKET, BOX],
+            BASKET,
+            Fixed::from_int(4),
+            StableId(2),
+        );
+        let h_no_relation = base.state_hash(&p, &p);
+
+        // The same beliefs plus a relation must hash DIFFERENTLY: the relation is folded once it exists.
+        let mut with = base.clone();
+        with.consider_relation(
+            StableId(30),
+            YIELDS,
+            StableId(31),
+            [RELATES, UNRELATED],
+            RELATES,
+            Fixed::ONE,
+            StableId(1),
+        );
+        assert_ne!(
+            h_no_relation,
+            with.state_hash(&p, &p),
+            "a relational belief is part of the mind's epistemic state and folds into its hash"
+        );
+    }
+
+    #[test]
+    fn the_relation_hash_is_order_independent() {
+        // Two minds that take the same relational evidence in different order hash identically: the fold is a
+        // pure function of the relation set, not of arrival order (the same guarantee first-order beliefs hold).
+        let p = params();
+        let (s0, s1, t) = (StableId(30), StableId(31), StableId(40));
+
+        let mut a = Mind::new(StableId(1), Fixed::ONE);
+        a.consider_relation(
+            s0,
+            YIELDS,
+            t,
+            [RELATES, UNRELATED],
+            RELATES,
+            Fixed::from_int(4),
+            StableId(5),
+        );
+        a.consider_relation(
+            s1,
+            YIELDS,
+            t,
+            [RELATES, UNRELATED],
+            UNRELATED,
+            Fixed::from_int(2),
+            StableId(6),
+        );
+
+        let mut b = Mind::new(StableId(1), Fixed::ONE);
+        b.consider_relation(
+            s1,
+            YIELDS,
+            t,
+            [RELATES, UNRELATED],
+            UNRELATED,
+            Fixed::from_int(2),
+            StableId(6),
+        );
+        b.consider_relation(
+            s0,
+            YIELDS,
+            t,
+            [RELATES, UNRELATED],
+            RELATES,
             Fixed::from_int(4),
             StableId(5),
         );

@@ -72,6 +72,7 @@ pub mod clock;
 pub mod conservation;
 pub mod controller;
 pub mod decision;
+pub mod decompose;
 pub mod demography;
 pub mod dialogue;
 pub mod discovery;
@@ -157,6 +158,10 @@ pub use controller::{
 };
 pub use decision::{
     ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
+pub use decompose::{
+    CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
+    DecomposerStockField,
 };
 pub use demography::{hazard_age, AgeHistogram};
 pub use dialogue::{

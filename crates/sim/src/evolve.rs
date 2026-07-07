@@ -53,6 +53,7 @@
 
 use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StableId};
 use civsim_world::Coord3;
+use rayon::prelude::*;
 
 use crate::anatomy::{BodyPlan, Part, Temperament};
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -910,7 +911,9 @@ pub fn evolve_with<F>(
     scorer: F,
 ) -> EvolveReport
 where
-    F: Fn(&Controller, u32, u64) -> u32,
+    // `Sync` so the per-genome scoring can run in parallel (arc 4): each score is a pure function of the
+    // genome and the folded seed on local state, so a shareable scorer keeps the result bit-identical.
+    F: Fn(&Controller, u32, u64) -> u32 + Sync,
 {
     // A degenerate empty population has nothing to select; return an empty report rather than
     // indexing an empty slice.
@@ -933,8 +936,13 @@ where
     for g in 0..params.generations as u64 {
         // Score every genome by homeostatic survival. The scoring seed folds the generation so a
         // fixed lineage is re-scored in the same environment, keyed reproducibly.
+        // DETERMINISTIC data-parallelism (arc 4): each score is a self-contained pure function of (genome,
+        // episode_ticks, seed): the scorer allocates its own Walker + ResourceField and runs the episode on
+        // that local state, drawing RNG only from the folded seed, with no shared mutable state and no thread
+        // input. The indexed parallel collect preserves each genome's position, so the scored vector, and thus
+        // the truncation-and-sort below, is bit-identical to the serial version at any thread count.
         let mut scored: Vec<(u32, usize)> = pop
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, genome)| {
                 let controller = Controller::express(&genes, genome, layout);

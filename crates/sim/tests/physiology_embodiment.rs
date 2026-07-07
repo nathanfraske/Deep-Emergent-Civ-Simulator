@@ -1015,6 +1015,8 @@ values = [
     // A tool with a tiny contact area (a sharp point), of the given substance.
     let tool = |substance: &str| WieldedTool {
         contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
+        length: Fixed::ONE,
         substance: substance.to_string(),
     };
     // A large bare working area, so the bare being cannot raise its pressure over granite's fracture
@@ -1099,6 +1101,1122 @@ values = [
         carried(&with_chalk),
         Fixed::ZERO,
         "a sharp but soft tool blunts and mines nothing: the tool material is part of the contest"
+    );
+}
+
+#[test]
+fn a_cut_frees_the_soft_constituent_of_a_composite_a_bare_extract_cannot_and_authors_nothing() {
+    // The made-world arc, tool-use: a CUT gates PER CONSTITUENT of the cell's own composite, freeing every
+    // substance whose OWN fracture strength the edge beats, where EXTRACT gates on the AGGREGATE (the hardest
+    // constituent binds the whole cell). So a keen edge frees the soft flesh from a tough rind a bare press
+    // cannot break, and WHICH substances are freed is derived from the cell's own composition, never a table.
+    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A composite target: a rind tough in shear (shear strength 5000) binding a soft flesh (shear strength 1),
+    // and a flint edge (shear strength 500, so its deliverable shear parts the flesh but not the rind). The
+    // extraction contest still reads fracture strength (kept on rind/flesh), so a bare extract gates on the
+    // aggregate rind. Kept in the test.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "rind"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1200" },
+  { axis = "mat.fracture_strength", value = "5000" },
+  { axis = "mat.shear_strength", value = "5000" },
+]
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "fibre"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1100" },
+  { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "5000" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let ration = Fixed::from_int(1000);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
+        length: Fixed::ONE,
+        substance: "flint".to_string(),
+    };
+    let bare_area = Fixed::from_int(1000);
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C07,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "rind", ration);
+        field.deposit(cell, "flesh", ration);
+        field.deposit(cell, "fibre", ration);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_extraction_params(ExtractionParams {
+            working_area: bare_area,
+            pressure_max: Fixed::from_int(150_000),
+        });
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_of =
+        |r: &Runner, s: &str| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume(s) };
+
+    // A sharp flint edge CUTS: it frees the soft flesh (its own shear strength is beaten by the edge's
+    // deliverable shear) into the carried load, and frees NO rind (the rind's 5000 shear strength exceeds the
+    // edge's deliverable shear, self-limited at the tool's own 500). Both outcomes derived.
+    let mut cutter = build(Some(tool()));
+    cutter.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert!(
+        carried_of(&cutter, "flesh") > Fixed::ZERO,
+        "a keen edge frees the soft flesh by beating its own shear strength"
+    );
+    assert_eq!(
+        carried_of(&cutter, "rind"),
+        Fixed::ZERO,
+        "the edge's deliverable shear is below the rind's shear strength, so it frees no rind: selective by physics"
+    );
+    // The sever gate reads SHEAR, not normal fracture: the fibre has the SAME low fracture strength as the
+    // flesh (1) but a high SHEAR strength (5000), so the OLD normal-stress gate would have freed it and the
+    // shear gate does NOT. It stays in the cell, proving R-CUT-SHEAR: the cut parts by shear.
+    assert_eq!(
+        carried_of(&cutter, "fibre"),
+        Fixed::ZERO,
+        "the fibre is weak in fracture but tough in shear, so the shear-parting cut leaves it: the gate is shear"
+    );
+
+    // The SAME being with the SAME tool EXTRACTS nothing: extraction gates on the aggregate (the hardest
+    // constituent, the rind at 5000), which the edge cannot beat, so the whole cell holds. The cut's distinct
+    // power is reaching the soft part the aggregate press cannot.
+    let mut extractor = build(Some(tool()));
+    extractor
+        .embodiment_mut()
+        .unwrap()
+        .extract_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&extractor, "flesh") + carried_of(&extractor, "rind"),
+        Fixed::ZERO,
+        "extraction gates on the aggregate rind and frees nothing: only the per-constituent cut reaches the flesh"
+    );
+
+    // A BARE being cuts nothing: the cut needs an edge, so an opted-out being is inert (byte-neutral gate).
+    let mut bare = build(None);
+    bare.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&bare, "flesh") + carried_of(&bare, "rind"),
+        Fixed::ZERO,
+        "a bare being has no edge and cuts nothing"
+    );
+}
+
+#[test]
+fn a_crush_fails_compression_where_a_cut_parts_shear_the_same_tool_diverging_by_the_targets_axis() {
+    // The made-world arc, tool-use, Section G: CRUSH fails matter in COMPRESSION where CUT parts it in SHEAR,
+    // so the SAME tool with the SAME force frees opposite constituents depending on which resistance axis each
+    // target is weak in. A chalk (weak in compression, tough in shear) is crushed but not cut; a fibre (tough
+    // in compression, weak in shear) is cut but not crushed. The divergence is the target's own material axes,
+    // by physics, never a per-action table or an `IsChalk`/`IsFibre` tag.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.compressive_strength"
+measures = "the compressive stress a substance fails at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "chalk"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1500" },
+  { axis = "mat.compressive_strength", value = "2" },
+  { axis = "mat.shear_strength", value = "5000" },
+]
+
+[[substance]]
+id = "fibre"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1100" },
+  { axis = "mat.compressive_strength", value = "5000" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "tool"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.compressive_strength", value = "500" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let ration = Fixed::from_int(1000);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::ONE,
+        length: Fixed::ONE,
+        substance: "tool".to_string(),
+    };
+
+    let build = |wielded: Option<WieldedTool>| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_crusher(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0A,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = wielded;
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "chalk", ration);
+        field.deposit(cell, "fibre", ration);
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_of =
+        |r: &Runner, s: &str| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume(s) };
+
+    // The SAME tool CRUSHES the chalk (weak in compression, effective stress beats its 2 MPa) and leaves the
+    // fibre (tough in compression, 5000 MPa), by the target's compressive strength alone.
+    let mut crusher = build(Some(tool()));
+    crusher
+        .embodiment_mut()
+        .unwrap()
+        .crush_underfoot(StableId(1));
+    assert!(
+        carried_of(&crusher, "chalk") > Fixed::ZERO,
+        "the face crushes the compression-weak chalk"
+    );
+    assert_eq!(
+        carried_of(&crusher, "fibre"),
+        Fixed::ZERO,
+        "the face leaves the compression-tough fibre: the crush gate is compression"
+    );
+
+    // The SAME tool CUTS the fibre (weak in shear) and leaves the chalk (tough in shear), the exact opposite
+    // outcome, from the same geometry and force: the ONLY difference is which resistance axis the target is
+    // weak in, so the two actions are distinct by physics, not a per-action table.
+    let mut cutter = build(Some(tool()));
+    cutter.embodiment_mut().unwrap().cut_underfoot(StableId(1));
+    assert!(
+        carried_of(&cutter, "fibre") > Fixed::ZERO,
+        "the edge parts the shear-weak fibre"
+    );
+    assert_eq!(
+        carried_of(&cutter, "chalk"),
+        Fixed::ZERO,
+        "the edge leaves the shear-tough chalk: the cut gate is shear"
+    );
+
+    // A bare being crushes nothing (a crush needs a wielded face), the byte-neutral gate.
+    let mut bare = build(None);
+    bare.embodiment_mut().unwrap().crush_underfoot(StableId(1));
+    assert_eq!(
+        carried_of(&bare, "chalk") + carried_of(&bare, "fibre"),
+        Fixed::ZERO,
+        "a bare being has no face and crushes nothing"
+    );
+}
+
+#[test]
+fn a_heavy_struck_tool_shatters_rock_a_light_one_of_the_same_shape_cannot_the_mass_payoff() {
+    // The made-world arc, tool-use, Section G, the MASS payoff: a percussion STRIKE swings the wielded tool,
+    // and its kinetic energy (1/2 m v^2 over the tool's own MASS = density times retained volume) fractures
+    // matter whose Griffith energy the blow exceeds. So a HEAVY tool shatters a brittle rock a LIGHT one of the
+    // IDENTICAL shape (same contact area, same volume, same swing) cannot, because it carries more mass into
+    // the same blow, the payoff of the tool carrying its own mass. The two tools differ ONLY in their material
+    // density, so the divergence is the mass, derived, never a per-tool table.
+    use civsim_sim::material::{MaterialField, StrikeParams, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A brittle rock: a Griffith fracture energy (1e6 J/m^2) that the heavy blow's delivered energy (400 J over
+    // the 1e-4 struck face, so 100 J of resistance) beats but the light blow's (40 J) does not. Two tool
+    // substances of identical everything but density: iron (dense) and pumice (light).
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_energy"
+measures = "the critical strain-energy release rate"
+unit = "J/m^2"
+dimension = "0,1,-2,0"
+scale = "J/m^2"
+tier = 0
+range_lo = "1"
+range_hi = "1000000"
+real = "test fixture"
+
+[[substance]]
+id = "rock"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "50" },
+  { axis = "mat.fracture_energy", value = "1000000" },
+]
+
+[[substance]]
+id = "iron"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "8000" },
+]
+
+[[substance]]
+id = "pumice"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "800" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // Both tools: identical shape (a 1e-4 struck face, a 1e-3 stock), differing ONLY in substance density. The
+    // iron tool's mass is 8 kg, the pumice tool's 0.8 kg; the same 10 m/s swing delivers 400 J vs 40 J, and the
+    // rock's 100 J Griffith resistance sits between them.
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 10_000),
+        volume: Fixed::from_ratio(1, 1_000),
+        length: Fixed::ONE,
+        substance: substance.to_string(),
+    };
+
+    let build = |substance: &str, arm_strike: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0C,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(substance));
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "rock", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        if arm_strike {
+            emb.set_strike(StrikeParams::dev_fixture());
+        }
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let carried_rock =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume("rock") };
+
+    // The HEAVY (iron) tool shatters the rock: its blow's energy beats the rock's Griffith resistance.
+    let mut heavy = build("iron", true);
+    heavy
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
+    assert!(
+        carried_rock(&heavy) > Fixed::ZERO,
+        "a heavy tool's blow shatters the rock and frees it"
+    );
+
+    // The LIGHT (pumice) tool of the IDENTICAL shape and swing does NOT: it carries less mass into the same
+    // blow, so its energy falls below the rock's Griffith resistance. The ONLY difference is the mass.
+    let mut light = build("pumice", true);
+    light
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
+    assert_eq!(
+        carried_rock(&light),
+        Fixed::ZERO,
+        "a light tool of the same shape cannot shatter the rock: the difference is the mass"
+    );
+
+    // OPT-OUT: the same heavy tool on an unarmed world strikes nothing (byte-neutral opt-in).
+    let mut unarmed = build("iron", false);
+    unarmed
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
+    assert_eq!(
+        carried_rock(&unarmed),
+        Fixed::ZERO,
+        "an unarmed world never strikes (byte-neutral opt-in)"
+    );
+}
+
+#[test]
+fn a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool_is_immortal() {
+    // The made-world arc, tool-use, Section D: a wielded tool that works matter loses volume by the Archard
+    // wear law ([`laws::wear`]), its coefficient the tool material's own `mat.wear_coefficient`, so it wears
+    // gradually and, once worn below the minimum viable tool volume (the craft threshold), is a spent nub and
+    // is unwielded, so it must be remade. The wear is DERIVED (force over stroke distance over the tool's own
+    // hardness, no authored durability count) and OPT-IN (a world that never arms the wear params keeps every
+    // tool immortal, byte-identical to before). This proves both: an armed tool wears down over several uses
+    // and spends out, and the same tool on an unarmed world never wears.
+    use civsim_sim::material::{CraftParams, MaterialField, WearParams, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A flesh cell (fracture 1, so a keen edge frees it) and a flint edge that carries a wear coefficient. The
+    // coefficient is a large test value so each use saturates the worn volume to the ceiling, making the
+    // spend-out countable; a real world sets a real Archard coefficient reserved-with-basis.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.wear_coefficient"
+measures = "the dimensionless Archard wear coefficient"
+unit = "1"
+dimension = "0,0,0,0"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "2000000000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "flint"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.wear_coefficient", value = "66666666" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // A tool with five units of volume: enough that the craft threshold (one unit) is reached only after
+    // several worn units, so the spend-out is gradual, not a single saturating use.
+    let tool_volume0 = Fixed::from_int(5);
+    let tool = || WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: tool_volume0,
+        length: Fixed::ONE,
+        substance: "flint".to_string(),
+    };
+
+    let build = |arm_wear: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C08,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool());
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "flesh", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        // The craft threshold (the minimum viable tool volume) below which a worn tool is a spent nub.
+        emb.set_craft_params(CraftParams::dev_fixture());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        if arm_wear {
+            // The stroke distance is the dev fixture; with the flint coefficient each use abrades roughly half
+            // a unit, so the five-unit tool crosses the one-unit craft floor after several uses (a gradual
+            // spend-out, not an instant break). The ceiling is a non-binding representability cap.
+            emb.set_wear(WearParams {
+                stroke_distance: Fixed::from_ratio(1, 10),
+                wear_max: Fixed::from_int(1000),
+            });
+        }
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let tool_volume_of =
+        |e: &Embodiment| -> Option<Fixed> { e.walkers()[0].wielded.as_ref().map(|t| t.volume) };
+
+    // ARMED: the tool wears gradually. After the first wear it is still wielded and has LESS volume (not spent
+    // in one use), and after repeated wear it spends out (its wielded slot empties). Count the uses to prove
+    // it is a gradual accumulation, not an instant break.
+    let mut armed = build(true);
+    let emb = armed.embodiment_mut().unwrap();
+    let start = tool_volume_of(emb);
+    assert_eq!(
+        start,
+        Some(tool_volume0),
+        "the tool starts at its full volume"
+    );
+    emb.wear_tool(StableId(1));
+    let after_one = tool_volume_of(emb);
+    assert!(
+        matches!(after_one, Some(v) if v < tool_volume0 && v > Fixed::ZERO),
+        "one use wears the tool DOWN but does not spend it out: gradual, not instant (was {after_one:?})"
+    );
+    let mut uses = 1u32;
+    while tool_volume_of(emb).is_some() {
+        emb.wear_tool(StableId(1));
+        uses += 1;
+        assert!(
+            uses < 10_000,
+            "the tool must spend out in a bounded number of uses"
+        );
+    }
+    assert!(
+        uses > 1,
+        "the tool spends out only after SEVERAL uses (it took {uses}), proving gradual wear"
+    );
+
+    // OPT-OUT: an unarmed world never wears the tool. The same number of `wear_tool` calls leaves the tool
+    // wielded at its full volume: the wear step is a no-op without the params, so every existing scenario is
+    // byte-identical.
+    let mut unarmed = build(false);
+    let emb2 = unarmed.embodiment_mut().unwrap();
+    for _ in 0..uses {
+        emb2.wear_tool(StableId(1));
+    }
+    assert_eq!(
+        tool_volume_of(emb2),
+        Some(tool_volume0),
+        "an unarmed world never wears the tool: it stays wielded at full volume (byte-neutral opt-in)"
+    );
+
+    // WIRED TO WORK: the dispatch wears only on a positive-work use. A real cut that frees flesh, followed by
+    // the wear the dispatch applies, reduces the tool's volume: wear rides on work, it is not a free tax.
+    let mut worker = build(true);
+    let emb3 = worker.embodiment_mut().unwrap();
+    let before = tool_volume_of(emb3);
+    if emb3.cut_underfoot(StableId(1)) > Fixed::ZERO {
+        emb3.wear_tool(StableId(1));
+    }
+    let after = tool_volume_of(emb3);
+    assert!(
+        matches!((before, after), (Some(b), Some(a)) if a < b),
+        "a cut that frees matter wears the wielded tool (before {before:?}, after {after:?})"
+    );
+}
+
+#[test]
+fn a_brittle_tool_snaps_under_its_own_working_stress_where_a_tough_one_survives_and_an_unarmed_tool_never_breaks(
+) {
+    // The made-world arc, tool-use, Section E: a wielded tool carries the reaction stress of its own working
+    // force over its edge, and if that stress exceeds the tool material's own fracture strength the tool
+    // fractures ([`laws::fracture_onset`]) and is unwielded. So the hardness-versus-fracture-strength material
+    // tradeoff bites: two tools of IDENTICAL geometry, differing ONLY in fracture strength, meet the same
+    // working stress, and the brittle one snaps where the tough one bears it, by physics not a durability tag.
+    // Opt-in: an unarmed world never breaks a tool, byte-identical to before.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A cuttable flesh (so the tool does real work) and two edges of equal geometry: a brittle one (fracture
+    // strength 10, below the ~75 MPa reaction stress its own force imposes over the 1e-6 edge) and a tough one
+    // (fracture strength 1000, well above it). Both share the same indentation hardness, so they cut alike;
+    // only their fracture strength differs, isolating the failure to the material tradeoff.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[substance]]
+id = "flesh"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1050" },
+  { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "brittle_edge"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "10" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+
+[[substance]]
+id = "tough_edge"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2500" },
+  { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "1000" },
+  { axis = "mat.shear_strength", value = "500" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    let tool = |substance: &str| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 1_000_000),
+        volume: Fixed::from_int(5),
+        length: Fixed::ONE,
+        substance: substance.to_string(),
+    };
+
+    let build = |substance: &str, arm_breakage: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_miner(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C09,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(substance));
+        emb.add(walker, band(305));
+        let mut field = MaterialField::new();
+        field.deposit(cell, "flesh", Fixed::from_int(1000));
+        emb.set_material(field);
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb.set_breakage(arm_breakage);
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let is_wielded =
+        |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+
+    // ARMED brittle: the reaction stress of its own force exceeds its fracture strength, so it snaps. The
+    // break_check reports the fracture and the tool is unwielded.
+    let mut brittle = build("brittle_edge", true);
+    let broke = brittle.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(
+        broke,
+        "a brittle edge fractures under the stress its own force imposes"
+    );
+    assert!(
+        !is_wielded(&brittle),
+        "the fractured tool is unwielded: it must be remade"
+    );
+
+    // ARMED tough: the same geometry and force, but a fracture strength well above the reaction stress, so it
+    // bears the load and stays wielded. The ONLY difference from the brittle case is the material.
+    let mut tough = build("tough_edge", true);
+    let survived = tough.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(
+        !survived,
+        "a tough edge bears the stress its force imposes and does not fracture"
+    );
+    assert!(is_wielded(&tough), "the surviving tool stays wielded");
+
+    // OPT-OUT: the SAME brittle edge on an unarmed world never breaks. The break_check is a no-op without the
+    // arm, so every existing scenario is byte-identical.
+    let mut unarmed = build("brittle_edge", false);
+    let broke_unarmed = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(
+        !broke_unarmed,
+        "an unarmed world never breaks a tool (byte-neutral opt-in)"
+    );
+    assert!(
+        is_wielded(&unarmed),
+        "the unarmed brittle tool stays wielded"
+    );
+
+    // WIRED TO WORK: a real cut frees flesh, then the dispatch's breakage check snaps the brittle edge. The
+    // cut still happened (the freed matter is taken) and the tool is spent by fracture, the make-use-break
+    // lifecycle in one stroke.
+    let mut worker = build("brittle_edge", true);
+    let emb = worker.embodiment_mut().unwrap();
+    let freed = emb.cut_underfoot(StableId(1));
+    let broke_on_use = if freed > Fixed::ZERO {
+        emb.break_check(StableId(1))
+    } else {
+        false
+    };
+    assert!(
+        freed > Fixed::ZERO,
+        "the brittle edge cut the flesh before it broke"
+    );
+    assert!(
+        broke_on_use,
+        "the reaction stress of the cutting stroke snapped the brittle edge"
+    );
+    assert!(
+        !is_wielded(&worker),
+        "after the breaking cut the being holds no tool"
+    );
+}
+
+#[test]
+fn a_slender_tool_buckles_under_its_working_load_where_a_stout_one_of_the_same_stock_bears_it() {
+    // The made-world arc, tool-use, the tool-geometry expansion (root R2): a tool now carries a characteristic
+    // LENGTH, from which its body CROSS-SECTION derives (`volume / length`). A wielded tool loaded axially by
+    // its own working force BUCKLES if that force exceeds its critical Euler load, so a SLENDER tool (a long
+    // thin body, a small cross-section) buckles where a STOUT one of the SAME stock (same volume, same
+    // material) bears the load. The two differ ONLY in length, so the failure is the geometry tradeoff a
+    // tool's material choice trades against, derived from `laws::euler_buckle` over the tool's own geometry
+    // and elastic modulus, no per-shape table. Opt-in: an unarmed world never buckles a tool.
+    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // One wood: a modest elastic modulus and a high fracture strength (so the edge STRESS never breaks either
+    // tool, isolating the failure to BUCKLING). Both tools are this wood, differing only in length.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.elastic_modulus"
+measures = "Young's modulus"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "1500000"
+real = "test fixture"
+
+[[substance]]
+id = "wood"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "800" },
+  { axis = "mat.fracture_strength", value = "100" },
+  { axis = "mat.elastic_modulus", value = "1000" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+    // Both tools share the SAME stock (volume 1e-3) and a modest edge (contact area 1e-4, so the reaction
+    // stress ~0.75 MPa is far below the 100 MPa fracture strength and never breaks either by stress). They
+    // differ ONLY in length: the stout is short (0.1 m, a fat cross-section), the slender is long (10 m, a
+    // thin one), so the slender's critical buckling load falls far below the working force.
+    let tool = |length: Fixed| WieldedTool {
+        contact_area: Fixed::from_ratio(1, 10_000),
+        volume: Fixed::from_ratio(1, 1_000),
+        length,
+        substance: "wood".to_string(),
+    };
+
+    let build = |length: Fixed, arm_breakage: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_cutter(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0C0B,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        walker.wielded = Some(tool(length));
+        emb.add(walker, band(305));
+        emb.set_material(MaterialField::new());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        emb.set_breakage(arm_breakage);
+        Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
+    };
+
+    let is_wielded =
+        |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+
+    // The STOUT tool (short, fat cross-section) has a high critical buckling load and bears the working force.
+    let mut stout = build(Fixed::from_ratio(1, 10), true);
+    let stout_broke = stout.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(
+        !stout_broke,
+        "a stout tool bears the axial working load without buckling"
+    );
+    assert!(is_wielded(&stout), "the stout tool stays wielded");
+
+    // The SLENDER tool (long, thin cross-section) of the SAME stock and material buckles under the same force:
+    // the ONLY difference is its length, so the failure is the geometry, not the material.
+    let mut slender = build(Fixed::from_int(10), true);
+    let slender_broke = slender.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(
+        slender_broke,
+        "a slender tool of the same stock buckles under the same working load"
+    );
+    assert!(!is_wielded(&slender), "the buckled tool is unwielded");
+
+    // OPT-OUT: the SAME slender tool on an unarmed world never buckles (byte-neutral opt-in).
+    let mut unarmed = build(Fixed::from_int(10), false);
+    let unarmed_broke = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
+    assert!(!unarmed_broke, "an unarmed world never buckles a tool");
+    assert!(
+        is_wielded(&unarmed),
+        "the unarmed slender tool stays wielded"
     );
 }
 
@@ -1631,14 +2749,69 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
     // being carrying stone with a lifted craft weight wields a tool of that stone (its carried stock spent
     // by the tool volume); a blank founder carrying the same stone never crafts. Founder-zero, evolved
     // decision, the tool made of the stone worked (Principles 8, 9).
-    use civsim_sim::material::{CraftParams, SubstanceMix};
+    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // A floor so the crafted edge derives from the worked granite's own fracture strength under the being's
+    // forming force (the craft is physics-derived now, so it needs the stone's physics and a muscle to knap).
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
+[[substance]]
+id = "granite"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2700" },
+  { axis = "mat.fracture_strength", value = "15" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
+]
+"#;
 
     let cell = Coord3::ground(2, 2);
-    let (organs, fat) = energy_registry();
-    let reg = energy_thermal_registry();
     let stock = Fixed::from_int(5);
 
     let build = |craft_weight: bool| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
         let mut emb = Embodiment::new(
             reg.clone(),
             AffordanceRegistry::dev_toolmaker(),
@@ -1664,7 +2837,7 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         let mut walker = resting_walker(
             1,
             cell,
-            body((1, 1), vec![organ(fat, (1, 1))]),
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
             &reg,
             &organs,
             controller,
@@ -1673,7 +2846,15 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         carried.add("granite", stock);
         walker.carried = carried;
         emb.add(walker, band(310));
-        emb.set_craft_params(CraftParams::dev_fixture()); // edge 1e-6 m^2, tool volume 1
+        emb.set_craft_params(CraftParams::dev_fixture()); // tool volume 1; the edge is derived
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_material(MaterialField::new());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
     };
 
@@ -1715,6 +2896,169 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
         carried_granite(&founder),
         stock,
         "the founder's carried stone is untouched"
+    );
+}
+
+#[test]
+fn a_crafted_edge_is_derived_from_the_worked_stone_so_a_hard_stone_makes_a_sharper_tool() {
+    // The made-world arc, tool-use: the crafted edge is the INTRINSIC finest working edge the stone's
+    // microstructure holds (mat.edge_length_scale), DERIVED from the material not an authored constant and not
+    // the crafter's force (so cutting stays a real function of the wielder's force, R-EDGE-INTRINSIC). A
+    // fine-grained hard obsidian holds a finer edge (a smaller contact area) than a coarse soft sandstone, and
+    // a being carrying both shapes the fitter stone into its tool, the material chosen by physics not by id.
+    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix, WieldedTool};
+    use civsim_sim::physiology::MUSCLE_STRENGTH;
+
+    // Two workable stones: a fine hard obsidian (edge 1e-4 m, hardness 6000) and a coarse soft sandstone (edge
+    // 1e-3 m, hardness 80). The ids sort obsidian first; the fitness pick is proven distinct from id order
+    // because obsidian also wins the derived cutting power.
+    const FLOOR: &str = r#"
+[[axis]]
+id = "mat.density"
+measures = "bulk density"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0.08"
+range_hi = "23000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.indentation_hardness"
+measures = "the contact pressure a surface resists before plastic indentation"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "1"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.fracture_strength"
+measures = "the stress a substance fractures at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
+[[substance]]
+id = "obsidian"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2400" },
+  { axis = "mat.indentation_hardness", value = "6000" },
+  { axis = "mat.fracture_strength", value = "5000" },
+  { axis = "mat.edge_length_scale", value = "0.0001" },
+]
+
+[[substance]]
+id = "sandstone"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "2300" },
+  { axis = "mat.indentation_hardness", value = "80" },
+  { axis = "mat.fracture_strength", value = "50" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
+]
+"#;
+
+    let cell = Coord3::ground(2, 2);
+
+    let build = |carried_stones: &[(&str, i32)]| -> Runner {
+        let (mut organs, fat) = energy_registry();
+        let muscle = organs.organs.len() as u16;
+        organs.organs.push(OrganKindDef {
+            id: muscle,
+            name: "muscle".to_string(),
+            fantasy: false,
+            composition: TissueComposition::from_pairs(&[(MUSCLE_STRENGTH, Fixed::ONE)]),
+        });
+        let reg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_toolmaker(),
+            LocomotionParams::dev_default(),
+            0,
+            0xC0DE,
+        );
+        let controller = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(fat, (1, 2)), organ(muscle, (1, 1))]),
+            &reg,
+            &organs,
+            controller,
+        );
+        let mut carried = SubstanceMix::new();
+        for (s, v) in carried_stones {
+            carried.add(s, Fixed::from_int(*v));
+        }
+        walker.carried = carried;
+        emb.add(walker, band(310));
+        emb.set_craft_params(CraftParams::dev_fixture());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
+        );
+        emb.set_material(MaterialField::new());
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs,
+            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        ));
+        Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
+    };
+
+    let wielded = |r: &Runner| -> Option<WieldedTool> {
+        r.embodiment().unwrap().walkers()[0].wielded.clone()
+    };
+
+    // Craft from obsidian alone, then from sandstone alone: the hard obsidian holds the finer edge.
+    let mut obs = build(&[("obsidian", 2)]);
+    obs.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    let mut sand = build(&[("sandstone", 2)]);
+    sand.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    let obs_tool = wielded(&obs).expect("obsidian holds an edge");
+    let sand_tool = wielded(&sand).expect("sandstone holds an edge");
+    assert_eq!(obs_tool.substance, "obsidian");
+    assert_eq!(sand_tool.substance, "sandstone");
+    assert!(
+        obs_tool.contact_area < sand_tool.contact_area,
+        "the harder stone holds a finer (smaller-area) edge under the same force: {} < {}",
+        obs_tool.contact_area,
+        sand_tool.contact_area
+    );
+
+    // Carrying BOTH, the being shapes the fitter stone (obsidian) into its tool, by capability not by id.
+    let mut both = build(&[("obsidian", 2), ("sandstone", 2)]);
+    both.embodiment_mut()
+        .unwrap()
+        .craft_from_carried(StableId(1));
+    assert_eq!(
+        wielded(&both).expect("a tool is made").substance,
+        "obsidian",
+        "carrying two stones, the being crafts the fitter one derived from physics, not the first by id"
     );
 }
 
@@ -1763,6 +3107,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.edge_length_scale"
+measures = "the finest working edge a material's microstructure holds"
+unit = "m"
+dimension = "1,0,0,0"
+scale = "m"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "test fixture"
+
 [[substance]]
 id = "granite"
 participates_in = []
@@ -1779,6 +3134,8 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "2600" },
   { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.fracture_strength", value = "100" },
+  { axis = "mat.edge_length_scale", value = "0.001" },
 ]
 "#;
 
@@ -2566,6 +3923,183 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
         scheduled.embodiment().unwrap().decomposed_mass(),
         pinned.embodiment().unwrap().decomposed_mass(),
         "the scheduled and pinned orders decompose identically"
+    );
+}
+
+#[test]
+fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
+    // DECOMPOSITION-AS-EMERGENCE (Principle 8), the whole point: the matter cycle no longer asserts that all
+    // warm matter rots. The substance's own rate is now its MAXIMUM susceptibility, and the fraction a cell
+    // realises this tick is a per-cell ACTIVITY the world derives from the cell's decomposer LIFE and its
+    // CONDITIONS. The decisive case (the one an abiotic proxy cannot express) is the sterile-but-favorable
+    // cell: warm, but with no decomposer life present, it does not rot. The physics barrier gate is untouched,
+    // so a frozen remains is still preserved, and an unarmed runner decays exactly as before (the opt-in flip).
+    use civsim_sim::decompose::{DecomposerDriver, DecomposerDriverRegistry, DecomposerStockField};
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+
+    // A runner with the matter cycle armed and, optionally, a decomposer registry and a standing-biomass
+    // stock. The carrion carries the mineral-ash and 273 K freezing barrier axes, so it is organic matter the
+    // cycle can act on; nothing else is armed, so moisture and oxygen have no field and default to full (the
+    // open-air convention), leaving the conditions kernel's WARMTH term the live gate here.
+    let build = |field_temp: i32,
+                 decomposer: Option<DecomposerDriverRegistry>,
+                 stock: Option<DecomposerStockField>|
+     -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "carrion", flesh0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+        if let Some(d) = decomposer {
+            r.set_decomposer(d);
+        }
+        if let Some(s) = stock {
+            r.set_decomposer_stock(s);
+        }
+        r
+    };
+    let flesh =
+        |r: &Runner| -> Fixed { r.embodiment().unwrap().material().volume(cell, "carrion") };
+    let life_only = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::life(Fixed::ONE));
+        d
+    };
+    let conditions_only = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::conditions(
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(100),
+        ));
+        d
+    };
+    let seeded = || {
+        let mut s = DecomposerStockField::new();
+        s.seed(cell, "carrion", Fixed::ONE);
+        s
+    };
+
+    // (1) THE CONTROL (the deliberate flip): the matter cycle armed but NO decomposer registry decays the warm
+    // carrion at its unconditional rate, today's behaviour. The defect cure is the owner's arming, not a
+    // silent engine default.
+    let mut control = build(300, None, None);
+    control.step();
+    assert!(
+        flesh(&control) < flesh0,
+        "unarmed: warm carrion rots at its unconditional rate (the pre-emergence control)"
+    );
+
+    // (2) THE STERILE-BUT-FAVORABLE CASE (the decisive one an abiotic proxy cannot express): a Life-only
+    // registry over a WARM cell with ZERO decomposer biomass decays NOTHING, because no decomposer life is
+    // present. Decay is driven by life, not by warmth.
+    let mut sterile = build(300, Some(life_only()), None);
+    sterile.step();
+    assert_eq!(
+        flesh(&sterile),
+        flesh0,
+        "sterile: warm carrion no decomposer life acts on is preserved"
+    );
+    assert_eq!(
+        sterile.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing decomposed with no decomposer life present, however warm"
+    );
+
+    // The SAME warm cell, once decomposer life stands in it (a hand-seeded stock, the biosphere's job later),
+    // now rots: decay emerges from the presence of life.
+    let mut colonised = build(300, Some(life_only()), Some(seeded()));
+    colonised.step();
+    assert!(
+        flesh(&colonised) < flesh0,
+        "colonised: the same warm cell rots once decomposer life stands in it"
+    );
+    assert!(
+        colonised.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the standing decomposer biomass drove the decay"
+    );
+
+    // (3) THE FROZEN PHYSICS GATE (untouched even when armed): a decomposer-armed, colonised cell BELOW the
+    // substance's own freezing barrier is preserved by the physics gate upstream of the activity factor, so
+    // falsifiability-by-physics survives: a frozen world does not rot however much decomposer life it carries.
+    let mut frozen = build(250, Some(life_only()), Some(seeded()));
+    frozen.step();
+    assert_eq!(
+        flesh(&frozen),
+        flesh0,
+        "frozen: preserved by the barrier gate even with decomposer life present"
+    );
+
+    // (4) THE CONDITIONS KERNEL, wired end-to-end: under a conditions-only registry a barely-thawed cell (one
+    // degree above the barrier) rots far SLOWER than a hot one, because the warmth term reads the cell
+    // temperature through to the realised rate. Both are warm, so both rot; the hotter rots more.
+    let mut barely = build(274, Some(conditions_only()), None);
+    let mut hot = build(373, Some(conditions_only()), None);
+    barely.step();
+    hot.step();
+    assert!(
+        flesh(&barely) < flesh0 && flesh(&hot) < flesh0,
+        "both warm cells rot under the conditions kernel"
+    );
+    assert!(
+        flesh(&hot) < flesh(&barely),
+        "the hotter cell rots faster: the conditions kernel reads the cell temperature end-to-end"
+    );
+
+    // (5) EXACT MASS CONSERVATION with the factor in the path: the activity multiplies the volume UPSTREAM of
+    // the unchanged mass-difference math, so the colonised cell's lost mass still lands in the soil store bit
+    // for bit (the conservation the ConservationRegistry guards).
+    assert_eq!(
+        colonised.embodiment().unwrap().soil().cell_total(cell),
+        colonised.embodiment().unwrap().decomposed_mass(),
+        "the decomposition conserves mass exactly with the activity factor in the path"
+    );
+
+    // (6) THE COMBINE MODE (a blind audit caught this): when a world arms BOTH a Life row and a favorable
+    // Conditions row, the default All combine GATES them, so a sterile warm-wet cell still preserves (the
+    // Life row's zero wins the minimum); the opt-in Any combine makes the Conditions row an independent
+    // driver, so the same sterile cell decays. The world chooses which regime through data, so the abiotic
+    // Conditions proxy cannot silently swallow the emergent Life signal.
+    use civsim_sim::decompose::CombineMode;
+    let both_all = || {
+        let mut d = DecomposerDriverRegistry::new();
+        d.push(DecomposerDriver::conditions(
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(10),
+        ));
+        d.push(DecomposerDriver::life(Fixed::ONE));
+        d
+    };
+    let mut sterile_both_all = build(300, Some(both_all()), None);
+    sterile_both_all.step();
+    assert_eq!(
+        flesh(&sterile_both_all),
+        flesh0,
+        "All combine: a sterile warm-wet cell preserves even beside a favorable Conditions row (Life gates it)"
+    );
+    let mut sterile_both_any = build(300, Some(both_all().with_combine(CombineMode::Any)), None);
+    sterile_both_any.step();
+    assert!(
+        flesh(&sterile_both_any) < flesh0,
+        "Any combine: the same sterile cell decays through the Conditions row, the world's explicit choice"
     );
 }
 

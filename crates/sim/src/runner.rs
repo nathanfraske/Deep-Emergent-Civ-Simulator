@@ -82,28 +82,33 @@
 //! repertoire, so the authored path is quarantined off the canonical-emergent runner until the
 //! deliberative tier is properly built on the evolved substrate.
 
-use crate::affordance_percept::{AffordancePerceptRefs, AffordancePerceptRegistry};
+use crate::affordance_percept::{
+    tool_capability, AffordancePerceptRefs, AffordancePerceptRegistry,
+};
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
-    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, DIG, ENERGY, EXTRACT, GEOPHAGE,
-    GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
+    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, attraction_gradient, avoidance_gradient, feature_observations,
-    reward_observations, sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep,
-    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
+    feature_observations, reward_observations, sequence_subject, step_belief_subject,
+    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR,
+    MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
+    MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix, TissueField,
+    WearParams, WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
@@ -111,9 +116,9 @@ use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
-    derive_exertion_coupling, MetabolicAnchors,
+    derive_exertion_coupling, whole_body_composition_vector, MetabolicAnchors,
 };
-use crate::planning::plan_toward;
+use crate::planning::plan_chain;
 use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_compose::FunctionLawRegistry;
@@ -122,6 +127,7 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
+use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 // The runner tick's phases as deterministic-scheduler systems over the resources they contend for
@@ -167,6 +173,15 @@ const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
 /// above [`REWARD_LEARN_ORDINAL_BASE`] so a material-feature reward observation never collides with a
 /// sequence reward or a harm observation for the same being in the same tick on the mind-then-ordinal sort.
 const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
+/// The base tick-input ordinal a NUTRITION reward credit carries (social-learning arc, piece 1), one per
+/// present substance in what the being ATE this tick, disjoint from and above
+/// [`MATERIAL_REWARD_LEARN_ORDINAL_BASE`] so an eaten-composition reward observation never collides with a
+/// ground-composition (trace) reward, a sequence reward, or a harm observation for the same being in the
+/// same tick on the mind-then-ordinal sort. The two material reward credits (ground-side and eaten-side)
+/// key their beliefs on the SAME material feature subject, so a being that both stands on and eats a
+/// substance accrues both observations toward one "this signature rewards" belief; the disjoint ordinal
+/// bands keep the two tick inputs from aliasing while the shared subject keeps the belief one fact.
+const NUTRITION_REWARD_LEARN_ORDINAL_BASE: u32 = 4_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -465,21 +480,30 @@ impl Field {
     /// boundary is deterministic, so the step is bit-identical on every machine and thread count and
     /// ports unchanged to a CubeCL `#[cube]` kernel.
     pub fn step(&mut self, c: &FieldCalib) {
-        let (w, h) = (self.width, self.height);
+        let (w, h) = (self.width as usize, self.height as usize);
         let mut next = self.temp.clone();
-        for y in 0..h {
+        // DETERMINISTIC data-parallelism (arc 4): a genuine double buffer (read `self.temp`, write `next`), so
+        // there is no read-after-write hazard whatever the compute order. Each cell writes only its own
+        // `next[i]` (disjoint, indexed by row-major position), reads only the immutable neighbours plus its own
+        // baseline, and draws no RNG, so the result is bit-identical to the serial loop at any thread count.
+        // The row-major write POSITION is fixed, so the `state_hash` fold walks the same byte stream. The four
+        // clamped-Neumann neighbours are computed by direct index (mirroring `idx`) to keep the closure a pure
+        // read of the immutable snapshot.
+        let temp = &self.temp;
+        let baseline = &self.baseline;
+        next.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             for x in 0..w {
-                let i = self.idx(x, y);
-                let cur = self.temp[i];
-                let up = self.temp[self.idx(x, if y > 0 { y - 1 } else { y })];
-                let dn = self.temp[self.idx(x, if y < h - 1 { y + 1 } else { y })];
-                let lf = self.temp[self.idx(if x > 0 { x - 1 } else { x }, y)];
-                let rt = self.temp[self.idx(if x < w - 1 { x + 1 } else { x }, y)];
+                let i = y * w + x;
+                let cur = temp[i];
+                let up = temp[if y > 0 { i - w } else { i }];
+                let dn = temp[if y < h - 1 { i + w } else { i }];
+                let lf = temp[if x > 0 { i - 1 } else { i }];
+                let rt = temp[if x < w - 1 { i + 1 } else { i }];
                 let lap = up + dn + lf + rt - Fixed::from_int(4).mul(cur);
-                let relax = self.baseline[i] - cur;
-                next[i] = cur + c.diffusion.mul(lap) + c.relaxation.mul(relax);
+                let relax = baseline[i] - cur;
+                row[x] = cur + c.diffusion.mul(lap) + c.relaxation.mul(relax);
             }
-        }
+        });
         self.temp = next;
     }
 
@@ -734,6 +758,16 @@ fn standard_gravity() -> Fixed {
 /// mechanical floor's declared force range). A representability cap, not an authored quantity.
 const FORCE_CEILING: Fixed = Fixed::from_int(100_000_000);
 
+/// The stress overflow-guard the tool contact-stress laws saturate at (a PURE representability cap, not a
+/// behavioural ceiling): one billion megapascals, far above any material's strength (the pressure axis tops
+/// at 150000 MPa) yet well below the Q32.32 maximum (~2.1e9), so a degenerate tiny or zero contact area
+/// cannot drive a contact stress into the near-maximum range where the subsequent margin subtractions would
+/// approach the fixed-point bounds. The effective stress is bounded by the tool's own material strength
+/// regardless, so this guard never changes an outcome; it only keeps the intermediate arithmetic clear of
+/// the type's edge. Replaces a looser `Fixed::MAX` cap (the arc-3 audit hardening), matching the ceiling
+/// the compose capability kernels pass.
+const STRESS_GUARD: Fixed = Fixed::from_int(1_000_000_000);
+
 /// A being's whole-body muscle force, its carry capacity: a GROWN body sums its grown tissue's muscle
 /// strength scaled to body mass, a catalog body reads it off its organs, the same read the exertion
 /// drain uses ([`being_derived_drains`]). Blind to any kind or race id (Principle 9).
@@ -917,6 +951,55 @@ pub struct Embodiment {
     /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
     /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
     attraction: bool,
+    /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
+    /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
+    /// credit never fires and every run hash is unchanged; the world-build opts in
+    /// ([`Embodiment::set_nutrition_learning`]) to let a being learn which foods nourish it from its own felt
+    /// reward. When true (and the runner's reward learner is armed), the nutrition credit reads each eater's
+    /// [`crate::locomotion::Walker::ate`] through the material-percept registry and feeds it into the SAME
+    /// `(subject, REWARD_ATTR)` frame the ground-side trace credit uses, keyed on the eaten substance's opaque
+    /// signature. No layout block, so this needs no rebuild: it is a learning credit, not a controller input;
+    /// the behaviour rides the existing attraction gradient (a being seeks the food it believes rewards).
+    nutrition_learning: bool,
+    /// Whether the PLACE-side (trace) material reward credit fires: the ground-composition credit the
+    /// lifetime/demography keystone built, which re-earns "standing where this material lies pays off" from
+    /// the composition of the cell UNDERFOOT (the physical-trace persistence loop). TRUE by default, so every
+    /// existing scenario that arms the reward learner keeps this credit exactly as before (this is a gate on
+    /// an existing mechanism, not a new opt-in, so its default preserves the keystone's behaviour). A world
+    /// sets it FALSE to run the eaten-side [`nutrition_learning`] credit in isolation, so a being learns which
+    /// food nourishes it without also crediting every material it merely stands on. Never folded into
+    /// `state_hash`; the crucible and default world arm no reward learner, so this gate leaves them
+    /// byte-identical whatever its value.
+    place_reward_learning: bool,
+    /// Whether the being observes and imitates (social-learning arc, piece 2, observe-and-imitate). FALSE by
+    /// default, so no valence-free eating ActionTrace is emitted, no being's `observed_actions` is populated,
+    /// and every run hash is unchanged; the world-build opts in ([`Embodiment::set_observe_and_imitate`]) to
+    /// let a co-located being perceive that another ate and be BIASED toward trying it. When true, a pass in
+    /// `couple_conversation` rebuilds each being's `observed_actions` from the actions co-located OTHERS ate
+    /// this tick, and the discovery sampler tips the draw toward those actions scaled by the being's
+    /// founder-zero `social_learning` weight. It only biases the proposal; the being's own felt reward stays
+    /// the sole gate to a committed belief (copy-and-verify). The living sibling of the physical trace: where
+    /// the trace carries a dead maker's mark to a later being, this carries a live neighbour's present action.
+    observe_and_imitate: bool,
+    /// Whether a discovered action's reward belief keys on the target's GRANULARITY (social-learning arc,
+    /// piece 3, material granularity). FALSE by default, so the belief keys on the primitive alone (the
+    /// generalising key the whole ideation loop uses today) and every run hash is unchanged; the world-build
+    /// opts in ([`Embodiment::set_granular_beliefs`]) to key the belief on the primitive against the target's
+    /// affordance CHANNEL and its quantized perceived VALUE, so "strike a hard thing" and "strike a soft
+    /// thing" diverge as distinct learned actions. It flips the single [`crate::learn::step_belief_subject`]
+    /// granularity that the credit (the WRITE) and every read (the discovery weight, the appetitive salience,
+    /// the planner match, the forward model) route through, so write and reads agree at the same grain and no
+    /// belief is masked. Reads the reserved target-value granularity from the discovery calib.
+    granular_beliefs: bool,
+    /// Whether a being's WIELDED TOOL contributes affordances (the made-world arc, tool-use, slice 1). FALSE by
+    /// default, so the afforded set is the body's alone and every run hash is unchanged; a tool-using world
+    /// opts in ([`Embodiment::set_tool_affordances`]) so a being wielding a keen-edged tool affords a CUT the
+    /// barehanded body cannot. The tool's own SHEAR capability enters the same afford derivation a body part's
+    /// does ([`crate::homeostasis::AffordanceRegistry::tool_affordances`] over
+    /// [`crate::affordance_percept::tool_capability`]), so matter the being holds EXTENDS what it can do, by
+    /// physics not an `IsAxe` tag (Principle 9). Inert for a being with no tool, so an armed world with no tools
+    /// yet is byte-identical too.
+    tool_affordances: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -960,6 +1043,30 @@ pub struct Embodiment {
     /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
     /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
     craft: Option<CraftParams>,
+    /// The reserved parameters of tool WEAR (the made-world arc, tool-use, Section D): the sliding distance of
+    /// one tool stroke and the worn-volume ceiling. `None` by default, so an embodiment that declares no wear
+    /// parameters never wears a tool (a tool is immortal) and every existing scenario is unchanged. Opt-in via
+    /// [`Embodiment::set_wear`]. When armed, a tool that WORKS matter (a successful cut or extract) loses volume
+    /// by the Archard wear law over the tool material's own `mat.wear_coefficient`, so a tool spends out and
+    /// must be remade, closing the make-use-wear-remake lifecycle.
+    wear: Option<WearParams>,
+    /// Whether a WIELDED tool can BREAK under the load it imposes (the made-world arc, tool-use, Section E).
+    /// `false` by default, so a tool never breaks and every existing scenario is unchanged. When armed, a tool
+    /// that works matter carries the reaction stress of its own working force over its edge, and if that stress
+    /// exceeds the tool material's own `mat.fracture_strength` the tool fractures (brittle chip or snap) by the
+    /// [`civsim_physics::laws::fracture_onset`] criterion and is unwielded. This is the SUDDEN failure mode that
+    /// complements WEAR's gradual one, and it is what makes the hardness-versus-fracture-strength material
+    /// tradeoff bite: a hard edge that imposes a high cutting stress must also survive that stress. Fully derived
+    /// from the tool's and being's own physics, no reserved durability value (Principles 9, 11). Opt-in via
+    /// [`Embodiment::set_breakage`].
+    breakage: bool,
+    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass
+    /// payoff). `None` by default, so a being never strikes and every existing scenario is unchanged. When
+    /// armed, a being that decides STRIKE swings its WIELDED tool, delivering a kinetic energy (`1/2 m v^2`
+    /// over the tool's own MASS, the extensive datum the tool's retained volume and density supply) that
+    /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
+    /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
+    strike: Option<StrikeParams>,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -994,6 +1101,14 @@ pub struct Embodiment {
     /// masses) + this total` is invariant. Empty by default, folded into `state_hash` only when non-empty, so
     /// a scenario with no matter cycle armed stays byte-identical.
     soil: SoilNutrientField,
+    /// The per-cell ORGANISM-TISSUE field (biosphere directive 2, organisms as usable material stuff): the
+    /// located matter a dead organism leaves, a composition vector derived from its own body plan rather than
+    /// a minted substance or an authored species-to-substance map (Principle 8). Empty by default and folded
+    /// into `state_hash` only when non-empty, so a scenario that deposits no corpse matter stays byte-
+    /// identical. Populated only by the opt-in corpse-matter death hook; the consumers (extraction here,
+    /// cutting and the matter cycle in later slices) union it with the located substance mixture, so a corpse
+    /// is worked and rots by the SAME mechanisms and axes as any other matter.
+    tissue: TissueField,
 }
 
 impl Embodiment {
@@ -1043,6 +1158,11 @@ impl Embodiment {
             percepts: PerceptRegistry::empty(),
             material_percepts: MaterialPerceptRegistry::empty(),
             attraction: false,
+            nutrition_learning: false,
+            place_reward_learning: true,
+            observe_and_imitate: false,
+            granular_beliefs: false,
+            tool_affordances: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1050,10 +1170,14 @@ impl Embodiment {
             material_registry: None,
             extraction: None,
             craft: None,
+            wear: None,
+            breakage: false,
+            strike: None,
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
             soil: SoilNutrientField::new(),
+            tissue: TissueField::new(),
         }
     }
 
@@ -1090,6 +1214,101 @@ impl Embodiment {
     pub fn set_attraction(&mut self, enabled: bool) {
         self.attraction = enabled;
         self.rebuild_layout();
+    }
+
+    /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
+    /// reward learner is armed, a being re-earns a reward belief from the perceived composition of what it
+    /// ATE this tick, so it learns which foods nourish it from its own felt reward rather than a handed
+    /// "this is food" percept. FALSE (the default) leaves the ingested-matter credit inert and every run
+    /// hash unchanged (opt-in). Unlike [`set_attraction`] and [`set_material_percepts`] this adds NO
+    /// controller block, so it needs no layout rebuild and may be set at any time: it is a learning credit
+    /// (the LEARN half), and the behaviour half (approaching a food believed to nourish) rides the existing
+    /// attraction gradient over the shared reward frame. The world still declares the food substances in the
+    /// material-percept registry, so the eaten composition is perceived as an opaque per-substance signature
+    /// (Principle 9), and the belief forms only from felt reward (the copy-and-verify gate), never handed.
+    pub fn set_nutrition_learning(&mut self, enabled: bool) {
+        self.nutrition_learning = enabled;
+    }
+
+    /// Enable (or disable) the PLACE-side (trace) material reward credit (the lifetime/demography keystone,
+    /// pillar 2). TRUE by default, so a world that arms the reward learner keeps the ground-composition credit
+    /// the keystone built; a world sets it FALSE to run the eaten-side [`set_nutrition_learning`] credit in
+    /// isolation (learning which food nourishes without crediting the material merely underfoot). A gate on an
+    /// existing mechanism, so its default preserves the keystone's behaviour rather than opting a new one in.
+    pub fn set_place_reward_learning(&mut self, enabled: bool) {
+        self.place_reward_learning = enabled;
+    }
+
+    /// Enable (or disable) OBSERVE-AND-IMITATE (social-learning arc, piece 2): when true, a being perceives
+    /// the valence-free ActionTrace a co-located being leaves by eating and is BIASED toward trying that
+    /// action, scaled by its founder-zero `social_learning` weight. FALSE (the default) leaves each being's
+    /// `observed_actions` empty and the discovery draw unbiased, so every run hash is unchanged (opt-in). It
+    /// needs no layout rebuild (it biases the discovery sampler, not the controller input). The bias only
+    /// tips which action the being tries; its own felt reward stays the sole gate to a committed belief, so a
+    /// copied action a being is not rewarded for forms no belief (copy-and-verify). Meaningful only with the
+    /// discovery loop armed (there is a proposal to bias) and beings carrying a positive `social_learning`.
+    pub fn set_observe_and_imitate(&mut self, enabled: bool) {
+        self.observe_and_imitate = enabled;
+    }
+
+    /// Enable (or disable) GRANULAR beliefs (social-learning arc, piece 3, material granularity): when true, a
+    /// discovered action's reward belief keys on the primitive against the target's affordance channel AND its
+    /// quantized perceived value, so a technique specialises to the target it pays off on ("strike a hard
+    /// thing" and "strike a soft thing" diverge) rather than one flat "the primitive pays off." FALSE (the
+    /// default) keys the belief on the primitive alone, the generalising key the whole ideation loop uses
+    /// today, so every run hash is unchanged (opt-in). It flips the one [`crate::learn::step_belief_subject`]
+    /// grain the credit and every read share, so no belief is masked; needs no layout rebuild.
+    pub fn set_granular_beliefs(&mut self, enabled: bool) {
+        self.granular_beliefs = enabled;
+    }
+
+    /// Enable (or disable) TOOL-CONTRIBUTED affordances (the made-world arc, tool-use, slice 1): when true, a
+    /// being's afforded set is its body's UNION the affordances its WIELDED tool grants, so a being holding a
+    /// keen-edged tool affords a CUT the barehanded body cannot. The tool's own Pierce capability enters the
+    /// same afford derivation a body part's does, by physics not an `IsAxe` tag (Principle 9). FALSE (the
+    /// default) affords the body's set alone, so every run hash is unchanged (opt-in); even armed, a being with
+    /// no tool contributes nothing, so a tool world with no tools yet is byte-identical. Meaningful with the
+    /// material registry installed (the tool's substance physics is read there).
+    pub fn set_tool_affordances(&mut self, enabled: bool) {
+        self.tool_affordances = enabled;
+    }
+
+    /// The affordances a being can perform: its body's (or grown structure's) own affordances, UNION any its
+    /// WIELDED tool grants when tool affordances are armed (the made-world arc, tool-use). The tool's
+    /// capability enters the same afford derivation a body part's does, so a keen edge affords CUT
+    /// ([`crate::homeostasis::AffordanceRegistry::tool_affordances`] over
+    /// [`crate::affordance_percept::tool_capability`]). Off by default, and empty for a being with no tool or
+    /// no material registry, so the result is byte-identical to the body-only afford there. Deterministic: the
+    /// tool affordances are appended in the registry's canonical id order after the body's, deduplicated.
+    fn being_afforded(&self, w: &Walker) -> Vec<AffordanceId> {
+        let mut afforded = match &w.structure {
+            Some(s) => self.afford.afforded_structure(
+                s,
+                &self.params.capability_refs,
+                &self.params.capability_caps,
+            ),
+            None => self.afford.afforded(
+                &w.body,
+                &self.organs,
+                &self.params.capability_refs,
+                &self.params.capability_caps,
+            ),
+        };
+        if self.tool_affordances {
+            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
+                let refs = &self.params.capability_refs;
+                let caps = &self.params.capability_caps;
+                let granted = self
+                    .afford
+                    .tool_affordances(|law| tool_capability(tool, reg, refs, caps, law));
+                for id in granted {
+                    if !afforded.contains(&id) {
+                        afforded.push(id);
+                    }
+                }
+            }
+        }
+        afforded
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -1202,6 +1421,18 @@ impl Embodiment {
         &self.soil
     }
 
+    /// The per-cell organism-tissue field (biosphere directive 2): the located matter dead organisms leave,
+    /// for the consumers (extraction, and cutting and the matter cycle in later slices) and the reader.
+    pub fn tissue(&self) -> &TissueField {
+        &self.tissue
+    }
+
+    /// Replace the organism-tissue field, the seam a test or worldgen uses to place corpse matter directly
+    /// (the death hook is the run-path path). Opt-in: an unset field stays empty and folds no bytes.
+    pub fn set_tissue(&mut self, tissue: TissueField) {
+        self.tissue = tissue;
+    }
+
     /// The total mass the matter cycle has decomposed into the soil store (material-substrate arc, cascade
     /// item 8): the sink side that closes decomposition's mass balance (`sum(cell masses) + this` is
     /// invariant), summed over the soil store's cells and classes for the conservation guard and the reader.
@@ -1231,6 +1462,203 @@ impl Embodiment {
     /// unchanged.
     pub fn set_craft_params(&mut self, params: CraftParams) {
         self.craft = Some(params);
+    }
+
+    /// Install the reserved tool-WEAR parameters (the made-world arc, tool-use, Section D): the sliding stroke
+    /// distance and the worn-volume ceiling ([`WearParams`]). Opt-in; without it a tool never wears (it is
+    /// immortal) and every existing scenario is unchanged. When armed, a tool that works matter loses volume by
+    /// the Archard wear law and eventually spends out.
+    pub fn set_wear(&mut self, params: WearParams) {
+        self.wear = Some(params);
+    }
+
+    /// Wear a being's WIELDED tool by one use (the made-world arc, tool-use, Section D): a tool that just
+    /// worked matter (a cut or an extract that freed a positive volume) loses matter to abrasion by the Archard
+    /// wear law ([`laws::wear`]), its worn volume proportional to the being's force and the stroke distance and
+    /// inversely proportional to the tool's own hardness, the coefficient the tool material's own
+    /// `mat.wear_coefficient`. The tool's retained volume drops by the worn amount; a tool worn below the
+    /// minimum viable tool volume (the craft threshold) is a spent nub and is unwielded, so the tool must be
+    /// remade. No-op unless the wear params, the material registry, the physiology, and a crafting threshold
+    /// are all present and the tool material declares a wear coefficient and a hardness, so an opted-out world
+    /// is byte-identical. A tool material that declares no hardness is left UNWORN (its wear physics is
+    /// unspecified, so it is not judged): this is the runner's uniform tool-absence convention, the same one
+    /// `break_check` applies to a missing fracture strength, and it is deliberately distinct from the wear
+    /// law's own zero-hardness branch (which routes a genuine zero hardness to maximal wear); the runner
+    /// guards before the call, so an under-specified tool is inert here rather than instantly eroded. Reads
+    /// only the tool's and being's own physics, no race, kind, or role (Principle 9).
+    pub fn wear_tool(&mut self, walker_id: StableId) {
+        let (Some(params), Some(craft)) = (self.wear, self.craft) else {
+            return;
+        };
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return;
+        };
+        let Some(tool) = w.wielded.as_ref() else {
+            return;
+        };
+        let force = being_muscle_force(w, phys);
+        let sub = reg.substance(&tool.substance);
+        let k = sub
+            .and_then(|x| x.vector.get("mat.wear_coefficient").copied())
+            .unwrap_or(Fixed::ZERO);
+        let hardness = sub
+            .and_then(|x| x.vector.get("mat.indentation_hardness").copied())
+            .unwrap_or(Fixed::ZERO);
+        if k <= Fixed::ZERO || hardness <= Fixed::ZERO {
+            return; // no wear data on the tool material, no wear
+        }
+        // The Archard coefficient is stored SCALED (the canonical `mat.wear_coefficient` axis declares
+        // `x1e6`, since a true 1e-9 to 1e-3 coefficient loses precision unscaled in Q32.32); the wear kernel
+        // divides that storage scale back out. The scale is read off the axis data, not fabricated here, so a
+        // world that declares a different storage scale is honoured (Principles 9, 11). An axis absent from
+        // the registry reads no coefficient above, so the scale is moot and the fallback of one is inert.
+        let coefficient_scale = reg
+            .axis("mat.wear_coefficient")
+            .map(|a| a.storage_scale())
+            .unwrap_or(Fixed::ONE);
+        let worn = laws::wear(
+            k,
+            coefficient_scale,
+            force,
+            params.stroke_distance,
+            hardness,
+            params.wear_max,
+        );
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return;
+        };
+        if let Some(tool) = w.wielded.as_mut() {
+            tool.volume = (tool.volume - worn).max(Fixed::ZERO);
+            if tool.volume < craft.tool_volume {
+                w.wielded = None; // spent out: a worn-down nub is no longer a viable tool
+            }
+        }
+    }
+
+    /// Arm tool BREAKAGE (the made-world arc, tool-use, Section E): when armed, a wielded tool that works
+    /// matter can fracture under the reaction stress of its own working force. Opt-in; without it a tool never
+    /// breaks (only wears, if wear is armed) and every existing scenario is byte-identical.
+    pub fn set_breakage(&mut self, on: bool) {
+        self.breakage = on;
+    }
+
+    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the swing
+    /// speed and the energy ceiling ([`StrikeParams`]). Opt-in; without it a being never strikes and every
+    /// existing scenario is byte-identical. When armed, a being that decides STRIKE swings its wielded tool and
+    /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
+    pub fn set_strike(&mut self, params: StrikeParams) {
+        self.strike = Some(params);
+    }
+
+    /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
+    /// material's fracture strength, OR if the tool's slender body buckles under that axial force (the
+    /// made-world arc, tool-use, Section E, with the tool-geometry expansion). The tool's working edge carries
+    /// the same contact stress it imposes on the matter it works (Newton's third law: the edge feels what it
+    /// presses), a stress that is the being's grown force over the tool's edge area ([`laws::contact_pressure`]).
+    /// The brittle-fracture criterion ([`laws::fracture_onset`]) compares that stress to the tool material's own
+    /// `mat.fracture_strength`; if the stress exceeds it the tool chips or snaps and is unwielded (a broken
+    /// tool must be remade). So a hard edge that imposes a high cutting stress must ALSO survive that stress:
+    /// a brittle low-fracture-strength edge shatters under a load a tougher one bears, the hardness-versus-
+    /// fracture-strength material tradeoff biting by physics. Returns whether the tool broke.
+    ///
+    /// The energy (toughness) limb of `fracture_onset` reads a delivered fracture energy of ZERO because a
+    /// CUT or an EXTRACT is a QUASI-STATIC working stroke (a press or a draw), not a dynamic blow: a
+    /// quasi-static load delivers no kinetic fracture energy, so the Griffith energy criterion is inert and
+    /// the stress criterion is the operative one, which is the physically correct limit for a slow working
+    /// stroke (the zero is derived from the quasi-static nature of the action, not an authored disabling
+    /// value). A DYNAMIC action (a percussion STRIKE) would deliver a real kinetic energy that activates the
+    /// energy limb, and the tool's own crack cross-section (a later tool-geometry extension) is the crack
+    /// area that limb then reads. The `crack_area` passed here is inert (the energy margin never fires with
+    /// zero delivered energy). No-op unless breakage is armed, the material registry and physiology are
+    /// present, a tool is wielded, and the tool material declares a fracture strength: absent it, the tool's
+    /// failure is not judged (a material whose failure physics is unspecified is left alone, the same uniform
+    /// tool-absence convention `wear_tool` uses for hardness, distinct from the law's own zero-strength
+    /// branch since the runner never reaches it). So an opted-out world is byte-identical. Reads only the
+    /// tool's and being's own physics, no race, kind, or role (Principle 9), and fabricates no value.
+    pub fn break_check(&mut self, walker_id: StableId) -> bool {
+        if !self.breakage {
+            return false;
+        }
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return false;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        let Some(tool) = w.wielded.as_ref() else {
+            return false;
+        };
+        let force = being_muscle_force(w, phys);
+        let sub = reg.substance(&tool.substance);
+        let fracture_strength = sub
+            .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+            .unwrap_or(Fixed::ZERO);
+        if fracture_strength <= Fixed::ZERO {
+            return false; // the tool material declares no fracture strength: its failure is not judged
+        }
+        let fracture_energy = sub
+            .and_then(|x| x.vector.get("mat.fracture_energy").copied())
+            .unwrap_or(Fixed::ZERO);
+        // The reaction stress the edge carries: the being's force over the tool's edge area (the same contact
+        // pressure the edge imposes). The cap is a fixed-point overflow guard ([`STRESS_GUARD`], far above any
+        // material strength and clear of the type's edge), never a behavioural ceiling.
+        let applied_stress = laws::contact_pressure(force, tool.contact_area, STRESS_GUARD);
+        // The brittle-fracture criterion. The energy limb reads a delivered fracture energy of zero (the
+        // quasi-static working-stroke limit; a dynamic strike would supply a real kinetic energy), so only
+        // the stress margin fires; the tool breaks when the reaction stress exceeds its own fracture strength.
+        let (stress_margin, _energy_margin) = laws::fracture_onset(
+            applied_stress,
+            fracture_strength,
+            fracture_energy,
+            tool.contact_area,
+            Fixed::ZERO,
+            STRESS_GUARD,
+        );
+        let stress_fails = stress_margin < Fixed::ZERO;
+        // The BUCKLING criterion (the tool-geometry expansion, root R2): the tool's own body, loaded axially by
+        // the working force, buckles if that force exceeds its critical Euler load ([`laws::euler_buckle`]),
+        // derived from its elastic modulus, its body CROSS-SECTION (`volume / length`), and its length. So a
+        // SLENDER tool (a long thin body, a small cross-section) buckles under a load a STOUT one bears, the
+        // geometry tradeoff a tool's material choice trades against. Skipped when the tool declares no elastic
+        // modulus or carries no body geometry (a tool with no length has no cross-section to buckle), so a
+        // tool that carries no geometry is judged on stress alone (the absence convention).
+        let modulus = sub
+            .and_then(|x| x.vector.get("mat.elastic_modulus").copied())
+            .unwrap_or(Fixed::ZERO);
+        let cross_section = tool.cross_section();
+        let buckles =
+            if modulus > Fixed::ZERO && tool.length > Fixed::ZERO && cross_section > Fixed::ZERO {
+                // The area moment of the body's square section, `I = A^2 / 12` (A the cross-section), the section
+                // property that resists buckling. The pinned-pinned end condition (factor one) is the canonical
+                // Euler reference; a per-tool end condition is a reserved refinement.
+                let second_moment = cross_section
+                    .checked_mul(cross_section)
+                    .and_then(|a2| a2.checked_div(Fixed::from_int(12)))
+                    .unwrap_or(Fixed::ZERO);
+                let critical = laws::euler_buckle(
+                    modulus,
+                    second_moment,
+                    Fixed::ONE,
+                    tool.length,
+                    FORCE_CEILING,
+                );
+                force > critical
+            } else {
+                false
+            };
+        if !stress_fails && !buckles {
+            return false; // the tool survives both the stress it imposes and the buckling of its own body
+        }
+        let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        w.wielded = None; // fractured or buckled: a broken tool is no longer wielded and must be remade
+        true
     }
 
     /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
@@ -1411,7 +1839,14 @@ impl Embodiment {
             }
             None => (params.working_area, None),
         };
-        let fracture = self.material.fracture_hardness(coord, reg);
+        // The fracture-gating hardness is the greater of the located substance mixture's and any organism
+        // tissue lying at the cell (biosphere directive 2), so a being working a spot must clear the hardest
+        // matter there, be it rock or a carcass, read by the SAME contest through the SAME axis. An empty
+        // tissue field reads zero, so a cell with no corpse is byte-identical to before.
+        let fracture = self
+            .material
+            .fracture_hardness(coord, reg)
+            .max(self.tissue.fracture_hardness(coord));
         // The fracture gate: the being's contact pressure must clear the cell's fracture-gating hardness to
         // break any matter loose. A cell with no fracture resistance (loose soil, void) reads zero and any
         // positive pressure breaks it (Principle 8: physics, no bonded-versus-loose tag).
@@ -1430,6 +1865,256 @@ impl Embodiment {
             return Fixed::ZERO;
         }
         self.grasp_underfoot(walker_id)
+    }
+
+    /// Enact a being's decided CUT (the made-world arc, tool-use): with its WIELDED edge, sever the
+    /// constituents of the composite matter the being stands on that the edge can beat, freeing them into its
+    /// carried load. Where EXTRACT gates on the cell's AGGREGATE resistance (its hardest constituent binds the
+    /// whole cell, so a being that cannot beat the rind takes nothing), CUT gates PER CONSTITUENT: the edge's
+    /// effective pressure is compared against EACH substance present in the cell's own `SubstanceMix`, and
+    /// every constituent whose own `mat.shear_strength` the edge's deliverable shear exceeds is severed loose
+    /// and taken. So a keen edge frees the soft flesh from a tough composite even when it cannot break the whole
+    /// cell, the distinct power of a cut over a bare press. WHICH substances a cut frees and HOW MUCH are both
+    /// DERIVED, never authored: the freed substances are exactly the cell's own constituents the edge beats (no
+    /// openable-versus-sealed list), and the volume is the strength-bounded carry the grasp uses (no release
+    /// fraction and no substance transmutation). A cut is a SHEAR-parting process (R-CUT-SHEAR): the edge drives
+    /// a shear stress over its contact area ([`laws::shear`]), self-limited at the tool's OWN shear strength (an
+    /// isotropic ductile tool deriving that limit from its yield by the von Mises ratio), and severs each
+    /// constituent whose own shear strength that deliverable shear beats. This retires the earlier normal-stress
+    /// proxy (indentation pressure against `mat.fracture_strength`): cutting parts material by shear, not
+    /// indentation. Requires a wielded edge (a bare being cannot cut), the material registry, and the
+    /// physiology; missing any it cuts nothing, and a being with no tool never reaches here, so an opted-out
+    /// world is byte-identical. The stress cap is a fixed-point overflow guard, not a behavioural ceiling.
+    /// Reads only substance ids and the beings' and matter's own physics, no race, kind, role, or per-world
+    /// table (Principles 8, 9, 11). Returns the total volume freed. The id-ordered walk over the cell is a
+    /// deterministic tie-break.
+    pub fn cut_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        // A cut needs an edge: a bare being cannot cut (it does not afford CUT either).
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO;
+        };
+        let force = being_muscle_force(w, phys);
+        // The cut is a SHEAR-parting process (R-CUT-SHEAR): the edge drives a shear stress over its contact
+        // area ([`laws::shear`]), self-limited at the tool's OWN shear strength (an isotropic ductile tool
+        // deriving that limit from its yield by the von Mises ratio inside the law), since a tool cannot
+        // impose a shear beyond what it withstands before it shears itself. This retires the earlier
+        // normal-stress proxy: cutting parts material by shear, not indentation. The stress cap passed to the
+        // law is a fixed-point overflow guard ([`Fixed::MAX`], never binding for a positive area), not a
+        // behavioural ceiling.
+        let tool_sub = reg.substance(&tool.substance);
+        let tool_shear = tool_sub.and_then(|s| s.vector.get("mat.shear_strength").copied());
+        let tool_yield = tool_sub
+            .and_then(|s| s.vector.get("mat.yield_strength").copied())
+            .unwrap_or(Fixed::ZERO);
+        let (tau_applied, tool_margin) = laws::shear(
+            force,
+            tool.contact_area,
+            tool_shear.filter(|v| *v > Fixed::ZERO),
+            tool_yield,
+            STRESS_GUARD,
+        );
+        // The effective shear the edge can deliver: the applied shear capped at the tool's own shear strength
+        // (add the margin where it is negative, i.e. where the applied exceeds the tool's own strength). A
+        // tool with neither a shear strength nor a yield delivers zero and severs nothing.
+        let effective = tau_applied + tool_margin.min(Fixed::ZERO);
+        // The cell's constituents the edge can SEVER: each substance present whose OWN shear resistance the
+        // effective shear beats, in canonical id order (snapshot before the mutable take). No per-world table:
+        // membership is derived from the shear physics of what is in the cell against the edge's deliverable
+        // shear. A constituent that declares neither a shear strength nor a yield offers zero shear resistance
+        // and is severed by any positive edge: this is the TARGET-absence convention, the same Principle-8
+        // convention the extraction contest holds (a cell with no declared resistance reads zero and yields to
+        // any pressure, so there is no hidden unbreakable tag), the deliberate mirror of the TOOL-absence
+        // convention above (a tool with no shear strength delivers zero and cannot cut). A world that means a
+        // constituent to resist cutting declares its shear strength, exactly as it declares fracture strength
+        // to resist extraction.
+        let severable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let cs = reg.substance(s);
+                    let cons_shear =
+                        cs.and_then(|sub| sub.vector.get("mat.shear_strength").copied());
+                    let cons_yield = cs
+                        .and_then(|sub| sub.vector.get("mat.yield_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    let (_, cons_margin) = laws::shear(
+                        force,
+                        tool.contact_area,
+                        cons_shear.filter(|v| *v > Fixed::ZERO),
+                        cons_yield,
+                        STRESS_GUARD,
+                    );
+                    // The constituent's shear resistance is `tau_applied + its margin` (its own shear strength,
+                    // the law's `tau_material`); the edge severs it when its deliverable shear beats that.
+                    let resistance = tau_applied + cons_margin;
+                    (effective > resistance).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        // Free each severed constituent into the carried load, strength-bounded, the same carry the grasp uses.
+        let mut freed = Fixed::ZERO;
+        for s in &severable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
+    }
+
+    /// Enact a being's decided CRUSH (the made-world arc, tool-use, Section G): with its WIELDED face, fail
+    /// the constituents of the matter the being stands on in COMPRESSION, freeing them into its carried load.
+    /// Where CUT parts matter by shear (a keen edge against `mat.shear_strength`), CRUSH fails it in
+    /// compression: the face drives a contact stress over its area ([`laws::contact_pressure`]), self-limited
+    /// at the tool's own `mat.compressive_strength` (a face cannot deliver a stress beyond what it withstands
+    /// before it crushes itself), and every constituent whose own `mat.compressive_strength` that effective
+    /// stress beats is failed loose and taken. So a material weak in compression but tough in shear is crushed
+    /// where a cut leaves it, and one weak in shear but strong in compression is cut where a crush leaves it,
+    /// the two diverging on the target's own resistance axes, by physics not a per-action table. The freed
+    /// substances are exactly the cell's own constituents the face beats (no transmutation: a crushed
+    /// constituent is the same matter, now loose and gatherable), and the volume is the strength-bounded carry
+    /// the grasp uses. Requires a wielded face, the material registry, and the physiology; a being with no
+    /// tool never reaches here, so an opted-out world is byte-identical. The stress cap is a fixed-point
+    /// overflow guard ([`STRESS_GUARD`]), not a behavioural ceiling. The tool-absence convention (no
+    /// compressive strength on the tool delivers zero stress) and the target-absence convention (a constituent
+    /// with no compressive strength offers zero resistance and is crushed) mirror the cut's, the Principle-8
+    /// no-hidden-tag rule. Reads only substance ids and the beings' and matter's own physics (Principles 8, 9,
+    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    pub fn crush_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO;
+        };
+        let force = being_muscle_force(w, phys);
+        // The face's effective compressive stress: the being's force over the tool's contact area, self-limited
+        // at the tool's own compressive strength (a face with no compressive strength delivers zero).
+        let tool_compressive = reg
+            .substance(&tool.substance)
+            .and_then(|s| s.vector.get("mat.compressive_strength").copied())
+            .unwrap_or(Fixed::ZERO);
+        let applied = laws::contact_pressure(force, tool.contact_area, STRESS_GUARD);
+        let effective = if tool_compressive > Fixed::ZERO {
+            applied.min(tool_compressive)
+        } else {
+            Fixed::ZERO
+        };
+        // The cell's constituents the face can CRUSH: each substance present whose OWN compressive strength the
+        // effective stress beats, in canonical id order. A constituent with no compressive strength offers zero
+        // resistance and is crushed (the target-absence convention, matching the cut and the extract).
+        let crushable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let resistance = reg
+                        .substance(s)
+                        .and_then(|sub| sub.vector.get("mat.compressive_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    (effective > resistance).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut freed = Fixed::ZERO;
+        for s in &crushable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
+    }
+
+    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff):
+    /// swing the WIELDED tool and fracture the matter underfoot with the blow's kinetic energy. The tool's own
+    /// MASS (its retained volume times its substance density, [`WieldedTool::mass`], the extensive datum only
+    /// the carried tool supplies) carried at the reserved swing speed is a kinetic energy
+    /// ([`laws::kinetic_energy`], `1/2 m v^2`), and every cell constituent whose GRIFFITH energy over the
+    /// struck face (its `mat.fracture_energy` times the tool's contact area) that delivered energy exceeds is
+    /// fractured loose and taken (the energy limb of [`laws::fracture_onset`]). So a HEAVY tool shatters rock a
+    /// LIGHT one cannot, the payoff of carrying the tool's mass, and a CONCENTRATED blow (a small struck face)
+    /// fractures where a spread one does not, by physics not a per-tool table. The delivered energy is scaled
+    /// from the law's kilojoule output to the joule scale the Griffith energy is on. WHICH constituents
+    /// fracture and HOW MUCH are both derived: the fractured set is the cell's own constituents the blow beats
+    /// (no openable list), and the volume is the strength-bounded carry the grasp uses (no transmutation). A
+    /// constituent with no declared fracture energy offers no Griffith resistance and is shattered by any blow
+    /// (the target-absence convention, matching the cut). Requires the strike params, a wielded tool, the
+    /// material registry, and the physiology; a being with no tool never reaches here, so an opted-out world is
+    /// byte-identical. Reads only the tool's and matter's own physics, no race, kind, or role (Principles 8, 9,
+    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    pub fn strike_underfoot(&mut self, walker_id: StableId) -> Fixed {
+        let Some(params) = self.strike else {
+            return Fixed::ZERO;
+        };
+        let (Some(reg), Some(_phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
+        else {
+            return Fixed::ZERO;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return Fixed::ZERO;
+        };
+        let coord = w.coord();
+        let Some(tool) = w.wielded.as_ref() else {
+            return Fixed::ZERO; // a strike needs a tool to swing (a bare being does not afford it)
+        };
+        let mass = tool.mass(reg);
+        if mass <= Fixed::ZERO {
+            return Fixed::ZERO; // a massless tool (no density or no volume) delivers no blow
+        }
+        let crack_area = tool.contact_area; // the struck face, the area the blow lands over
+                                            // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
+                                            // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
+                                            // one scale. A swing beyond the representable range saturates to the ceiling.
+        let ke_kj = laws::kinetic_energy(mass, params.swing_velocity, params.energy_max);
+        let delivered_energy = ke_kj
+            .checked_mul(Fixed::from_int(1000))
+            .unwrap_or(params.energy_max);
+        // The cell's constituents the blow FRACTURES: each whose Griffith energy over the struck face the
+        // delivered energy exceeds, in canonical id order (snapshot before the mutable take). Uses the energy
+        // limb of `fracture_onset` (a zero applied stress, so only the Griffith energy criterion fires): a
+        // constituent fractures when the delivered energy beats its own `mat.fracture_energy` times the struck
+        // area.
+        let fracturable: Vec<String> = match self.material.cell(coord) {
+            Some(mix) => mix
+                .substances()
+                .filter_map(|(s, _)| {
+                    let sub = reg.substance(s);
+                    let fracture_strength = sub
+                        .and_then(|x| x.vector.get("mat.fracture_strength").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    let fracture_energy = sub
+                        .and_then(|x| x.vector.get("mat.fracture_energy").copied())
+                        .unwrap_or(Fixed::ZERO);
+                    let (_, energy_margin) = laws::fracture_onset(
+                        Fixed::ZERO,
+                        fracture_strength,
+                        fracture_energy,
+                        crack_area,
+                        delivered_energy,
+                        params.energy_max,
+                    );
+                    (energy_margin < Fixed::ZERO).then(|| s.clone())
+                })
+                .collect(),
+            None => return Fixed::ZERO,
+        };
+        let mut freed = Fixed::ZERO;
+        for s in &fracturable {
+            let want = self.material.volume(coord, s);
+            freed += self.pick_up(walker_id, coord, s, want);
+        }
+        freed
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -1593,43 +2278,105 @@ impl Embodiment {
                 }
             }
         }
+        // Record the INGESTED composition on the eater (social-learning arc, piece 1, nutrition learning): the
+        // per-substance volume this bite took into the being, so the nutrition reward credit can re-earn "this
+        // food nourishes me" from the perceived composition of what it ATE, keyed exactly as the ground-side
+        // trace credit keys the composition underfoot. Set from the same `eaten_volume` the byproduct deposit
+        // reads (a substance that fed two reserves counts its total), in canonical id order. A bite that ate
+        // nothing leaves it empty (the loop skipped every axis), so a full or foodless being records no
+        // ingestion. Never folded into `state_hash` (transient per-tick scratch); its only reach into canon is
+        // the belief the nutrition credit forms from it, and only when that credit is armed.
+        if !eaten_volume.is_empty() {
+            if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                let mut ate = SubstanceMix::new();
+                for (substance, volume) in &eaten_volume {
+                    ate.add(substance, *volume);
+                }
+                w.ate = ate;
+            }
+        }
         gained
     }
 
-    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter
-    /// the being carries into a wielded tool. It consumes the reserved tool volume of the FIRST substance
-    /// the being carries enough of (canonical id order, a deterministic tie-break over a mixture, never a
-    /// per-substance preference) and wields a tool of that substance with the reserved working-edge area,
-    /// replacing any prior tool. So a being that has mined and carried stone can shape it into a point, and
-    /// the tool it makes is only as good as the stone it worked (a hard stone a hard tool, a soft stone a
-    /// soft one, the tool's function derived from its material and geometry by the crafting seam's cut read,
-    /// never a recipe catalog). Reads only the carried substance ids and the reserved geometry, no race,
-    /// kind, or role (Principles 8, 9). Returns true if a tool was made. Opt-in: an embodiment with no
-    /// crafting parameters, or a being carrying too little of any one substance, makes nothing.
+    /// Enact a being's decided CRAFT (material-substrate arc, cascade item 4, knapping): shape the matter the
+    /// being carries into a wielded tool, its EDGE and its MATERIAL both DERIVED from the worked stone's own
+    /// physics, never an authored constant. The tool's edge is the INTRINSIC finest working edge the stone's
+    /// microstructure holds (`mat.edge_length_scale`), a material property independent of the forming force, so
+    /// a fine-grained stone gives a fine edge whoever knaps it and the cut pressure at USE stays a real function
+    /// of the WIELDER's force (the earlier force-derived edge cancelled the maker's force and left cutting
+    /// force-insensitive; the intrinsic edge fixes that, R-EDGE-INTRINSIC). The contact area is that edge length
+    /// squared. When the being carries more than one workable stone it shapes the one that yields the BEST tool
+    /// in ITS hand, the argmax of the cutting power `min(contact_pressure(force, edge_area), hardness)` the tool
+    /// would deliver, canonical id order breaking a tie, so the material chosen is fittest by physics not first
+    /// by id. Consumes the reserved tool volume and replaces any prior tool. Reads only the carried substance
+    /// ids and the beings' and stones' own physics, no race, kind, role, or recipe (Principles 8, 9, 11).
+    /// Returns true if a tool was made. Opt-in: an embodiment with no crafting params, material registry, or
+    /// physiology, or a being carrying too little of any stone that holds an edge, makes nothing.
     pub fn craft_from_carried(&mut self, walker_id: StableId) -> bool {
         let Some(params) = self.craft else {
             return false;
         };
-        // The first substance the being carries enough of to shape a tool, in canonical id order.
-        let Some(substance) = self
-            .walkers
-            .iter()
-            .find(|w| w.id == walker_id)
-            .and_then(|w| {
-                w.carried
-                    .substances()
-                    .find(|(_, &vol)| vol >= params.tool_volume)
-                    .map(|(s, _)| s.clone())
-            })
+        // The crafted edge is derived from the worked stone's fracture strength (the material registry) under
+        // the being's forming force (its physiology); a world with neither cannot derive an edge and crafts
+        // nothing.
+        let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
         else {
-            return false; // not carrying enough of any one substance to make a tool
+            return false;
+        };
+        let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+            return false;
+        };
+        let force = being_muscle_force(w, phys);
+        // The carried stone (with enough stock) that yields the best tool, derived. The tool's EDGE is an
+        // INTRINSIC property of the stone, the finest working edge its microstructure holds
+        // (`mat.edge_length_scale`), NOT a function of the forming force: a fine-grained stone holds a fine edge
+        // whoever knaps it, so the cut pressure at USE stays a real function of the WIELDER's current force
+        // rather than cancelling the maker's. The contact area is that edge length squared. The fitness is the
+        // cutting power the tool would deliver in THIS being's hand, the contact pressure its edge concentrates
+        // the being's force into ([`laws::contact_pressure`], the cap a fixed-point overflow guard), blunted to
+        // the stone's own hardness (a soft stone blunts before it bites): `min(pressure, hardness)`. The argmax,
+        // ties to lowest id (a strictly greater power replaces the incumbent, so the first-seen equal wins). A
+        // stone with no working edge (no positive edge-length scale, or one finer than the fixed-point grid
+        // resolves as an area) is no tool stock and is skipped.
+        let mut best: Option<(Fixed, WieldedTool)> = None;
+        for (s, &vol) in w.carried.substances() {
+            if vol < params.tool_volume {
+                continue;
+            }
+            let sub = reg.substance(s);
+            let edge_length = sub
+                .and_then(|x| x.vector.get("mat.edge_length_scale").copied())
+                .unwrap_or(Fixed::ZERO);
+            if edge_length <= Fixed::ZERO {
+                continue; // a stone that holds no working edge is no tool stock
+            }
+            let hardness = sub
+                .and_then(|x| x.vector.get("mat.indentation_hardness").copied())
+                .unwrap_or(Fixed::ZERO);
+            let area = match edge_length.checked_mul(edge_length) {
+                Some(a) if a > Fixed::ZERO => a,
+                _ => continue, // the edge is finer than the fixed-point grid resolves as an area
+            };
+            let pressure = laws::contact_pressure(force, area, Fixed::MAX);
+            let power = pressure.min(hardness);
+            if best.as_ref().is_none_or(|(bp, _)| power > *bp) {
+                best = Some((
+                    power,
+                    WieldedTool {
+                        contact_area: area,
+                        volume: params.tool_volume,
+                        length: params.tool_length,
+                        substance: s.clone(),
+                    },
+                ));
+            }
+        }
+        let Some((_, tool)) = best else {
+            return false; // no carried stock holds a viable edge
         };
         if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
-            w.carried.take(&substance, params.tool_volume);
-            w.wielded = Some(WieldedTool {
-                contact_area: params.edge_area,
-                substance,
-            });
+            w.carried.take(&tool.substance, params.tool_volume);
+            w.wielded = Some(tool);
         }
         true
     }
@@ -1872,6 +2619,29 @@ pub struct Runner {
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
+    /// The decomposer-driver registry (decomposition-as-emergence, Principle 8), armed opt-in beside the
+    /// matter cycle. `None` on a runner without it, so the matter cycle (if armed) decays at the
+    /// substance's own unconditional rate exactly as before and every existing scenario is byte-identical.
+    /// Armed via [`Runner::set_decomposer`], the matter cycle and the organic-trace salience then multiply
+    /// their rate by the per-cell decomposition ACTIVITY this registry derives from the cell's decomposer
+    /// life and conditions, so a sterile, dry, or airless cell preserves its matter. Off the calibrated
+    /// worldbuild path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
+    decomposer: Option<DecomposerDriverRegistry>,
+    /// The per-cell standing decomposer-biomass field the Life kernel reads, armed opt-in beside the
+    /// decomposer registry. `None` (or empty) on a runner without it, so the Life kernel reads zero biomass
+    /// and a life-driven world's cells preserve until colonised; folded into `state_hash` only when
+    /// non-empty, so an unarmed or unseeded field folds no bytes and the run is byte-identical. Hand-seeded
+    /// by a test in this slice; the biosphere wiring that fills it from a generated decomposer species is
+    /// the deferred follow-on (task 21).
+    decomposer_stock: Option<DecomposerStockField>,
+    /// Whether a death leaves the being's body as located matter (biosphere directive 2, organisms as usable
+    /// material stuff). `false` by default, so a death retires the body and nothing is deposited and every
+    /// existing scenario is byte-identical; armed via [`Runner::set_corpse_matter`], the lifecycle
+    /// reconciliation then derives the dying being's own composition vector from its body plan and deposits it
+    /// into the embodiment's tissue field where it fell, so the corpse becomes forageable and (in later
+    /// slices) decomposable matter. World-design and narrative choice (does a death leave a corpse), reserved
+    /// for the owner; off the canonical path.
+    corpse_matter: bool,
     /// The set of beings this runner promoted to the individual dialogue tier through the arc-scoped
     /// promotion policy last tick (base-level liveliness §4). The policy owns only this set: each tick it
     /// promotes the new arc set and restricts the beings in this set that left the arc, so a promotion set
@@ -1935,6 +2705,9 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -1979,6 +2752,9 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2036,6 +2812,9 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2116,6 +2895,9 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            decomposer: None,
+            decomposer_stock: None,
+            corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
             liveliness: LivelinessCalib::dev_default(),
@@ -2169,6 +2951,44 @@ impl Runner {
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
+    }
+
+    /// Arm the decomposer-driver registry (decomposition-as-emergence, Principle 8): the matter cycle and
+    /// the organic-trace salience then multiply their rate by the per-cell decomposition ACTIVITY this
+    /// registry derives, so a cell's matter breaks down only as fast as its own decomposer life and
+    /// conditions afford. Opt-in and orthogonal to [`Runner::set_matter_cycle`]: arming this alone changes
+    /// nothing (the matter cycle must be armed to decay at all), and arming the matter cycle without this
+    /// keeps its unconditional rate, so every existing scenario is byte-identical. The reserved parameters
+    /// are the owner's ([`crate::decompose::DecomposerDriver`]); off the calibrated worldbuild path until the
+    /// biosphere slice wires the stock field.
+    pub fn set_decomposer(&mut self, registry: DecomposerDriverRegistry) {
+        self.decomposer = Some(registry);
+    }
+
+    /// Arm (or seed) the per-cell standing decomposer-biomass field the Life kernel reads. Opt-in and folded
+    /// into `state_hash` only when non-empty, so an unseeded field leaves the run byte-identical. Hand-seeded
+    /// in this slice; the biosphere wiring that fills it from a generated decomposer species is the deferred
+    /// follow-on (task 21).
+    pub fn set_decomposer_stock(&mut self, stock: DecomposerStockField) {
+        self.decomposer_stock = Some(stock);
+    }
+
+    /// Arm corpse matter (biosphere directive 2): a death then leaves the being's body as located matter,
+    /// its composition vector derived from its own body plan and deposited into the embodiment's tissue field
+    /// where it fell. Opt-in and default off, so an unarmed runner retires a body and deposits nothing, and
+    /// every existing scenario is byte-identical. Whether a death leaves a corpse is the owner's world-design
+    /// choice; off the calibrated worldbuild path until worldgen wires the biosphere.
+    pub fn set_corpse_matter(&mut self, on: bool) {
+        self.corpse_matter = on;
+    }
+
+    /// The standing decomposer biomass for a substance at a cell, the Life-kernel input; zero when no stock
+    /// field is armed or the cell is sterile (the absence convention).
+    fn life_stock_at(&self, cell: Coord3, substance: &str) -> Fixed {
+        self.decomposer_stock
+            .as_ref()
+            .map(|s| s.mass(cell, substance))
+            .unwrap_or(Fixed::ZERO)
     }
 
     /// Arm the reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
@@ -2411,7 +3231,43 @@ impl Runner {
                         .get("bio.decomposition_rate")
                         .copied()
                         .unwrap_or(calib.decomposition_rate);
-                    let decomposed = volume.checked_mul(rate).unwrap_or(Fixed::ZERO);
+                    // Decomposition-as-emergence (Principle 8): the substance's own rate is its MAXIMUM
+                    // decomposition susceptibility; the fraction of it a cell realises this tick is the
+                    // per-cell decomposer ACTIVITY, in [0, 1], derived from the cell's decomposer life
+                    // (the standing biomass) and its conditions (moisture, oxygen, warmth above the
+                    // barrier). Unarmed (no decomposer registry) the factor is one, the substance's
+                    // unconditional rate exactly as before (byte-identical); armed, a sterile, bone-dry,
+                    // or airless cell reads zero and preserves its matter though warm. The barrier gate
+                    // above is untouched, so this modulates only the rate ABOVE it and the conservation
+                    // math below is unchanged.
+                    let factor = match self.decomposer.as_ref() {
+                        Some(driver) => {
+                            // An unmodelled conditions axis is NON-LIMITING: a world with no moisture field
+                            // or no medium makes no claim that a cell is dry or airless, so that axis reads
+                            // full (one) and does not gate decomposition, exactly the open-air convention the
+                            // combustion beat uses for its respirable read (`step_combustion`: no medium
+                            // reads full concentration). This one is the boundary of the saturating response,
+                            // a structural convention, not a tuned reserved value: to make moisture or oxygen
+                            // GATE decay a world arms the environ or medium field that carries it.
+                            let moisture = self
+                                .environ
+                                .as_ref()
+                                .map(|(env, _)| env.moisture_at(cell.x, cell.y))
+                                .unwrap_or(Fixed::ONE);
+                            let oxygen = emb
+                                .physiology
+                                .as_ref()
+                                .map(|p| p.medium.respirable_at(cell.x, cell.y))
+                                .unwrap_or(Fixed::ONE);
+                            let life_stock = self.life_stock_at(*cell, substance);
+                            driver.activity_at(temperature, barrier, moisture, oxygen, life_stock)
+                        }
+                        None => Fixed::ONE,
+                    };
+                    let decomposed = volume
+                        .checked_mul(rate)
+                        .and_then(|d| d.checked_mul(factor))
+                        .unwrap_or(Fixed::ZERO);
                     if decomposed <= Fixed::ZERO {
                         continue;
                     }
@@ -2676,6 +3532,10 @@ impl Runner {
             self.step_embodiment();
         }
         self.recouple_hydrology();
+        // The world-independent eligibility-trace advance (decay + record), in the embodiment phase before
+        // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
+        // trace identically even for a world-less embodiment runner.
+        self.advance_eligibility_traces();
         // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
         // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
@@ -2705,6 +3565,30 @@ impl Runner {
     /// randomness, so it replays and is worker-count invariant. A runner with no embodiment publishes
     /// nothing and returns the inputs unchanged; a world that declares no percepts observes no features,
     /// so the learner is inert and the run is unchanged.
+    /// Advance every being's eligibility trace: decay each remembered sequence by the reserved TD lambda
+    /// (pruning underflows), then record the affordance the being acted on THIS tick at full eligibility, so a
+    /// reserve rise felt this same tick credits the action that CAUSED it (ideation arc, piece 1, slice 1c, the
+    /// record-before-credit TD-lambda order). This is the WORLD-INDEPENDENT half of the reward-credit
+    /// machinery: it reads only the reward calibration, the embodiment, and the being's own belief granularity,
+    /// never the world, so it runs whenever the reward learner and an embodiment are present, on both the
+    /// pinned and scheduled entry points, in the embodiment phase before `couple_conversation` reads the trace.
+    /// Runs in canonical walker order, drawing no randomness. Only when the reward learner is armed; unarmed, no
+    /// trace is ever populated, so this is inert and byte-identical.
+    fn advance_eligibility_traces(&mut self) {
+        if let Some(reward_learn) = self.reward_learning {
+            if let Some(emb) = self.embodiment.as_mut() {
+                let granular = emb.granular_beliefs;
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(step) = w.decided_step {
+                        w.eligibility_trace
+                            .record(step_belief_subject(&step, granular));
+                    }
+                }
+            }
+        }
+    }
+
     fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
         // The learner calibrations (Copy), read once so the borrow of the embodiment below does not
         // conflict with the read.
@@ -2721,30 +3605,11 @@ impl Runner {
         // Computed here where the mind is readable and applied to the walker below (a being that enacted
         // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
         let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
-        // Advance each being's eligibility trace BEFORE the reward credit reads it (ideation arc, piece 1,
-        // slice 1c, the record-before-credit ordering, the standard TD-lambda order): decay every remembered
-        // sequence by the reserved TD lambda (pruning those that underflow), then record the affordance the
-        // being acted on THIS tick at full eligibility, so a reserve rise felt this same tick credits the
-        // action that CAUSED it. Geophage and ingest refill the reserve on the tick they are enacted, so the
-        // felt rise is immediate; recording first gives the just-enacted action full eligibility for it, the
-        // way the standard trace credits the action that produced the reward, while a genuinely lagged reward
-        // still rides the decayed trace of earlier actions. Runs in canonical walker order, drawing no
-        // randomness. Only when the reward learner is armed; unarmed, no trace is ever populated, so this is
-        // inert and the run stays byte-identical.
-        if let Some(reward_learn) = reward_learn {
-            if let Some(emb) = self.embodiment.as_mut() {
-                for w in emb.walkers.iter_mut() {
-                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
-                    if let Some(affordance) = w.decided_affordance {
-                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
-                            primitive: affordance.0,
-                            target_bucket: 0,
-                            param_bucket: 0,
-                        }]));
-                    }
-                }
-            }
-        }
+        // The eligibility-trace advance (decay this tick, then record the enacted action) is done in
+        // `advance_eligibility_traces`, called in the embodiment phase before this coupling on BOTH the
+        // pinned and scheduled paths, so a world-less embodiment runner advances the trace identically on
+        // both entry points (determinism, Principle 3). It is world-independent, so it must not sit behind
+        // the world tick the way this coupling's remaining, world-reading work does.
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -2856,29 +3721,73 @@ impl Runner {
                     // quantized material percept, so "this residue marks a place that pays off" emerges from the
                     // being's own correlation (Principles 8, 9). Inert where the world declares no material
                     // percepts (an empty vector yields no observation), so an opted-out run is byte-identical.
-                    let material = emb.material_percepts.perceive(emb.material.cell(c));
-                    for (k, obs) in reward_observations(
-                        reward,
-                        &material,
-                        plasticity,
-                        &reward_learn,
-                        MATERIAL_FEATURE_CHANNEL_BASE,
-                    )
-                    .into_iter()
-                    .enumerate()
-                    {
-                        env_inputs.push(TickInput {
-                            mind: w.id,
-                            ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
-                            stim: Stimulus::Observe {
-                                subject: obs.subject,
-                                attr: REWARD_ATTR,
-                                hyps: vec![REWARDS, NEUTRAL],
-                                toward: obs.toward,
-                                weight: obs.weight,
-                                from: w.id,
-                            },
-                        });
+                    // Gated on the place-side switch (TRUE by default so the keystone's behaviour is unchanged);
+                    // a world sets it false to run the eaten-side nutrition credit below in isolation.
+                    if emb.place_reward_learning {
+                        let material = emb.material_percepts.perceive(emb.material.cell(c));
+                        for (k, obs) in reward_observations(
+                            reward,
+                            &material,
+                            plasticity,
+                            &reward_learn,
+                            MATERIAL_FEATURE_CHANNEL_BASE,
+                        )
+                        .into_iter()
+                        .enumerate()
+                        {
+                            env_inputs.push(TickInput {
+                                mind: w.id,
+                                ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                stim: Stimulus::Observe {
+                                    subject: obs.subject,
+                                    attr: REWARD_ATTR,
+                                    hyps: vec![REWARDS, NEUTRAL],
+                                    toward: obs.toward,
+                                    weight: obs.weight,
+                                    from: w.id,
+                                },
+                            });
+                        }
+                    }
+                    // NUTRITION reward credit (social-learning arc, piece 1): the being re-earns "this food
+                    // nourishes me" from its OWN felt reward, feature-keyed on the composition of what it ATE
+                    // this tick rather than the ground it stands on. Where the trace credit above reads the cell
+                    // underfoot (learning a PLACE is marked), this reads `w.ate` (learning a FOOD nourishes), so
+                    // a being standing on inert matter it did not eat forms no reward belief about that matter,
+                    // and a being that ate a food learns it wherever the bite came from (ground or carried).
+                    // Perceived through the SAME material-percept registry and keyed under the SAME
+                    // MATERIAL_FEATURE_CHANNEL_BASE band as the ground-side trace credit, so the eaten-side and
+                    // ground-side evidence commit one "this signature rewards" belief the shared attraction
+                    // gradient then reads; the disjoint ordinal band keeps the two tick inputs from aliasing on
+                    // the mind-then-ordinal sort. Nothing is handed: the sign is the reserve rising, the subject
+                    // a raw quantized material signature, so "this food nourishes me" emerges from the being's
+                    // own correlation (Principles 8, 9). Gated on the opt-in `nutrition_learning`; off (the
+                    // default) `w.ate` is never read, so an opted-out run is byte-identical.
+                    if emb.nutrition_learning && !w.ate.is_empty() {
+                        let eaten = emb.material_percepts.perceive(Some(&w.ate));
+                        for (k, obs) in reward_observations(
+                            reward,
+                            &eaten,
+                            plasticity,
+                            &reward_learn,
+                            MATERIAL_FEATURE_CHANNEL_BASE,
+                        )
+                        .into_iter()
+                        .enumerate()
+                        {
+                            env_inputs.push(TickInput {
+                                mind: w.id,
+                                ordinal: NUTRITION_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                stim: Stimulus::Observe {
+                                    subject: obs.subject,
+                                    attr: REWARD_ATTR,
+                                    hyps: vec![REWARDS, NEUTRAL],
+                                    toward: obs.toward,
+                                    weight: obs.weight,
+                                    from: w.id,
+                                },
+                            });
+                        }
                     }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
                     // prediction of its last-enacted action against the reward it felt, and remember the
@@ -2889,18 +3798,21 @@ impl Runner {
                     // about the action it took. Read here where the mind is in scope; applied to the walker
                     // in the mutable pass below.
                     if discovery.is_some() {
-                        if let Some(affordance) = w.decided_affordance {
+                        if let Some(step) = w.decided_step {
                             if let Some((mind, params)) = self.world.as_ref().and_then(|world| {
                                 world.mind(w.id).map(|m| (m, world.belief_params()))
                             }) {
-                                let step = SequenceStep {
-                                    primitive: affordance.0,
-                                    target_bucket: 0,
-                                    param_bucket: 0,
-                                };
                                 let felt = if reward { Fixed::ONE } else { Fixed::ZERO };
-                                let predicted =
-                                    crate::forward_model::predicted_reward(mind, &step, params);
+                                // The prediction reads the belief at the SAME grain the credit above records
+                                // (piece 3): primitive-only by default, the full enacted step when granular, so
+                                // the surprise measures how far the reward defied what the being believed about
+                                // the action-on-this-target it took, never a masked cross-grain belief.
+                                let predicted = crate::forward_model::predicted_reward(
+                                    mind,
+                                    &step,
+                                    emb.granular_beliefs,
+                                    params,
+                                );
                                 surprise.insert(w.id, (felt - predicted).abs());
                             }
                         }
@@ -2918,6 +3830,56 @@ impl Runner {
             if let Some(emb) = self.embodiment.as_mut() {
                 for w in emb.walkers.iter_mut() {
                     w.surprise = surprise.get(&w.id).copied().unwrap_or(Fixed::ZERO);
+                }
+            }
+        }
+        // Observe-and-imitate (social-learning arc, piece 2): rebuild each being's transient observed-action
+        // prior from the actions co-located OTHER beings ATE this tick (the valence-free ActionTrace eating
+        // leaves), so next tick's discovery proposal can be biased toward a demonstrated technique. A being
+        // reads only the primitive its neighbours enacted, never their reward or belief (the valence-free
+        // bias). It rebuilds every armed tick (empty where a being saw no one eat), a one-tick memory the
+        // discovery sampler consumes, never a store. Gated on the opt-in; unarmed, no `observed_actions` is
+        // ever populated, so an opted-out run folds nothing and stays byte-identical. Runs in canonical
+        // walker order, drawing no randomness.
+        let observe_and_imitate = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.observe_and_imitate)
+            .unwrap_or(false);
+        if observe_and_imitate {
+            if let Some(emb) = self.embodiment.as_mut() {
+                // Per place, the (eater id, enacted primitive) of every being that ate this tick, in
+                // canonical walker order (so the per-observer set is reproducible and thread-invariant).
+                let mut eaten_at: BTreeMap<PlaceId, Vec<(StableId, u16)>> = BTreeMap::new();
+                for w in emb.walkers.iter() {
+                    if !w.ate.is_empty() {
+                        if let (Some(&place), Some(aff)) = (cells.get(&w.id), w.decided_affordance)
+                        {
+                            eaten_at.entry(place).or_default().push((w.id, aff.0));
+                        }
+                    }
+                }
+                for w in emb.walkers.iter_mut() {
+                    let mut observed = BTreeSet::new();
+                    // Only a being that CAN imitate (a positive heritable social-learning weight) carries the
+                    // prior: a founder applies no bias whatever it saw, so leaving its prior empty is
+                    // behaviour-identical and keeps founder-zero at the HASH level too (a founder folds
+                    // nothing), so imitation emerges by selection at both the behavioural and the canonical
+                    // level, never switched on for a being that cannot act on it.
+                    if w.social_learning > Fixed::ZERO {
+                        if let Some(&place) = cells.get(&w.id) {
+                            if let Some(eaters) = eaten_at.get(&place) {
+                                for &(eater, primitive) in eaters {
+                                    // Observe OTHERS, not one's own bite: a being that ate already has the
+                                    // reward path to the belief; the prior is for copying a neighbour.
+                                    if eater != w.id {
+                                        observed.insert(primitive);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    w.observed_actions = observed;
                 }
             }
         }
@@ -3057,8 +4019,16 @@ impl Runner {
             _ => BTreeMap::new(),
         };
         let ids: Vec<StableId> = self.body_temp.keys().copied().collect();
-        for id in ids {
-            if let Some(coord) = self.index.coord_of(OccupantId::being(id)) {
+        // DETERMINISTIC data-parallelism (arc 4), gather-then-apply: each being reads only immutable state
+        // (the located index, the field, its own exchange rate, its current body temperature, the pre-built
+        // insulation map) and computes one Newton-cooling value, writing NOTHING shared during the parallel
+        // gather. The updates are snapshotted into a Vec before any insert, so there is no read-after-write
+        // hazard; and each id is unique (the keys of `body_temp`), so the serial apply is order-independent,
+        // and the result is bit-identical at any thread count.
+        let updates: Vec<(StableId, Fixed)> = ids
+            .par_iter()
+            .filter_map(|&id| {
+                let coord = self.index.coord_of(OccupantId::being(id))?;
                 let env = self.field.at(coord.x, coord.y);
                 let bt = self.body_temp[&id];
                 // The being's own DERIVED coupling rate h*A/(m*c) when supplied, else the labelled
@@ -3082,9 +4052,11 @@ impl Runner {
                 } else {
                     rate
                 };
-                let next = bt + eff_rate.mul(env - bt);
-                self.body_temp.insert(id, next);
-            }
+                Some((id, bt + eff_rate.mul(env - bt)))
+            })
+            .collect();
+        for (id, next) in updates {
+            self.body_temp.insert(id, next);
         }
     }
 
@@ -3146,12 +4118,22 @@ impl Runner {
             // downhill routing, which no other phase reads this tick, so the placement is order-safe and
             // the scheduled and pinned orders stay bit-identical.
             self.recouple_hydrology();
+            // The world-independent eligibility-trace advance runs in the embodiment phase, before the world
+            // coupling, matching step_inner. It reads no world, so placing it here (present whenever an
+            // embodiment is) rather than inside SYS_WORLD keeps a world-less embodiment runner bit-identical
+            // to the pinned order, closing the couple_conversation sibling of the vigor divergence at its root.
+            self.advance_eligibility_traces();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
             // them after step_embodiment, so the scheduled and pinned orders publish identical cells and
             // inject identical env observations.
             let inputs = self.couple_conversation(world_inputs);
+            // Feed the graded reproductive-vigor coupling into the world before its tick, in the SAME place
+            // step_inner does (after couple_conversation, before world.tick), so an armed vigor coupling
+            // ticks the world with the identical vigor map on both entry points. A no-op when unarmed, so the
+            // scheduled and pinned orders stay bit-identical on every existing scenario.
+            self.couple_reproductive_vigor();
             if let Some(world) = self.world.as_mut() {
                 world.tick(&inputs);
             }
@@ -3205,8 +4187,12 @@ impl Runner {
                     // axis's direction slot, so a being that has learned some ground harms it senses a
                     // unit direction away from it. Only where the registry carries CONDITION.
                     let condition_reg = emb.homeo.axis(CONDITION).is_some();
+                    // DETERMINISTIC data-parallelism (arc 4): each being's percept directions are pure reads of
+                    // immutable shared state (the field, the being's mind, the resources and percepts) keyed by
+                    // w.id, drawing no RNG; collecting into a BTreeMap is order-free, so the result is
+                    // bit-identical at any thread count.
                     emb.walkers
-                        .iter()
+                        .par_iter()
                         .map(|w| {
                             let coord = w.coord();
                             let (gx, gy) = self.field.gradient_at(coord.x, coord.y);
@@ -3250,9 +4236,11 @@ impl Runner {
         // to act, and selection wires that. Read before the mutable embodiment borrow, drawing no RNG.
         let field_signed: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>> =
             match self.embodiment.as_ref() {
+                // Parallel (arc 4): pure reads of body_temp and the thermal band, keyed by w.id, no RNG; the
+                // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 Some(emb) => emb
                     .walkers
-                    .iter()
+                    .par_iter()
                     .filter_map(|w| {
                         let bt = *self.body_temp.get(&w.id)?;
                         let band = emb.thermal.get(&w.id)?;
@@ -3277,11 +4265,50 @@ impl Runner {
             Some(emb) if emb.appetitive => match self.world.as_ref() {
                 Some(world) => {
                     let ids = emb.layout.affordance_ids();
+                    // Social-learning arc, piece 3 (the flagged deep spot): when granular beliefs are armed the
+                    // salience is CANDIDATE-AWARE (it lights an affordance when a PRESENT target of it is
+                    // believed to pay off), so it needs each being's binding graph. Computed inline only when
+                    // granular AND the discovery loop's refs are installed; otherwise the candidates are empty
+                    // and the salience keys the primitive-only belief exactly as before, byte-identical.
+                    let granular = emb.granular_beliefs;
+                    let value_gran = self
+                        .discovery
+                        .map(|d| d.target_value_granularity)
+                        .unwrap_or(Fixed::ONE);
+                    let refs_ready =
+                        emb.affordance_refs.is_some() && emb.material_registry.is_some();
+                    // Parallel (arc 4): each entry is a pure read of the being's mind, the matter underfoot,
+                    // and its afforded primitives, keyed by w.id and drawing no RNG; the filter_map collect
+                    // into a BTreeMap is order-free, so it is bit-identical at any thread count.
                     emb.walkers
-                        .iter()
+                        .par_iter()
                         .filter_map(|w| {
                             let mind = world.mind(w.id)?;
-                            Some((w.id, appetitive_salience(mind, &ids, world.belief_params())))
+                            let candidates = if granular && refs_ready {
+                                let refs = emb.affordance_refs.as_ref().unwrap();
+                                let reg = emb.material_registry.as_ref().unwrap();
+                                let matter = emb.material.cell(w.coord());
+                                let percepts = emb.affordance_percepts.perceive(
+                                    matter,
+                                    w.wielded.as_ref(),
+                                    reg,
+                                    refs,
+                                );
+                                let afforded = emb.being_afforded(w);
+                                candidate_bindings(&afforded, &percepts, true, value_gran)
+                            } else {
+                                Vec::new()
+                            };
+                            Some((
+                                w.id,
+                                appetitive_salience(
+                                    mind,
+                                    &ids,
+                                    &candidates,
+                                    granular,
+                                    world.belief_params(),
+                                ),
+                            ))
                         })
                         .collect()
                 }
@@ -3303,9 +4330,12 @@ impl Runner {
             self.world.as_ref(),
             self.reward_learning,
         ) {
+            // Parallel (arc 4): each direction is a pure read of the being's reward belief and the material
+            // trace it senses, keyed by w.id and drawing no RNG; the filter_map collect into a BTreeMap is
+            // order-free, so it is bit-identical at any thread count.
             (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
                 .walkers
-                .iter()
+                .par_iter()
                 .filter_map(|w| {
                     let mind = world.mind(w.id)?;
                     let raw = attraction_gradient(
@@ -3355,47 +4385,78 @@ impl Runner {
                 let params = world.belief_params();
                 let tick = self.clock;
                 let seed = emb.seed;
+                // The belief GRANULARITY (social-learning arc, piece 3): keys the candidate, the sampled
+                // proposal, the deliberated match, and the credit RECORD on the same grain. False by default
+                // (primitive-only, byte-identical); true keys on the target's channel and value.
+                let granular = emb.granular_beliefs;
+                // The relation kinds the multi-hop planner may traverse as means-ends edges (relational-belief
+                // substrate, arc 2): the data-defined causal set, built once. A being with no relational belief
+                // never reaches the traversal, so this is inert on the current run path (byte-identical).
+                let reachable = builtin_reachable_relations();
+                // Parallel (arc 4): each being's proposal draws only from its OWN counter-keyed RNG
+                // (`DrawKey::entity(w.id, tick, HYPOTHESIZE).rng(seed)`, independent of iteration order and
+                // mutating no shared stream) and its deliberation is a pure ranked read; keyed by w.id, the
+                // filter_map collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
                 emb.walkers
-                    .iter()
+                    .par_iter()
                     .filter_map(|w| {
                         let mind = world.mind(w.id)?;
                         let matter = emb.material.cell(w.coord());
                         let percepts =
                             emb.affordance_percepts
                                 .perceive(matter, w.wielded.as_ref(), reg, refs);
-                        let afforded = match &w.structure {
-                            Some(s) => emb.afford.afforded_structure(
-                                s,
-                                &emb.params.capability_refs,
-                                &emb.params.capability_caps,
-                            ),
-                            None => emb.afford.afforded(
-                                &w.body,
-                                &emb.organs,
-                                &emb.params.capability_refs,
-                                &emb.params.capability_caps,
-                            ),
-                        };
-                        let candidates = candidate_bindings(&afforded, &percepts);
-                        let proposal =
-                            sample_candidate(&candidates, mind, &calib, params, w.id, tick, seed)?;
-                        // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
-                        // (plan_toward over the reward goal), then take the highest-confidence plan step whose
-                        // action is a candidate PRESENT in its current binding graph. This is the grounding
-                        // gate: a recalled belief becomes actable only where the being's own senses currently
-                        // afford and perceive it, so a plan with no matching percept is inert. The candidate's
-                        // PRIMITIVE subject is matched (the subject the reward credit records and the plan
-                        // ranks), so the deliberated choice is the believed-best action the being can do now.
-                        let plan =
-                            plan_toward(mind, REWARD_ATTR, REWARDS, params, calib.plan_depth_cap);
-                        let deliberated = plan.iter().find_map(|step| {
-                            candidates.iter().copied().find(|c| {
-                                sequence_subject(&[SequenceStep {
-                                    primitive: c.primitive,
-                                    target_bucket: 0,
-                                    param_bucket: 0,
-                                }]) == step.subject
-                            })
+                        let afforded = emb.being_afforded(w);
+                        let candidates = candidate_bindings(
+                            &afforded,
+                            &percepts,
+                            granular,
+                            calib.target_value_granularity,
+                        );
+                        // The observe-and-imitate bias (social-learning arc, piece 2): the actions the being
+                        // perceived co-located neighbours enact, and its founder-zero social-learning weight,
+                        // tip the draw toward a demonstrated technique. Empty and zero for a founder or an
+                        // opted-out world, so the draw is byte-identical there.
+                        let proposal = sample_candidate(
+                            &candidates,
+                            mind,
+                            &calib,
+                            params,
+                            w.id,
+                            tick,
+                            seed,
+                            &w.observed_actions,
+                            w.social_learning,
+                            granular,
+                        )?;
+                        // The DELIBERATED action (piece 4, slice 4b; relational-belief substrate, arc 2): rank
+                        // what the being believes pays off, now through the MULTI-HOP planner (plan_chain over
+                        // the reward goal), then take the highest-confidence plan whose ACTION STEP is a
+                        // candidate PRESENT in its current binding graph. A chain's action step is its deepest
+                        // antecedent, so a being that believes "cutting pays off" and "striking yields a sharp
+                        // thing" is grounded on STRIKING here, a goal one hop could not reach. This is the
+                        // grounding gate: a recalled plan becomes actable only where the being's own senses
+                        // currently afford and perceive its first action, so a plan with no matching percept is
+                        // inert. A being with no relational belief plans one-hop, so this is byte-identical to
+                        // the prior single-hop deliberation there.
+                        let plans = plan_chain(
+                            mind,
+                            REWARD_ATTR,
+                            REWARDS,
+                            params,
+                            calib.plan_depth_cap,
+                            calib.plan_hop_cap,
+                            &reachable,
+                        );
+                        // Match a plan's action step to a PRESENT candidate at the belief GRANULARITY (piece 3):
+                        // the plan ranks the being's committed reward beliefs (keyed at the credit's grain), so
+                        // the candidate is matched on the SAME grain through `step_belief_subject`, or the
+                        // granular belief the plan surfaced would never match a primitive-only candidate.
+                        let deliberated = plans.iter().find_map(|plan| {
+                            let act = plan.action_step();
+                            candidates
+                                .iter()
+                                .copied()
+                                .find(|c| step_belief_subject(c, granular) == act.subject)
                         });
                         Some((w.id, (proposal, deliberated)))
                     })
@@ -3424,9 +4485,12 @@ impl Runner {
         let drains: BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>> =
             match self.embodiment.as_ref() {
                 Some(emb) => match &emb.physiology {
+                    // Parallel (arc 4): each drain is a pure read of the being's body plan and its live core
+                    // temperature, keyed by w.id and drawing no RNG; the map collect into a BTreeMap is
+                    // order-free, so it is bit-identical at any thread count.
                     Some(phys) => emb
                         .walkers
-                        .iter()
+                        .par_iter()
                         .map(|w| {
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
@@ -3596,11 +4660,23 @@ impl Runner {
                         let primitive = AffordanceId(action.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                            GRASP
+                                | EXTRACT
+                                | GEOPHAGE
+                                | CRAFT
+                                | CUT
+                                | CRUSH
+                                | POUND
+                                | DIG
+                                | RELEASE
+                                | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
                             w.decided_affordance = Some(primitive);
+                            // The deliberated action carries the target it acted on (piece 3): record the full
+                            // step so the granular credit keys the belief on that target, not the primitive alone.
+                            w.decided_step = Some(action);
                             acted = true;
                         }
                     }
@@ -3645,11 +4721,23 @@ impl Runner {
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER
+                            GRASP
+                                | EXTRACT
+                                | GEOPHAGE
+                                | CRAFT
+                                | CUT
+                                | CRUSH
+                                | POUND
+                                | DIG
+                                | RELEASE
+                                | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
                             w.decided_affordance = Some(primitive);
+                            // The enacted proposal carries the target it acted on (piece 3): record the full
+                            // step so the granular credit keys the belief on that target, not the primitive alone.
+                            w.decided_step = Some(proposal);
                         }
                     }
                 }
@@ -3669,13 +4757,42 @@ impl Runner {
                         emb.grasp_underfoot(id);
                     }
                     EXTRACT => {
-                        emb.extract_underfoot(id);
+                        // A wielded tool that breaks matter loose carries the reaction stress and abrades: on
+                        // positive work, first check breakage (sudden failure), then wear (gradual) only if it
+                        // survived. Both no-op for a bare-handed extract and when unarmed, so the opted-out
+                        // path is byte-identical.
+                        if emb.extract_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
                     }
                     GEOPHAGE => {
                         emb.geophage(id);
                     }
                     CRAFT => {
                         emb.craft_from_carried(id);
+                    }
+                    CUT => {
+                        // The working edge carries the reaction stress and slides against the matter it severs:
+                        // on positive work, first check breakage (sudden), then wear (gradual) only if it
+                        // survived. Both no-op unless armed, so an opted-out world is byte-identical.
+                        if emb.cut_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
+                    }
+                    CRUSH => {
+                        // The face presses the matter it crushes, carrying the reaction stress: on positive
+                        // work, breakage before wear, exactly as the cut. Both no-op unless armed.
+                        if emb.crush_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
+                    }
+                    POUND => {
+                        // A swung tool delivers a percussion blow, carrying the reaction stress into its own
+                        // body: on positive work, breakage before wear, exactly as the cut. Both no-op unless
+                        // armed, so an opted-out world is byte-identical.
+                        if emb.strike_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
                     }
                     DIG => {
                         emb.dig_underfoot(id);
@@ -3757,6 +4874,33 @@ impl Runner {
             .map(|w| w.id)
             .filter(|id| !live_minds.contains(id))
             .collect();
+        // (2') Corpse matter (biosphere directive 2, organisms as usable material stuff): before a retired
+        // body leaves, if corpse matter is armed, deposit the being's OWN body as located tissue where it
+        // fell, the composition vector derived by a development-weighted fold over its individual body plan
+        // (`whole_body_composition_vector`), never a species-to-substance map. Read before `retire_body`
+        // removes the walker and its located-index entry. Off by default, so an unarmed runner deposits
+        // nothing and the run is byte-identical.
+        if self.corpse_matter {
+            let deposits: Vec<(Coord3, BTreeMap<String, Fixed>, Fixed)> = {
+                let emb = self.embodiment.as_ref().unwrap();
+                retire
+                    .iter()
+                    .filter_map(|&id| {
+                        let coord = self.index.coord_of(OccupantId::being(id))?;
+                        let walker = emb.walkers.iter().find(|w| w.id == id)?;
+                        let composition = whole_body_composition_vector(&walker.body, &emb.organs);
+                        // The corpse volume is the being's own body-size trait, so a bigger organism leaves
+                        // more matter; the physical volume (mass over the tissue density) is a follow-on once
+                        // the tissue density reserved data lands.
+                        Some((coord, composition, walker.body.body_mass))
+                    })
+                    .collect()
+            };
+            let emb = self.embodiment.as_mut().unwrap();
+            for (coord, composition, volume) in deposits {
+                emb.tissue.deposit(coord, composition, volume);
+            }
+        }
         for id in retire {
             self.retire_body(id);
         }
@@ -3886,6 +5030,9 @@ impl Runner {
                         walker.deliberation = race
                             .genes
                             .express_unit(genome, crate::genome::Channel::Deliberation);
+                        walker.social_learning = race
+                            .genes
+                            .express_unit(genome, crate::genome::Channel::SocialLearning);
                     }
                     if let Some(s) = structure {
                         walker = walker.with_structure(s);
@@ -3956,6 +5103,23 @@ impl Runner {
             if !emb.soil.is_empty() {
                 emb.soil.hash_into(&mut h);
             }
+            // The organism-tissue field (biosphere directive 2, organisms as usable material stuff): the
+            // located matter dead organisms leave, folded after the soil store in canonical (cell,
+            // composition, volume) order and only when non-empty, so a scenario that deposits no corpse
+            // matter folds no bytes and the run is byte-identical (the opt-in empty-default, the sibling of
+            // the soil store above).
+            if !emb.tissue.is_empty() {
+                emb.tissue.hash_into(&mut h);
+            }
+            // The standing decomposer-biomass field (decomposition-as-emergence, the Life kernel's input),
+            // folded after the soil store in canonical (cell, substance, biomass) order and only when armed
+            // and non-empty, so a scenario with no decomposer life folds no bytes and the run is byte-
+            // identical (the opt-in empty-default, the sibling of the soil store above).
+            if let Some(stock) = &self.decomposer_stock {
+                if !stock.is_empty() {
+                    stock.hash_into(&mut h);
+                }
+            }
             let mut ordered: Vec<&Walker> = emb.walkers.iter().collect();
             ordered.sort_by_key(|w| w.id);
             for w in ordered {
@@ -4012,6 +5176,22 @@ impl Runner {
                 // every founder-only) run's hash unchanged; only a primed or mutant being folds it.
                 if w.deliberation > Fixed::ZERO {
                     h.write_fixed(w.deliberation);
+                }
+                // The heritable social-learning weight (social-learning arc, piece 2, observe-and-imitate):
+                // the rate at which the being's proposal is biased toward an observed action, folded after
+                // the deliberation weight. FOUNDER-ZERO: zero for a being whose weight was never lifted off
+                // zero, so it folds nothing and leaves an opted-out (and every founder-only) run's hash
+                // unchanged; only a primed or mutant being folds it.
+                if w.social_learning > Fixed::ZERO {
+                    h.write_fixed(w.social_learning);
+                }
+                // The transient observed-action prior (social-learning arc, piece 2): the primitive ids of
+                // the actions co-located beings enacted last tick, folded in sorted order after the
+                // social-learning weight. EMPTY for a being that saw no one eat (and for every run with
+                // observe-and-imitate unarmed), so it folds nothing and leaves an opted-out run's hash
+                // unchanged; a being carrying a live observation folds its primitives.
+                for primitive in &w.observed_actions {
+                    h.write_u32(*primitive as u32);
                 }
                 // The carried matter (material-substrate arc, cascade item 3): the load a being bears,
                 // per-being dynamic state folded after the reserve memory in canonical (substance-id,
@@ -5773,6 +6953,213 @@ values = [
     }
 
     #[test]
+    fn granular_beliefs_key_the_discovered_technique_on_the_target_it_acted_on_end_to_end() {
+        // Social-learning arc, piece 3 (material granularity, the run-path proof): with granular beliefs armed,
+        // the SAME discovery loop that forms "geophage pays off" keys the belief on the TARGET it acted on (the
+        // primitive against the target's affordance channel and quantized value), NOT the primitive alone. So a
+        // granular being's committed belief lives on the FULL-step subject and NOT on the primitive-only subject
+        // the default keys, proving the credit and the whole loop moved to the finer grain together (no belief
+        // masked). The default is byte-identical: the same being with granular off commits the primitive-only
+        // belief exactly as the viability loop does. This is the end-to-end closure of the unit-level split.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::{InferenceParams, ValueId};
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, step_belief_subject, RewardLearningCalib, SequenceStep, REWARDS,
+            REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let primitive_only = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Returns (belief on the primitive-only subject, belief on the being's own granular subject, whether
+        // the granular subject differs from the primitive-only one). `granular` arms the target-value keying.
+        let run = |granular: bool| -> (Option<ValueId>, Option<ValueId>, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = Fixed::ONE;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            emb.set_granular_beliefs(granular);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            // A fine target-value granularity, so the oilseed's positive fracture potential buckets to a
+            // NON-ZERO value: the granular subject then genuinely differs from the primitive-only one, and the
+            // test can tell the two grains apart.
+            runner.set_discovery(DiscoveryCalib {
+                target_value_granularity: Fixed::from_ratio(1, 1000),
+                ..DiscoveryCalib::dev_default()
+            });
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            // The being's granular subject: the full step it last acted on, keyed at the granular grain. Read
+            // from its own `decided_step` (the target it acted on), so the test asks about the exact belief the
+            // credit would have committed, not a guessed value.
+            let decided = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                .and_then(|w| w.decided_step);
+            let granular_subject = decided
+                .map(|s| step_belief_subject(&s, true))
+                .unwrap_or(primitive_only);
+            let mind = runner.world().and_then(|w| w.mind(id));
+            let po = mind.and_then(|m| m.belief(primitive_only, REWARD_ATTR, &bp));
+            let gr = mind.and_then(|m| m.belief(granular_subject, REWARD_ATTR, &bp));
+            (po, gr, granular_subject != primitive_only)
+        };
+
+        // Default (granular off): byte-identical to the viability loop, the belief is on the primitive-only
+        // subject, and the being's grain does not distinguish the target (its granular subject IS the
+        // primitive-only one).
+        let (po_flat, _, differ_flat) = run(false);
+        assert_eq!(
+            po_flat,
+            Some(REWARDS),
+            "with granular off the discovered technique keys the primitive-only subject (byte-identical)"
+        );
+        assert!(
+            !differ_flat,
+            "with granular off the candidate carries no target value, so there is one grain"
+        );
+        // Granular on: the SAME loop keys the belief on the TARGET it acted on (a distinct, finer subject), and
+        // NOT on the primitive-only subject, so the technique specialised to its target and no belief was masked
+        // across grains.
+        let (po_gran, gr_gran, differ_gran) = run(true);
+        assert!(
+            differ_gran,
+            "the oilseed's positive fracture potential gives the granular subject a non-zero target value"
+        );
+        assert_eq!(
+            gr_gran,
+            Some(REWARDS),
+            "the granular being commits its technique on the target it acted on (the finer subject)"
+        );
+        assert_eq!(
+            po_gran, None,
+            "the granular belief is NOT on the primitive-only subject: the whole loop moved grain together"
+        );
+    }
+
+    #[test]
     fn a_being_re_earns_a_material_trace_reward_belief_from_its_own_felt_reward() {
         // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice C (the LEARN
         // half, the run-path proof): a being re-earns "eating where this residue lies pays off" by correlating
@@ -5961,6 +7348,659 @@ values = [
             run(Fixed::ZERO),
             Some(REWARDS),
             "a founder-zero being never enacts, so it never eats and re-earns no material reward belief"
+        );
+    }
+
+    #[test]
+    fn a_being_learns_which_food_nourishes_from_what_it_ate_not_the_ground_it_stood_on() {
+        // Social-learning arc, piece 1 (NUTRITION learning, the run-path proof): a being re-earns "this food
+        // nourishes me" by correlating the OPAQUE material signature of what it ATE with its OWN felt reward,
+        // through the same associative loop the harm learner runs over a ground-feature, keyed on a material
+        // feature subject on the disjoint REWARD_ATTR. It is the eaten-side sibling of the keystone's
+        // ground-side trace credit: where that learns a PLACE is marked, this learns a FOOD nourishes. The
+        // place-side credit is OFF here so the only material learning is the eaten-side one under test, which
+        // lets the test isolate the distinguishing claim: the being eats a bounded oilseed ration while
+        // standing on inert granite it never eats (granite backs no reserve, so geophage skips it), and it
+        // re-earns a reward belief about the OILSEED IT ATE and NONE about the GRANITE IT STOOD ON. Proven
+        // three ways, mirroring the trace proof above: a primed nutrition learner forms the food belief and
+        // not the ground belief (the eaten-keying); an opted-out being (nutrition off) forms none (the
+        // byte-neutral opt-in); a founder-zero being never enacts geophage, never eats, and forms none (the
+        // emergence falsifier). Nothing is handed: the sign is the reserve rising as it eats, the subject a
+        // raw quantized signature of what it ate, so "this food nourishes me" emerges from felt reward.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        // The being can sense BOTH the oilseed it eats and the granite it stands on: two declared per-substance
+        // material channels (channel 0 = oilseed, channel 1 = granite, in registry order). The eaten-side
+        // credit must learn channel 0 (the food) and never channel 1 (the inert ground it never ate).
+        let run = |exploration: Fixed, nutrition_on: bool| -> (bool, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&[
+                "oilseed", "granite",
+            ]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            // Arm the eaten-side nutrition credit under test, and turn the place-side (trace) credit OFF so the
+            // only material learning is the one keyed on what the being ATE (isolating the eaten-keying from
+            // the ground-keying the keystone built).
+            emb.set_nutrition_learning(nutrition_on);
+            emb.set_place_reward_learning(false);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The bounded oilseed RATION the being eats (the C2 convention: a per-tick ration below one
+                    // granularity step keeps the eaten volume in bucket 0, so the reward evidence accumulates on
+                    // one stable subject and commits), beside an inert GRANITE the being stands on but never
+                    // eats (granite backs no reserve, so geophage skips it while it eats the oilseed).
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "granite", Fixed::ONE);
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            // Whether any bucket on a material channel committed a REWARDS belief (robust to the exact eaten
+            // amount): channel 0 is the oilseed the being ate, channel 1 the granite it stood on.
+            let learned = |channel: u16| -> bool {
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => (0i64..=8).any(|bucket| {
+                        m.belief(
+                            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE + channel, bucket),
+                            REWARD_ATTR,
+                            &bp,
+                        ) == Some(REWARDS)
+                    }),
+                    None => false,
+                }
+            };
+            (learned(0), learned(1))
+        };
+
+        // Primed and nutrition-armed: the being enacts geophage, eats the oilseed ration, feels its reserve
+        // rise, and re-earns "the food I ate (oilseed) nourishes me" from its own felt reward, and re-earns
+        // NOTHING about the granite it stood on but never ate. This is the eaten-keying, the distinguishing
+        // claim of nutrition learning over the ground-keyed trace.
+        assert_eq!(
+            run(Fixed::ONE, true),
+            (true, false),
+            "a primed nutrition learner re-earns the reward belief about the food it ATE (oilseed) and none \
+             about the inert granite it merely stood on"
+        );
+        // Byte-neutral opt-in falsifier: with nutrition learning off (and the place credit off) the being eats
+        // the same oilseed but re-earns no material reward belief, so the eaten-side credit is the sole path.
+        assert!(
+            !run(Fixed::ONE, false).0,
+            "with nutrition learning off the being eats but re-earns no food belief (the opt-in falsifier)"
+        );
+        // Emergence falsifier: a founder-zero being never enacts geophage, so it never eats, no reserve rises,
+        // and no nutrition belief forms however long the food lies underfoot.
+        assert!(
+            !run(Fixed::ZERO, true).0,
+            "a founder-zero being never enacts geophage, so it never eats and re-earns no nutrition belief"
+        );
+    }
+
+    #[test]
+    fn the_mixed_material_payoff_world_composes_a_variety_of_food_techniques() {
+        // Social-learning arc, THE PAYOFF that closes arc 1: the first world where a being interacts with
+        // more than one material. It forages a MIXED-MATERIAL cell holding TWO foods, a hard oilseed and a
+        // soft tuber (distinct energy signatures and distinct hardness), and one INERT matter (granite), and
+        // discovers a VARIETY of techniques: it learns that BOTH foods nourish it, each keyed on the perceived
+        // composition of what it ATE, and learns NOTHING about the granite it stood among but never ate. All
+        // three arc-1 pieces are armed together on ONE runner (nutrition learning, observe-and-imitate, and
+        // granular beliefs) over the keystone's material substrate, so the composition runs coherently. The
+        // falsifier is the opt-in: with the learning off, the same forage forms no food belief.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticAxisId,
+            HomeostaticRegistry, ENERGY, GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        // A second food reserve beside ENERGY: STARCH, backed by the soft tuber, so a being that eats EITHER
+        // food feels a backing reserve rise as its own reward, and one geophage bite of the mixed cell eats
+        // both foods (geophage draws every backed substance present).
+        const STARCH: HomeostaticAxisId = HomeostaticAxisId(1);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: STARCH,
+                    name: "starch".to_string(),
+                    backing_component: Some("tuber".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The being requires and assimilates BOTH foods, so eating either feeds its backing reserve.
+        let seed_physiology = || Physiology {
+            requirements: [
+                ("oilseed".to_string(), Fixed::ONE),
+                ("tuber".to_string(), Fixed::ONE),
+            ]
+            .into_iter()
+            .collect(),
+            assimilation: [
+                ("oilseed".to_string(), Fixed::ONE),
+                ("tuber".to_string(), Fixed::ONE),
+            ]
+            .into_iter()
+            .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        // Channels, in material-percept registry order: oilseed = 0, tuber = 1, granite = 2.
+        let run = |nutrition: bool| -> (bool, bool, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0F00D5,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&[
+                "oilseed", "tuber", "granite",
+            ]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            homeostasis.set_level(STARCH, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = Fixed::ONE;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            // Arc 1 composed: the eaten-side nutrition credit (the piece under demonstration), the place-side
+            // trace credit OFF so only the eaten-side learning is read, observe-and-imitate and granular
+            // beliefs armed to prove the three pieces run together over one substrate.
+            emb.set_nutrition_learning(nutrition);
+            emb.set_place_reward_learning(false);
+            emb.set_observe_and_imitate(true);
+            emb.set_granular_beliefs(true);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The mixed-material cell: a bounded ration of each food (so each bite is a supply-limited
+                    // rise the being feels as reward) beside an inert granite it can perceive but never eats.
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "tuber", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "granite", Fixed::ONE);
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            let learned = |channel: u16| -> bool {
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => (0i64..=8).any(|bucket| {
+                        m.belief(
+                            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE + channel, bucket),
+                            REWARD_ATTR,
+                            &bp,
+                        ) == Some(REWARDS)
+                    }),
+                    None => false,
+                }
+            };
+            (learned(0), learned(1), learned(2))
+        };
+
+        // Armed: the being discovers a VARIETY of food techniques, learning that BOTH the oilseed and the
+        // tuber nourish it (each from the composition of what it ate), and learns NOTHING about the inert
+        // granite it stood among but never ate. This is the mixed-material world arc 1 was building toward.
+        assert_eq!(
+            run(true),
+            (true, true, false),
+            "the being learns both foods nourish (a variety of techniques) and not the inert granite"
+        );
+        // Opt-in falsifier: with nutrition learning off the same forage over the same mixed cell forms no food
+        // belief, so the variety is earned by the composed learning, not the mere presence of the materials.
+        let (oilseed_off, tuber_off, _) = run(false);
+        assert!(
+            !oilseed_off && !tuber_off,
+            "with the learning off the mixed-material forage forms no food belief (the opt-in falsifier)"
+        );
+    }
+
+    #[test]
+    fn a_being_perceives_a_co_located_eater_into_a_transient_prior_and_forms_no_belief_from_watching(
+    ) {
+        // Social-learning arc, piece 2 (observe-and-imitate, the run-path proof): a being co-located with a
+        // neighbour that eats perceives the valence-free ActionTrace eating leaves (its `observed_actions`
+        // gains the neighbour's enacted primitive), the LIVING sibling of the physical trace. Two claims:
+        // (1) the observer perceives the eater's action (the emit-and-gather works, gated on the opt-in, so
+        // an opted-out observer perceives nothing); (2) merely watching forms NO reward belief, because the
+        // observer's own felt reward stays the sole gate (copy-and-verify): the observer here is kept well
+        // fed so it never eats, so however long it watches the eater it commits no "geophage pays off"
+        // belief. The bias the prior then applies to the observer's own proposal is proven deterministically
+        // in the discovery unit test; here the point is the perception and the belief gate.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The action the eater enacts and the observer perceives: a single-primitive geophage sequence.
+        let geophage_subject = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Returns (the observer perceived the eater's geophage, the observer committed a geophage reward
+        // belief, the final canonical state_hash). `observe` arms observe-and-imitate; off, the observer
+        // should perceive nothing. `scheduled` runs the deterministic-scheduler tick variant instead of the
+        // pinned order, so the two must fold identically (the observed-action prior is worker-invariant).
+        let run = |observe: bool, scheduled: bool| -> (bool, bool, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let eater_id = world.spawn(Fixed::ONE);
+            world.set_place(eater_id, 0);
+            let observer_id = world.spawn(Fixed::ONE);
+            world.set_place(observer_id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0B5E44E,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["oilseed"]));
+            let tile = Coord3::ground(4, 4);
+
+            // The eater: hungry and primed to explore, so it enacts geophage and eats the oilseed each tick.
+            let mut eater_h = Homeostasis::from_mass(&reg, Fixed::ONE);
+            eater_h.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut eater = Walker::new(
+                eater_id,
+                tile,
+                body.clone(),
+                eater_h,
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            eater.exploration = Fixed::ONE;
+            emb.add(eater, band());
+
+            // The observer: co-located, a positive social-learning weight, but kept FULL so it never eats
+            // (its bite has no room), so it only watches. It never enacts a proposal (exploration zero).
+            let mut observer_h = Homeostasis::from_mass(&reg, Fixed::ONE);
+            observer_h.set_level(ENERGY, observer_h.capacity(ENERGY));
+            let mut observer = Walker::new(
+                observer_id,
+                tile,
+                body.clone(),
+                observer_h,
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            observer.social_learning = Fixed::ONE;
+            observer.exploration = Fixed::ZERO;
+            emb.add(observer, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            emb.set_observe_and_imitate(observe);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..16 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                if scheduled {
+                    runner.step_scheduled(&[]);
+                } else {
+                    runner.step();
+                }
+            }
+            let perceived = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == observer_id))
+                .map(|w| w.observed_actions.contains(&GEOPHAGE.0))
+                .unwrap_or(false);
+            let observer_belief = runner
+                .world()
+                .and_then(|w| w.mind(observer_id))
+                .map(|m| m.belief(geophage_subject, REWARD_ATTR, &bp) == Some(REWARDS))
+                .unwrap_or(false);
+            (perceived, observer_belief, runner.state_hash())
+        };
+
+        // Armed: the observer perceives the co-located eater's geophage into its transient prior (the
+        // emit-and-gather), yet forms NO reward belief from watching, because it never ate and its own felt
+        // reward is the sole gate to a belief (copy-and-verify).
+        let (perceived, believed, hash_pinned) = run(true, false);
+        assert!(
+            perceived,
+            "an observer co-located with an eater perceives the eater's action into its transient prior"
+        );
+        assert!(
+            !believed,
+            "watching alone forms no belief: the observer's own felt reward is the sole gate (copy-and-verify)"
+        );
+        // Worker-invariance: the observed-action prior is folded per-being dynamic state built from the
+        // post-enact tick state with no fresh randomness, so the scheduled variant folds bit-identically to
+        // the pinned order (the prior is deterministic and order-invariant, not a hidden divergence).
+        let (_, _, hash_scheduled) = run(true, true);
+        assert_eq!(
+            hash_pinned, hash_scheduled,
+            "the observed-action prior folds identically in the pinned and scheduled tick orders"
+        );
+        // Opt-in falsifier: with observe-and-imitate off the observer perceives nothing, so the prior and its
+        // fold stay empty and the run is byte-identical.
+        let (perceived_off, _, _) = run(false, false);
+        assert!(
+            !perceived_off,
+            "with observe-and-imitate off the observer perceives no action (the opt-in falsifier)"
         );
     }
 
