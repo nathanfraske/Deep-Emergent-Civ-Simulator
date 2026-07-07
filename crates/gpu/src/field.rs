@@ -333,6 +333,15 @@ impl FieldResident {
             self.owner,
             "FieldResident::dispatch off the owning thread"
         );
+        // Fail loud on a double dispatch: overwriting `pending` would drop the prior kernel's input handle
+        // under a possibly-still-queued kernel, a use-after-free that could feed the readback nondeterministic
+        // bytes and break replay. The caller must `readback` between dispatches; today's step_field wiring
+        // does (readback at the head, dispatch after combustion), so this guards a future refactor, not a
+        // live path. A single Option check per tick, cheap enough to keep in release (a memory-safety pin).
+        assert!(
+            self.pending.is_none(),
+            "FieldResident::dispatch called with a readback still pending (would drop a live device handle)"
+        );
         assert_eq!(
             temp.len(),
             self.n,

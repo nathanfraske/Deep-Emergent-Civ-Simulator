@@ -4138,8 +4138,10 @@ impl Runner {
         // hazard; and each id is unique (the keys of `body_temp`), so the serial apply is order-independent,
         // and the result is bit-identical at any thread count.
         let updates: Vec<(StableId, Fixed)> = ids
-            .par_iter()
-            .with_min_len(PAR_MIN_LEN)
+            // Body exchange never amortizes Rayon's overhead (the audit measured 0.44x even at big
+            // population: the per-being Newton-cooling work is too tiny), so this per-being map runs SERIAL
+            // always, not thresholded. Byte-identical: filter_map into a Vec in id order, no RNG, no thread.
+            .iter()
             .filter_map(|&id| {
                 let coord = self.index.coord_of(OccupantId::being(id))?;
                 let env = self.field.at(coord.x, coord.y);
