@@ -44,6 +44,8 @@ use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
 use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
+use crate::material::MaterialField;
+use crate::material_percept::MaterialPerceptRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
@@ -85,6 +87,16 @@ const FEATURE_SUBJECT_BASE: u64 = 1 << 62;
 const FEATURE_CHANNEL_SHIFT: u32 = 32;
 /// The mask for the 32-bit bucket field.
 const FEATURE_BUCKET_MASK: u64 = 0xFFFF_FFFF;
+
+/// The channel base the MATERIAL-feature reward learner offsets its channels by (the lifetime/demography
+/// keystone, pillar 2, trace slice C), so a material-feature belief subject never aliases a biology-feature
+/// one even under the same belief attribute. Biology feature channels run from zero (harm keys them under
+/// `HARM_ATTR`); material feature channels run from this base (the trace reward keys them under
+/// `REWARD_ATTR`). The two are disjoint by attribute today, so this is a defensive future-proofing (the gate
+/// asked for it): a later slice that keyed reward on biology features too would otherwise collide with the
+/// material reward channels on the same subject. The high base leaves ample room below it for biology
+/// channels (a handful) and above it for material ones (up to the `u16` ceiling).
+pub const MATERIAL_FEATURE_CHANNEL_BASE: u16 = 1 << 15;
 
 /// Mint the belief subject for a perceived feature: the `(channel, bucket)` pair packed into the
 /// reserved feature-subject band. Two cells whose feature amount lands in the same bucket mint the SAME
@@ -448,14 +460,18 @@ pub fn feature_observations(
 /// (whether any reserve ROSE beyond the noise floor, [`crate::homeostasis::is_reward_tick`]), the feature is
 /// the same raw percept, and the produced [`FeatureObservation`]s are fed into the `(subject, REWARD_ATTR)`
 /// frame (disjoint from the harm frame on the same subject), so the reward belief emerges from correlation
-/// with nothing read but the raw feature and the felt sign (Principles 8, 9). Slice 1b will re-key the
-/// subject from the standing-on feature to the executed primitive SEQUENCE; this single-tick form is the
-/// mirror the harm learner already proved.
+/// with nothing read but the raw feature and the felt sign (Principles 8, 9). The `channel_base` offsets the
+/// feature channel into a disjoint band ([`MATERIAL_FEATURE_CHANNEL_BASE`] for the physical-trace material
+/// percept, the lifetime/demography keystone pillar 2), so a material-feature reward subject never aliases a
+/// biology-feature one; pass zero to key channels from the base. The run path uses this to re-earn "eating
+/// where this residue lies pays off" from the material composition underfoot, feature-keyed exactly as the
+/// harm learner keys felt harm to a ground feature.
 pub fn reward_observations(
     reward: bool,
     features: &[Fixed],
     plasticity: Fixed,
     calib: &RewardLearningCalib,
+    channel_base: u16,
 ) -> Vec<FeatureObservation> {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
@@ -467,7 +483,7 @@ pub fn reward_observations(
         .map(|(channel, &amount)| {
             let bucket = feature_bucket(amount, calib.feature_granularity);
             FeatureObservation {
-                subject: feature_subject(channel as u16, bucket),
+                subject: feature_subject(channel_base + channel as u16, bucket),
                 toward,
                 weight,
             }
@@ -524,6 +540,74 @@ pub fn avoidance_gradient(
                 if let (Some(cx), Some(cy)) = (
                     Fixed::from_int(-dx).checked_div(d2),
                     Fixed::from_int(-dy).checked_div(d2),
+                ) {
+                    ax = ax.saturating_add(cx);
+                    ay = ay.saturating_add(cy);
+                }
+            }
+        }
+    }
+    (ax, ay)
+}
+
+/// The belief-derived expected-reward ATTRACTION gradient for a being at `here` (the lifetime/demography
+/// keystone, pillar 2, physical-trace persistence, trace slice C3): the positive mirror of
+/// [`avoidance_gradient`], the summed inverse-distance attraction TOWARD every cell within `sense_range`
+/// whose MATERIAL signature the being holds a committed REWARDS belief about. Each believed-rewarding cell
+/// contributes a vector pointing from the being toward the cell, weighted by inverse distance (a nearer
+/// rewarding place pulls harder), so the raw sum points toward the bulk of believed reward; a being that
+/// believes nothing nearby pays off gets a zero gradient. The caller normalises the raw sum to a unit
+/// percept, exactly as [`avoidance_gradient`] and the temperature gradient are normalised. The material
+/// feature subject is reconstructed at `channel_base` ([`MATERIAL_FEATURE_CHANNEL_BASE`]), the same offset
+/// the trace reward learner committed it under, so this reads the belief that learner formed.
+///
+/// This is a PERCEPT, not a heading, the exact behavioural mirror of avoidance: the runner feeds it into a
+/// direction slot the evolved controller reads, and ONLY a heritable weight lifted off founder-zero by
+/// selection turns it into approach, so seeking the trace-marked place emerges rather than being authored
+/// (Principle 9): the mechanism never adds a reward term to the heading itself. It reads the being's own
+/// reward beliefs and the raw material it senses, never a label or a race id (Principle 8). Pure and
+/// RNG-free. The physical trace only BIASES the being toward the place; the being's own felt reward stays
+/// the sole gate to a committed belief.
+#[allow(clippy::too_many_arguments)]
+pub fn attraction_gradient(
+    mind: &Mind,
+    here: Coord3,
+    material: &MaterialField,
+    material_percepts: &MaterialPerceptRegistry,
+    sense_range: i64,
+    granularity: Fixed,
+    channel_base: u16,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    if material_percepts.is_empty() {
+        return (Fixed::ZERO, Fixed::ZERO);
+    }
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    let r = sense_range.max(0) as i32;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let cell = Coord3::ground(here.x + dx, here.y + dy);
+            let features = material_percepts.perceive(material.cell(cell));
+            let believes_reward = features.iter().enumerate().any(|(channel, &amount)| {
+                amount > Fixed::ZERO && {
+                    let subject = feature_subject(
+                        channel_base + channel as u16,
+                        feature_bucket(amount, granularity),
+                    );
+                    mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS)
+                }
+            });
+            if believes_reward {
+                // A vector from the being TOWARD the rewarding cell (the sign flip of avoidance's repulsion):
+                // (dx, dy) / (dx^2 + dy^2). No square root; a nearer rewarding place pulls harder.
+                let d2 = Fixed::from_int(dx * dx + dy * dy);
+                if let (Some(cx), Some(cy)) = (
+                    Fixed::from_int(dx).checked_div(d2),
+                    Fixed::from_int(dy).checked_div(d2),
                 ) {
                     ax = ax.saturating_add(cx);
                     ay = ay.saturating_add(cy);
@@ -675,7 +759,7 @@ mod tests {
         // tick points it toward REWARDS and a non-reward tick toward NEUTRAL, on the same subject key.
         let calib = RewardLearningCalib::dev_default();
         let features = vec![Fixed::ZERO, Fixed::from_int(2)];
-        let reward = reward_observations(true, &features, Fixed::ONE, &calib);
+        let reward = reward_observations(true, &features, Fixed::ONE, &calib, 0);
         assert_eq!(
             reward.len(),
             1,
@@ -697,11 +781,41 @@ mod tests {
             "the observation carries positive evidence"
         );
         // A non-reward tick on the same cell points the same subject toward NEUTRAL.
-        let neutral = reward_observations(false, &features, Fixed::ONE, &calib);
+        let neutral = reward_observations(false, &features, Fixed::ONE, &calib, 0);
         assert_eq!(neutral[0].toward, NEUTRAL);
         assert_eq!(neutral[0].subject, reward[0].subject);
         // A cell with no present feature yields nothing to correlate.
-        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+        assert!(reward_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib, 0).is_empty());
+    }
+
+    #[test]
+    fn a_channel_base_offsets_the_material_reward_subject_disjoint_from_a_biology_feature() {
+        // The lifetime/demography keystone, pillar 2, trace slice C, sub-seam 1 (the gate's disjoint-channel
+        // requirement): a material-feature reward observation offsets its channel by the channel base, so its
+        // subject can never alias a biology-feature subject on the same channel index even under the same
+        // belief attribute. The same present feature at base zero and at the material base mint DIFFERENT
+        // subjects; the material one equals the feature subject at the offset channel.
+        let calib = RewardLearningCalib::dev_default();
+        let features = vec![Fixed::from_int(2)];
+        let at_zero = reward_observations(true, &features, Fixed::ONE, &calib, 0);
+        let at_material = reward_observations(
+            true,
+            &features,
+            Fixed::ONE,
+            &calib,
+            MATERIAL_FEATURE_CHANNEL_BASE,
+        );
+        assert_ne!(
+            at_zero[0].subject, at_material[0].subject,
+            "the material reward subject is disjoint from the base-zero (biology) subject"
+        );
+        let bucket = feature_bucket(Fixed::from_int(2), calib.feature_granularity);
+        assert_eq!(at_zero[0].subject, feature_subject(0, bucket));
+        assert_eq!(
+            at_material[0].subject,
+            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, bucket),
+            "the material channel is offset by the base"
+        );
     }
 
     #[test]
@@ -718,7 +832,7 @@ mod tests {
         let mut mind = Mind::new(StableId(1), Fixed::ONE);
         assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), None);
         for _ in 0..3 {
-            for obs in reward_observations(true, &features, Fixed::ONE, &calib) {
+            for obs in reward_observations(true, &features, Fixed::ONE, &calib, 0) {
                 mind.consider(
                     obs.subject,
                     REWARD_ATTR,
@@ -752,7 +866,7 @@ mod tests {
         );
         let mut mind = Mind::new(StableId(3), Fixed::ONE);
         for _ in 0..3 {
-            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib) {
+            for obs in reward_observations(true, &features, Fixed::ONE, &rcalib, 0) {
                 mind.consider(
                     obs.subject,
                     REWARD_ATTR,
@@ -1126,6 +1240,93 @@ mod tests {
                 &PerceptRegistry::empty(),
                 4,
                 Fixed::ONE,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
+        );
+    }
+
+    #[test]
+    fn a_being_reads_an_attraction_gradient_toward_a_believed_rewarding_material() {
+        // Trace slice C3, the belief-to-behaviour percept, the positive mirror of the avoidance gradient: a
+        // being that has re-earned "this material marks a place that pays off" reads an attraction gradient
+        // pointing TOWARD the believed-rewarding cell; a being that has learned nothing reads none. The
+        // gradient is a percept the controller weights, so no approach is authored here (it emerges when
+        // selection lifts the weight). The subject is reconstructed at the material channel base, the same
+        // offset the trace reward learner committed it under.
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+
+        let percepts = MaterialPerceptRegistry::from_substances(&["spent_hull"]);
+        let here = Coord3::ground(5, 5);
+        let hull_cell = Coord3::ground(7, 5); // two tiles due east of the being
+        let amount = Fixed::from_int(2);
+        let mut field = MaterialField::new();
+        field.deposit(hull_cell, "spent_hull", amount);
+        let gran = Fixed::ONE;
+        let subject = feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, feature_bucket(amount, gran));
+
+        // A being that believes nothing rewarding nearby has no attraction gradient.
+        let mut mind = Mind::new(StableId(1), Fixed::ONE);
+        assert_eq!(
+            attraction_gradient(
+                &mind,
+                here,
+                &field,
+                &percepts,
+                4,
+                gran,
+                MATERIAL_FEATURE_CHANNEL_BASE,
+                &params()
+            ),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no learned reward nearby, no attraction gradient"
+        );
+
+        // Teach it that the hull marks a rewarding place (commit REWARDS about the material feature-kind).
+        for _ in 0..3 {
+            mind.consider(
+                subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                RewardLearningCalib::dev_default().observation_weight(),
+                mind.id,
+            );
+        }
+        assert_eq!(mind.belief(subject, REWARD_ATTR, &params()), Some(REWARDS));
+        let (gx, gy) = attraction_gradient(
+            &mind,
+            here,
+            &field,
+            &percepts,
+            4,
+            gran,
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            &params(),
+        );
+        // The hull is to the EAST (+x), so the attraction gradient points EAST (+x), toward it, with no
+        // north-south component (the hull is due east). The exact sign flip of the avoidance gradient.
+        assert!(
+            gx > Fixed::ZERO,
+            "the gradient points toward the hull to the east: gx={gx:?}"
+        );
+        assert_eq!(
+            gy,
+            Fixed::ZERO,
+            "the hull is due east, so no north-south pull"
+        );
+
+        // Opt-out: an empty material-percept registry senses nothing, so the gradient is zero.
+        assert_eq!(
+            attraction_gradient(
+                &mind,
+                here,
+                &field,
+                &MaterialPerceptRegistry::empty(),
+                4,
+                gran,
+                MATERIAL_FEATURE_CHANNEL_BASE,
                 &params()
             ),
             (Fixed::ZERO, Fixed::ZERO),

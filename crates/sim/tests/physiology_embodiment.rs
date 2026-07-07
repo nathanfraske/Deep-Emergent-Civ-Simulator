@@ -1496,6 +1496,135 @@ fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
 }
 
 #[test]
+fn the_geophage_enact_deposits_a_spent_hull_trace_and_is_inert_unarmed() {
+    // The physical-trace cultural-persistence substrate (the lifetime/demography keystone, pillar 2, trace
+    // slice B, the WIRE slice): an enacted extract-and-eat bite leaves a durable located residue of what it
+    // ate. Armed with a byproduct map (oilseed -> spent_hull), the geophage deposits a fraction of the eaten
+    // oilseed volume as spent_hull into the cell underfoot: the world's own physical record that the technique
+    // happened here, the mark a later being re-earns a belief from (trace slice C), never a handed conclusion.
+    // It is opt-in: with NO byproduct map the identical bite deposits nothing, so the material field stays empty
+    // and the run is byte-identical. The deposit reads only the eaten substance id and the data map, never a
+    // belief, race, or kind (Principle 9): the mark is a physical fact whether or not the eater understands it.
+    use civsim_sim::material::{MaterialField, SubstanceMix};
+
+    // The same extract-then-eat fixture the reserve-feeding test uses: an ENERGY reserve backed by oilseed, the
+    // being carrying the extracted oilseed, the cell holding none.
+    let cell = Coord3::ground(1, 1);
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "seed-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("oilseed", Fixed::ONE)]),
+    });
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "energy".to_string(),
+                backing_component: Some("oilseed".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+
+    // A factory so the armed and unarmed runs start from bit-identical state (only the byproduct map differs).
+    let build = || {
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x0115EED,
+        );
+        let blank = Controller::zeros(emb.layout());
+        let mut walker = resting_walker(
+            1,
+            cell,
+            body((1, 1), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            blank,
+        );
+        walker
+            .homeostasis
+            .set_level(ENERGY, Fixed::from_ratio(1, 2));
+        let mut carried = SubstanceMix::new();
+        carried.add("oilseed", Fixed::from_int(1000));
+        walker.carried = carried;
+        emb.add(walker, band(1));
+        emb.set_material(MaterialField::new());
+        emb.set_material_registry(
+            civsim_physics::PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+        );
+        emb
+    };
+
+    // UNARMED: no byproduct map. The bite feeds the reserve exactly as before and deposits NOTHING, so the
+    // material field stays empty (the opt-in default that keeps every existing scenario byte-identical).
+    let mut bare = build();
+    let bare_gain = bare.geophage(StableId(1));
+    assert!(bare_gain > Fixed::ZERO, "the unarmed bite still eats");
+    assert!(
+        bare.material().is_empty(),
+        "an unarmed embodiment deposits no trace: the material field stays empty and folds no bytes"
+    );
+
+    // ARMED: map oilseed -> spent_hull. The deposit fraction is a dev value here; the reserved basis is the
+    // shell-to-kernel mass ratio of an oil nut converted through the two substances' densities (surfaced
+    // reserved-with-basis, not fabricated), and it lives as world data, never a code constant.
+    let fraction = Fixed::from_ratio(2, 5);
+    let mut armed = build();
+    let mut byproducts = std::collections::BTreeMap::new();
+    byproducts.insert("oilseed".to_string(), ("spent_hull".to_string(), fraction));
+    armed.set_byproducts(byproducts);
+
+    let coord = armed.walkers()[0].coord();
+    let held = armed.walkers()[0].carried.volume("oilseed");
+    let armed_gain = armed.geophage(StableId(1));
+
+    // The trace is a byproduct, not a tax on the bite: the being gains exactly what the unarmed run gained.
+    assert_eq!(
+        armed_gain, bare_gain,
+        "arming the byproduct deposits a trace without changing what the being gains from the bite"
+    );
+
+    // What left the inventory is what was eaten (the cell held no oilseed), and the deposit is that fraction of
+    // it as spent_hull underfoot: the technique marked the ground it was practised on.
+    let eaten = held - armed.walkers()[0].carried.volume("oilseed");
+    assert!(
+        eaten > Fixed::ZERO,
+        "the bite ate oilseed to leave a trace of"
+    );
+    let deposited = armed.material().volume(coord, "spent_hull");
+    assert_eq!(
+        deposited,
+        eaten
+            .checked_mul(fraction)
+            .expect("the fraction is bounded"),
+        "the enact deposits the byproduct fraction of the eaten volume as spent_hull underfoot"
+    );
+    assert!(
+        deposited > Fixed::ZERO && deposited < eaten,
+        "the trace is present and is a residue (a fraction of the eaten mass, not the whole of it), so a being \
+         that comes later can perceive it (trace slice C)"
+    );
+}
+
+#[test]
 fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight() {
     // Material-substrate arc item 4, crafting, THE KNAPPING: a being shapes its carried stone into a wielded
     // tool only because its evolved controller decided to, never because the engine scripts toolmaking. A
@@ -2437,6 +2566,101 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
         scheduled.embodiment().unwrap().decomposed_mass(),
         pinned.embodiment().unwrap().decomposed_mass(),
         "the scheduled and pinned orders decompose identically"
+    );
+}
+
+#[test]
+fn a_spent_hull_trace_weathers_slowly_when_warm_and_is_preserved_when_frozen() {
+    // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice D (the WEATHERING
+    // half): a spent_hull left in the world weathers by the SAME matter cycle carrion does, because it carries
+    // the same physics gates (a mineral-ash fraction and a freezing decomposition barrier), keyed off its own
+    // composition, not a tag (Principles 8, 11). This is the trace's falsifiability by PHYSICS: an unsupported
+    // trace fades, so an abandoned site loses its marks (and the reward-attraction pull that rides them) rather
+    // than persisting forever. The hull is RECALCITRANT (lignified shell), so it weathers SLOWLY: it outlives a
+    // being's lifespan, which is what lets a technique's mark persist past its maker, then fades if unvisited.
+    // The weathering rate is RESERVED, surfaced with its basis (the recalcitrant-lignin decomposition timescale
+    // of a nut shell, far slower than soft tissue), never fabricated; a dev value proves the mechanism here.
+    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let hull0 = Fixed::from_int(10);
+    // RESERVED (the weathering rate): the per-tick decomposition fraction of a lignified spent hull. Basis: the
+    // recalcitrant-lignin decomposition timescale (nut-shell material persists for years to decades in soil,
+    // far slower than the soft-tissue carrion the global fixture rate models), surfaced for the owner. A dev
+    // value here (slow enough to outlive a being, fast enough to show weathering in the test window).
+    let hull_weathering_rate = Fixed::from_ratio(1, 50);
+    let matter_cycle = MatterCycleCalib {
+        decomposition_rate: hull_weathering_rate,
+        fertility_scale: Fixed::from_ratio(1, 1000),
+    };
+
+    let build = |field_temp: i32| -> Runner {
+        let hreg = energy_thermal_registry();
+        let mut emb = Embodiment::new(
+            hreg,
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xDECA,
+        );
+        let mut field = MaterialField::new();
+        field.deposit(cell, "spent_hull", hull0);
+        emb.set_material(field);
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
+        r.set_matter_cycle(matter_cycle);
+        r
+    };
+
+    let hull = |r: &Runner| -> Fixed {
+        r.embodiment()
+            .unwrap()
+            .material()
+            .volume(cell, "spent_hull")
+    };
+
+    // A warm cell (300 K, above the hull's 273 K decomposition barrier): the hull weathers, its mass moving
+    // into the decomposed sink.
+    let mut warm = build(300);
+    warm.step();
+    assert!(hull(&warm) < hull0, "a warm spent hull weathers");
+    assert!(
+        warm.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the weathered mass moved into the sink"
+    );
+    // But SLOWLY: after a single step the hull is barely touched (it is recalcitrant), so it durably persists,
+    // which is what lets a technique's mark outlive its maker.
+    assert!(
+        hull(&warm) > hull0.checked_div(Fixed::from_int(2)).unwrap(),
+        "the recalcitrant hull weathers slowly: most of it survives a step"
+    );
+    // Over many ticks it does fade, so an unvisited trace does not persist forever (falsifiability by physics),
+    // yet is still present after a span that outlives a being.
+    for _ in 0..30 {
+        warm.step();
+    }
+    assert!(hull(&warm) < hull0, "over many ticks the hull fades");
+    assert!(
+        hull(&warm) > Fixed::ZERO,
+        "but it is still present after a span that outlives a being (durable, not instant)"
+    );
+
+    // A frozen cell (250 K, below the barrier): the hull is preserved and nothing weathers, exactly as a
+    // frozen carcass is preserved.
+    let mut frozen = build(250);
+    for _ in 0..10 {
+        frozen.step();
+    }
+    assert_eq!(hull(&frozen), hull0, "a frozen spent hull is preserved");
+    assert_eq!(
+        frozen.embodiment().unwrap().decomposed_mass(),
+        Fixed::ZERO,
+        "nothing weathered in the cold"
     );
 }
 

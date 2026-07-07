@@ -95,9 +95,9 @@ use crate::homeostasis::{
     GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, avoidance_gradient, feature_observations, sequence_subject,
-    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, NEUTRAL,
-    REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, feature_observations,
+    reward_observations, sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep,
+    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -105,6 +105,7 @@ use crate::material::{
     CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
     MatterCycleCalib, ShelterCalib, SoilNutrientField, WieldedTool,
 };
+use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
@@ -161,6 +162,11 @@ const LEARN_ORDINAL_BASE: u32 = 1_000_000;
 /// sequence in a being's trace, disjoint from and above [`LEARN_ORDINAL_BASE`] so a reward observation and a
 /// harm observation for the same being in the same tick never collide on the mind-then-ordinal sort.
 const REWARD_LEARN_ORDINAL_BASE: u32 = 2_000_000;
+/// The base tick-input ordinal a MATERIAL-feature reward credit carries (the lifetime/demography keystone,
+/// pillar 2, trace slice C), one per present material feature the being senses underfoot, disjoint from and
+/// above [`REWARD_LEARN_ORDINAL_BASE`] so a material-feature reward observation never collides with a
+/// sequence reward or a harm observation for the same being in the same tick on the mind-then-ordinal sort.
+const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -896,6 +902,21 @@ pub struct Embodiment {
     /// layout to feed the feature block) to opt a world into the feature percept. The membership is the
     /// biology-floor's data, so a new sensible feature is a data edit, never a code change.
     percepts: PerceptRegistry,
+    /// The MATERIAL-percept registry the beings sense in the cell's matter (the lifetime/demography keystone,
+    /// pillar 2, physical-trace persistence, trace slice C). EMPTY by default, so the controller layout
+    /// carries no material-feature block and every run hash is unchanged; the world-build installs a
+    /// non-empty registry ([`Embodiment::set_material_percepts`], which rebuilds the layout to feed the
+    /// material block) to opt a world into sensing the substances underfoot (the spent-hull trace and its
+    /// siblings). The membership is the material-floor's data, so a new sensible substance is a data edit.
+    material_percepts: MaterialPerceptRegistry,
+    /// Whether the controller layout feeds the belief-derived ATTRACTION-direction input (the
+    /// lifetime/demography keystone, pillar 2, trace slice C3). FALSE by default, so the layout carries no
+    /// attraction block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_attraction`],
+    /// which rebuilds the layout) to let a being sense the direction toward believed-rewarding matter (the
+    /// physical trace it re-earned a reward belief from). When true, the runner writes each being's unit
+    /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
+    /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
+    attraction: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -939,6 +960,20 @@ pub struct Embodiment {
     /// by default, so an embodiment that declares no crafting parameters cannot make a tool (the craft
     /// action no-ops) and every existing scenario is unchanged. Opt-in via [`Embodiment::set_craft_params`].
     craft: Option<CraftParams>,
+    /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
+    /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
+    /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
+    /// [`Embodiment::geophage`] eats a substance carried in this map, it deposits that fraction of the eaten
+    /// volume as the byproduct substance underfoot, the durable located record that the technique happened
+    /// here (the spent hull a cracked oilseed leaves). EMPTY by default, so an embodiment that declares no
+    /// byproducts deposits nothing, the material field stays empty, and every existing scenario is
+    /// byte-identical (the opt-in empty-default). Populated by the world-build ([`Embodiment::set_byproducts`]).
+    /// The deposit reads only the eaten substance id and the map, never a belief, race, or kind (Principle 9):
+    /// the bite marks the ground whether or not the eater understands why, so the trace is a physical fact
+    /// a later being re-earns a belief from (trace slice C), never a handed conclusion. The fraction is a real
+    /// physical ratio (the shell-to-kernel mass a cracked oilseed leaves, converted through the two
+    /// substances' densities), surfaced reserved-with-basis rather than fabricated.
+    byproducts: BTreeMap<String, (String, Fixed)>,
     /// The per-column earthwork delta a being's digging has made to the terrain (material-substrate arc,
     /// cascade item 5, modifiable terrain). EMPTY by default, so a scenario where nothing digs folds no
     /// bytes into `state_hash` and stays byte-identical (the opt-in empty-default). Digging lowers a column
@@ -1006,6 +1041,8 @@ impl Embodiment {
             physiology: None,
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
+            material_percepts: MaterialPerceptRegistry::empty(),
+            attraction: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1013,6 +1050,7 @@ impl Embodiment {
             material_registry: None,
             extraction: None,
             craft: None,
+            byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
             soil: SoilNutrientField::new(),
@@ -1025,6 +1063,33 @@ impl Embodiment {
     /// no tolerance (the harm sink stays inert for it).
     pub fn set_tolerances(&mut self, tolerances: ToleranceRegistry) {
         self.tolerances = tolerances;
+    }
+
+    /// Install the MATERIAL-percept registry and REBUILD the controller layout to feed its material-feature
+    /// block (the lifetime/demography keystone, pillar 2, trace slice C). Set BEFORE the embodiment's beings
+    /// are built, exactly like [`set_percepts`]: the beings' controllers are expressed against
+    /// [`Embodiment::layout`], so a material percept added after they exist would leave their weight vectors
+    /// the wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
+    /// unchanged (opt-in). The new material-feature weights a founder then expresses are zero (unseeded
+    /// channels), so sensing the matter underfoot moves no behaviour until selection lifts a weight, the
+    /// emergent pattern the feature block established.
+    pub fn set_material_percepts(&mut self, material_percepts: MaterialPerceptRegistry) {
+        self.material_percepts = material_percepts;
+        self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the belief-derived ATTRACTION-direction input in the controller layout, so a being
+    /// can sense the direction toward the nearest believed-rewarding material it senses and evolve to approach
+    /// it (the lifetime/demography keystone, pillar 2, trace slice C3, the behaviour half). Set BEFORE the
+    /// embodiment's beings are built, exactly like [`set_appetitive`] and [`set_material_percepts`], because
+    /// the beings' controllers are expressed against [`Embodiment::layout`], so a block added after they exist
+    /// would leave their weight vectors the wrong length. FALSE (the default) leaves the layout and every run
+    /// hash unchanged (opt-in). The new attraction weights a founder then expresses are zero (unseeded
+    /// channels), so the gradient moves no behaviour until selection lifts a weight, the positive mirror of
+    /// harm avoidance.
+    pub fn set_attraction(&mut self, enabled: bool) {
+        self.attraction = enabled;
+        self.rebuild_layout();
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -1071,11 +1136,13 @@ impl Embodiment {
     /// both feeding an input block the founder weights ignore until selection lifts them). Called by
     /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_and_appetitive(
+        self.layout = ControllerLayout::with_percepts_appetitive_material_and_attraction(
             &self.homeo,
             &self.afford,
             &self.percepts,
             self.appetitive,
+            &self.material_percepts,
+            self.attraction,
             self.layout.hidden(),
         );
     }
@@ -1164,6 +1231,18 @@ impl Embodiment {
     /// unchanged.
     pub fn set_craft_params(&mut self, params: CraftParams) {
         self.craft = Some(params);
+    }
+
+    /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
+    /// substrate, the lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance
+    /// id to the (byproduct substance id, deposit fraction) it leaves behind. Opt-in, like
+    /// [`set_extraction_params`] and [`set_craft_params`]: an empty map (the default) deposits nothing, so the
+    /// material field stays empty and every existing scenario is byte-identical. The membership is world data
+    /// (Principle 11); a world opts a technique into leaving a physical trace by mapping its eaten substance to
+    /// a residue. The deposit fraction is a real physical mass ratio surfaced reserved-with-basis, not a code
+    /// default.
+    pub fn set_byproducts(&mut self, byproducts: BTreeMap<String, (String, Fixed)>) {
+        self.byproducts = byproducts;
     }
 
     /// The volume of a substance the being `walker_id` could take from the ground at `coord`, bounded by
@@ -1382,6 +1461,11 @@ impl Embodiment {
         // The substances the being eats this bite, for the toxin harm below (a set so a substance that feeds
         // two reserves is not counted twice against its own toxicity).
         let mut eaten: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        // The eaten VOLUME per substance, accumulated across the reserve loop (a substance that feeds two
+        // reserves is eaten twice, and the byproduct trace deposits against the total), for the byproduct
+        // deposit below (trace slice B). Empty when nothing is eaten, so an unarmed embodiment deposits
+        // nothing.
+        let mut eaten_volume: BTreeMap<String, Fixed> = BTreeMap::new();
         for i in 0..self.homeo.axes.len() {
             let Some(substance) = self.homeo.axes[i].backing_component.clone() else {
                 continue; // an axis with no backing substance is not fed by matter
@@ -1438,6 +1522,8 @@ impl Embodiment {
             }
             gained += gain;
             if taken > Fixed::ZERO {
+                let acc = eaten_volume.entry(substance.clone()).or_insert(Fixed::ZERO);
+                *acc = acc.saturating_add(taken);
                 eaten.insert(substance);
             }
         }
@@ -1485,6 +1571,26 @@ impl Embodiment {
         if harm > Fixed::ZERO {
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.adjust(CONDITION, Fixed::ZERO - harm);
+            }
+        }
+        // The BYPRODUCT DEPOSIT (the physical-trace cultural-persistence substrate, pillar 2, trace slice B):
+        // the enact leaves a durable located residue of what it ate. For each eaten substance the byproduct
+        // map keys, deposit that fraction of the eaten volume as the mapped byproduct substance into the cell
+        // underfoot, so a technique marks the ground it was practised on and a being that comes later can
+        // perceive the mark. Walks the accumulation in canonical substance-id order (a `BTreeMap`) so the
+        // deposit is reproducible and thread-invariant. An empty map deposits nothing, the opt-in default that
+        // keeps every existing scenario byte-identical (the material field stays empty and folds no bytes).
+        // Reads only the eaten substance id and the data map, never a belief, race, or kind (Principle 9): the
+        // mark is a physical fact whether or not the eater understands it, and re-earning "eating here pays
+        // off" from perceiving it is the later being's own reward learning (trace slice C), never authored
+        // here.
+        if !self.byproducts.is_empty() {
+            for (substance, volume) in &eaten_volume {
+                if let Some((byproduct, fraction)) = self.byproducts.get(substance) {
+                    let byproduct = byproduct.clone();
+                    let deposit = volume.checked_mul(*fraction).unwrap_or(*volume);
+                    self.material.deposit(coord, &byproduct, deposit);
+                }
             }
         }
         gained
@@ -2739,6 +2845,41 @@ impl Runner {
                             },
                         });
                     }
+                    // MATERIAL-feature reward credit (the lifetime/demography keystone, pillar 2, physical-trace
+                    // persistence, trace slice C, the LEARN half): the being re-earns "eating where this material
+                    // lies pays off" from its OWN felt reward, feature-keyed on the composition of the matter it
+                    // stands on exactly as the harm learner keys felt harm to a biology ground-feature. For each
+                    // present material feature it contributes one piece of evidence toward REWARDS (a reward tick)
+                    // or NEUTRAL (otherwise) on the disjoint REWARD_ATTR, keyed on a material feature subject
+                    // offset into its own channel band (MATERIAL_FEATURE_CHANNEL_BASE) so it never aliases a
+                    // biology feature. Nothing is handed: the sign is the reserve rising, the subject a raw
+                    // quantized material percept, so "this residue marks a place that pays off" emerges from the
+                    // being's own correlation (Principles 8, 9). Inert where the world declares no material
+                    // percepts (an empty vector yields no observation), so an opted-out run is byte-identical.
+                    let material = emb.material_percepts.perceive(emb.material.cell(c));
+                    for (k, obs) in reward_observations(
+                        reward,
+                        &material,
+                        plasticity,
+                        &reward_learn,
+                        MATERIAL_FEATURE_CHANNEL_BASE,
+                    )
+                    .into_iter()
+                    .enumerate()
+                    {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: MATERIAL_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: obs.subject,
+                                attr: REWARD_ATTR,
+                                hyps: vec![REWARDS, NEUTRAL],
+                                toward: obs.toward,
+                                weight: obs.weight,
+                                from: w.id,
+                            },
+                        });
+                    }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
                     // prediction of its last-enacted action against the reward it felt, and remember the
                     // prediction-error magnitude. Only when the discovery loop is armed (piece 2 supplies the
@@ -3148,6 +3289,44 @@ impl Runner {
             },
             _ => BTreeMap::new(),
         };
+        // (0b') The belief-derived ATTRACTION-direction percept (the lifetime/demography keystone, pillar 2,
+        // physical-trace persistence, trace slice C3): each being senses the UNIT direction toward the nearest
+        // believed-rewarding material it senses, the positive mirror of the avoidance gradient. Present only
+        // when the embodiment enables the attraction input AND the reward learner is armed (its feature
+        // granularity keys the belief subject the gradient reconstructs, at MATERIAL_FEATURE_CHANNEL_BASE, the
+        // same offset the trace reward learner committed it under). A being with no reward belief nearby reads
+        // a zero direction and is omitted, so its attraction block reads zero. Read before the mutable
+        // embodiment borrow, RNG-free. Founder-zero: the direction moves no behaviour until selection lifts the
+        // attraction weight, so approaching the trace-marked place emerges (Principle 9).
+        let attraction: BTreeMap<StableId, Vec<Fixed>> = match (
+            self.embodiment.as_ref(),
+            self.world.as_ref(),
+            self.reward_learning,
+        ) {
+            (Some(emb), Some(world), Some(reward_learn)) if emb.attraction => emb
+                .walkers
+                .iter()
+                .filter_map(|w| {
+                    let mind = world.mind(w.id)?;
+                    let raw = attraction_gradient(
+                        mind,
+                        w.coord(),
+                        &emb.material,
+                        &emb.material_percepts,
+                        emb.params.sense_range,
+                        reward_learn.feature_granularity,
+                        MATERIAL_FEATURE_CHANNEL_BASE,
+                        world.belief_params(),
+                    );
+                    let (ax, ay) = unit(raw.0, raw.1);
+                    if ax == Fixed::ZERO && ay == Fixed::ZERO {
+                        return None;
+                    }
+                    Some((w.id, vec![ax, ay]))
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -3380,8 +3559,11 @@ impl Runner {
             &field_signed,
             &drains,
             &emb.percepts,
+            &emb.material_percepts,
+            &emb.material,
             &load_factors,
             &appetitive,
+            &attraction,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -5591,6 +5773,198 @@ values = [
     }
 
     #[test]
+    fn a_being_re_earns_a_material_trace_reward_belief_from_its_own_felt_reward() {
+        // The lifetime/demography keystone, pillar 2, physical-trace persistence, trace slice C (the LEARN
+        // half, the run-path proof): a being re-earns "eating where this residue lies pays off" by correlating
+        // the OPAQUE material signature underfoot (a spent_hull, the durable trace) with its OWN felt reward,
+        // through the same associative loop the harm learner runs over a biology ground-feature, keyed on a
+        // material feature subject on the disjoint REWARD_ATTR. Nothing is handed: the sign is the being's
+        // reserve rising as it eats, the subject a raw quantized material percept, so the belief tracks the
+        // felt reward, not the mere presence of the hull. The falsifier is founder-zero: an otherwise
+        // identical being whose exploration propensity is off never enacts, so it never eats, no reserve
+        // rises, and no material reward belief forms. This mirrors the viability loop above, adding the
+        // material percept and a persistent inedible hull marker beside the eaten oilseed.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // The belief the loop should re-earn: standing where a spent_hull of this quantized amount lies pays
+        // off. The material channel is offset into its disjoint band so it never aliases a biology feature.
+        let hull_amount = Fixed::ONE;
+        let material_subject = feature_subject(
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            feature_bucket(
+                hull_amount,
+                RewardLearningCalib::dev_default().feature_granularity,
+            ),
+        );
+
+        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            // Arm the material percept BEFORE the controller is expressed, so the grown layout carries the
+            // material-feature block and the being can sense the hull (the SENSE half of slice C).
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = exploration;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            let mut committed = None;
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The eaten seed (the reward source), plus the durable INEDIBLE hull marker beside it: the
+                    // hull backs no reserve, so geophage never consumes it and it persists in the cell for the
+                    // being to perceive while it eats (the trace's role, isolated here from the slice-B deposit).
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "spent_hull", hull_amount);
+                    emb.set_material(material);
+                }
+                runner.step();
+                if let Some(m) = runner.world().and_then(|w| w.mind(id)) {
+                    if let Some(v) = m.belief(material_subject, REWARD_ATTR, &bp) {
+                        committed = Some(v);
+                    }
+                }
+            }
+            committed
+        };
+
+        // Primed: the being enacts geophage, eats the oilseed, feels its reserve rise, and re-earns the belief
+        // that the hull-marked place pays off, feature-keyed on the opaque material signature, through the
+        // runner, with no injection. The trace's meaning is earned from felt reward, never handed.
+        assert_eq!(
+            run(Fixed::ONE),
+            Some(REWARDS),
+            "a primed being re-earns the material-trace reward belief from its own felt reward"
+        );
+        // Founder-zero (the emergence falsifier): an off-propensity being never enacts, never eats, feels no
+        // reward, and forms no material reward belief however long the hull lies underfoot.
+        assert_ne!(
+            run(Fixed::ZERO),
+            Some(REWARDS),
+            "a founder-zero being never enacts, so it never eats and re-earns no material reward belief"
+        );
+    }
+
+    #[test]
     fn surprise_lifts_a_beings_exploration_multiplicatively_and_never_lifts_a_founder() {
         // Ideation arc, piece 3, slice 3b (surprise-modulated exploration): a being's recent prediction error
         // (surprise) LIFTS its heritable exploration propensity at the enact gate, so it enacts its proposals
@@ -6244,6 +6618,630 @@ values = [
             level(&runner, avoider),
             level(&runner, stayer)
         );
+    }
+
+    #[test]
+    fn a_being_steers_toward_a_believed_rewarding_trace_only_through_an_evolved_attraction_weight()
+    {
+        // The lifetime/demography keystone, pillar 2, trace slice C3 (the ADAPTIVE leg, the positive mirror of
+        // the harm avoider): two beings sit WEST of a spent_hull region (the durable physical trace, to their
+        // east). Both hold the same REWARDS belief about the hull's material signature; the one whose
+        // controller has the evolved attraction-dir-to-heading weight steers EAST toward the believed-rewarding
+        // place (its attraction percept points toward the trace), while the one with the founder-zero weight
+        // cannot act on the belief and stays put. So the trace biases approach only through the evolved weight,
+        // and seeking the trace-marked place emerges (Principle 9): no authored approach, both hold the same
+        // belief, only the evolved weight differs. The exact sign-flipped mirror of the avoidance test.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+            REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::percept::feature_bucket;
+        use crate::tom::{AccessChannelId, AccessWeights};
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        let hull_amount = Fixed::from_int(2);
+        let subject = feature_subject(
+            MATERIAL_FEATURE_CHANNEL_BASE,
+            feature_bucket(
+                hull_amount,
+                RewardLearningCalib::dev_default().feature_granularity,
+            ),
+        );
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let approacher = world.spawn(Fixed::ONE);
+        let stayer = world.spawn(Fixed::ONE);
+        world.set_place(approacher, 0);
+        world.set_place(stayer, 1);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Arm the material percept AND the attraction input BEFORE the controllers are expressed, so the grown
+        // layout carries the attraction block the approacher's weight targets.
+        emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+        emb.set_attraction(true);
+        let layout = emb.layout().clone();
+        // The approacher's controller: it wants to move (MOVE activation from the bias) and steers its MOVE
+        // heading along the dedicated attraction-direction input, so it acts on the belief. MOVE is output 0
+        // (act, dx, dy); the reaction-norm weight for (output o, input i) sits at o * n_in + i.
+        let atbase = layout.attraction_input_base();
+        let n_in = layout.n_in();
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[n_in - 1] = Fixed::ONE; // MOVE activation (output 0) from the bias.
+        w[n_in + atbase] = Fixed::ONE; // MOVE dx (output 1) from the attraction dx input.
+        w[2 * n_in + atbase + 1] = Fixed::ONE; // MOVE dy (output 2) from the attraction dy input.
+        let approacher_ctrl = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), w);
+        let blank = Controller::zeros(&layout);
+
+        // Both start WEST of a hull region: spent_hull fills every cell with x >= 6, the empty ground is x < 6,
+        // and each stands at x = 3, one row apart so they do not share a cell.
+        let ap_start = Coord3::ground(3, 3);
+        let st_start = Coord3::ground(3, 6);
+        emb.add(
+            Walker::new(
+                approacher,
+                ap_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                approacher_ctrl,
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                stayer,
+                st_start,
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+        // The durable trace to the east: a spent_hull region the beings perceive but cannot eat (it backs no
+        // reserve), so it persists and the attraction gradient reads it.
+        let mut material = MaterialField::new();
+        for y in 0..8 {
+            for x in 6..8 {
+                material.deposit(Coord3::ground(x, y), "spent_hull", hull_amount);
+            }
+        }
+        emb.set_material(material);
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The reward learner armed only for its feature granularity (the key the attraction gradient
+        // reconstructs the belief subject with); no eating happens, so it forms no belief and the seeded one
+        // stands.
+        runner.set_reward_learning(RewardLearningCalib::dev_default());
+        // Both beings already hold the REWARDS belief about the hull's material signature (they re-earned it):
+        // seed each once so the leg under test is approach, not formation.
+        let seed = |id: StableId| TickInput {
+            mind: id,
+            ordinal: 0,
+            stim: Stimulus::Observe {
+                subject,
+                attr: REWARD_ATTR,
+                hyps: vec![REWARDS, NEUTRAL],
+                toward: REWARDS,
+                weight: Fixed::from_int(50),
+                from: id,
+            },
+        };
+        runner.step_with_world_inputs(&[seed(approacher), seed(stayer)]);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(0)
+        };
+        // Both hold the same belief, but only the approacher can act on it: it steered EAST toward the hull,
+        // while the stayer could not and stayed put.
+        assert!(
+            x_of(&runner, approacher) > 3,
+            "the approacher steered east toward the believed-rewarding hull (x = {})",
+            x_of(&runner, approacher)
+        );
+        assert_eq!(
+            x_of(&runner, stayer),
+            3,
+            "the stayer, unable to act on the belief, stayed put (founder-zero attraction weight)"
+        );
+    }
+
+    #[test]
+    fn a_technique_outlives_its_maker_when_an_heir_re_earns_it_from_the_dead_makers_hulls() {
+        // The lifetime/demography keystone, trace slice D, the CLOSING CAPSTONE: the whole loop composed on ONE
+        // runner across a MAKER'S DEATH. A discoverer (the maker) eats oilseed, its byproducts leave a durable
+        // spent_hull (slice B), and it re-earns "eating where this residue lies pays off" keyed on the opaque
+        // hull signature from its OWN felt reward (slices C1, C2). It DIES by pillar-1 per-tick mortality (its
+        // walker retired). Its hull PERSISTS past its death and WEATHERS slowly by the matter cycle (slice D).
+        // Then a younger being (the heir), a living mind that coexisted with the maker at a different age
+        // (overlapping generations, pillar 1) and comes to the abandoned site AFTER the maker is gone, re-earns
+        // the SAME belief from ITS OWN felt reward at the hull the dead maker left, never taught (gossip is not
+        // armed, so no belief can be told to it). Knowledge outlives the knower, re-earned from the world's
+        // physical record rather than handed by a living teacher or inherited. The falsifier is founder-zero: an
+        // heir whose exploration is off never enacts, never eats, and re-earns nothing however long it stands on
+        // the maker's hull, so the belief is earned, not authored and not transmitted.
+        //
+        // The three integration frictions the earlier composed attempt hit are dissolved by construction, each a
+        // staging choice the gate ruled (option b, single lineage): the TEMPERATURE axis is inert (no drain, no
+        // death floor), so the field sits at 300 K (above the hull's 273 K decomposition barrier, so the hull
+        // weathers) while the beings live on their energy alone, no being-comfort-versus-weathering conflict;
+        // the maker and heir are NEVER embodied at once (the heir arrives after the maker's death), so there is
+        // no competition for the food; and the heir is embodied well-fed enough that eating lifts its reserve,
+        // so it feels a reward and forms a REWARDS belief rather than a neutral one. Labelled dev fixtures
+        // throughout; the weathering rate and the deposit fraction are reserved values surfaced with basis.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::decision::Curve;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::{MaterialField, MatterCycleCalib};
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // TEMPERATURE inert (no drain, no death floor, no backing), so the field temperature never touches
+        // survival; ENERGY drains a flat fraction and is refilled by eating oilseed (the C2 discovery registry).
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        let field_temp = 300; // K, above the spent_hull's 273 K decomposition barrier; TEMPERATURE inert.
+                              // RESERVED (the deposit fraction), the shell-to-kernel mass ratio of an oil nut (slice B basis); a dev
+                              // value proves the mechanism, the owner sets the real ratio.
+        let deposit_fraction = Fixed::from_ratio(1, 2);
+        // RESERVED (the weathering rate), the recalcitrant-lignin decomposition timescale of a nut shell (slice
+        // D basis, as in the weathering test); a dev value proves the mechanism.
+        let matter_cycle = MatterCycleCalib {
+            decomposition_rate: Fixed::from_ratio(1, 50),
+            fertility_scale: Fixed::from_ratio(1, 1000),
+        };
+        let calib_reward = RewardLearningCalib::dev_default();
+        let cadence = 2u64;
+        // A raw-age hazard: zero through the maker's discovery years (so it cannot die before it discovers),
+        // certain once old, so the OLD maker dies while the YOUNG heir never faces the roll (labelled balance
+        // knob, not an owner value).
+        let hazard = || {
+            Curve::new([
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::from_int(45), Fixed::ZERO),
+                (Fixed::from_int(46), Fixed::ONE),
+            ])
+        };
+        let tile = Coord3::ground(4, 4);
+        let band_at = |t: i32| BeingThermal {
+            setpoint: Fixed::from_int(t),
+            half_band: Fixed::from_int(8),
+            initial_temp: Fixed::from_int(t),
+        };
+
+        // One composed run, parameterized by the heir's exploration (ONE = primed, ZERO = the founder-zero
+        // falsifier). Returns the demonstration's observations plus the final state hash for the replay check.
+        let run = |heir_exploration: Fixed| -> (
+            bool,
+            Option<u32>,
+            Fixed,
+            Fixed,
+            bool,
+            bool,
+            bool,
+            Fixed,
+            Fixed,
+            u128,
+        ) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let maker = world.spawn(Fixed::ONE);
+            let heir = world.spawn(Fixed::ONE);
+            world.set_place(maker, 0);
+            world.set_place(heir, 0);
+            // Overlapping ages at the dawn: the maker is old, the heir young; both are living minds at once.
+            world.set_age(maker, 40);
+            world.set_age(heir, 10);
+            world.set_life_cadence(cadence);
+            world.set_mortality_hazard(hazard());
+            world.arm_per_tick_mortality();
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0xD0E5,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+            // Slice B: eating oilseed leaves a durable spent_hull (the deposit fraction is a reserved mass
+            // ratio; a dev value proves the mechanism).
+            emb.set_byproducts(
+                [(
+                    "oilseed".to_string(),
+                    ("spent_hull".to_string(), deposit_fraction),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            // The maker only: hungry, exploration on, at the food tile. The heir is NOT embodied yet.
+            let mut maker_walker = Walker::new(
+                maker,
+                tile,
+                body(),
+                {
+                    let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+                    h.set_level(ENERGY, Fixed::from_ratio(1, 20));
+                    h
+                },
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            maker_walker.exploration = Fixed::ONE;
+            emb.add(maker_walker, band_at(field_temp));
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(field_temp); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(calib_reward);
+            runner.set_matter_cycle(matter_cycle);
+
+            let hull = |r: &Runner| -> Fixed {
+                r.embodiment()
+                    .unwrap()
+                    .material()
+                    .volume(tile, "spent_hull")
+            };
+            // Whether `id` holds a committed REWARDS belief keyed on the hull's material signature at ANY
+            // non-void bucket. The slice-B deposit grows the hull over the maker's life and the matter cycle
+            // weathers it, so the perceived bucket drifts; a being commits on whatever bucket it perceived while
+            // eating, so the check scans the non-void material buckets rather than a single frozen amount. Void
+            // (bucket zero) is excluded, so a belief only counts if it is about a hull actually present.
+            let holds_reward = |r: &Runner, id: StableId| -> bool {
+                let Some(mind) = r.world().and_then(|w| w.mind(id)) else {
+                    return false;
+                };
+                (1..=64i64).any(|bucket| {
+                    let subject = feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, bucket);
+                    mind.belief(subject, REWARD_ATTR, &bp) == Some(REWARDS)
+                })
+            };
+            let maker_alive =
+                |r: &Runner| -> bool { r.world().and_then(|w| w.mind(maker)).is_some() };
+
+            // PHASE 1: the maker discovers (re-earns the reward belief), deposits hulls, and dies. Step until it
+            // is culled by the per-tick mortality (or a generous cap).
+            // Top up a small, bounded ration of oilseed at the tile each tick (the C2 discovery convention), so
+            // a being at the tile rises gradually and keeps feeling reward while it perceives the hull, rather
+            // than gorging a stock in one tick and never feeling reward again. Cloning preserves the hulls the
+            // slice-B deposit has accumulated and the matter cycle has weathered.
+            let ration = |r: &mut Runner| {
+                if let Some(e) = r.embodiment_mut() {
+                    let mut m = e.material().clone();
+                    m.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    e.set_material(m);
+                }
+            };
+
+            let mut maker_formed = false;
+            let mut overlapped = false;
+            let mut maker_dead_at = None;
+            for t in 1..=60u32 {
+                ration(&mut runner);
+                runner.step();
+                if holds_reward(&runner, maker) {
+                    maker_formed = true;
+                }
+                if let Some(w) = runner.world() {
+                    if w.mind(maker).is_some() && w.mind(heir).is_some() {
+                        if let (Some(am), Some(ah)) = (w.age_of(maker), w.age_of(heir)) {
+                            if am != ah {
+                                overlapped = true;
+                            }
+                        }
+                    }
+                }
+                if !maker_alive(&runner) {
+                    maker_dead_at = Some(t);
+                    break;
+                }
+            }
+            let hull_at_death = hull(&runner);
+
+            // WEATHERING WINDOW: no being embodied (the maker retired, the heir not yet arrived). The abandoned
+            // hull weathers by the matter cycle but persists.
+            for _ in 0..3 {
+                runner.step();
+            }
+            let hull_after_weathering = hull(&runner);
+
+            // PHASE 2: the heir arrives at the abandoned site, embodied well-fed at the tile.
+            {
+                let layout = runner.embodiment().unwrap().layout().clone();
+                let mut heir_walker = Walker::new(
+                    heir,
+                    tile,
+                    body(),
+                    {
+                        // Enough reserve that a NON-eating (founder-zero) heir survives the whole window, so the
+                        // falsifier is clean: it stands on the maker's hull, alive, and still forms no belief,
+                        // isolating eating (not starvation) as the gate. A primed heir at the same reserve still
+                        // forages (foraging is exploration-driven, not hunger-gated) and feels its reserve rise.
+                        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+                        h.set_level(ENERGY, Fixed::from_ratio(1, 2));
+                        h
+                    },
+                    seed_physiology(),
+                    Controller::zeros(&layout),
+                );
+                heir_walker.exploration = heir_exploration;
+                runner
+                    .embodiment_mut()
+                    .unwrap()
+                    .add(heir_walker, band_at(field_temp));
+            }
+            // The heir's ENERGY reserve, or zero if it has no body (a pure read).
+            let heir_energy = |r: &Runner| -> Fixed {
+                r.embodiment()
+                    .and_then(|e| e.walkers().iter().find(|w| w.id == heir))
+                    .map(|w| w.homeostasis.level(ENERGY))
+                    .unwrap_or(Fixed::ZERO)
+            };
+            // BEFORE the eating window: the heir holds no reward belief (it coexisted with the maker only as a
+            // bodiless mind, gossip off, so nothing was told to it), and this is its reserve at the window's
+            // start. Captured so the test asserts the belief forms DURING eating and that the reserve RISES,
+            // rather than leaving a reader to reconstruct it from the falsifier.
+            let heir_blank_before_eating = !holds_reward(&runner, heir);
+            let heir_energy_start = heir_energy(&runner);
+
+            let mut heir_reearned = false;
+            for _ in 0..24 {
+                ration(&mut runner);
+                runner.step();
+                if holds_reward(&runner, heir) {
+                    heir_reearned = true;
+                }
+            }
+            let heir_energy_end = heir_energy(&runner);
+
+            (
+                maker_formed,
+                maker_dead_at,
+                hull_at_death,
+                hull_after_weathering,
+                overlapped,
+                heir_reearned,
+                heir_blank_before_eating,
+                heir_energy_start,
+                heir_energy_end,
+                runner.state_hash(),
+            )
+        };
+
+        // PRIMED heir: the whole loop closes across the maker's death.
+        let (
+            m_formed,
+            m_dead,
+            h_death,
+            h_weathered,
+            overlapped,
+            heir_re,
+            heir_blank_before,
+            heir_energy_start,
+            heir_energy_end,
+            hash1,
+        ) = run(Fixed::ONE);
+        assert!(
+            m_formed,
+            "the maker re-earns the reward belief from its own eating (it discovers the technique)"
+        );
+        assert!(
+            m_dead.is_some(),
+            "the maker dies by pillar-1 per-tick mortality within its lifespan"
+        );
+        assert!(
+            h_death > Fixed::ZERO,
+            "the maker's spent_hull persists past its death (it did not vanish with the maker)"
+        );
+        assert!(
+            h_weathered < h_death && h_weathered > Fixed::ZERO,
+            "the abandoned hull weathers by the matter cycle yet persists ({h_weathered:?} of {h_death:?})"
+        );
+        assert!(
+            overlapped,
+            "the maker (old) and the heir (young) were living minds at once at different ages (overlapping generations)"
+        );
+        assert!(
+            heir_re,
+            "the heir re-earns the technique from its own felt reward at the hull the dead maker left, never taught (gossip off)"
+        );
+        // TRANSMISSION IS OFF (made explicit, not left to the falsifier): the heir holds NO reward belief before
+        // its eating window opens, though it coexisted with the belief-holding maker as a bodiless mind through
+        // phase 1. So the belief provably forms DURING its own eating, never from an overlap-phase transmission.
+        assert!(
+            heir_blank_before,
+            "the heir holds no reward belief before its eating window, so the belief forms from its own eating and not from any overlap-phase gossip (gossip unarmed)"
+        );
+        // THE FELT REWARD IS VERIFIED (not inferred from the belief): the heir's ENERGY reserve is strictly
+        // higher at the end of the eating window than at its start, so it truly felt its reserve rise, which is
+        // the sign the reward learner keys the belief on.
+        assert!(
+            heir_energy_end > heir_energy_start,
+            "the heir's energy reserve rises across the eating window ({heir_energy_start:?} to {heir_energy_end:?}), so the felt reward is verified not inferred"
+        );
+
+        // FOUNDER-ZERO (the emergence falsifier): an off-exploration heir never enacts, so it never eats and
+        // re-earns nothing, even standing on the maker's hull. The belief is earned, not authored or gossiped.
+        let (_, _, _, _, _, heir_re0, _, _, _, _) = run(Fixed::ZERO);
+        assert!(
+            !heir_re0,
+            "a founder-zero heir never eats, so it re-earns no belief from the trace (not authored, not transmitted)"
+        );
+
+        // DETERMINISM: the whole composed capstone replays bit for bit (every draw keys on the being and the
+        // tick), so the lifecycle, embodiment, and trace on one runner do not cost determinism.
+        let (_, _, _, _, _, _, _, _, _, hash2) = run(Fixed::ONE);
+        assert_eq!(hash1, hash2, "the composed capstone replays bit for bit");
     }
 
     #[test]

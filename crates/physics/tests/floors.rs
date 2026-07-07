@@ -231,6 +231,49 @@ fn the_ground_floor_extends_the_mechanical_floor_with_cited_ground_substances() 
 }
 
 #[test]
+fn the_spent_hull_trace_substance_is_perceivable_and_weatherable() {
+    use civsim_core::Fixed;
+    // The physical-trace cultural-persistence substrate (the lifetime/demography keystone, pillar 2, trace
+    // slice A): the spent hull the extract-and-eat technique leaves behind is a ground substance carrying
+    // the physics a durable trace needs. It is HARD (a positive mat.fracture_strength, so a being can sense
+    // it as fracturable matter) and WEATHERABLE (a mineral-ash fraction and a decomposition barrier, the two
+    // axes the matter cycle gates on, so an unvisited trace fades over time). Authored environment physics
+    // (Principle 9); deposited nowhere by default, so this is inert until the deposit hook (trace slice B).
+    let reg = PhysicsRegistry::ground().expect("the ground registry loads");
+    let hull = reg
+        .substance("spent_hull")
+        .expect("spent_hull is a ground substance");
+    assert_eq!(
+        hull.vector.get("mat.density"),
+        Some(&Fixed::from_int(1200)),
+        "the cited spent-hull density reads back exactly (a carry weighs it)"
+    );
+    // Perceivable: a positive fracture strength, so its FracturePotential reads positive (the only
+    // MaterialField-read percept today, the interim until the per-substance trace percept lands).
+    assert_eq!(
+        hull.vector.get("mat.fracture_strength"),
+        Some(&Fixed::from_int(12)),
+        "the spent hull is hard enough to be sensed as fracturable matter"
+    );
+    // Weatherable: the two axes step_matter_cycle gates on, so the matter cycle fades the trace and an
+    // unsupported residue does not persist forever (falsifiability by physics).
+    assert!(
+        hull.vector.contains_key("bio.mineral_ash_fraction"),
+        "the spent hull carries the ash fraction the matter cycle needs to weather it"
+    );
+    assert_eq!(
+        hull.vector.get("bio.decomposition_barrier"),
+        Some(&Fixed::from_int(273)),
+        "the spent hull weathers only above its freezing decomposition barrier"
+    );
+    // It carries NO energy: a hull is residue, never food (the kernel's energy stayed in the oilseed).
+    assert!(
+        !hull.vector.contains_key("bio.energy_density"),
+        "the spent hull is inedible residue, not a food"
+    );
+}
+
+#[test]
 fn each_floor_hashes_deterministically_across_loads() {
     assert_eq!(mechanical().content_id(), mechanical().content_id());
     assert_eq!(biology().content_id(), biology().content_id());

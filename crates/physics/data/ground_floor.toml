@@ -78,3 +78,24 @@ values = [
   { axis = "mat.fracture_strength", value = "10" },
   { axis = "bio.energy_density", value = "25" },
 ]
+
+# The spent hull: the lignified shell fragments LEFT BEHIND when a forager cracks and eats an oilseed, the
+# durable physical residue of the extract-and-eat technique. It is the world's own record that the technique
+# happened here, deposited into the material field by the enact and perceivable by a being that comes later
+# (the physical-trace cultural-persistence substrate, the lifetime/demography keystone pillar 2). It carries
+# no belief and no energy: it is HARD (a mat.fracture_strength of lignified shell material, so a being can
+# sense it the way it senses any fracturable matter) and it WEATHERS SLOWLY (a low mineral-ash fraction and a
+# freezing-point decomposition barrier, so the matter cycle fades it over time and an unvisited trace does not
+# persist forever, falsifiability by physics). Its physics is authored environment (Principle 9); that a being
+# re-earns "eating here pays off" from perceiving it is DISCOVERED. Deposited nowhere by default, so every
+# existing world is unchanged.
+[[substance]]
+id = "spent_hull"
+participates_in = ["law.fracture_onset", "law.contact_pressure"]
+real = "Nut-shell and lignified pericarp material (walnut, hazel, macadamia): dry bulk density ~1.1 to 1.3 g/cm^3 (lignin ~1.3, cellulose ~1.5, with shell porosity), Koyuncu et al. (2004) and Braga et al. (1999) rupture stress on the order of 5 to 20 MPa for the intact shell. Nut-shell ash mass fraction ~0.01 to 0.02 (lignin-and-cellulose dominated, low mineral), Demirbas (2002) biomass ash. The decomposition barrier is the freezing point of the residual shell water (~273 K), below which decay is arrested (CRC Handbook water fusion); lignified shell is recalcitrant, so it weathers slowly above it"
+values = [
+  { axis = "mat.density", value = "1200" },
+  { axis = "mat.fracture_strength", value = "12" },
+  { axis = "bio.mineral_ash_fraction", value = "0.015" },
+  { axis = "bio.decomposition_barrier", value = "273" },
+]
