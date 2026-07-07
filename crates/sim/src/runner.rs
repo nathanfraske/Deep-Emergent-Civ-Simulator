@@ -746,6 +746,16 @@ fn standard_gravity() -> Fixed {
 /// mechanical floor's declared force range). A representability cap, not an authored quantity.
 const FORCE_CEILING: Fixed = Fixed::from_int(100_000_000);
 
+/// The stress overflow-guard the tool contact-stress laws saturate at (a PURE representability cap, not a
+/// behavioural ceiling): one billion megapascals, far above any material's strength (the pressure axis tops
+/// at 150000 MPa) yet well below the Q32.32 maximum (~2.1e9), so a degenerate tiny or zero contact area
+/// cannot drive a contact stress into the near-maximum range where the subsequent margin subtractions would
+/// approach the fixed-point bounds. The effective stress is bounded by the tool's own material strength
+/// regardless, so this guard never changes an outcome; it only keeps the intermediate arithmetic clear of
+/// the type's edge. Replaces a looser `Fixed::MAX` cap (the arc-3 audit hardening), matching the ceiling
+/// the compose capability kernels pass.
+const STRESS_GUARD: Fixed = Fixed::from_int(1_000_000_000);
+
 /// A being's whole-body muscle force, its carry capacity: a GROWN body sums its grown tissue's muscle
 /// strength scaled to body mass, a catalog body reads it off its organs, the same read the exertion
 /// drain uses ([`being_derived_drains`]). Blind to any kind or race id (Principle 9).
@@ -1429,7 +1439,12 @@ impl Embodiment {
     /// minimum viable tool volume (the craft threshold) is a spent nub and is unwielded, so the tool must be
     /// remade. No-op unless the wear params, the material registry, the physiology, and a crafting threshold
     /// are all present and the tool material declares a wear coefficient and a hardness, so an opted-out world
-    /// is byte-identical. Reads only the tool's and being's own physics, no race, kind, or role (Principle 9).
+    /// is byte-identical. A tool material that declares no hardness is left UNWORN (its wear physics is
+    /// unspecified, so it is not judged): this is the runner's uniform tool-absence convention, the same one
+    /// `break_check` applies to a missing fracture strength, and it is deliberately distinct from the wear
+    /// law's own zero-hardness branch (which routes a genuine zero hardness to maximal wear); the runner
+    /// guards before the call, so an under-specified tool is inert here rather than instantly eroded. Reads
+    /// only the tool's and being's own physics, no race, kind, or role (Principle 9).
     pub fn wear_tool(&mut self, walker_id: StableId) {
         let (Some(params), Some(craft)) = (self.wear, self.craft) else {
             return;
@@ -1500,13 +1515,19 @@ impl Embodiment {
     /// a brittle low-fracture-strength edge shatters under a load a tougher one bears, the hardness-versus-
     /// fracture-strength material tradeoff biting by physics. Returns whether the tool broke.
     ///
-    /// The energy (toughness) limb of `fracture_onset` rides inert here: the delivered fracture energy is
-    /// passed as zero, so only the quasi-static STRESS criterion fires. The energy criterion (a brittle edge
-    /// shattering under a high-energy blow its stress margin would survive) needs the stroke energy and the
-    /// tool's own crack cross-section, a tool-geometry extension folded into a later section; until then a
-    /// tool breaks on overstress alone. No-op unless breakage is armed, the material registry and physiology
-    /// are present, a tool is wielded, and the tool material declares a fracture strength (a material whose
-    /// failure physics is unspecified is not judged), so an opted-out world is byte-identical. Reads only the
+    /// The energy (toughness) limb of `fracture_onset` reads a delivered fracture energy of ZERO because a
+    /// CUT or an EXTRACT is a QUASI-STATIC working stroke (a press or a draw), not a dynamic blow: a
+    /// quasi-static load delivers no kinetic fracture energy, so the Griffith energy criterion is inert and
+    /// the stress criterion is the operative one, which is the physically correct limit for a slow working
+    /// stroke (the zero is derived from the quasi-static nature of the action, not an authored disabling
+    /// value). A DYNAMIC action (a percussion STRIKE) would deliver a real kinetic energy that activates the
+    /// energy limb, and the tool's own crack cross-section (a later tool-geometry extension) is the crack
+    /// area that limb then reads. The `crack_area` passed here is inert (the energy margin never fires with
+    /// zero delivered energy). No-op unless breakage is armed, the material registry and physiology are
+    /// present, a tool is wielded, and the tool material declares a fracture strength: absent it, the tool's
+    /// failure is not judged (a material whose failure physics is unspecified is left alone, the same uniform
+    /// tool-absence convention `wear_tool` uses for hardness, distinct from the law's own zero-strength
+    /// branch since the runner never reaches it). So an opted-out world is byte-identical. Reads only the
     /// tool's and being's own physics, no race, kind, or role (Principle 9), and fabricates no value.
     pub fn break_check(&mut self, walker_id: StableId) -> bool {
         if !self.breakage {
@@ -1534,18 +1555,19 @@ impl Embodiment {
             .and_then(|x| x.vector.get("mat.fracture_energy").copied())
             .unwrap_or(Fixed::ZERO);
         // The reaction stress the edge carries: the being's force over the tool's edge area (the same contact
-        // pressure the edge imposes). The cap is a fixed-point overflow guard, never a behavioural ceiling.
-        let applied_stress = laws::contact_pressure(force, tool.contact_area, Fixed::MAX);
+        // pressure the edge imposes). The cap is a fixed-point overflow guard ([`STRESS_GUARD`], far above any
+        // material strength and clear of the type's edge), never a behavioural ceiling.
+        let applied_stress = laws::contact_pressure(force, tool.contact_area, STRESS_GUARD);
         // The brittle-fracture criterion. The energy limb reads a delivered fracture energy of zero (the
-        // stroke energy and crack cross-section are a later geometry extension), so only the stress margin
-        // fires; the tool breaks when the reaction stress exceeds its own fracture strength.
+        // quasi-static working-stroke limit; a dynamic strike would supply a real kinetic energy), so only
+        // the stress margin fires; the tool breaks when the reaction stress exceeds its own fracture strength.
         let (stress_margin, _energy_margin) = laws::fracture_onset(
             applied_stress,
             fracture_strength,
             fracture_energy,
             tool.contact_area,
             Fixed::ZERO,
-            Fixed::MAX,
+            STRESS_GUARD,
         );
         if stress_margin >= Fixed::ZERO {
             return false; // the tool survives the load it imposes
@@ -1808,7 +1830,7 @@ impl Embodiment {
             tool.contact_area,
             tool_shear.filter(|v| *v > Fixed::ZERO),
             tool_yield,
-            Fixed::MAX,
+            STRESS_GUARD,
         );
         // The effective shear the edge can deliver: the applied shear capped at the tool's own shear strength
         // (add the margin where it is negative, i.e. where the applied exceeds the tool's own strength). A
@@ -1818,7 +1840,12 @@ impl Embodiment {
         // effective shear beats, in canonical id order (snapshot before the mutable take). No per-world table:
         // membership is derived from the shear physics of what is in the cell against the edge's deliverable
         // shear. A constituent that declares neither a shear strength nor a yield offers zero shear resistance
-        // (the absence convention) and is severed by any positive edge.
+        // and is severed by any positive edge: this is the TARGET-absence convention, the same Principle-8
+        // convention the extraction contest holds (a cell with no declared resistance reads zero and yields to
+        // any pressure, so there is no hidden unbreakable tag), the deliberate mirror of the TOOL-absence
+        // convention above (a tool with no shear strength delivers zero and cannot cut). A world that means a
+        // constituent to resist cutting declares its shear strength, exactly as it declares fracture strength
+        // to resist extraction.
         let severable: Vec<String> = match self.material.cell(coord) {
             Some(mix) => mix
                 .substances()
@@ -1833,7 +1860,7 @@ impl Embodiment {
                         tool.contact_area,
                         cons_shear.filter(|v| *v > Fixed::ZERO),
                         cons_yield,
-                        Fixed::MAX,
+                        STRESS_GUARD,
                     );
                     // The constituent's shear resistance is `tau_applied + its margin` (its own shear strength,
                     // the law's `tau_material`); the edge severs it when its deliverable shear beats that.

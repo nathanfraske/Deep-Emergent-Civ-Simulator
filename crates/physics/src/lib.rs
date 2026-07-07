@@ -323,16 +323,23 @@ impl QuantityAxis {
 }
 
 /// Parse a scaled-storage factor, either a plain decimal (`1000000`) or the `<mantissa>e<exponent>`
-/// scientific form the data writes (`1e6`), into a `Fixed`. `None` if it is neither well-formed nor
+/// scientific form the data writes (`1e6`, or a sub-unity `1e-6` for a coefficient stored scaled DOWN),
+/// into a `Fixed`. A negative exponent divides rather than multiplies, so a down-scaled storage convention
+/// is honoured rather than silently collapsing to one. `None` if it is neither well-formed nor
 /// representable. Kept beside [`QuantityAxis::storage_scale`], the only caller.
 fn parse_scale_factor(s: &str) -> Option<Fixed> {
     let split = s.split_once('e').or_else(|| s.split_once('E'));
     match split {
         Some((mantissa, exponent)) => {
             let mut f = Fixed::from_decimal_str(mantissa).ok()?;
-            let e: u32 = exponent.parse().ok()?;
-            for _ in 0..e {
-                f = f.checked_mul(Fixed::from_int(10))?;
+            let e: i32 = exponent.parse().ok()?;
+            let ten = Fixed::from_int(10);
+            for _ in 0..e.abs() {
+                f = if e >= 0 {
+                    f.checked_mul(ten)?
+                } else {
+                    f.checked_div(ten)?
+                };
             }
             Some(f)
         }
@@ -1555,6 +1562,8 @@ real = "CRC"
         assert_eq!(parse_scale_factor("1000000"), Some(Fixed::from_int(1_000_000)));
         assert_eq!(parse_scale_factor("2e3"), Some(Fixed::from_int(2000)));
         assert_eq!(parse_scale_factor("nonsense"), None);
+        // A negative exponent divides (a down-scaled storage convention), not a silent collapse to one.
+        assert_eq!(parse_scale_factor("1e-3"), Some(Fixed::from_ratio(1, 1000)));
     }
 
     #[test]
