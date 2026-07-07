@@ -131,7 +131,7 @@ consume it. Verify every finding against source before acting.
 ## Arc-CHECKPOINT audit (2026-07-07, on Sections A, B, C): verdict and applied fixes
 
 A two-agent blind panel (physics-only seat plus correctness; determinism plus crash) verified the
-reworked cut, craft, edge_area_at, and mass. Confirmed genuinely fixed: the cut_yields map is gone (the
+reworked cut, craft, edge_area_at, and mass. Confirmed fixed: the cut_yields map is gone (the
 severable set derives from the cell's own constituents), the fixed edge_area is gone, edge_area_at is
 the exact algebraic inverse of contact_pressure with no crash, determinism and opt-in byte-neutrality
 both hold. Applied on their verified findings: mass now uses checked_mul with a saturating fallback (was
