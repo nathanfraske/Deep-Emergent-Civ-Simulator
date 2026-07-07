@@ -497,7 +497,7 @@ impl CapabilityRefs {
             reference_optical_contrast: dec("0.3"), // a lens-to-air index step that focuses (n~1.3)
             reference_shear_resistance: dec("3"), // MPa, soft-tissue/fibre shear strength a sever parts
             reference_compressive_resistance: dec("5"), // MPa, the compressive strength a crush must fail
-            reference_swing_velocity: dec("10"), // m/s, a muscle-driven blow's tip speed
+            reference_swing_velocity: dec("10"),        // m/s, a muscle-driven blow's tip speed
             reference_strike_energy: dec("0.1"), // kJ (100 J), the energy a fully-capable blow lands
         }
     }
@@ -793,7 +793,10 @@ mod tests {
         let keen_inert = shear_of(&keen, &inert);
         let no_edge = shear_of(&geo_of(BTreeMap::new()), &strong);
 
-        assert!(keen_strong > Fixed::ZERO, "a keen strong edge severs: {keen_strong:?}");
+        assert!(
+            keen_strong > Fixed::ZERO,
+            "a keen strong edge severs: {keen_strong:?}"
+        );
         assert!(
             keen_strong > keen_weak,
             "a strong-shear material severs where a too-weak one cannot ({keen_strong:?} vs {keen_weak:?})"
@@ -821,7 +824,8 @@ mod tests {
     }
 
     #[test]
-    fn a_strong_faced_tool_reads_a_crush_capability_a_weak_or_spread_or_strengthless_one_does_not() {
+    fn a_strong_faced_tool_reads_a_crush_capability_a_weak_or_spread_or_strengthless_one_does_not()
+    {
         // The made-world arc, Section G, the second non-piercing action: the CRUSH kernel reads whether a part
         // can fail matter in compression, from its face geometry and its own compressive strength. A face of a
         // strong-compression material clears the reference and crushes; a too-weak material self-limits below
@@ -886,7 +890,8 @@ mod tests {
         let none = mat_of(BTreeMap::new());
 
         let impact_of = |geo: &dyn Fn(&str) -> Fixed| {
-            derive_capabilities(&fns, geo, &none, &refs, &caps).score(FunctionLawRegistry::ID_IMPACT)
+            derive_capabilities(&fns, geo, &none, &refs, &caps)
+                .score(FunctionLawRegistry::ID_IMPACT)
         };
 
         assert!(

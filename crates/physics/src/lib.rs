@@ -1559,7 +1559,10 @@ real = "CRC"
             "a plain unit label carries no rescale"
         );
         // The parser handles a plain-decimal factor and rejects a malformed one (falling back to one).
-        assert_eq!(parse_scale_factor("1000000"), Some(Fixed::from_int(1_000_000)));
+        assert_eq!(
+            parse_scale_factor("1000000"),
+            Some(Fixed::from_int(1_000_000))
+        );
         assert_eq!(parse_scale_factor("2e3"), Some(Fixed::from_int(2000)));
         assert_eq!(parse_scale_factor("nonsense"), None);
         // A negative exponent divides (a down-scaled storage convention), not a silent collapse to one.

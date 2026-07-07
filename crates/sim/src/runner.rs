@@ -88,9 +88,9 @@ use crate::affordance_percept::{
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
-use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
@@ -113,7 +113,6 @@ use crate::material::{
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
-use rayon::prelude::*;
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
@@ -128,6 +127,7 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
+use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 // The runner tick's phases as deterministic-scheduler systems over the resources they contend for
@@ -1631,21 +1631,26 @@ impl Embodiment {
             .and_then(|x| x.vector.get("mat.elastic_modulus").copied())
             .unwrap_or(Fixed::ZERO);
         let cross_section = tool.cross_section();
-        let buckles = if modulus > Fixed::ZERO && tool.length > Fixed::ZERO && cross_section > Fixed::ZERO
-        {
-            // The area moment of the body's square section, `I = A^2 / 12` (A the cross-section), the section
-            // property that resists buckling. The pinned-pinned end condition (factor one) is the canonical
-            // Euler reference; a per-tool end condition is a reserved refinement.
-            let second_moment = cross_section
-                .checked_mul(cross_section)
-                .and_then(|a2| a2.checked_div(Fixed::from_int(12)))
-                .unwrap_or(Fixed::ZERO);
-            let critical =
-                laws::euler_buckle(modulus, second_moment, Fixed::ONE, tool.length, FORCE_CEILING);
-            force > critical
-        } else {
-            false
-        };
+        let buckles =
+            if modulus > Fixed::ZERO && tool.length > Fixed::ZERO && cross_section > Fixed::ZERO {
+                // The area moment of the body's square section, `I = A^2 / 12` (A the cross-section), the section
+                // property that resists buckling. The pinned-pinned end condition (factor one) is the canonical
+                // Euler reference; a per-tool end condition is a reserved refinement.
+                let second_moment = cross_section
+                    .checked_mul(cross_section)
+                    .and_then(|a2| a2.checked_div(Fixed::from_int(12)))
+                    .unwrap_or(Fixed::ZERO);
+                let critical = laws::euler_buckle(
+                    modulus,
+                    second_moment,
+                    Fixed::ONE,
+                    tool.length,
+                    FORCE_CEILING,
+                );
+                force > critical
+            } else {
+                false
+            };
         if !stress_fails && !buckles {
             return false; // the tool survives both the stress it imposes and the buckling of its own body
         }
@@ -1935,7 +1940,8 @@ impl Embodiment {
                 .substances()
                 .filter_map(|(s, _)| {
                     let cs = reg.substance(s);
-                    let cons_shear = cs.and_then(|sub| sub.vector.get("mat.shear_strength").copied());
+                    let cons_shear =
+                        cs.and_then(|sub| sub.vector.get("mat.shear_strength").copied());
                     let cons_yield = cs
                         .and_then(|sub| sub.vector.get("mat.yield_strength").copied())
                         .unwrap_or(Fixed::ZERO);
@@ -2067,9 +2073,9 @@ impl Embodiment {
             return Fixed::ZERO; // a massless tool (no density or no volume) delivers no blow
         }
         let crack_area = tool.contact_area; // the struck face, the area the blow lands over
-        // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
-        // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
-        // one scale. A swing beyond the representable range saturates to the ceiling.
+                                            // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
+                                            // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
+                                            // one scale. A swing beyond the representable range saturates to the ceiling.
         let ke_kj = laws::kinetic_energy(mass, params.swing_velocity, params.energy_max);
         let delivered_energy = ke_kj
             .checked_mul(Fixed::from_int(1000))
@@ -3526,6 +3532,10 @@ impl Runner {
             self.step_embodiment();
         }
         self.recouple_hydrology();
+        // The world-independent eligibility-trace advance (decay + record), in the embodiment phase before
+        // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
+        // trace identically even for a world-less embodiment runner.
+        self.advance_eligibility_traces();
         // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
         // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
         // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
@@ -3555,6 +3565,30 @@ impl Runner {
     /// randomness, so it replays and is worker-count invariant. A runner with no embodiment publishes
     /// nothing and returns the inputs unchanged; a world that declares no percepts observes no features,
     /// so the learner is inert and the run is unchanged.
+    /// Advance every being's eligibility trace: decay each remembered sequence by the reserved TD lambda
+    /// (pruning underflows), then record the affordance the being acted on THIS tick at full eligibility, so a
+    /// reserve rise felt this same tick credits the action that CAUSED it (ideation arc, piece 1, slice 1c, the
+    /// record-before-credit TD-lambda order). This is the WORLD-INDEPENDENT half of the reward-credit
+    /// machinery: it reads only the reward calibration, the embodiment, and the being's own belief granularity,
+    /// never the world, so it runs whenever the reward learner and an embodiment are present, on both the
+    /// pinned and scheduled entry points, in the embodiment phase before `couple_conversation` reads the trace.
+    /// Runs in canonical walker order, drawing no randomness. Only when the reward learner is armed; unarmed, no
+    /// trace is ever populated, so this is inert and byte-identical.
+    fn advance_eligibility_traces(&mut self) {
+        if let Some(reward_learn) = self.reward_learning {
+            if let Some(emb) = self.embodiment.as_mut() {
+                let granular = emb.granular_beliefs;
+                for w in emb.walkers.iter_mut() {
+                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
+                    if let Some(step) = w.decided_step {
+                        w.eligibility_trace
+                            .record(step_belief_subject(&step, granular));
+                    }
+                }
+            }
+        }
+    }
+
     fn couple_conversation(&mut self, world_inputs: &[TickInput]) -> Vec<TickInput> {
         // The learner calibrations (Copy), read once so the borrow of the embodiment below does not
         // conflict with the read.
@@ -3571,32 +3605,11 @@ impl Runner {
         // Computed here where the mind is readable and applied to the walker below (a being that enacted
         // nothing this tick is absent, so its surprise resets to zero). Empty unless discovery is armed.
         let mut surprise: BTreeMap<StableId, Fixed> = BTreeMap::new();
-        // Advance each being's eligibility trace BEFORE the reward credit reads it (ideation arc, piece 1,
-        // slice 1c, the record-before-credit ordering, the standard TD-lambda order): decay every remembered
-        // sequence by the reserved TD lambda (pruning those that underflow), then record the affordance the
-        // being acted on THIS tick at full eligibility, so a reserve rise felt this same tick credits the
-        // action that CAUSED it. Geophage and ingest refill the reserve on the tick they are enacted, so the
-        // felt rise is immediate; recording first gives the just-enacted action full eligibility for it, the
-        // way the standard trace credits the action that produced the reward, while a genuinely lagged reward
-        // still rides the decayed trace of earlier actions. Runs in canonical walker order, drawing no
-        // randomness. Only when the reward learner is armed; unarmed, no trace is ever populated, so this is
-        // inert and the run stays byte-identical.
-        if let Some(reward_learn) = reward_learn {
-            if let Some(emb) = self.embodiment.as_mut() {
-                // The credit keys the belief at the world's belief GRANULARITY (social-learning arc, piece 3):
-                // primitive-only by default (byte-identical), the full enacted step (primitive, target channel,
-                // target value) when granular beliefs are armed, so the technique specialises to the target it
-                // acted on. Reads the same `step_belief_subject` grain every consumer reads, so no belief masks.
-                let granular = emb.granular_beliefs;
-                for w in emb.walkers.iter_mut() {
-                    w.eligibility_trace.decay(reward_learn.eligibility_decay);
-                    if let Some(step) = w.decided_step {
-                        w.eligibility_trace
-                            .record(step_belief_subject(&step, granular));
-                    }
-                }
-            }
-        }
+        // The eligibility-trace advance (decay this tick, then record the enacted action) is done in
+        // `advance_eligibility_traces`, called in the embodiment phase before this coupling on BOTH the
+        // pinned and scheduled paths, so a world-less embodiment runner advances the trace identically on
+        // both entry points (determinism, Principle 3). It is world-independent, so it must not sit behind
+        // the world tick the way this coupling's remaining, world-reading work does.
         if let Some(emb) = self.embodiment.as_ref() {
             let (width, _) = self.field.dims();
             for w in emb.walkers() {
@@ -4105,6 +4118,11 @@ impl Runner {
             // downhill routing, which no other phase reads this tick, so the placement is order-safe and
             // the scheduled and pinned orders stay bit-identical.
             self.recouple_hydrology();
+            // The world-independent eligibility-trace advance runs in the embodiment phase, before the world
+            // coupling, matching step_inner. It reads no world, so placing it here (present whenever an
+            // embodiment is) rather than inside SYS_WORLD keeps a world-less embodiment runner bit-identical
+            // to the pinned order, closing the couple_conversation sibling of the vigor divergence at its root.
+            self.advance_eligibility_traces();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
@@ -4642,7 +4660,16 @@ impl Runner {
                         let primitive = AffordanceId(action.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | POUND | DIG | RELEASE | SHELTER
+                            GRASP
+                                | EXTRACT
+                                | GEOPHAGE
+                                | CRAFT
+                                | CUT
+                                | CRUSH
+                                | POUND
+                                | DIG
+                                | RELEASE
+                                | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4694,7 +4721,16 @@ impl Runner {
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | POUND | DIG | RELEASE | SHELTER
+                            GRASP
+                                | EXTRACT
+                                | GEOPHAGE
+                                | CRAFT
+                                | CUT
+                                | CRUSH
+                                | POUND
+                                | DIG
+                                | RELEASE
+                                | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));

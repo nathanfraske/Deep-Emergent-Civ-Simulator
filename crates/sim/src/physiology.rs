@@ -300,11 +300,15 @@ pub fn whole_body_composition_vector(
             contributors.push((organ.development, &comp.components));
         }
     }
-    if let Some(cov) = registry.coverings.get(plan.covering.kind as usize) {
+    if let Some(cov) = registry
+        .coverings
+        .iter()
+        .find(|k| k.id == plan.covering.kind)
+    {
         contributors.push((plan.covering.development, &cov.material));
     }
     for weapon in &plan.weapons {
-        if let Some(kd) = registry.weapons.get(weapon.kind as usize) {
+        if let Some(kd) = registry.weapons.iter().find(|k| k.id == weapon.kind) {
             contributors.push((weapon.development, &kd.material));
         }
     }

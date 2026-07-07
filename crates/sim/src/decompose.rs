@@ -500,7 +500,11 @@ mod tests {
             Fixed::from_int(10),
         ));
         reg.push(DecomposerDriver::life(Fixed::ONE));
-        assert_eq!(reg.combine(), CombineMode::All, "the default gates the drivers");
+        assert_eq!(
+            reg.combine(),
+            CombineMode::All,
+            "the default gates the drivers"
+        );
         let (t, b, m, o) = favorable();
         assert_eq!(
             reg.activity_at(t, b, m, o, Fixed::ZERO),
@@ -519,8 +523,7 @@ mod tests {
         // The opt-in alternative (CombineMode::Any): the MAXIMUM, so biotic and abiotic decay are
         // independent sufficient drivers. A sterile but favorable cell decays through the Conditions row,
         // the world's explicit choice; the activity never exceeds full.
-        let reg = DecomposerDriverRegistry::new()
-            .with_combine(CombineMode::Any);
+        let reg = DecomposerDriverRegistry::new().with_combine(CombineMode::Any);
         let mut reg = reg;
         reg.push(DecomposerDriver::conditions(
             Fixed::from_ratio(1, 2),
@@ -565,6 +568,9 @@ mod tests {
         // A non-positive biomass clears the entry, and the emptied field folds nothing.
         field.seed(cell, "carrion", Fixed::ZERO);
         assert_eq!(field.mass(cell, "carrion"), Fixed::ZERO);
-        assert!(field.is_empty(), "clearing the last entry empties the field");
+        assert!(
+            field.is_empty(),
+            "clearing the last entry empties the field"
+        );
     }
 }

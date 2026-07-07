@@ -1441,7 +1441,10 @@ values = [
     // The SAME tool CRUSHES the chalk (weak in compression, effective stress beats its 2 MPa) and leaves the
     // fibre (tough in compression, 5000 MPa), by the target's compressive strength alone.
     let mut crusher = build(Some(tool()));
-    crusher.embodiment_mut().unwrap().crush_underfoot(StableId(1));
+    crusher
+        .embodiment_mut()
+        .unwrap()
+        .crush_underfoot(StableId(1));
     assert!(
         carried_of(&crusher, "chalk") > Fixed::ZERO,
         "the face crushes the compression-weak chalk"
@@ -1612,7 +1615,10 @@ values = [
 
     // The HEAVY (iron) tool shatters the rock: its blow's energy beats the rock's Griffith resistance.
     let mut heavy = build("iron", true);
-    heavy.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    heavy
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
     assert!(
         carried_rock(&heavy) > Fixed::ZERO,
         "a heavy tool's blow shatters the rock and frees it"
@@ -1621,7 +1627,10 @@ values = [
     // The LIGHT (pumice) tool of the IDENTICAL shape and swing does NOT: it carries less mass into the same
     // blow, so its energy falls below the rock's Griffith resistance. The ONLY difference is the mass.
     let mut light = build("pumice", true);
-    light.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    light
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
     assert_eq!(
         carried_rock(&light),
         Fixed::ZERO,
@@ -1630,7 +1639,10 @@ values = [
 
     // OPT-OUT: the same heavy tool on an unarmed world strikes nothing (byte-neutral opt-in).
     let mut unarmed = build("iron", false);
-    unarmed.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    unarmed
+        .embodiment_mut()
+        .unwrap()
+        .strike_underfoot(StableId(1));
     assert_eq!(
         carried_rock(&unarmed),
         Fixed::ZERO,
@@ -1794,9 +1806,8 @@ values = [
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
 
-    let tool_volume_of = |e: &Embodiment| -> Option<Fixed> {
-        e.walkers()[0].wielded.as_ref().map(|t| t.volume)
-    };
+    let tool_volume_of =
+        |e: &Embodiment| -> Option<Fixed> { e.walkers()[0].wielded.as_ref().map(|t| t.volume) };
 
     // ARMED: the tool wears gradually. After the first wear it is still wielded and has LESS volume (not spent
     // in one use), and after repeated wear it spends out (its wielded slot empties). Count the uses to prove
@@ -1804,7 +1815,11 @@ values = [
     let mut armed = build(true);
     let emb = armed.embodiment_mut().unwrap();
     let start = tool_volume_of(emb);
-    assert_eq!(start, Some(tool_volume0), "the tool starts at its full volume");
+    assert_eq!(
+        start,
+        Some(tool_volume0),
+        "the tool starts at its full volume"
+    );
     emb.wear_tool(StableId(1));
     let after_one = tool_volume_of(emb);
     assert!(
@@ -1815,7 +1830,10 @@ values = [
     while tool_volume_of(emb).is_some() {
         emb.wear_tool(StableId(1));
         uses += 1;
-        assert!(uses < 10_000, "the tool must spend out in a bounded number of uses");
+        assert!(
+            uses < 10_000,
+            "the tool must spend out in a bounded number of uses"
+        );
     }
     assert!(
         uses > 1,
@@ -1995,13 +2013,17 @@ values = [
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
 
-    let is_wielded = |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+    let is_wielded =
+        |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
 
     // ARMED brittle: the reaction stress of its own force exceeds its fracture strength, so it snaps. The
     // break_check reports the fracture and the tool is unwielded.
     let mut brittle = build("brittle_edge", true);
     let broke = brittle.embodiment_mut().unwrap().break_check(StableId(1));
-    assert!(broke, "a brittle edge fractures under the stress its own force imposes");
+    assert!(
+        broke,
+        "a brittle edge fractures under the stress its own force imposes"
+    );
     assert!(
         !is_wielded(&brittle),
         "the fractured tool is unwielded: it must be remade"
@@ -2011,15 +2033,24 @@ values = [
     // bears the load and stays wielded. The ONLY difference from the brittle case is the material.
     let mut tough = build("tough_edge", true);
     let survived = tough.embodiment_mut().unwrap().break_check(StableId(1));
-    assert!(!survived, "a tough edge bears the stress its force imposes and does not fracture");
+    assert!(
+        !survived,
+        "a tough edge bears the stress its force imposes and does not fracture"
+    );
     assert!(is_wielded(&tough), "the surviving tool stays wielded");
 
     // OPT-OUT: the SAME brittle edge on an unarmed world never breaks. The break_check is a no-op without the
     // arm, so every existing scenario is byte-identical.
     let mut unarmed = build("brittle_edge", false);
     let broke_unarmed = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
-    assert!(!broke_unarmed, "an unarmed world never breaks a tool (byte-neutral opt-in)");
-    assert!(is_wielded(&unarmed), "the unarmed brittle tool stays wielded");
+    assert!(
+        !broke_unarmed,
+        "an unarmed world never breaks a tool (byte-neutral opt-in)"
+    );
+    assert!(
+        is_wielded(&unarmed),
+        "the unarmed brittle tool stays wielded"
+    );
 
     // WIRED TO WORK: a real cut frees flesh, then the dispatch's breakage check snaps the brittle edge. The
     // cut still happened (the freed matter is taken) and the tool is spent by fracture, the make-use-break
@@ -2032,9 +2063,18 @@ values = [
     } else {
         false
     };
-    assert!(freed > Fixed::ZERO, "the brittle edge cut the flesh before it broke");
-    assert!(broke_on_use, "the reaction stress of the cutting stroke snapped the brittle edge");
-    assert!(!is_wielded(&worker), "after the breaking cut the being holds no tool");
+    assert!(
+        freed > Fixed::ZERO,
+        "the brittle edge cut the flesh before it broke"
+    );
+    assert!(
+        broke_on_use,
+        "the reaction stress of the cutting stroke snapped the brittle edge"
+    );
+    assert!(
+        !is_wielded(&worker),
+        "after the breaking cut the being holds no tool"
+    );
 }
 
 #[test]
@@ -2148,26 +2188,36 @@ values = [
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
 
-    let is_wielded = |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
+    let is_wielded =
+        |r: &Runner| -> bool { r.embodiment().unwrap().walkers()[0].wielded.is_some() };
 
     // The STOUT tool (short, fat cross-section) has a high critical buckling load and bears the working force.
     let mut stout = build(Fixed::from_ratio(1, 10), true);
     let stout_broke = stout.embodiment_mut().unwrap().break_check(StableId(1));
-    assert!(!stout_broke, "a stout tool bears the axial working load without buckling");
+    assert!(
+        !stout_broke,
+        "a stout tool bears the axial working load without buckling"
+    );
     assert!(is_wielded(&stout), "the stout tool stays wielded");
 
     // The SLENDER tool (long, thin cross-section) of the SAME stock and material buckles under the same force:
     // the ONLY difference is its length, so the failure is the geometry, not the material.
     let mut slender = build(Fixed::from_int(10), true);
     let slender_broke = slender.embodiment_mut().unwrap().break_check(StableId(1));
-    assert!(slender_broke, "a slender tool of the same stock buckles under the same working load");
+    assert!(
+        slender_broke,
+        "a slender tool of the same stock buckles under the same working load"
+    );
     assert!(!is_wielded(&slender), "the buckled tool is unwielded");
 
     // OPT-OUT: the SAME slender tool on an unarmed world never buckles (byte-neutral opt-in).
     let mut unarmed = build(Fixed::from_int(10), false);
     let unarmed_broke = unarmed.embodiment_mut().unwrap().break_check(StableId(1));
     assert!(!unarmed_broke, "an unarmed world never buckles a tool");
-    assert!(is_wielded(&unarmed), "the unarmed slender tool stays wielded");
+    assert!(
+        is_wielded(&unarmed),
+        "the unarmed slender tool stays wielded"
+    );
 }
 
 #[test]
@@ -3911,8 +3961,11 @@ fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
         field.deposit(cell, "carrion", flesh0);
         emb.set_material(field);
         emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
-        let mut r =
-            Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(field_temp)), calib(), emb);
+        let mut r = Runner::with_embodiment(
+            uniform_field(w, h, Fixed::from_int(field_temp)),
+            calib(),
+            emb,
+        );
         r.set_matter_cycle(MatterCycleCalib::dev_fixture());
         if let Some(d) = decomposer {
             r.set_decomposer(d);

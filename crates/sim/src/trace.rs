@@ -650,7 +650,13 @@ mod tests {
             decay: TransformKind::static_kind(),
         };
         assert_eq!(
-            organic_salience(Fixed::from_int(1000), Fixed::from_int(50), &kind, race, Fixed::ONE),
+            organic_salience(
+                Fixed::from_int(1000),
+                Fixed::from_int(50),
+                &kind,
+                race,
+                Fixed::ONE
+            ),
             Fixed::ONE,
             "a static kind is not organic and reads full salience"
         );

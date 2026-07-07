@@ -1053,7 +1053,10 @@ impl TissueField {
     pub fn volume_at(&self, cell: Coord3) -> Fixed {
         self.cells
             .get(&cell)
-            .map(|m| m.values().fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v)))
+            .map(|m| {
+                m.values()
+                    .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v))
+            })
             .unwrap_or(Fixed::ZERO)
     }
 
@@ -1204,7 +1207,11 @@ mod tests {
         field.deposit(cell, hard.clone(), Fixed::from_int(4)); // distinct content, new parcel
         field.deposit(cell, soft.clone(), Fixed::ZERO); // non-positive, a no-op
         let parcels = field.parcels(cell);
-        assert_eq!(parcels.len(), 2, "two distinct compositions, the identical ones merged");
+        assert_eq!(
+            parcels.len(),
+            2,
+            "two distinct compositions, the identical ones merged"
+        );
         assert_eq!(
             field.volume_at(cell),
             Fixed::from_int(7),
@@ -1228,7 +1235,11 @@ mod tests {
         field.hash_into(&mut h1);
         let mut h2 = StateHasher::new();
         other.hash_into(&mut h2);
-        assert_eq!(h1.finish(), h2.finish(), "deposit order does not change the fold");
+        assert_eq!(
+            h1.finish(),
+            h2.finish(),
+            "deposit order does not change the fold"
+        );
     }
 
     /// A minimal mechanical floor: the two axes the material layer reads, and three substances that

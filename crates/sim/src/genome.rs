@@ -961,16 +961,19 @@ impl GenePool {
         // slot `*p` (disjoint, indexed) and derives its whole 2*Ne Bernoulli stream from
         // `DrawKey::pair(pool_id, locus, generation, EVOLVE)`, so the LOCUS INDEX (not the executing thread)
         // fully determines the RNG stream and the result is bit-identical at any thread count.
-        self.freqs.par_iter_mut().enumerate().for_each(|(locus, p)| {
-            let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
-            let mut count: u32 = 0;
-            for k in 0..two_ne {
-                if rng.unit_fixed(k as u64) < *p {
-                    count += 1;
+        self.freqs
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(locus, p)| {
+                let rng = DrawKey::pair(pool_id, locus as u64, generation, Phase::EVOLVE).rng(seed);
+                let mut count: u32 = 0;
+                for k in 0..two_ne {
+                    if rng.unit_fixed(k as u64) < *p {
+                        count += 1;
+                    }
                 }
-            }
-            *p = Fixed::from_ratio(count as i64, two_ne as i64);
-        });
+                *p = Fixed::from_ratio(count as i64, two_ne as i64);
+            });
     }
 
     /// Directional selection by a per-locus selection coefficient (state 1's relative

@@ -156,12 +156,12 @@ pub use controller::{
     forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
     ControllerLayout, ForageGains,
 };
+pub use decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
 pub use decompose::{
     CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
     DecomposerStockField,
-};
-pub use decision::{
-    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
 };
 pub use demography::{hazard_age, AgeHistogram};
 pub use dialogue::{

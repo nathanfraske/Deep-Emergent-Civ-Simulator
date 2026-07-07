@@ -32,10 +32,10 @@
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId, StateHasher};
-use rayon::prelude::*;
 use civsim_world::{
     BiomeSet, Coord3, FlatBounded, OrbitalElements, TileMap, TopologySpace, WorldgenParams,
 };
+use rayon::prelude::*;
 
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};

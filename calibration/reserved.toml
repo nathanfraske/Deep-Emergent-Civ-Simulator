@@ -2144,6 +2144,14 @@ unit = "dose"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/percept.rs"
 
 [[reserved]]
+id = "discovery.target_value_granularity"
+basis = "the quantization step that buckets a candidate's perceived affordance VALUE into a coarse kind (social-learning arc, piece 3, material granularity), the just-noticeable difference at which a hard thing and a soft thing become distinct learned targets. Set at the sensorium per-class just-noticeable difference for the affordance scalar, the same basis harm.feature_granularity and reward.feature_granularity carry, so a discovered technique specialises over the same perceptual resolution a harm or reward belief generalises over. Read only when a world arms granular beliefs; unarmed the belief keys on the primitive alone and this is never read"
+status = "reserved"
+value = ""
+unit = "dose"
+source = "social-learning arc piece 3 material granularity; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
+
+[[reserved]]
 id = "reward.p_reward_given_rewards"
 basis = "P(the interoceptive reward signal fires | this action truly pays off), the first of the two likelihoods the reward-belief weight reads (learn::good_weight), the mirror of harm.p_harm_given_harms. Set at the fraction of ticks a naive being that took a beneficial action feels a supra-recovery rise, the dose-and-physiology benefit rate the floor implies, the way the harm arc sets its likelihoods. Together with p_reward_given_neutral it sets how strong a single correlation observation is (ln of their ratio)"
 status = "reserved"
