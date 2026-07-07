@@ -149,14 +149,18 @@ const SYS_EMBODIMENT: SystemId = SystemId(2);
 const SYS_WORLD: SystemId = SystemId(3);
 
 /// The minimum items per Rayon job for the per-being parallel maps. Below this many walkers a
-/// `par_iter` runs as a single job (no split), so a small population pays no work-stealing overhead. This
-/// is a PERFORMANCE threshold only, not a canonical value: the parallel and serial results are
-/// bit-identical (each item writes a fixed position and draws RNG by id, never by thread), so this cannot
-/// move the `state_hash`. Its basis is the measured crossover: on this machine the per-being work is small
-/// enough that unconditional `par_iter` is a net LOSS below a few thousand beings (serial beats 18 threads
-/// by 19 to 75 percent at hundreds to low-thousands of founders, breaking even only near 8000), so the
-/// threshold serializes the realistic range and hands Rayon only populations large enough to amortize it.
-const PAR_MIN_LEN: usize = 4096;
+/// `par_iter` runs as a single job (no split), so a small population pays no work-stealing overhead. A
+/// PERFORMANCE threshold only, not a canonical value: the parallel and serial results are bit-identical
+/// (each item writes a fixed position and draws RNG by id, never by thread), so this cannot move the
+/// `state_hash`. Basis, from a GRID-SIZED measurement sweep (an earlier capped-grid sweep mislabelled the
+/// crossover by founding count and set this too high): the heavy per-being embodiment maps (perception,
+/// discovery) WIN parallel from a low SUSTAINED population, 1.36x at roughly ten thousand walkers and
+/// marginally positive by a few thousand, so the threshold serializes only genuinely tiny worlds and hands
+/// Rayon everything larger. The tiny-work `phase_body_exchange` never benefits (serial beats 18 threads
+/// even at big population), but it is a small phase, so a single threshold nets strongly positive (the
+/// embodiment win dwarfs the body-exchange overhead); a per-phase serial pin for body exchange is a noted
+/// refinement, not taken here.
+const PAR_MIN_LEN: usize = 2048;
 
 // Base-level liveliness step 5 (conversation liveliness): the movement coupling and an environment-
 // sourced belief. The runner republishes each being's live cell into the cognition world each tick so
@@ -461,6 +465,21 @@ impl Field {
     /// The field extent.
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
+    }
+
+    /// The temperature field as row-major `i64` Q32.32 bits, the snapshot the GPU stencil dispatches over.
+    #[cfg(feature = "gpu")]
+    fn temp_bits(&self) -> Vec<i64> {
+        self.temp.iter().map(|f| f.to_bits()).collect()
+    }
+
+    /// Overwrite the whole temperature field from row-major `i64` Q32.32 bits (the GPU stencil readback).
+    /// One wholesale assignment, so no reader can see a torn value; the stored values fold into the hash,
+    /// so a readback that equals the CPU `Field::step` output is bit-identical to running it on the CPU.
+    #[cfg(feature = "gpu")]
+    fn set_temp_from_bits(&mut self, bits: &[i64]) {
+        debug_assert_eq!(bits.len(), self.temp.len());
+        self.temp = bits.iter().map(|&b| Fixed::from_bits(b)).collect();
     }
 
     /// The raw temperature gradient at a cell: the central difference over the four clamped neighbours
@@ -2576,6 +2595,12 @@ pub struct ReproductiveVigorCalib {
 pub struct Runner {
     clock: u64,
     field: Field,
+    /// The GPU field-stencil offload, armed only under the `gpu` feature and an explicit
+    /// [`arm_gpu_field`](Self::arm_gpu_field) call. `None` on every default path, so the field's own
+    /// `state_hash` fold is untouched; when armed, the cross-tick pipeline dispatches next tick's stencil
+    /// after combustion and reads it back at the head of the next `step_field` (`GPU_BLUEPRINT.md`).
+    #[cfg(feature = "gpu")]
+    gpu_field: Option<civsim_gpu::FieldResident>,
     calib: FieldCalib,
     index: LocationIndex,
     /// Per-located-being body temperature, absolute Q32.32 on the `therm.temperature` axis. Held here
@@ -2704,6 +2729,8 @@ impl Runner {
         Runner {
             clock: 0,
             field,
+            #[cfg(feature = "gpu")]
+            gpu_field: None,
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
@@ -2751,6 +2778,8 @@ impl Runner {
         Runner {
             clock: 0,
             field,
+            #[cfg(feature = "gpu")]
+            gpu_field: None,
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
@@ -2811,6 +2840,8 @@ impl Runner {
         Runner {
             clock: 0,
             field,
+            #[cfg(feature = "gpu")]
+            gpu_field: None,
             calib,
             index,
             body_temp,
@@ -2894,6 +2925,8 @@ impl Runner {
         Runner {
             clock: 0,
             field,
+            #[cfg(feature = "gpu")]
+            gpu_field: None,
             calib,
             index,
             body_temp,
@@ -2942,6 +2975,26 @@ impl Runner {
     /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
     pub fn set_combustion(&mut self, calib: CombustionCalib) {
         self.combustion = Some(calib);
+    }
+
+    /// Arm the GPU field-stencil offload (the cross-tick pipeline). Uploads the field's own baseline once
+    /// and holds the resident context; from the next tick `step_field` dispatches the stencil to the GPU
+    /// after combustion and reads it back at the head of the following tick, in place of the synchronous CPU
+    /// `Field::step`. Reads only the field's own private baseline and dims (no authored input), draws no
+    /// randomness, and is bit-identical to the CPU path (the fence changes only how long the CPU parks). Off
+    /// by default and only under `--features gpu`, so an unarmed or feature-off runner is byte-identical.
+    #[cfg(feature = "gpu")]
+    pub fn arm_gpu_field(&mut self, client: civsim_gpu::CudaClient) {
+        let baseline: Vec<i64> = self.field.baseline.iter().map(|f| f.to_bits()).collect();
+        let (w, h) = (self.field.width as u32, self.field.height as u32);
+        self.gpu_field = Some(civsim_gpu::FieldResident::new(client, &baseline, w, h));
+    }
+
+    /// A mutable handle to the armed GPU field context, for the timing-invariance test to inject a readback
+    /// delay. `None` when unarmed.
+    #[cfg(feature = "gpu")]
+    pub fn gpu_field_mut(&mut self) -> Option<&mut civsim_gpu::FieldResident> {
+        self.gpu_field.as_mut()
     }
 
     /// Arm shelter (material-substrate arc, cascade item 7): each tick, the body-exchange phase attenuates a
@@ -3142,6 +3195,17 @@ impl Runner {
     fn step_field(&mut self) {
         {
             let _g = crate::profile::scope(crate::profile::P_FIELD);
+            #[cfg(feature = "gpu")]
+            {
+                // If last tick dispatched the stencil to the GPU, consume the finished result here (the
+                // single fenced sync point); otherwise the synchronous CPU step is the fallback (the first
+                // tick, or an unarmed runner). The readback equals the CPU `Field::step` output bit-for-bit.
+                match self.gpu_field.as_mut().and_then(|g| g.readback()) {
+                    Some(bits) => self.field.set_temp_from_bits(&bits),
+                    None => self.field.step(&self.calib),
+                }
+            }
+            #[cfg(not(feature = "gpu"))]
             self.field.step(&self.calib);
         }
         {
@@ -3174,6 +3238,20 @@ impl Runner {
         {
             let _g = crate::profile::scope(crate::profile::P_COMBUST);
             self.step_combustion();
+        }
+        // The field is now frozen for the rest of the tick: its only writers are `Field::step` (done, at the
+        // head) and `add_heat` (done, inside `step_combustion`), and nothing below touches `temp`. Dispatch
+        // next tick's stencil so the GPU runs it concurrently with this tick's CPU tail (matter cycle, body
+        // exchange, embodiment, world tick, lifecycle); the readback at the head of next tick's `step_field`
+        // consumes it. Coefficients are pulled fresh from the calib each tick, never cached.
+        #[cfg(feature = "gpu")]
+        if self.gpu_field.is_some() {
+            let temp = self.field.temp_bits();
+            let (d, r) = (
+                self.calib.diffusion.to_bits(),
+                self.calib.relaxation.to_bits(),
+            );
+            self.gpu_field.as_mut().unwrap().dispatch(&temp, d, r);
         }
         {
             let _g = crate::profile::scope(crate::profile::P_MATTER);
