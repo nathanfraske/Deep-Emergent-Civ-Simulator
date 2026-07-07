@@ -104,6 +104,7 @@ pub mod personality;
 pub mod physiology;
 pub mod planning;
 pub mod primes;
+pub mod profile;
 pub mod race;
 pub mod runner;
 pub mod scenario;

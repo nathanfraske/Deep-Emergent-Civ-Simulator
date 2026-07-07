@@ -3130,30 +3130,45 @@ impl Runner {
     /// before the body and embodiment phases read them. The environment step is a pure deterministic fold
     /// (Principle 3); the supply write keys off the physical productivity, no label (Principles 8, 9).
     fn step_field(&mut self) {
-        self.field.step(&self.calib);
-        if let Some((env, calib)) = self.environ.as_mut() {
-            let calib = *calib;
-            // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
-            // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
-            // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
-            // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
-            if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
-                env.set_fertility_from(emb.soil(), mc.fertility_scale);
-            }
-            env.step(&self.field, &calib);
+        {
+            let _g = crate::profile::scope(crate::profile::P_FIELD);
+            self.field.step(&self.calib);
         }
-        // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
-        // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
-        // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
-        // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
-        // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
-        if let Some((env, calib)) = self.environ.as_ref() {
-            if let Some(emb) = self.embodiment.as_mut() {
-                env.regrow_supply(emb.resources_mut(), calib);
+        {
+            let _g = crate::profile::scope(crate::profile::P_ENV);
+            if let Some((env, calib)) = self.environ.as_mut() {
+                let calib = *calib;
+                // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
+                // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
+                // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
+                // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
+                if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
+                    env.set_fertility_from(emb.soil(), mc.fertility_scale);
+                }
+                env.step(&self.field, &calib);
             }
         }
-        self.step_combustion();
-        self.step_matter_cycle();
+        {
+            let _g = crate::profile::scope(crate::profile::P_REGROW);
+            // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
+            // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
+            // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
+            // tick's grazed amount and regrows it; the RES_FIELD read-after-write already serializes this
+            // SYS_FIELD write before the SYS_EMBODIMENT graze in the scheduled order (matching the pinned one).
+            if let Some((env, calib)) = self.environ.as_ref() {
+                if let Some(emb) = self.embodiment.as_mut() {
+                    env.regrow_supply(emb.resources_mut(), calib);
+                }
+            }
+        }
+        {
+            let _g = crate::profile::scope(crate::profile::P_COMBUST);
+            self.step_combustion();
+        }
+        {
+            let _g = crate::profile::scope(crate::profile::P_MATTER);
+            self.step_matter_cycle();
+        }
     }
 
     /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
@@ -3527,8 +3542,12 @@ impl Runner {
 
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         self.step_field();
-        self.phase_body_exchange();
+        {
+            let _g = crate::profile::scope(crate::profile::P_BODY);
+            self.phase_body_exchange();
+        }
         if self.embodiment.is_some() {
+            let _g = crate::profile::scope(crate::profile::P_EMB);
             self.step_embodiment();
         }
         self.recouple_hydrology();
@@ -3536,17 +3555,20 @@ impl Runner {
         // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
         // trace identically even for a world-less embodiment runner.
         self.advance_eligibility_traces();
-        // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
-        // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
-        // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
-        // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
-        let inputs = self.couple_conversation(world_inputs);
-        // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
-        // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
-        // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
-        self.couple_reproductive_vigor();
-        if let Some(world) = self.world.as_mut() {
-            world.tick(&inputs);
+        {
+            let _g = crate::profile::scope(crate::profile::P_WORLD);
+            // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
+            // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
+            // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
+            // order (SYS_EMBODIMENT before SYS_WORLD), so both orders publish post-movement cells.
+            let inputs = self.couple_conversation(world_inputs);
+            // Feed the graded reproductive-vigor coupling into the world before its tick, so the reproduce
+            // beat inside the tick reads each being's coupled reserve as its eligibility to pair this
+            // generation (opt-in; a no-op that installs no vigor when unarmed, so the crucible is unchanged).
+            self.couple_reproductive_vigor();
+            if let Some(world) = self.world.as_mut() {
+                world.tick(&inputs);
+            }
         }
         self.reconcile_lifecycle();
         self.clock += 1;

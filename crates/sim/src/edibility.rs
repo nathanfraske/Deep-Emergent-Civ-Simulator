@@ -91,6 +91,33 @@ impl Composition {
         self.toxins.get(axis).copied().unwrap_or(Fixed::ZERO)
     }
 
+    /// Set (or update) a nutrient class's supply in place, reusing the entry and its already-interned key
+    /// so a repeated per-tick write allocates the key string at most once (on the first touch of a fresh
+    /// composition), never every call. The stored {class: value} content is what folds into the state
+    /// hash, so this is byte-identical to rebuilding the map with the same content.
+    pub fn set_nutrient(&mut self, class: &str, value: Fixed) {
+        if let Some(v) = self.nutrients.get_mut(class) {
+            *v = value;
+        } else {
+            self.nutrients.insert(class.to_string(), value);
+        }
+    }
+
+    /// Set or clear a toxin class's dose in place. A positive dose sets it (reusing the key); a zero or
+    /// negative dose removes the class, matching the absence convention a rebuilt composition follows when
+    /// it omits an absent toxin, so the stored content and its hash are unchanged.
+    pub fn set_toxin(&mut self, class: &str, dose: Fixed) {
+        if dose > Fixed::ZERO {
+            if let Some(v) = self.toxins.get_mut(class) {
+                *v = dose;
+            } else {
+                self.toxins.insert(class.to_string(), dose);
+            }
+        } else {
+            self.toxins.remove(class);
+        }
+    }
+
     /// The raw amount of a substance class present, whatever its valence: the nutrient supply plus the
     /// toxin dose of the class (a class lives in at most one map, so one term is zero). This is the
     /// valence-blind percept read the feature substrate uses ([`crate::percept`]): a being senses how

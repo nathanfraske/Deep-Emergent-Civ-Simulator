@@ -1602,8 +1602,19 @@ fn main() {
     let channels = channels();
     let resolution = resolve_medium(&manifest, &cfg.medium);
 
-    // A generated world large enough that the founding bands land on distinct cells.
-    let topo = FlatBounded::new(WORLD_W, WORLD_H, 1);
+    // A generated world large enough that the founding bands land on distinct cells. Grid size is
+    // overridable for profiling sweeps (CIVSIM_W / CIVSIM_H); it defaults to the fixture size. The founding
+    // bands still seed within the WORLD_W x WORLD_H corner, so a larger grid scales the per-cell grid work
+    // (field, env, matter cycle) while holding the population fixed, which is the sweep the profile wants.
+    let gw = std::env::var("CIVSIM_W")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(WORLD_W);
+    let gh = std::env::var("CIVSIM_H")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(WORLD_H);
+    let topo = FlatBounded::new(gw, gh, 1);
     let biomes = BiomeSet::dev_default();
     let map = TileMap::generate(cfg.seed, topo, &biomes, &WorldgenParams::dev_default());
 
@@ -1812,4 +1823,5 @@ fn main() {
     );
     println!("  final state_hash: {:032x}", runner.state_hash());
     println!("  (same arguments reproduce this hash: Principle 3 determinism)");
+    civsim_sim::profile::report();
 }
