@@ -1112,8 +1112,10 @@ fn a_cut_frees_the_soft_constituent_of_a_composite_a_bare_extract_cannot_and_aut
     use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
-    // A composite target: a tough rind (fracture 5000) binding a soft flesh (fracture 1), and a hard flint
-    // edge (hardness 1000, so the blunted pressure beats the flesh but not the rind). Kept in the test.
+    // A composite target: a rind tough in shear (shear strength 5000) binding a soft flesh (shear strength 1),
+    // and a flint edge (shear strength 500, so its deliverable shear parts the flesh but not the rind). The
+    // extraction contest still reads fracture strength (kept on rind/flesh), so a bare extract gates on the
+    // aggregate rind. Kept in the test.
     const FLOOR: &str = r#"
 [[axis]]
 id = "mat.density"
@@ -1148,6 +1150,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
 [[substance]]
 id = "rind"
 participates_in = []
@@ -1155,6 +1168,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "1200" },
   { axis = "mat.fracture_strength", value = "5000" },
+  { axis = "mat.shear_strength", value = "5000" },
 ]
 
 [[substance]]
@@ -1164,6 +1178,17 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "1050" },
   { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
+]
+
+[[substance]]
+id = "fibre"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "mat.density", value = "1100" },
+  { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "5000" },
 ]
 
 [[substance]]
@@ -1172,6 +1197,7 @@ participates_in = []
 real = "test fixture"
 values = [
   { axis = "mat.indentation_hardness", value = "1000" },
+  { axis = "mat.shear_strength", value = "500" },
 ]
 "#;
 
@@ -1215,6 +1241,7 @@ values = [
         let mut field = MaterialField::new();
         field.deposit(cell, "rind", ration);
         field.deposit(cell, "flesh", ration);
+        field.deposit(cell, "fibre", ration);
         emb.set_material(field);
         emb.set_material_registry(
             civsim_physics::PhysicsRegistry::from_toml_str(FLOOR).expect("test floor parses"),
@@ -1233,18 +1260,27 @@ values = [
     let carried_of =
         |r: &Runner, s: &str| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume(s) };
 
-    // A sharp flint edge CUTS: it frees the soft flesh (its own fracture strength is beaten) into the carried
-    // load, and frees NO rind (the edge blunts to 1000, below the rind's 5000). Both outcomes derived.
+    // A sharp flint edge CUTS: it frees the soft flesh (its own shear strength is beaten by the edge's
+    // deliverable shear) into the carried load, and frees NO rind (the rind's 5000 shear strength exceeds the
+    // edge's deliverable shear, self-limited at the tool's own 500). Both outcomes derived.
     let mut cutter = build(Some(tool()));
     cutter.embodiment_mut().unwrap().cut_underfoot(StableId(1));
     assert!(
         carried_of(&cutter, "flesh") > Fixed::ZERO,
-        "a keen edge frees the soft flesh by beating its own fracture strength"
+        "a keen edge frees the soft flesh by beating its own shear strength"
     );
     assert_eq!(
         carried_of(&cutter, "rind"),
         Fixed::ZERO,
-        "the edge blunts below the rind's fracture strength, so it frees no rind: the cut is selective by physics"
+        "the edge's deliverable shear is below the rind's shear strength, so it frees no rind: selective by physics"
+    );
+    // The sever gate reads SHEAR, not normal fracture: the fibre has the SAME low fracture strength as the
+    // flesh (1) but a high SHEAR strength (5000), so the OLD normal-stress gate would have freed it and the
+    // shear gate does NOT. It stays in the cell, proving R-CUT-SHEAR: the cut parts by shear.
+    assert_eq!(
+        carried_of(&cutter, "fibre"),
+        Fixed::ZERO,
+        "the fibre is weak in fracture but tough in shear, so the shear-parting cut leaves it: the gate is shear"
     );
 
     // The SAME being with the SAME tool EXTRACTS nothing: extraction gates on the aggregate (the hardest
@@ -1331,6 +1367,17 @@ range_lo = "0"
 range_hi = "2000000000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
 [[substance]]
 id = "flesh"
 participates_in = []
@@ -1338,6 +1385,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "1050" },
   { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
 ]
 
 [[substance]]
@@ -1348,6 +1396,7 @@ values = [
   { axis = "mat.density", value = "2500" },
   { axis = "mat.indentation_hardness", value = "1000" },
   { axis = "mat.wear_coefficient", value = "66666666" },
+  { axis = "mat.shear_strength", value = "500" },
 ]
 "#;
 
@@ -1520,6 +1569,17 @@ range_lo = "0"
 range_hi = "150000"
 real = "test fixture"
 
+[[axis]]
+id = "mat.shear_strength"
+measures = "the shear stress a substance parts at"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0"
+range_hi = "150000"
+real = "test fixture"
+
 [[substance]]
 id = "flesh"
 participates_in = []
@@ -1527,6 +1587,7 @@ real = "test fixture"
 values = [
   { axis = "mat.density", value = "1050" },
   { axis = "mat.fracture_strength", value = "1" },
+  { axis = "mat.shear_strength", value = "1" },
 ]
 
 [[substance]]
@@ -1537,6 +1598,7 @@ values = [
   { axis = "mat.density", value = "2500" },
   { axis = "mat.indentation_hardness", value = "1000" },
   { axis = "mat.fracture_strength", value = "10" },
+  { axis = "mat.shear_strength", value = "500" },
 ]
 
 [[substance]]
@@ -1547,6 +1609,7 @@ values = [
   { axis = "mat.density", value = "2500" },
   { axis = "mat.indentation_hardness", value = "1000" },
   { axis = "mat.fracture_strength", value = "1000" },
+  { axis = "mat.shear_strength", value = "500" },
 ]
 "#;
 

@@ -1761,20 +1761,22 @@ impl Embodiment {
     /// carried load. Where EXTRACT gates on the cell's AGGREGATE resistance (its hardest constituent binds the
     /// whole cell, so a being that cannot beat the rind takes nothing), CUT gates PER CONSTITUENT: the edge's
     /// effective pressure is compared against EACH substance present in the cell's own `SubstanceMix`, and
-    /// every constituent whose own `mat.fracture_strength` the edge exceeds is severed loose and taken. So a
-    /// keen edge frees the soft flesh from a tough composite even when it cannot break the whole cell, the
-    /// distinct power of a cut over a bare press. WHICH substances a cut frees and HOW MUCH are both DERIVED,
-    /// never authored: the freed substances are exactly the cell's own constituents the edge beats (no
+    /// every constituent whose own `mat.shear_strength` the edge's deliverable shear exceeds is severed loose
+    /// and taken. So a keen edge frees the soft flesh from a tough composite even when it cannot break the whole
+    /// cell, the distinct power of a cut over a bare press. WHICH substances a cut frees and HOW MUCH are both
+    /// DERIVED, never authored: the freed substances are exactly the cell's own constituents the edge beats (no
     /// openable-versus-sealed list), and the volume is the strength-bounded carry the grasp uses (no release
-    /// fraction and no substance transmutation). The effective pressure is the extraction contest's: the being's
-    /// grown muscle force over the tool's contact area ([`laws::contact_pressure`]), capped at the tool's own
-    /// indentation hardness (a soft tool blunts before it bites). Requires a wielded edge (a bare being cannot
-    /// cut), the material registry, and the physiology; missing any it cuts nothing, and a being with no tool
-    /// never reaches here, so an opted-out world is byte-identical. The pressure cap is a fixed-point overflow
-    /// guard, not a behavioural ceiling: the cut reads no authored pressure_max and is decoupled from the
-    /// extraction subsystem. Reads only substance ids and the beings' and matter's own physics, no race, kind,
-    /// role, or per-world table (Principles 8, 9, 11). Returns the total volume freed. The id-ordered walk over
-    /// the cell is a deterministic tie-break.
+    /// fraction and no substance transmutation). A cut is a SHEAR-parting process (R-CUT-SHEAR): the edge drives
+    /// a shear stress over its contact area ([`laws::shear`]), self-limited at the tool's OWN shear strength (an
+    /// isotropic ductile tool deriving that limit from its yield by the von Mises ratio), and severs each
+    /// constituent whose own shear strength that deliverable shear beats. This retires the earlier normal-stress
+    /// proxy (indentation pressure against `mat.fracture_strength`): cutting parts material by shear, not
+    /// indentation. Requires a wielded edge (a bare being cannot cut), the material registry, and the
+    /// physiology; missing any it cuts nothing, and a being with no tool never reaches here, so an opted-out
+    /// world is byte-identical. The stress cap is a fixed-point overflow guard, not a behavioural ceiling.
+    /// Reads only substance ids and the beings' and matter's own physics, no race, kind, role, or per-world
+    /// table (Principles 8, 9, 11). Returns the total volume freed. The id-ordered walk over the cell is a
+    /// deterministic tie-break.
     pub fn cut_underfoot(&mut self, walker_id: StableId) -> Fixed {
         let (Some(reg), Some(phys)) = (self.material_registry.as_ref(), self.physiology.as_ref())
         else {
@@ -1789,29 +1791,53 @@ impl Embodiment {
             return Fixed::ZERO;
         };
         let force = being_muscle_force(w, phys);
-        let tool_hardness = reg
-            .substance(&tool.substance)
-            .and_then(|s| s.vector.get("mat.indentation_hardness").copied())
+        // The cut is a SHEAR-parting process (R-CUT-SHEAR): the edge drives a shear stress over its contact
+        // area ([`laws::shear`]), self-limited at the tool's OWN shear strength (an isotropic ductile tool
+        // deriving that limit from its yield by the von Mises ratio inside the law), since a tool cannot
+        // impose a shear beyond what it withstands before it shears itself. This retires the earlier
+        // normal-stress proxy: cutting parts material by shear, not indentation. The stress cap passed to the
+        // law is a fixed-point overflow guard ([`Fixed::MAX`], never binding for a positive area), not a
+        // behavioural ceiling.
+        let tool_sub = reg.substance(&tool.substance);
+        let tool_shear = tool_sub.and_then(|s| s.vector.get("mat.shear_strength").copied());
+        let tool_yield = tool_sub
+            .and_then(|s| s.vector.get("mat.yield_strength").copied())
             .unwrap_or(Fixed::ZERO);
-        // The edge's effective pressure: force over the tool's working area, blunted to the tool's OWN
-        // hardness (a soft tool cannot carry a pressure above the material it is made of). The pressure cap
-        // passed to `contact_pressure` is a fixed-point overflow GUARD ([`Fixed::MAX`], never binding since a
-        // wielded tool has a positive area), NOT a behavioural ceiling: the tool's own hardness is the only
-        // material limit, so the cut reads no authored pressure_max and is decoupled from the extraction
-        // subsystem it once borrowed one from.
-        let pressure = laws::contact_pressure(force, tool.contact_area, Fixed::MAX);
-        let effective = pressure.min(tool_hardness);
-        // The cell's constituents the edge can SEVER: each substance present whose OWN fracture strength the
-        // edge beats, in canonical id order (snapshot before the mutable take). No per-world table: membership
-        // is derived from what is physically in the cell and whether the edge exceeds each part's resistance.
+        let (tau_applied, tool_margin) = laws::shear(
+            force,
+            tool.contact_area,
+            tool_shear.filter(|v| *v > Fixed::ZERO),
+            tool_yield,
+            Fixed::MAX,
+        );
+        // The effective shear the edge can deliver: the applied shear capped at the tool's own shear strength
+        // (add the margin where it is negative, i.e. where the applied exceeds the tool's own strength). A
+        // tool with neither a shear strength nor a yield delivers zero and severs nothing.
+        let effective = tau_applied + tool_margin.min(Fixed::ZERO);
+        // The cell's constituents the edge can SEVER: each substance present whose OWN shear resistance the
+        // effective shear beats, in canonical id order (snapshot before the mutable take). No per-world table:
+        // membership is derived from the shear physics of what is in the cell against the edge's deliverable
+        // shear. A constituent that declares neither a shear strength nor a yield offers zero shear resistance
+        // (the absence convention) and is severed by any positive edge.
         let severable: Vec<String> = match self.material.cell(coord) {
             Some(mix) => mix
                 .substances()
                 .filter_map(|(s, _)| {
-                    let resistance = reg
-                        .substance(s)
-                        .and_then(|sub| sub.vector.get("mat.fracture_strength").copied())
+                    let cs = reg.substance(s);
+                    let cons_shear = cs.and_then(|sub| sub.vector.get("mat.shear_strength").copied());
+                    let cons_yield = cs
+                        .and_then(|sub| sub.vector.get("mat.yield_strength").copied())
                         .unwrap_or(Fixed::ZERO);
+                    let (_, cons_margin) = laws::shear(
+                        force,
+                        tool.contact_area,
+                        cons_shear.filter(|v| *v > Fixed::ZERO),
+                        cons_yield,
+                        Fixed::MAX,
+                    );
+                    // The constituent's shear resistance is `tau_applied + its margin` (its own shear strength,
+                    // the law's `tau_material`); the edge severs it when its deliverable shear beats that.
+                    let resistance = tau_applied + cons_margin;
                     (effective > resistance).then(|| s.clone())
                 })
                 .collect(),

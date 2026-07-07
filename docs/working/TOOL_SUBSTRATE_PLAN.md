@@ -89,9 +89,13 @@ shear-parting action. Compose falsifier
 STILL PLANNED: the remaining kernels (impact/percussion, lever, crush, bend, friction) land as their actions
 (Section G) read them, one per consumer, the "capability lands when read" discipline. The kernel SET stays
 fixed Rust; which affordances a world declares is data.
-NOTE: the cut ENACT sever gate (R-CUT-SHEAR) still uses the normal-stress `fracture_strength` proxy; folding
-it onto the shear contest (each constituent's `mat.shear_strength`, and the tool's own) needs a floor rewrite
-that ripples the cut/wear/breakage enact falsifiers, so it is the next follow-on, tracked below.
+DONE (R-CUT-SHEAR): the cut ENACT sever gate now reads the SHEAR contest. `cut_underfoot` drives a shear
+stress over the edge's contact area ([`laws::shear`]), self-limited at the tool's own `mat.shear_strength`
+(von Mises from yield where the axis is silent), and severs each constituent whose own `mat.shear_strength`
+that deliverable shear beats, retiring the normal-stress `fracture_strength` proxy. The cut/wear/breakage
+enact floors gained `mat.shear_strength`; the cut falsifier isolates the change with a `fibre` weak in
+fracture but tough in shear that the shear cut leaves. Byte-neutral, sim 893. So the cut is now a shear
+process end to end: it AFFORDS via the SHEAR kernel (F) and ENACTS via the shear contest.
 
 ### G. New tool actions derived from F + C. STATUS: planned, needs F and C.
 Sever/divide (shear through a cut depth), strike/percussion (the `impact` law over the tool's mass and
