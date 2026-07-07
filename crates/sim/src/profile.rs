@@ -35,7 +35,7 @@ pub const NAMES: [&str; PHASES] = [
     "body_exchange", // per-being Newton cooling (GPU target 3)
     "embodiment",    // per-being perception/decision/movement (GPU target 2/3)
     "world.tick",    // the composed cognition world + conversation coupling
-    "other",         // anything not wrapped
+    "tick(full)", // the WHOLE step (P_TICK): the report denominator, so the remainder is real, not zero
 ];
 pub const P_FIELD: usize = 0;
 pub const P_ENV: usize = 1;
@@ -45,6 +45,11 @@ pub const P_MATTER: usize = 4;
 pub const P_BODY: usize = 5;
 pub const P_EMB: usize = 6;
 pub const P_WORLD: usize = 7;
+/// The whole tick, wrapped once around `step_inner`. Used as the report denominator, so the per-phase
+/// percentages are shares of the REAL tick time and the work outside the wrapped phases (recouple
+/// hydrology, the eligibility advance, lifecycle reconcile) shows as an honest "unwrapped" remainder
+/// rather than a silent, always-zero bucket (the dead-bucket defect a blind audit caught here).
+pub const P_TICK: usize = 8;
 
 static ACC: [AtomicU64; PHASES] = [
     AtomicU64::new(0),
@@ -103,18 +108,28 @@ pub fn report() {
     let per: Vec<u64> = (0..PHASES)
         .map(|i| ACC[i].load(Ordering::Relaxed))
         .collect();
-    let total: u64 = per.iter().sum();
-    let denom = total.max(1) as f64;
+    // The full tick is measured directly (P_TICK wraps the whole step), so IT, not the sum of the wrapped
+    // phases, is the denominator: the percentages are shares of the REAL tick, and whatever the tick spends
+    // outside the wrapped phases shows as an honest "unwrapped" remainder rather than a silent zero.
+    let total = per[P_TICK].max(1);
+    let wrapped: u64 = per[..P_TICK].iter().sum();
+    let unwrapped = total.saturating_sub(wrapped);
     eprintln!(
-        "=== per-phase profile (wrapped total {:.3}s) ===",
-        total as f64 / 1e9
+        "=== per-phase profile (full tick {:.3}s) ===",
+        per[P_TICK] as f64 / 1e9
     );
-    for i in 0..PHASES {
+    for i in 0..P_TICK {
         eprintln!(
             "  {:14} {:9.4}s  {:5.1}%",
             NAMES[i],
             per[i] as f64 / 1e9,
-            100.0 * per[i] as f64 / denom
+            100.0 * per[i] as f64 / total as f64
         );
     }
+    eprintln!(
+        "  {:14} {:9.4}s  {:5.1}%",
+        "unwrapped",
+        unwrapped as f64 / 1e9,
+        100.0 * unwrapped as f64 / total as f64
+    );
 }

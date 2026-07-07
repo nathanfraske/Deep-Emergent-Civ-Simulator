@@ -3629,6 +3629,8 @@ impl Runner {
     }
 
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
+        // The whole-tick timer; its remainder over the wrapped phases is the honest "unwrapped" cost.
+        let _tick = crate::profile::scope(crate::profile::P_TICK);
         self.step_field();
         {
             let _g = crate::profile::scope(crate::profile::P_BODY);
