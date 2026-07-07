@@ -50,6 +50,10 @@ const AXIS_FRACTURE: &str = "mat.fracture_strength";
 /// over, the intrinsic geometry a shaped object carries and loose matter does not ([`WieldedTool`]).
 const AXIS_CONTACT_AREA: &str = "mech.contact_area";
 
+/// The mass axis the percussion IMPACT kernel reads: the tool's extensive mass (its retained volume times
+/// its substance density), the datum only a carried object supplies, exposed to the capability dispatch.
+const AXIS_MASS: &str = "mech.mass";
+
 /// A perceived affordance channel's id: its slot in the affordance-percept block, in registry order,
 /// exactly as [`crate::percept::PerceptId`] slots the raw-feature block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -198,9 +202,16 @@ pub fn tool_capability(
 ) -> Fixed {
     let fns = FunctionLawRegistry::dev_seed();
     let contact_area = tool.contact_area;
+    // The tool's MASS is the extensive datum (its retained volume times its substance density) that a
+    // percussion IMPACT read needs and the registry's intensive axes cannot supply; exposed to the capability
+    // dispatch as `mech.mass` (the made-world arc, the tool-geometry expansion, GATE 2), so a HEAVY tool reads
+    // an impact a light one does not, by physics. Derived, never stored.
+    let mass = tool.mass(reg);
     let geo = |axis: &str| {
         if axis == AXIS_CONTACT_AREA {
             contact_area
+        } else if axis == AXIS_MASS {
+            mass
         } else {
             Fixed::ZERO
         }

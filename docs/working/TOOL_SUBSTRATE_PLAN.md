@@ -106,15 +106,17 @@ process end to end: it AFFORDS via the SHEAR kernel (F) and ENACTS via the shear
   `a_crush_fails_compression_where_a_cut_parts_shear_the_same_tool_diverging_by_the_targets_axis`: the SAME
   tool crushes a compression-weak constituent and cuts a shear-weak one, diverging by the target's own axes.
   So the non-piercing action space now holds two kernels (shear + crush) and two enacts, byte-neutral.
-- STRIKE/percussion: the ENACT and the MASS PAYOFF are DONE. `strike_underfoot` swings the wielded tool and
-  its kinetic energy (`laws::kinetic_energy`, `1/2 m v^2` over the tool's own mass = density x volume)
-  fractures the matter underfoot whose Griffith energy the blow exceeds (`fracture_onset`'s energy limb, the
-  delivered energy scaled from the law's kJ to the J the toughness is on). Falsifier
-  `a_heavy_struck_tool_shatters_rock_a_light_one_of_the_same_shape_cannot_the_mass_payoff`: a HEAVY tool
-  shatters a rock a LIGHT one of the identical shape cannot, the mass payoff. Reserved: `StrikeParams`
-  (swing velocity, energy ceiling). REMAINING for STRIKE: the AFFORDANCE (an Impact capability kernel reading
-  the tool MASS via GATE 2, so a being can DECIDE to strike) and the dispatch arm; the enact is directly
-  proven, the affordance is the world-wiring follow-on.
+- STRIKE/percussion (POUND affordance, id 12): FULLY DONE (enact + affordance + dispatch). `strike_underfoot`
+  swings the wielded tool and its kinetic energy (`laws::kinetic_energy`, `1/2 m v^2` over the tool's own mass
+  = density x volume) fractures the matter underfoot whose Griffith energy the blow exceeds (`fracture_onset`'s
+  energy limb, the delivered energy scaled from the law's kJ to the J the toughness is on). The AFFORDANCE is
+  the `Impact` capability kernel (`ID_IMPACT`), which reads the tool MASS exposed to the capability closure as
+  `mech.mass` (GATE 2), so a HEAVY tool affords a POUND a light one does not, the distinction the
+  geometry-and-stress contacts cannot make. Reserved: `StrikeParams` (swing velocity, energy ceiling),
+  `reference_swing_velocity` + `reference_strike_energy`. Falsifiers:
+  `a_heavy_struck_tool_shatters_rock_a_light_one_of_the_same_shape_cannot_the_mass_payoff` (enact),
+  `a_heavy_part_reads_an_impact_capability_a_light_or_massless_one_does_not` (compose kernel), and the POUND
+  affordance-grant case. So GATE 2 (mass in the capability closure) is DONE, and STRIKE is a complete action.
 - LEVER/pry, ABRADE, BORE, and the depth-sizing of the cut (R-CUT-DEPTH): each needs a substrate expansion,
   listed in the gate-map below. Marked, not forced.
 

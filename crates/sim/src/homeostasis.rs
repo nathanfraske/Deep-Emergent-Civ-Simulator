@@ -793,6 +793,23 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a tool-USING world that STRIKES (the made-world arc, tool-use, Section G, the
+    /// mass payoff): move, ingest, and STRIKE, the latter capability-gated on IMPACT (a heavy tool's percussion
+    /// blow). A being wielding a MASSIVE tool affords a strike the barehanded body cannot, the percussion
+    /// sibling of [`AffordanceRegistry::dev_cutter`] and [`AffordanceRegistry::dev_crusher`]. What the blow
+    /// fractures is the enact's Griffith-energy contest.
+    pub fn dev_striker() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_default();
+        reg.affordances.push(AffordanceDef {
+            id: POUND,
+            name: "pound".to_string(),
+            requires: Some(FunctionLawRegistry::ID_IMPACT),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Scalar,
+        });
+        reg
+    }
+
     /// The affordances a given body can perform, in canonical id order, DERIVED from the capabilities its
     /// parts read (emergent-anatomy step one). A rooted body cannot move (no part reads LOCOMOTE); a body
     /// bearing a load-bearing limb can, whatever its kingdom, by physics not by an authored category.
@@ -916,6 +933,15 @@ pub const CUT: AffordanceId = AffordanceId(10);
 /// in shear is crushed where it is not cut, and the two diverge on the target's own resistance axes, by
 /// physics not a tag. The id sits just past CUT, within the belief-subject packing bound.
 pub const CRUSH: AffordanceId = AffordanceId(11);
+
+/// The pound affordance (the made-world arc, tool-use, Section G, the mass payoff): a tool-CONTRIBUTED
+/// affordance granted by a WIELDED tool with enough MASS, capability-gated on IMPACT (a percussion blow's
+/// kinetic energy). Named POUND to avoid the body-weapon [`STRIKE`] (id 2); this is the TOOL percussion, a
+/// hammering blow. Distinct from the contact actions (cut/crush/pierce): those read only geometry and stress,
+/// so they cannot tell a heavy tool from a light one of the same shape; IMPACT reads the tool's mass, so a
+/// HEAVY tool affords a pound a light one does not, the payoff of carrying the tool's mass. The id sits just
+/// past CRUSH, within the belief-subject packing bound.
+pub const POUND: AffordanceId = AffordanceId(12);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
 /// and material through the function-law dispatch (emergent-anatomy step one), blind to any kind or race
@@ -1119,6 +1145,26 @@ mod tests {
         assert!(
             dull.is_empty(),
             "a tool that reads no capability grants no affordance"
+        );
+
+        // The percussion sibling (Section G, the mass payoff): a heavy tool reads a positive IMPACT and grants
+        // POUND through the dev_striker world, a strike the barehanded body cannot, by mass not a tag.
+        let striker = AffordanceRegistry::dev_striker();
+        let heavy = striker.tool_affordances(|law| {
+            if law == FunctionLawRegistry::ID_IMPACT {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        });
+        assert!(
+            heavy.contains(&POUND),
+            "a tool that reads the required IMPACT capability grants the pound affordance"
+        );
+        let light = striker.tool_affordances(|_| Fixed::ZERO);
+        assert!(
+            light.is_empty(),
+            "a tool that reads no impact grants no pound"
         );
     }
 

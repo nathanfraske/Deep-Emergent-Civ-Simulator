@@ -94,7 +94,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
     HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
-    GEOPHAGE, GRASP, INTEGRITY, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
@@ -4460,7 +4460,7 @@ impl Runner {
                         let primitive = AffordanceId(action.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | POUND | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4512,7 +4512,7 @@ impl Runner {
                         let primitive = AffordanceId(proposal.primitive);
                         let matter_primitive = matches!(
                             primitive,
-                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | DIG | RELEASE | SHELTER
+                            GRASP | EXTRACT | GEOPHAGE | CRAFT | CUT | CRUSH | POUND | DIG | RELEASE | SHELTER
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -4565,6 +4565,14 @@ impl Runner {
                         // The face presses the matter it crushes, carrying the reaction stress: on positive
                         // work, breakage before wear, exactly as the cut. Both no-op unless armed.
                         if emb.crush_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
+                            emb.wear_tool(id);
+                        }
+                    }
+                    POUND => {
+                        // A swung tool delivers a percussion blow, carrying the reaction stress into its own
+                        // body: on positive work, breakage before wear, exactly as the cut. Both no-op unless
+                        // armed, so an opted-out world is byte-identical.
+                        if emb.strike_underfoot(id) > Fixed::ZERO && !emb.break_check(id) {
                             emb.wear_tool(id);
                         }
                     }
