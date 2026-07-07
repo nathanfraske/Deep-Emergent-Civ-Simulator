@@ -96,8 +96,9 @@ use crate::homeostasis::{
 };
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, feature_observations,
-    reward_observations, sequence_subject, HarmLearningCalib, RewardLearningCalib, SequenceStep,
-    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    reward_observations, sequence_subject, step_belief_subject, HarmLearningCalib,
+    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
+    NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -956,6 +957,16 @@ pub struct Embodiment {
     /// the sole gate to a committed belief (copy-and-verify). The living sibling of the physical trace: where
     /// the trace carries a dead maker's mark to a later being, this carries a live neighbour's present action.
     observe_and_imitate: bool,
+    /// Whether a discovered action's reward belief keys on the target's GRANULARITY (social-learning arc,
+    /// piece 3, material granularity). FALSE by default, so the belief keys on the primitive alone (the
+    /// generalising key the whole ideation loop uses today) and every run hash is unchanged; the world-build
+    /// opts in ([`Embodiment::set_granular_beliefs`]) to key the belief on the primitive against the target's
+    /// affordance CHANNEL and its quantized perceived VALUE, so "strike a hard thing" and "strike a soft
+    /// thing" diverge as distinct learned actions. It flips the single [`crate::learn::step_belief_subject`]
+    /// granularity that the credit (the WRITE) and every read (the discovery weight, the appetitive salience,
+    /// the planner match, the forward model) route through, so write and reads agree at the same grain and no
+    /// belief is masked. Reads the reserved target-value granularity from the discovery calib.
+    granular_beliefs: bool,
     /// Whether the controller layout feeds the APPETITIVE belief block (ideation / experiential-discovery
     /// arc, piece 1, the belief-to-behaviour feedback). FALSE by default, so the layout carries no
     /// appetitive block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_appetitive`],
@@ -1085,6 +1096,7 @@ impl Embodiment {
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
+            granular_beliefs: false,
             appetitive: false,
             affordance_percepts: AffordancePerceptRegistry::empty(),
             affordance_refs: None,
@@ -1167,6 +1179,17 @@ impl Embodiment {
     /// discovery loop armed (there is a proposal to bias) and beings carrying a positive `social_learning`.
     pub fn set_observe_and_imitate(&mut self, enabled: bool) {
         self.observe_and_imitate = enabled;
+    }
+
+    /// Enable (or disable) GRANULAR beliefs (social-learning arc, piece 3, material granularity): when true, a
+    /// discovered action's reward belief keys on the primitive against the target's affordance channel AND its
+    /// quantized perceived value, so a technique specialises to the target it pays off on ("strike a hard
+    /// thing" and "strike a soft thing" diverge) rather than one flat "the primitive pays off." FALSE (the
+    /// default) keys the belief on the primitive alone, the generalising key the whole ideation loop uses
+    /// today, so every run hash is unchanged (opt-in). It flips the one [`crate::learn::step_belief_subject`]
+    /// grain the credit and every read share, so no belief is masked; needs no layout rebuild.
+    pub fn set_granular_beliefs(&mut self, enabled: bool) {
+        self.granular_beliefs = enabled;
     }
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
@@ -2827,14 +2850,16 @@ impl Runner {
         // inert and the run stays byte-identical.
         if let Some(reward_learn) = reward_learn {
             if let Some(emb) = self.embodiment.as_mut() {
+                // The credit keys the belief at the world's belief GRANULARITY (social-learning arc, piece 3):
+                // primitive-only by default (byte-identical), the full enacted step (primitive, target channel,
+                // target value) when granular beliefs are armed, so the technique specialises to the target it
+                // acted on. Reads the same `step_belief_subject` grain every consumer reads, so no belief masks.
+                let granular = emb.granular_beliefs;
                 for w in emb.walkers.iter_mut() {
                     w.eligibility_trace.decay(reward_learn.eligibility_decay);
-                    if let Some(affordance) = w.decided_affordance {
-                        w.eligibility_trace.record(sequence_subject(&[SequenceStep {
-                            primitive: affordance.0,
-                            target_bucket: 0,
-                            param_bucket: 0,
-                        }]));
+                    if let Some(step) = w.decided_step {
+                        w.eligibility_trace
+                            .record(step_belief_subject(&step, granular));
                     }
                 }
             }
@@ -3027,18 +3052,21 @@ impl Runner {
                     // about the action it took. Read here where the mind is in scope; applied to the walker
                     // in the mutable pass below.
                     if discovery.is_some() {
-                        if let Some(affordance) = w.decided_affordance {
+                        if let Some(step) = w.decided_step {
                             if let Some((mind, params)) = self.world.as_ref().and_then(|world| {
                                 world.mind(w.id).map(|m| (m, world.belief_params()))
                             }) {
-                                let step = SequenceStep {
-                                    primitive: affordance.0,
-                                    target_bucket: 0,
-                                    param_bucket: 0,
-                                };
                                 let felt = if reward { Fixed::ONE } else { Fixed::ZERO };
-                                let predicted =
-                                    crate::forward_model::predicted_reward(mind, &step, params);
+                                // The prediction reads the belief at the SAME grain the credit above records
+                                // (piece 3): primitive-only by default, the full enacted step when granular, so
+                                // the surprise measures how far the reward defied what the being believed about
+                                // the action-on-this-target it took, never a masked cross-grain belief.
+                                let predicted = crate::forward_model::predicted_reward(
+                                    mind,
+                                    &step,
+                                    emb.granular_beliefs,
+                                    params,
+                                );
                                 surprise.insert(w.id, (felt - predicted).abs());
                             }
                         }
@@ -3465,11 +3493,59 @@ impl Runner {
             Some(emb) if emb.appetitive => match self.world.as_ref() {
                 Some(world) => {
                     let ids = emb.layout.affordance_ids();
+                    // Social-learning arc, piece 3 (the flagged deep spot): when granular beliefs are armed the
+                    // salience is CANDIDATE-AWARE (it lights an affordance when a PRESENT target of it is
+                    // believed to pay off), so it needs each being's binding graph. Computed inline only when
+                    // granular AND the discovery loop's refs are installed; otherwise the candidates are empty
+                    // and the salience keys the primitive-only belief exactly as before, byte-identical.
+                    let granular = emb.granular_beliefs;
+                    let value_gran = self
+                        .discovery
+                        .map(|d| d.target_value_granularity)
+                        .unwrap_or(Fixed::ONE);
+                    let refs_ready =
+                        emb.affordance_refs.is_some() && emb.material_registry.is_some();
                     emb.walkers
                         .iter()
                         .filter_map(|w| {
                             let mind = world.mind(w.id)?;
-                            Some((w.id, appetitive_salience(mind, &ids, world.belief_params())))
+                            let candidates = if granular && refs_ready {
+                                let refs = emb.affordance_refs.as_ref().unwrap();
+                                let reg = emb.material_registry.as_ref().unwrap();
+                                let matter = emb.material.cell(w.coord());
+                                let percepts = emb.affordance_percepts.perceive(
+                                    matter,
+                                    w.wielded.as_ref(),
+                                    reg,
+                                    refs,
+                                );
+                                let afforded = match &w.structure {
+                                    Some(s) => emb.afford.afforded_structure(
+                                        s,
+                                        &emb.params.capability_refs,
+                                        &emb.params.capability_caps,
+                                    ),
+                                    None => emb.afford.afforded(
+                                        &w.body,
+                                        &emb.organs,
+                                        &emb.params.capability_refs,
+                                        &emb.params.capability_caps,
+                                    ),
+                                };
+                                candidate_bindings(&afforded, &percepts, true, value_gran)
+                            } else {
+                                Vec::new()
+                            };
+                            Some((
+                                w.id,
+                                appetitive_salience(
+                                    mind,
+                                    &ids,
+                                    &candidates,
+                                    granular,
+                                    world.belief_params(),
+                                ),
+                            ))
                         })
                         .collect()
                 }
@@ -3543,6 +3619,10 @@ impl Runner {
                 let params = world.belief_params();
                 let tick = self.clock;
                 let seed = emb.seed;
+                // The belief GRANULARITY (social-learning arc, piece 3): keys the candidate, the sampled
+                // proposal, the deliberated match, and the credit RECORD on the same grain. False by default
+                // (primitive-only, byte-identical); true keys on the target's channel and value.
+                let granular = emb.granular_beliefs;
                 emb.walkers
                     .iter()
                     .filter_map(|w| {
@@ -3564,7 +3644,12 @@ impl Runner {
                                 &emb.params.capability_caps,
                             ),
                         };
-                        let candidates = candidate_bindings(&afforded, &percepts);
+                        let candidates = candidate_bindings(
+                            &afforded,
+                            &percepts,
+                            granular,
+                            calib.target_value_granularity,
+                        );
                         // The observe-and-imitate bias (social-learning arc, piece 2): the actions the being
                         // perceived co-located neighbours enact, and its founder-zero social-learning weight,
                         // tip the draw toward a demonstrated technique. Empty and zero for a founder or an
@@ -3579,6 +3664,7 @@ impl Runner {
                             seed,
                             &w.observed_actions,
                             w.social_learning,
+                            granular,
                         )?;
                         // The DELIBERATED action (piece 4, slice 4b): rank what the being believes pays off
                         // (plan_toward over the reward goal), then take the highest-confidence plan step whose
@@ -3589,14 +3675,15 @@ impl Runner {
                         // ranks), so the deliberated choice is the believed-best action the being can do now.
                         let plan =
                             plan_toward(mind, REWARD_ATTR, REWARDS, params, calib.plan_depth_cap);
+                        // Match a plan step to a PRESENT candidate at the belief GRANULARITY (piece 3): the
+                        // plan ranks the being's committed reward beliefs (keyed at the credit's grain), so the
+                        // candidate is matched on the SAME grain through `step_belief_subject`, or the granular
+                        // belief the plan surfaced would never match a primitive-only candidate reconstruction.
                         let deliberated = plan.iter().find_map(|step| {
-                            candidates.iter().copied().find(|c| {
-                                sequence_subject(&[SequenceStep {
-                                    primitive: c.primitive,
-                                    target_bucket: 0,
-                                    param_bucket: 0,
-                                }]) == step.subject
-                            })
+                            candidates
+                                .iter()
+                                .copied()
+                                .find(|c| step_belief_subject(c, granular) == step.subject)
                         });
                         Some((w.id, (proposal, deliberated)))
                     })
@@ -3802,6 +3889,9 @@ impl Runner {
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
                             w.decided_affordance = Some(primitive);
+                            // The deliberated action carries the target it acted on (piece 3): record the full
+                            // step so the granular credit keys the belief on that target, not the primitive alone.
+                            w.decided_step = Some(action);
                             acted = true;
                         }
                     }
@@ -3851,6 +3941,9 @@ impl Runner {
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
                             w.decided_affordance = Some(primitive);
+                            // The enacted proposal carries the target it acted on (piece 3): record the full
+                            // step so the granular credit keys the belief on that target, not the primitive alone.
+                            w.decided_step = Some(proposal);
                         }
                     }
                 }
@@ -5989,6 +6082,213 @@ values = [
             run(Fixed::ZERO),
             Some(REWARDS),
             "a founder-zero being never enacts, so it never eats and forms no reward belief (founder-zero)"
+        );
+    }
+
+    #[test]
+    fn granular_beliefs_key_the_discovered_technique_on_the_target_it_acted_on_end_to_end() {
+        // Social-learning arc, piece 3 (material granularity, the run-path proof): with granular beliefs armed,
+        // the SAME discovery loop that forms "geophage pays off" keys the belief on the TARGET it acted on (the
+        // primitive against the target's affordance channel and quantized value), NOT the primitive alone. So a
+        // granular being's committed belief lives on the FULL-step subject and NOT on the primitive-only subject
+        // the default keys, proving the credit and the whole loop moved to the finer grain together (no belief
+        // masked). The default is byte-identical: the same being with granular off commits the primitive-only
+        // belief exactly as the viability loop does. This is the end-to-end closure of the unit-level split.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::{InferenceParams, ValueId};
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            sequence_subject, step_belief_subject, RewardLearningCalib, SequenceStep, REWARDS,
+            REWARD_ATTR,
+        };
+        use crate::material::MaterialField;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let primitive_only = sequence_subject(&[SequenceStep {
+            primitive: GEOPHAGE.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        }]);
+
+        // Returns (belief on the primitive-only subject, belief on the being's own granular subject, whether
+        // the granular subject differs from the primitive-only one). `granular` arms the target-value keying.
+        let run = |granular: bool| -> (Option<ValueId>, Option<ValueId>, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0115EED,
+            );
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = Fixed::ONE;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            emb.set_granular_beliefs(granular);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            // A fine target-value granularity, so the oilseed's positive fracture potential buckets to a
+            // NON-ZERO value: the granular subject then genuinely differs from the primitive-only one, and the
+            // test can tell the two grains apart.
+            runner.set_discovery(DiscoveryCalib {
+                target_value_granularity: Fixed::from_ratio(1, 1000),
+                ..DiscoveryCalib::dev_default()
+            });
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            // The being's granular subject: the full step it last acted on, keyed at the granular grain. Read
+            // from its own `decided_step` (the target it acted on), so the test asks about the exact belief the
+            // credit would have committed, not a guessed value.
+            let decided = runner
+                .embodiment()
+                .and_then(|e| e.walkers().iter().find(|w| w.id == id))
+                .and_then(|w| w.decided_step);
+            let granular_subject = decided
+                .map(|s| step_belief_subject(&s, true))
+                .unwrap_or(primitive_only);
+            let mind = runner.world().and_then(|w| w.mind(id));
+            let po = mind.and_then(|m| m.belief(primitive_only, REWARD_ATTR, &bp));
+            let gr = mind.and_then(|m| m.belief(granular_subject, REWARD_ATTR, &bp));
+            (po, gr, granular_subject != primitive_only)
+        };
+
+        // Default (granular off): byte-identical to the viability loop, the belief is on the primitive-only
+        // subject, and the being's grain does not distinguish the target (its granular subject IS the
+        // primitive-only one).
+        let (po_flat, _, differ_flat) = run(false);
+        assert_eq!(
+            po_flat,
+            Some(REWARDS),
+            "with granular off the discovered technique keys the primitive-only subject (byte-identical)"
+        );
+        assert!(
+            !differ_flat,
+            "with granular off the candidate carries no target value, so there is one grain"
+        );
+        // Granular on: the SAME loop keys the belief on the TARGET it acted on (a distinct, finer subject), and
+        // NOT on the primitive-only subject, so the technique specialised to its target and no belief was masked
+        // across grains.
+        let (po_gran, gr_gran, differ_gran) = run(true);
+        assert!(
+            differ_gran,
+            "the oilseed's positive fracture potential gives the granular subject a non-zero target value"
+        );
+        assert_eq!(
+            gr_gran,
+            Some(REWARDS),
+            "the granular being commits its technique on the target it acted on (the finer subject)"
+        );
+        assert_eq!(
+            po_gran, None,
+            "the granular belief is NOT on the primitive-only subject: the whole loop moved grain together"
         );
     }
 

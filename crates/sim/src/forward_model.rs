@@ -47,7 +47,7 @@ use civsim_core::Fixed;
 use crate::agent::Mind;
 use crate::evidence::InferenceParams;
 use crate::homeostasis::is_reward_tick;
-use crate::learn::{sequence_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
 
 /// The forward model's predicted interoceptive outcome for a candidate action step, in `[0, 1]`: `Fixed::ONE`
 /// when the being holds a committed REWARDS belief about the step's [`sequence_subject`] (it PREDICTS the
@@ -57,8 +57,17 @@ use crate::learn::{sequence_subject, SequenceStep, REWARDS, REWARD_ATTR};
 /// bucket), so the prediction reads the EXACT template belief the piece-1 credit pass commits and the piece-2
 /// discovery sampler weights: the model has no state of its own, the belief IS the prediction. Reads only the
 /// being's own reward beliefs, never an authored valence or a race id (Principle 8). Pure and RNG-free.
-pub fn predicted_reward(mind: &Mind, step: &SequenceStep, params: &InferenceParams) -> Fixed {
-    let subject = sequence_subject(std::slice::from_ref(step));
+pub fn predicted_reward(
+    mind: &Mind,
+    step: &SequenceStep,
+    granular: bool,
+    params: &InferenceParams,
+) -> Fixed {
+    // Key at the SAME grain the credit committed the belief on (social-learning arc, piece 3): primitive-only
+    // when not granular (so a proposal's non-zero target channel does not silently mint a different subject
+    // than the credit's), the full step when granular. Routing through the one shared helper keeps the
+    // prediction and the credit on the identical belief.
+    let subject = step_belief_subject(step, granular);
     if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
         Fixed::ONE
     } else {
@@ -86,6 +95,7 @@ pub fn prediction_error(
     step: &SequenceStep,
     felt_delta: Fixed,
     reward_noise_floor: Fixed,
+    granular: bool,
     params: &InferenceParams,
 ) -> Fixed {
     let felt = if is_reward_tick(felt_delta, reward_noise_floor) {
@@ -93,14 +103,14 @@ pub fn prediction_error(
     } else {
         Fixed::ZERO
     };
-    felt - predicted_reward(mind, step, params)
+    felt - predicted_reward(mind, step, granular, params)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::evidence::{AttrKindId, ValueId};
-    use crate::learn::NEUTRAL;
+    use crate::learn::{sequence_subject, NEUTRAL};
     use civsim_core::StableId;
 
     fn params() -> InferenceParams {
@@ -147,7 +157,7 @@ mod tests {
         // A fresh mind holds no belief, so it predicts nothing (the forward model has no state of its own).
         let mut believer = Mind::new(StableId(1), Fixed::ONE);
         assert_eq!(
-            predicted_reward(&believer, &s, &p),
+            predicted_reward(&believer, &s, false, &p),
             Fixed::ZERO,
             "a being that believes nothing about the action predicts no reward"
         );
@@ -160,7 +170,7 @@ mod tests {
             "the being committed the REWARDS belief (the associative engine's own commit)"
         );
         assert_eq!(
-            predicted_reward(&believer, &s, &p),
+            predicted_reward(&believer, &s, false, &p),
             Fixed::ONE,
             "the committed reward belief IS the prediction that the action pays off"
         );
@@ -169,7 +179,7 @@ mod tests {
         let mut neutral = Mind::new(StableId(2), Fixed::ONE);
         commit(&mut neutral, subject, NEUTRAL);
         assert_eq!(
-            predicted_reward(&neutral, &s, &p),
+            predicted_reward(&neutral, &s, false, &p),
             Fixed::ZERO,
             "a committed NEUTRAL belief predicts no reward"
         );
@@ -189,13 +199,13 @@ mod tests {
         commit(&mut believer, subject, REWARDS);
         // Predicted reward, and it came: no surprise.
         assert_eq!(
-            prediction_error(&believer, &s, big_rise, floor, &p),
+            prediction_error(&believer, &s, big_rise, floor, false, &p),
             Fixed::ZERO,
             "a well-predicted reward is no surprise"
         );
         // Predicted reward, and it FAILED to come: negative surprise (the expected payoff did not arrive).
         assert_eq!(
-            prediction_error(&believer, &s, no_rise, floor, &p),
+            prediction_error(&believer, &s, no_rise, floor, false, &p),
             -Fixed::ONE,
             "an expected reward that fails to come is a negative surprise"
         );
@@ -204,13 +214,13 @@ mod tests {
         let naive = Mind::new(StableId(4), Fixed::ONE);
         // Predicted none, and none came: no surprise.
         assert_eq!(
-            prediction_error(&naive, &s, no_rise, floor, &p),
+            prediction_error(&naive, &s, no_rise, floor, false, &p),
             Fixed::ZERO,
             "a well-predicted non-reward is no surprise"
         );
         // Predicted none, and reward CAME: positive surprise (an unexpected payoff).
         assert_eq!(
-            prediction_error(&naive, &s, big_rise, floor, &p),
+            prediction_error(&naive, &s, big_rise, floor, false, &p),
             Fixed::ONE,
             "an unexpected reward is a positive surprise"
         );
@@ -227,7 +237,7 @@ mod tests {
         let tiny_rise = Fixed::from_ratio(1, 100); // below the floor
         let naive = Mind::new(StableId(5), Fixed::ONE);
         assert_eq!(
-            prediction_error(&naive, &s, tiny_rise, floor, &p),
+            prediction_error(&naive, &s, tiny_rise, floor, false, &p),
             Fixed::ZERO,
             "a sub-floor rise is not a felt reward, so predicting none of it is no surprise"
         );

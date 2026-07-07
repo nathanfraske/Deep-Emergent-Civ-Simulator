@@ -425,6 +425,16 @@ pub struct Walker {
     /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
     /// source the reward-credit pass reads to record what the being just did.
     pub decided_affordance: Option<AffordanceId>,
+    /// The full step the being ACTED on this tick (social-learning arc, piece 3, material granularity): the
+    /// primitive plus the target's affordance channel and quantized perceived value, when the action came
+    /// from a discovery proposal or a deliberated plan (which carry the target); a plain primitive with a
+    /// zero target when the base controller decided it (which names no target). `None` on a tick it took no
+    /// matter action. Transient like [`decided_affordance`](Walker::decided_affordance) (re-derived every
+    /// tick, never folded into `state_hash`); the granular reward credit keys the belief on this step's
+    /// grain through [`crate::learn::step_belief_subject`], so a technique specialises to the target it acted
+    /// on. Its `primitive` always equals `decided_affordance`; it carries the target the primitive alone
+    /// cannot.
+    pub decided_step: Option<SequenceStep>,
     /// The matter the being INGESTED this tick, the perceived composition of what it ate (social-learning
     /// arc, piece 1, nutrition learning): the per-substance volume [`crate::runner::Embodiment::geophage`]
     /// took into the being this tick, keyed by material-floor substance id. EMPTY on a tick it ate nothing.
@@ -516,6 +526,7 @@ impl Walker {
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
             decided_affordance: None,
+            decided_step: None,
             ate: SubstanceMix::new(),
             proposed_action: None,
             exploration: Fixed::ZERO,
@@ -958,6 +969,15 @@ pub fn step_with_field_dirs<T: Terrain>(
             .as_ref()
             .filter(|d| d.activation > Fixed::ZERO)
             .map(|d| d.affordance);
+        // The full enacted step (social-learning arc, piece 3): the controller names an affordance but NO
+        // target, so its step carries a zero target channel and value; a discovery proposal or a deliberated
+        // plan below OVERWRITES this with the target it acted on when it enacts one. Set each tick alongside
+        // the primitive so the granular reward credit can key on the target the action was directed at.
+        w.decided_step = w.decided_affordance.map(|a| SequenceStep {
+            primitive: a.0,
+            target_bucket: 0,
+            param_bucket: 0,
+        });
 
         let mut exertion = Fixed::ZERO;
         if let Some(d) = decision {

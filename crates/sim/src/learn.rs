@@ -123,6 +123,19 @@ const SEQ_MAX_STEPS: usize = 4;
 /// The bit width of each packed step field (the primitive id, the target-affordance bucket, the param
 /// bucket). A field value wider than this clamps to the field maximum (the honest bound; the reserved
 /// quantization keeps the buckets small, so the clamp does not bite in practice).
+///
+/// FLAGGED BOUND (deep audit, social-learning arc piece 3): four bits caps EACH field at 16 distinct
+/// values, so the belief-subject packing distinguishes at most 16 PRIMITIVES, 16 target CHANNELS, and 16
+/// target-VALUE buckets; anything above saturates to 15 and MERGES with its neighbours (an over-merge, not a
+/// mask, since the clamp is applied identically at write and read). This is currently LATENT: the affordance
+/// alphabet is 10 primitives (ids 0..9), the demonstrations perceive one or two channels, and hard-vs-soft
+/// needs two value buckets, all well under 16. It WILL bite as the affordance set grows (arc 3, the made
+/// world, adds tool-use and composition primitives), at which point distinct primitives above 15 would share
+/// one reward belief even in the non-granular default. The refinement is the owner's call and is NOT
+/// byte-neutral (widening the field or hashing changes every existing belief subject), so it is surfaced
+/// here rather than changed: widen `SEQ_FIELD_BITS` (a `u32` step is already 12 bits, with room to grow the
+/// primitive field to the affordance `u16`), or mint the subject by a collision-resistant hash of the full
+/// step, before the primitive alphabet crosses 16.
 const SEQ_FIELD_BITS: u32 = 4;
 /// The bit width of one packed step (its three fields).
 const SEQ_STEP_BITS: u32 = SEQ_FIELD_BITS * 3;
@@ -168,6 +181,32 @@ pub fn sequence_subject(steps: &[SequenceStep]) -> StableId {
     // sequence mints a different subject than the 3-step sequence itself.
     payload |= (n as u64) << (SEQ_MAX_STEPS as u32 * SEQ_STEP_BITS);
     StableId(SEQUENCE_SUBJECT_BASE | payload)
+}
+
+/// The belief subject one executed step keys on, at the caller's GRANULARITY (social-learning arc, piece 3,
+/// material granularity). The single point that decides how coarsely a discovered action generalises, so the
+/// credit that WRITES the belief and every read that consumes it (the discovery weight, the appetitive
+/// salience, the planner match, the forward model) agree by construction: a keying mismatch here is the
+/// belief-masking class the belief-key consistency fix caught, so every site routes through this one function.
+///
+/// When `granular` is FALSE (the default, and every scenario today), the belief keys on the PRIMITIVE ALONE
+/// (`target_bucket` and `param_bucket` zeroed), the generalising key that makes a learned primitive preferred
+/// against every present target, the exact key the whole ideation loop uses now, so an opted-out run is
+/// byte-identical. When TRUE, the belief keys on the FULL step, the primitive against the target's affordance
+/// CHANNEL (`target_bucket`, the kind of thing) AND its quantized perceived VALUE (`param_bucket`, the
+/// just-noticeable how-hard), so "strike a hard thing" and "strike a soft thing" diverge as distinct learned
+/// actions and a technique specialises to the target it pays off on rather than one flat "the primitive pays
+/// off." Pure, RNG-free; the channel and value already ride the candidate the discovery loop proposes.
+pub fn step_belief_subject(step: &SequenceStep, granular: bool) -> StableId {
+    if granular {
+        sequence_subject(std::slice::from_ref(step))
+    } else {
+        sequence_subject(&[SequenceStep {
+            primitive: step.primitive,
+            target_bucket: 0,
+            param_bucket: 0,
+        }])
+    }
 }
 
 /// The reserved calibrations of the associative learner (Principle 11): the numbers that set when a
@@ -634,22 +673,45 @@ pub fn attraction_gradient(
 /// directly, and the afforded-set gate in [`crate::controller::ControllerLayout::decide`] still bounds
 /// which action can win, so a believed-rewarding action the body cannot currently perform is never forced.
 /// Reads only the being's own reward beliefs and the affordance ids, never an affordance's authored valence
-/// or a race id (Principle 8). Pure and RNG-free; the single-primitive subject matches exactly what the
-/// slice-1c credit pass commits, so the belief this reads is the belief that pass formed.
+/// or a race id (Principle 8). Pure and RNG-free; the belief key it reads matches exactly what the slice-1c
+/// credit pass commits at the same grain, so the belief this reads is the belief that pass formed.
+///
+/// SOCIAL-LEARNING ARC, PIECE 3 (material granularity), THE DEEP RECONCILIATION SPOT (flagged): this read
+/// was TARGET-BLIND (one belief per primitive), at odds with a value-keyed belief. It is now made
+/// CANDIDATE-AWARE so it agrees with the granular credit at the same grain. When `granular` is FALSE (the
+/// default), it keys the primitive-only subject exactly as before, so `candidates` is unused and the salience
+/// is byte-identical. When TRUE, an affordance lights when the being holds a committed REWARDS belief about
+/// ANY currently-PRESENT candidate of that affordance (a target of the kind and value it can act on now,
+/// keyed at the target's grain through [`step_belief_subject`]), so the appetitive drive fires for "I believe
+/// a present target of this affordance pays off" rather than a target-blind "this primitive pays off." The
+/// output stays per-affordance in the caller's canonical order (the controller's appetitive input block), and
+/// the afforded-set gate in [`crate::controller::ControllerLayout::decide`] still bounds which action can win.
 pub fn appetitive_salience(
     mind: &Mind,
     affordances: &[AffordanceId],
+    candidates: &[SequenceStep],
+    granular: bool,
     params: &InferenceParams,
 ) -> Vec<Fixed> {
     affordances
         .iter()
         .map(|a| {
-            let subject = sequence_subject(&[SequenceStep {
-                primitive: a.0,
-                target_bucket: 0,
-                param_bucket: 0,
-            }]);
-            if mind.belief(subject, REWARD_ATTR, params) == Some(REWARDS) {
+            let believed = if granular {
+                // Any PRESENT candidate of this affordance the being believes pays off, keyed at the target's
+                // grain, so the belief this reads is exactly the one the granular credit commits.
+                candidates.iter().filter(|c| c.primitive == a.0).any(|c| {
+                    mind.belief(step_belief_subject(c, true), REWARD_ATTR, params) == Some(REWARDS)
+                })
+            } else {
+                // The primitive-only key, byte-identical to the pre-granularity read.
+                let step = SequenceStep {
+                    primitive: a.0,
+                    target_bucket: 0,
+                    param_bucket: 0,
+                };
+                mind.belief(step_belief_subject(&step, false), REWARD_ATTR, params) == Some(REWARDS)
+            };
+            if believed {
                 Fixed::ONE
             } else {
                 Fixed::ZERO
@@ -955,7 +1017,7 @@ mod tests {
         let mut mind = Mind::new(StableId(7), Fixed::ONE);
         // A being that has learned nothing reads a flat-zero appetitive percept (no signal to act on).
         assert_eq!(
-            appetitive_salience(&mind, &affordances, &params()),
+            appetitive_salience(&mind, &affordances, &[], false, &params()),
             vec![Fixed::ZERO; 3],
             "a being with no reward belief reads no appetitive signal on any affordance"
         );
@@ -978,14 +1040,14 @@ mod tests {
         // The appetitive percept now lights ONLY the ingest channel, in the caller's canonical order, and the
         // channels for the actions it holds no belief about stay dark.
         assert_eq!(
-            appetitive_salience(&mind, &affordances, &params()),
+            appetitive_salience(&mind, &affordances, &[], false, &params()),
             vec![Fixed::ONE, Fixed::ZERO, Fixed::ZERO],
             "the appetitive percept lights only the affordance the being believes pays off"
         );
         // The salience aligns to the caller's affordance order, not a fixed index: reorder the inputs and the
         // lit channel moves with ingest.
         assert_eq!(
-            appetitive_salience(&mind, &[grasp, ingest], &params()),
+            appetitive_salience(&mind, &[grasp, ingest], &[], false, &params()),
             vec![Fixed::ZERO, Fixed::ONE],
             "the salience aligns to the caller's canonical affordance order"
         );
