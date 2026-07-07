@@ -97,11 +97,55 @@ enact floors gained `mat.shear_strength`; the cut falsifier isolates the change 
 fracture but tough in shear that the shear cut leaves. Byte-neutral, sim 893. So the cut is now a shear
 process end to end: it AFFORDS via the SHEAR kernel (F) and ENACTS via the shear contest.
 
-### G. New tool actions derived from F + C. STATUS: planned, needs F and C.
-Sever/divide (shear through a cut depth), strike/percussion (the `impact` law over the tool's mass and
-swing energy, which also is how knapping physically happens), lever/pry (the `lever` law over the tool's
-arm), crush (compressive strength), abrade (wear as an action), bore (hertzian contact). Each outcome
-derived from the tool's and target's physics, no per-action table.
+### G. New tool actions derived from F + C. STATUS: SEVER done (R-CUT-SHEAR); the rest gated, see the gate-map below.
+- SEVER/divide: DONE (R-CUT-SHEAR, the shear cut, afford + enact).
+- CRUSH (compressive failure): BUILDABLE NOW, no substrate gap. The exact sibling of the shear cut but
+  gating per constituent on `mat.compressive_strength` (axis exists), with a Crush capability kernel
+  mirroring Shear; outcome the freed crushed constituent (no transmutation). Not yet built (the audit and
+  the deeper gates were prioritised); the next clean additive action.
+- STRIKE/percussion, LEVER/pry, ABRADE, BORE, and the depth-sizing of the cut (R-CUT-DEPTH): each needs a
+  substrate expansion, listed in the gate-map below. Marked, not forced.
+
+## SUBSTRATE-EXPANSION GATE-MAP (owner: these are where the physics substrate needs to grow to unblock the rest)
+The absolute rule holds: the substrate is the only authored place. Each item below is a place the tool
+work HITS the edge of the current substrate and cannot derive further without the owner adding a physics
+axis, a law, or a piece of DERIVED tool/matter geometry. None is authored-behaviour; each is a substrate
+grow. Ordered by how much it unblocks.
+
+- GATE 1, TOOL BODY GEOMETRY (the load-bearing one, completes root R2). `WieldedTool` carries only
+  `{contact_area, volume, substance}`. It has no characteristic LENGTH and no CROSS-SECTION / section
+  modulus. Deriving these at craft from the shaped stock (a prism of the given volume with a reserved
+  aspect ratio, the shape a being knaps, surfaced reserved-with-basis) unblocks AT ONCE: E's toughness
+  (energy) limb of `fracture_onset` (which needs the tool's crack cross-section), E's bend/buckle failures
+  (a slender haft overloaded, an edge pried sideways, via `bend_stress`/`euler_buckle`, which need length +
+  section modulus), LEVER/pry (`laws::lever` needs the effort and load arms), and the energy criterion of
+  STRIKE. This is a deepening of C, sibling to H. The geometry AXES already exist in the mechanical floor
+  (`mech.section_modulus`, `mech.arm_length`); the grow is carrying the derived geometry on the tool.
+- GATE 2, TOOL MASS IN THE CAPABILITY CLOSURE. The affordance capability closure exposes only
+  `mech.contact_area` to a kernel; to afford a mass-driven action (STRIKE percussion, `kinetic_energy` over
+  the tool mass = density x volume, both known) the closure must also expose the tool's volume/mass. A
+  wiring grow, not a new axis. With it plus a reserved swing velocity, STRIKE is derivable (the blow's
+  delivered energy fractures the target via `fracture_onset`'s energy limb, crack area the struck face).
+- GATE 3, MATTER FORM/STATE. A cell's `SubstanceMix` is BULK composition with no geometry or state, so a
+  TRANSFORMATIVE action (grind to powder, shape, cook) cannot represent its OUTCOME without authoring a
+  transmutation (the very thing Section A purged), and a percussive/abrasive action cannot derive the
+  target's struck effective-mass, crack area, or removal amount. The grow: a matter form/state
+  representation (a particle-size or worked-state axis on the cell's matter), or a derived convention for a
+  struck/removed geometry from a cell's composition. This gates: STRIKE's target-mass, ABRADE's removal
+  amount, R-CUT-DEPTH's depth-sized cut amount (which otherwise stays carry-bounded; `mat.specific_cut_energy`
+  and `cut_penetrate` already exist, only the stroke length and the amount->depth wiring are missing), and
+  any cook/grind/shape action.
+- GATE 4, HERTZIAN CONTACT for BORE. Drilling/boring wants a hertzian contact stress; confirm whether a
+  hertzian law exists in the floor (R-PHYS-MECH lists one) and wire it, plus a bore-hole geometry (gated on
+  GATE 3's matter geometry).
+- GATE 5, TOOL OBJECT IDENTITY + THERMAL WIRING (Section I). A tool as a `StableId` object that accrues
+  state across hands, plus wiring the EXISTING thermal laws (`conduction`, `combustion`, `phase_change`,
+  `thermal_stress`) to the tool: friction heats, fire consumes a wooden tool, a fluid corrodes a metal one,
+  and a QUENCH raises `mat.indentation_hardness` (feeding back into the tool's own strength). The thermal
+  laws exist; the grow is the object-identity rider and the couplings.
+- GATE 6, COMPOSITE TOOL STRUCTURE (Section H). `WieldedTool` becomes a multi-material jointed structure (a
+  hard head bound to a tough shaft), the bind a physical joint (`shear`/`friction`), craft consuming a
+  `SubstanceMix` or another tool as stock. The deepest grow, the composition stage of the made-world arc.
 
 ### H. Composite and hafted tools. STATUS: planned, deepest.
 A tool of more than one material (a hard head bound to a tough shaft), each part with its own axes and
