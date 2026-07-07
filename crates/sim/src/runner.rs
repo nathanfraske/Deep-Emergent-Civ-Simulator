@@ -6829,6 +6829,368 @@ values = [
     }
 
     #[test]
+    fn a_technique_outlives_its_maker_when_an_heir_re_earns_it_from_the_dead_makers_hulls() {
+        // The lifetime/demography keystone, trace slice D, the CLOSING CAPSTONE: the whole loop composed on ONE
+        // runner across a MAKER'S DEATH. A discoverer (the maker) eats oilseed, its byproducts leave a durable
+        // spent_hull (slice B), and it re-earns "eating where this residue lies pays off" keyed on the opaque
+        // hull signature from its OWN felt reward (slices C1, C2). It DIES by pillar-1 per-tick mortality (its
+        // walker retired). Its hull PERSISTS past its death and WEATHERS slowly by the matter cycle (slice D).
+        // Then a younger being (the heir), a living mind that coexisted with the maker at a different age
+        // (overlapping generations, pillar 1) and comes to the abandoned site AFTER the maker is gone, re-earns
+        // the SAME belief from ITS OWN felt reward at the hull the dead maker left, never taught (gossip is not
+        // armed, so no belief can be told to it). Knowledge outlives the knower, re-earned from the world's
+        // physical record rather than handed by a living teacher or inherited. The falsifier is founder-zero: an
+        // heir whose exploration is off never enacts, never eats, and re-earns nothing however long it stands on
+        // the maker's hull, so the belief is earned, not authored and not transmitted.
+        //
+        // The three integration frictions the earlier composed attempt hit are dissolved by construction, each a
+        // staging choice the gate ruled (option b, single lineage): the TEMPERATURE axis is inert (no drain, no
+        // death floor), so the field sits at 300 K (above the hull's 273 K decomposition barrier, so the hull
+        // weathers) while the beings live on their energy alone, no being-comfort-versus-weathering conflict;
+        // the maker and heir are NEVER embodied at once (the heir arrives after the maker's death), so there is
+        // no competition for the food; and the heir is embodied well-fed enough that eating lifts its reserve,
+        // so it feels a reward and forms a REWARDS belief rather than a neutral one. Labelled dev fixtures
+        // throughout; the weathering rate and the deposit fraction are reserved values surfaced with basis.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::decision::Curve;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
+            GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::{MaterialField, MatterCycleCalib};
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // TEMPERATURE inert (no drain, no death floor, no backing), so the field temperature never touches
+        // survival; ENERGY drains a flat fraction and is refilled by eating oilseed (the C2 discovery registry).
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let seed_physiology = || Physiology {
+            requirements: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            assimilation: [("oilseed".to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        let field_temp = 300; // K, above the spent_hull's 273 K decomposition barrier; TEMPERATURE inert.
+                              // RESERVED (the deposit fraction), the shell-to-kernel mass ratio of an oil nut (slice B basis); a dev
+                              // value proves the mechanism, the owner sets the real ratio.
+        let deposit_fraction = Fixed::from_ratio(1, 2);
+        // RESERVED (the weathering rate), the recalcitrant-lignin decomposition timescale of a nut shell (slice
+        // D basis, as in the weathering test); a dev value proves the mechanism.
+        let matter_cycle = MatterCycleCalib {
+            decomposition_rate: Fixed::from_ratio(1, 50),
+            fertility_scale: Fixed::from_ratio(1, 1000),
+        };
+        let calib_reward = RewardLearningCalib::dev_default();
+        let cadence = 2u64;
+        // A raw-age hazard: zero through the maker's discovery years (so it cannot die before it discovers),
+        // certain once old, so the OLD maker dies while the YOUNG heir never faces the roll (labelled balance
+        // knob, not an owner value).
+        let hazard = || {
+            Curve::new([
+                (Fixed::ZERO, Fixed::ZERO),
+                (Fixed::from_int(45), Fixed::ZERO),
+                (Fixed::from_int(46), Fixed::ONE),
+            ])
+        };
+        let tile = Coord3::ground(4, 4);
+        let band_at = |t: i32| BeingThermal {
+            setpoint: Fixed::from_int(t),
+            half_band: Fixed::from_int(8),
+            initial_temp: Fixed::from_int(t),
+        };
+
+        // One composed run, parameterized by the heir's exploration (ONE = primed, ZERO = the founder-zero
+        // falsifier). Returns the demonstration's observations plus the final state hash for the replay check.
+        let run = |heir_exploration: Fixed| -> (bool, Option<u32>, Fixed, Fixed, bool, bool, u128) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let maker = world.spawn(Fixed::ONE);
+            let heir = world.spawn(Fixed::ONE);
+            world.set_place(maker, 0);
+            world.set_place(heir, 0);
+            // Overlapping ages at the dawn: the maker is old, the heir young; both are living minds at once.
+            world.set_age(maker, 40);
+            world.set_age(heir, 10);
+            world.set_life_cadence(cadence);
+            world.set_mortality_hazard(hazard());
+            world.arm_per_tick_mortality();
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0xD0E5,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&["spent_hull"]));
+            // Slice B: eating oilseed leaves a durable spent_hull (the deposit fraction is a reserved mass
+            // ratio; a dev value proves the mechanism).
+            emb.set_byproducts(
+                [(
+                    "oilseed".to_string(),
+                    ("spent_hull".to_string(), deposit_fraction),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            // The maker only: hungry, exploration on, at the food tile. The heir is NOT embodied yet.
+            let mut maker_walker = Walker::new(
+                maker,
+                tile,
+                body(),
+                {
+                    let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+                    h.set_level(ENERGY, Fixed::from_ratio(1, 20));
+                    h
+                },
+                seed_physiology(),
+                Controller::zeros(emb.layout()),
+            );
+            maker_walker.exploration = Fixed::ONE;
+            emb.add(maker_walker, band_at(field_temp));
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(field_temp); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(calib_reward);
+            runner.set_matter_cycle(matter_cycle);
+
+            let hull = |r: &Runner| -> Fixed {
+                r.embodiment()
+                    .unwrap()
+                    .material()
+                    .volume(tile, "spent_hull")
+            };
+            // Whether `id` holds a committed REWARDS belief keyed on the hull's material signature at ANY
+            // non-void bucket. The slice-B deposit grows the hull over the maker's life and the matter cycle
+            // weathers it, so the perceived bucket drifts; a being commits on whatever bucket it perceived while
+            // eating, so the check scans the non-void material buckets rather than a single frozen amount. Void
+            // (bucket zero) is excluded, so a belief only counts if it is about a hull actually present.
+            let holds_reward = |r: &Runner, id: StableId| -> bool {
+                let Some(mind) = r.world().and_then(|w| w.mind(id)) else {
+                    return false;
+                };
+                (1..=64i64).any(|bucket| {
+                    let subject = feature_subject(MATERIAL_FEATURE_CHANNEL_BASE, bucket);
+                    mind.belief(subject, REWARD_ATTR, &bp) == Some(REWARDS)
+                })
+            };
+            let maker_alive =
+                |r: &Runner| -> bool { r.world().and_then(|w| w.mind(maker)).is_some() };
+
+            // PHASE 1: the maker discovers (re-earns the reward belief), deposits hulls, and dies. Step until it
+            // is culled by the per-tick mortality (or a generous cap).
+            // Top up a small, bounded ration of oilseed at the tile each tick (the C2 discovery convention), so
+            // a being at the tile rises gradually and keeps feeling reward while it perceives the hull, rather
+            // than gorging a stock in one tick and never feeling reward again. Cloning preserves the hulls the
+            // slice-B deposit has accumulated and the matter cycle has weathered.
+            let ration = |r: &mut Runner| {
+                if let Some(e) = r.embodiment_mut() {
+                    let mut m = e.material().clone();
+                    m.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    e.set_material(m);
+                }
+            };
+
+            let mut maker_formed = false;
+            let mut overlapped = false;
+            let mut maker_dead_at = None;
+            for t in 1..=60u32 {
+                ration(&mut runner);
+                runner.step();
+                if holds_reward(&runner, maker) {
+                    maker_formed = true;
+                }
+                if let Some(w) = runner.world() {
+                    if w.mind(maker).is_some() && w.mind(heir).is_some() {
+                        if let (Some(am), Some(ah)) = (w.age_of(maker), w.age_of(heir)) {
+                            if am != ah {
+                                overlapped = true;
+                            }
+                        }
+                    }
+                }
+                if !maker_alive(&runner) {
+                    maker_dead_at = Some(t);
+                    break;
+                }
+            }
+            let hull_at_death = hull(&runner);
+
+            // WEATHERING WINDOW: no being embodied (the maker retired, the heir not yet arrived). The abandoned
+            // hull weathers by the matter cycle but persists.
+            for _ in 0..3 {
+                runner.step();
+            }
+            let hull_after_weathering = hull(&runner);
+
+            // PHASE 2: the heir arrives at the abandoned site, embodied well-fed at the tile.
+            {
+                let layout = runner.embodiment().unwrap().layout().clone();
+                let mut heir_walker = Walker::new(
+                    heir,
+                    tile,
+                    body(),
+                    {
+                        // Enough reserve that a NON-eating (founder-zero) heir survives the whole window, so the
+                        // falsifier is clean: it stands on the maker's hull, alive, and still forms no belief,
+                        // isolating eating (not starvation) as the gate. A primed heir at the same reserve still
+                        // forages (foraging is exploration-driven, not hunger-gated) and feels its reserve rise.
+                        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+                        h.set_level(ENERGY, Fixed::from_ratio(1, 2));
+                        h
+                    },
+                    seed_physiology(),
+                    Controller::zeros(&layout),
+                );
+                heir_walker.exploration = heir_exploration;
+                runner
+                    .embodiment_mut()
+                    .unwrap()
+                    .add(heir_walker, band_at(field_temp));
+            }
+            let mut heir_reearned = false;
+            for _ in 0..24 {
+                ration(&mut runner);
+                runner.step();
+                if holds_reward(&runner, heir) {
+                    heir_reearned = true;
+                }
+            }
+
+            (
+                maker_formed,
+                maker_dead_at,
+                hull_at_death,
+                hull_after_weathering,
+                overlapped,
+                heir_reearned,
+                runner.state_hash(),
+            )
+        };
+
+        // PRIMED heir: the whole loop closes across the maker's death.
+        let (m_formed, m_dead, h_death, h_weathered, overlapped, heir_re, hash1) = run(Fixed::ONE);
+        assert!(
+            m_formed,
+            "the maker re-earns the reward belief from its own eating (it discovers the technique)"
+        );
+        assert!(
+            m_dead.is_some(),
+            "the maker dies by pillar-1 per-tick mortality within its lifespan"
+        );
+        assert!(
+            h_death > Fixed::ZERO,
+            "the maker's spent_hull persists past its death (it did not vanish with the maker)"
+        );
+        assert!(
+            h_weathered < h_death && h_weathered > Fixed::ZERO,
+            "the abandoned hull weathers by the matter cycle yet persists ({h_weathered:?} of {h_death:?})"
+        );
+        assert!(
+            overlapped,
+            "the maker (old) and the heir (young) were living minds at once at different ages (overlapping generations)"
+        );
+        assert!(
+            heir_re,
+            "the heir re-earns the technique from its own felt reward at the hull the dead maker left, never taught (gossip off)"
+        );
+
+        // FOUNDER-ZERO (the emergence falsifier): an off-exploration heir never enacts, so it never eats and
+        // re-earns nothing, even standing on the maker's hull. The belief is earned, not authored or gossiped.
+        let (_, _, _, _, _, heir_re0, _) = run(Fixed::ZERO);
+        assert!(
+            !heir_re0,
+            "a founder-zero heir never eats, so it re-earns no belief from the trace (not authored, not transmitted)"
+        );
+
+        // DETERMINISM: the whole composed capstone replays bit for bit (every draw keys on the being and the
+        // tick), so the lifecycle, embodiment, and trace on one runner do not cost determinism.
+        let (_, _, _, _, _, _, hash2) = run(Fixed::ONE);
+        assert_eq!(hash1, hash2, "the composed capstone replays bit for bit");
+    }
+
+    #[test]
     fn a_learned_feature_harm_belief_rides_the_shipped_gossip_to_a_co_located_naive_being() {
         // Harm-learning arc slice d, the TRANSMISSION leg: because a learned "this feature harms me"
         // belief is an ordinary (subject, attr) frame, it rides the shipped overhearing transmission for
