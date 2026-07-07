@@ -6694,6 +6694,225 @@ values = [
     }
 
     #[test]
+    fn the_mixed_material_payoff_world_composes_a_variety_of_food_techniques() {
+        // Social-learning arc, THE PAYOFF that closes arc 1: the first world where a being interacts with
+        // more than one material. It forages a MIXED-MATERIAL cell holding TWO foods, a hard oilseed and a
+        // soft tuber (distinct energy signatures and distinct hardness), and one INERT matter (granite), and
+        // discovers a VARIETY of techniques: it learns that BOTH foods nourish it, each keyed on the perceived
+        // composition of what it ATE, and learns NOTHING about the granite it stood among but never ate. All
+        // three arc-1 pieces are armed together on ONE runner (nutrition learning, observe-and-imitate, and
+        // granular beliefs) over the keystone's material substrate, so the composition runs coherently. The
+        // falsifier is the opt-in: with the learning off, the same forage forms no food belief.
+        use crate::affordance_percept::{
+            AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
+        };
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{
+            AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticAxisId,
+            HomeostaticRegistry, ENERGY, GEOPHAGE, TEMPERATURE,
+        };
+        use crate::learn::{
+            feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
+        };
+        use crate::material::MaterialField;
+        use crate::material_percept::MaterialPerceptRegistry;
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_physics::PhysicsRegistry;
+
+        // A second food reserve beside ENERGY: STARCH, backed by the soft tuber, so a being that eats EITHER
+        // food feels a backing reserve rise as its own reward, and one geophage bite of the mixed cell eats
+        // both foods (geophage draws every backed substance present).
+        const STARCH: HomeostaticAxisId = HomeostaticAxisId(1);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some("oilseed".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: STARCH,
+                    name: "starch".to_string(),
+                    backing_component: Some("tuber".to_string()),
+                    capacity_per_mass: Fixed::from_int(10),
+                    base_drain: Fixed::from_ratio(1, 100),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let geophage_only = || AffordanceRegistry {
+            affordances: vec![AffordanceDef {
+                id: GEOPHAGE,
+                name: "geophage".to_string(),
+                requires: None,
+                min_capability: Fixed::ZERO,
+                param: AffordanceParam::Scalar,
+            }],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The being requires and assimilates BOTH foods, so eating either feeds its backing reserve.
+        let seed_physiology = || Physiology {
+            requirements: [
+                ("oilseed".to_string(), Fixed::ONE),
+                ("tuber".to_string(), Fixed::ONE),
+            ]
+            .into_iter()
+            .collect(),
+            assimilation: [
+                ("oilseed".to_string(), Fixed::ONE),
+                ("tuber".to_string(), Fixed::ONE),
+            ]
+            .into_iter()
+            .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+
+        // Channels, in material-percept registry order: oilseed = 0, tuber = 1, granite = 2.
+        let run = |nutrition: bool| -> (bool, bool, bool) {
+            let mut world = World::new(
+                bp,
+                bp,
+                AccessWeights::from_pairs([
+                    (AccessChannelId(1), Fixed::from_int(4)),
+                    (AccessChannelId(3), Fixed::from_int(2)),
+                ]),
+            );
+            let id = world.spawn(Fixed::ONE);
+            world.set_place(id, 0);
+
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                geophage_only(),
+                LocomotionParams::dev_default(),
+                0,
+                0x0F00D5,
+            );
+            emb.set_material_percepts(MaterialPerceptRegistry::from_substances(&[
+                "oilseed", "tuber", "granite",
+            ]));
+            let controller = Controller::zeros(emb.layout());
+            let tile = Coord3::ground(4, 4);
+            let mut homeostasis = Homeostasis::from_mass(&reg, Fixed::ONE);
+            homeostasis.set_level(ENERGY, Fixed::from_ratio(1, 20));
+            homeostasis.set_level(STARCH, Fixed::from_ratio(1, 20));
+            let mut walker = Walker::new(
+                id,
+                tile,
+                body.clone(),
+                homeostasis,
+                seed_physiology(),
+                controller,
+            );
+            walker.exploration = Fixed::ONE;
+            emb.add(walker, band());
+
+            emb.set_material(MaterialField::new());
+            emb.set_material_registry(
+                PhysicsRegistry::ground().expect("the embedded ground floor loads"),
+            );
+            emb.set_affordance_percepts(
+                AffordancePerceptRegistry::from_kinds(&[AffordancePerceptKind::FracturePotential]),
+                AffordancePerceptRefs::dev_refs(),
+            );
+            // Arc 1 composed: the eaten-side nutrition credit (the piece under demonstration), the place-side
+            // trace credit OFF so only the eaten-side learning is read, observe-and-imitate and granular
+            // beliefs armed to prove the three pieces run together over one substrate.
+            emb.set_nutrition_learning(nutrition);
+            emb.set_place_reward_learning(false);
+            emb.set_observe_and_imitate(true);
+            emb.set_granular_beliefs(true);
+
+            let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+            let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+            runner.set_discovery(DiscoveryCalib::dev_default());
+            runner.set_reward_learning(RewardLearningCalib::dev_default());
+            for _ in 0..24 {
+                if let Some(emb) = runner.embodiment_mut() {
+                    let mut material = MaterialField::new();
+                    // The mixed-material cell: a bounded ration of each food (so each bite is a supply-limited
+                    // rise the being feels as reward) beside an inert granite it can perceive but never eats.
+                    material.deposit(tile, "oilseed", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "tuber", Fixed::from_ratio(1, 2));
+                    material.deposit(tile, "granite", Fixed::ONE);
+                    emb.set_material(material);
+                }
+                runner.step();
+            }
+            let learned = |channel: u16| -> bool {
+                match runner.world().and_then(|w| w.mind(id)) {
+                    Some(m) => (0i64..=8).any(|bucket| {
+                        m.belief(
+                            feature_subject(MATERIAL_FEATURE_CHANNEL_BASE + channel, bucket),
+                            REWARD_ATTR,
+                            &bp,
+                        ) == Some(REWARDS)
+                    }),
+                    None => false,
+                }
+            };
+            (learned(0), learned(1), learned(2))
+        };
+
+        // Armed: the being discovers a VARIETY of food techniques, learning that BOTH the oilseed and the
+        // tuber nourish it (each from the composition of what it ate), and learns NOTHING about the inert
+        // granite it stood among but never ate. This is the mixed-material world arc 1 was building toward.
+        assert_eq!(
+            run(true),
+            (true, true, false),
+            "the being learns both foods nourish (a variety of techniques) and not the inert granite"
+        );
+        // Opt-in falsifier: with nutrition learning off the same forage over the same mixed cell forms no food
+        // belief, so the variety is earned by the composed learning, not the mere presence of the materials.
+        let (oilseed_off, tuber_off, _) = run(false);
+        assert!(
+            !oilseed_off && !tuber_off,
+            "with the learning off the mixed-material forage forms no food belief (the opt-in falsifier)"
+        );
+    }
+
+    #[test]
     fn a_being_perceives_a_co_located_eater_into_a_transient_prior_and_forms_no_belief_from_watching(
     ) {
         // Social-learning arc, piece 2 (observe-and-imitate, the run-path proof): a being co-located with a
