@@ -978,6 +978,98 @@ impl SoilNutrientField {
     }
 }
 
+/// A data-defined MASS-CONSTITUENT registry (Principle 11): how the decomposed mass of a substance or a body
+/// is apportioned into located soil-nutrient CLASSES by the decomposing matter's OWN composition, generalizing
+/// the fixed ash-plus-organic pair to k=N constituents. Each constituent names a FRACTION AXIS (a value in
+/// [0, 1] on the matter's composition giving the share of the decomposed mass that is that constituent) and the
+/// soil CLASS it deposits into; whatever the constituents do not claim is the RESIDUAL, deposited to the
+/// residual class, so the split is mass-EXACT (the constituent shares plus the residual equal the whole loss
+/// bit for bit, the residual absorbing every fixed-point rounding). The membership is DATA: a world adds a
+/// constituent by adding a row, so the split never authors a closed Earth ash-and-humus pair in the
+/// decomposition hot path. Read against the decomposing matter's own composition (a substance's `vector` or a
+/// decayed body parcel's composition), so the SAME split serves the material leg (rock, carrion) and the
+/// tissue leg (a decayed body), symmetric: a body re-materialises into the soil by ITS OWN axes, not a
+/// hardcoded organic bucket.
+#[derive(Clone, Debug)]
+pub struct ConstituentRegistry {
+    constituents: Vec<Constituent>,
+    residual_class: String,
+}
+
+/// One mass constituent: the [0, 1] fraction axis on the decomposing matter's composition and the soil class
+/// its share deposits into.
+#[derive(Clone, Debug)]
+struct Constituent {
+    fraction_axis: String,
+    deposit_class: String,
+}
+
+impl ConstituentRegistry {
+    /// An empty registry whose whole loss goes to `residual_class` (the k=1 case). Push constituents to carve
+    /// fraction axes out of the residual.
+    pub fn new(residual_class: &str) -> ConstituentRegistry {
+        ConstituentRegistry {
+            constituents: Vec::new(),
+            residual_class: residual_class.to_string(),
+        }
+    }
+
+    /// Add a constituent: the [0, 1] `fraction_axis` on the decomposing matter's composition gives the share
+    /// of its decomposed mass that is this constituent, deposited to `deposit_class`. Push order fixes only
+    /// the canonical deposit sequence (the residual always follows), never the mass total.
+    pub fn push(&mut self, fraction_axis: &str, deposit_class: &str) {
+        self.constituents.push(Constituent {
+            fraction_axis: fraction_axis.to_string(),
+            deposit_class: deposit_class.to_string(),
+        });
+    }
+
+    /// The UNCONFIGURED default split (the opt-in sibling of the decomposer's `None` -> unconditional-rate
+    /// default): the decomposing matter's own mineral-ash fraction to a mineral class, the remainder to an
+    /// organic class, the pre-chemistry-arc behaviour exactly. Named after Earth axes only as a labelled
+    /// default a world overrides by arming its own [`ConstituentRegistry`]; the mechanism reads the matter's
+    /// OWN composition, never a per-species table (residue F1: a Terran-clean world names its own axes here).
+    pub fn terran_default() -> ConstituentRegistry {
+        let mut r = ConstituentRegistry::new("bio.organic_residue");
+        r.push("bio.mineral_ash_fraction", "bio.mineral_ash_fraction");
+        r
+    }
+
+    /// Apportion `mass` into (deposit_class, mass) shares by the decomposing matter's composition (`axis`, a
+    /// lookup returning the matter's value on a named floor axis, zero for an absent one). Each constituent
+    /// claims `min(remaining, mass * fraction)`, the residual takes the final remaining, so the shares sum to
+    /// `mass` EXACTLY (the residual absorbs all fixed-point rounding). A non-positive mass or a zero share is
+    /// dropped (no empty deposit, so an armed-but-unmatched body still lands its whole mass in the residual).
+    /// Canonical: the constituents in push order, then the residual, so the deposit sequence is reproducible
+    /// and thread-invariant.
+    pub fn split(&self, mass: Fixed, axis: impl Fn(&str) -> Fixed) -> Vec<(String, Fixed)> {
+        if mass <= Fixed::ZERO {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut remaining = mass;
+        for c in &self.constituents {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let frac = axis(&c.fraction_axis);
+            if frac <= Fixed::ZERO {
+                continue;
+            }
+            let share = mass.checked_mul(frac).unwrap_or(Fixed::ZERO).min(remaining);
+            if share <= Fixed::ZERO {
+                continue;
+            }
+            out.push((c.deposit_class.clone(), share));
+            remaining -= share;
+        }
+        if remaining > Fixed::ZERO {
+            out.push((self.residual_class.clone(), remaining));
+        }
+        out
+    }
+}
+
 /// A TISSUE PARCEL: a quantity of an organism's own MATTER, deposited where it fell, carried as a raw
 /// COMPOSITION VECTOR (its value on each biology and mechanical floor axis, keyed by axis id) rather than a
 /// registered [`civsim_physics::Substance`] id. This is how a generated organism becomes located, usable
@@ -1126,11 +1218,15 @@ impl TissueField {
         total
     }
 
-    /// Rot every parcel by a fraction of its volume, returning the (cell, mass) removed for the soil deposit
-    /// (the tissue -> soil RETURN leg of the nutrient cycle): the located body matter is fed back to the soil
-    /// the producers draw. Canonical order; an emptied parcel/cell is dropped so the fold stays reproducible.
-    /// The removed volume is the mass returned (a unit tissue density until a reserved density lands).
-    pub fn decay(&mut self, rate: Fixed) -> Vec<(Coord3, Fixed)> {
+    /// Rot every parcel by a fraction of its volume, returning per parcel the (cell, its own COMPOSITION, mass
+    /// removed) for the soil deposit (the tissue -> soil RETURN leg of the nutrient cycle): the located body
+    /// matter is fed back to the soil the producers draw, re-materialised into the soil by the body's OWN
+    /// composition axes (T5), symmetric with the material leg's per-substance split. Each parcel carries its
+    /// own composition so a caller ([`crate::material::ConstituentRegistry::split`]) apportions its lost mass
+    /// by that composition, never a hardcoded organic bucket. Canonical order; an emptied parcel/cell is
+    /// dropped so the fold stays reproducible. The removed volume is the mass returned (a unit tissue density
+    /// until a reserved density lands).
+    pub fn decay(&mut self, rate: Fixed) -> Vec<(Coord3, BTreeMap<String, Fixed>, Fixed)> {
         if rate <= Fixed::ZERO {
             return Vec::new();
         }
@@ -1139,7 +1235,6 @@ impl TissueField {
         for cell in cells {
             let parcels = self.cells.get_mut(&cell).unwrap();
             let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
-            let mut removed = Fixed::ZERO;
             for key in keys {
                 let volume = *parcels.get(&key).unwrap();
                 let d = volume.checked_mul(rate).unwrap_or(Fixed::ZERO).min(volume);
@@ -1147,18 +1242,16 @@ impl TissueField {
                     continue;
                 }
                 let nv = volume - d;
+                let composition: BTreeMap<String, Fixed> = key.iter().cloned().collect();
                 if nv <= Fixed::ZERO {
                     parcels.remove(&key);
                 } else {
                     parcels.insert(key, nv);
                 }
-                removed = removed.saturating_add(d);
+                out.push((cell, composition, d));
             }
             if parcels.is_empty() {
                 self.cells.remove(&cell);
-            }
-            if removed > Fixed::ZERO {
-                out.push((cell, removed));
             }
         }
         out
@@ -1323,6 +1416,86 @@ impl GroundProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constituent_split_is_mass_exact_and_generalises_the_ash_pair_to_k_axes() {
+        // Chemistry arc, T5: the decomposed mass is apportioned into soil classes by the decomposing matter's
+        // OWN composition (data-defined), generalizing the fixed ash-plus-organic pair to k=N constituents,
+        // and the split is mass-EXACT (the constituent shares plus the residual equal the whole loss bit for
+        // bit, whatever the per-share fixed-point multiplies round to).
+        let mass = Fixed::from_int(100);
+        // A k=3 registry: three fraction axes plus a residual. The fractions do NOT sum to a round number, so
+        // the residual has to absorb the rounding for the sum to stay exact.
+        let mut reg = ConstituentRegistry::new("residual");
+        reg.push("ash", "soil.ash");
+        reg.push("lignin", "soil.lignin");
+        reg.push("labile", "soil.labile");
+        let comp: BTreeMap<String, Fixed> = [
+            ("ash".to_string(), Fixed::from_ratio(7, 100)),
+            ("lignin".to_string(), Fixed::from_ratio(23, 100)),
+            ("labile".to_string(), Fixed::from_ratio(31, 100)),
+        ]
+        .into_iter()
+        .collect();
+        let split = reg.split(mass, |a| comp.get(a).copied().unwrap_or(Fixed::ZERO));
+        // Four shares: the three constituents plus the residual (39% of the mass, whatever rounds up).
+        assert_eq!(split.len(), 4, "k=3 constituents plus the residual");
+        let total = split
+            .iter()
+            .fold(Fixed::ZERO, |acc, (_, m)| acc.saturating_add(*m));
+        assert_eq!(
+            total, mass,
+            "the shares sum to the whole loss EXACTLY (mass-exact)"
+        );
+        // The classes are the matter's OWN chemistry, not a hardcoded Earth bucket.
+        let classes: Vec<&str> = split.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            classes,
+            vec!["soil.ash", "soil.lignin", "soil.labile", "residual"]
+        );
+
+        // The terran_default reproduces the pre-arc k=2 split exactly (mineral-ash to a mineral class, the
+        // remainder to an organic class), the byte-neutral fallback an unarmed matter cycle uses.
+        let carrion: BTreeMap<String, Fixed> = [(
+            "bio.mineral_ash_fraction".to_string(),
+            Fixed::from_ratio(5, 100),
+        )]
+        .into_iter()
+        .collect();
+        let d = ConstituentRegistry::terran_default();
+        let s = d.split(mass, |a| carrion.get(a).copied().unwrap_or(Fixed::ZERO));
+        // The expected shares are computed the SAME way the pre-arc code did (mineral = mass * ash via
+        // checked_mul, organic = the exact remainder), so this proves equivalence without assuming 0.05 is
+        // exactly representable in fixed point. The remainder construction is what keeps the sum exact.
+        let ash = Fixed::from_ratio(5, 100);
+        let mineral = mass.checked_mul(ash).unwrap();
+        let organic = mass - mineral;
+        assert_eq!(
+            s,
+            vec![
+                ("bio.mineral_ash_fraction".to_string(), mineral),
+                ("bio.organic_residue".to_string(), organic),
+            ],
+            "the default is the mineral-ash + organic-remainder pair (the pre-arc split)"
+        );
+        assert_eq!(
+            mineral.saturating_add(organic),
+            mass,
+            "and the pair still sums to the whole loss exactly"
+        );
+
+        // A body carrying NONE of the fraction axes lands its WHOLE mass in the residual (the tissue leg's
+        // byte-neutral case: a body with no declared constituent decays to the organic residual entire).
+        let body: BTreeMap<String, Fixed> = [("mat.density".to_string(), Fixed::from_int(1000))]
+            .into_iter()
+            .collect();
+        let sb = reg.split(mass, |a| body.get(a).copied().unwrap_or(Fixed::ZERO));
+        assert_eq!(
+            sb,
+            vec![("residual".to_string(), mass)],
+            "a body with no constituent axis returns its whole mass to the residual (mass-exact)"
+        );
+    }
 
     #[test]
     fn a_tissue_field_accumulates_by_content_and_folds_order_free() {

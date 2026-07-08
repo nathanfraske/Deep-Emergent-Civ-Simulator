@@ -3927,6 +3927,66 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
 }
 
 #[test]
+fn the_decomposition_split_is_data_defined_and_gated_on_the_barrier_not_the_ash_axis() {
+    // Chemistry arc, T5: decomposability is the substance declaring a decomposition BARRIER (its own physical
+    // gate), NOT the presence of an Earth mineral-ash axis (the retired gather-gate), and how the lost mass
+    // splits into soil classes is a DATA-defined ConstituentRegistry, not a hardcoded ash-plus-organic pair.
+    // Proof: arm a world whose registry references a fraction axis carrion does NOT carry. Carrion still
+    // decomposes (the barrier gate, not the ash gate), and its whole lost mass lands in the world's own
+    // residual class, none in the Earth `bio.*` classes, so the split follows the armed data, never a bucket
+    // baked into the engine.
+    use civsim_sim::material::{ConstituentRegistry, MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+
+    let hreg = energy_thermal_registry();
+    let mut emb = Embodiment::new(
+        hreg,
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0xDECA,
+    );
+    let mut field = MaterialField::new();
+    field.deposit(cell, "carrion", flesh0); // carrion carries mineral_ash_fraction AND a 273 K barrier
+    emb.set_material(field);
+    emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+    let mut r = Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(300)), calib(), emb);
+    r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+    // The world's OWN chemistry: a residual class and a constituent keyed on an axis carrion does not carry,
+    // so nothing is carved out and the whole loss falls to the residual. Neither class is a `bio.*` Earth name.
+    let mut world_reg = ConstituentRegistry::new("world.humus");
+    world_reg.push("world.labile_fraction", "world.labile");
+    r.set_constituents(world_reg);
+
+    r.step();
+
+    let soil = r.embodiment().unwrap().soil();
+    let decomposed = r.embodiment().unwrap().decomposed_mass();
+    assert!(
+        decomposed > Fixed::ZERO,
+        "carrion still decomposes: decomposability is its BARRIER, not the ash axis (retired gather-gate)"
+    );
+    assert_eq!(
+        soil.mass(cell, "world.humus"),
+        decomposed,
+        "the whole lost mass lands in the WORLD'S own residual class (the split follows the armed data)"
+    );
+    assert_eq!(
+        soil.mass(cell, "bio.mineral_ash_fraction"),
+        Fixed::ZERO,
+        "no mass leaks to the Earth mineral class: the ash bucket is no longer hardcoded"
+    );
+    assert_eq!(
+        soil.mass(cell, "bio.organic_residue"),
+        Fixed::ZERO,
+        "no mass leaks to the Earth organic class: the split is data-defined end to end"
+    );
+}
+
+#[test]
 fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
     // DECOMPOSITION-AS-EMERGENCE (Principle 8), the whole point: the matter cycle no longer asserts that all
     // warm matter rots. The substance's own rate is now its MAXIMUM susceptibility, and the fraction a cell
