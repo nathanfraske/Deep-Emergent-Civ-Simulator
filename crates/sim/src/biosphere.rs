@@ -36,11 +36,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_core::{DrawKey, Fixed, Phase, StableId};
 
 use crate::anatomy::{sample_body_plan, BodyPlan, BodyPlanRegistry, WorldProfile};
-use crate::genome::{GenePool, SchemeId};
+use crate::genome::{append_morphogen_block, GeneDef, GenePool, MorphogenParamId, SchemeId};
 use crate::lineage::{Lineage, SpeciesId};
+use crate::morphogen::{
+    express_program, grow, morphogen_gene_set_with_prefix, MorphogenProgram, Structure,
+};
+
+/// The RNG counter base for a grown species' per-parameter morphogen target seeds (Arc 6), placed clear of
+/// the niche (0..2*env_axes), draws_on (100), and body-plan (200) counter blocks in [`sample_candidate`].
+const MORPHOGEN_SEED_BASE: u64 = 300;
 
 /// A region's environmental profile: the value of each environmental field in `[0, ONE]`,
 /// indexed by environmental-axis ordinal (the terrain elevation, moisture, and temperature
@@ -154,7 +161,12 @@ impl Niche {
 pub struct Species {
     pub layer: u16,
     pub niche: Niche,
-    pub body_plan: BodyPlan,
+    /// The species' body. `Some` is the CATALOG tier: a sampled [`BodyPlan`] of typed parts (byte-identical
+    /// to the pre-Arc-6 world). `None` is the GROWN tier (Arc 6): the body is not stored but regrown on
+    /// demand from `pool` against the world's shared morphogen program, so a species' morphology EMERGES from
+    /// its genome and is selected, rather than sampled from a catalog. The `None` arm is itself the tier
+    /// discriminator (a species, unlike a race, has no walker to hang the grown tier off).
+    pub body_plan: Option<BodyPlan>,
     pub draws_on: Vec<SourceRef>,
     pub pool: GenePool,
     /// Whether the lineage has gone extinct. Append-only: an extinct species stays in the
@@ -256,6 +268,16 @@ pub struct GeneratorParams {
     /// since heterotrophy favours moving to the food, but above zero so a sessile consumer (a
     /// coral, a barnacle) can arise. Whether a body walks is drawn morphology, never kingdom.
     pub consumer_rooted_prior: Fixed,
+    /// The ploidy of a grown species' genome (Arc 6): how many haplotype copies a member carries, so the
+    /// morphogen block's dosage-normalised additive effect (`target / ploidy`) reads correctly. RESERVED.
+    /// Basis: matches the sexual-diploid founder default (`Race::ploidy()` = 2) for a grounded fixture; a
+    /// haploid or clonal alien lineage is an equally legitimate world choice through this same DATA field,
+    /// never a hardcoded 2.
+    pub ploidy: usize,
+    /// The additive-variance approximation for a grown species' morphogen block (Arc 6): the Gaussian lever
+    /// the pool draws allele effects with. RESERVED. Basis: cross-tier consistency with whatever the founder
+    /// morphogen path settles on (itself currently a labelled test fixture); the dev fixture is the default.
+    pub morphogen_gauss: civsim_core::GaussApprox,
 }
 
 impl GeneratorParams {
@@ -292,6 +314,11 @@ impl GeneratorParams {
             // sessile filter-feeder can both emerge rather than being forbidden by kingdom.
             producer_rooted_prior: Fixed::from_ratio(97, 100),
             consumer_rooted_prior: Fixed::from_ratio(3, 100),
+            // Grow-tier fixtures (Arc 6): sexual-diploid ploidy and the stamped k=12 additive-variance lever
+            // (the canonical central-limit identity, scale exactly one; NOT the unset sentinel k=0, which
+            // panics on draw). RESERVED: the owner sets the world-identity gauss stamp; k=12 is the fixture.
+            ploidy: 2,
+            morphogen_gauss: civsim_core::GaussApprox::SumOfUniforms { k: 12 },
         }
     }
 }
@@ -365,6 +392,7 @@ pub fn generate(
     p: &GeneratorParams,
     reg: &BodyPlanRegistry,
     profile: WorldProfile,
+    morphogen: Option<&crate::morphogen::MorphogenProgram>,
 ) -> Biosphere {
     let mut lin: Lineage<Species> = Lineage::new();
     let mut empty_niches = 0u32;
@@ -383,7 +411,9 @@ pub fn generate(
                     .in_region(region_id)
                     .slot(attempt)
                     .rng(seed);
-                let cand = match sample_candidate(&rng, layer, region, &by_layer, p, reg, profile) {
+                let cand = match sample_candidate(
+                    &rng, layer, region, &by_layer, p, reg, profile, morphogen,
+                ) {
                     Some(c) => c,
                     None => continue, // no lower-layer prey exists yet; a later layer stays thin
                 };
@@ -451,6 +481,34 @@ fn commit(
 /// species for a consumer), and a fresh pool. Returns `None` if a consumer layer has no
 /// lower-layer prey to draw on yet.
 #[allow(clippy::too_many_arguments)]
+/// A deterministic stable id for a species (Arc 6), used to counter-key its representative body growth. A
+/// trivial wrap of the species ordinal, distinct per species and stable across queries, so a species' grown
+/// Structure is reproducible; it never enters the run's founder id space (growth keys on `Phase::MORPHOGEN`).
+pub fn species_stable_id(id: SpeciesId) -> StableId {
+    StableId(id.0 as u64)
+}
+
+/// The REPRESENTATIVE grown body of a species (Arc 6): promote a representative genome from the species pool
+/// and grow its Structure through the shared morphogen program. Pure and deterministic (same species, pool,
+/// program, and seed give the same Structure), uncached, so the grown body is never stored on `Species` and
+/// stays a read of the current pool. The gene set is prefixed past the `niche_loci` bookkeeping loci so each
+/// morphogen parameter reads its own allele ([`morphogen_gene_set_with_prefix`]).
+pub fn representative_structure(
+    species_id: SpeciesId,
+    pool: &GenePool,
+    program: &MorphogenProgram,
+    niche_loci: usize,
+    ploidy: usize,
+    seed: u64,
+) -> Structure {
+    let id = species_stable_id(species_id);
+    let genome = pool.promote(seed, id.0, ploidy);
+    let gene_set = morphogen_gene_set_with_prefix(niche_loci, program);
+    let params = express_program(program, &gene_set, &genome);
+    grow(program, &params, seed, id)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn sample_candidate(
     rng: &civsim_core::Rng,
     layer: u16,
@@ -459,6 +517,7 @@ fn sample_candidate(
     p: &GeneratorParams,
     reg: &BodyPlanRegistry,
     profile: WorldProfile,
+    morphogen: Option<&crate::morphogen::MorphogenProgram>,
 ) -> Option<Species> {
     let mut optimum = Vec::with_capacity(p.env_axes);
     let mut breadth = Vec::with_capacity(p.env_axes);
@@ -488,17 +547,52 @@ fn sample_candidate(
         vec![SourceRef::Species(prey_layer[pick])]
     };
 
-    // A fresh pool at half frequencies, the reserved loci count and effective size.
-    let pool = GenePool::new(
-        SchemeId(0),
-        p.pool_size,
-        vec![Fixed::from_ratio(1, 2); p.loci],
-    );
-    // The structured aggregate-tier anatomy: a body plan of typed parts and a temperament,
-    // drawn on counters offset past the niche counters (design 25.14). Whether the body is rooted
-    // or mobile is drawn against the role prior, not fixed by kingdom, so a mobile autotroph (a
-    // walking tree) can emerge rather than being ruled out (Principle 9).
-    let body_plan = sample_body_plan(rng, layer, p.rooted_prior(layer), reg, profile, 200);
+    let (body_plan, pool) = match morphogen {
+        None => {
+            // CATALOG tier (byte-identical to the pre-Arc-6 world): a fresh pool at half frequencies with a
+            // flat (all-zero) additive spine, and a sampled body plan of typed parts and a temperament, drawn
+            // on counters offset past the niche counters (design 25.14). Whether the body is rooted or mobile
+            // is drawn against the role prior, not fixed by kingdom, so a mobile autotroph (a walking tree)
+            // can emerge rather than being ruled out (Principle 9).
+            let pool = GenePool::new(
+                SchemeId(0),
+                p.pool_size,
+                vec![Fixed::from_ratio(1, 2); p.loci],
+            );
+            let plan = sample_body_plan(rng, layer, p.rooted_prior(layer), reg, profile, 200);
+            (Some(plan), pool)
+        }
+        Some(program) => {
+            // GROWN tier (Arc 6): the body EMERGES from the genome. Draw a per-species RANDOMIZED
+            // target-fraction seed for every morphogen parameter (a fresh counter block, MORPHOGEN_SEED_BASE,
+            // clear of the niche 0..2*env_axes, draws_on 100, and body-plan 200 counters), so species differ
+            // in morphology from their first draw rather than collapsing to one trivial body (the flat-spine
+            // hazard). Append the morphogen block onto the flat niche-loci prefix and build the pool with the
+            // additive spine; the body plan is None (regrown on demand from the pool, never cached).
+            let seeds: Vec<(MorphogenParamId, Fixed)> = (0..program.param_count())
+                .map(|k| {
+                    (
+                        MorphogenParamId(k as u32),
+                        rng.unit_fixed(MORPHOGEN_SEED_BASE + k as u64),
+                    )
+                })
+                .collect();
+            let mut throwaway_genes: Vec<GeneDef> = Vec::new();
+            let mut freqs = vec![Fixed::from_ratio(1, 2); p.loci];
+            let mut effects = vec![Fixed::ZERO; p.loci];
+            append_morphogen_block(
+                &mut throwaway_genes,
+                &mut freqs,
+                &mut effects,
+                p.ploidy,
+                program.param_count(),
+                &seeds,
+            );
+            let pool = GenePool::new(SchemeId(0), p.pool_size, freqs)
+                .with_additive(effects, p.morphogen_gauss);
+            (None, pool)
+        }
+    };
     Some(Species {
         layer,
         niche: Niche { optimum, breadth },
@@ -533,6 +627,66 @@ mod tests {
     }
 
     #[test]
+    fn a_grown_world_grows_distinct_bodies_from_the_genome_not_a_catalog_or_a_flat_spine() {
+        // Arc 6: with a morphogen program, every species carries NO sampled BodyPlan (its body is grown from
+        // its own genome), and the randomized per-species seed makes the species express DISTINCT morphogen
+        // parameters, so selection has real morphological variation to act on rather than one repeated trivial
+        // body (the flat-spine collapse the design flagged). Proof, three parts.
+        let p = GeneratorParams::dev_default();
+        let program = MorphogenProgram::dev_default();
+        let seed = 0xB105u64;
+        let world = generate(
+            seed,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            Some(&program),
+        );
+        let ids: Vec<_> = world.species.ids().collect();
+        assert!(
+            ids.len() >= 2,
+            "the dev region grows a multi-species web to compare"
+        );
+
+        // (1) Every species is GROWN, none catalog-sampled.
+        for &id in &ids {
+            assert!(
+                world.species.get(id).unwrap().body_plan.is_none(),
+                "a grown species carries no catalog body plan"
+            );
+        }
+
+        // (2) The species express DISTINCT morphogen parameters (the randomized-seed fix): a flat-zero spine
+        // would make every species express the identical parameter vector.
+        let mut param_sets: BTreeSet<Vec<i64>> = BTreeSet::new();
+        for &id in &ids {
+            let sp = world.species.get(id).unwrap();
+            let nl = sp.pool.loci().saturating_sub(program.param_count());
+            let genome = sp.pool.promote(seed, species_stable_id(id).0, p.ploidy);
+            let gene_set = morphogen_gene_set_with_prefix(nl, &program);
+            let params = express_program(&program, &gene_set, &genome);
+            param_sets.insert(params.iter().map(|f| f.to_bits()).collect());
+        }
+        assert!(
+            param_sets.len() > 1,
+            "grown species express distinct morphogen params, not one flat-spine body"
+        );
+
+        // (3) Regrowing a species is DETERMINISTIC: the same pool, program, and seed give the same body.
+        let sp = world.species.get(ids[0]).unwrap();
+        let nl = sp.pool.loci().saturating_sub(program.param_count());
+        let a = representative_structure(ids[0], &sp.pool, &program, nl, p.ploidy, seed);
+        let b = representative_structure(ids[0], &sp.pool, &program, nl, p.ploidy, seed);
+        assert_eq!(
+            a.digest().body_mass,
+            b.digest().body_mass,
+            "regrowing a species' representative body is deterministic"
+        );
+    }
+
+    #[test]
     fn suitability_peaks_at_the_optimum_and_falls_to_zero_past_breadth() {
         let n = Niche {
             optimum: vec![Fixed::from_ratio(5, 10)],
@@ -560,7 +714,15 @@ mod tests {
     #[test]
     fn a_generated_web_is_closed() {
         let p = GeneratorParams::dev_default();
-        let b = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
+        let b = generate(
+            0xB105,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
         assert!(!b.is_empty(), "the region is seeded");
         let all: BTreeMap<SpeciesId, Species> = b
             .species
@@ -593,10 +755,34 @@ mod tests {
                 })
                 .collect()
         };
-        let a = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
-        let b = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
+        let a = generate(
+            0xB105,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
+        let b = generate(
+            0xB105,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
         assert_eq!(hash(&a), hash(&b), "same seed and region, same biosphere");
-        let c = generate(0x1234, &region(), 7, &p, &reg(), WorldProfile::grounded());
+        let c = generate(
+            0x1234,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
         assert_ne!(
             hash(&a),
             hash(&c),
@@ -607,8 +793,24 @@ mod tests {
     #[test]
     fn generated_species_have_distinct_deterministic_anatomy() {
         let p = GeneratorParams::dev_default();
-        let a = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
-        let b = generate(0xB105, &region(), 7, &p, &reg(), WorldProfile::grounded());
+        let a = generate(
+            0xB105,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
+        let b = generate(
+            0xB105,
+            &region(),
+            7,
+            &p,
+            &reg(),
+            WorldProfile::grounded(),
+            None,
+        );
         // Deterministic: the same seed gives the same anatomy.
         for id in a.species.ids() {
             assert_eq!(
@@ -620,7 +822,16 @@ mod tests {
         let masses: std::collections::BTreeSet<i64> = a
             .species
             .ids()
-            .map(|id| a.species.get(id).unwrap().body_plan.body_mass.to_bits())
+            .map(|id| {
+                a.species
+                    .get(id)
+                    .unwrap()
+                    .body_plan
+                    .as_ref()
+                    .unwrap()
+                    .body_mass
+                    .to_bits()
+            })
             .collect();
         assert!(masses.len() > 1, "species differ in body mass");
     }
@@ -647,7 +858,7 @@ mod tests {
                     optimum: vec![],
                     breadth: vec![],
                 },
-                body_plan: bp.clone(),
+                body_plan: Some(bp.clone()),
                 draws_on: vec![SourceRef::Abiotic(0)],
                 pool: pool.clone(),
                 extinct: false,
@@ -661,7 +872,7 @@ mod tests {
                     optimum: vec![],
                     breadth: vec![],
                 },
-                body_plan: bp,
+                body_plan: Some(bp),
                 draws_on: vec![SourceRef::Species(SpeciesId(99))],
                 pool,
                 extinct: false,

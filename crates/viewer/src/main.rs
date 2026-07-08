@@ -85,6 +85,7 @@ fn snapshot(argv: &[String]) {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     let biomes = BiomeSet::dev_default();
     let center = populated_center(&living, params.width, params.height);
@@ -191,6 +192,7 @@ fn render_cmd(argv: &[String]) {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     let biomes = BiomeSet::dev_default();
     if mode == "superfine" {
@@ -223,6 +225,7 @@ fn stats_cmd(argv: &[String]) {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     let daughters: u32 = living.regions.values().map(|r| r.report.daughters).sum();
     let extinctions: u32 = living.regions.values().map(|r| r.report.extinctions).sum();
@@ -252,6 +255,7 @@ fn radiate_cmd(argv: &[String]) {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     println!(
         "staged genesis: {} regions, {} founder species over {} generations",
@@ -287,6 +291,7 @@ fn radiate_cmd(argv: &[String]) {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     let ok = stepped.state_hash() == batch.state_hash();
     println!(
@@ -371,6 +376,7 @@ fn main() {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
     // Demo mode has no interactive control, so run the radiation to completion up front and
     // showcase the finished, matured world with the auto-zoom.

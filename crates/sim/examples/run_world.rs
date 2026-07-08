@@ -1697,6 +1697,7 @@ fn main() {
             // The world's abiotic sources: the Earth-triad dev fixture (Arc 5 T1). An alien world declares
             // its own; the run arms this same registry via worldbuild, so generation and run agree by data.
             &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+            None,
         );
         let producers = living.producer_biomass(Fixed::ONE);
         println!(

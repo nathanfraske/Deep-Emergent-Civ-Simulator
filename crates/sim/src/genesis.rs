@@ -38,13 +38,17 @@ use civsim_world::{
 use rayon::prelude::*;
 
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
-use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
+use crate::biosphere::{
+    generate, representative_structure, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef,
+    Species,
+};
 use crate::clock::Steppable;
 use crate::environ::AbioticSourceRegistry;
 use crate::epoch::{run, EpochParams, EpochReport, Radiation};
 use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
+use crate::morphogen::MorphogenProgram;
 use crate::physiology::whole_body_composition_vector;
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
@@ -122,9 +126,70 @@ pub struct LivingWorld {
     /// [`AbioticSourceRegistry::earth_dev`]; an alien world its own), and the run arms it from here rather
     /// than a hand-written literal, closing the generation-to-run consistency gap.
     pub abiotic: AbioticSourceRegistry,
+    /// The world's grown-body context (Arc 6), if it grows its biosphere bodies from their genomes. `None` is
+    /// the catalog-tier world (every species carries a sampled `BodyPlan`, byte-identical to pre-Arc-6).
+    /// `Some` is the grown-tier world: each species' body is regrown on demand from its pool against the
+    /// shared program (diversity comes from the per-species genome, not per-species programs). Bundles the
+    /// program, ploidy, and world seed the consumers that read a species' composition and mass need to regrow
+    /// its representative Structure.
+    pub grown: Option<GrownBodies>,
+}
+
+/// The world-scoped context for growing biosphere bodies from their genomes (Arc 6): the shared morphogen
+/// program, the ploidy the pools were built with, and the world seed. Held on [`LivingWorld`] so a consumer
+/// can regrow any species' representative [`crate::morphogen::Structure`] from its pool
+/// ([`crate::biosphere::representative_structure`]); the niche-loci prefix a species carries is read off its
+/// own pool, so it is not stored here.
+#[derive(Clone, Debug)]
+pub struct GrownBodies {
+    pub program: MorphogenProgram,
+    pub ploidy: usize,
+    pub seed: u64,
 }
 
 impl LivingWorld {
+    /// A species' whole-body composition VECTOR (Arc 6), forking on the body tier: a catalog species reads
+    /// its sampled [`BodyPlan`] against the registry (byte-identical to pre-Arc-6); a grown species regrows
+    /// its representative [`crate::morphogen::Structure`] from its pool against the world's shared program and
+    /// reads its composition directly off the grown tissue. Fail-loud if a grown species is present without
+    /// the world's grown-body context (an invariant violation, never a silent Terran default).
+    fn species_composition_vector(
+        &self,
+        species_id: SpeciesId,
+        species: &Species,
+    ) -> BTreeMap<String, Fixed> {
+        match &species.body_plan {
+            Some(bp) => whole_body_composition_vector(bp, &self.registry),
+            None => self
+                .representative_structure_of(species_id, species)
+                .whole_body_composition_vector(),
+        }
+    }
+
+    /// Regrow a grown-tier species' representative Structure from its pool and the world's grown-body context
+    /// (Arc 6). The niche-loci prefix is read off the species' own pool (`pool.loci() - program.param_count()`)
+    /// so the morphogen block aligns. Panics if the world carries no grown-body context (a grown species
+    /// cannot exist without one), matching the fail-loud discipline over a silent default.
+    fn representative_structure_of(
+        &self,
+        species_id: SpeciesId,
+        species: &Species,
+    ) -> crate::morphogen::Structure {
+        let g = self
+            .grown
+            .as_ref()
+            .expect("a grown-tier species requires the world's morphogen grown-body context");
+        let niche_loci = species.pool.loci().saturating_sub(g.program.param_count());
+        representative_structure(
+            species_id,
+            &species.pool,
+            &g.program,
+            niche_loci,
+            g.ploidy,
+            g.seed,
+        )
+    }
+
     /// The located biomass of every PRODUCER occupant, for seeding the run world's food field (the
     /// biosphere-into-run arc): each producer token contributes `pop_capacity * its niche suitability` in
     /// its region, so a plant stands as food where the climate suits it and the founders graze real located
@@ -235,7 +300,7 @@ impl LivingWorld {
                 if autotroph {
                     continue;
                 }
-                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                let composition = self.species_composition_vector(info.species, species);
                 if composition.is_empty() {
                     continue;
                 }
@@ -285,7 +350,7 @@ impl LivingWorld {
                 if !autotroph {
                     continue;
                 }
-                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                let composition = self.species_composition_vector(info.species, species);
                 if composition.is_empty() {
                     continue;
                 }
@@ -365,30 +430,46 @@ impl LivingWorld {
         } else {
             "herbivore"
         };
-        let bp = &sp.body_plan;
-        let reg = &self.registry;
-        let weapons: Vec<&str> = bp
-            .weapons
-            .iter()
-            .map(|p| BodyPlanRegistry::name(&reg.weapons, p.kind))
-            .collect();
-        let senses: Vec<&str> = bp
-            .senses
-            .iter()
-            .map(|p| BodyPlanRegistry::name(&reg.senses, p.kind))
-            .collect();
-        let covering = BodyPlanRegistry::name(&reg.coverings, bp.covering.kind);
-        let arms = if weapons.is_empty() {
-            "unarmed".to_string()
-        } else {
-            weapons.join("+")
-        };
-        format!(
-            "{label}#{}  {}  {arms}  {covering}  senses:{}",
-            info.species.0,
-            temperament_word(bp.temperament.boldness),
-            senses.join("/")
-        )
+        match &sp.body_plan {
+            // Catalog tier: name the typed parts (byte-identical to pre-Arc-6).
+            Some(bp) => {
+                let reg = &self.registry;
+                let weapons: Vec<&str> = bp
+                    .weapons
+                    .iter()
+                    .map(|p| BodyPlanRegistry::name(&reg.weapons, p.kind))
+                    .collect();
+                let senses: Vec<&str> = bp
+                    .senses
+                    .iter()
+                    .map(|p| BodyPlanRegistry::name(&reg.senses, p.kind))
+                    .collect();
+                let covering = BodyPlanRegistry::name(&reg.coverings, bp.covering.kind);
+                let arms = if weapons.is_empty() {
+                    "unarmed".to_string()
+                } else {
+                    weapons.join("+")
+                };
+                format!(
+                    "{label}#{}  {}  {arms}  {covering}  senses:{}",
+                    info.species.0,
+                    temperament_word(bp.temperament.boldness),
+                    senses.join("/")
+                )
+            }
+            // Grown tier (Arc 6): a grown body has no named parts (function is read off the structure, not a
+            // catalog), so describe it by its grown physics: segment count and grown energy density. Flagged
+            // as reduced-fidelity, not a placeholder default.
+            None => {
+                let s = self.representative_structure_of(info.species, sp);
+                format!(
+                    "{label}#{}  grown  segments:{}  e_density:{}",
+                    info.species.0,
+                    s.segment_count(),
+                    s.whole_body_energy_density().to_bits()
+                )
+            }
+        }
     }
 
     /// A deterministic 128-bit hash of the whole living world: the map, then each region in
@@ -430,7 +511,12 @@ impl LivingWorld {
 }
 
 /// Run the whole world-genesis sequence deterministically from one world seed.
-pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistry) -> LivingWorld {
+pub fn genesis(
+    seed: u64,
+    params: &GenesisParams,
+    abiotic: &AbioticSourceRegistry,
+    morphogen: Option<&MorphogenProgram>,
+) -> LivingWorld {
     let biomes = BiomeSet::dev_default();
     let map = TileMap::generate(
         seed,
@@ -446,6 +532,13 @@ pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistr
     let side = params.region_side.max(1);
     let cols = (params.width + side - 1) / side;
     let rows = (params.height + side - 1) / side;
+    // The world's grown-body context (Arc 6), built once from the shared program, the generator ploidy, and
+    // the seed; passed to promotion and carried on the world so a consumer can regrow any species' body.
+    let grown = morphogen.map(|p| GrownBodies {
+        program: p.clone(),
+        ploidy: params.generator.ploidy,
+        seed,
+    });
 
     for ry in 0..rows {
         for rx in 0..cols {
@@ -461,6 +554,7 @@ pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistr
                 &params.generator,
                 &registry,
                 params.profile,
+                morphogen,
             );
             // The pre-dawn biosphere declares no Dobzhansky-Muller incompatibilities yet, so the
             // speciation gate reads an empty table and falls back to the frequency-distance rule; a
@@ -485,6 +579,7 @@ pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistr
                 y0,
                 side,
                 &map,
+                grown.as_ref(),
             );
 
             regions.insert(
@@ -506,6 +601,7 @@ pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistr
         registry,
         orbital: params.orbital,
         abiotic: abiotic.clone(),
+        grown,
     }
 }
 
@@ -538,13 +634,19 @@ pub struct WorldGenesis {
     side: i32,
     gen: u64,
     abiotic: AbioticSourceRegistry,
+    grown: Option<GrownBodies>,
 }
 
 impl WorldGenesis {
     /// Begin a staged world genesis: run worldgen and seed every region's founders (generation 0),
     /// leaving the radiation to be stepped. Deterministic from the one world seed, exactly as
     /// [`genesis`].
-    pub fn new(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistry) -> WorldGenesis {
+    pub fn new(
+        seed: u64,
+        params: &GenesisParams,
+        abiotic: &AbioticSourceRegistry,
+        morphogen: Option<&MorphogenProgram>,
+    ) -> WorldGenesis {
         let biomes = BiomeSet::dev_default();
         let map = TileMap::generate(
             seed,
@@ -571,6 +673,7 @@ impl WorldGenesis {
                     &params.generator,
                     &registry,
                     params.profile,
+                    morphogen,
                 );
                 let radiation = Radiation::new(
                     seed,
@@ -597,6 +700,11 @@ impl WorldGenesis {
             side,
             gen: 0,
             abiotic: abiotic.clone(),
+            grown: morphogen.map(|p| GrownBodies {
+                program: p.clone(),
+                ploidy: params.generator.ploidy,
+                seed,
+            }),
         }
     }
 
@@ -672,6 +780,7 @@ impl WorldGenesis {
                 sr.y0,
                 self.side,
                 &self.map,
+                self.grown.as_ref(),
             );
             regions.insert(
                 sr.coord,
@@ -690,6 +799,7 @@ impl WorldGenesis {
             registry: self.registry.clone(),
             orbital: self.params.orbital,
             abiotic: self.abiotic.clone(),
+            grown: self.grown.clone(),
         }
     }
 
@@ -784,6 +894,7 @@ fn place_survivors(
     y0: i32,
     side: i32,
     map: &TileMap,
+    grown: Option<&GrownBodies>,
 ) {
     let topo = map.topo();
     for id in biosphere.species.ids() {
@@ -807,7 +918,23 @@ fn place_survivors(
                     species: id,
                     layer: sp.layer,
                     region,
-                    body_mass: sp.body_plan.body_mass,
+                    // Arc 6: a catalog species reads its sampled plan's mass; a grown species reads the mass
+                    // its representative Structure digests to (fail-loud without the world's grown context).
+                    body_mass: match &sp.body_plan {
+                        Some(bp) => bp.body_mass,
+                        None => {
+                            let g = grown.expect(
+                                "a grown-tier species requires the world's morphogen grown-body context",
+                            );
+                            let niche_loci =
+                                sp.pool.loci().saturating_sub(g.program.param_count());
+                            representative_structure(
+                                id, &sp.pool, &g.program, niche_loci, g.ploidy, g.seed,
+                            )
+                            .digest()
+                            .body_mass
+                        }
+                    },
                 },
             );
         }
@@ -821,14 +948,14 @@ mod tests {
     #[test]
     fn genesis_replays_bit_identically() {
         let p = GenesisParams::dev_default();
-        let a = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
-        let b = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let a = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
+        let b = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert_eq!(
             a.state_hash(),
             b.state_hash(),
             "the same seed yields the same living world"
         );
-        let c = genesis(0x2222, &p, &AbioticSourceRegistry::earth_dev());
+        let c = genesis(0x2222, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert_ne!(
             a.state_hash(),
             c.state_hash(),
@@ -842,10 +969,10 @@ mod tests {
         // hash identically, and the same seed under a different orbit hashes differently, so a
         // world's year and day length are part of what makes it that world.
         let mut p = GenesisParams::dev_default();
-        let earth = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let earth = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert_eq!(
             earth.state_hash(),
-            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None).state_hash(),
             "same seed and orbit, same hash"
         );
         // A different orbit, everything else held: a different world.
@@ -853,7 +980,7 @@ mod tests {
             orbital_period_seconds: Fixed::from_int(86_400),
             rotation_period_seconds: Fixed::from_int(3_600),
         };
-        let fast = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let fast = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert_ne!(
             earth.state_hash(),
             fast.state_hash(),
@@ -862,7 +989,7 @@ mod tests {
         // And the different-orbit world is itself reproducible.
         assert_eq!(
             fast.state_hash(),
-            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None).state_hash(),
             "the different-orbit world replays bit-identically"
         );
     }
@@ -873,9 +1000,9 @@ mod tests {
         // completion produces a living world bit-identical to the one-shot batch genesis, so
         // watching the radiation unfold never diverges from the canonical result.
         let p = GenesisParams::dev_default();
-        let batch = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let batch = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         let staged =
-            WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).into_living();
+            WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None).into_living();
         assert_eq!(
             batch.state_hash(),
             staged.state_hash(),
@@ -886,7 +1013,7 @@ mod tests {
     #[test]
     fn a_staged_genesis_can_be_watched_step_by_step() {
         let p = GenesisParams::dev_default();
-        let mut wg = WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let mut wg = WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert_eq!(wg.generation(), 0);
         let founders = wg.species();
         assert!(founders > 0, "the founders are seeded before any radiation");
@@ -909,7 +1036,7 @@ mod tests {
         );
         assert_eq!(
             snapf.state_hash(),
-            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None).state_hash(),
             "the fully stepped snapshot equals batch genesis"
         );
     }
@@ -917,7 +1044,7 @@ mod tests {
     #[test]
     fn the_living_world_has_a_populated_ecology() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         assert!(!w.regions.is_empty(), "the map is partitioned into regions");
         assert!(w.species() > 0, "species were generated");
         assert!(w.alive() > 0, "some species survive to the dawn");
@@ -932,7 +1059,7 @@ mod tests {
     #[test]
     fn the_epoch_radiated_the_founders() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         let daughters: u32 = w.regions.values().map(|r| r.report.daughters).sum();
         assert!(
             daughters > 0,
@@ -943,7 +1070,7 @@ mod tests {
     #[test]
     fn occupants_are_findable_at_the_superfine_zoom() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev(), None);
         // Some occupied tile has a promoted organism the located join can return.
         let coord = w.occupants.occupied().next().expect("an occupied tile");
         assert!(

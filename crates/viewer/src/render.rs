@@ -446,6 +446,7 @@ mod tests {
             0xEA27,
             &params,
             &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+            None,
         );
         let (w, h, tile_px) = (240usize, 160usize, 18usize);
         // Centre on an occupied tile so at least one organism mark is drawn.

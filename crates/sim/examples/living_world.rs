@@ -54,6 +54,7 @@ fn main() {
         seed,
         &params,
         &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
     );
 
     println!(

@@ -479,6 +479,7 @@ mod tests {
                 &gp,
                 &crate::anatomy::BodyPlanRegistry::dev_default(),
                 crate::anatomy::WorldProfile::grounded(),
+                None,
             );
             let founders = bio.len();
             let report = run(
@@ -517,6 +518,7 @@ mod tests {
                 &gp,
                 &crate::anatomy::BodyPlanRegistry::dev_default(),
                 crate::anatomy::WorldProfile::grounded(),
+                None,
             )
         };
 
@@ -571,6 +573,7 @@ mod tests {
             &gp,
             &crate::anatomy::BodyPlanRegistry::dev_default(),
             crate::anatomy::WorldProfile::grounded(),
+            None,
         );
         let report = run(
             0xB105,
@@ -595,6 +598,7 @@ mod tests {
             &gp,
             &crate::anatomy::BodyPlanRegistry::dev_default(),
             crate::anatomy::WorldProfile::grounded(),
+            None,
         );
         let founders = bio.len();
         // The cap bounds the radiation (the daughters), so set it above the founder count and
@@ -656,6 +660,7 @@ mod tests {
             &gp,
             &bpr,
             crate::anatomy::WorldProfile::grounded(),
+            None,
         );
         let bio_step = generate(
             0xB105,
@@ -664,6 +669,7 @@ mod tests {
             &gp,
             &bpr,
             crate::anatomy::WorldProfile::grounded(),
+            None,
         );
 
         let report_batch = run(
@@ -715,6 +721,7 @@ mod tests {
             &gp,
             &bpr,
             crate::anatomy::WorldProfile::grounded(),
+            None,
         );
         let mut rad = Radiation::new(0xB105, bio, reg, ep, IncompatibilityTable::new());
         assert_eq!(rad.generation(), 0);
