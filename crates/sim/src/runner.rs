@@ -3583,7 +3583,20 @@ impl Runner {
                                 .map(|p| p.medium.respirable_at(cell.x, cell.y))
                                 .unwrap_or(Fixed::ONE);
                             let life_stock = self.life_stock_at(*cell, substance);
-                            driver.activity_at(temperature, barrier, moisture, oxygen, life_stock)
+                            // The per-cell condition PROFILE (Arc 5 T6): the source-to-value slice a Conditions
+                            // row folds its world-declared axes against. The Terran runner supplies all three
+                            // (moisture, respirable, warmth-above-barrier), so a world arming the Earth triad
+                            // reads byte-identical to the pre-T6 kernel; a world declaring fewer or other axes
+                            // reads only what it declares.
+                            let profile = [
+                                (crate::decompose::ConditionSource::Moisture, moisture),
+                                (crate::decompose::ConditionSource::Respirable, oxygen),
+                                (
+                                    crate::decompose::ConditionSource::WarmthAboveBarrier,
+                                    crate::decompose::warmth_above_barrier(temperature, barrier),
+                                ),
+                            ];
+                            driver.activity_at(&profile, life_stock)
                         }
                         None => Fixed::ONE,
                     };

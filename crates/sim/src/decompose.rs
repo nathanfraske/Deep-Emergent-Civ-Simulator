@@ -36,12 +36,15 @@
 //! value, semantic, and institution-function substrates. Two kernels are defined:
 //!
 //! - The CONDITIONS kernel is the abiotic microbial-activity PROXY: a Liebig minimum of saturating
-//!   responses over the cell's MOISTURE (the precipitation and soil-moisture the environment field
-//!   carries, not standing water, since waterlogging suppresses decomposition through the oxygen term),
-//!   its OXYGEN (the same respirable content the combustion beat reads, so a submerged or sealed cell
-//!   throttles and anoxia falls out for free), and its WARMTH (the span above the substance's own
-//!   thermal barrier). Any one response at zero yields activity zero, so a dry, airless, or barely
-//!   thawed cell does not decay.
+//!   responses over a world-declared set of condition AXES ([`ConditionAxis`], Arc 5 T6), each a
+//!   [`ConditionSource`] and a reference scale. The Earth-aerobic fixture declares three: MOISTURE (the
+//!   precipitation and soil-moisture the environment field carries, not standing water, since waterlogging
+//!   suppresses decomposition through the oxygen term), RESPIRABLE (the same respirable content the
+//!   combustion beat reads, so a submerged or sealed cell throttles and anoxia falls out for free), and
+//!   WARMTH above the substance's own thermal barrier. Any one response at zero yields activity zero, so a
+//!   dry, airless, or barely thawed cell does not decay. The axis SET is data, not the engine's: an
+//!   anaerobic world drops the respirable axis, a world whose decay needs a different solvent declares its
+//!   own, so oxygen is not an engine-universal decomposition gate but one axis a world may or may not carry.
 //! - The LIFE kernel is the emergent branch: a saturating response on the per-cell standing DECOMPOSER
 //!   BIOMASS a world's own ecology deposits ([`DecomposerStockField`]). It is zero where no decomposer
 //!   life is present, so under the default combine a warm, wet, airy but STERILE cell does not decay, the
@@ -107,6 +110,35 @@ pub enum DecomposerKernelId {
     Life,
 }
 
+/// A CONDITION SOURCE (Arc 5 T6): the kind of environmental quantity a Conditions axis reads. This is the
+/// fixed-vocabulary-plus-data-binding boundary the abiotic [`crate::environ::AbioticField`] draws: the engine
+/// knows how to READ each source (the caller supplies its per-cell value), while WHICH sources gate a given
+/// substance's decomposition, and their reference scales, are the world's data. Extending the set is a Rust
+/// change (a new physical quantity needs a new reader), the same bounded cost `AbioticField` has; a world's
+/// CHOICE of which axes gate its decomposition is data, so an anaerobic world drops the respirable axis, a
+/// world whose decay needs a solvent other than water declares that axis, all without a new kernel variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConditionSource {
+    /// The cell's moisture (a wetness fraction the environ field carries).
+    Moisture,
+    /// The cell's respirable-medium concentration (the oxygen surrogate the medium substrate carries).
+    Respirable,
+    /// The cell's warmth ABOVE the substance's own thermal barrier (a derived quantity,
+    /// [`warmth_above_barrier`]), so the axis is zero at the freeze gate and rises over the reference span.
+    WarmthAboveBarrier,
+}
+
+/// One CONDITIONS axis (Arc 5 T6): a source and the reference scale at which it stops limiting. A Conditions
+/// row is a Liebig conjunction of these, so a world builds the axis set its own decomposition chemistry needs
+/// rather than the hardcoded Earth-aerobic moisture-oxygen-warmth triad.
+#[derive(Clone, Debug)]
+pub struct ConditionAxis {
+    pub source: ConditionSource,
+    /// The value at or above which this axis no longer limits decomposition (RESERVED, its basis on the row
+    /// constructor). A saturating response rises from zero to full as the source reaches this reference.
+    pub reference: Fixed,
+}
+
 /// A DECOMPOSER-DRIVER row: a data binding of one [`DecomposerKernelId`] to its reserved parameters,
 /// keyed by name (the accepted [`crate::trace::TransformKind`] shape). A registry is a sequence of these
 /// rows, and a cell's decomposition activity is the clamped saturating sum of their contributions.
@@ -114,6 +146,10 @@ pub enum DecomposerKernelId {
 pub struct DecomposerDriver {
     /// The kernel this row's contribution dispatches to.
     pub kernel: DecomposerKernelId,
+    /// The CONDITIONS axes this row folds (Arc 5 T6), used only by the Conditions kernel; empty for a Life
+    /// row. A world declares its own axis set here, so decomposition's environmental gates are data, not the
+    /// hardcoded moisture-oxygen-warmth triad.
+    pub axes: Vec<ConditionAxis>,
     /// The kernel's reserved parameters, keyed by name. An absent parameter reads zero (the substrate
     /// absence convention). The Conditions kernel reads `moisture_saturation` (the moisture at or above
     /// which moisture no longer limits, RESERVED, basis the field-capacity moisture of soil-decomposition
@@ -133,19 +169,40 @@ impl DecomposerDriver {
         self.params.get(name).copied().unwrap_or(Fixed::ZERO)
     }
 
-    /// The abiotic CONDITIONS driver: the moisture saturation, the oxygen reference, and the warmth span.
+    /// The Earth-aerobic CONDITIONS driver (Arc 5 T6): the moisture saturation, the oxygen reference, and the
+    /// warmth span, as the three-axis Terran fixture. A world with a different decomposition chemistry builds
+    /// its own axis set with [`Self::conditions_from`]; this convenience keeps the common triad terse and
+    /// byte-identical to the pre-T6 hardcoded kernel.
     pub fn conditions(
         moisture_saturation: Fixed,
         oxygen_reference: Fixed,
         warmth_span: Fixed,
     ) -> DecomposerDriver {
+        DecomposerDriver::conditions_from(vec![
+            ConditionAxis {
+                source: ConditionSource::Moisture,
+                reference: moisture_saturation,
+            },
+            ConditionAxis {
+                source: ConditionSource::Respirable,
+                reference: oxygen_reference,
+            },
+            ConditionAxis {
+                source: ConditionSource::WarmthAboveBarrier,
+                reference: warmth_span,
+            },
+        ])
+    }
+
+    /// A CONDITIONS driver over a world-declared axis set (Arc 5 T6): the row's activity is the Liebig minimum
+    /// of the axes' saturating responses. An anaerobic world drops the respirable axis; a world whose decay
+    /// needs a solvent declares that axis; a world with no conditions gate at all passes an empty set (which
+    /// never limits, the always-active row).
+    pub fn conditions_from(axes: Vec<ConditionAxis>) -> DecomposerDriver {
         DecomposerDriver {
             kernel: DecomposerKernelId::Conditions,
-            params: BTreeMap::from([
-                ("moisture_saturation".to_string(), moisture_saturation),
-                ("oxygen_reference".to_string(), oxygen_reference),
-                ("warmth_span".to_string(), warmth_span),
-            ]),
+            axes,
+            params: BTreeMap::new(),
         }
     }
 
@@ -153,40 +210,31 @@ impl DecomposerDriver {
     pub fn life(biomass_reference: Fixed) -> DecomposerDriver {
         DecomposerDriver {
             kernel: DecomposerKernelId::Life,
+            axes: Vec::new(),
             params: BTreeMap::from([("biomass_reference".to_string(), biomass_reference)]),
         }
     }
 
-    /// This row's per-cell contribution to the decomposition activity, in `[0, 1]`. A Conditions row
-    /// reads the cell's moisture, oxygen, and warmth-above-barrier; a Life row reads the cell's standing
-    /// decomposer biomass. The unused inputs for a given kernel are ignored, so the caller passes all of
-    /// them once.
-    fn contribution(
-        &self,
-        temperature: Fixed,
-        barrier: Fixed,
-        moisture: Fixed,
-        oxygen: Fixed,
-        life_stock: Fixed,
-    ) -> Fixed {
+    /// This row's per-cell contribution to the decomposition activity, in `[0, 1]`. A Conditions row folds its
+    /// world-declared axes against the cell's `profile` (a source-to-value slice the caller builds); a Life
+    /// row reads the cell's standing decomposer biomass. The unused inputs for a given kernel are ignored, so
+    /// the caller passes all of them once.
+    fn contribution(&self, profile: &[(ConditionSource, Fixed)], life_stock: Fixed) -> Fixed {
         match self.kernel {
             DecomposerKernelId::Conditions => {
-                // The Liebig minimum of the three saturating responses: the worst-limiting axis sets the
+                // The Liebig minimum of the axes' saturating responses: the worst-limiting axis sets the
                 // activity, the order-independent form the biosphere's niche suitability and the floor's
-                // net_nutrition already use. Any axis at zero yields activity zero.
-                let m = saturating_response(moisture, self.param("moisture_saturation"));
-                let o = saturating_response(oxygen, self.param("oxygen_reference"));
-                // Warmth is measured from the substance's own thermal barrier (the caller's freeze gate),
-                // so it is zero at the barrier and rises to full over the reserved span. The difference is a
-                // SATURATING subtraction over the raw bits (the same discipline `organic_salience` uses for
-                // its negation), so an extreme temperature-minus-barrier cannot overflow i64 and panic under
-                // the release profile's overflow checks; a non-positive excess (this function is pure and may
-                // be called below the barrier) then reads zero.
-                let warmth =
-                    Fixed::from_bits(temperature.to_bits().saturating_sub(barrier.to_bits()))
-                        .max(Fixed::ZERO);
-                let w = saturating_response(warmth, self.param("warmth_span"));
-                m.min(o).min(w)
+                // net_nutrition already use. An axis whose source the profile does not carry is NON-LIMITING
+                // (skipped): a world that supplies no value for an axis makes no claim it limits, the same
+                // open-air convention the runner's `unwrap_or(ONE)` already applied. An empty axis set never
+                // limits (activity full), the always-active conditions row.
+                let mut activity = Fixed::ONE;
+                for axis in &self.axes {
+                    if let Some((_, value)) = profile.iter().find(|(s, _)| *s == axis.source) {
+                        activity = activity.min(saturating_response(*value, axis.reference));
+                    }
+                }
+                activity
             }
             DecomposerKernelId::Life => {
                 // Zero at sterility (no decomposer biomass), rising to full at the reference standing crop.
@@ -194,6 +242,16 @@ impl DecomposerDriver {
             }
         }
     }
+}
+
+/// The warmth of a cell ABOVE a substance's own thermal barrier (Arc 5 T6, extracted from the Conditions
+/// kernel so a caller builds the [`ConditionSource::WarmthAboveBarrier`] profile value once): zero at or
+/// below the barrier (the caller's freeze gate), rising with the excess. A fixed Rust physics derivation,
+/// not data. The difference is a SATURATING subtraction over the raw bits (the same discipline
+/// `organic_salience` uses for its negation), so an extreme temperature-minus-barrier cannot overflow i64
+/// and panic under the release profile's overflow checks; a non-positive excess reads zero.
+pub fn warmth_above_barrier(temperature: Fixed, barrier: Fixed) -> Fixed {
+    Fixed::from_bits(temperature.to_bits().saturating_sub(barrier.to_bits())).max(Fixed::ZERO)
 }
 
 /// A saturating response in `[0, 1]`: zero at a zero value, rising linearly to full as the value reaches
@@ -282,18 +340,11 @@ impl DecomposerDriverRegistry {
     /// result is deterministic regardless of row order; the final clamp is a defensive guard. The caller
     /// multiplies the substance's rate by this before the volume breaks down, so a factor of one reproduces
     /// the unconditional rate and a factor of zero preserves the matter.
-    pub fn activity_at(
-        &self,
-        temperature: Fixed,
-        barrier: Fixed,
-        moisture: Fixed,
-        oxygen: Fixed,
-        life_stock: Fixed,
-    ) -> Fixed {
+    pub fn activity_at(&self, profile: &[(ConditionSource, Fixed)], life_stock: Fixed) -> Fixed {
         let mut contributions = self
             .rows
             .iter()
-            .map(|row| row.contribution(temperature, barrier, moisture, oxygen, life_stock));
+            .map(|row| row.contribution(profile, life_stock));
         let combined = match contributions.next() {
             None => return Fixed::ZERO,
             Some(first) => match self.combine {
@@ -420,13 +471,34 @@ mod tests {
         )
     }
 
+    // The Earth-triad condition profile a test cell presents (Arc 5 T6): the moisture, respirable, and
+    // warmth-above-barrier the runner supplies, so the tests exercise the same axes the run does.
+    fn profile(
+        temperature: Fixed,
+        barrier: Fixed,
+        moisture: Fixed,
+        oxygen: Fixed,
+    ) -> Vec<(ConditionSource, Fixed)> {
+        vec![
+            (ConditionSource::Moisture, moisture),
+            (ConditionSource::Respirable, oxygen),
+            (
+                ConditionSource::WarmthAboveBarrier,
+                warmth_above_barrier(temperature, barrier),
+            ),
+        ]
+    }
+
     #[test]
     fn an_unarmed_registry_reads_zero_activity() {
         // An armed-but-empty registry has no driver, so it preserves everything (activity zero). The
         // runner reads a full activity of one only from the ABSENCE of a registry, not from an empty one.
         let reg = DecomposerDriverRegistry::new();
         let (t, b, m, o) = favorable();
-        assert_eq!(reg.activity_at(t, b, m, o, Fixed::ONE), Fixed::ZERO);
+        assert_eq!(
+            reg.activity_at(&profile(t, b, m, o), Fixed::ONE),
+            Fixed::ZERO
+        );
     }
 
     #[test]
@@ -436,9 +508,9 @@ mod tests {
         let mut reg = DecomposerDriverRegistry::new();
         reg.push(DecomposerDriver::life(Fixed::from_int(2)));
         let (t, b, m, o) = favorable();
-        let sterile = reg.activity_at(t, b, m, o, Fixed::ZERO);
-        let colonised = reg.activity_at(t, b, m, o, Fixed::ONE);
-        let full = reg.activity_at(t, b, m, o, Fixed::from_int(2));
+        let sterile = reg.activity_at(&profile(t, b, m, o), Fixed::ZERO);
+        let colonised = reg.activity_at(&profile(t, b, m, o), Fixed::ONE);
+        let full = reg.activity_at(&profile(t, b, m, o), Fixed::from_int(2));
         assert_eq!(
             sterile,
             Fixed::ZERO,
@@ -467,23 +539,63 @@ mod tests {
         ));
         let (t, b, m, o) = favorable();
         assert!(
-            reg.activity_at(t, b, m, o, Fixed::ZERO) > Fixed::ZERO,
+            reg.activity_at(&profile(t, b, m, o), Fixed::ZERO) > Fixed::ZERO,
             "a warm, wet, oxygenated cell decays"
         );
         assert_eq!(
-            reg.activity_at(t, b, Fixed::ZERO, o, Fixed::ZERO),
+            reg.activity_at(&profile(t, b, Fixed::ZERO, o), Fixed::ZERO),
             Fixed::ZERO,
             "a bone-dry cell does not decay"
         );
         assert_eq!(
-            reg.activity_at(t, b, m, Fixed::ZERO, Fixed::ZERO),
+            reg.activity_at(&profile(t, b, m, Fixed::ZERO), Fixed::ZERO),
             Fixed::ZERO,
             "an airless cell does not decay"
         );
         assert_eq!(
-            reg.activity_at(b, b, m, o, Fixed::ZERO),
+            reg.activity_at(&profile(b, b, m, o), Fixed::ZERO),
             Fixed::ZERO,
             "a cell exactly at its thawing barrier does not decay"
+        );
+    }
+
+    #[test]
+    fn a_world_that_declares_its_own_condition_axes_is_not_bound_to_the_earth_triad() {
+        // Arc 5 T6: the Conditions axis set is world data, not the hardcoded moisture-oxygen-warmth triad, so
+        // an ANAEROBIC world (whose decomposition does not need oxygen) drops the respirable axis and its
+        // airless cells decay, where the Earth-triad kernel would gate them to zero. Proof: the same airless
+        // cell (oxygen zero) reads zero under the Earth triad but full-limited-only-by-moisture-and-warmth
+        // under a world that declares just those two axes. No new kernel, only a different data axis set.
+        let (t, b, m, _o) = favorable();
+        let airless = profile(t, b, m, Fixed::ZERO); // wet and warm, but no oxygen
+
+        let mut terran = DecomposerDriverRegistry::new();
+        terran.push(DecomposerDriver::conditions(
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(10),
+        ));
+        assert_eq!(
+            terran.activity_at(&airless, Fixed::ZERO),
+            Fixed::ZERO,
+            "under the Earth triad an airless cell does not decay (the respirable axis gates it)"
+        );
+
+        let mut anaerobic = DecomposerDriverRegistry::new();
+        anaerobic.push(DecomposerDriver::conditions_from(vec![
+            ConditionAxis {
+                source: ConditionSource::Moisture,
+                reference: Fixed::from_ratio(1, 2),
+            },
+            ConditionAxis {
+                source: ConditionSource::WarmthAboveBarrier,
+                reference: Fixed::from_int(10),
+            },
+        ]));
+        assert!(
+            anaerobic.activity_at(&airless, Fixed::ZERO) > Fixed::ZERO,
+            "a world that declares no respirable axis decays an airless but wet, warm cell: oxygen is not an \
+             engine-universal gate, it is one axis a world may or may not declare"
         );
     }
 
@@ -507,12 +619,12 @@ mod tests {
         );
         let (t, b, m, o) = favorable();
         assert_eq!(
-            reg.activity_at(t, b, m, o, Fixed::ZERO),
+            reg.activity_at(&profile(t, b, m, o), Fixed::ZERO),
             Fixed::ZERO,
             "a sterile cell does not decay under All even with a favorable Conditions row (Life gates it)"
         );
         assert_eq!(
-            reg.activity_at(t, b, m, o, Fixed::ONE),
+            reg.activity_at(&profile(t, b, m, o), Fixed::ONE),
             Fixed::ONE,
             "a fully colonised, favorable cell decays at the full rate (both drivers permit)"
         );
@@ -533,12 +645,12 @@ mod tests {
         reg.push(DecomposerDriver::life(Fixed::ONE));
         let (t, b, m, o) = favorable();
         assert_eq!(
-            reg.activity_at(t, b, m, o, Fixed::ZERO),
+            reg.activity_at(&profile(t, b, m, o), Fixed::ZERO),
             Fixed::ONE,
             "under Any a favorable Conditions row drives decay even at a sterile cell (the explicit OR choice)"
         );
         assert_eq!(
-            reg.activity_at(t, b, m, o, Fixed::from_int(5)),
+            reg.activity_at(&profile(t, b, m, o), Fixed::from_int(5)),
             Fixed::ONE,
             "the combined activity never exceeds full"
         );
