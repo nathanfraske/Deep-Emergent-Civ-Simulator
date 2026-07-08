@@ -60,6 +60,7 @@ use civsim_core::Fixed;
 
 use std::collections::BTreeSet;
 
+use crate::conviction_percept::ConvictionPerceptRegistry;
 use crate::genome::{Channel, ControllerParamId, GeneSet, Genome};
 use crate::homeostasis::{
     AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis, HomeostaticAxisId,
@@ -173,8 +174,20 @@ pub struct ControllerLayout {
     /// bias, so every earlier base and the bias-as-last convention hold unchanged. A founder expresses zero
     /// for the attraction weights, so nothing is drawn toward a trace until selection lifts one (Principle 9).
     n_attraction: usize,
-    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction
-    /// + 1` for the bias).
+    /// The number of CONVICTION channels (the width of the conviction input block; Prereq B for the learned
+    /// experience-to-conviction coupling, `OWNER_DECISIONS_LOG.md` R2). Zero unless the world exposes a
+    /// nonempty [`crate::conviction_percept::ConvictionPerceptRegistry`], in which case it is one channel per
+    /// conviction axis declared, each carrying the being's own STANCE on that axis (from its intrinsic
+    /// beliefs, written by the runner). Zero yields an input vector, weight count, and genome expression
+    /// identical to a world without it, so it is OPT-IN and hash-neutral by default, the same discipline as
+    /// the feature, appetitive, material, and attraction blocks. The block sits AFTER the attraction block and
+    /// before the bias, so every earlier base and the bias-as-last convention hold unchanged. A founder
+    /// expresses zero for the conviction weights, so a conviction moves no behaviour until selection lifts a
+    /// weight off zero: whether and how a conviction sways action EMERGES rather than being authored (Principle
+    /// 8). Keys on the axis id, never a named institution or religion (the Steering Audit bites here).
+    n_conviction: usize,
+    /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction +
+    /// n_conviction + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -292,12 +305,51 @@ impl ControllerLayout {
         attraction: bool,
         hidden: usize,
     ) -> ControllerLayout {
+        ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
+            homeo,
+            afford,
+            percept,
+            appetitive,
+            material,
+            attraction,
+            &ConvictionPerceptRegistry::empty(),
+            hidden,
+        )
+    }
+
+    /// Build a layout that also feeds a CONVICTION block, one channel per conviction axis the registry exposes
+    /// (Prereq B for the learned experience-to-conviction coupling, `OWNER_DECISIONS_LOG.md` R2). The block
+    /// sits AFTER the attraction block and before the bias, so the per-axis input bases ([`axis_input_base`]),
+    /// every earlier block base ([`feature_input_base`], [`appetitive_input_base`], [`material_input_base`],
+    /// [`attraction_input_base`]), and the bias-as-last convention all hold unchanged; an EMPTY conviction
+    /// registry yields exactly [`ControllerLayout::with_percepts_appetitive_material_and_attraction`]'s layout
+    /// (`n_conviction` zero), so the conviction substrate is opt-in and a world that exposes no conviction is
+    /// bit-identical. Each channel carries the being's own STANCE on that conviction axis, written by the
+    /// runner from its intrinsic beliefs; the channels grow `n_in`, so the weight count and the genome
+    /// expression grow with them, and a founder expresses zero for the new conviction weights, so a conviction
+    /// moves no behaviour until selection lifts a weight off zero. Whether and how a conviction sways action
+    /// EMERGES from selection over the evolved weight, never an authored conviction-to-action rule (Principle
+    /// 8); the block keys on the axis id, never a named institution or religion (Principle 9, the Steering
+    /// Audit).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_percepts_appetitive_material_attraction_and_conviction(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        appetitive: bool,
+        material: &MaterialPerceptRegistry,
+        attraction: bool,
+        conviction: &ConvictionPerceptRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
         let n_features = percept.len();
         let n_material = material.len();
         // The attraction-direction input is two components (dx, dy), or none when the world does not enable
         // the reward-attraction gradient.
         let n_attraction = if attraction { 2 } else { 0 };
+        // One conviction channel per exposed conviction axis, or none when the world exposes no conviction.
+        let n_conviction = conviction.len();
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         // One appetitive channel per affordance (aligned to the output slots below), or none when the
@@ -308,6 +360,7 @@ impl ControllerLayout {
             + n_appetitive
             + n_material
             + n_attraction
+            + n_conviction
             + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
@@ -327,6 +380,7 @@ impl ControllerLayout {
             n_appetitive,
             n_material,
             n_attraction,
+            n_conviction,
             n_in,
             n_out,
             hidden,
@@ -413,6 +467,24 @@ impl ControllerLayout {
     /// attraction direction reads this so it never hardcodes the block's position.
     pub fn attraction_input_base(&self) -> usize {
         INPUTS_PER_AXIS * self.axes.len() + self.n_features + self.n_appetitive + self.n_material
+    }
+
+    /// The number of conviction channels this layout feeds (zero unless the world exposes a nonempty
+    /// [`crate::conviction_percept::ConvictionPerceptRegistry`]; Prereq B). When positive it is one channel per
+    /// exposed conviction axis, in the registry's canonical order, each carrying the being's own stance.
+    pub fn n_conviction(&self) -> usize {
+        self.n_conviction
+    }
+
+    /// The input-vector index where the conviction block begins: after the per-axis blocks and the feature,
+    /// appetitive, material, and attraction blocks, before the bias. A caller writing the conviction vector
+    /// reads this so it never hardcodes the block's position, which the earlier block widths set.
+    pub fn conviction_input_base(&self) -> usize {
+        INPUTS_PER_AXIS * self.axes.len()
+            + self.n_features
+            + self.n_appetitive
+            + self.n_material
+            + self.n_attraction
     }
 
     /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
@@ -557,6 +629,41 @@ impl ControllerLayout {
         material: &[Fixed],
         attraction: &[Fixed],
     ) -> Vec<Fixed> {
+        self.build_input_full_with_conviction(
+            homeo,
+            here,
+            source_dirs,
+            signed,
+            features,
+            appetitive,
+            material,
+            attraction,
+            &[],
+        )
+    }
+
+    /// Build the input vector including the CONVICTION block (Prereq B, `OWNER_DECISIONS_LOG.md` R2): the
+    /// per-axis blocks and the feature, appetitive, material, and attraction blocks and bias exactly as
+    /// [`build_input_full`], plus each conviction channel's own stance written into the conviction block
+    /// ([`conviction_input_base`] onward, in the registry's canonical axis order). `conviction` is the being's
+    /// own stance on each exposed conviction axis, read from its intrinsic beliefs by the runner; a shorter
+    /// slice leaves the unfilled channels zero (clean degrade), and an empty slice with `n_conviction` zero is
+    /// byte-identical to [`build_input_full`] before the conviction block existed, so an opted-out world is
+    /// unchanged. A pure read of the being's own physiology, earned knowledge, and convictions (Principles 9,
+    /// 10); the controller, not this builder, decides whether a conviction moves behaviour (Principle 8).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_input_full_with_conviction(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+        appetitive: &[Fixed],
+        material: &[Fixed],
+        attraction: &[Fixed],
+        conviction: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -586,6 +693,10 @@ impl ControllerLayout {
         let atbase = self.attraction_input_base();
         for (k, &a) in attraction.iter().enumerate().take(self.n_attraction) {
             v[atbase + k] = a;
+        }
+        let cbase = self.conviction_input_base();
+        for (k, &c) in conviction.iter().enumerate().take(self.n_conviction) {
+            v[cbase + k] = c;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
@@ -1009,6 +1120,111 @@ mod tests {
         assert_eq!(
             lit_out, dark_out,
             "a founder's behaviour is unmoved by the appetitive percept (emergent, not authored)"
+        );
+    }
+
+    #[test]
+    fn the_conviction_block_is_opt_in_byte_identical_and_founder_inert() {
+        // Prereq B for the learned experience-to-conviction coupling (OWNER_DECISIONS_LOG R2): the conviction
+        // input block is opt-in and hash-neutral by default, one channel per exposed conviction axis when
+        // armed, sits AFTER the attraction block and before the bias (so every earlier base holds), and is
+        // inert for a founder whose weights are all zero, so whether a conviction moves behaviour EMERGES
+        // (Principle 8) and an opted-out world is bit-identical.
+        use crate::axiom::AxiomAxisId;
+        use crate::material_percept::MaterialPerceptRegistry;
+        let homeo = HomeostaticRegistry::dev_default();
+        let afford = AffordanceRegistry::dev_default();
+        let percept = PerceptRegistry::empty();
+        let material = MaterialPerceptRegistry::empty();
+
+        // Opt-out: the conviction-empty layout is byte-identical to the attraction-tier layout it delegates to.
+        let plain = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+            &homeo, &afford, &percept, false, &material, false, 0,
+        );
+        let off = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
+            &homeo,
+            &afford,
+            &percept,
+            false,
+            &material,
+            false,
+            &ConvictionPerceptRegistry::empty(),
+            0,
+        );
+        assert_eq!(off, plain, "the conviction-empty layout is byte-identical");
+        assert_eq!(off.n_conviction(), 0);
+
+        // Opt-in: n_in grows by exactly one channel per exposed conviction axis, the block sits just past the
+        // attraction block (here, with no other blocks, just before the bias), and the weight count follows.
+        let convictions = ConvictionPerceptRegistry::from_axes(&[AxiomAxisId(0), AxiomAxisId(3)]);
+        let on = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
+            &homeo,
+            &afford,
+            &percept,
+            false,
+            &material,
+            false,
+            &convictions,
+            0,
+        );
+        assert_eq!(on.n_conviction(), 2);
+        assert_eq!(on.n_in(), plain.n_in() + 2);
+        assert_eq!(on.conviction_input_base(), plain.n_in() - 1); // just past attraction, before the bias
+        assert_eq!(on.weight_count(), on.n_out() * on.n_in());
+
+        // The builder writes the being's own stances into the conviction block and keeps the bias last.
+        let here = BTreeSet::new();
+        let dirs = BTreeMap::new();
+        let signed = BTreeMap::new();
+        let homeostasis = Homeostasis::from_mass(&homeo, Fixed::ONE);
+        let stances = vec![Fixed::ONE, Fixed::from_ratio(1, 2)];
+        let input = on.build_input_full_with_conviction(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &[],
+            &[],
+            &[],
+            &stances,
+        );
+        let cbase = on.conviction_input_base();
+        assert_eq!(
+            input[cbase],
+            Fixed::ONE,
+            "conviction channel 0 is the being's own stance"
+        );
+        assert_eq!(
+            input[cbase + 1],
+            Fixed::from_ratio(1, 2),
+            "conviction channel 1 is its stance"
+        );
+        assert_eq!(
+            input[on.n_in() - 1],
+            Fixed::ONE,
+            "the bias is still the last slot"
+        );
+
+        // A founder (all-zero weights) issues the identical output whether or not the conviction block is lit,
+        // so a conviction moves no behaviour until selection lifts a conviction weight off zero.
+        let founder = Controller::zeros(&on);
+        let dark = on.build_input_full_with_conviction(
+            &homeostasis,
+            &here,
+            &dirs,
+            &signed,
+            &[],
+            &[],
+            &[],
+            &[],
+            &vec![Fixed::ZERO; 2],
+        );
+        let (lit_out, _) = founder.evaluate(&input, &[]);
+        let (dark_out, _) = founder.evaluate(&dark, &[]);
+        assert_eq!(
+            lit_out, dark_out,
+            "a founder's behaviour is unmoved by its convictions until selection lifts a weight (emergent)"
         );
     }
 
