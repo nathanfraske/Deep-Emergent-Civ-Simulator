@@ -269,6 +269,13 @@ pub struct EnvironFields {
     /// folded into `state_hash`: it is a pure derived read of the embodiment's soil store (which folds
     /// itself), and its effect enters the hash through the `capacity` it shifts.
     fertility: Vec<Fixed>,
+    /// The located PRODUCER biomass per cell, seeded once at world build from the living biosphere (the
+    /// biosphere-into-run arc). Where a real producer organism stands, its biomass is the food CAPACITY here
+    /// instead of the abstract climate productivity, so the founders graze real located plants (patchy, with
+    /// species identity) rather than a uniform number field. All-zero until the biosphere seeds it, so a run
+    /// with no biosphere reads the plain climate productivity and its hash is unchanged. Not folded into
+    /// `state_hash` (like `fertility`): its effect enters the hash through the `capacity` it sets.
+    producer: Vec<Fixed>,
 }
 
 impl EnvironFields {
@@ -305,6 +312,7 @@ impl EnvironFields {
             elevation,
             downhill,
             fertility: vec![Fixed::ZERO; n],
+            producer: vec![Fixed::ZERO; n],
         }
     }
 
@@ -548,6 +556,21 @@ impl EnvironFields {
         }
     }
 
+    /// Seed the located PRODUCER biomass from the living biosphere (the biosphere-into-run arc), once at
+    /// world build. Overwrites (idempotent on re-seed); an off-grid cell is dropped. See [`Self::producer`].
+    pub fn set_producer(&mut self, cells: &[(Coord3, Fixed)]) {
+        for p in self.producer.iter_mut() {
+            *p = Fixed::ZERO;
+        }
+        for &(cell, biomass) in cells {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            self.producer[i] = self.producer[i].saturating_add(biomass);
+        }
+    }
+
     /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
     /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
     /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
@@ -563,13 +586,22 @@ impl EnvironFields {
             for x in 0..w {
                 let i = self.idx(x, y);
                 let soil = calib.soil_baseline.saturating_add(self.fertility[i]);
-                self.capacity.cells[i] = biomass_from(
+                let climate = biomass_from(
                     self.water.cells[i],
                     self.light[i],
                     temp.at(x, y),
                     soil,
                     calib,
                 );
+                // Where a real producer organism stands (biosphere-into-run), its located biomass is the food
+                // ceiling; elsewhere the abstract climate productivity is the baseline (the stand-in for
+                // unmodelled background vegetation). An all-zero producer (no biosphere seeded) takes the
+                // climate branch on every cell, so the capacity and its hash are byte-unchanged.
+                self.capacity.cells[i] = if self.producer[i] > Fixed::ZERO {
+                    self.producer[i]
+                } else {
+                    climate
+                };
             }
         }
     }
@@ -738,6 +770,7 @@ mod tests {
             elevation,
             downhill,
             fertility: vec![Fixed::ZERO; elev_tenths.len()],
+            producer: vec![Fixed::ZERO; elev_tenths.len()],
         }
     }
 

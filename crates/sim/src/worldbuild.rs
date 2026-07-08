@@ -44,6 +44,7 @@ use crate::controller::Controller;
 use crate::decision::Curve;
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
+use crate::genesis::LivingWorld;
 use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use crate::langmod::{
     articulated_geometry, form_system_from_values, phoneme_priors, producible_values,
@@ -106,6 +107,11 @@ pub struct DawnPeoples {
     /// bodies ([`crate::runner::Runner::with_world_and_embodiment`]). When absent, the world-build
     /// returns a world-only runner exactly as before.
     pub embodiment: Option<EmbodimentGenesis>,
+    /// The living biosphere seeded into the run world (the biosphere-into-run arc, `--scenario full`): the
+    /// genesis-generated regions, occupants, and species, whose PRODUCER occupants seed the food field so
+    /// the founders forage over real located plants rather than a uniform climate number. `None` (the
+    /// default and every scenario but `full`) leaves the run byte-identical.
+    pub biosphere: Option<LivingWorld>,
 }
 
 /// The inputs the founder step embodies the dawn population from (real-world unification step 3): the
@@ -414,10 +420,17 @@ pub fn build_dawn_runner(
     // productivity is the default abstract source of the per-cell producer biomass, which the
     // living-biosphere addendum replaces with real producer occupants. Fail-loud on a reserved forcing
     // constant (Principle 11).
-    runner.set_environ(
-        EnvironFields::from_map(map),
-        EnvironCalib::from_manifest(manifest)?,
-    );
+    // Seed the run's food field from the living biosphere's PRODUCER occupants when armed (the
+    // biosphere-into-run arc): where a real producer stands, its located biomass is the food capacity, so
+    // the founders graze real plants rather than a uniform climate number. The reconstitution scalar is
+    // `Fixed::ONE`, the epoch's own `pop_capacity` (reserved; it must match the genesis epoch's
+    // `pop_capacity` so the run biomass matches what genesis radiated). `None` leaves the producer field
+    // all-zero and the run byte-identical.
+    let mut environ = EnvironFields::from_map(map);
+    if let Some(living) = &peoples.biosphere {
+        environ.set_producer(&living.producer_biomass(civsim_core::Fixed::ONE));
+    }
+    runner.set_environ(environ, EnvironCalib::from_manifest(manifest)?);
     // Arm the base-level liveliness surfacing policy (the arc-promotion magnitudes), fail-loud from the
     // manifest (Principle 11): the values that gate and weight the run-path story hooks are
     // reserved-with-basis, not hardcoded inline constants.

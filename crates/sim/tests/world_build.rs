@@ -174,6 +174,7 @@ fn peoples() -> DawnPeoples {
         mortality_hazard: None,
         language: None,
         embodiment: None,
+        biosphere: None,
     }
 }
 
@@ -266,6 +267,7 @@ fn peoples_with_language() -> DawnPeoples {
         mortality_hazard: None,
         language: Some(a_genesis()),
         embodiment: None,
+        biosphere: None,
     }
 }
 
@@ -630,6 +632,7 @@ fn sexed_peoples() -> DawnPeoples {
         mortality_hazard: None,
         language: None,
         embodiment: None,
+        biosphere: None,
     }
 }
 
@@ -792,6 +795,7 @@ fn embodied_peoples() -> DawnPeoples {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     }
 }
 
@@ -852,6 +856,7 @@ fn dispersing_peoples() -> DawnPeoples {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     }
 }
 
@@ -1122,6 +1127,7 @@ fn a_founder_expresses_a_primed_evolve_channel_at_the_birth_path() {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     };
 
     let runner = build_dawn_runner(
@@ -1492,6 +1498,7 @@ fn morphogen_peoples(limbed: bool) -> DawnPeoples {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     }
 }
 
@@ -1735,6 +1742,7 @@ fn viability_peoples(limbed: bool) -> DawnPeoples {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     }
 }
 
@@ -1880,6 +1888,7 @@ fn fully_grown_peoples(nourished: bool, physiological: bool) -> DawnPeoples {
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
+        biosphere: None,
     }
 }
 
