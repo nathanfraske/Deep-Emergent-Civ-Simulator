@@ -690,6 +690,34 @@ pub fn two_reserve_episode_survival(controller: &Controller, ticks: u32, seed: u
     (total / set.len() as u64) as u32
 }
 
+/// The DAWN BOOTSTRAP for conditional foraging: evolve a recurrent forage controller against the two-reserve
+/// viability challenge (the food-versus-water trap) and return the FITTEST genome, ready to seed a founder or
+/// creature pool so it enters the run PRE-ADAPTED to keep multiple spatially-separated reserves up (the
+/// capability a linear reaction norm cannot express, validated by
+/// `a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one`). Pass a
+/// `layout` with a positive hidden width for the recurrent representation. Deterministic in the seed. The
+/// behaviour is NOT authored: the physics scores viability and conditional foraging is what survives; this
+/// is the same emergent selection the run itself uses, run once up front so beings are not helpless at dawn.
+pub fn evolve_forage_controller(
+    layout: &ControllerLayout,
+    params: &EvolveParams,
+    seed: u64,
+) -> Genome {
+    let report = evolve_with(layout, params, seed, two_reserve_episode_survival);
+    let genes = controller_gene_set(layout);
+    report
+        .final_genomes
+        .into_iter()
+        .max_by_key(|g| {
+            two_reserve_episode_survival(
+                &Controller::express(&genes, g, layout),
+                params.episode_ticks,
+                seed ^ 0xE0,
+            )
+        })
+        .unwrap_or_else(|| random_controller_genome(layout, params, seed, 0))
+}
+
 // --- The thermal-survival scorer: evolve the thermotaxis controller in-situ on the coupled runner ---
 
 /// The controller layout for the thermal environment: the temperature-only development physiology and
@@ -1179,6 +1207,31 @@ mod tests {
 
     fn scoring_layout(hidden: usize) -> ControllerLayout {
         ControllerLayout::new(&scoring_reg(), &AffordanceRegistry::dev_default(), hidden)
+    }
+
+    #[test]
+    fn the_dawn_bootstrap_returns_a_usable_recurrent_forage_controller() {
+        // A fast wiring check (the full substrate validation is the recurrent-vs-linear test below): the dawn
+        // bootstrap runs, returns a genome expressing a valid controller at the recurrent hidden width, and
+        // that controller runs the two-reserve episode.
+        let reg = two_reserve_reg();
+        let layout = ControllerLayout::new(&reg, &AffordanceRegistry::dev_default(), 4);
+        let mut params = EvolveParams::dev_default();
+        params.pop_size = 8;
+        params.generations = 4;
+        params.episode_ticks = 60;
+        let genome = evolve_forage_controller(&layout, &params, 0xF00D);
+        let genes = controller_gene_set(&layout);
+        let controller = Controller::express(&genes, &genome, &layout);
+        assert_eq!(
+            controller.hidden(),
+            4,
+            "the bootstrapped controller carries the recurrent hidden width"
+        );
+        assert!(
+            two_reserve_episode_survival(&controller, 200, 0x5EED) > 0,
+            "the bootstrapped controller runs the food-vs-water episode"
+        );
     }
 
     #[test]
