@@ -80,6 +80,17 @@ pub struct Race {
     /// life-hazard curve is evaluated at (see [`Race::life_fraction`]), so a long-lived and a
     /// short-lived race face the same curve on their own scale from this one number, never a
     /// per-race code branch (Principle 9). A plain count with no formula: the owner sets it.
+    ///
+    /// OWNER DIRECTIVE (2026-07-08), to honor when the lifespan work is built: this must NOT stay an
+    /// authored number. Lifespan (and `maturity_years`, and the life-hazard curve behind them) is to be
+    /// DERIVED from the race's own anatomy and physiology, the way [`crate::physiology::derive_base_drain`]
+    /// derives metabolism from the body: from body mass and metabolic rate (the mass-longevity / rate-of-living
+    /// scaling), organ integrity and repair capacity, and whatever else the body's own physics dictate, so a
+    /// large slow-metabolism race lives for decades or centuries and a small fast one lives briefly BECAUSE of
+    /// its body, not because a number was typed. The authored value is the interim; the goal is a senescence
+    /// law reading the being's own body (the derive-not-author line: author it in the physics floor, grow the
+    /// rest). A magical/silicon/photosynthetic race then gets its own lifespan as a data row from its own body.
+    /// Surfaced in `docs/working/OWNER_DECISIONS_LOG.md` (R3) and the R-AGING design flag.
     pub lifespan_years: u32,
     /// The race's age of maturity in life-cadence steps, the same units as `lifespan_years`, an
     /// owner-set per-race datum (design.md:1594). It normalizes raw age into the maturation

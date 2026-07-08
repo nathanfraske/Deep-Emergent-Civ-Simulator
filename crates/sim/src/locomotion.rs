@@ -69,6 +69,7 @@ use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, Functi
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::controller::{Controller, ControllerLayout};
+use crate::conviction_experience::ConvictionExperience;
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
@@ -556,6 +557,14 @@ pub struct Walker {
     /// reward trace is opt-in, hash-neutral by default). Populated, decayed, and credited only where the
     /// runner arms the reward learner.
     pub eligibility_trace: EligibilityTrace,
+    /// The being's CONVICTION-EXPERIENCE record (Branch 1 of the learned experience-to-conviction coupling,
+    /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4): the per-conviction leaky signed accumulator that learns,
+    /// by correlation over the being's own life, which conviction its felt experience bears on
+    /// ([`crate::conviction_experience::ConvictionExperience`]). EMPTY by default, so a being in a world with
+    /// no felt-conviction learner armed folds nothing into `state_hash` (opt-in, hash-neutral by default).
+    /// Folded each tick from the being's own felt reserve swings and its held convictions only where the runner
+    /// arms the learner; it is inert (records, changes no conviction and no behaviour: Branch 2 consumes it).
+    pub conviction_experience: ConvictionExperience,
     /// The affordance the being ACTED on this tick, the head of the sequence its eligibility trace records
     /// (ideation arc, piece 1, slice 1c). Set each tick from the being's own decision and `None` on a tick
     /// it took no matter action; transient (re-derived every tick, never folded into `state_hash`), the
@@ -661,6 +670,7 @@ impl Walker {
             carried: SubstanceMix::new(),
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
+            conviction_experience: ConvictionExperience::new(),
             decided_affordance: None,
             decided_step: None,
             ate: SubstanceMix::new(),

@@ -52,6 +52,59 @@ R2. **How first-hand felt experience feeds a being's convictions: the LEARNED-CO
    28 consolidation happens when it is built. Reserved: the interoceptive-signal-to-salience scale (basis: the
    existing salience range of social events), owner's to set.
 
+R4. **Branch-1 (correlation-record) framing CORRECTED by a second blind framing panel (2026-07-08).** The R2
+   substrate's Branch 1. The first-cut framing defined a conviction's eligibility for felt-experience
+   association as (evolved controller weight x stance value), glossed as "the degree the conviction influenced
+   behaviour this tick." A fully-blind six-agent framing panel (three types, three models, de-narrivatized,
+   none seeing the conclusion) caught the SAME seam UNANIMOUSLY (6 of 6, none "sound-as-is"), verified against
+   source: (1) STATICNESS: both factors are constant within a life (controller weights change only across
+   generations; stance is read-only on the run path, moving only by cadence-gated enculturation that run_world
+   does not even arm), so weight x stance is a per-being CONSTANT MASK recomputed to the same value every tick,
+   the "decaying trace" does no credit assignment, and it becomes non-defeasible glue between a persistent trait
+   and an outcome (a template-case / P9 violation, indistinguishable from authoring). (2) MOTILITY-PARASITISM:
+   gating on the behaviour weight means a founder's unweighted convictions, and any conviction on a
+   sessile/immobile being, can never form an association however strongly their value tracks the felt swings, so
+   the substrate's coverage is silently contingent on motility (an admit-the-alien / P8 violation) and can only
+   rediscover what selection already wired into movement. THE CORRECTED FRAMING (derived, preserves R2's core):
+   drop the behaviour-weight coupling; mirror R2's own cited precedent, the harm learner (which correlates
+   felt-harm with the varying perceived feature weight-agnostically, defeasible via a BENIGN counter-signal).
+   Branch 1 is a per-being DECAYING SIGNED ACCUMULATOR per HELD conviction axis: each felt event folds the felt
+   summary (`physiology::felt_salience` valence x intensity) into the accumulator of each conviction the being
+   currently holds, engagement-weighted by the conviction's strength (|stance|), with a retention decay so it
+   tracks RECENT lived valence and can un-form (defeasible). It reads NO behaviour weight (weight-agnostic,
+   alien-clean); it changes no conviction and no behaviour (inert recording; Branch 2 consumes it); a being that
+   holds no conviction or a world that does not arm the learner records nothing (byte-neutral honest default).
+   Per-axis divergence emerges from WHEN each conviction was held relative to the being's lived valence (a
+   conviction held through hard years accumulates negative, one acquired after fortunes improved accumulates
+   positive), so the selectivity is lived-contingent, not seed-pinned. DIVERGENCE FROM R2's WORDING, surfaced
+   for owner review (not blocking, derivable): R2 said the pole follows "whether the felt outcome confirmed or
+   disconfirmed the stance the being was ACTING ON"; the panel found the literal behaviour-coupled reading of
+   "acting on" IS the defect, so the corrected framing uses "held while experiencing" (weight-agnostic), which
+   is MORE faithful to R2's own cited harm-learner primitive and preserves R2's core (felt experience emits only
+   magnitude + valence; which conviction it bears on is a learned per-being coupling). HONEST LIMIT (unchanged,
+   panel-confirmed): across-conviction attribution is DIFFUSE at the controller-percept tier (a felt outcome
+   folds into every held conviction, not one specific conviction); crisp per-conviction attribution needs the
+   deliberative tier, a future refinement. Reserved: the association retention/decay rate (basis: the
+   eligibility-decay and evidence-ring rates the reward and harm learners already use, set equal for
+   consistency) and the engagement weighting (|stance| the interim; uniform the alternative), owner's to confirm.
+
+R3. **Lifespan must be DERIVED from anatomy, not authored. OWNER DIRECTIVE 2026-07-08, a note to honor when
+   the lifespan/R-AGING work is built (not built now, surfaced so it is recalled then).** Today `Race.lifespan_years`
+   and `maturity_years` are authored per-race numbers (a plain owner-set count, `crates/sim/src/race.rs`,
+   design Part 20), and the individual-tier mortality rolls each being against an owner-supplied age-hazard
+   curve (`World::apply_mortality`). This is data-driven and per-race differentiable (a short-lived and a
+   long-lived race are different data rows, the R-AGING keystone, built and tested), but the lifespan is not
+   grown from the body. The owner's directive: it must be DERIVED from the race's own anatomy and physiology,
+   the way `physiology::derive_base_drain` derives metabolism from the body, so lifespan follows from body mass
+   and metabolic rate (the mass-longevity and rate-of-living scalings), organ integrity and repair capacity,
+   and the body's own physics, and a large slow-metabolism race lives for decades or centuries while a small
+   fast one lives briefly BECAUSE of its body rather than a typed value. The authored number is the interim
+   scaffold; the target is a senescence law that reads the being's own body (the derive-not-author line: author
+   only in the physics floor, grow the rest), so a magical / silicon / photosynthetic race gets its lifespan as
+   a data row from its own anatomy, and medicine (design Part 22/34) later modifies it. Recorded durably at the
+   `lifespan_years` field doc-comment and the R-AGING design flag (`docs/audit.md`) so the builder sees it.
+   Not a blocker for the current arc; a directive for the lifespan build.
+
 0. **The `--scenario full` collapse: RE-DIAGNOSED 2026-07-08 (my earlier soil-draw diagnosis was WRONG,
    corrected here).** With the edibility grounding, default/discovery/viability all THRIVE; only `--scenario
    full` collapses. EARLIER (incorrect) claim: the producer food-override drives the extract cycle to

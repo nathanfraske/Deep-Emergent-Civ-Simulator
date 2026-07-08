@@ -71,6 +71,7 @@ pub mod census;
 pub mod clock;
 pub mod conservation;
 pub mod controller;
+pub mod conviction_experience;
 pub mod conviction_percept;
 pub mod decision;
 pub mod decompose;

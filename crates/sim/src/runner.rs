@@ -86,8 +86,10 @@ use crate::affordance_percept::{
     tool_capability, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
+use crate::axiom::AxiomAxisId;
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::conviction_experience::FeltConvictionCalib;
 use crate::conviction_percept::ConvictionPerceptRegistry;
 use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
@@ -118,7 +120,7 @@ use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
-    derive_exertion_coupling, whole_body_composition_vector, MetabolicAnchors,
+    derive_exertion_coupling, felt_salience, whole_body_composition_vector, MetabolicAnchors,
 };
 use crate::planning::plan_chain;
 use crate::scenario::ScenarioResolution;
@@ -2931,6 +2933,16 @@ pub struct Runner {
     /// replays bit-for-bit. Armed via [`Runner::set_discovery`]; a proposal is sampled each tick from the
     /// being's binding graph, biased by its own reward beliefs, under the counter-keyed `HYPOTHESIZE` phase.
     discovery: Option<DiscoveryCalib>,
+    /// The FELT-CONVICTION learner's calibration (Branch 1 of the learned experience-to-conviction coupling,
+    /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), armed OPT-IN. `None` by default, so a runner with no
+    /// felt-conviction learner never snapshots reserves for it nor folds any felt experience into a being's
+    /// conviction-experience record, the record stays empty and folds nothing, and every existing scenario
+    /// replays bit-for-bit. Armed via [`Runner::set_felt_conviction_learning`]; each tick, after the embodiment
+    /// step, each being's own felt-experience summary ([`crate::physiology::felt_salience`] over its reserve
+    /// deltas) is folded into the accumulator of each conviction it holds (from its intrinsic beliefs),
+    /// weight-agnostically (it reads no behaviour weight, the R4 correction) and inertly (Branch 2 consumes the
+    /// record to move a conviction; Branch 1 only records).
+    felt_conviction_learning: Option<FeltConvictionCalib>,
     /// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture), armed
     /// OPT-IN. `None` by default, so a runner with no coupling installs no vigor into its world, the
     /// reproduce beat takes no eligibility draw, and every existing scenario and the crucible replay
@@ -2971,6 +2983,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3022,6 +3035,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3086,6 +3100,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3173,6 +3188,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3320,6 +3336,19 @@ impl Runner {
     /// the manifest (Principle 11).
     pub fn set_reward_learning(&mut self, calib: RewardLearningCalib) {
         self.reward_learning = Some(calib);
+    }
+
+    /// Arm the FELT-CONVICTION learner (Branch 1 of the learned experience-to-conviction coupling,
+    /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4). OPT-IN: unarmed (the default), no being's reserves are
+    /// snapshotted for it and no felt experience is folded into any conviction-experience record, so the record
+    /// stays empty and the run is byte-identical; armed, each tick the runner snapshots each being's reserves
+    /// before the embodiment step and, after it, folds the being's own felt-experience summary
+    /// ([`crate::physiology::felt_salience`]) into the accumulator of each conviction it holds, decayed by the
+    /// reserved retention. Weight-agnostic (reads no behaviour weight, the R4 correction) and inert (records
+    /// only; Branch 2 consumes the record to move a conviction). Requires the world to carry the being's
+    /// intrinsic beliefs; a being with none records nothing.
+    pub fn set_felt_conviction_learning(&mut self, calib: FeltConvictionCalib) {
+        self.felt_conviction_learning = Some(calib);
     }
 
     /// Arm the graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
@@ -3934,6 +3963,10 @@ impl Runner {
             let _g = crate::profile::scope(crate::profile::P_BODY);
             self.phase_body_exchange();
         }
+        // Snapshot reserves for the felt-conviction learner BEFORE the embodiment step, so this tick's
+        // interoceptive delta is readable after it even when no other experiential learner triggers the
+        // embodiment-step snapshot (Branch 1; a no-op unless the learner is armed, matching the scheduled path).
+        self.snapshot_reserves_for_conviction();
         if self.embodiment.is_some() {
             let _g = crate::profile::scope(crate::profile::P_EMB);
             self.step_embodiment();
@@ -3943,6 +3976,10 @@ impl Runner {
         // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
         // trace identically even for a world-less embodiment runner.
         self.advance_eligibility_traces();
+        // Fold each being's felt experience into its per-conviction association record (Branch 1), after the
+        // embodiment step so the reserve delta reflects this tick, matching the scheduled placement; inert and
+        // byte-identical unless the felt-conviction learner is armed.
+        self.fold_conviction_experience();
         {
             let _g = crate::profile::scope(crate::profile::P_WORLD);
             // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
@@ -3996,6 +4033,81 @@ impl Runner {
                     }
                 }
             }
+        }
+    }
+
+    /// Snapshot each being's reserve levels BEFORE the embodiment step when the felt-conviction learner is
+    /// armed (Branch 1, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), so [`fold_conviction_experience`] can read
+    /// this tick's interoceptive delta even when no other experiential learner (the harm/reward percept and
+    /// eligibility signals that otherwise trigger the snapshot inside the embodiment step) is armed. A no-op
+    /// unless the learner is armed, so an opted-out run never snapshots and folds nothing (byte-identical);
+    /// idempotent with the embodiment-step snapshot (both record the same top-of-tick levels), so arming it
+    /// alongside the harm/reward learners changes no hash. Runs in canonical walker order, drawing no RNG.
+    fn snapshot_reserves_for_conviction(&mut self) {
+        if self.felt_conviction_learning.is_none() {
+            return;
+        }
+        if let Some(emb) = self.embodiment.as_mut() {
+            let homeo = &emb.homeo;
+            for w in emb.walkers.iter_mut() {
+                w.reserve_memory.snapshot(homeo, &w.homeostasis);
+            }
+        }
+    }
+
+    /// Fold each being's felt experience into its per-conviction association record (Branch 1 of the learned
+    /// experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4). After the embodiment
+    /// step (so the reserve deltas reflect this tick's metabolism and intake), each being's felt-experience
+    /// summary ([`crate::physiology::felt_salience`] over its OWN reserve deltas, keyed on no axis identity) is
+    /// folded into the accumulator of each conviction it currently holds (its intrinsic-belief axioms),
+    /// engagement-weighted by the conviction's strength and decayed by the reserved retention. Reads NO
+    /// behaviour weight (weight-agnostic, the R4 correction of the first-cut framing a blind panel caught) and
+    /// changes no conviction and no behaviour (inert; Branch 2 consumes the record). Only when the learner is
+    /// armed AND the world carries the being's intrinsic beliefs; unarmed or belief-less, the record stays empty
+    /// and folds nothing, so an opted-out run is byte-identical. Runs in canonical walker order, drawing no RNG,
+    /// so it replays and is worker-count invariant. Reads the world (intrinsic beliefs) and the embodiment
+    /// (walkers) through disjoint field borrows.
+    fn fold_conviction_experience(&mut self) {
+        let calib = match self.felt_conviction_learning {
+            Some(c) => c,
+            None => return,
+        };
+        let world = match self.world.as_ref() {
+            Some(w) => w,
+            None => return,
+        };
+        let emb = match self.embodiment.as_mut() {
+            Some(e) => e,
+            None => return,
+        };
+        // The homeostatic axis ids, read once so the walker loop's mutable borrow does not conflict with the
+        // registry read; the felt summary folds the being's own signed per-axis reserve deltas.
+        let axis_ids: Vec<crate::homeostasis::HomeostaticAxisId> =
+            emb.homeo.axes.iter().map(|a| a.id).collect();
+        for w in emb.walkers.iter_mut() {
+            if !w.alive {
+                continue;
+            }
+            let intr = match world.intrinsic_of(w.id) {
+                Some(i) => i,
+                None => continue,
+            };
+            if intr.axioms.is_empty() {
+                continue;
+            }
+            // The being's own felt-experience summary: fold its signed per-axis reserve deltas (the same
+            // interoceptive deltas the harm and reward learners read) into one (intensity, valence), keyed on no
+            // axis identity so an alien's reserves fold identically (Prereq A).
+            let felt = felt_salience(
+                axis_ids
+                    .iter()
+                    .map(|&axis| w.reserve_memory.delta(axis, &w.homeostasis)),
+            );
+            // The being's currently-held convictions as (axis, stance) pairs; the fold reads their strengths
+            // (|stance|) as the engagement weight and no behaviour weight at all.
+            let held: Vec<(AxiomAxisId, Fixed)> =
+                intr.axioms.iter().map(|a| (a.axis, a.stance)).collect();
+            w.conviction_experience.fold(felt, &held, calib.retention);
         }
     }
 
@@ -4525,6 +4637,9 @@ impl Runner {
         } else if sid == SYS_BODY {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
+            // Snapshot reserves for the felt-conviction learner before the embodiment step, matching step_inner
+            // (Branch 1; a no-op unless armed), so the interoceptive delta is readable after the step.
+            self.snapshot_reserves_for_conviction();
             self.step_embodiment();
             // Recouple the hydrology to this tick's digging, exactly as step_inner does after
             // step_embodiment (material-substrate item 5): a pure fold touching only the environmental
@@ -4536,6 +4651,9 @@ impl Runner {
             // embodiment is) rather than inside SYS_WORLD keeps a world-less embodiment runner bit-identical
             // to the pinned order, closing the couple_conversation sibling of the vigor divergence at its root.
             self.advance_eligibility_traces();
+            // Fold each being's felt experience into its per-conviction record (Branch 1), after the embodiment
+            // step, matching step_inner; inert and byte-identical unless the felt-conviction learner is armed.
+            self.fold_conviction_experience();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
@@ -5775,6 +5893,13 @@ impl Runner {
                 // leaves an opted-out run's hash unchanged.
                 if !w.eligibility_trace.is_empty() {
                     w.eligibility_trace.hash_into(&mut h);
+                }
+                // The conviction-experience record (Branch 1 of the learned experience-to-conviction coupling,
+                // OWNER_DECISIONS_LOG R2/R4): new per-being dynamic state, folded after the eligibility trace in
+                // canonical (axis, association) order. Empty for a being with no felt-conviction learner armed
+                // (never folded), so it folds nothing and leaves an opted-out run's hash unchanged.
+                if !w.conviction_experience.is_empty() {
+                    w.conviction_experience.hash_into(&mut h);
                 }
                 // The discovery proposal (ideation arc, piece 2, slice 2c): the candidate action the being is
                 // about to test, folded as its canonical sequence subject after the eligibility trace. `None`
@@ -9713,6 +9838,180 @@ values = [
             x_of(&runner, founder),
             4,
             "the founder's conviction moves nothing (founder-zero conviction weight)"
+        );
+    }
+
+    #[test]
+    fn sustained_hardship_records_a_negative_conviction_experience_weight_agnostically_and_inertly()
+    {
+        // Branch 1 (correlation-record) of the learned experience-to-conviction coupling
+        // (`docs/working/OWNER_DECISIONS_LOG.md` R2/R4): a being that HOLDS a conviction and SUFFERS (its
+        // reserves fall tick after tick) accrues a NEGATIVE felt-experience association with that conviction,
+        // learned by correlation over its own life. Two properties the blind framing panel demanded, proven
+        // here: (a) WEIGHT-AGNOSTIC, no conviction percept is armed, so the conviction never touches the being's
+        // behaviour, yet the association still forms from the felt reserve swings alone (the R4 correction of
+        // the first-cut behaviour-weight-gated framing); (b) INERT, the conviction's own stance is UNCHANGED,
+        // Branch 1 only records (Branch 2 consumes the record to move a conviction). The felt signal is the
+        // being's own interoceptive delta (its draining energy), keyed on no axis identity.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_experience::FeltConvictionCalib;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // ENERGY drains a flat fraction each tick with no food to refill it, so the being's reserves fall and it
+        // feels sustained hardship (felt valence negative). TEMPERATURE is inert (no drain), so the net felt
+        // signal is the energy fall. A low death floor keeps it alive across the window.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::from_ratio(1, 50),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let held_stance = Fixed::from_ratio(8, 10);
+        let beliefs = IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance: held_stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 1,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: held_stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            ),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([(AccessChannelId(1), Fixed::from_int(4))]),
+        );
+        let sufferer = world.spawn(Fixed::ONE);
+        world.set_place(sufferer, 0);
+        world.set_intrinsic(sufferer, beliefs);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // NO conviction percept armed: the conviction never enters the controller, so the being's behaviour is
+        // wholly independent of it. If an association still forms, it did so weight-agnostically (the R4 fix).
+        let layout = emb.layout().clone();
+        emb.add(
+            Walker::new(
+                sufferer,
+                Coord3::ground(2, 2),
+                body,
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology,
+                Controller::zeros(&layout),
+            ),
+            band(),
+        );
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Arm the felt-conviction learner (Branch 1). No reward learner, no percepts: the ONLY experiential
+        // learner is the felt-conviction one, so it must drive its own reserve snapshot (the pre-step pass).
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_default());
+        for _ in 0..8 {
+            runner.step();
+        }
+
+        let emb_ref = runner.embodiment().unwrap();
+        let w = emb_ref
+            .walkers()
+            .iter()
+            .find(|w| w.id == sufferer)
+            .expect("the sufferer is still embodied");
+        // (a) A negative association accrued: sustained hardship while holding the conviction correlated the
+        // felt-negative valence with it, weight-agnostically (no percept, no behaviour coupling).
+        assert!(
+            w.conviction_experience.association(AXIS) < Fixed::ZERO,
+            "sustained hardship recorded a negative felt-experience association with the held conviction (got {:?})",
+            w.conviction_experience.association(AXIS)
+        );
+        // (b) Inert: the conviction's own stance is UNCHANGED. Branch 1 records; it does not move the conviction.
+        let stance_now = runner
+            .world()
+            .unwrap()
+            .intrinsic_of(sufferer)
+            .unwrap()
+            .axioms
+            .iter()
+            .find(|a| a.axis == AXIS)
+            .unwrap()
+            .stance;
+        assert_eq!(
+            stance_now, held_stance,
+            "Branch 1 is inert: the conviction stance is unchanged by the recording (Branch 2 moves it)"
         );
     }
 
