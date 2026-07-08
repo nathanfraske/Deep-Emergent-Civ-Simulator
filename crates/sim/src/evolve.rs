@@ -64,7 +64,7 @@ use crate::genome::{
     GenePool, GeneSet, Genome, Haplotype, SchemeId,
 };
 use crate::homeostasis::{
-    AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, WATER,
+    AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
 };
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
@@ -570,6 +570,126 @@ pub fn full_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> 
     (total / set.len() as u64) as u32
 }
 
+// --- The FOOD-VERSUS-WATER (thirst-trap) scorer: the two-reserve spatial-conflict episode ---
+
+/// A TWO-RESERVE physiology for the food-versus-water episode: an ENERGY reserve backed by
+/// `bio.energy_density` and a WATER reserve backed by `bio.water_fraction`, both draining and both lethal
+/// at their floor. The challenge selection must solve is SPATIAL: energy food and water lie in different
+/// places, so a being that fixates on one dies of the other, and only a controller that PRIORITISES
+/// whichever reserve is scarcer right now (a nonlinear, mode-switching behaviour a linear reaction norm
+/// cannot express, since prioritisation is a deficit-times-direction product) survives both. A labelled
+/// scoring fixture, symmetric between the two reserves so no fixed bias is rewarded.
+fn two_reserve_reg() -> HomeostaticRegistry {
+    let axis = |id| HomeostaticAxisDef {
+        id,
+        name: if id == ENERGY { "energy" } else { "water" }.to_string(),
+        backing_component: Some(
+            if id == ENERGY {
+                "bio.energy_density"
+            } else {
+                "bio.water_fraction"
+            }
+            .to_string(),
+        ),
+        capacity_per_mass: Fixed::ONE,
+        base_drain: Fixed::from_ratio(1, 200),
+        exertion_drain: Fixed::from_ratio(1, 600),
+        death_floor: Fixed::ZERO,
+    };
+    HomeostaticRegistry {
+        axes: vec![axis(ENERGY), axis(WATER)],
+    }
+}
+
+/// Energy food matter (mirrors [`water_matter`] for the energy reserve's backing class).
+fn energy_matter() -> Composition {
+    Composition {
+        nutrients: [("bio.energy_density".to_string(), Fixed::from_ratio(1, 4))]
+            .into_iter()
+            .collect(),
+        toxins: std::collections::BTreeMap::new(),
+    }
+}
+
+/// One directional episode of the FOOD-VERSUS-WATER scorer (the thirst-trap challenge): energy food sits in
+/// a band in `dir`, water in the OPPOSITE direction `-dir`, both known, both persistent. A being that
+/// fixates on one starves of the other; only one that migrates between them, prioritising whichever reserve
+/// is scarcer, survives. Returns ticks survived (capped at `ticks`). Deterministic and seed-keyed.
+fn two_reserve_episode_survival_dir(
+    controller: &Controller,
+    ticks: u32,
+    seed: u64,
+    dir: (i32, i32),
+) -> u32 {
+    let reg = two_reserve_reg();
+    let afford = AffordanceRegistry::dev_default();
+    let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
+    let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+    let mut walker = Walker::new(
+        StableId(1),
+        Coord3::ground(0, 0),
+        scoring_body(),
+        homeo,
+        Physiology::dev_for_registry(&reg),
+        controller.clone(),
+    );
+    let mut field = ResourceField::new();
+    // Energy in `dir`, water in the opposite direction: the being starts between them and must shuttle.
+    for c in scoring_water_cells(dir, 2, 3, 1) {
+        field.set(c, energy_matter());
+        walker.learn(ENERGY, c);
+    }
+    for c in scoring_water_cells((-dir.0, -dir.1), 2, 3, 1) {
+        field.set(c, water_matter());
+        walker.learn(WATER, c);
+    }
+    let p = LocomotionParams::dev_default();
+    let mut ws = vec![walker];
+    // The HOMEOSTATIC-VIABILITY integral, not raw ticks-survived: each tick add the being's TOTAL reserve
+    // health (`energy + water`). Two honest findings drove this choice, and both matter. (1) Raw
+    // ticks-survived is DECEPTIVE on a two-reserve trap: topping ONE reserve buys no survival over the drain
+    // time (the other still empties), so partial competence earns nothing and selection stalls with no
+    // gradient toward the conditional foraging that keeps both up. (2) A `min(energy, water)` measure is
+    // survival-honest (the worst reserve is what kills you) but ALSO flat here, because foraging one reserve
+    // does not raise the min (the other still drains), so it too gives no climbable gradient. The SUM is a
+    // general physiological-VIABILITY measure (total reserve maintained over the episode) that DOES give a
+    // climbable gradient: forage one reserve and it rises, keep both up and it rises more. It is not an
+    // authored behaviour: HOW to keep the reserves up (which way to go when, whether to shuttle) still
+    // emerges from the network and selection; the fitness only measures how healthy the being stayed.
+    let mut health = Fixed::ZERO;
+    for t in 0..ticks {
+        locomotion::step(
+            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+        );
+        if !ws[0].alive {
+            break;
+        }
+        let e = ws[0].homeostasis.amount(ENERGY);
+        let w = ws[0].homeostasis.amount(WATER);
+        health = health.saturating_add(e.saturating_add(w));
+    }
+    // Fixed [0,1] per tick summed over up to `ticks` ticks; scale to a u32 score (x256, clamped).
+    let scaled = health
+        .checked_mul(Fixed::from_int(256))
+        .unwrap_or(Fixed::from_int(256 * ticks as i32));
+    scaled.to_int().clamp(0, i32::MAX) as u32
+}
+
+/// Score a controller by HOMEOSTATIC HEALTH on the FOOD-VERSUS-WATER trap, aggregated over the symmetric
+/// direction set (energy and water swap sides across the set, so no fixed heading or reserve bias is
+/// rewarded, only genuine spatial prioritisation). A pure function of the seed. This is the fitness whose
+/// environment selects the nonlinear conditional foraging a spatially-structured living world demands.
+pub fn two_reserve_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    let set = scoring_set(seed);
+    let mut total = 0u64;
+    for (i, &dir) in set.iter().enumerate() {
+        total +=
+            two_reserve_episode_survival_dir(controller, ticks, seed ^ SCORING_DIR_SALT[i], dir)
+                as u64;
+    }
+    (total / set.len() as u64) as u32
+}
+
 // --- The thermal-survival scorer: evolve the thermotaxis controller in-situ on the coupled runner ---
 
 /// The controller layout for the thermal environment: the temperature-only development physiology and
@@ -1059,6 +1179,56 @@ mod tests {
 
     fn scoring_layout(hidden: usize) -> ControllerLayout {
         ControllerLayout::new(&scoring_reg(), &AffordanceRegistry::dev_default(), hidden)
+    }
+
+    #[test]
+    fn a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one() {
+        // The pivotal test for the recurrent-controller foundation (the living-world crux): energy food and
+        // water lie in OPPOSITE directions, so surviving requires PRIORITISING whichever reserve is scarcer
+        // and shuttling between them, a nonlinear mode-switching behaviour a LINEAR reaction norm cannot
+        // express (it steers toward the vector average of its needs and starves of one). A RECURRENT net,
+        // carrying a "which need is critical now" state across ticks, CAN. So selection against the SAME
+        // two-reserve challenge should evolve strictly HIGHER survival for the recurrent representation.
+        // Nothing is authored: the physics scores survival and the prioritisation is what survives.
+        let reg = two_reserve_reg();
+        let afford = AffordanceRegistry::dev_default();
+        let mut params = EvolveParams::dev_default();
+        params.pop_size = 48;
+        params.generations = 60;
+        params.episode_ticks = 400;
+        let linear_layout = ControllerLayout::new(&reg, &afford, 0);
+        let recurrent_layout = ControllerLayout::new(&reg, &afford, 4);
+        let lin = evolve_with(
+            &linear_layout,
+            &params,
+            0xF00D,
+            two_reserve_episode_survival,
+        );
+        let rec = evolve_with(
+            &recurrent_layout,
+            &params,
+            0xF00D,
+            two_reserve_episode_survival,
+        );
+        let lin_best = *lin.best_fitness.last().unwrap();
+        let rec_best = *rec.best_fitness.last().unwrap();
+        eprintln!(
+            "  [foodwater] linear best-fitness trajectory: {:?}",
+            lin.best_fitness
+        );
+        eprintln!(
+            "  [foodwater] recurrent best-fitness trajectory: {:?}",
+            rec.best_fitness
+        );
+        eprintln!(
+            "  [foodwater] linear best {lin_best} vs recurrent best {rec_best} (cap {})",
+            params.episode_ticks
+        );
+        assert!(
+            rec_best > lin_best,
+            "the recurrent controller must evolve higher food-vs-water survival ({rec_best}) than the \
+             linear one ({lin_best}): the nonlinear substrate is what a spatially-structured world needs"
+        );
     }
 
     #[test]
