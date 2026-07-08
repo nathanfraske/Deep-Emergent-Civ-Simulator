@@ -8,6 +8,50 @@ entry using a derived or dev-set value.
 
 ## Open
 
+R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
+   by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
+   spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
+   engine fix. The owner ruled: band placement is where the gameplay comes in, so it is legitimately authored
+   (a player/scenario choice), a Principle-9 INPUT like the physics floor, not a cultural OUTCOME. If a band
+   is placed somewhere barely survivable and dies, that is the player's choice faithfully simulated, not a bug.
+   If a band claws through the hardship and, say, comes to resent its god for the suffering it endured, that
+   emergent narrative is the fun. So the engine must NOT auto-place founders for survivability, and the
+   seed-dependent death is correct behaviour, not a defect. Consequence for the finding: the ONLY genuine
+   remaining engine gap is forage COMPETENCE (the recurrent controller freezing one tile short of REACHABLE
+   known food, so a being dies where it should survive), because that corrupts the hardship signal: death must
+   come from real scarcity, not from a controller that cannot walk to visible food. The emergent payoff the
+   owner named (sustained material hardship shaping a band's beliefs, e.g. resentment of its god) is the
+   demonstration target that rides on the axiom/belief kernel (Parts 21/28) plus the harm-learning felt-
+   experience path. Keep the recurrent controller as the emergent foundation; the run-matched dawn bootstrap
+   (train forage competence under partial knowledge on real terrain, alien-general food matter) is the work
+   that makes survival reflect genuine hardship rather than a forage bug.
+
+R2. **How first-hand felt experience feeds a being's convictions: the LEARNED-COUPLING framing. RESOLVED by
+   the owner 2026-07-08 via a blind framing panel.** Before wiring "hardship shapes belief" (the resent-god
+   loop), the proposed framing was: felt hardship enters the axiom-update kernel as generic SIGNED EVIDENCE on
+   a conviction axis, a magnitude plus a DIRECTION toward a pole, the resulting shift emerging from the being's
+   disposition. A fully-blind panel (six agents, three types, three models, each seeing only the guiding
+   principles and the de-narrativized statement, none seeing the author's or owner's conclusion,
+   AGENTIC_ADDENDUM.md section 10) UNANIMOUSLY and independently caught the seam: the DIRECTION clause authors
+   the exact coupling it claims to forbid. Deciding that hardship bears on providence and points to its
+   negative pole reads the high-level MEANING of the experience to produce the outcome, the kin-template
+   violation (Hamilton's rule as a mechanism) relocated from kinship to belief. Verified against source: the
+   magnitude side is floor-derivable and clean; the axis-and-pole selection is the authored crux; the alien
+   test confirms it (magnitude generalizes to any being with a reserve, an authored direction needs
+   per-species authoring). THE RESOLVED FRAMING to build: first-hand felt experience emits ONLY a magnitude
+   (interoceptive salience of the reserve-delta) and a valence sign (the floor sign of the delta), with NO
+   axis and NO pole; which conviction it bears on, and in which direction, is a per-being LEARNED COUPLING
+   (the same associative/credit-assignment primitive that already lets a being learn "this ground harms me"
+   from felt reserve-fall, extended so a conviction can be credited), with the pole following from whether the
+   felt outcome confirmed or disconfirmed the stance the being was acting on; where no association exists the
+   felt event changes no conviction (the honest default). So "hardship erodes faith" is a DESCRIPTION of a
+   learned outcome for some beings and its opposite for others, never a coded route. CONCRETE TRAP recorded:
+   do NOT reuse `affect.rs`'s `AppraisalBinding` (a per-race `DriveId -> AffectAxisId` table) for axioms; it is
+   legitimate for affect (a felt-coloring layer close to an innate disposition) but would be the violation for
+   axioms (which hold emergent cultural content). This is the framing for the next build; the design-doc Part
+   28 consolidation happens when it is built. Reserved: the interoceptive-signal-to-salience scale (basis: the
+   existing salience range of social events), owner's to set.
+
 0. **The `--scenario full` collapse: RE-DIAGNOSED 2026-07-08 (my earlier soil-draw diagnosis was WRONG,
    corrected here).** With the edibility grounding, default/discovery/viability all THRIVE; only `--scenario
    full` collapses. EARLIER (incorrect) claim: the producer food-override drives the extract cycle to
