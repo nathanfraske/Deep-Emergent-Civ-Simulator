@@ -3462,6 +3462,13 @@ impl Runner {
             emb.soil.deposit(cell, "bio.mineral_ash_fraction", mineral);
             emb.soil.deposit(cell, "bio.organic_residue", organic);
         }
+        // The tissue -> soil RETURN leg (closing the nutrient cycle): located body matter (eaten remains,
+        // corpses, seeded animal bodies) rots a fraction each tick into the soil-nutrient store the producers
+        // draw, so a plant is fed by the decay of what ate or outlived it, not by weathering alone. The mass
+        // returns to the organic bucket the producer SoilStock binding draws (the by-axes split is T5).
+        for (cell, mass) in emb.tissue.decay(calib.decomposition_rate) {
+            emb.soil.deposit(cell, "bio.organic_residue", mass);
+        }
     }
 
     /// The combustion beat (material-substrate arc, cascade item 6, live fire): the combustible matter each

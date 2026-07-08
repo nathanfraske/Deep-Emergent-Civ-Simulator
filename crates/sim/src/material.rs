@@ -1126,6 +1126,44 @@ impl TissueField {
         total
     }
 
+    /// Rot every parcel by a fraction of its volume, returning the (cell, mass) removed for the soil deposit
+    /// (the tissue -> soil RETURN leg of the nutrient cycle): the located body matter is fed back to the soil
+    /// the producers draw. Canonical order; an emptied parcel/cell is dropped so the fold stays reproducible.
+    /// The removed volume is the mass returned (a unit tissue density until a reserved density lands).
+    pub fn decay(&mut self, rate: Fixed) -> Vec<(Coord3, Fixed)> {
+        if rate <= Fixed::ZERO {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let cells: Vec<Coord3> = self.cells.keys().copied().collect();
+        for cell in cells {
+            let parcels = self.cells.get_mut(&cell).unwrap();
+            let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+            let mut removed = Fixed::ZERO;
+            for key in keys {
+                let volume = *parcels.get(&key).unwrap();
+                let d = volume.checked_mul(rate).unwrap_or(Fixed::ZERO).min(volume);
+                if d <= Fixed::ZERO {
+                    continue;
+                }
+                let nv = volume - d;
+                if nv <= Fixed::ZERO {
+                    parcels.remove(&key);
+                } else {
+                    parcels.insert(key, nv);
+                }
+                removed = removed.saturating_add(d);
+            }
+            if parcels.is_empty() {
+                self.cells.remove(&cell);
+            }
+            if removed > Fixed::ZERO {
+                out.push((cell, removed));
+            }
+        }
+        out
+    }
+
     /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
     /// yields nothing.
     pub fn parcels(&self, cell: Coord3) -> Vec<TissueParcel> {

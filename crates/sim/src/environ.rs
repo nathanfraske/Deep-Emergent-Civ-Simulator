@@ -681,14 +681,24 @@ impl EnvironFields {
         soil: &mut SoilNutrientField,
         registry: &AbioticSourceRegistry,
     ) {
+        // Fail loud on an unset reserved conversion rather than silently capping every producer to zero.
+        assert!(
+            registry.biomass_per_stock > Fixed::ZERO,
+            "nutrient cycle: biomass_per_stock reserved value is unset (would starve every producer)"
+        );
         let (w, h) = (self.width, self.height);
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
                 let id = self.producer_source[i];
-                let Some(binding) = registry.binding(id) else {
-                    continue;
-                };
+                if id == u16::MAX {
+                    continue; // no producer stands on this cell
+                }
+                // A seeded producer whose evolved source the world never bound is a config error: fail loud
+                // rather than fall through to an uncapped producer (the old infinite-well behaviour).
+                let binding = registry.binding(id).unwrap_or_else(|| {
+                    panic!("nutrient cycle: producer source id {id} has no registry binding")
+                });
                 match binding.field {
                     AbioticField::Flux => {
                         let supply = self.light[i];
