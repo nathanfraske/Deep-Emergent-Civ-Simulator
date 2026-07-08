@@ -596,6 +596,9 @@ impl EnvironFields {
     /// the same way as data. Walks canonical row-major order; a pure deterministic fold (Principle 3).
     pub fn regrow_supply(&self, resource: &mut ResourceField, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
+        // Size the dense ground layer to the environ grid the first time (idempotent), so every per-cell
+        // write below lands in an O(1) indexed slot rather than a BTreeMap tree descent.
+        resource.set_dims(w, h);
         for y in 0..h {
             for x in 0..w {
                 let coord = Coord3::ground(x, y);
