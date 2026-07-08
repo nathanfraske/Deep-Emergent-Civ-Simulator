@@ -620,17 +620,17 @@ fn two_reserve_episode_survival_dir(
     ticks: u32,
     seed: u64,
     dir: (i32, i32),
+    reg: &HomeostaticRegistry,
 ) -> u32 {
-    let reg = two_reserve_reg();
     let afford = AffordanceRegistry::dev_default();
-    let layout = ControllerLayout::new(&reg, &afford, controller.hidden());
-    let homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+    let layout = ControllerLayout::new(reg, &afford, controller.hidden());
+    let homeo = Homeostasis::from_mass(reg, Fixed::ONE);
     let mut walker = Walker::new(
         StableId(1),
         Coord3::ground(0, 0),
         scoring_body(),
         homeo,
-        Physiology::dev_for_registry(&reg),
+        Physiology::dev_for_registry(reg),
         controller.clone(),
     );
     let mut field = ResourceField::new();
@@ -659,7 +659,7 @@ fn two_reserve_episode_survival_dir(
     let mut health = Fixed::ZERO;
     for t in 0..ticks {
         locomotion::step(
-            &mut ws, &reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
+            &mut ws, reg, &layout, &afford, &OpenPlane, &field, &p, seed, t as u64,
         );
         if !ws[0].alive {
             break;
@@ -675,41 +675,62 @@ fn two_reserve_episode_survival_dir(
     scaled.to_int().clamp(0, i32::MAX) as u32
 }
 
-/// Score a controller by HOMEOSTATIC HEALTH on the FOOD-VERSUS-WATER trap, aggregated over the symmetric
-/// direction set (energy and water swap sides across the set, so no fixed heading or reserve bias is
-/// rewarded, only genuine spatial prioritisation). A pure function of the seed. This is the fitness whose
-/// environment selects the nonlinear conditional foraging a spatially-structured living world demands.
-pub fn two_reserve_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+/// Score a controller by HOMEOSTATIC HEALTH on the FOOD-VERSUS-WATER trap, for the being physiology `reg`
+/// (which must carry the ENERGY and WATER reserves the challenge separates in space), aggregated over the
+/// symmetric direction set (energy and water swap sides across the set, so no fixed heading or reserve bias
+/// is rewarded, only genuine spatial prioritisation). The registry is DATA (Principle 11), so the same
+/// challenge bootstraps whichever grazer physiology a world declares, at that physiology's OWN drains: a
+/// being is pre-adapted on the reserves it will actually carry. A pure function of the seed.
+pub fn reserve_conflict_survival(
+    controller: &Controller,
+    ticks: u32,
+    seed: u64,
+    reg: &HomeostaticRegistry,
+) -> u32 {
     let set = scoring_set(seed);
     let mut total = 0u64;
     for (i, &dir) in set.iter().enumerate() {
-        total +=
-            two_reserve_episode_survival_dir(controller, ticks, seed ^ SCORING_DIR_SALT[i], dir)
-                as u64;
+        total += two_reserve_episode_survival_dir(
+            controller,
+            ticks,
+            seed ^ SCORING_DIR_SALT[i],
+            dir,
+            reg,
+        ) as u64;
     }
     (total / set.len() as u64) as u32
 }
 
-/// The DAWN BOOTSTRAP for conditional foraging: evolve a recurrent forage controller against the two-reserve
-/// viability challenge (the food-versus-water trap) and return the FITTEST genome, ready to seed a founder or
-/// creature pool so it enters the run PRE-ADAPTED to keep multiple spatially-separated reserves up (the
-/// capability a linear reaction norm cannot express, validated by
+/// The two-reserve food-vs-water scorer on the labelled minimal [`two_reserve_reg`] physiology: the crux
+/// fixture that proves the recurrent substrate. Thin wrapper over [`reserve_conflict_survival`].
+pub fn two_reserve_episode_survival(controller: &Controller, ticks: u32, seed: u64) -> u32 {
+    reserve_conflict_survival(controller, ticks, seed, &two_reserve_reg())
+}
+
+/// The DAWN BOOTSTRAP for conditional foraging: evolve a recurrent forage controller against the food-versus-
+/// water viability challenge on the physiology `reg` (the reserves the beings will actually carry, so the
+/// pre-adaptation transfers), and return the FITTEST genome, ready to seed a founder or creature pool so it
+/// enters the run PRE-ADAPTED to keep multiple spatially-separated reserves up (the capability a linear
+/// reaction norm cannot express, validated by
 /// `a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one`). Pass a
-/// `layout` with a positive hidden width for the recurrent representation. Deterministic in the seed. The
-/// behaviour is NOT authored: the physics scores viability and conditional foraging is what survives; this
-/// is the same emergent selection the run itself uses, run once up front so beings are not helpless at dawn.
+/// `layout` with a positive hidden width for the recurrent representation, built over the SAME `reg`.
+/// Deterministic in the seed. The behaviour is NOT authored: the physics scores viability and conditional
+/// foraging is what survives; this is the run's own emergent selection, run once up front so beings are not
+/// helpless at dawn (the chicken-and-egg that kills a naive population before selection can act).
 pub fn evolve_forage_controller(
     layout: &ControllerLayout,
+    reg: &HomeostaticRegistry,
     params: &EvolveParams,
     seed: u64,
 ) -> Genome {
-    let report = evolve_with(layout, params, seed, two_reserve_episode_survival);
+    let score = |c: &Controller, t: u32, s: u64| reserve_conflict_survival(c, t, s, reg);
+    let report = evolve_with(layout, params, seed, &score);
     let genes = controller_gene_set(layout);
     report
         .final_genomes
         .into_iter()
         .max_by_key(|g| {
-            two_reserve_episode_survival(
+            score(
                 &Controller::express(&genes, g, layout),
                 params.episode_ticks,
                 seed ^ 0xE0,
@@ -1220,7 +1241,7 @@ mod tests {
         params.pop_size = 8;
         params.generations = 4;
         params.episode_ticks = 60;
-        let genome = evolve_forage_controller(&layout, &params, 0xF00D);
+        let genome = evolve_forage_controller(&layout, &reg, &params, 0xF00D);
         let genes = controller_gene_set(&layout);
         let controller = Controller::express(&genes, &genome, &layout);
         assert_eq!(
@@ -1231,6 +1252,44 @@ mod tests {
         assert!(
             two_reserve_episode_survival(&controller, 200, 0x5EED) > 0,
             "the bootstrapped controller runs the food-vs-water episode"
+        );
+    }
+
+    #[test]
+    fn the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology() {
+        // The transfer de-risk: the bootstrap must pre-adapt the physiology the RUN's founders actually carry
+        // (dev_grazer: lethal energy + water, plus neutral temperature/condition), not only the minimal crux
+        // fixture. Evolved on the grazer's OWN reserves and drains, the recurrent forager must end far
+        // healthier on held-out food-vs-water than a random controller of the same layout. Held out on a
+        // different seed so it is generalisation, not overfit. Nothing authored: viability is the only score.
+        use crate::homeostasis::HomeostaticRegistry;
+        let reg = HomeostaticRegistry::dev_grazer();
+        let afford = AffordanceRegistry::dev_default();
+        let layout = ControllerLayout::new(&reg, &afford, 4);
+        let mut params = EvolveParams::dev_default();
+        params.pop_size = 40;
+        params.generations = 36;
+        params.episode_ticks = 400;
+        let genes = controller_gene_set(&layout);
+        let evolved = evolve_forage_controller(&layout, &reg, &params, 0xF00D);
+        let random = random_controller_genome(&layout, &params, 0xF00D, 9999);
+        let evolved_h = reserve_conflict_survival(
+            &Controller::express(&genes, &evolved, &layout),
+            params.episode_ticks,
+            0x5EED,
+            &reg,
+        );
+        let random_h = reserve_conflict_survival(
+            &Controller::express(&genes, &random, &layout),
+            params.episode_ticks,
+            0x5EED,
+            &reg,
+        );
+        eprintln!("  [grazer-bootstrap] evolved health {evolved_h} vs random {random_h}");
+        assert!(
+            evolved_h > random_h,
+            "the dawn-evolved grazer forager ({evolved_h}) must be healthier than a random one ({random_h}) \
+             on held-out food-vs-water: the founders' own physiology pre-adapts"
         );
     }
 
