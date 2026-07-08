@@ -711,8 +711,10 @@ impl Steppable for WorldGenesis {
 
 /// Derive a region's environmental profile from the map tiles in its block: the mean of each
 /// terrain field over the block, plus a soil-fertility field (a moisture-derived stand-in
-/// until the soil stock lands). Abiotic sources present: light always, water when the block is
-/// moist enough for a producer to ground on.
+/// until the soil stock lands). The abiotic sources PRESENT are a data read of the world's own
+/// `sources` registry against the region's env (Arc 5 T1, [`AbioticSourceRegistry::available_in`]),
+/// not a hardcoded triad: the Terran fixture reproduces "light always, water where moist, else a
+/// dryland soil source", an alien world declares its own presence bands.
 fn derive_region(
     map: &TileMap,
     x0: i32,

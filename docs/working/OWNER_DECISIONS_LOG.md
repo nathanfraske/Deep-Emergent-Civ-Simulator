@@ -46,12 +46,15 @@ entry using a derived or dev-set value.
    still read on the no-physiology fallback path). This is a deliberate model change (a being eats until
    sated, room-bounded, rather than to a per-tick requirement curve), not a silent bug, but the owner should
    confirm the requirement datum's role is subsumed by the reserve capacity or restore it as an intake gate
-   if a distinct per-tick need is wanted. The edibility grounding makes intake and drain both physical in the reserve's units; the ABSOLUTE
-   scale (how a floor `bio.energy_density` in kJ/g maps to the reserve's stored joules) is the one genuine
-   units anchor. INTERIM: dev-set to the value that keeps the dev world viable, iterated against the
-   survival proof. BASIS: the reserve stored energy is `capacity * body_mass_kg * bio.energy_density`; set so
-   a being's daily intake at plausible forage density offsets its Kleiber drain. Owner sets the canonical
-   value; the mechanism derives everything else.
+   if a distinct per-tick need is wanted.
+
+6. **The viability calibration has NO scenario-level CI protection yet** (the audit's confirmation-bias
+   finding). No `#[test]` asserts a population survives across generations, so the "world thrives" proof is a
+   manual run of the (non-canonical) run_world example, and the known `--scenario full` collapse is unflagged
+   by any red test. INTERIM: a unit-level regression guard now ties `food_energy_density` to a survivable
+   intake regime (a foraging being's per-tick gain stays a meaningful fraction of its reserve), so a scale
+   regression fails CI; a full scenario-level survival test (a foraging cohort holds a population over N
+   generations, and `full` marked as a known-collapse) is the follow-on the biosphere-balance pass should add.
 
 2. **The T2/T3/T5 axis-conversion sign-off + Part 62 consolidation** (the chemistry arc, PR #105 merged).
    The mechanism is built and byte-neutral; the design-doc consolidation (a Part 62 record, the

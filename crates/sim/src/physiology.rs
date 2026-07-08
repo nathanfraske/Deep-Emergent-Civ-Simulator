@@ -730,6 +730,34 @@ mod tests {
     }
 
     #[test]
+    fn the_food_energy_density_reconciliation_keeps_forage_intake_in_the_survivable_regime() {
+        // Regression guard for R-UNITS-PIN (the end-of-arc audit flagged the "world thrives" proof as a manual
+        // eyeball of a non-canonical example, with NO test protecting the calibration): the forage
+        // reconciliation `food_energy_density` must keep a foraging being's per-tick intake gain a MEANINGFUL
+        // fraction of its reserve room, not the near-zero gain the un-reconciled physical bridge gives (the
+        // body_mass * storage_density denominator is ~1500x the raw standing-food supply, the mismatch that
+        // starved the world before the reconciliation). If the scale regresses out of the survivable regime,
+        // this fails, so a silent change to the dev value can no longer pass CI unnoticed. This is a unit-level
+        // guard; a scenario-level cohort-survival test is the follow-on (OWNER_DECISIONS_LOG item 6).
+        let food_ed = crate::locomotion::LocomotionParams::dev_default().food_energy_density;
+        let assim = Fixed::ONE;
+        let eta = Fixed::from_ratio(1, 2);
+        let body_mass = Fixed::from_int(60); // a representative body mass (kg)
+        let storage_density = Fixed::from_int(25); // a representative tissue energy density
+        let supply = Fixed::from_ratio(1, 2); // a plausible standing-food supply the forager reads off the field
+        let room = Fixed::ONE; // a drained unit reserve
+        let content = supply.checked_mul(food_ed).unwrap();
+        let (_eaten, gain) = physical_intake(content, assim, eta, body_mass, storage_density, room);
+        // The reconciled gain fills at least a quarter of the drained reserve in one forage tick (survivable);
+        // at food_ed = 1 (un-reconciled) the gain is ~1e-4 * room and this guard trips.
+        assert!(
+            gain >= room.checked_div(Fixed::from_int(4)).unwrap(),
+            "the reconciled forage intake gain {gain:?} must fill a survivable fraction of the reserve room \
+             {room:?}; a regression of food_energy_density out of the survivable regime trips this guard"
+        );
+    }
+
+    #[test]
     fn whole_body_composition_vector_generalizes_body_density_and_unions_axes() {
         use crate::medium::body_density;
         let (organs, _skin, flesh, fat) = registry();
