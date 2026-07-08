@@ -88,6 +88,7 @@ use crate::affordance_percept::{
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::conviction_percept::ConvictionPerceptRegistry;
 use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
@@ -984,6 +985,18 @@ pub struct Embodiment {
     /// material block) to opt a world into sensing the substances underfoot (the spent-hull trace and its
     /// siblings). The membership is the material-floor's data, so a new sensible substance is a data edit.
     material_percepts: MaterialPerceptRegistry,
+    /// The CONVICTION-percept registry: which of a being's own conviction axes (axiom-axis stances) are
+    /// exposed to its behaviour controller as input channels (Prereq B for the learned
+    /// experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2). EMPTY by default, so the
+    /// controller layout carries no conviction block and every run hash is unchanged; the world-build installs
+    /// a non-empty registry ([`Embodiment::set_conviction_percepts`], which rebuilds the layout to feed the
+    /// conviction block) to opt a world into letting a being's convictions bias its embodied behaviour. When
+    /// non-empty, the runner writes each being's own STANCE on each exposed conviction axis (read from its
+    /// intrinsic beliefs) into the block each tick, and only a heritable weight lifted off founder-zero by
+    /// selection turns a conviction into a behaviour bias (Principle 8): whether and how a conviction sways
+    /// action EMERGES rather than being an authored conviction-to-action rule. The membership keys on the
+    /// axiom-axis id alone, never a named institution or religion (the Steering Audit bites here).
+    conviction_percepts: ConvictionPerceptRegistry,
     /// Whether the controller layout feeds the belief-derived ATTRACTION-direction input (the
     /// lifetime/demography keystone, pillar 2, trace slice C3). FALSE by default, so the layout carries no
     /// attraction block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_attraction`],
@@ -1198,6 +1211,7 @@ impl Embodiment {
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
             material_percepts: MaterialPerceptRegistry::empty(),
+            conviction_percepts: ConvictionPerceptRegistry::empty(),
             attraction: false,
             nutrition_learning: false,
             place_reward_learning: true,
@@ -1240,6 +1254,21 @@ impl Embodiment {
     /// emergent pattern the feature block established.
     pub fn set_material_percepts(&mut self, material_percepts: MaterialPerceptRegistry) {
         self.material_percepts = material_percepts;
+        self.rebuild_layout();
+    }
+
+    /// Install the CONVICTION-percept registry and REBUILD the controller layout to feed its conviction block
+    /// (Prereq B for the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2).
+    /// Set BEFORE the embodiment's beings are built, exactly like [`set_material_percepts`]: the beings'
+    /// controllers are expressed against [`Embodiment::layout`], so a conviction channel added after they exist
+    /// would leave their weight vectors the wrong length. With an empty registry this is a no-op that leaves the
+    /// layout and every run hash unchanged (opt-in). The new conviction weights a founder then expresses are
+    /// zero (unseeded channels), so a conviction moves no behaviour until selection lifts a weight off zero:
+    /// whether and how a conviction sways action EMERGES from selection over the evolved weight, never an
+    /// authored conviction-to-action rule (Principle 8, the emergent pattern the feature, appetitive, material,
+    /// and attraction blocks established). The registry keys on the axiom-axis id alone (the Steering Audit).
+    pub fn set_conviction_percepts(&mut self, conviction_percepts: ConvictionPerceptRegistry) {
+        self.conviction_percepts = conviction_percepts;
         self.rebuild_layout();
     }
 
@@ -1392,17 +1421,20 @@ impl Embodiment {
         self.affordance_refs = Some(refs);
     }
 
-    /// Rebuild the controller layout from the current percept registry and appetitive flag (both opt-in,
-    /// both feeding an input block the founder weights ignore until selection lifts them). Called by
-    /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
+    /// Rebuild the controller layout from the current percept registry, appetitive flag, material percepts,
+    /// attraction flag, and conviction percepts (all opt-in, each feeding an input block the founder weights
+    /// ignore until selection lifts them). Called by [`set_percepts`], [`set_appetitive`],
+    /// [`set_material_percepts`], [`set_attraction`], and [`set_conviction_percepts`], so the flags compose:
+    /// setting one preserves the others.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+        self.layout = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
             &self.homeo,
             &self.afford,
             &self.percepts,
             self.appetitive,
             &self.material_percepts,
             self.attraction,
+            &self.conviction_percepts,
             self.layout.hidden(),
         );
     }
@@ -4742,6 +4774,48 @@ impl Runner {
                 .collect(),
             _ => BTreeMap::new(),
         };
+        // (0b''') Belief to percept, the CONVICTION stance (Prereq B for the learned experience-to-conviction
+        // coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2): each being's own STANCE on each exposed
+        // conviction axis, in the registry's canonical axis order, written into the controller's conviction
+        // input block so it senses "where do I stand on this conviction". Present only when the embodiment opts
+        // in (a non-empty `conviction_percepts` registry) and the world carries the being's intrinsic beliefs.
+        // A being that holds no axiom on an exposed axis reads zero on that channel (it takes no stance, a
+        // clean degrade), and the evolved conviction weights (founder-zero) must be lifted by selection before a
+        // stance moves the decision, so a conviction-biased behaviour EMERGES rather than being an authored
+        // conviction-to-action rule (Principle 8). Read before the mutable embodiment borrow, drawing no RNG,
+        // the exact discipline the appetitive and attraction percepts use.
+        let conviction: BTreeMap<StableId, Vec<Fixed>> = match self.embodiment.as_ref() {
+            Some(emb) if !emb.conviction_percepts.is_empty() => match self.world.as_ref() {
+                Some(world) => {
+                    let axes = emb.conviction_percepts.axes();
+                    // Parallel (arc 4): each entry is a pure read of the being's own intrinsic beliefs, keyed by
+                    // w.id and drawing no RNG; the filter_map collect into a BTreeMap is order-free, so it is
+                    // bit-identical at any thread count.
+                    emb.walkers
+                        .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
+                        .filter_map(|w| {
+                            let intr = world.intrinsic_of(w.id)?;
+                            // The being's own signed stance on each exposed conviction axis, in the registry's
+                            // canonical order; an axis it holds no axiom on reads zero (it takes no stance).
+                            let stances: Vec<Fixed> = axes
+                                .iter()
+                                .map(|&axis| {
+                                    intr.axioms
+                                        .iter()
+                                        .find(|a| a.axis == axis)
+                                        .map(|a| a.stance)
+                                        .unwrap_or(Fixed::ZERO)
+                                })
+                                .collect();
+                            Some((w.id, stances))
+                        })
+                        .collect()
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -5027,6 +5101,7 @@ impl Runner {
             &load_factors,
             &appetitive,
             &attraction,
+            &conviction,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -9418,6 +9493,226 @@ values = [
             x_of(&runner, stayer),
             3,
             "the stayer, unable to act on the belief, stayed put (founder-zero attraction weight)"
+        );
+    }
+
+    #[test]
+    fn a_beings_conviction_biases_its_behaviour_only_through_an_evolved_conviction_weight() {
+        // Prereq B THREADING slice (the learned experience-to-conviction coupling,
+        // `docs/working/OWNER_DECISIONS_LOG.md` R2): the runner reads each being's own STANCE on the exposed
+        // conviction axis (from its intrinsic beliefs) and feeds it into the controller's conviction block each
+        // tick, so a conviction CAN bias embodied behaviour. Three beings share the IDENTICAL controller weight
+        // that routes the conviction stance to a MOVE heading; two hold OPPOSITE stances on the axis and steer
+        // in OPPOSITE directions (proving the stance itself is threaded and read, not a constant), while the
+        // third (a founder with a blank controller) does not move on its conviction at all. So whether and which
+        // way a conviction sways action rides on the stance times an EVOLVED weight, and a conviction-biased
+        // behaviour EMERGES (Principle 8): no authored conviction-to-action rule, only the stance and the weight.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_percept::ConvictionPerceptRegistry;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        // The exposed conviction axis: a bare id, its meaning the world's data (the Steering Audit bites here).
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // Two inert axes (no drain, no death floor): nothing competes with the conviction-driven heading and
+        // no being dies over the run, so the only thing steering is the conviction stance times its weight.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // A being's intrinsic beliefs holding a single axiom on the exposed axis, at the given signed stance.
+        let beliefs = |stance: Fixed| IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 1,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            ),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let east_leaner = world.spawn(Fixed::ONE);
+        let west_leaner = world.spawn(Fixed::ONE);
+        let founder = world.spawn(Fixed::ONE);
+        world.set_place(east_leaner, 0);
+        world.set_place(west_leaner, 1);
+        world.set_place(founder, 2);
+        // The east-leaner holds a POSITIVE stance, the west-leaner the NEGATIVE mirror, the founder a positive
+        // stance it cannot act on (its blank controller ignores it). The dawn seeds intrinsic beliefs; here we
+        // set them directly so the leg under test is the threading, not the seeding.
+        world.set_intrinsic(east_leaner, beliefs(Fixed::ONE));
+        world.set_intrinsic(west_leaner, beliefs(Fixed::ZERO - Fixed::ONE));
+        world.set_intrinsic(founder, beliefs(Fixed::ONE));
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Arm the conviction percept BEFORE the controllers are expressed, so the grown layout carries the
+        // conviction block the leaners' weight targets (one channel for AXIS).
+        emb.set_conviction_percepts(ConvictionPerceptRegistry::from_axes(&[AXIS]));
+        let layout = emb.layout().clone();
+        assert_eq!(layout.n_conviction(), 1, "one exposed conviction channel");
+        // The leaner controller: it wants to move (MOVE act, output 0, from the bias) and routes its MOVE dx
+        // (output 1) from the conviction input, so its heading is +x scaled by its stance (a positive stance
+        // steers east, a negative one west). MOVE dy (output 2) stays zero. The reaction-norm weight for
+        // (output o, input i) sits at o * n_in + i (the attraction test's convention).
+        let cbase = layout.conviction_input_base();
+        let n_in = layout.n_in();
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[n_in - 1] = Fixed::ONE; // MOVE act (output 0) from the bias.
+        w[n_in + cbase] = Fixed::ONE; // MOVE dx (output 1) from the conviction stance input.
+        let leaner_ctrl =
+            || Controller::from_weights(n_in, layout.n_out(), layout.hidden(), w.clone());
+        let blank = Controller::zeros(&layout);
+
+        // All three start at x = 4, one row apart so they never share a cell, on an 8x8 uniform field.
+        emb.add(
+            Walker::new(
+                east_leaner,
+                Coord3::ground(4, 1),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                leaner_ctrl(),
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                west_leaner,
+                Coord3::ground(4, 3),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                leaner_ctrl(),
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                founder,
+                Coord3::ground(4, 5),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(-1)
+        };
+        // Same weight, opposite stances: the east-leaner steered EAST and the west-leaner WEST, so the stance
+        // itself is threaded and read (the direction follows the being's own conviction, not a constant).
+        assert!(
+            x_of(&runner, east_leaner) > 4,
+            "the east-leaner's positive conviction steered it east (x = {})",
+            x_of(&runner, east_leaner)
+        );
+        assert!(
+            x_of(&runner, west_leaner) < 4,
+            "the west-leaner's negative conviction steered it west (x = {})",
+            x_of(&runner, west_leaner)
+        );
+        // The founder holds a conviction too, but its blank controller cannot act on it, so it stays put: a
+        // conviction moves no behaviour until selection lifts a weight off zero (Principle 8, founder-inert).
+        assert_eq!(
+            x_of(&runner, founder),
+            4,
+            "the founder's conviction moves nothing (founder-zero conviction weight)"
         );
     }
 
