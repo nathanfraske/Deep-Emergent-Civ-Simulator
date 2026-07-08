@@ -91,6 +91,7 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
+use crate::environ::AbioticSourceRegistry;
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
@@ -106,9 +107,9 @@ use crate::learn::{
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material::{
-    CombustionCalib, CraftParams, EarthworkField, ExtractionParams, FireField, MaterialField,
-    MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix, TissueField,
-    WearParams, WieldedTool,
+    CombustionCalib, ConstituentRegistry, CraftParams, EarthworkField, ExtractionParams, FireField,
+    MaterialField, MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix,
+    TissueField, WearParams, WieldedTool,
 };
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
@@ -1450,10 +1451,20 @@ impl Embodiment {
         &self.soil
     }
 
+    /// A mutable handle to the soil-nutrient store (the extract-deplete draw-down and the weathering seed).
+    pub fn soil_mut(&mut self) -> &mut SoilNutrientField {
+        &mut self.soil
+    }
+
     /// The per-cell organism-tissue field (biosphere directive 2): the located matter dead organisms leave,
     /// for the consumers (extraction, and cutting and the matter cycle in later slices) and the reader.
     pub fn tissue(&self) -> &TissueField {
         &self.tissue
+    }
+
+    /// A mutable handle to the located body-matter field (seed biosphere consumer bodies; predation eats it).
+    pub fn tissue_mut(&mut self) -> &mut TissueField {
+        &mut self.tissue
     }
 
     /// Replace the organism-tissue field, the seam a test or worldgen uses to place corpse matter directly
@@ -1467,6 +1478,27 @@ impl Embodiment {
     /// invariant), summed over the soil store's cells and classes for the conservation guard and the reader.
     pub fn decomposed_mass(&self) -> Fixed {
         self.soil.total()
+    }
+
+    /// The closed matter-cycle CONSERVATION LEDGER (chemistry arc, Arc 4): the total matter mass the
+    /// decomposition legs move between pools, `located material mass + soil-nutrient store + located tissue`,
+    /// which the matter cycle holds INVARIANT (a substance's lost mass re-materialises into the soil bit for
+    /// bit through the constituent split, and a decayed body's lost volume the same, at the unit tissue
+    /// density the decay leg uses). This closes the LOOP the earlier `decomposed_mass` half-covered: the
+    /// tissue -> soil return leg is now inside the ledger, so both decomposition legs are conserved together.
+    /// The producer BIOMASS layer is OPEN and deliberately NOT in this ledger: the extract-deplete beat's
+    /// weathering deposit is a source and the producer draw a sink, so a run with the producer cycle armed is
+    /// not expected to hold this invariant across a whole tick, only the decomposition legs in isolation. Zero
+    /// material term if no material registry is installed. For the [`crate::conservation::ConservationRegistry`].
+    pub fn decay_ledger_mass(&self) -> Fixed {
+        let material = self
+            .material_registry
+            .as_ref()
+            .map(|reg| self.material.total_mass(reg))
+            .unwrap_or(Fixed::ZERO);
+        material
+            .saturating_add(self.soil.total())
+            .saturating_add(self.tissue.total_volume())
     }
 
     /// Install the world material registry a carried load's weight is derived against (material-substrate
@@ -2192,6 +2224,9 @@ impl Embodiment {
             // carry a backing substance is byte-identical.
             let cell_supply = self.material.volume(coord, &substance);
             // Size the bite from the being's own physiology and the room its reserve has left (immutable).
+            // The located BODY at the cell is eaten SEPARATELY, in one whole-body bite after this loop, so a
+            // multi-axis carcass is not over-depleted (a volume per axis); this arm eats only the loose cell
+            // matter and the being's inventory, each an independent substance.
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return gained;
             };
@@ -2239,6 +2274,129 @@ impl Embodiment {
                 let acc = eaten_volume.entry(substance.clone()).or_insert(Fixed::ZERO);
                 *acc = acc.saturating_add(taken);
                 eaten.insert(substance);
+            }
+        }
+        // PREDATION, the WHOLE-BODY BITE (chemistry arc, Arc 2): a located body at the cell is eaten in ONE
+        // volume bite that credits EVERY axis the eater assimilates, rather than a volume drawn per axis (which
+        // over-depleted a multi-axis carcass, a declared-open-biomass leak). Eaten by the SAME edibility as
+        // loose matter (a body is food iff the eater assimilates its composition, so carnivore/herbivore/
+        // omnivore emerges, never a tag). The bite VOLUME is sized so no reserve overflows: for each body axis
+        // the eater can digest and needs, the volume whose assimilated mass would fill that reserve's room, and
+        // the bite is the MINIMUM (the first reserve to fill caps it), capped by the body's available volume.
+        // Zero body -> a no-op, so a run where no corpse lies is byte-identical (the whole predation change is
+        // opt-in on a non-empty tissue field).
+        let body_volume = self.tissue.volume_at(coord);
+        if body_volume > Fixed::ZERO {
+            // Grossed-up assimilation: the reserve gain a unit of a body axis's mass yields, `assim * eta`
+            // (the ingest efficiency, one when unset). A helper so the SIZING and the CREDIT agree exactly.
+            let per_mass = |assim: Fixed| -> Fixed {
+                if eta > Fixed::ZERO {
+                    assim.checked_mul(eta).unwrap_or(Fixed::MAX)
+                } else {
+                    assim
+                }
+            };
+            // Size the bite (immutable read of the being's physiology and reserves). The bite volume is the
+            // TIGHTEST room-filling volume over the body axes the eater can BOTH digest and needs; if NO such
+            // axis exists (a full or non-digesting eater), the bite is nothing, so a full eater does not
+            // destroy a carcass it cannot use.
+            let bite_vol = match self.walkers.iter().find(|w| w.id == walker_id) {
+                Some(w) => {
+                    let mut limit: Option<Fixed> = None;
+                    for axis in &self.homeo.axes {
+                        let Some(sub) = axis.backing_component.as_deref() else {
+                            continue;
+                        };
+                        // The body's mean density on this axis (axis mass per unit body volume). An overflow
+                        // (a near-fully-eaten carcass with a tiny volume) reads MAX, a maximally-dense axis
+                        // that limits the bite hard, never zero (which would drop the axis and oversize it).
+                        let axis_total = self.tissue.axis_supply(coord, sub);
+                        let density = axis_total.checked_div(body_volume).unwrap_or(Fixed::MAX);
+                        if density <= Fixed::ZERO {
+                            continue; // the body carries none of this axis
+                        }
+                        let assim = w.physiology.assimilation(sub);
+                        if assim <= Fixed::ZERO {
+                            continue; // the eater cannot digest this axis
+                        }
+                        let room = w.homeostasis.capacity(axis.id) - w.homeostasis.amount(axis.id);
+                        if room <= Fixed::ZERO {
+                            continue; // this reserve is full: it does not limit the bite
+                        }
+                        // The volume whose gain fills the room: room / (density * assim * eta). A denominator
+                        // overflow reads MAX, so fill_vol is a tiny (limiting) bite, never the whole body.
+                        let denom = density.checked_mul(per_mass(assim)).unwrap_or(Fixed::MAX);
+                        if denom <= Fixed::ZERO {
+                            continue;
+                        }
+                        let fill_vol = room.checked_div(denom).unwrap_or(Fixed::ZERO);
+                        limit = Some(match limit {
+                            Some(cur) => cur.min(fill_vol),
+                            None => fill_vol,
+                        });
+                    }
+                    limit.map(|l| l.min(body_volume)).unwrap_or(Fixed::ZERO)
+                }
+                None => Fixed::ZERO,
+            };
+            if bite_vol > Fixed::ZERO {
+                // One bite: remove the volume once, get the mass of every axis in it.
+                let removed = self.tissue.bite(coord, bite_vol);
+                // Credit each axis from the SHARED removed mass, tracking what each backing substance has
+                // already fed so two reserves backed by the SAME substance split its mass rather than each
+                // being credited the full amount (which would create biomass in the eater).
+                let mut consumed: BTreeMap<String, Fixed> = BTreeMap::new();
+                for axis in &self.homeo.axes {
+                    let Some(sub) = axis.backing_component.as_deref() else {
+                        continue;
+                    };
+                    let total = removed.get(sub).copied().unwrap_or(Fixed::ZERO);
+                    let already = consumed.get(sub).copied().unwrap_or(Fixed::ZERO);
+                    let avail = (total - already).max(Fixed::ZERO);
+                    if avail <= Fixed::ZERO {
+                        continue; // this substance's bite mass is already spent on an earlier reserve
+                    }
+                    let (assim, room) = match self.walkers.iter().find(|w| w.id == walker_id) {
+                        Some(w) => (
+                            w.physiology.assimilation(sub),
+                            w.homeostasis.capacity(axis.id) - w.homeostasis.amount(axis.id),
+                        ),
+                        None => (Fixed::ZERO, Fixed::ZERO),
+                    };
+                    if assim <= Fixed::ZERO {
+                        continue;
+                    }
+                    let per = per_mass(assim);
+                    let gain = avail
+                        .checked_mul(per)
+                        .unwrap_or(avail)
+                        .min(room.max(Fixed::ZERO));
+                    if gain <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The mass this reserve drew to produce its gain (gain / (assim * eta)), booked against
+                    // the substance so a sibling reserve sees only the remainder.
+                    let mass_consumed = if per > Fixed::ZERO {
+                        gain.checked_div(per).unwrap_or(avail).min(avail)
+                    } else {
+                        avail
+                    };
+                    if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                        w.homeostasis.ingest(axis.id, gain);
+                    }
+                    gained += gain;
+                    let acc = consumed.entry(sub.to_string()).or_insert(Fixed::ZERO);
+                    *acc = acc.saturating_add(mass_consumed);
+                }
+                // Feed the harm-half and byproduct trace: every axis in the bite counts as eaten (the full
+                // bite mass, whether or not a reserve had room for it: the body lost it either way).
+                for (axis, mass) in &removed {
+                    if *mass > Fixed::ZERO {
+                        let acc = eaten_volume.entry(axis.clone()).or_insert(Fixed::ZERO);
+                        *acc = acc.saturating_add(*mass);
+                        eaten.insert(axis.clone());
+                    }
+                }
             }
         }
         // The HARM-HALF (the symmetric completion of ingestion): the toxins in what was eaten harm the eater
@@ -2654,6 +2812,8 @@ pub struct Runner {
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
+    /// The data-defined abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
+    abiotic_sources: Option<AbioticSourceRegistry>,
     /// The decomposer-driver registry (decomposition-as-emergence, Principle 8), armed opt-in beside the
     /// matter cycle. `None` on a runner without it, so the matter cycle (if armed) decays at the
     /// substance's own unconditional rate exactly as before and every existing scenario is byte-identical.
@@ -2669,6 +2829,16 @@ pub struct Runner {
     /// by a test in this slice; the biosphere wiring that fills it from a generated decomposer species is
     /// the deferred follow-on (task 21).
     decomposer_stock: Option<DecomposerStockField>,
+    /// The data-defined MASS-CONSTITUENT registry (chemistry arc, T5): how a decomposing substance's or body's
+    /// lost mass is apportioned into located soil-nutrient CLASSES by its OWN composition axes, generalizing
+    /// the fixed ash-plus-organic pair to k=N (`crate::material::ConstituentRegistry`). `None` on a runner
+    /// without it, so the matter cycle (if armed) uses the unconfigured Terran default split (the substance's
+    /// own mineral-ash fraction to a mineral class, the remainder to an organic class) exactly as before and
+    /// every existing scenario is byte-identical; armed via [`Runner::set_constituents`], a world declares its
+    /// own constituents and the split re-materialises matter by its own chemistry. A param, not state: folds
+    /// nothing into `state_hash` (its effect enters through the soil classes it deposits, which the soil field
+    /// folds). Off the calibrated worldbuild path until the biosphere slice wires it, like the matter-cycle calib.
+    constituents: Option<ConstituentRegistry>,
     /// Whether a death leaves the being's body as located matter (biosphere directive 2, organisms as usable
     /// material stuff). `false` by default, so a death retires the body and nothing is deposited and every
     /// existing scenario is byte-identical; armed via [`Runner::set_corpse_matter`], the lifecycle
@@ -2742,8 +2912,10 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
+            constituents: None,
             corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
@@ -2791,8 +2963,10 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
+            constituents: None,
             corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
@@ -2853,8 +3027,10 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
+            constituents: None,
             corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
@@ -2938,8 +3114,10 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
+            constituents: None,
             corpse_matter: false,
             arc_promoted: BTreeSet::new(),
             obs_deaths: Vec::new(),
@@ -3016,6 +3194,11 @@ impl Runner {
         self.matter_cycle = Some(calib);
     }
 
+    /// Arm the abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
+    pub fn set_abiotic_sources(&mut self, registry: AbioticSourceRegistry) {
+        self.abiotic_sources = Some(registry);
+    }
+
     /// Arm the decomposer-driver registry (decomposition-as-emergence, Principle 8): the matter cycle and
     /// the organic-trace salience then multiply their rate by the per-cell decomposition ACTIVITY this
     /// registry derives, so a cell's matter breaks down only as fast as its own decomposer life and
@@ -3034,6 +3217,16 @@ impl Runner {
     /// follow-on (task 21).
     pub fn set_decomposer_stock(&mut self, stock: DecomposerStockField) {
         self.decomposer_stock = Some(stock);
+    }
+
+    /// Arm the mass-constituent registry (chemistry arc, T5): the matter cycle then apportions each decomposing
+    /// substance's and body's lost mass into located soil classes by the matter's OWN composition axes,
+    /// generalizing the fixed ash-plus-organic pair to k=N. Opt-in and orthogonal to [`Runner::set_matter_cycle`]:
+    /// arming this alone changes nothing (the matter cycle must be armed to decay), and arming the matter cycle
+    /// without this keeps the unconfigured Terran default split, so every existing scenario is byte-identical.
+    /// The constituents are the world's own chemistry ([`crate::material::ConstituentRegistry`]).
+    pub fn set_constituents(&mut self, registry: ConstituentRegistry) {
+        self.constituents = Some(registry);
     }
 
     /// Arm corpse matter (biosphere directive 2): a death then leaves the being's body as located matter,
@@ -3223,6 +3416,19 @@ impl Runner {
             }
         }
         {
+            // The producer EXTRACT-DEPLETE beat (closed nutrient cycle): each producer draws its food from
+            // its evolved abiotic source, caps productivity by it, and draws down a depletable stock (soil,
+            // water) with a weathering bootstrap. After productivity set the capacity, before regrow. Opt-in
+            // (only when the biosphere armed the source registry), so an unarmed run is byte-identical.
+            if let (Some(reg), Some((env, _)), Some(emb)) = (
+                self.abiotic_sources.as_ref(),
+                self.environ.as_mut(),
+                self.embodiment.as_mut(),
+            ) {
+                env.extract_producers(emb.soil_mut(), reg);
+            }
+        }
+        {
             let _g = crate::profile::scope(crate::profile::P_REGROW);
             // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
             // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
@@ -3260,12 +3466,13 @@ impl Runner {
     }
 
     /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
-    /// over time and enriches the ground where it rots. For each cell substance carrying a biological
-    /// composition (a `bio.mineral_ash_fraction`, the mark of organic matter) whose cell temperature is at or
-    /// above the substance's own decomposition barrier, a per-substance fraction of its volume breaks down
-    /// this tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split by the
-    /// substance's own composition (the mineral-ash share to a mineral class, the remainder to an organic
-    /// class). Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
+    /// over time and enriches the ground where it rots. For each cell substance DECLARING A DECOMPOSITION
+    /// BARRIER (its own thermal gate, the mark of decomposable organic matter, whatever its chemistry) whose
+    /// cell temperature is at or above that barrier, a per-substance fraction of its volume breaks down this
+    /// tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split into located soil
+    /// classes by the substance's OWN composition through the data-defined [`crate::material::ConstituentRegistry`]
+    /// (chemistry arc, T5: the constituent fraction axes plus a residual, not a fixed ash-and-organic pair).
+    /// Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
     /// against the settled temperature identically. A pure deterministic fold in canonical cell-and-substance
     /// order (Principle 3); the outcome keys off the substance's own composition physics and the cell
     /// temperature, no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no
@@ -3283,10 +3490,21 @@ impl Runner {
         let Some(calib) = self.matter_cycle else {
             return;
         };
+        // The mass-constituent split (chemistry arc, T5): how each decomposing substance's and body's lost
+        // mass is apportioned into located soil classes by its OWN composition axes (data, Principle 11). An
+        // unarmed runner uses the unconfigured Terran default (mineral-ash fraction to a mineral class, the
+        // remainder to an organic class), the pre-arc behaviour exactly. Cloned once so the read and apply
+        // phases share it without re-borrowing self.
+        let split_reg = self
+            .constituents
+            .clone()
+            .unwrap_or_else(ConstituentRegistry::terran_default);
         // Read phase: over every cell of organic matter warm enough to decompose, compute the volume that
-        // breaks down, the exact mass it carries off, and the substance's mineral-ash fraction (the split the
-        // deposit routes by). Snapshotted so the take below does not alias the read.
-        let decomp: Vec<(Coord3, String, Fixed, Fixed, Fixed)> = {
+        // breaks down, the exact mass it carries off, and the soil-class DEPOSITS its own composition splits
+        // that mass into. Snapshotted so the take below does not alias the read.
+        // (cell, substance, volume decomposed, the (soil-class, mass) deposits its composition splits into).
+        type DecompEntry = (Coord3, String, Fixed, Vec<(String, Fixed)>);
+        let decomp: Vec<DecompEntry> = {
             let Some(emb) = self.embodiment.as_ref() else {
                 return;
             };
@@ -3300,18 +3518,15 @@ impl Runner {
                     let Some(def) = reg.substance(substance) else {
                         continue;
                     };
-                    // Organic matter carries a biological composition (an ash fraction); inorganic matter
-                    // (rock, soil, metal) does not and is skipped. This is the substance's own physics, not a
-                    // tag: what decomposes is what has a biological make-up (Principles 8, 11). The ash
-                    // fraction also routes the deposit: the mineral share of the decomposed mass.
-                    let Some(ash_fraction) = def.vector.get("bio.mineral_ash_fraction").copied()
-                    else {
-                        continue;
-                    };
-                    // The decomposition BARRIER is the substance's own thermal gate (its tissue-water
-                    // freezing point), read per-substance from its floor axis: at or below it a frozen
-                    // remains is preserved. A substance carrying no barrier axis does not decompose (the
-                    // barrier is its physical gate, so there is no global fallback for it).
+                    // DECOMPOSABILITY is the substance declaring a decomposition BARRIER, its own thermal gate
+                    // (a tissue-water freezing point): a substance with no barrier axis does not decompose (the
+                    // barrier is its physical gate, no global fallback), and one that declares it is organic
+                    // matter the cycle acts on, whatever its constituents. This retires the earlier ash-fraction
+                    // gather-gate (which read the presence of `bio.mineral_ash_fraction` as the "is organic"
+                    // test, an Earth-chemistry assumption): decomposability is the substance's own barrier
+                    // physics, and how its mass splits is the data-defined ConstituentRegistry above, never a
+                    // hardcoded ash bucket (Principles 8, 11). At or below the barrier a frozen remains is
+                    // preserved.
                     let Some(barrier) = def.vector.get("bio.decomposition_barrier").copied() else {
                         continue;
                     };
@@ -3367,10 +3582,16 @@ impl Runner {
                         }
                         None => Fixed::ONE,
                     };
+                    // The volume that breaks down: the substance's rate times the per-cell activity, CLAMPED to
+                    // the volume present. The rate is world-authored data (`bio.decomposition_rate`) with no
+                    // code-level upper bound, so an accidental rate above one (a fraction cannot exceed 100%)
+                    // must not decompose more than exists, or `volume - decomposed` would go negative and the
+                    // mass balance would CREATE matter (deposit more into the soil than the material lost).
                     let decomposed = volume
                         .checked_mul(rate)
                         .and_then(|d| d.checked_mul(factor))
-                        .unwrap_or(Fixed::ZERO);
+                        .unwrap_or(Fixed::ZERO)
+                        .min(volume);
                     if decomposed <= Fixed::ZERO {
                         continue;
                     }
@@ -3385,33 +3606,41 @@ impl Runner {
                     if mass_lost <= Fixed::ZERO {
                         continue;
                     }
-                    out.push((
-                        *cell,
-                        substance.clone(),
-                        decomposed,
-                        mass_lost,
-                        ash_fraction,
-                    ));
+                    // Split the lost mass into soil classes by the substance's OWN composition (T5): each
+                    // constituent's fraction axis read off `def.vector`, the residual absorbing the rest, so
+                    // the deposit is mass-exact and named by the substance's chemistry, not a fixed ash bucket.
+                    let deposits = split_reg.split(mass_lost, |a| {
+                        def.vector.get(a).copied().unwrap_or(Fixed::ZERO)
+                    });
+                    out.push((*cell, substance.clone(), decomposed, deposits));
                 }
             }
             out
         };
         // Apply phase: remove the decomposed volume and re-materialise its exact mass into the cell's soil
-        // nutrient store, split by the substance's own composition. The mineral share is the ash fraction of
-        // the loss; the organic share is the REMAINDER (loss minus mineral), so mineral plus organic equals
-        // the loss bit for bit whatever the mineral multiply rounds to, and the deposit conserves mass
-        // exactly (mass-valued, so no volume-quantisation rounding). Located at the cell where the matter
-        // rots, so the ground is enriched rather than the mass sitting in a placeless scalar.
+        // nutrient store, split by the substance's own composition (the constituent shares plus the residual
+        // equal the loss bit for bit, mass-valued so no volume-quantisation rounding). Located at the cell
+        // where the matter rots, so the ground is enriched rather than the mass sitting in a placeless scalar.
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
-        for (cell, substance, decomposed, mass_lost, ash_fraction) in decomp {
+        for (cell, substance, decomposed, deposits) in decomp {
             emb.material.take(cell, &substance, decomposed);
-            let mineral = mass_lost.checked_mul(ash_fraction).unwrap_or(Fixed::ZERO);
-            let mineral = mineral.min(mass_lost);
-            let organic = mass_lost - mineral;
-            emb.soil.deposit(cell, "bio.mineral_ash_fraction", mineral);
-            emb.soil.deposit(cell, "bio.organic_residue", organic);
+            for (class, mass) in deposits {
+                emb.soil.deposit(cell, &class, mass);
+            }
+        }
+        // The tissue -> soil RETURN leg (closing the nutrient cycle): located body matter (eaten remains,
+        // corpses, seeded animal bodies) rots a fraction each tick into the soil-nutrient store the producers
+        // draw, so a plant is fed by the decay of what ate or outlived it, not by weathering alone. T5: each
+        // decayed parcel re-materialises into the soil by ITS OWN composition axes through the SAME split the
+        // material leg uses (symmetric), so a body deposits its own chemistry, not one hardcoded organic bucket.
+        for (cell, composition, mass) in emb.tissue.decay(calib.decomposition_rate) {
+            for (class, share) in
+                split_reg.split(mass, |a| composition.get(a).copied().unwrap_or(Fixed::ZERO))
+            {
+                emb.soil.deposit(cell, &class, share);
+            }
         }
     }
 

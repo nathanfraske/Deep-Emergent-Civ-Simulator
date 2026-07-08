@@ -637,6 +637,13 @@ impl MaterialField {
         self.matter.iter()
     }
 
+    /// The total mass of all located matter over every cell, derived from the registry (the material term of
+    /// the matter-cycle conservation ledger, chemistry arc Arc 4): what decomposition moves OUT of the located
+    /// substances and into the soil store. Saturating; an empty field reads zero.
+    pub fn total_mass(&self, reg: &PhysicsRegistry) -> Fixed {
+        Fixed::saturating_sum(self.matter.values().map(|mix| mix.mass(reg)))
+    }
+
     /// Add a volume of one substance to a cell (a deposit: mined spoil dropped, a corpse's remains, an
     /// ash residue). Creates the cell's mixture if it was void.
     pub fn deposit(&mut self, coord: Coord3, substance: &str, volume: Fixed) {
@@ -892,6 +899,32 @@ impl SoilNutrientField {
         *entry = entry.saturating_add(mass);
     }
 
+    /// Remove up to `want` of a class's nutrient mass at a cell (the extract-and-deplete sibling of
+    /// [`Self::deposit`]): the draw a producer makes on the located soil-nutrient store as it fixes biomass,
+    /// so soil is finite and a heavily-worked column depletes rather than reading an infinite well (the
+    /// closed nutrient cycle). Clamped to the present mass, never negative; the class entry is removed when
+    /// it reaches zero and an emptied cell is dropped, so a drawn-then-emptied cell is byte-identical to a
+    /// never-deposited one and the `hash_into` fold is unperturbed. Returns the mass actually removed. Reads
+    /// and writes only the class string's mass, never an identity (Principle 9), so the drawn class is
+    /// whatever the world's chemistry declares, not an authored nutrient.
+    pub fn take(&mut self, cell: Coord3, class: &str, want: Fixed) -> Fixed {
+        let Some(classes) = self.cells.get_mut(&cell) else {
+            return Fixed::ZERO;
+        };
+        let Some(have) = classes.get_mut(class) else {
+            return Fixed::ZERO;
+        };
+        let taken = want.clamp(Fixed::ZERO, *have);
+        *have -= taken;
+        if *have <= Fixed::ZERO {
+            classes.remove(class);
+            if classes.is_empty() {
+                self.cells.remove(&cell);
+            }
+        }
+        taken
+    }
+
     /// The nutrient mass of a class at a cell; an unenriched cell or an absent class reads zero.
     pub fn mass(&self, cell: Coord3, class: &str) -> Fixed {
         self.cells
@@ -949,6 +982,98 @@ impl SoilNutrientField {
                 h.write_fixed(*mass);
             }
         }
+    }
+}
+
+/// A data-defined MASS-CONSTITUENT registry (Principle 11): how the decomposed mass of a substance or a body
+/// is apportioned into located soil-nutrient CLASSES by the decomposing matter's OWN composition, generalizing
+/// the fixed ash-plus-organic pair to k=N constituents. Each constituent names a FRACTION AXIS (a value in
+/// [0, 1] on the matter's composition giving the share of the decomposed mass that is that constituent) and the
+/// soil CLASS it deposits into; whatever the constituents do not claim is the RESIDUAL, deposited to the
+/// residual class, so the split is mass-EXACT (the constituent shares plus the residual equal the whole loss
+/// bit for bit, the residual absorbing every fixed-point rounding). The membership is DATA: a world adds a
+/// constituent by adding a row, so the split never authors a closed Earth ash-and-humus pair in the
+/// decomposition hot path. Read against the decomposing matter's own composition (a substance's `vector` or a
+/// decayed body parcel's composition), so the SAME split serves the material leg (rock, carrion) and the
+/// tissue leg (a decayed body), symmetric: a body re-materialises into the soil by ITS OWN axes, not a
+/// hardcoded organic bucket.
+#[derive(Clone, Debug)]
+pub struct ConstituentRegistry {
+    constituents: Vec<Constituent>,
+    residual_class: String,
+}
+
+/// One mass constituent: the [0, 1] fraction axis on the decomposing matter's composition and the soil class
+/// its share deposits into.
+#[derive(Clone, Debug)]
+struct Constituent {
+    fraction_axis: String,
+    deposit_class: String,
+}
+
+impl ConstituentRegistry {
+    /// An empty registry whose whole loss goes to `residual_class` (the k=1 case). Push constituents to carve
+    /// fraction axes out of the residual.
+    pub fn new(residual_class: &str) -> ConstituentRegistry {
+        ConstituentRegistry {
+            constituents: Vec::new(),
+            residual_class: residual_class.to_string(),
+        }
+    }
+
+    /// Add a constituent: the [0, 1] `fraction_axis` on the decomposing matter's composition gives the share
+    /// of its decomposed mass that is this constituent, deposited to `deposit_class`. Push order fixes only
+    /// the canonical deposit sequence (the residual always follows), never the mass total.
+    pub fn push(&mut self, fraction_axis: &str, deposit_class: &str) {
+        self.constituents.push(Constituent {
+            fraction_axis: fraction_axis.to_string(),
+            deposit_class: deposit_class.to_string(),
+        });
+    }
+
+    /// The UNCONFIGURED default split (the opt-in sibling of the decomposer's `None` -> unconditional-rate
+    /// default): the decomposing matter's own mineral-ash fraction to a mineral class, the remainder to an
+    /// organic class, the pre-chemistry-arc behaviour exactly. Named after Earth axes only as a labelled
+    /// default a world overrides by arming its own [`ConstituentRegistry`]; the mechanism reads the matter's
+    /// OWN composition, never a per-species table (residue F1: a Terran-clean world names its own axes here).
+    pub fn terran_default() -> ConstituentRegistry {
+        let mut r = ConstituentRegistry::new("bio.organic_residue");
+        r.push("bio.mineral_ash_fraction", "bio.mineral_ash_fraction");
+        r
+    }
+
+    /// Apportion `mass` into (deposit_class, mass) shares by the decomposing matter's composition (`axis`, a
+    /// lookup returning the matter's value on a named floor axis, zero for an absent one). Each constituent
+    /// claims `min(remaining, mass * fraction)`, the residual takes the final remaining, so the shares sum to
+    /// `mass` EXACTLY (the residual absorbs all fixed-point rounding). A non-positive mass or a zero share is
+    /// dropped (no empty deposit, so an armed-but-unmatched body still lands its whole mass in the residual).
+    /// Canonical: the constituents in push order, then the residual, so the deposit sequence is reproducible
+    /// and thread-invariant.
+    pub fn split(&self, mass: Fixed, axis: impl Fn(&str) -> Fixed) -> Vec<(String, Fixed)> {
+        if mass <= Fixed::ZERO {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut remaining = mass;
+        for c in &self.constituents {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let frac = axis(&c.fraction_axis);
+            if frac <= Fixed::ZERO {
+                continue;
+            }
+            let share = mass.checked_mul(frac).unwrap_or(Fixed::ZERO).min(remaining);
+            if share <= Fixed::ZERO {
+                continue;
+            }
+            out.push((c.deposit_class.clone(), share));
+            remaining -= share;
+        }
+        if remaining > Fixed::ZERO {
+            out.push((self.residual_class.clone(), remaining));
+        }
+        out
     }
 }
 
@@ -1026,6 +1151,167 @@ impl TissueField {
         *entry = entry.saturating_add(volume);
     }
 
+    /// Remove up to `want` of AXIS `axis` from the located body matter at a cell (the eaten-and-deplete
+    /// sibling of [`Self::deposit`]): a bite of a body, drawn through the SAME edibility a grazer uses on
+    /// standing food, so predation is grazing on a located depleting body and needs no new verb. Each parcel
+    /// yields up to `volume * composition[axis]` of the axis; removing that reduces the parcel's VOLUME
+    /// proportionally, so the whole body shrinks together with its composition unchanged (a fraction of the
+    /// carcass is eaten, not one axis leached out of it). Walks parcels in canonical `TissueKey` order
+    /// (matching [`Self::parcels`] and the `hash_into` fold), drops an emptied parcel and an emptied cell so
+    /// a fully-eaten cell is byte-identical to a never-deposited one, and returns the axis mass removed
+    /// (which equals the body's loss, so the eater's gain is conservation-honest). Keyed off the axis string
+    /// alone, never an identity: what a body yields is whatever its physics-floor composition carries, so an
+    /// alien tissue enters as data (Principle 9).
+    pub fn take(&mut self, cell: Coord3, axis: &str, want: Fixed) -> Fixed {
+        if want <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let Some(parcels) = self.cells.get_mut(&cell) else {
+            return Fixed::ZERO;
+        };
+        let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+        let mut remaining = want;
+        let mut removed = Fixed::ZERO;
+        for key in keys {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let density = key
+                .iter()
+                .find(|(a, _)| a.as_str() == axis)
+                .map(|(_, v)| *v)
+                .unwrap_or(Fixed::ZERO);
+            if density <= Fixed::ZERO {
+                continue;
+            }
+            let volume = *parcels.get(&key).unwrap();
+            let available = volume.checked_mul(density).unwrap_or(Fixed::MAX);
+            let take_axis = remaining.min(available);
+            let vol_removed = take_axis
+                .checked_div(density)
+                .unwrap_or(Fixed::ZERO)
+                .min(volume);
+            let axis_removed = vol_removed.checked_mul(density).unwrap_or(Fixed::ZERO);
+            let new_volume = volume - vol_removed;
+            if new_volume <= Fixed::ZERO {
+                parcels.remove(&key);
+            } else {
+                parcels.insert(key, new_volume);
+            }
+            removed = removed.saturating_add(axis_removed);
+            remaining -= axis_removed;
+        }
+        if parcels.is_empty() {
+            self.cells.remove(&cell);
+        }
+        removed
+    }
+
+    /// Take a single whole-body BITE of up to `want` VOLUME from the located body matter at a cell (predation's
+    /// whole-body bite, chemistry arc Arc 2), returning the mass of EVERY axis in the removed volume. Unlike
+    /// [`Self::take`] (which draws one named axis and removes the volume that carried it), one bite removes one
+    /// volume ONCE and credits every nutrient the eater assimilates, so a multi-axis carcass is not
+    /// over-depleted (the earlier per-axis draw removed a volume per axis, a declared-open-biomass leak). Walks
+    /// parcels in canonical order, shrinks each proportionally, drops an emptied parcel and an emptied cell so
+    /// a fully-eaten cell is byte-identical to a never-deposited one, and returns the summed per-axis mass
+    /// removed. A non-positive want or an empty cell returns an empty map. Keyed off no identity: what the bite
+    /// yields is whatever the body's own composition carries (Principle 9).
+    pub fn bite(&mut self, cell: Coord3, want: Fixed) -> BTreeMap<String, Fixed> {
+        let mut removed_axes: BTreeMap<String, Fixed> = BTreeMap::new();
+        if want <= Fixed::ZERO {
+            return removed_axes;
+        }
+        let Some(parcels) = self.cells.get_mut(&cell) else {
+            return removed_axes;
+        };
+        let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+        let mut remaining = want;
+        for key in keys {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let volume = *parcels.get(&key).unwrap();
+            let take_vol = remaining.min(volume);
+            if take_vol <= Fixed::ZERO {
+                continue;
+            }
+            // Every axis in the removed volume: its mass is removed_volume * density (the body's own value).
+            for (axis, density) in &key {
+                let m = take_vol.checked_mul(*density).unwrap_or(Fixed::MAX);
+                let acc = removed_axes.entry(axis.clone()).or_insert(Fixed::ZERO);
+                *acc = acc.saturating_add(m);
+            }
+            let new_volume = volume - take_vol;
+            if new_volume <= Fixed::ZERO {
+                parcels.remove(&key);
+            } else {
+                parcels.insert(key, new_volume);
+            }
+            remaining -= take_vol;
+        }
+        if parcels.is_empty() {
+            self.cells.remove(&cell);
+        }
+        removed_axes
+    }
+
+    /// The total of AXIS `axis` available in the located body matter at a cell (the read the ingest measures
+    /// its bite against): the sum over parcels of `volume * composition[axis]`. Zero where no body lies.
+    pub fn axis_supply(&self, cell: Coord3, axis: &str) -> Fixed {
+        let Some(parcels) = self.cells.get(&cell) else {
+            return Fixed::ZERO;
+        };
+        let mut total = Fixed::ZERO;
+        for (key, &volume) in parcels {
+            let density = key
+                .iter()
+                .find(|(a, _)| a.as_str() == axis)
+                .map(|(_, v)| *v)
+                .unwrap_or(Fixed::ZERO);
+            total = total.saturating_add(volume.checked_mul(density).unwrap_or(Fixed::MAX));
+        }
+        total
+    }
+
+    /// Rot every parcel by a fraction of its volume, returning per parcel the (cell, its own COMPOSITION, mass
+    /// removed) for the soil deposit (the tissue -> soil RETURN leg of the nutrient cycle): the located body
+    /// matter is fed back to the soil the producers draw, re-materialised into the soil by the body's OWN
+    /// composition axes (T5), symmetric with the material leg's per-substance split. Each parcel carries its
+    /// own composition so a caller ([`crate::material::ConstituentRegistry::split`]) apportions its lost mass
+    /// by that composition, never a hardcoded organic bucket. Canonical order; an emptied parcel/cell is
+    /// dropped so the fold stays reproducible. The removed volume is the mass returned (a unit tissue density
+    /// until a reserved density lands).
+    pub fn decay(&mut self, rate: Fixed) -> Vec<(Coord3, BTreeMap<String, Fixed>, Fixed)> {
+        if rate <= Fixed::ZERO {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let cells: Vec<Coord3> = self.cells.keys().copied().collect();
+        for cell in cells {
+            let parcels = self.cells.get_mut(&cell).unwrap();
+            let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+            for key in keys {
+                let volume = *parcels.get(&key).unwrap();
+                let d = volume.checked_mul(rate).unwrap_or(Fixed::ZERO).min(volume);
+                if d <= Fixed::ZERO {
+                    continue;
+                }
+                let nv = volume - d;
+                let composition: BTreeMap<String, Fixed> = key.iter().cloned().collect();
+                if nv <= Fixed::ZERO {
+                    parcels.remove(&key);
+                } else {
+                    parcels.insert(key, nv);
+                }
+                out.push((cell, composition, d));
+            }
+            if parcels.is_empty() {
+                self.cells.remove(&cell);
+            }
+        }
+        out
+    }
+
     /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
     /// yields nothing.
     pub fn parcels(&self, cell: Coord3) -> Vec<TissueParcel> {
@@ -1058,6 +1344,15 @@ impl TissueField {
                     .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v))
             })
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The total tissue volume over every cell and parcel (the tissue term of the matter-cycle conservation
+    /// ledger, chemistry arc Arc 4): the located body matter that decomposition returns to the soil store, at
+    /// the unit tissue density the decay leg uses. Saturating; an empty field reads zero.
+    pub fn total_volume(&self) -> Fixed {
+        self.cells.values().fold(Fixed::ZERO, |acc, parcels| {
+            parcels.values().fold(acc, |a, v| a.saturating_add(*v))
+        })
     }
 
     /// The fracture hardness a being must overcome to work the tissue at a cell: the greatest
@@ -1185,6 +1480,86 @@ impl GroundProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constituent_split_is_mass_exact_and_generalises_the_ash_pair_to_k_axes() {
+        // Chemistry arc, T5: the decomposed mass is apportioned into soil classes by the decomposing matter's
+        // OWN composition (data-defined), generalizing the fixed ash-plus-organic pair to k=N constituents,
+        // and the split is mass-EXACT (the constituent shares plus the residual equal the whole loss bit for
+        // bit, whatever the per-share fixed-point multiplies round to).
+        let mass = Fixed::from_int(100);
+        // A k=3 registry: three fraction axes plus a residual. The fractions do NOT sum to a round number, so
+        // the residual has to absorb the rounding for the sum to stay exact.
+        let mut reg = ConstituentRegistry::new("residual");
+        reg.push("ash", "soil.ash");
+        reg.push("lignin", "soil.lignin");
+        reg.push("labile", "soil.labile");
+        let comp: BTreeMap<String, Fixed> = [
+            ("ash".to_string(), Fixed::from_ratio(7, 100)),
+            ("lignin".to_string(), Fixed::from_ratio(23, 100)),
+            ("labile".to_string(), Fixed::from_ratio(31, 100)),
+        ]
+        .into_iter()
+        .collect();
+        let split = reg.split(mass, |a| comp.get(a).copied().unwrap_or(Fixed::ZERO));
+        // Four shares: the three constituents plus the residual (39% of the mass, whatever rounds up).
+        assert_eq!(split.len(), 4, "k=3 constituents plus the residual");
+        let total = split
+            .iter()
+            .fold(Fixed::ZERO, |acc, (_, m)| acc.saturating_add(*m));
+        assert_eq!(
+            total, mass,
+            "the shares sum to the whole loss EXACTLY (mass-exact)"
+        );
+        // The classes are the matter's OWN chemistry, not a hardcoded Earth bucket.
+        let classes: Vec<&str> = split.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            classes,
+            vec!["soil.ash", "soil.lignin", "soil.labile", "residual"]
+        );
+
+        // The terran_default reproduces the pre-arc k=2 split exactly (mineral-ash to a mineral class, the
+        // remainder to an organic class), the byte-neutral fallback an unarmed matter cycle uses.
+        let carrion: BTreeMap<String, Fixed> = [(
+            "bio.mineral_ash_fraction".to_string(),
+            Fixed::from_ratio(5, 100),
+        )]
+        .into_iter()
+        .collect();
+        let d = ConstituentRegistry::terran_default();
+        let s = d.split(mass, |a| carrion.get(a).copied().unwrap_or(Fixed::ZERO));
+        // The expected shares are computed the SAME way the pre-arc code did (mineral = mass * ash via
+        // checked_mul, organic = the exact remainder), so this proves equivalence without assuming 0.05 is
+        // exactly representable in fixed point. The remainder construction is what keeps the sum exact.
+        let ash = Fixed::from_ratio(5, 100);
+        let mineral = mass.checked_mul(ash).unwrap();
+        let organic = mass - mineral;
+        assert_eq!(
+            s,
+            vec![
+                ("bio.mineral_ash_fraction".to_string(), mineral),
+                ("bio.organic_residue".to_string(), organic),
+            ],
+            "the default is the mineral-ash + organic-remainder pair (the pre-arc split)"
+        );
+        assert_eq!(
+            mineral.saturating_add(organic),
+            mass,
+            "and the pair still sums to the whole loss exactly"
+        );
+
+        // A body carrying NONE of the fraction axes lands its WHOLE mass in the residual (the tissue leg's
+        // byte-neutral case: a body with no declared constituent decays to the organic residual entire).
+        let body: BTreeMap<String, Fixed> = [("mat.density".to_string(), Fixed::from_int(1000))]
+            .into_iter()
+            .collect();
+        let sb = reg.split(mass, |a| body.get(a).copied().unwrap_or(Fixed::ZERO));
+        assert_eq!(
+            sb,
+            vec![("residual".to_string(), mass)],
+            "a body with no constituent axis returns its whole mass to the residual (mass-exact)"
+        );
+    }
 
     #[test]
     fn a_tissue_field_accumulates_by_content_and_folds_order_free() {
@@ -1621,6 +1996,61 @@ values = [
         );
         assert!(field.is_empty());
         assert_eq!(field.bulk_hardness(coord, &reg), Fixed::ZERO);
+    }
+
+    #[test]
+    fn a_whole_body_bite_removes_one_volume_and_credits_every_axis_where_per_axis_takes_over_deplete(
+    ) {
+        // Chemistry arc, Arc 2 (FIX-2): one whole-body bite removes ONE volume and returns the mass of EVERY
+        // axis in it, so a multi-axis carcass is not over-depleted, where the per-axis `take` (one axis, and
+        // the volume that carried it) would remove a volume PER axis, the declared-open-biomass leak the bite
+        // fixes. A body carrying two axes (exact binary densities, so the arithmetic is representable).
+        let cell = Coord3::ground(1, 1);
+        let e_density = Fixed::from_ratio(1, 2); // 0.5
+        let m_density = Fixed::from_ratio(1, 4); // 0.25
+        let body = || -> BTreeMap<String, Fixed> {
+            [
+                ("bio.energy_density".to_string(), e_density),
+                ("halite".to_string(), m_density),
+            ]
+            .into_iter()
+            .collect()
+        };
+        // The expected per-axis mass in a 10-volume bite, computed the way the mechanism does.
+        let expect_e = Fixed::from_int(10).checked_mul(e_density).unwrap();
+        let expect_m = Fixed::from_int(10).checked_mul(m_density).unwrap();
+
+        // One bite of 10 volume: removes 10 volume ONCE, credits BOTH axes.
+        let mut field = TissueField::new();
+        field.deposit(cell, body(), Fixed::from_int(100));
+        let removed = field.bite(cell, Fixed::from_int(10));
+        assert_eq!(
+            removed.get("bio.energy_density").copied().unwrap(),
+            expect_e,
+            "the bite credits the energy axis (10 volume * its density)"
+        );
+        assert_eq!(
+            removed.get("halite").copied().unwrap(),
+            expect_m,
+            "the SAME bite also credits the mineral axis: one bite, every axis"
+        );
+        assert_eq!(
+            field.volume_at(cell),
+            Fixed::from_int(90),
+            "the body lost exactly ONE bite's volume (10), not one per axis"
+        );
+
+        // Contrast: two per-axis takes (the pre-fix predation) remove TWO volumes for the same nutrition, each
+        // draw removing the volume that carried its axis (expect_e / e_density = 10, and again for the mineral).
+        let mut field2 = TissueField::new();
+        field2.deposit(cell, body(), Fixed::from_int(100));
+        field2.take(cell, "bio.energy_density", expect_e);
+        field2.take(cell, "halite", expect_m);
+        assert_eq!(
+            field2.volume_at(cell),
+            Fixed::from_int(80),
+            "two per-axis takes removed TWO volumes (the over-depletion the whole-body bite fixes)"
+        );
     }
 
     #[test]

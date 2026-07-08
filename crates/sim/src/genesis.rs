@@ -44,6 +44,7 @@ use crate::epoch::{run, EpochParams, EpochReport, Radiation};
 use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
+use crate::physiology::whole_body_composition_vector;
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
 /// generator and epoch parameters. DEVELOPMENT FIXTURE via [`GenesisParams::dev_default`].
@@ -153,6 +154,135 @@ impl LivingWorld {
                 if biomass > Fixed::ZERO {
                     out.push((coord, biomass));
                 }
+            }
+        }
+        out
+    }
+
+    /// The evolved abiotic SOURCE id each producer occupant draws on, for the extract-deplete cycle: a
+    /// producer fixes biomass from the specific abiotic source its niche evolved to close on (its
+    /// `SourceRef::Abiotic(id)`), and the run consults a DATA-DEFINED source binding to learn which field
+    /// that id reads and whether it is a depletable stock or a renewable flux. The id's MEANING is never
+    /// interpreted here (no `id == 2` soil switch, which would re-author a closed Earth triad): it is read
+    /// off the evolved food web and passed opaque to the registry, so an alien source (geothermal, a redox
+    /// gradient, a mana field) is one data row, not code. Canonical order, deterministic.
+    pub fn producer_sources(&self) -> Vec<(Coord3, Vec<u16>)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                // EVERY abiotic edge the niche evolved to draw on (its Liebig factor set), not just the
+                // first: a producer limited by light AND soil closes on both, and the extract beat takes the
+                // minimum over the set. Species order is canonical; a producer with one edge yields a
+                // one-element list (the scalar case, unchanged).
+                let sources: Vec<u16> = species
+                    .draws_on
+                    .iter()
+                    .filter_map(|s| match s {
+                        SourceRef::Abiotic(id) => Some(*id),
+                        _ => None,
+                    })
+                    .collect();
+                if !sources.is_empty() {
+                    out.push((coord, sources));
+                }
+            }
+        }
+        out
+    }
+
+    /// The located BODY MATTER of every CONSUMER occupant (a non-autotroph animal), for predation: each
+    /// consumer's body is its own physics-derived `whole_body_composition_vector` (the SAME fold a corpse
+    /// uses, content-addressed, no minted substance), scaled to a volume by its body mass and the located
+    /// population. Consumer versus producer is read from the food-web PRIMITIVE draws_on (no Abiotic edge
+    /// means a consumer), never a trophic tag. Deterministic canonical order. A founder eats one through the
+    /// geophage by the same edibility that grazes plants; the matter cycle decomposes it back to soil.
+    pub fn consumer_bodies(
+        &self,
+        pop_capacity: Fixed,
+    ) -> Vec<(Coord3, std::collections::BTreeMap<String, Fixed>, Fixed)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let autotroph = species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)));
+                if autotroph {
+                    continue;
+                }
+                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                if composition.is_empty() {
+                    continue;
+                }
+                let suit = species.niche.suitability(&rb.region.env);
+                let volume = info
+                    .body_mass
+                    .checked_mul(pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO))
+                    .unwrap_or(Fixed::ZERO);
+                if volume > Fixed::ZERO {
+                    out.push((coord, composition, volume));
+                }
+            }
+        }
+        out
+    }
+
+    /// The standing-food COMPOSITION of every PRODUCER occupant (an autotroph), for the food web's write side
+    /// (chemistry arc, T3): a producer's standing food is its OWN physics-derived `whole_body_composition_vector`
+    /// (the SAME fold a corpse and a consumer body use), so the food a grazer eats carries the plant's own
+    /// chemistry rather than one minted `bio.energy_density` class. Producer versus consumer is read from the
+    /// food-web PRIMITIVE draws_on (an Abiotic edge means an autotroph), never a kingdom tag, so a walking,
+    /// prey-eating autotroph is still a producer here. The composition is the fixed per-unit-biomass density
+    /// vector; the standing biomass VOLUME it scales is the environ's logistic productivity stock, so grazing
+    /// draws the volume and the composition rides fixed (the read-back stays a single volume, not N stocks).
+    /// The consumer of this ([`crate::environ::EnvironFields::set_producer_food`]) normalises it to a nutrient
+    /// simplex. Deterministic canonical order; a cell with two producer occupants keeps the last (as
+    /// `set_producer_food` overwrites). Mirrors [`Self::consumer_bodies`].
+    pub fn producer_compositions(
+        &self,
+    ) -> Vec<(Coord3, std::collections::BTreeMap<String, Fixed>)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let autotroph = species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)));
+                if !autotroph {
+                    continue;
+                }
+                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                if composition.is_empty() {
+                    continue;
+                }
+                out.push((coord, composition));
             }
         }
         out

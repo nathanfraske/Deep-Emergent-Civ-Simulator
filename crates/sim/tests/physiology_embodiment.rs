@@ -29,6 +29,7 @@ use civsim_sim::controller::Controller;
 use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE,
+    WATER,
 };
 use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::medium::{MediumField, RESPIRATORY_SURFACE};
@@ -2349,6 +2350,133 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
 }
 
 #[test]
+fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_substance() {
+    // Chemistry arc, Arc 2 hardening (an audit catch): when TWO homeostatic reserves are backed by the SAME
+    // body substance, one whole-body bite must SPLIT that substance's removed mass between them, not credit
+    // each reserve the full amount (which would create biomass in the eater). Proof: a body carrying one
+    // substance, an eater whose two drained reserves both draw on it; after one bite the eater's TOTAL gain
+    // does not exceed the assimilable value of the mass the body actually lost.
+    use civsim_sim::homeostasis::HomeostaticAxisDef;
+    use civsim_sim::material::TissueField;
+
+    // Two DRAINING reserves (energy and water), BOTH backed by the same substance "flesh", plus the required
+    // non-draining TEMPERATURE axis (set each tick from the body core, never self-drains).
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "reserve-a".to_string(),
+                backing_component: Some("flesh".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 20),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: WATER,
+                name: "reserve-b".to_string(),
+                backing_component: Some("flesh".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 20),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+    // Two tissues so both reserves have capacity to refill into.
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "flesh-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("flesh", Fixed::ONE)]),
+    });
+    let cell = Coord3::ground(2, 2);
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x111D,
+    );
+    let n_in = emb.layout().n_in();
+    let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+    w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> geophage activation
+    let ctrl = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+    emb.add(
+        resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            ctrl,
+        ),
+        band(305),
+    );
+    let mut runner =
+        Runner::with_embodiment(uniform_field(6, 6, Fixed::from_int(305)), calib(), emb);
+
+    // Drain the reserves (no food present), so both have room to refill from a bite.
+    for _ in 0..8 {
+        runner.step();
+    }
+    // Deposit a body carrying ONLY "flesh" at the eater's cell.
+    let mut tissue = TissueField::new();
+    let flesh: std::collections::BTreeMap<String, Fixed> =
+        [("flesh".to_string(), Fixed::ONE)].into_iter().collect();
+    tissue.deposit(cell, flesh, Fixed::from_int(50));
+    runner.embodiment_mut().unwrap().set_tissue(tissue);
+
+    let reserves = |r: &Runner| -> (Fixed, Fixed) {
+        let w = r
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(1))
+            .unwrap();
+        (w.homeostasis.amount(ENERGY), w.homeostasis.amount(WATER))
+    };
+    let body_vol = |r: &Runner| -> Fixed { r.embodiment().unwrap().tissue().volume_at(cell) };
+    let (a0, b0) = reserves(&runner);
+    let vol0 = body_vol(&runner);
+
+    // One tick: the geophage fires exactly one whole-body bite.
+    runner.step();
+
+    let (a1, b1) = reserves(&runner);
+    let vol1 = body_vol(&runner);
+    // The eater's TOTAL gain (both reserves), adding back the same-tick drain so we measure intake alone.
+    let drain = Fixed::from_ratio(1, 20);
+    let gain_a = (a1 - a0).saturating_add(drain);
+    let gain_b = (b1 - b0).saturating_add(drain);
+    let total_gain = gain_a.saturating_add(gain_b);
+    // The body's lost mass this tick (flesh density is one, so lost mass == lost volume), times the ingest
+    // efficiency: the assimilable value of what the body actually gave up.
+    let removed = vol0 - vol1;
+    let eta = LocomotionParams::dev_default().ingest_efficiency;
+    let assimilable = removed.checked_mul(eta).unwrap_or(removed);
+    assert!(removed > Fixed::ZERO, "the eater bit the body");
+    assert!(
+        total_gain <= assimilable.saturating_add(Fixed::from_ratio(1, 1000)),
+        "the two reserves SHARED the bite's mass (total gain {total_gain:?} <= one bite's assimilable value \
+         {assimilable:?}), not double-credited"
+    );
+}
+
+#[test]
 fn eating_a_food_that_sickens_harms_the_sensitive_eater_and_spares_the_tolerant_one() {
     // Material-substrate arc item 4, the HARM-HALF of INGEST-FOR-COMPOSITION (the owner's seam): eating is
     // not only benefit. A being that eats a substance carrying a toxin takes the harm against its OWN
@@ -3924,6 +4052,140 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
         pinned.embodiment().unwrap().decomposed_mass(),
         "the scheduled and pinned orders decompose identically"
     );
+}
+
+#[test]
+fn the_decomposition_split_is_data_defined_and_gated_on_the_barrier_not_the_ash_axis() {
+    // Chemistry arc, T5: decomposability is the substance declaring a decomposition BARRIER (its own physical
+    // gate), NOT the presence of an Earth mineral-ash axis (the retired gather-gate), and how the lost mass
+    // splits into soil classes is a DATA-defined ConstituentRegistry, not a hardcoded ash-plus-organic pair.
+    // Proof: arm a world whose registry references a fraction axis carrion does NOT carry. Carrion still
+    // decomposes (the barrier gate, not the ash gate), and its whole lost mass lands in the world's own
+    // residual class, none in the Earth `bio.*` classes, so the split follows the armed data, never a bucket
+    // baked into the engine.
+    use civsim_sim::material::{ConstituentRegistry, MaterialField, MatterCycleCalib};
+
+    let (w, h) = (8, 8);
+    let cell = Coord3::ground(2, 2);
+    let flesh0 = Fixed::from_int(10);
+
+    let hreg = energy_thermal_registry();
+    let mut emb = Embodiment::new(
+        hreg,
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0xDECA,
+    );
+    let mut field = MaterialField::new();
+    field.deposit(cell, "carrion", flesh0); // carrion carries mineral_ash_fraction AND a 273 K barrier
+    emb.set_material(field);
+    emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+    let mut r = Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(300)), calib(), emb);
+    r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+    // The world's OWN chemistry: a residual class and a constituent keyed on an axis carrion does not carry,
+    // so nothing is carved out and the whole loss falls to the residual. Neither class is a `bio.*` Earth name.
+    let mut world_reg = ConstituentRegistry::new("world.humus");
+    world_reg.push("world.labile_fraction", "world.labile");
+    r.set_constituents(world_reg);
+
+    r.step();
+
+    let soil = r.embodiment().unwrap().soil();
+    let decomposed = r.embodiment().unwrap().decomposed_mass();
+    assert!(
+        decomposed > Fixed::ZERO,
+        "carrion still decomposes: decomposability is its BARRIER, not the ash axis (retired gather-gate)"
+    );
+    assert_eq!(
+        soil.mass(cell, "world.humus"),
+        decomposed,
+        "the whole lost mass lands in the WORLD'S own residual class (the split follows the armed data)"
+    );
+    assert_eq!(
+        soil.mass(cell, "bio.mineral_ash_fraction"),
+        Fixed::ZERO,
+        "no mass leaks to the Earth mineral class: the ash bucket is no longer hardcoded"
+    );
+    assert_eq!(
+        soil.mass(cell, "bio.organic_residue"),
+        Fixed::ZERO,
+        "no mass leaks to the Earth organic class: the split is data-defined end to end"
+    );
+}
+
+#[test]
+fn the_matter_cycle_conserves_material_plus_soil_plus_tissue_across_both_legs() {
+    // Chemistry arc, Arc 4: the CLOSED decay ledger, registered. Decomposition moves matter between three
+    // pools (located material, the soil-nutrient store, and located body tissue) and holds their SUM invariant:
+    // a substance's lost mass re-materialises into the soil bit for bit through the constituent split, and a
+    // decayed body's lost volume the same through the tissue return leg. With BOTH a rotting carrion substance
+    // AND a rotting body parcel present, and the producer biomass layer OPEN (no extract beat armed), the
+    // registered ledger is conserved across the tick and both legs are active (material and tissue both fall,
+    // the soil store rises). This closes the loop the earlier material-only conservation half-covered.
+    use civsim_sim::conservation::ConservationRegistry;
+    use civsim_sim::material::{MaterialField, MatterCycleCalib, TissueField};
+
+    let (w, h) = (8, 8);
+    let mcell = Coord3::ground(2, 2);
+    let tcell = Coord3::ground(3, 3);
+    let ground = || civsim_physics::PhysicsRegistry::ground().unwrap();
+
+    let hreg = energy_thermal_registry();
+    let mut emb = Embodiment::new(
+        hreg,
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0xDECA,
+    );
+    let mut field = MaterialField::new();
+    field.deposit(mcell, "carrion", Fixed::from_int(10)); // decomposes via its barrier (material leg)
+    emb.set_material(field);
+    emb.set_material_registry(ground());
+    // A located body parcel that decays unconditionally at the reserved rate (the tissue return leg): its own
+    // composition (here a single nutrient) carves nothing from the default split, so its whole volume returns.
+    let mut tissue = TissueField::new();
+    let body: std::collections::BTreeMap<String, Fixed> =
+        [("bio.energy_density".to_string(), Fixed::from_int(5))]
+            .into_iter()
+            .collect();
+    tissue.deposit(tcell, body, Fixed::from_int(8));
+    emb.set_tissue(tissue);
+    let mut r = Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(300)), calib(), emb);
+    r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+
+    let mut conservation: ConservationRegistry<Runner> = ConservationRegistry::new();
+    conservation.register("decay_ledger", |r: &Runner| {
+        r.embodiment().unwrap().decay_ledger_mass().to_bits() as i128
+    });
+    let material0 = r.embodiment().unwrap().material().total_mass(&ground());
+    let tissue0 = r.embodiment().unwrap().tissue().total_volume();
+    let baseline = conservation.snapshot(&r);
+
+    r.step();
+    conservation
+        .check_against(&baseline, &r)
+        .expect("the matter cycle conserves material + soil + tissue across both legs");
+    assert!(
+        r.embodiment().unwrap().material().total_mass(&ground()) < material0,
+        "the material leg rotted (the carrion mass fell)"
+    );
+    assert!(
+        r.embodiment().unwrap().tissue().total_volume() < tissue0,
+        "the tissue leg rotted (the body volume fell)"
+    );
+    assert!(
+        r.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the soil store gained the matter both legs lost"
+    );
+
+    for _ in 0..10 {
+        r.step();
+    }
+    conservation
+        .check_against(&baseline, &r)
+        .expect("the ledger stays conserved as both pools rot down over many ticks");
 }
 
 #[test]

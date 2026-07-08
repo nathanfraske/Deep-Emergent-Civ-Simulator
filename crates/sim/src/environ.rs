@@ -43,8 +43,10 @@
 use civsim_core::{Fixed, StateHasher};
 use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
+use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
 use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
@@ -80,6 +82,21 @@ impl ScalarField {
     /// The value at a cell (row-major, in bounds by construction of the caller).
     pub fn at(&self, x: i32, y: i32) -> Fixed {
         self.cells[self.idx(x, y)]
+    }
+
+    /// Draw up to `want` down from a cell's standing value (the extract-and-deplete sibling of the read): a
+    /// producer's draw on the located water depth as it fixes biomass. Clamped to what is present (never
+    /// negative), returns what was removed. This makes water a real draw-down sink; the hydrology is an OPEN
+    /// reservoir (precipitation source, evaporation and edge-outflow sink), so a draw is dimensionally clean
+    /// against the standing depth but sits OUTSIDE the conserved-matter ledger, an honest limit.
+    pub fn take(&mut self, x: i32, y: i32, want: Fixed) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height || want <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let i = self.idx(x, y);
+        let taken = want.clamp(Fixed::ZERO, self.cells[i]);
+        self.cells[i] -= taken;
+        taken
     }
 
     /// The field extent.
@@ -276,6 +293,98 @@ pub struct EnvironFields {
     /// with no biosphere reads the plain climate productivity and its hash is unchanged. Not folded into
     /// `state_hash` (like `fertility`): its effect enters the hash through the `capacity` it sets.
     producer: Vec<Fixed>,
+    /// The evolved abiotic SOURCE id LIST each producer cell draws on (an empty list where no producer
+    /// stands), seeded once from the biosphere. A producer closes on ONE OR MORE abiotic sources (light,
+    /// water, a soil nutrient, an alien gradient), and its productivity is the Liebig MINIMUM over the set
+    /// (each source a potential limiting factor, no authored priority, Principle 8). The run consults a
+    /// data-defined [`AbioticSourceRegistry`] to learn which field each id reads and whether it is a
+    /// depletable stock, so the extract path never switches on the integer id (which would re-author a
+    /// closed Earth source enum). A single-source producer is capped by that one source exactly as a scalar
+    /// would (the min over a singleton). Not folded into `state_hash` like `producer`/`fertility`: its
+    /// effect enters through the `capacity` the extract beat shapes.
+    producer_source: Vec<Vec<u16>>,
+    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3): the fixed
+    /// per-unit-biomass nutrient simplex (summing to one) a producer's food carries, seeded once from the
+    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]) and normalised here. `None` where
+    /// no producer composition is seeded, in which case the standing food is the single `bio.energy_density`
+    /// class exactly as before (byte-identical). Where `Some`, `regrow_supply` writes each food axis's supply
+    /// as the logistic biomass VOLUME times that axis's density, and reads the remaining volume back as the
+    /// Liebig MINIMUM over the axes of `supply / density`, so a grazer that ate one axis shrinks the whole
+    /// plant and the composition stays a single scalar stock (never N independent stocks). Not folded into
+    /// `state_hash`: its effect enters through the food supplies it shapes, which the [`ResourceField`] folds.
+    producer_food: Vec<Option<BTreeMap<String, Fixed>>>,
+}
+
+/// Which run FIELD an abiotic source reads: the field IDENTITY, named explicitly so a source binds to the
+/// field it actually draws on, never a variant that conflates identity with depletion behaviour (FINDING-1).
+/// Whether the source DEPLETES the field is separate data ([`AbioticBinding::depletes`]), so a renewable
+/// light-flux and a finite water-stock are the SAME mechanism with different data, and (with Arc 5's
+/// data-defined field set) an alien source, geothermal or a redox gradient or a mana field, is a new field
+/// handle plus the environ field it reads rather than a rewrite of the extract dispatch (Principle 11).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AbioticField {
+    /// The LIGHT field (the latitude-light rate). Renewable by default (a world sets `depletes` if it models
+    /// a consumable light budget).
+    Light,
+    /// The WATER field (the hydrology depth).
+    Water,
+    /// The located SOIL-NUTRIENT field, read and drawn by class.
+    Soil,
+}
+
+/// The data-defined binding of one abiotic source id to the run field it reads, whether it depletes that
+/// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
+#[derive(Clone, Debug)]
+pub struct AbioticBinding {
+    /// The run field this source reads (the field identity, decoupled from the depletion behaviour below).
+    pub field: AbioticField,
+    /// Whether drawing on this source DEPLETES its field's stock (a finite stock) or leaves it untouched (a
+    /// renewable flux). Decoupled from the field so the flux-versus-stock choice is the world's data, not the
+    /// engine's per-variant assumption (FINDING-1): a world can declare a renewable nutrient spring (Soil,
+    /// `depletes = false`) as readily as a finite one. Depletion draws only a field that HAS a located stock
+    /// to draw (Water, Soil); on Light the flag is presently inert because there is no light-stock field to
+    /// deplete (a consumable light budget would be a new field under Arc 5's data-defined field set).
+    pub depletes: bool,
+    /// The physics-floor nutrient class this field supplies (used only for the soil field; empty otherwise).
+    pub class: String,
+}
+
+/// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
+/// (which evolved source id binds to which field and class) is DATA, so the run path never authors a closed
+/// Earth source enum. Carries the reserved extract-deplete conversions, surfaced with basis, never set here.
+#[derive(Clone, Debug, Default)]
+pub struct AbioticSourceRegistry {
+    bindings: BTreeMap<u16, AbioticBinding>,
+    /// RESERVED (surfaced, not set): the standing biomass a unit of drawn located stock supports. Basis: the
+    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns.
+    pub biomass_per_stock: Fixed,
+    /// RESERVED: the fraction of the supported biomass a producer sequesters from its stock per tick. Basis:
+    /// the nutrient turnover the standing biomass holds; set so a grazed cell depletes over a plausible span.
+    pub draw_fraction: Fixed,
+    /// RESERVED: the located stock a physical WEATHERING source (rock to nutrient) deposits per producer cell
+    /// per tick, the bootstrap that seeds a bare soil before any corpse decomposes. Basis: the rock-weathering
+    /// release rate the material data implies; set so a virgin world greens slowly.
+    pub weathering_rate: Fixed,
+}
+
+impl AbioticSourceRegistry {
+    /// The binding for a source id, if the world defines one.
+    pub fn binding(&self, id: u16) -> Option<&AbioticBinding> {
+        self.bindings.get(&id)
+    }
+
+    /// Bind a source id to a field, whether it depletes that field, and the class it supplies (data; called
+    /// at the biosphere-arming site). A renewable flux passes `depletes = false`, a finite stock `true`.
+    pub fn insert(&mut self, id: u16, field: AbioticField, depletes: bool, class: &str) {
+        self.bindings.insert(
+            id,
+            AbioticBinding {
+                field,
+                depletes,
+                class: class.to_string(),
+            },
+        );
+    }
 }
 
 impl EnvironFields {
@@ -313,6 +422,8 @@ impl EnvironFields {
             downhill,
             fertility: vec![Fixed::ZERO; n],
             producer: vec![Fixed::ZERO; n],
+            producer_source: vec![Vec::new(); n],
+            producer_food: vec![None; n],
         }
     }
 
@@ -571,6 +682,156 @@ impl EnvironFields {
         }
     }
 
+    /// Seed the evolved abiotic source id LIST of each producer cell from the biosphere (once at world
+    /// build). A cell's list is overwritten (last occupant wins on a shared cell, as the scalar seed did).
+    /// Off-grid cells are dropped. See [`Self::producer_source`].
+    pub fn set_producer_source(&mut self, cells: &[(Coord3, Vec<u16>)]) {
+        for s in self.producer_source.iter_mut() {
+            s.clear();
+        }
+        for (cell, ids) in cells {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            self.producer_source[i] = ids.clone();
+        }
+    }
+
+    /// Seed the standing-food COMPOSITION of each producer cell from the biosphere (chemistry arc, T3, once at
+    /// world build), normalising the given per-unit-biomass axis vector to a NUTRIENT SIMPLEX (the food axes
+    /// summing to one) so the standing food is the producer's own chemistry scaled by the logistic biomass
+    /// volume. The environmental axes regrow writes itself (water, salinity) are EXCLUDED, so the food
+    /// composition never fights the hydrology write. A composition with no positive food axis seeds nothing
+    /// (the cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last
+    /// occupant wins on a shared cell. See [`Self::producer_food`].
+    pub fn set_producer_food(&mut self, cells: &[(Coord3, BTreeMap<String, Fixed>)]) {
+        for f in self.producer_food.iter_mut() {
+            *f = None;
+        }
+        for (cell, comp) in cells {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let is_food = |a: &str| a != WATER_FRACTION && a != SALINITY;
+            let total = comp
+                .iter()
+                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
+                .fold(Fixed::ZERO, |acc, (_, v)| acc.saturating_add(*v));
+            if total <= Fixed::ZERO {
+                continue; // no positive food axis: keep the energy-density default
+            }
+            let simplex: BTreeMap<String, Fixed> = comp
+                .iter()
+                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
+                .map(|(a, v)| (a.clone(), v.checked_div(total).unwrap_or(Fixed::ZERO)))
+                .filter(|(_, v)| *v > Fixed::ZERO)
+                .collect();
+            if simplex.is_empty() {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            self.producer_food[i] = Some(simplex);
+        }
+    }
+
+    /// The producer EXTRACT-DEPLETE beat (the closed nutrient cycle): each producer draws its food from the
+    /// availability of the specific abiotic source its niche EVOLVED to close on (its `producer_source` id,
+    /// bound to a field by the data-defined `registry`, never an id switch), the source LIMITS its
+    /// productivity ceiling, and a depletable stock (soil, water) is DRAWN DOWN so a heavily-worked cell
+    /// depletes rather than reading an infinite well. A physical WEATHERING source (rock to soil nutrient)
+    /// seeds a bare soil stock each tick so the cycle bootstraps before any corpse decomposes. Runs after
+    /// `step_productivity` set the niche-fit `capacity` and before `regrow_supply`. Sequential row-major
+    /// fold (worker-invariant); the soil/water `take`/`deposit` are canonical, so the new state folds
+    /// reproducibly. The biomass layer is OPEN; the conserved ledger is soil+material+tissue across decay.
+    pub fn extract_producers(
+        &mut self,
+        soil: &mut SoilNutrientField,
+        registry: &AbioticSourceRegistry,
+    ) {
+        // Fail loud on an unset reserved conversion rather than silently capping every producer to zero.
+        assert!(
+            registry.biomass_per_stock > Fixed::ZERO,
+            "nutrient cycle: biomass_per_stock reserved value is unset (would starve every producer)"
+        );
+        let (w, h) = (self.width, self.height);
+        for y in 0..h {
+            for x in 0..w {
+                let i = self.idx(x, y);
+                if self.producer_source[i].is_empty() {
+                    continue; // no producer stands on this cell
+                }
+                let coord = Coord3::ground(x, y);
+                // Pass 1 (the Liebig LAW OF THE MINIMUM, Principle 8): each evolved source is a potential
+                // limiting factor. Deposit the physical weathering seed of each soil source, read each
+                // source's supply, and cap the productivity to the SCARCEST source's supported biomass, so a
+                // producer that closes on light AND water AND a soil nutrient is limited by whichever is
+                // least, with no authored priority among them. A single-source producer is capped by that one
+                // source exactly as the scalar seed was (the minimum over a singleton is that source).
+                let mut min_supported = Fixed::MAX;
+                for k in 0..self.producer_source[i].len() {
+                    let id = self.producer_source[i][k];
+                    // A seeded producer whose evolved source the world never bound is a config error: fail
+                    // loud rather than fall through to an uncapped producer (the old infinite-well).
+                    let binding = registry.binding(id).unwrap_or_else(|| {
+                        panic!("nutrient cycle: producer source id {id} has no registry binding")
+                    });
+                    let supply = match binding.field {
+                        AbioticField::Light => self.light[i],
+                        AbioticField::Soil => {
+                            // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
+                            // a general per-field replenishment handle is Arc 5).
+                            if registry.weathering_rate > Fixed::ZERO {
+                                soil.deposit(coord, &binding.class, registry.weathering_rate);
+                            }
+                            soil.mass(coord, &binding.class)
+                        }
+                        AbioticField::Water => self.water.at(x, y),
+                    };
+                    let supported = supply
+                        .checked_mul(registry.biomass_per_stock)
+                        .unwrap_or(Fixed::MAX);
+                    if supported < min_supported {
+                        min_supported = supported;
+                    }
+                }
+                if self.capacity.cells[i] > min_supported {
+                    self.capacity.cells[i] = min_supported;
+                }
+                // Pass 2: draw down each DEPLETING source's field by the realised productivity's share, so a
+                // heavily-worked cell depletes rather than reading an infinite well. Whether a source depletes
+                // is its own DATA (`binding.depletes`), decoupled from the field (FINDING-1): a renewable flux
+                // leaves its field untouched, a finite stock draws down, and the world chooses which. The draw
+                // reads the FINAL capped capacity, so the single-source sequence (cap, then draw) is
+                // bit-identical to the scalar path it replaces.
+                for k in 0..self.producer_source[i].len() {
+                    let id = self.producer_source[i][k];
+                    let binding = registry.binding(id).unwrap_or_else(|| {
+                        panic!("nutrient cycle: producer source id {id} has no registry binding")
+                    });
+                    if !binding.depletes {
+                        continue; // a renewable source leaves its field untouched
+                    }
+                    let draw_biomass = self.capacity.cells[i]
+                        .checked_mul(registry.draw_fraction)
+                        .unwrap_or(Fixed::ZERO);
+                    let draw_amt = draw_biomass
+                        .checked_div(registry.biomass_per_stock)
+                        .unwrap_or(Fixed::ZERO);
+                    match binding.field {
+                        AbioticField::Light => {} // light has no located stock to deplete
+                        AbioticField::Soil => {
+                            soil.take(coord, &binding.class, draw_amt);
+                        }
+                        AbioticField::Water => {
+                            self.water.take(x, y, draw_amt);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
     /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
     /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
@@ -648,8 +909,19 @@ impl EnvironFields {
                 // per cell every tick: an absent tile is created empty (standing reads zero, matching the
                 // old `supply`), and the only classes the field ever bears are these three, so the stored
                 // content and its state-hash fold are unchanged. At a large grid this is the whole cost.
+                // The producer's fixed food composition on this cell (T3), if the biosphere seeded one; where
+                // none, the food is the single energy-density class exactly as before.
+                let food = self.producer_food[self.idx(x, y)].as_ref();
                 let comp = resource.composition_mut(coord);
-                let standing = comp.nutrient(ENERGY_DENSITY);
+                // The standing food VOLUME read back: with a producer composition, the remaining volume is the
+                // Liebig MINIMUM over its axes of supply/density (a grazer that ate one axis has shrunk the
+                // whole plant, and the axes stay in the composition's fixed ratio, so the stock is a single
+                // scalar, never N independent stocks); with none, the food is the single energy-density class
+                // and the volume IS its supply (byte-identical to before).
+                let standing = match food {
+                    Some(fc) => food_volume(comp, fc),
+                    None => comp.nutrient(ENERGY_DENSITY),
+                };
                 let mut stock = Stock::new(standing, cap, calib.regen_rate);
                 if cap > Fixed::ZERO {
                     // Colonization: a viable-but-empty cell gets a propagule floor so logistic regrowth
@@ -660,7 +932,21 @@ impl EnvironFields {
                     }
                 }
                 stock.step(Fixed::ZERO); // logistic regrow toward capacity (grazing already applied)
-                comp.set_nutrient(ENERGY_DENSITY, stock.amount());
+                let volume = stock.amount();
+                // Write the food supplies from the regrown VOLUME and the fixed composition (each food axis =
+                // volume times its density), so the standing food carries the producer's OWN chemistry a
+                // grazer reads; with no composition it is the single energy-density class exactly as before.
+                match food {
+                    Some(fc) => {
+                        for (axis, density) in fc {
+                            comp.set_nutrient(
+                                axis,
+                                volume.checked_mul(*density).unwrap_or(Fixed::MAX),
+                            );
+                        }
+                    }
+                    None => comp.set_nutrient(ENERGY_DENSITY, volume),
+                }
                 comp.set_nutrient(WATER_FRACTION, water);
                 comp.set_toxin(SALINITY, salinity);
             }
@@ -698,6 +984,31 @@ pub fn biomass_from(
         (temperature, Fixed::ONE, Some(calib.temp_req)),
         (soil, Fixed::ONE, Some(calib.soil_req)),
     ])
+}
+
+/// The standing food VOLUME implied by a cell's food supplies and its fixed producer composition (T3): the
+/// Liebig MINIMUM over the composition's axes of `supply / density`, so the axes stay in the fixed ratio and
+/// a grazer that depleted one axis has shrunk the WHOLE plant's volume (never N axes drifting apart into
+/// independent stocks). An empty composition or one whose densities are all non-positive reads zero.
+fn food_volume(comp: &Composition, food_comp: &BTreeMap<String, Fixed>) -> Fixed {
+    let mut vol: Option<Fixed> = None;
+    for (axis, density) in food_comp {
+        if *density <= Fixed::ZERO {
+            continue;
+        }
+        // The volume this axis's supply implies. An overflow (a large supply over a tiny density) means an
+        // effectively unbounded volume, so the axis is NON-LIMITING and reads MAX (the Liebig minimum ignores
+        // it); reading ZERO here would wrongly zero the WHOLE cell's standing food off one overflowing axis.
+        let axis_vol = comp
+            .nutrient(axis)
+            .checked_div(*density)
+            .unwrap_or(Fixed::MAX);
+        vol = Some(match vol {
+            Some(cur) => axis_vol.min(cur),
+            None => axis_vol,
+        });
+    }
+    vol.unwrap_or(Fixed::ZERO)
 }
 
 /// The latitude light factor at a row: full at the equator, falling to zero at the poles, `1 - |y -
@@ -771,6 +1082,8 @@ mod tests {
             downhill,
             fertility: vec![Fixed::ZERO; elev_tenths.len()],
             producer: vec![Fixed::ZERO; elev_tenths.len()],
+            producer_source: vec![Vec::new(); elev_tenths.len()],
+            producer_food: vec![None; elev_tenths.len()],
         }
     }
 
@@ -1067,6 +1380,72 @@ mod tests {
     }
 
     #[test]
+    fn standing_food_carries_the_producers_own_composition_and_grazing_draws_the_whole_volume() {
+        // Chemistry arc, T3: a producer's standing food is its OWN composition (not one minted energy class),
+        // stored as a single logistic biomass VOLUME with the composition riding as fixed densities. Two
+        // proofs: (1) the food a grazer reads stands in the producer's composition RATIO; (2) grazing ONE axis
+        // draws the VOLUME, so ALL axes shrink together (the plant loses biomass, not one nutrient leached out
+        // of it), the read-back staying a single scalar stock rather than N independent ones.
+        let map = a_map(0x7EED);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..30 {
+            e.step(&temp, &calib); // warm the hydrology so cells carry a productivity capacity
+        }
+        let (w, h) = e.dims();
+        let cell = (1..h - 1)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.capacity_at(x, y) > Fixed::ZERO)
+            .map(|(x, y)| Coord3::ground(x, y))
+            .expect("the wet world offers a productive interior cell");
+        // The producer is 60% energy, 40% a second nutrient (its fixed composition).
+        let comp: BTreeMap<String, Fixed> = [
+            (ENERGY_DENSITY.to_string(), Fixed::from_ratio(6, 10)),
+            ("bio.protein".to_string(), Fixed::from_ratio(4, 10)),
+        ]
+        .into_iter()
+        .collect();
+        e.set_producer_food(&[(cell, comp)]);
+        let mut resource = ResourceField::new();
+        for _ in 0..20 {
+            e.step(&temp, &calib);
+            e.regrow_supply(&mut resource, &calib);
+        }
+        let energy0 = resource.supply(cell, ENERGY_DENSITY);
+        let protein0 = resource.supply(cell, "bio.protein");
+        assert!(
+            energy0 > Fixed::ZERO && protein0 > Fixed::ZERO,
+            "the standing food carries both of the producer's own axes, not one minted energy class"
+        );
+        // Proof (1): the two axes are volume * density, so their ratio is the density ratio exactly (60:40,
+        // i.e. energy = 1.5 * protein).
+        assert_eq!(
+            energy0,
+            protein0.checked_mul(Fixed::from_ratio(3, 2)).unwrap(),
+            "the food axes stand in the producer's fixed 60:40 composition ratio"
+        );
+        // Proof (2): graze the ENERGY axis to nothing, then regrow once.
+        resource.take(cell, ENERGY_DENSITY, energy0);
+        e.step(&temp, &calib);
+        e.regrow_supply(&mut resource, &calib);
+        let energy1 = resource.supply(cell, ENERGY_DENSITY);
+        let protein1 = resource.supply(cell, "bio.protein");
+        assert!(
+            protein1 < protein0,
+            "grazing the energy axis shrank the WHOLE plant: the un-grazed protein axis fell too (a volume \
+             draw, not a per-axis leach)"
+        );
+        // And the composition ratio survives the graze-and-regrow (the axes never drift into independent
+        // stocks): the read-back is the single-volume Liebig minimum, so both are volume * density again.
+        assert_eq!(
+            energy1,
+            protein1.checked_mul(Fixed::from_ratio(3, 2)).unwrap(),
+            "the food axes stay in the fixed composition ratio after grazing (one volume stock, not N)"
+        );
+    }
+
+    #[test]
     fn decomposed_soil_fertility_lifts_productivity_where_soil_is_the_limiting_factor() {
         // Material-substrate item 8 slice C2 (the matter cycle closes into the food web): the nutrient the
         // matter cycle deposits into the soil raises a cell's productivity where soil is the limiting Liebig
@@ -1127,6 +1506,62 @@ mod tests {
             e.capacity_at(ux, uy),
             Fixed::ZERO,
             "an equally-viable unfertilised cell stays barren (the lift is local to the deposit)"
+        );
+    }
+
+    #[test]
+    fn productivity_is_the_liebig_minimum_over_the_evolved_source_set_not_the_first() {
+        // T2 source-vector (the chemistry generalization): a producer closes on a SET of abiotic sources and
+        // the extract beat caps its productivity to the SCARCEST of them (the Law of the Minimum), never the
+        // first-listed. A cell drawing on an abundant flux AND a scarce soil nutrient is limited by the soil;
+        // the same cell drawing on the flux ALONE is not. The soil-limited outcome is identical whether the
+        // soil is listed first or last, so the min is over the whole set, not the head of the list.
+        let map = a_map(0x50FF);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        // A scarce soil stock: seeded tiny so its supported biomass sits far below the abundant flux's.
+        let scarce = Fixed::from_ratio(1, 100);
+        // The registry: id 0 an abundant flux (light), id 1 a scarce soil nutrient. The draw is zeroed so
+        // this isolates the CAP from the deplete, and there is no weathering bootstrap.
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(0, AbioticField::Light, false, ""); // an abundant renewable flux
+        reg.insert(1, AbioticField::Soil, true, "nutrient"); // a scarce depletable soil stock
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        // A helper: run the extract beat once on a fresh field with the given source list and return the
+        // capped capacity at `cell`. A large producer biomass makes the pre-cap capacity high, so the source
+        // set is what binds.
+        let run = |ids: Vec<u16>| -> Fixed {
+            let mut e = EnvironFields::from_map(&map);
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, ids)]);
+            e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
+            let mut soil = SoilNutrientField::new();
+            soil.deposit(cell, "nutrient", scarce);
+            e.extract_producers(&mut soil, &reg);
+            e.capacity_at(cell.x, cell.y)
+        };
+        let flux_only = run(vec![0]);
+        let soil_only = run(vec![1]);
+        let flux_then_soil = run(vec![0, 1]);
+        let soil_then_flux = run(vec![1, 0]);
+        assert!(
+            flux_only > soil_only,
+            "the abundant flux alone supports more biomass than the scarce soil alone"
+        );
+        assert_eq!(
+            flux_then_soil, soil_only,
+            "drawing on both, the SCARCE soil binds the productivity (the Liebig minimum, not the flux)"
+        );
+        assert_eq!(
+            soil_then_flux, flux_then_soil,
+            "the minimum is over the whole source set: order of the sources does not change the cap"
+        );
+        assert!(
+            flux_then_soil < flux_only,
+            "adding a scarcer source can only lower the ceiling, never raise it above the flux-only cap"
         );
     }
 
