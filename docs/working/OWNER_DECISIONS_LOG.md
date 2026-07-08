@@ -88,13 +88,17 @@ entry using a derived or dev-set value.
    Structure's own capability or viability was read. A fitness term reading the Structure (so morphology is
    selected on its own merits) is a natural next research item, surfaced not silently carried.
 
-9. **Arc 7 (creatures-have-simpler-minds) is scoped, not built.** The first slice (spawn biosphere creatures
-   as living `Walker`s reusing the founder machinery, byte-neutral behind a new flag) is fully planned in
-   `docs/working/ARC7_CREATURE_MINDS_PLAN.md`. It touches the runner lifecycle and mints new StableIds (the
-   two highest-risk areas: a creature id must be PROVABLY disjoint from founder ids, and a mind-less creature
-   needs a `reconcile_lifecycle` guard), so it is surfaced as a focused dedicated slice rather than
-   tail-of-marathon work. KEY finding for the owner: flee/chase CANNOT emerge from the first slice, because
-   the evolved controller perceives only its own reserves and the matter field, NOT other beings; a
-   being-perception percept (added to the shared `ControllerLayout`, which re-pins every walker) is the
-   prerequisite deferred slice, and it must stay a general percept + evolved controller + selection so the
-   predator-avoidance EMERGES rather than being an authored rule.
+9. **Arc 7 (creatures-have-simpler-minds) first slice BUILT (`45b269e`), creature-SURVIVAL is the follow-on.**
+   Behind `--creatures` (requires `--scenario full`), 131 biosphere consumers spawn as living `Walker`-agents
+   riding the founder embodiment loop, byte-neutral off (full unchanged 1c7cf2f2), worker-invariant. The
+   runner-lifecycle trap is fixed (a creature is retired when IT dies, a founder when its MIND dies) and the
+   creature id namespace is provably disjoint (asserted). HONEST LIMIT the owner should know: the creatures
+   spawn with FULL reserves but DIE within the first tick, because the metabolic Kleiber drain exceeds their
+   reserve at the small biosphere body scale (body_mass ~0.06 to 0.9) in the oilseed-based dev food world.
+   This is the SAME metabolism-calibration class as R-UNITS-PIN and the item-0 `--scenario full` collapse, and
+   it is the crux of the owner's "not just authored oilseed eaters" question: making creatures (and the whole
+   real biosphere) survive is a metabolism/food BALANCE, surfaced for a dedicated pass, being scoped in
+   `docs/working/FOODWEB_INTEGRATION_PLAN.md`. Two further deferred Arc-7 slices stay: a being-perception
+   percept (so flee/chase can EMERGE, the controller perceives no other beings today, a re-pinning
+   `ControllerLayout` change) and creature reproduction/selection (so good foragers are selected). All must
+   stay a general percept + evolved controller + selection so predator-avoidance EMERGES, never authored.
