@@ -432,7 +432,7 @@ impl Field {
             for x in 0..w {
                 let t = map
                     .tile(Coord3::new(x, y, 0))
-                    .map(|t| t.temperature)
+                    .map(|t| t.temperature())
                     .expect("every in-bounds cell has a tile");
                 baseline.push(t);
             }

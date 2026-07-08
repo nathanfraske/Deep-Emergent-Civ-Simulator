@@ -522,8 +522,8 @@ impl EnvironFields {
                 let tile = map
                     .tile(Coord3::new(x, y, 0))
                     .expect("every in-bounds cell has a tile");
-                elevation.push(tile.elevation);
-                moisture.push(tile.moisture);
+                elevation.push(tile.elevation());
+                moisture.push(tile.moisture());
                 light.push(latitude_light(y, h));
             }
         }

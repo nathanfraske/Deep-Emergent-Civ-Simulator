@@ -732,9 +732,9 @@ fn derive_region(
     for y in y0..y1 {
         for x in x0..x1 {
             if let Some(t) = map.tile(Coord3::ground(x, y)) {
-                elev.push(t.elevation);
-                moist.push(t.moisture);
-                temp.push(t.temperature);
+                elev.push(t.elevation());
+                moist.push(t.moisture());
+                temp.push(t.temperature());
             }
         }
     }

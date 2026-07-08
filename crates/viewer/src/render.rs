@@ -369,7 +369,8 @@ pub fn superfine(
                     .map
                     .tile(coord)
                     .map(|t| {
-                        let physics = physics_terrain_color(t.elevation, t.moisture, t.temperature);
+                        let physics =
+                            physics_terrain_color(t.elevation(), t.moisture(), t.temperature());
                         blend(physics, biomes.color(t.biome), 46, 255) // about 18% biome accent
                     })
                     .unwrap_or(bg)
