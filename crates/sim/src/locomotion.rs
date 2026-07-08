@@ -222,31 +222,114 @@ pub trait Terrain {
 /// it, it can only perceive the tiles near it (see [`step`]).
 #[derive(Clone, Debug, Default)]
 pub struct ResourceField {
-    matter: BTreeMap<Coord3, Composition>,
+    /// The DENSE ground layer (`z == 0`), row-major `y*w+x`, sized to `w*h` once the grid dimensions are
+    /// known ([`set_dims`](Self::set_dims)). `None` is an unoccupied cell (the per-cell occupied flag, so
+    /// an unwritten cell folds NOTHING into the hash, exactly as an absent `BTreeMap` key did). The hot
+    /// per-cell-per-tick path (regrow, take, supply) indexes this in O(1) with no tree descent, which is
+    /// the whole point: `regrow_supply` writes every cell every tick, so the field is dense, and a
+    /// `BTreeMap<Coord3>` paid an O(log n) tree walk plus poor locality per cell.
+    dense: Vec<Option<Composition>>,
+    width: i32,
+    height: i32,
+    /// The dormant sparse overflow: non-ground cells (`z != 0`), out-of-bounds or negative reads (a
+    /// grazer's sense range walks off the grid edge), and the unsized fixture path (a bare `new()` written
+    /// before any `set_dims`). Empty on every canonical armed run, so it costs no tree descent there; it
+    /// keeps the field total for the nominally 2.5D `Coord3` and for the tests that seed sparse coords.
+    overflow: BTreeMap<Coord3, Composition>,
 }
 
 impl ResourceField {
-    /// An empty field.
+    /// An empty, unsized field. Writes fall to the overflow until [`set_dims`](Self::set_dims) sizes the
+    /// dense layer.
     pub fn new() -> ResourceField {
         ResourceField::default()
     }
 
+    /// Size the dense ground layer once the grid dimensions are known (from the environ stack, at the top
+    /// of `regrow_supply`). Idempotent: re-sizing to the same dimensions is a no-op. Any overflow cell that
+    /// now falls in-bounds ground is migrated into the dense layer, so a cell written before sizing is not
+    /// stranded (on the canonical path the overflow is empty here, so the migration is a no-op).
+    pub fn set_dims(&mut self, width: i32, height: i32) {
+        if self.width == width && self.height == height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        let n = (width.max(0) as usize) * (height.max(0) as usize);
+        self.dense = (0..n).map(|_| None).collect();
+        let migrate: Vec<Coord3> = self
+            .overflow
+            .keys()
+            .filter(|c| self.dense_index(**c).is_some())
+            .copied()
+            .collect();
+        for c in migrate {
+            if let (Some(comp), Some(i)) = (self.overflow.remove(&c), self.dense_index(c)) {
+                self.dense[i] = Some(comp);
+            }
+        }
+    }
+
+    /// The flat dense index of a ground cell inside the sized grid, or `None` for anything the overflow
+    /// owns: a non-ground cell, an out-of-bounds or negative coordinate, or an unsized field. Never wraps.
+    #[inline]
+    fn dense_index(&self, coord: Coord3) -> Option<usize> {
+        if coord.z == 0
+            && self.width > 0
+            && coord.x >= 0
+            && coord.y >= 0
+            && coord.x < self.width
+            && coord.y < self.height
+        {
+            Some((coord.y as usize) * (self.width as usize) + (coord.x as usize))
+        } else {
+            None
+        }
+    }
+
     /// Record the matter composition on a tile (overwriting any prior).
     pub fn set(&mut self, coord: Coord3, comp: Composition) {
-        self.matter.insert(coord, comp);
+        match self.dense_index(coord) {
+            Some(i) => self.dense[i] = Some(comp),
+            None => {
+                self.overflow.insert(coord, comp);
+            }
+        }
     }
 
     /// A mutable handle to a tile's composition, inserting an empty one if the tile has none. The regrow
-    /// write-back updates a cell's food, water, and salinity through this, so a full-grid regrow reuses
-    /// each tile's entry and its already-interned keys rather than allocating a fresh composition, two
-    /// key strings, and two maps per cell every tick. One tree access per cell, no per-cell heap churn.
+    /// write-back updates a cell's food, water, and salinity through this; a dense ground cell is one
+    /// indexed slot (no tree descent, no per-cell heap churn), an off-grid cell falls to the overflow.
     pub fn composition_mut(&mut self, coord: Coord3) -> &mut Composition {
-        self.matter.entry(coord).or_default()
+        match self.dense_index(coord) {
+            Some(i) => self.dense[i].get_or_insert_with(Composition::default),
+            None => self.overflow.entry(coord).or_default(),
+        }
     }
 
-    /// The matter composition on a tile, if any.
+    /// A mutable handle to an EXISTING tile's composition, without creating one: the graze draw, so a
+    /// graze on an unwritten tile is a no-op. `None` when the tile has no composition.
+    fn composition_get_mut(&mut self, coord: Coord3) -> Option<&mut Composition> {
+        match self.dense_index(coord) {
+            Some(i) => self.dense[i].as_mut(),
+            None => self.overflow.get_mut(&coord),
+        }
+    }
+
+    /// The matter composition on a tile, if any. An off-grid or unwritten tile reads `None`.
     pub fn composition(&self, coord: Coord3) -> Option<&Composition> {
-        self.matter.get(&coord)
+        match self.dense_index(coord) {
+            Some(i) => self.dense[i].as_ref(),
+            None => self.overflow.get(&coord),
+        }
+    }
+
+    /// Every occupied cell's composition, in no particular order (for the order-free sum and any queries).
+    fn cells(&self) -> impl Iterator<Item = &Composition> {
+        self.dense
+            .iter()
+            .filter_map(|c| c.as_ref())
+            .chain(self.overflow.values())
     }
 
     /// Whether a coordinate bears a source of an axis: does its composition carry a NONZERO supply on
@@ -265,8 +348,7 @@ impl ResourceField {
         else {
             return false;
         };
-        self.matter
-            .get(&coord)
+        self.composition(coord)
             .is_some_and(|c| c.nutrient(class) > Fixed::ZERO)
     }
 
@@ -277,11 +359,9 @@ impl ResourceField {
             .axes
             .iter()
             .filter(|def| {
-                def.backing_component.as_deref().is_some_and(|class| {
-                    self.matter
-                        .values()
-                        .any(|c| c.nutrient(class) > Fixed::ZERO)
-                })
+                def.backing_component
+                    .as_deref()
+                    .is_some_and(|class| self.cells().any(|c| c.nutrient(class) > Fixed::ZERO))
             })
             .map(|def| def.id)
             .collect()
@@ -291,7 +371,7 @@ impl ResourceField {
     /// being can ingest where it stands): a backed axis the tile's composition carries a nonzero
     /// supply of.
     pub fn axes_here(&self, coord: Coord3, homeo: &HomeostaticRegistry) -> Vec<HomeostaticAxisId> {
-        let Some(comp) = self.matter.get(&coord) else {
+        let Some(comp) = self.composition(coord) else {
             return Vec::new();
         };
         homeo
@@ -310,8 +390,7 @@ impl ResourceField {
     /// grazer reads before it bites. An absent tile or class reads as zero (the substrate absence
     /// convention). Keyed off the class string alone, never a race or kind id (Principle 9).
     pub fn supply(&self, coord: Coord3, class: &str) -> Fixed {
-        self.matter
-            .get(&coord)
+        self.composition(coord)
             .map(|c| c.nutrient(class))
             .unwrap_or(Fixed::ZERO)
     }
@@ -323,7 +402,7 @@ impl ResourceField {
     /// grazed-out tile empties and beings move on. Reads and writes only the class string's supply, no
     /// identity (Principle 9); a tile or class with no supply is a no-op returning zero.
     pub fn take(&mut self, coord: Coord3, class: &str, want: Fixed) -> Fixed {
-        let Some(comp) = self.matter.get_mut(&coord) else {
+        let Some(comp) = self.composition_get_mut(coord) else {
             return Fixed::ZERO;
         };
         let Some(supply) = comp.nutrients.get_mut(class) else {
@@ -338,29 +417,63 @@ impl ResourceField {
     /// the whole map's grazable stock of that class, for the carrying-capacity reader. A pure read of
     /// hashed state.
     pub fn total_supply(&self, class: &str) -> Fixed {
-        Fixed::saturating_sum(self.matter.values().map(|c| c.nutrient(class)))
+        Fixed::saturating_sum(self.cells().map(|c| c.nutrient(class)))
     }
 
-    /// Fold the standing resource supplies into a hash in canonical (coordinate, class) order (base-
-    /// level liveliness step 3): the grazable stock is dynamic state the runner's `state_hash` must
-    /// carry, or a divergence in the regrow-and-graze loop would pass replay while hiding. The
-    /// `BTreeMap`s walk in canonical key order, so the fold is reproducible and thread-invariant.
-    pub fn hash_into(&self, h: &mut StateHasher) {
-        for (coord, comp) in &self.matter {
-            h.write_i64(coord.x as i64);
-            h.write_i64(coord.y as i64);
-            h.write_i64(coord.z as i64);
-            for (class, supply) in &comp.nutrients {
-                for b in class.as_bytes() {
-                    h.write_u32(*b as u32);
-                }
-                h.write_fixed(*supply);
+    /// Fold one cell into the hash exactly as the old `BTreeMap<Coord3>` walk did: the coordinate as three
+    /// `i64`s, then nutrients then toxins, each `Composition` map in string-sorted (`BTreeMap`) order with
+    /// each class byte through `write_u32`. `Composition` is unchanged, so this is byte-identical.
+    fn fold_cell(h: &mut StateHasher, coord: Coord3, comp: &Composition) {
+        h.write_i64(coord.x as i64);
+        h.write_i64(coord.y as i64);
+        h.write_i64(coord.z as i64);
+        for (class, supply) in &comp.nutrients {
+            for b in class.as_bytes() {
+                h.write_u32(*b as u32);
             }
-            for (class, dose) in &comp.toxins {
-                for b in class.as_bytes() {
-                    h.write_u32(*b as u32);
+            h.write_fixed(*supply);
+        }
+        for (class, dose) in &comp.toxins {
+            for b in class.as_bytes() {
+                h.write_u32(*b as u32);
+            }
+            h.write_fixed(*dose);
+        }
+    }
+
+    /// Fold the standing resource supplies into a hash in canonical `Coord3` order (base-level liveliness
+    /// step 3). The old form walked a `BTreeMap<Coord3>`, which orders x-primary, then y, then z. The dense
+    /// ground layer reproduces that byte-for-byte with a STRIDED x-major walk (`for x { for y }`) at
+    /// snapshot time only (the hot paths stay sequential `y*w+x`), skipping unoccupied slots so an absent
+    /// cell folds nothing. When the overflow is empty (every canonical run) that walk is the whole fold;
+    /// otherwise all cells are merged into full `Coord3` order for the rare non-ground / fixture case.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        let w = self.width.max(0) as usize;
+        if self.overflow.is_empty() {
+            for x in 0..self.width {
+                for y in 0..self.height {
+                    let i = (y as usize) * w + (x as usize);
+                    if let Some(comp) = &self.dense[i] {
+                        Self::fold_cell(h, Coord3::ground(x, y), comp);
+                    }
                 }
-                h.write_fixed(*dose);
+            }
+        } else {
+            let mut all: Vec<(Coord3, &Composition)> = Vec::new();
+            for x in 0..self.width {
+                for y in 0..self.height {
+                    let i = (y as usize) * w + (x as usize);
+                    if let Some(comp) = &self.dense[i] {
+                        all.push((Coord3::ground(x, y), comp));
+                    }
+                }
+            }
+            for (coord, comp) in &self.overflow {
+                all.push((*coord, comp));
+            }
+            all.sort_by_key(|(c, _)| *c);
+            for (coord, comp) in all {
+                Self::fold_cell(h, coord, comp);
             }
         }
     }
