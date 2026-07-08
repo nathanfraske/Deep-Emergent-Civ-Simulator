@@ -430,6 +430,52 @@ pub fn base_drain_from(
     )
 }
 
+/// The ALIEN-CLEAN physical intake (the R-PHYS-BIO edibility measure): the reserve-amount a being gains by
+/// eating a food's content on a reserve's OWN backing class, and the content it eats to do so. This is the
+/// intake counterpart to [`derive_base_drain`] and uses the SAME size-scaled reserve bridge: one unit of
+/// reserve amount is worth `body_mass * body_storage_density` of physical content (for the energy reserve,
+/// `mass_kg * bio.energy_density` joules), so eating `content` of the class, assimilated (`assim`) and passed
+/// at the trophic efficiency (`eta`), raises the reserve by `content * assim * eta / (body_mass *
+/// body_storage_density)`. The being eats only enough to fill its `room` (bounded by what is `available`), so
+/// no bite overflows the reserve, and the reserve fills by the food's PHYSICAL content, never a made-up
+/// biomass number. Keyed on NO axis identity: the same mechanism fills a chemical-energy reserve from an
+/// energy-dense seed and a thaumic reserve from a mana-bearing plant (Principle 9), the class and the storage
+/// density being the being's own data. A being whose body stores none of the class (`body_storage_density <=
+/// 0`), a zero body mass, a non-digester (`assim <= 0`), or a full reserve (`room <= 0`) eats nothing.
+/// Returns `(content_to_eat, reserve_gain)`, the gain bounded by `room`.
+pub fn physical_intake(
+    available: Fixed,
+    assim: Fixed,
+    eta: Fixed,
+    body_mass: Fixed,
+    body_storage_density: Fixed,
+    room: Fixed,
+) -> (Fixed, Fixed) {
+    let num = assim.checked_mul(eta).unwrap_or(Fixed::ZERO); // assimilated, trophic-passed content -> reserve
+    let denom = body_mass
+        .checked_mul(body_storage_density)
+        .unwrap_or(Fixed::ZERO); // reserve-unit content worth
+    if available <= Fixed::ZERO || room <= Fixed::ZERO || num <= Fixed::ZERO || denom <= Fixed::ZERO
+    {
+        return (Fixed::ZERO, Fixed::ZERO);
+    }
+    // The content that would exactly fill the room: room * denom / num. An overflow means the room is
+    // effectively unbounded relative to the content, so eat everything available.
+    let content_to_fill = room
+        .checked_mul(denom)
+        .and_then(|x| x.checked_div(num))
+        .unwrap_or(Fixed::MAX);
+    let eaten = available.min(content_to_fill);
+    // The reserve gain from the eaten content, capped at the room (the division can round up by a fixed-point
+    // ulp, so the min keeps the reserve from a one-tick overfill).
+    let gain = eaten
+        .checked_mul(num)
+        .and_then(|x| x.checked_div(denom))
+        .unwrap_or(room)
+        .min(room);
+    (eaten, gain)
+}
+
 /// The derived exertion drain coupling: the added fraction of the energy reserve drained per tick per
 /// unit of exertion, from the mechanical work power a full-exertion body sustains (`force * velocity`),
 /// bridged to a reserve fraction. This replaces the authored `exertion_drain_coupling`;
@@ -535,6 +581,86 @@ mod tests {
     use super::*;
     use crate::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
     use crate::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
+
+    #[test]
+    fn physical_intake_is_alien_clean_and_fills_by_physical_content_not_a_biomass_number() {
+        // The R-PHYS-BIO edibility measure keys on NO axis identity: the reserve fills by the food's physical
+        // content through the being's own storage bridge, so the SAME call fills a chemical-energy reserve
+        // from an energy-dense food and a thaumic reserve from a mana-bearing food, given the same physical
+        // quantities. Proof: two callers with identical numbers (one thinking "joules", one "mana") get the
+        // identical (eaten, gain); the mechanism never reads bio.energy_density or any Earth axis.
+        let assim = Fixed::from_ratio(8, 10);
+        let eta = Fixed::from_ratio(1, 2);
+        let body_mass = Fixed::from_int(60);
+        let storage_density = Fixed::from_int(5); // reserve-unit content worth = 60 * 5 = 300
+                                                  // A large room and abundant food: the being eats only what fills the room, and the gain equals room.
+        let room = Fixed::from_int(30);
+        let plenty = Fixed::from_int(100000);
+        let energy_reserve = physical_intake(plenty, assim, eta, body_mass, storage_density, room);
+        let mana_reserve = physical_intake(plenty, assim, eta, body_mass, storage_density, room);
+        assert_eq!(
+            energy_reserve, mana_reserve,
+            "the intake is alien-clean: identical physical quantities give an identical result whatever the \
+             backing class means (energy or mana)"
+        );
+        let (eaten, gain) = energy_reserve;
+        // Abundant food fills the reserve to its room, never past it (the round-trip through two divisions can
+        // lose a fixed-point ulp, so gain is at or just under room, never above).
+        let ulp = Fixed::from_ratio(1, 1000);
+        assert!(
+            gain <= room && gain >= room - ulp,
+            "abundant food fills the reserve to its room ({gain:?} ~ {room:?}), never past it"
+        );
+        // The eaten content is room * (body_mass * storage_density) / (assim * eta) = 30*300/0.4 = 22500.
+        assert_eq!(
+            eaten,
+            room.checked_mul(body_mass.checked_mul(storage_density).unwrap())
+                .unwrap()
+                .checked_div(assim.checked_mul(eta).unwrap())
+                .unwrap(),
+            "the content eaten is the physical amount whose assimilated value fills the room"
+        );
+        // Round-trip: the gain from the eaten content is the physical conversion, not a fabricated number.
+        assert_eq!(
+            gain,
+            eaten
+                .checked_mul(assim.checked_mul(eta).unwrap())
+                .unwrap()
+                .checked_div(body_mass.checked_mul(storage_density).unwrap())
+                .unwrap(),
+            "gain = eaten * assim * eta / (body_mass * storage_density): the drain's own reserve bridge"
+        );
+
+        // Scarce food: the being eats all that is available and gains proportionally less than a full room.
+        let scarce = Fixed::from_int(300); // worth 300 * 0.4 / 300 = 0.4 reserve amount
+        let (eaten_s, gain_s) =
+            physical_intake(scarce, assim, eta, body_mass, storage_density, room);
+        assert_eq!(
+            eaten_s, scarce,
+            "when food is scarce the being eats all of it"
+        );
+        assert!(
+            gain_s < room && gain_s > Fixed::ZERO,
+            "a scarce bite fills the reserve partway"
+        );
+
+        // A being that stores none of the class (no reserve of that kind) or cannot digest it eats nothing.
+        assert_eq!(
+            physical_intake(plenty, assim, eta, body_mass, Fixed::ZERO, room),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a body that stores none of the class has no reserve of that kind and eats none"
+        );
+        assert_eq!(
+            physical_intake(plenty, Fixed::ZERO, eta, body_mass, storage_density, room),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a non-digester of the class gains nothing"
+        );
+        assert_eq!(
+            physical_intake(plenty, assim, eta, body_mass, storage_density, Fixed::ZERO),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a full reserve draws nothing"
+        );
+    }
 
     fn temperament() -> Temperament {
         Temperament {

@@ -54,6 +54,30 @@ content on its backing class; the per-reserve unit bridge is the same R-UNITS-PI
 material for the modelled reserves; a reserve whose backing class has no physical content axis would be the
 "more materials" case, flagged if one appears.
 
+## The derivation must be ALIEN-CLEAN (owner constraint, 2026-07-08)
+
+The energy-from-food path must NOT hardcode `bio.energy_density` (a Terran chemical-energy assumption). A
+thaumic being draws its reserve from a mana axis, a chemosynthetic one from a redox axis, another directly
+from some alien substance. The mechanism must let each being derive its reserve a DIFFERENT way from data.
+
+This is already the substrate's shape and must stay so: a reserve is backed by a DATA class
+(`HomeostaticAxisDef::backing_component`), and the intake reads the food's content on THAT class. The physical
+form keys on the reserve's OWN backing class `C` and the being's OWN body composition (its storage density on
+`C`, from `whole_body_composition_vector`), never a fixed `bio.energy_density`:
+
+    reserve gain = (content_of_C_eaten * assimilation(C) * eta) / (body_mass_kg * body_composition[C])
+
+- `content_of_C_eaten`: how much of the food's `C`-content the being takes (the food declares `C`, whatever
+  `C` is: `bio.energy_density`, `arcane.mana_density`, a redox axis, ...).
+- `body_composition[C]`: the being's own storage density on `C` (from its body plan), so the reserve-amount
+  units are body-relative and the SAME bridge the drain uses (`reserve stored = amount * mass_kg * body[C]`).
+- A being whose body carries no `C` (no storage density) has no reserve of that kind and eats none of it.
+
+So a thaumic grazer with a mana-backed reserve eats a mana-bearing plant and fills its mana reserve by the
+SAME mechanism a chemical grazer fills its energy reserve from an energy-dense seed. The membership (which
+axis a reserve draws on) is data; the mechanism is fixed. No `bio.energy_density` in the engine's decision
+path; the Steering Audit invariant is that swapping every axis label leaves the mechanism unchanged.
+
 ## Build shape (proposed)
 
 1. A `laws::edible_energy` (or a physiology helper) giving the reserve gain from `(mass, food_axis_value,
