@@ -1108,6 +1108,24 @@ impl TissueField {
         removed
     }
 
+    /// The total of AXIS `axis` available in the located body matter at a cell (the read the ingest measures
+    /// its bite against): the sum over parcels of `volume * composition[axis]`. Zero where no body lies.
+    pub fn axis_supply(&self, cell: Coord3, axis: &str) -> Fixed {
+        let Some(parcels) = self.cells.get(&cell) else {
+            return Fixed::ZERO;
+        };
+        let mut total = Fixed::ZERO;
+        for (key, &volume) in parcels {
+            let density = key
+                .iter()
+                .find(|(a, _)| a.as_str() == axis)
+                .map(|(_, v)| *v)
+                .unwrap_or(Fixed::ZERO);
+            total = total.saturating_add(volume.checked_mul(density).unwrap_or(Fixed::MAX));
+        }
+        total
+    }
+
     /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
     /// yields nothing.
     pub fn parcels(&self, cell: Coord3) -> Vec<TissueParcel> {

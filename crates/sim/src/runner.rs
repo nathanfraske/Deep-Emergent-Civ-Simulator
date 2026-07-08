@@ -1462,6 +1462,11 @@ impl Embodiment {
         &self.tissue
     }
 
+    /// A mutable handle to the located body-matter field (seed biosphere consumer bodies; predation eats it).
+    pub fn tissue_mut(&mut self) -> &mut TissueField {
+        &mut self.tissue
+    }
+
     /// Replace the organism-tissue field, the seam a test or worldgen uses to place corpse matter directly
     /// (the death hook is the run-path path). Opt-in: an unset field stays empty and folds no bytes.
     pub fn set_tissue(&mut self, tissue: TissueField) {
@@ -2197,11 +2202,15 @@ impl Embodiment {
             // reserve, an ordinary carried rock, reads zero here, so an existing scenario whose beings never
             // carry a backing substance is byte-identical.
             let cell_supply = self.material.volume(coord, &substance);
+            // Predation: a located BODY at the cell (a corpse or seeded animal) offers this axis too, eaten by
+            // the SAME edibility as loose matter (a body is food iff the eater assimilates its composition, so
+            // carnivore/herbivore/omnivore emerges, never a tag). Zero where no body lies (byte-identical).
+            let tissue_supply = self.tissue.axis_supply(coord, &substance);
             // Size the bite from the being's own physiology and the room its reserve has left (immutable).
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return gained;
             };
-            let supply = cell_supply + w.carried.volume(&substance);
+            let supply = cell_supply + w.carried.volume(&substance) + tissue_supply;
             if supply <= Fixed::ZERO {
                 continue; // neither the cell nor the being's inventory holds this substance
             }
@@ -2235,7 +2244,17 @@ impl Embodiment {
             } else {
                 Fixed::ZERO
             };
-            let taken = from_cell + from_carried;
+            // Take any remainder from the located body (predation depletes the carcass), after the loose
+            // cell matter and the inventory, in the same conservation-honest per-field way.
+            let from_tissue = {
+                let rem = gross - from_cell - from_carried;
+                if rem > Fixed::ZERO {
+                    self.tissue.take(coord, &substance, rem)
+                } else {
+                    Fixed::ZERO
+                }
+            };
+            let taken = from_cell + from_carried + from_tissue;
             let gain = taken.checked_mul(eta).unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);

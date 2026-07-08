@@ -1882,6 +1882,17 @@ fn main() {
             sources.draw_fraction = Fixed::from_ratio(1, 20);
             sources.weathering_rate = Fixed::from_ratio(1, 100);
             runner.set_abiotic_sources(sources);
+            // Seed the biosphere CONSUMERS as located body matter (predation + the matter cycle): each animal
+            // is its physics-derived body composition, eaten via the geophage by edibility and decomposed back
+            // to soil, so the trophic web turns. No minted substance; content-addressed like a corpse.
+            if let Some(living) = &peoples.biosphere {
+                let bodies = living.consumer_bodies(Fixed::ONE);
+                if let Some(emb) = runner.embodiment_mut() {
+                    for (coord, composition, volume) in bodies {
+                        emb.tissue_mut().deposit(coord, composition, volume);
+                    }
+                }
+            }
             // Social learning + tools (on the embodiment): a discovered technique can spread by watching a
             // knower and by co-located gossip, rather than only by lone re-discovery in each short lifetime,
             // and a worked object can afford an action its raw form does not.

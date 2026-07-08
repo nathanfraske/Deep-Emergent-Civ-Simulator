@@ -44,6 +44,7 @@ use crate::epoch::{run, EpochParams, EpochReport, Radiation};
 use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
+use crate::physiology::whole_body_composition_vector;
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
 /// generator and epoch parameters. DEVELOPMENT FIXTURE via [`GenesisParams::dev_default`].
@@ -184,6 +185,52 @@ impl LivingWorld {
                 });
                 if let Some(id) = source {
                     out.push((coord, id));
+                }
+            }
+        }
+        out
+    }
+
+    /// The located BODY MATTER of every CONSUMER occupant (a non-autotroph animal), for predation: each
+    /// consumer's body is its own physics-derived `whole_body_composition_vector` (the SAME fold a corpse
+    /// uses, content-addressed, no minted substance), scaled to a volume by its body mass and the located
+    /// population. Consumer versus producer is read from the food-web PRIMITIVE draws_on (no Abiotic edge
+    /// means a consumer), never a trophic tag. Deterministic canonical order. A founder eats one through the
+    /// geophage by the same edibility that grazes plants; the matter cycle decomposes it back to soil.
+    pub fn consumer_bodies(
+        &self,
+        pop_capacity: Fixed,
+    ) -> Vec<(Coord3, std::collections::BTreeMap<String, Fixed>, Fixed)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let autotroph = species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)));
+                if autotroph {
+                    continue;
+                }
+                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                if composition.is_empty() {
+                    continue;
+                }
+                let suit = species.niche.suitability(&rb.region.env);
+                let volume = info
+                    .body_mass
+                    .checked_mul(pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO))
+                    .unwrap_or(Fixed::ZERO);
+                if volume > Fixed::ZERO {
+                    out.push((coord, composition, volume));
                 }
             }
         }
