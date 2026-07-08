@@ -3333,12 +3333,13 @@ impl Runner {
     }
 
     /// The matter-cycle beat (material-substrate arc, cascade item 8): a cell's organic matter decomposes
-    /// over time and enriches the ground where it rots. For each cell substance carrying a biological
-    /// composition (a `bio.mineral_ash_fraction`, the mark of organic matter) whose cell temperature is at or
-    /// above the substance's own decomposition barrier, a per-substance fraction of its volume breaks down
-    /// this tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split by the
-    /// substance's own composition (the mineral-ash share to a mineral class, the remainder to an organic
-    /// class). Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
+    /// over time and enriches the ground where it rots. For each cell substance DECLARING A DECOMPOSITION
+    /// BARRIER (its own thermal gate, the mark of decomposable organic matter, whatever its chemistry) whose
+    /// cell temperature is at or above that barrier, a per-substance fraction of its volume breaks down this
+    /// tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split into located soil
+    /// classes by the substance's OWN composition through the data-defined [`crate::material::ConstituentRegistry`]
+    /// (chemistry arc, T5: the constituent fraction axes plus a residual, not a fixed ash-and-organic pair).
+    /// Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
     /// against the settled temperature identically. A pure deterministic fold in canonical cell-and-substance
     /// order (Principle 3); the outcome keys off the substance's own composition physics and the cell
     /// temperature, no race, kind, or role (Principles 8, 9). Opt-in: a runner with no matter-cycle calib, no
