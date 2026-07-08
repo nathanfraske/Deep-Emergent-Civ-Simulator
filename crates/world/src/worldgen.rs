@@ -29,9 +29,18 @@ use civsim_core::{Fixed, StateHasher};
 
 /// The conventional ORDINAL ROLES for the terrain axes the engine's built-in consumers read (Arc 5 T4): the
 /// hydrology routing reads elevation, the biome classifier reads all three. A world's tile-axis vector
-/// carries these three first, in this order, then any additional niche axes it declares. A world with a
-/// radically different terrain (a pressure-layered gas world, a radiation gradient in place of temperature)
-/// declares its own generation spec and role ordinals; these constants are the dev-fixture convention.
+/// carries these three first, in this order, then any additional niche axes it declares.
+///
+/// HONEST LIMIT (the end-of-arc audit flagged this, recorded not hidden): T4 makes the axis-generation SHAPE
+/// data (a world declares how many axes it carries and how each is generated, via `WorldgenParams.axes`), but
+/// the ROLE-to-ordinal binding is still an engine convention, these `pub const` ordinals, NOT world-remappable
+/// data. So a world with no temperature, or with elevation at a different ordinal, cannot yet express that
+/// through data alone; the hydrology and biome consumers read ordinals 0/1/2. Lifting the role binding into
+/// world data (a `WorldgenParams.elevation_axis: Option<usize>` role map read by the consumers) is the
+/// follow-on that would make a truly alien terrain a data row here too; the axis-vector SHAPE generalization
+/// is the step that unblocks it. Light is likewise not a tile axis (it enters through the abiotic registry,
+/// Arc 5 T1, and the environ latitude-light field), so a lightless world expresses that through its abiotic
+/// sources, not the tile-axis vector.
 pub const AXIS_ELEVATION: usize = 0;
 pub const AXIS_MOISTURE: usize = 1;
 pub const AXIS_TEMPERATURE: usize = 2;

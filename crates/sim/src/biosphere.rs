@@ -674,6 +674,27 @@ mod tests {
             "grown species express distinct morphogen params, not one flat-spine body"
         );
 
+        // (2b) The distinct params translate into distinct GROWN BODIES, not just distinct genomes (the audit
+        // asked whether "distinct params" is enough): the grown Structures differ across species on a physics
+        // read of the whole body (its composition vector, folded to a hash), so selection has real
+        // morphological variation, not near-identical bodies.
+        let mut body_shapes: BTreeSet<Vec<(String, i64)>> = BTreeSet::new();
+        for &id in &ids {
+            let sp = world.species.get(id).unwrap();
+            let nl = sp.pool.loci().saturating_sub(program.param_count());
+            let s = representative_structure(id, &sp.pool, &program, nl, p.ploidy, seed);
+            let shape: Vec<(String, i64)> = s
+                .whole_body_composition_vector()
+                .into_iter()
+                .map(|(k, v)| (k, v.to_bits()))
+                .collect();
+            body_shapes.insert(shape);
+        }
+        assert!(
+            body_shapes.len() > 1,
+            "grown species' bodies differ in composition, not just in genome (real morphological variation)"
+        );
+
         // (3) Regrowing a species is DETERMINISTIC: the same pool, program, and seed give the same body.
         let sp = world.species.get(ids[0]).unwrap();
         let nl = sp.pool.loci().saturating_sub(program.param_count());
