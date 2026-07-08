@@ -2234,28 +2234,24 @@ impl Embodiment {
             if supply <= Fixed::ZERO {
                 continue; // neither the cell nor the being's inventory holds this substance
             }
-            let frac = laws::satisfaction(
-                supply,
-                w.physiology.assimilation(&substance),
-                w.physiology.requirement(&substance),
-            );
-            let cap = w.homeostasis.capacity(axis_id);
-            let room = cap - w.homeostasis.amount(axis_id);
-            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
-            if target_gain <= Fixed::ZERO {
-                continue; // the reserve is full: draw nothing, deplete nothing
+            // R-PHYS-BIO edibility: the located matter the reserve is backed by (a mineral, a seed) DIRECTLY
+            // fills that reserve, so the being eats enough of it to fill the room and its reserve rises by the
+            // eaten amount assimilated (its own digestibility of the substance) and trophic-passed, not by a
+            // saturating satisfaction fill. A direct-fill reserve (the substance IS the reserve content) takes
+            // the unit bridge (`body_mass = storage_density = ONE`), so the gain is `eaten * assim * eta`
+            // bounded by room; alien-clean, keyed on the substance the reserve draws on, never a chemistry.
+            let assim = w.physiology.assimilation(&substance);
+            let room = w.homeostasis.capacity(axis_id) - w.homeostasis.amount(axis_id);
+            let (want, _) =
+                physiology::physical_intake(supply, assim, eta, Fixed::ONE, Fixed::ONE, room);
+            if want <= Fixed::ZERO {
+                continue; // the reserve is full or the being cannot digest this substance
             }
-            let gross = if eta > Fixed::ZERO {
-                target_gain.checked_div(eta).unwrap_or(target_gain)
-            } else {
-                target_gain
-            };
-            // Take the gross bite from the cell first, then from what the being carries, and deposit the
-            // assimilated part in the reserve (each field mutated on its own, conservation-honest as the
-            // forage ingest is): the cell loses what it held, the inventory the rest, and the being gains the
-            // total times the efficiency.
-            let from_cell = self.material.take(coord, &substance, gross);
-            let remaining = gross - from_cell;
+            // Take the wanted amount from the cell first, then from what the being carries (each field mutated
+            // on its own, conservation-honest as the forage ingest is), and gain the assimilated, trophic-
+            // passed part of what was ACTUALLY taken (the take may clamp to what is present).
+            let from_cell = self.material.take(coord, &substance, want);
+            let remaining = want - from_cell;
             let from_carried = if remaining > Fixed::ZERO {
                 match self.walkers.iter_mut().find(|w| w.id == walker_id) {
                     Some(w) => w.carried.take(&substance, remaining),
@@ -2265,7 +2261,16 @@ impl Embodiment {
                 Fixed::ZERO
             };
             let taken = from_cell + from_carried;
-            let gain = taken.checked_mul(eta).unwrap_or(taken);
+            let gain = taken
+                .checked_mul(assim)
+                .and_then(|x| {
+                    if eta > Fixed::ZERO {
+                        x.checked_mul(eta)
+                    } else {
+                        Some(x)
+                    }
+                })
+                .unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);
             }
