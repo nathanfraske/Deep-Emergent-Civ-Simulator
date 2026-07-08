@@ -476,6 +476,50 @@ pub fn physical_intake(
     (eaten, gain)
 }
 
+/// A being's summarized FIRST-HAND FELT EXPERIENCE over a window: its own reserves' movement folded into an
+/// intensity (how much its total reserve health changed) and a signed valence (whether it improved or
+/// worsened). See [`felt_salience`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FeltExperience {
+    /// How intense the felt change was: the absolute net movement of the being's total reserve health over
+    /// the window, in reserve-fraction units. A calm window (reserves roughly held) reads near zero.
+    pub intensity: Fixed,
+    /// The signed valence of the change: `+1` if the being's total reserve health ROSE over the window, `-1`
+    /// if it FELL (a falling reserve is negative, the floor sign of hardship), `0` if unchanged. This is a
+    /// floor fact about the being's own body, carrying NO axis and NO pole: which conviction the experience
+    /// bears on, and in which direction, is a per-being LEARNED coupling ABOVE this primitive, never authored
+    /// here (the blind framing panel's ruling, `docs/working/OWNER_DECISIONS_LOG.md` R2).
+    pub valence: Fixed,
+}
+
+/// The ALIEN-CLEAN felt-experience measure: fold a being's own signed reserve level-changes (the floor's
+/// interoceptive deltas, [`crate::homeostasis::ReserveMemory::delta`]) into one [`FeltExperience`]. This is
+/// the floor input the learned experience-to-conviction coupling reads: the intensity is the absolute net
+/// change in the being's total reserve health, the valence its sign. Keyed on NO axis identity: it sums the
+/// signed level-changes over WHATEVER reserves the being's physiology declares, so a photosynthetic being's
+/// light-charge, a silicon body's heat store, and a grazer's energy and water fold through the same call and
+/// the alien is a data row (Principle 9). It authors nothing above the floor: it emits only how much the
+/// being's reserves moved and in which net direction, never which belief that bears on, so the coupling that
+/// routes this felt signal to a conviction (and gives it a direction on that conviction) stays a learned,
+/// per-being fact the layer above discovers rather than a mapping this primitive stamps (OWNER_DECISIONS_LOG
+/// R2, the corrected framing the blind framing panel converged on). A pure function; the net saturates rather
+/// than wrapping, so an extreme swing cannot panic under the release overflow checks.
+pub fn felt_salience(reserve_deltas: impl IntoIterator<Item = Fixed>) -> FeltExperience {
+    let mut net = Fixed::ZERO;
+    for d in reserve_deltas {
+        net = net.saturating_add(d);
+    }
+    let valence = match net.cmp(&Fixed::ZERO) {
+        std::cmp::Ordering::Greater => Fixed::ONE,
+        std::cmp::Ordering::Less => Fixed::ZERO - Fixed::ONE,
+        std::cmp::Ordering::Equal => Fixed::ZERO,
+    };
+    FeltExperience {
+        intensity: net.abs(),
+        valence,
+    }
+}
+
 /// The derived exertion drain coupling: the added fraction of the energy reserve drained per tick per
 /// unit of exertion, from the mechanical work power a full-exertion body sustains (`force * velocity`),
 /// bridged to a reserve fraction. This replaces the authored `exertion_drain_coupling`;
@@ -581,6 +625,56 @@ mod tests {
     use super::*;
     use crate::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
     use crate::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
+
+    #[test]
+    fn felt_salience_folds_reserve_deltas_alien_clean_with_no_axis_or_pole() {
+        // The felt-experience primitive keys on NO axis identity: it folds an iterator of signed reserve
+        // level-changes into (intensity, valence), so the SAME call summarizes a grazer's energy+water and a
+        // thaumic being's mana+heat identically when their deltas match. A falling total is negative (the
+        // floor sign of hardship); a rising total positive; a net-calm window near zero.
+        let quarter = Fixed::from_ratio(1, 4);
+        let eighth = Fixed::from_ratio(1, 8);
+
+        // A grazer whose energy fell 1/4 and water fell 1/8: total reserve health fell 3/8, valence negative.
+        let hardship = felt_salience([Fixed::ZERO - quarter, Fixed::ZERO - eighth]);
+        assert_eq!(
+            hardship.valence,
+            Fixed::ZERO - Fixed::ONE,
+            "falling reserves feel negative"
+        );
+        assert_eq!(
+            hardship.intensity,
+            Fixed::from_ratio(3, 8),
+            "intensity is the absolute net fall"
+        );
+
+        // An ALIEN with the IDENTICAL delta magnitudes on entirely different reserves (a mana pool and a heat
+        // store) folds to the identical felt experience: no axis identity is read (Principle 9).
+        let alien = felt_salience(vec![Fixed::ZERO - quarter, Fixed::ZERO - eighth].into_iter());
+        assert_eq!(
+            alien, hardship,
+            "the same deltas give the same felt experience whatever the reserves mean"
+        );
+
+        // A rising total feels positive; a net-calm window (equal-and-opposite swings) feels nothing at all,
+        // carrying no valence to hand any conviction, so the layer above has nothing to route until real net
+        // change is felt.
+        assert_eq!(
+            felt_salience([quarter, eighth]).valence,
+            Fixed::ONE,
+            "rising reserves feel positive"
+        );
+        let calm = felt_salience([quarter, Fixed::ZERO - quarter]);
+        assert_eq!(
+            calm.valence,
+            Fixed::ZERO,
+            "an equal-and-opposite window has no net valence"
+        );
+        assert_eq!(calm.intensity, Fixed::ZERO, "and no net intensity");
+
+        // An extreme swing saturates rather than panicking under the release overflow checks.
+        let _ = felt_salience([Fixed::MAX, Fixed::MAX]);
+    }
 
     #[test]
     fn physical_intake_is_alien_clean_and_fills_by_physical_content_not_a_biomass_number() {
