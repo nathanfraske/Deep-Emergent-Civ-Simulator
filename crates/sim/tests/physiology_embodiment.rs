@@ -3987,6 +3987,80 @@ fn the_decomposition_split_is_data_defined_and_gated_on_the_barrier_not_the_ash_
 }
 
 #[test]
+fn the_matter_cycle_conserves_material_plus_soil_plus_tissue_across_both_legs() {
+    // Chemistry arc, Arc 4: the CLOSED decay ledger, registered. Decomposition moves matter between three
+    // pools (located material, the soil-nutrient store, and located body tissue) and holds their SUM invariant:
+    // a substance's lost mass re-materialises into the soil bit for bit through the constituent split, and a
+    // decayed body's lost volume the same through the tissue return leg. With BOTH a rotting carrion substance
+    // AND a rotting body parcel present, and the producer biomass layer OPEN (no extract beat armed), the
+    // registered ledger is conserved across the tick and both legs are active (material and tissue both fall,
+    // the soil store rises). This closes the loop the earlier material-only conservation half-covered.
+    use civsim_sim::conservation::ConservationRegistry;
+    use civsim_sim::material::{MaterialField, MatterCycleCalib, TissueField};
+
+    let (w, h) = (8, 8);
+    let mcell = Coord3::ground(2, 2);
+    let tcell = Coord3::ground(3, 3);
+    let ground = || civsim_physics::PhysicsRegistry::ground().unwrap();
+
+    let hreg = energy_thermal_registry();
+    let mut emb = Embodiment::new(
+        hreg,
+        AffordanceRegistry::dev_default(),
+        LocomotionParams::dev_default(),
+        0,
+        0xDECA,
+    );
+    let mut field = MaterialField::new();
+    field.deposit(mcell, "carrion", Fixed::from_int(10)); // decomposes via its barrier (material leg)
+    emb.set_material(field);
+    emb.set_material_registry(ground());
+    // A located body parcel that decays unconditionally at the reserved rate (the tissue return leg): its own
+    // composition (here a single nutrient) carves nothing from the default split, so its whole volume returns.
+    let mut tissue = TissueField::new();
+    let body: std::collections::BTreeMap<String, Fixed> =
+        [("bio.energy_density".to_string(), Fixed::from_int(5))]
+            .into_iter()
+            .collect();
+    tissue.deposit(tcell, body, Fixed::from_int(8));
+    emb.set_tissue(tissue);
+    let mut r = Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(300)), calib(), emb);
+    r.set_matter_cycle(MatterCycleCalib::dev_fixture());
+
+    let mut conservation: ConservationRegistry<Runner> = ConservationRegistry::new();
+    conservation.register("decay_ledger", |r: &Runner| {
+        r.embodiment().unwrap().decay_ledger_mass().to_bits() as i128
+    });
+    let material0 = r.embodiment().unwrap().material().total_mass(&ground());
+    let tissue0 = r.embodiment().unwrap().tissue().total_volume();
+    let baseline = conservation.snapshot(&r);
+
+    r.step();
+    conservation
+        .check_against(&baseline, &r)
+        .expect("the matter cycle conserves material + soil + tissue across both legs");
+    assert!(
+        r.embodiment().unwrap().material().total_mass(&ground()) < material0,
+        "the material leg rotted (the carrion mass fell)"
+    );
+    assert!(
+        r.embodiment().unwrap().tissue().total_volume() < tissue0,
+        "the tissue leg rotted (the body volume fell)"
+    );
+    assert!(
+        r.embodiment().unwrap().decomposed_mass() > Fixed::ZERO,
+        "the soil store gained the matter both legs lost"
+    );
+
+    for _ in 0..10 {
+        r.step();
+    }
+    conservation
+        .check_against(&baseline, &r)
+        .expect("the ledger stays conserved as both pools rot down over many ticks");
+}
+
+#[test]
 fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
     // DECOMPOSITION-AS-EMERGENCE (Principle 8), the whole point: the matter cycle no longer asserts that all
     // warm matter rots. The substance's own rate is now its MAXIMUM susceptibility, and the fraction a cell

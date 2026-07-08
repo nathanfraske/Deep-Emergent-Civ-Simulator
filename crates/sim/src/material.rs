@@ -637,6 +637,13 @@ impl MaterialField {
         self.matter.iter()
     }
 
+    /// The total mass of all located matter over every cell, derived from the registry (the material term of
+    /// the matter-cycle conservation ledger, chemistry arc Arc 4): what decomposition moves OUT of the located
+    /// substances and into the soil store. Saturating; an empty field reads zero.
+    pub fn total_mass(&self, reg: &PhysicsRegistry) -> Fixed {
+        Fixed::saturating_sum(self.matter.values().map(|mix| mix.mass(reg)))
+    }
+
     /// Add a volume of one substance to a cell (a deposit: mined spoil dropped, a corpse's remains, an
     /// ash residue). Creates the cell's mixture if it was void.
     pub fn deposit(&mut self, coord: Coord3, substance: &str, volume: Fixed) {
@@ -1289,6 +1296,15 @@ impl TissueField {
                     .fold(Fixed::ZERO, |acc, v| acc.saturating_add(*v))
             })
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The total tissue volume over every cell and parcel (the tissue term of the matter-cycle conservation
+    /// ledger, chemistry arc Arc 4): the located body matter that decomposition returns to the soil store, at
+    /// the unit tissue density the decay leg uses. Saturating; an empty field reads zero.
+    pub fn total_volume(&self) -> Fixed {
+        self.cells.values().fold(Fixed::ZERO, |acc, parcels| {
+            parcels.values().fold(acc, |a, v| a.saturating_add(*v))
+        })
     }
 
     /// The fracture hardness a being must overcome to work the tissue at a cell: the greatest

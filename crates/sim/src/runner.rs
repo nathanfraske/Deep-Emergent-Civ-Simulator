@@ -1480,6 +1480,27 @@ impl Embodiment {
         self.soil.total()
     }
 
+    /// The closed matter-cycle CONSERVATION LEDGER (chemistry arc, Arc 4): the total matter mass the
+    /// decomposition legs move between pools, `located material mass + soil-nutrient store + located tissue`,
+    /// which the matter cycle holds INVARIANT (a substance's lost mass re-materialises into the soil bit for
+    /// bit through the constituent split, and a decayed body's lost volume the same, at the unit tissue
+    /// density the decay leg uses). This closes the LOOP the earlier `decomposed_mass` half-covered: the
+    /// tissue -> soil return leg is now inside the ledger, so both decomposition legs are conserved together.
+    /// The producer BIOMASS layer is OPEN and deliberately NOT in this ledger: the extract-deplete beat's
+    /// weathering deposit is a source and the producer draw a sink, so a run with the producer cycle armed is
+    /// not expected to hold this invariant across a whole tick, only the decomposition legs in isolation. Zero
+    /// material term if no material registry is installed. For the [`crate::conservation::ConservationRegistry`].
+    pub fn decay_ledger_mass(&self) -> Fixed {
+        let material = self
+            .material_registry
+            .as_ref()
+            .map(|reg| self.material.total_mass(reg))
+            .unwrap_or(Fixed::ZERO);
+        material
+            .saturating_add(self.soil.total())
+            .saturating_add(self.tissue.total_volume())
+    }
+
     /// Install the world material registry a carried load's weight is derived against (material-substrate
     /// arc, cascade item 3): the ground registry ([`civsim_physics::PhysicsRegistry::ground`]). Opt-in;
     /// without it the carry actions no-op and every existing scenario is unchanged. This is the first
