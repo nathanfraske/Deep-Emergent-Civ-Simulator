@@ -175,8 +175,9 @@ pub use evidence::{
     EvidenceRef, InferenceFrame, InferenceParams,
 };
 pub use evolve::{
-    controller_gene_set, episode_survival, evolve, full_episode_survival, homeostatic_coefficient,
-    selection_gradient, EvolveParams, EvolveReport,
+    controller_gene_set, episode_survival, evolve, evolve_forage_controller, full_episode_survival,
+    homeostatic_coefficient, reserve_conflict_survival, selection_gradient, EvolveParams,
+    EvolveReport,
 };
 pub use genome::{
     append_controller_block, append_morphogen_block, append_scalar_channel, Allele, AlleleState,

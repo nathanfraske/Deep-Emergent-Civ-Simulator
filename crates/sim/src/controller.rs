@@ -858,6 +858,14 @@ impl Controller {
         self.weights.get(k).copied().unwrap_or(Fixed::ZERO)
     }
 
+    /// The full heritable weight vector, in [`ControllerParamId`] order (weight `k` feeds
+    /// `Channel::Controller(ControllerParamId(k))`). A caller that has evolved a controller (the dawn
+    /// forage bootstrap) reads this to seed a founder pool with each weight as its target, so a founder
+    /// expresses the pre-adapted controller (`crate::genome::append_controller_block`).
+    pub fn weights(&self) -> &[Fixed] {
+        &self.weights
+    }
+
     /// A fresh zero hidden state of the right width (empty for a reaction norm), the state a being
     /// starts life with.
     pub fn fresh_hidden(&self) -> Vec<Fixed> {

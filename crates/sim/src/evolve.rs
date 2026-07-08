@@ -678,9 +678,15 @@ fn two_reserve_episode_survival_dir(
 /// Score a controller by HOMEOSTATIC HEALTH on the FOOD-VERSUS-WATER trap, for the being physiology `reg`
 /// (which must carry the ENERGY and WATER reserves the challenge separates in space), aggregated over the
 /// symmetric direction set (energy and water swap sides across the set, so no fixed heading or reserve bias
-/// is rewarded, only genuine spatial prioritisation). The registry is DATA (Principle 11), so the same
-/// challenge bootstraps whichever grazer physiology a world declares, at that physiology's OWN drains: a
-/// being is pre-adapted on the reserves it will actually carry. A pure function of the seed.
+/// is rewarded, only genuine spatial prioritisation). The registry is DATA (Principle 11) for the reserve
+/// SET and its DRAINS, so the challenge bootstraps a grazer physiology at that physiology's own drains: a
+/// being is pre-adapted on the reserves it will carry. HONEST LIMIT (Terran-narrowed, not fully
+/// alien-general): the scored MATTER is the fixed pair `energy_matter` (`bio.energy_density`) and
+/// `water_matter` (`bio.water_fraction`) with the food learned at the fixed ENERGY/WATER axis ids, so a
+/// grazer whose energy or hydration reserve is backed by a NON-Terran floor class (a redox or mana analogue)
+/// would be fed matter it cannot assimilate and fail the pre-adaptation with no signal. The full-general form
+/// derives the food matter and learned axis ids from `reg`'s own `backing_component`, so an alien-substrate
+/// grazer is a data row; that generalisation is a bootstrap follow-on. A pure function of the seed.
 pub fn reserve_conflict_survival(
     controller: &Controller,
     ticks: u32,
@@ -715,8 +721,11 @@ pub fn two_reserve_episode_survival(controller: &Controller, ticks: u32, seed: u
 /// `a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one`). Pass a
 /// `layout` with a positive hidden width for the recurrent representation, built over the SAME `reg`.
 /// Deterministic in the seed. The behaviour is NOT authored: the physics scores viability and conditional
-/// foraging is what survives; this is the run's own emergent selection, run once up front so beings are not
-/// helpless at dawn (the chicken-and-egg that kills a naive population before selection can act).
+/// foraging is what survives. This is an OFFLINE PROXY pre-adaptation (a warm start on a synthetic
+/// food-vs-water fixture), run once up front so beings are not helpless at dawn (the chicken-and-egg that
+/// kills a naive population before selection can act). Whether the warm start TRANSFERS to the real run's
+/// regime (partial knowledge, sparse sources, real terrain) is a separate, empirical question, not implied
+/// by the fixture score (see the `--scenario living` finding: it does not, robustly, transfer yet).
 pub fn evolve_forage_controller(
     layout: &ControllerLayout,
     reg: &HomeostaticRegistry,
@@ -724,7 +733,7 @@ pub fn evolve_forage_controller(
     seed: u64,
 ) -> Genome {
     let score = |c: &Controller, t: u32, s: u64| reserve_conflict_survival(c, t, s, reg);
-    let report = evolve_with(layout, params, seed, &score);
+    let report = evolve_with(layout, params, seed, score);
     let genes = controller_gene_set(layout);
     report
         .final_genomes

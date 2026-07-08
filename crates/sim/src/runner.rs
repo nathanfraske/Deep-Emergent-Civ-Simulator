@@ -3318,6 +3318,14 @@ impl Runner {
         self.environ.as_ref().map(|(f, _)| f)
     }
 
+    /// The environmental field stack for a post-build mutation of its producer occupants (a caller that
+    /// arms a scenario's real-plant food after the runner is built, e.g. the living-world harness writing
+    /// `set_producer_food` from the biosphere's own producer compositions). The calibration is left as
+    /// armed; only the field data is exposed. `None` when no environ is armed.
+    pub fn environ_mut(&mut self) -> Option<&mut EnvironFields> {
+        self.environ.as_mut().map(|(f, _)| f)
+    }
+
     /// Place a being on the map at a coordinate with an initial body temperature.
     pub fn place_being(&mut self, id: StableId, coord: Coord3, body_temp: Fixed) {
         self.index.place(OccupantId::being(id), coord);
