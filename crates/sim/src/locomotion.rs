@@ -126,6 +126,16 @@ pub struct LocomotionParams {
     /// Its manifest home is `locomotion.ingest_efficiency` once the locomotion parameters read fail-loud
     /// from the manifest; the dev harness stands up a labelled fixture through [`Self::dev_default`].
     pub ingest_efficiency: Fixed,
+    /// R-UNITS-PIN (the reserve joule-scale reconciliation): the physical energy content a unit of standing
+    /// food carries, bridging the abstract climate-productivity supply to the reserve's physical joules the
+    /// Kleiber drain is paid in, so the forage INGEST fills a reserve by the food's PHYSICAL content
+    /// ([`crate::physiology::physical_intake`]) rather than a saturating fill. RESERVED, dev-set: the
+    /// absolute scale is the owner's units anchor, and a real producer's own `bio.energy_density` supersedes
+    /// it per cell once the standing food carries its composition (T3). Basis: set so a being's forage intake
+    /// at a plausible standing density offsets its Kleiber drain (the calibration target: the dev world
+    /// survives). Alien-clean: it scales the food's content, never assuming a chemistry (a mana or redox food
+    /// carries its own content the same way).
+    pub food_energy_density: Fixed,
     /// The floor caps the environmental-harm sink reads (base-level liveliness step 4): the per-class and
     /// aggregate harm ceilings the dose-response ([`civsim_physics::laws::net_harm`]) clamps to. RESERVED
     /// (their home is [`crate::edibility::FloorCaps`], the floor's reserved harm caps); the dev harness
@@ -176,6 +186,11 @@ impl LocomotionParams {
             // at twice the reserve gained, giving carrying capacity teeth while a lineage can still
             // subsist. A canonical run reads the reserved trophic efficiency.
             ingest_efficiency: Fixed::from_ratio(1, 2),
+            // R-UNITS-PIN dev-set (a labelled fixture, not owner canon): the physical energy a unit of
+            // standing food carries, the reconciliation of the abstract productivity supply to the reserve's
+            // Kleiber joules. Calibrated so a foraging being's intake offsets its drain and the dev world
+            // survives; the owner sets the canonical units anchor.
+            food_energy_density: Fixed::from_int(3000),
             // The labelled floor harm caps (base-level liveliness step 4); a canonical run reads the
             // reserved FloorCaps.
             harm_caps: FloorCaps::dev_default(),
@@ -904,6 +919,8 @@ pub fn step<T: Terrain>(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        // The field-less fixture path installs no physiology, so the INGEST uses the pre-grounding measure.
+        None,
         // The field-less scoring/fixture path senses no features (the evolve proxy and movement tests
         // run without the percept substrate), so the controller feature block, if any, reads zero.
         &PerceptRegistry::empty(),
@@ -962,6 +979,12 @@ pub fn step_with_field_dirs<T: Terrain>(
     field_dirs: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>>,
     field_signed: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, Fixed>>,
     drains: &BTreeMap<StableId, BTreeMap<HomeostaticAxisId, DerivedDrain>>,
+    // The metabolic anchors (R-PHYS-BIO edibility), `Some` when a physiology is installed: the forage INGEST
+    // then fills a reserve by the food's PHYSICAL content, converted through the being's own body mass
+    // (`body_mass_kg`) and its storage density on the reserve's backing class (`whole_body_composition_vector`,
+    // computed inside from `organs` and `w.body`), the same size-scaled bridge the drain uses. `None` leaves
+    // the INGEST on the pre-grounding satisfaction measure (byte-identical for a fixture with no physiology).
+    intake_anchors: Option<crate::physiology::MetabolicAnchors>,
     percepts: &PerceptRegistry,
     material_percepts: &MaterialPerceptRegistry,
     material_field: &MaterialField,
@@ -1138,52 +1161,97 @@ pub fn step_with_field_dirs<T: Terrain>(
                         }
                     }
                     INGEST => {
-                        // Take in the matter underfoot, its worth MEASURED not authored AND its stock
-                        // DEPLETED (base-level liveliness step 3): for each homeostatic axis backed by a
-                        // biology-floor class, read the tile's standing supply of that class and put it
-                        // through the resolved edibility floor's satisfaction measure (`laws::satisfaction`)
-                        // against this being's own physiology (per-class assimilation and requirement).
-                        // The satisfaction-measured net gain is bounded by the room left in the reserve (a
-                        // full reserve draws nothing), grossed up by the reserved trophic efficiency to the
-                        // biomass the bite removes, taken from the standing stock (capped at what is there),
-                        // and the assimilated part deposited. So the tile loses the gross bite while the
-                        // being gains that times the efficiency (conservation-honest, the `stocks::flow`
-                        // trophic step), a grazed-out tile feeds the next id-ordered being less, and a
-                        // half-grazed patch yields half through the same Liebig math (Principle 8, no
-                        // stock-empty gate). Reads only `homeo.axes`, the backing-class strings, the tile
-                        // supply, and the being's own physiology: no race, species, or kind id (Principle 9).
-                        for axis in &homeo.axes {
-                            let Some(class) = axis.backing_component.as_deref() else {
-                                continue;
-                            };
-                            let supply = resources.supply(here, class);
-                            if supply <= Fixed::ZERO {
-                                continue; // the tile is no source of this axis
+                        // Take in the matter underfoot, its worth DERIVED FROM PHYSICS not authored AND its
+                        // stock DEPLETED (base-level liveliness step 3, R-PHYS-BIO edibility): for each
+                        // homeostatic axis backed by a biology-floor class, the being eats the tile's standing
+                        // CONTENT of that class and its reserve rises by that content assimilated (its own
+                        // per-class assimilation) and passed at the trophic efficiency, CONVERTED through the
+                        // being's OWN storage density on the class ([`physiology::physical_intake`], the same
+                        // size-scaled reserve bridge the drain uses). So the reserve fills by the food's
+                        // PHYSICAL content and not a saturating fill-to-capacity or a biomass fudge, and the
+                        // mechanism is ALIEN-CLEAN: it keys on the reserve's backing class and the being's own
+                        // composition, never `bio.energy_density`, so a thaumic being fills a mana reserve from
+                        // a mana-bearing plant by the SAME call a grazer fills energy from a seed (Principle 9).
+                        // The tile loses exactly the content the being takes (conservation-honest), a grazed
+                        // tile feeds the next id-ordered being less, and a full reserve draws nothing.
+                        let eta = p.ingest_efficiency;
+                        match intake_anchors {
+                            Some(anchors) => {
+                                // The being's own storage density on each class and its mass, its data alone.
+                                let body_mass = crate::physiology::body_mass_kg(&w.body, &anchors);
+                                let storage = crate::physiology::whole_body_composition_vector(
+                                    &w.body, organs,
+                                );
+                                for axis in &homeo.axes {
+                                    let Some(class) = axis.backing_component.as_deref() else {
+                                        continue;
+                                    };
+                                    let supply = resources.supply(here, class);
+                                    if supply <= Fixed::ZERO {
+                                        continue; // the tile is no source of this axis
+                                    }
+                                    // The food's PHYSICAL content on the class: the standing supply times its
+                                    // energy content per unit (R-UNITS-PIN; a real producer's own axis value
+                                    // supersedes this per cell once T3 wires the food composition).
+                                    let content = supply
+                                        .checked_mul(p.food_energy_density)
+                                        .unwrap_or(Fixed::MAX);
+                                    let body_c = storage.get(class).copied().unwrap_or(Fixed::ZERO);
+                                    let room = w.homeostasis.capacity(axis.id)
+                                        - w.homeostasis.amount(axis.id);
+                                    let (eaten_content, gain) = crate::physiology::physical_intake(
+                                        content,
+                                        w.physiology.assimilation(class),
+                                        eta,
+                                        body_mass,
+                                        body_c,
+                                        room,
+                                    );
+                                    if eaten_content <= Fixed::ZERO {
+                                        continue;
+                                    }
+                                    // Remove the standing supply the eaten content came from (content back to
+                                    // supply units), so the tile depletes by exactly what the being took.
+                                    let eaten_supply = eaten_content
+                                        .checked_div(p.food_energy_density)
+                                        .unwrap_or(eaten_content);
+                                    resources.take(here, class, eaten_supply);
+                                    w.homeostasis.ingest(axis.id, gain);
+                                }
                             }
-                            let frac = laws::satisfaction(
-                                supply,
-                                w.physiology.assimilation(class),
-                                w.physiology.requirement(class),
-                            );
-                            let cap = w.homeostasis.capacity(axis.id);
-                            let room = cap - w.homeostasis.amount(axis.id);
-                            // The net gain sought this bite, bounded by the room the reserve can hold.
-                            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
-                            if target_gain <= Fixed::ZERO {
-                                continue; // the reserve is full: draw nothing, deplete nothing
+                            None => {
+                                // No physiology installed: the pre-grounding satisfaction measure stands, so a
+                                // fixture without a physiology is byte-identical to before the grounding.
+                                for axis in &homeo.axes {
+                                    let Some(class) = axis.backing_component.as_deref() else {
+                                        continue;
+                                    };
+                                    let supply = resources.supply(here, class);
+                                    if supply <= Fixed::ZERO {
+                                        continue;
+                                    }
+                                    let frac = laws::satisfaction(
+                                        supply,
+                                        w.physiology.assimilation(class),
+                                        w.physiology.requirement(class),
+                                    );
+                                    let cap = w.homeostasis.capacity(axis.id);
+                                    let room = cap - w.homeostasis.amount(axis.id);
+                                    let target_gain =
+                                        frac.checked_mul(cap).unwrap_or(cap).min(room);
+                                    if target_gain <= Fixed::ZERO {
+                                        continue;
+                                    }
+                                    let gross = if eta > Fixed::ZERO {
+                                        target_gain.checked_div(eta).unwrap_or(target_gain)
+                                    } else {
+                                        target_gain
+                                    };
+                                    let taken = resources.take(here, class, gross);
+                                    let gain = taken.checked_mul(eta).unwrap_or(taken);
+                                    w.homeostasis.ingest(axis.id, gain);
+                                }
                             }
-                            // Gross the target up by the trophic efficiency to the biomass the bite removes.
-                            let eta = p.ingest_efficiency;
-                            let gross = if eta > Fixed::ZERO {
-                                target_gain.checked_div(eta).unwrap_or(target_gain)
-                            } else {
-                                target_gain
-                            };
-                            let taken = resources.take(here, class, gross);
-                            // The assimilated part reaches the reserve (tile loses `taken`, being gains
-                            // `taken * eta`), so the pair conserves biomass as `stocks::flow` does.
-                            let gain = taken.checked_mul(eta).unwrap_or(taken);
-                            w.homeostasis.ingest(axis.id, gain);
                         }
                         // The tile's toxin classes are NOT a factor in this ingest arm (they neither feed
                         // nor deny a reserve here); they are the environmental-harm sink's concern, applied
@@ -1876,6 +1944,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &BTreeMap::new(),
+                    None,
                     &PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),
@@ -1956,6 +2025,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &BTreeMap::new(),
+                    None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),
@@ -2046,6 +2116,7 @@ mod tests {
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                     &BTreeMap::new(),
+                    None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),
@@ -2291,6 +2362,7 @@ mod tests {
             &empty_dirs,
             &empty_signed,
             &empty_drains,
+            None,
             &crate::percept::PerceptRegistry::empty(),
             &crate::material_percept::MaterialPerceptRegistry::empty(),
             &crate::material::MaterialField::new(),
@@ -2414,6 +2486,7 @@ mod tests {
                     &empty_dirs,
                     &empty_signed,
                     &empty_drains,
+                    None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),
@@ -2533,6 +2606,7 @@ mod tests {
                     &empty_dirs,
                     &empty_signed,
                     &empty_drains,
+                    None,
                     &percepts,
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),
@@ -2631,6 +2705,7 @@ mod tests {
                     &west,
                     &empty_signed,
                     &empty_drains,
+                    None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
                     &crate::material::MaterialField::new(),

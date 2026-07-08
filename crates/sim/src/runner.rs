@@ -4857,6 +4857,17 @@ impl Runner {
                 },
                 None => return,
             };
+        // (0d) Physics to physiology, the INTAKE bridge (R-PHYS-BIO edibility measure): the being's metabolic
+        // anchors, so the forage INGEST can fill a reserve by the food's PHYSICAL content (converted through
+        // the being's own body mass and its storage density on the reserve's backing class, the same bridge
+        // the drain uses) rather than a saturating fill-to-capacity. `None` (no physiology) leaves the INGEST
+        // on the pre-grounding satisfaction measure. Alien-clean: the intake reads the being's OWN composition
+        // per backing class, never `bio.energy_density` (computed inside the INGEST from `organs` + `w.body`).
+        let intake_anchors: Option<MetabolicAnchors> = self
+            .embodiment
+            .as_ref()
+            .and_then(|e| e.physiology.as_ref())
+            .map(|p| p.anchors);
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
@@ -4972,6 +4983,7 @@ impl Runner {
             &field_dirs,
             &field_signed,
             &drains,
+            intake_anchors,
             &emb.percepts,
             &emb.material_percepts,
             &emb.material,
