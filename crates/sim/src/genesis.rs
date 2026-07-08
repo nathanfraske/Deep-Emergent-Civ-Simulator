@@ -166,7 +166,7 @@ impl LivingWorld {
     /// interpreted here (no `id == 2` soil switch, which would re-author a closed Earth triad): it is read
     /// off the evolved food web and passed opaque to the registry, so an alien source (geothermal, a redox
     /// gradient, a mana field) is one data row, not code. Canonical order, deterministic.
-    pub fn producer_sources(&self) -> Vec<(Coord3, u16)> {
+    pub fn producer_sources(&self) -> Vec<(Coord3, Vec<u16>)> {
         let mut out = Vec::new();
         for coord in self.occupants.occupied() {
             for occ in self.occupants.occupants(coord) {
@@ -179,12 +179,20 @@ impl LivingWorld {
                 let Some(species) = rb.biosphere.species.get(info.species) else {
                     continue;
                 };
-                let source = species.draws_on.iter().find_map(|s| match s {
-                    SourceRef::Abiotic(id) => Some(*id),
-                    _ => None,
-                });
-                if let Some(id) = source {
-                    out.push((coord, id));
+                // EVERY abiotic edge the niche evolved to draw on (its Liebig factor set), not just the
+                // first: a producer limited by light AND soil closes on both, and the extract beat takes the
+                // minimum over the set. Species order is canonical; a producer with one edge yields a
+                // one-element list (the scalar case, unchanged).
+                let sources: Vec<u16> = species
+                    .draws_on
+                    .iter()
+                    .filter_map(|s| match s {
+                        SourceRef::Abiotic(id) => Some(*id),
+                        _ => None,
+                    })
+                    .collect();
+                if !sources.is_empty() {
+                    out.push((coord, sources));
                 }
             }
         }

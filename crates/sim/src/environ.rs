@@ -292,12 +292,16 @@ pub struct EnvironFields {
     /// with no biosphere reads the plain climate productivity and its hash is unchanged. Not folded into
     /// `state_hash` (like `fertility`): its effect enters the hash through the `capacity` it sets.
     producer: Vec<Fixed>,
-    /// The evolved abiotic SOURCE id each producer cell draws on (u16::MAX where no producer stands),
-    /// seeded once from the biosphere. The run consults a data-defined [`AbioticSourceRegistry`] to learn
-    /// which field that id reads and whether it is a depletable stock, so the extract path never switches
-    /// on the integer id (which would re-author a closed Earth source enum). Not folded into `state_hash`
-    /// like `producer`/`fertility`: its effect enters through the `capacity` the extract beat shapes.
-    producer_source: Vec<u16>,
+    /// The evolved abiotic SOURCE id LIST each producer cell draws on (an empty list where no producer
+    /// stands), seeded once from the biosphere. A producer closes on ONE OR MORE abiotic sources (light,
+    /// water, a soil nutrient, an alien gradient), and its productivity is the Liebig MINIMUM over the set
+    /// (each source a potential limiting factor, no authored priority, Principle 8). The run consults a
+    /// data-defined [`AbioticSourceRegistry`] to learn which field each id reads and whether it is a
+    /// depletable stock, so the extract path never switches on the integer id (which would re-author a
+    /// closed Earth source enum). A single-source producer is capped by that one source exactly as a scalar
+    /// would (the min over a singleton). Not folded into `state_hash` like `producer`/`fertility`: its
+    /// effect enters through the `capacity` the extract beat shapes.
+    producer_source: Vec<Vec<u16>>,
 }
 
 /// Which run field an abiotic source draws on. These are the engine's ACTUAL environmental fields; a world
@@ -393,7 +397,7 @@ impl EnvironFields {
             downhill,
             fertility: vec![Fixed::ZERO; n],
             producer: vec![Fixed::ZERO; n],
-            producer_source: vec![u16::MAX; n],
+            producer_source: vec![Vec::new(); n],
         }
     }
 
@@ -652,18 +656,19 @@ impl EnvironFields {
         }
     }
 
-    /// Seed the evolved abiotic source id of each producer cell from the biosphere (once at world build).
+    /// Seed the evolved abiotic source id LIST of each producer cell from the biosphere (once at world
+    /// build). A cell's list is overwritten (last occupant wins on a shared cell, as the scalar seed did).
     /// Off-grid cells are dropped. See [`Self::producer_source`].
-    pub fn set_producer_source(&mut self, cells: &[(Coord3, u16)]) {
+    pub fn set_producer_source(&mut self, cells: &[(Coord3, Vec<u16>)]) {
         for s in self.producer_source.iter_mut() {
-            *s = u16::MAX;
+            s.clear();
         }
-        for &(cell, id) in cells {
+        for (cell, ids) in cells {
             if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
                 continue;
             }
             let i = self.idx(cell.x, cell.y);
-            self.producer_source[i] = id;
+            self.producer_source[i] = ids.clone();
         }
     }
 
@@ -690,60 +695,70 @@ impl EnvironFields {
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
-                let id = self.producer_source[i];
-                if id == u16::MAX {
+                if self.producer_source[i].is_empty() {
                     continue; // no producer stands on this cell
                 }
-                // A seeded producer whose evolved source the world never bound is a config error: fail loud
-                // rather than fall through to an uncapped producer (the old infinite-well behaviour).
-                let binding = registry.binding(id).unwrap_or_else(|| {
-                    panic!("nutrient cycle: producer source id {id} has no registry binding")
-                });
-                match binding.field {
-                    AbioticField::Flux => {
-                        let supply = self.light[i];
-                        let supported = supply
-                            .checked_mul(registry.biomass_per_stock)
-                            .unwrap_or(Fixed::MAX);
-                        if self.capacity.cells[i] > supported {
-                            self.capacity.cells[i] = supported;
+                let coord = Coord3::ground(x, y);
+                // Pass 1 (the Liebig LAW OF THE MINIMUM, Principle 8): each evolved source is a potential
+                // limiting factor. Deposit the physical weathering seed of each soil source, read each
+                // source's supply, and cap the productivity to the SCARCEST source's supported biomass, so a
+                // producer that closes on light AND water AND a soil nutrient is limited by whichever is
+                // least, with no authored priority among them. A single-source producer is capped by that one
+                // source exactly as the scalar seed was (the minimum over a singleton is that source).
+                let mut min_supported = Fixed::MAX;
+                for k in 0..self.producer_source[i].len() {
+                    let id = self.producer_source[i][k];
+                    // A seeded producer whose evolved source the world never bound is a config error: fail
+                    // loud rather than fall through to an uncapped producer (the old infinite-well).
+                    let binding = registry.binding(id).unwrap_or_else(|| {
+                        panic!("nutrient cycle: producer source id {id} has no registry binding")
+                    });
+                    let supply = match binding.field {
+                        AbioticField::Flux => self.light[i],
+                        AbioticField::SoilStock => {
+                            if registry.weathering_rate > Fixed::ZERO {
+                                soil.deposit(coord, &binding.class, registry.weathering_rate);
+                            }
+                            soil.mass(coord, &binding.class)
                         }
+                        AbioticField::WaterStock => self.water.at(x, y),
+                    };
+                    let supported = supply
+                        .checked_mul(registry.biomass_per_stock)
+                        .unwrap_or(Fixed::MAX);
+                    if supported < min_supported {
+                        min_supported = supported;
                     }
-                    AbioticField::SoilStock => {
-                        let coord = Coord3::ground(x, y);
-                        if registry.weathering_rate > Fixed::ZERO {
-                            soil.deposit(coord, &binding.class, registry.weathering_rate);
-                        }
-                        let supply = soil.mass(coord, &binding.class);
-                        let supported = supply
-                            .checked_mul(registry.biomass_per_stock)
-                            .unwrap_or(Fixed::MAX);
-                        if self.capacity.cells[i] > supported {
-                            self.capacity.cells[i] = supported;
-                        }
-                        let draw_biomass = self.capacity.cells[i]
-                            .checked_mul(registry.draw_fraction)
-                            .unwrap_or(Fixed::ZERO);
-                        let draw_mass = draw_biomass
-                            .checked_div(registry.biomass_per_stock)
-                            .unwrap_or(Fixed::ZERO);
-                        soil.take(coord, &binding.class, draw_mass);
+                }
+                if self.capacity.cells[i] > min_supported {
+                    self.capacity.cells[i] = min_supported;
+                }
+                // Pass 2: draw down each DEPLETABLE stock (soil, water) by the realised productivity's share,
+                // so a heavily-worked cell depletes rather than reading an infinite well. A renewable flux
+                // (light) has no stock to draw. The draw reads the FINAL capped capacity, so the single-
+                // source sequence (cap, then draw) is bit-identical to the scalar path it replaces.
+                for k in 0..self.producer_source[i].len() {
+                    let id = self.producer_source[i][k];
+                    let binding = registry.binding(id).unwrap_or_else(|| {
+                        panic!("nutrient cycle: producer source id {id} has no registry binding")
+                    });
+                    if matches!(binding.field, AbioticField::Flux) {
+                        continue; // a renewable flux has no stock to deplete
                     }
-                    AbioticField::WaterStock => {
-                        let supply = self.water.at(x, y);
-                        let supported = supply
-                            .checked_mul(registry.biomass_per_stock)
-                            .unwrap_or(Fixed::MAX);
-                        if self.capacity.cells[i] > supported {
-                            self.capacity.cells[i] = supported;
+                    let draw_biomass = self.capacity.cells[i]
+                        .checked_mul(registry.draw_fraction)
+                        .unwrap_or(Fixed::ZERO);
+                    let draw_amt = draw_biomass
+                        .checked_div(registry.biomass_per_stock)
+                        .unwrap_or(Fixed::ZERO);
+                    match binding.field {
+                        AbioticField::Flux => {}
+                        AbioticField::SoilStock => {
+                            soil.take(coord, &binding.class, draw_amt);
                         }
-                        let draw_biomass = self.capacity.cells[i]
-                            .checked_mul(registry.draw_fraction)
-                            .unwrap_or(Fixed::ZERO);
-                        let draw_amt = draw_biomass
-                            .checked_div(registry.biomass_per_stock)
-                            .unwrap_or(Fixed::ZERO);
-                        self.water.take(x, y, draw_amt);
+                        AbioticField::WaterStock => {
+                            self.water.take(x, y, draw_amt);
+                        }
                     }
                 }
             }
@@ -950,7 +965,7 @@ mod tests {
             downhill,
             fertility: vec![Fixed::ZERO; elev_tenths.len()],
             producer: vec![Fixed::ZERO; elev_tenths.len()],
-            producer_source: vec![u16::MAX; elev_tenths.len()],
+            producer_source: vec![Vec::new(); elev_tenths.len()],
         }
     }
 
@@ -1307,6 +1322,62 @@ mod tests {
             e.capacity_at(ux, uy),
             Fixed::ZERO,
             "an equally-viable unfertilised cell stays barren (the lift is local to the deposit)"
+        );
+    }
+
+    #[test]
+    fn productivity_is_the_liebig_minimum_over_the_evolved_source_set_not_the_first() {
+        // T2 source-vector (the chemistry generalization): a producer closes on a SET of abiotic sources and
+        // the extract beat caps its productivity to the SCARCEST of them (the Law of the Minimum), never the
+        // first-listed. A cell drawing on an abundant flux AND a scarce soil nutrient is limited by the soil;
+        // the same cell drawing on the flux ALONE is not. The soil-limited outcome is identical whether the
+        // soil is listed first or last, so the min is over the whole set, not the head of the list.
+        let map = a_map(0x50FF);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        // A scarce soil stock: seeded tiny so its supported biomass sits far below the abundant flux's.
+        let scarce = Fixed::from_ratio(1, 100);
+        // The registry: id 0 an abundant flux (light), id 1 a scarce soil nutrient. The draw is zeroed so
+        // this isolates the CAP from the deplete, and there is no weathering bootstrap.
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(0, AbioticField::Flux, "");
+        reg.insert(1, AbioticField::SoilStock, "nutrient");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        // A helper: run the extract beat once on a fresh field with the given source list and return the
+        // capped capacity at `cell`. A large producer biomass makes the pre-cap capacity high, so the source
+        // set is what binds.
+        let run = |ids: Vec<u16>| -> Fixed {
+            let mut e = EnvironFields::from_map(&map);
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, ids)]);
+            e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
+            let mut soil = SoilNutrientField::new();
+            soil.deposit(cell, "nutrient", scarce);
+            e.extract_producers(&mut soil, &reg);
+            e.capacity_at(cell.x, cell.y)
+        };
+        let flux_only = run(vec![0]);
+        let soil_only = run(vec![1]);
+        let flux_then_soil = run(vec![0, 1]);
+        let soil_then_flux = run(vec![1, 0]);
+        assert!(
+            flux_only > soil_only,
+            "the abundant flux alone supports more biomass than the scarce soil alone"
+        );
+        assert_eq!(
+            flux_then_soil, soil_only,
+            "drawing on both, the SCARCE soil binds the productivity (the Liebig minimum, not the flux)"
+        );
+        assert_eq!(
+            soil_then_flux, flux_then_soil,
+            "the minimum is over the whole source set: order of the sources does not change the cap"
+        );
+        assert!(
+            flux_then_soil < flux_only,
+            "adding a scarcer source can only lower the ceiling, never raise it above the flux-only cap"
         );
     }
 
