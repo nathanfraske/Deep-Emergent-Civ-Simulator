@@ -430,6 +430,12 @@ pub fn build_dawn_runner(
     if let Some(living) = &peoples.biosphere {
         environ.set_producer(&living.producer_biomass(civsim_core::Fixed::ONE));
         environ.set_producer_source(&living.producer_sources());
+        // Arm the run's abiotic-source registry from the SAME object the biosphere was generated against
+        // (Arc 5 T1), so the extract-deplete cycle resolves each producer's evolved source id against the
+        // world's own bindings rather than a hand-written literal that only agreed with generation by
+        // comment convention. Closes the confirmed generation-to-run gap: the canonical build path never
+        // armed this registry before, only the run_world example did.
+        runner.set_abiotic_sources(living.abiotic.clone());
         // T3 (standing food as the producer's OWN composition) MECHANISM is built and proven
         // (`environ.set_producer_food` + the regrow volume read-back + the environ falsifier), but wiring it
         // here is OWNER-GATED: seeding `living.producer_compositions()` normalises each plant to a nutrient

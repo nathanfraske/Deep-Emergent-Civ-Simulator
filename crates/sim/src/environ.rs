@@ -43,7 +43,7 @@
 use civsim_core::{Fixed, StateHasher};
 use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
@@ -332,6 +332,30 @@ pub enum AbioticField {
     Soil,
 }
 
+/// One AVAILABILITY BAND on an abiotic source (chemistry arc, Arc 5 T1): the source is present in a region
+/// only where the region's environment reads inside the HALF-OPEN interval `[min, max)` on env axis `axis`
+/// (an ORDINAL into `EnvProfile::fields`, exactly as `Niche::suitability` reads its axes, so a band never
+/// names "moisture" in Rust, only in the world's own row comment). `min` is inclusive, `max` is exclusive
+/// (so a `min` band and a `max` band on the same axis partition it with no overlap at the boundary, as the
+/// wet-versus-dry source split needs); `max = None` is an open upper bound. This is what lets a
+/// lightless cave, an anaerobic world, or a mana world derive its OWN abiotic set from its own environment,
+/// never the Earth "light always, water where moist" logic.
+#[derive(Clone, Debug)]
+pub struct AxisBand {
+    pub axis: usize,
+    pub min: Fixed,
+    pub max: Option<Fixed>,
+}
+
+/// The availability rule of an abiotic source: it is present in a region iff EVERY band passes (a Liebig
+/// conjunction, like the niche). An empty rule is always available (an unbounded renewable flux, like light
+/// above ground). Data (Principle 11): a world declares each source's presence condition as bands over its
+/// own env axes, never a hardcoded per-source predicate.
+#[derive(Clone, Debug, Default)]
+pub struct AbioticAvailability {
+    pub bands: Vec<AxisBand>,
+}
+
 /// The data-defined binding of one abiotic source id to the run field it reads, whether it depletes that
 /// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
 #[derive(Clone, Debug)]
@@ -347,6 +371,9 @@ pub struct AbioticBinding {
     pub depletes: bool,
     /// The physics-floor nutrient class this field supplies (used only for the soil field; empty otherwise).
     pub class: String,
+    /// Where in a region this source is PRESENT (Arc 5 T1): the availability rule over the region's env axes.
+    /// Empty (the default) means always present, so a source inserted without a rule keeps the old behaviour.
+    pub availability: AbioticAvailability,
 }
 
 /// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
@@ -374,16 +401,107 @@ impl AbioticSourceRegistry {
     }
 
     /// Bind a source id to a field, whether it depletes that field, and the class it supplies (data; called
-    /// at the biosphere-arming site). A renewable flux passes `depletes = false`, a finite stock `true`.
+    /// at the biosphere-arming site). A renewable flux passes `depletes = false`, a finite stock `true`. The
+    /// source is ALWAYS present (empty availability); use [`Self::insert_available`] for a conditional source.
     pub fn insert(&mut self, id: u16, field: AbioticField, depletes: bool, class: &str) {
+        self.insert_available(id, field, depletes, class, AbioticAvailability::default());
+    }
+
+    /// Bind a source id with an AVAILABILITY rule (Arc 5 T1): the source is present in a region only where the
+    /// rule's bands pass over the region's env axes, so a world derives its own abiotic set from its own
+    /// environment (water where wet, geothermal where hot, mana where the ley-field reads) rather than the
+    /// Earth "light always, water where moist" hardcode.
+    pub fn insert_available(
+        &mut self,
+        id: u16,
+        field: AbioticField,
+        depletes: bool,
+        class: &str,
+        availability: AbioticAvailability,
+    ) {
         self.bindings.insert(
             id,
             AbioticBinding {
                 field,
                 depletes,
                 class: class.to_string(),
+                availability,
             },
         );
+    }
+
+    /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
+    /// Earth-terrain world derives byte-identical `Region.abiotic` sets to the pre-arc hardcode: id 0 LIGHT
+    /// always present (a renewable flux, no bands); id 1 WATER present where the moisture axis (ordinal 1 in
+    /// the dev env vector `[elevation, moisture, temperature, soil]`) reads at or above 0.3 (a depletable
+    /// stock); id 2 a dryland SOIL nutrient present where drier (moisture below 0.3), supplying
+    /// `bio.organic_residue`. Carries the same reserved extract-deplete scalars the run previously set inline.
+    /// Not owner canon; an alien world declares its own sources and presence bands.
+    pub fn earth_dev() -> AbioticSourceRegistry {
+        let mut r = AbioticSourceRegistry::default();
+        let moisture_axis = 1usize;
+        r.insert_available(
+            0,
+            AbioticField::Light,
+            false,
+            "",
+            AbioticAvailability::default(),
+        );
+        r.insert_available(
+            1,
+            AbioticField::Water,
+            true,
+            "",
+            AbioticAvailability {
+                bands: vec![AxisBand {
+                    axis: moisture_axis,
+                    min: Fixed::from_ratio(3, 10),
+                    max: None,
+                }],
+            },
+        );
+        r.insert_available(
+            2,
+            AbioticField::Soil,
+            true,
+            "bio.organic_residue",
+            AbioticAvailability {
+                bands: vec![AxisBand {
+                    axis: moisture_axis,
+                    min: Fixed::ZERO,
+                    max: Some(Fixed::from_ratio(3, 10)),
+                }],
+            },
+        );
+        r.biomass_per_stock = Fixed::from_int(4);
+        r.draw_fraction = Fixed::from_ratio(1, 20);
+        r.weathering_rate = Fixed::from_ratio(1, 100);
+        r
+    }
+
+    /// The abiotic source ids PRESENT in a region whose env reads `fields` (Arc 5 T1): every source whose
+    /// availability bands all pass, in canonical id order. Replaces the Earth-hardcoded {light, water, soil}
+    /// derivation with a data read, so a world's own declared sources and presence conditions decide its
+    /// regions' abiotic sets. Fail-loud on a band referencing an axis the env does not carry (a config error),
+    /// naming the offending source, rather than silently dropping it.
+    pub fn available_in(&self, fields: &[Fixed]) -> BTreeSet<u16> {
+        let mut present = BTreeSet::new();
+        for (id, binding) in &self.bindings {
+            let ok = binding.availability.bands.iter().all(|band| {
+                let value = *fields.get(band.axis).unwrap_or_else(|| {
+                    panic!(
+                        "abiotic source {id}: availability band on env axis {} but the region carries only {} axes",
+                        band.axis,
+                        fields.len()
+                    )
+                });
+                value >= band.min && band.max.is_none_or(|m| value < m)
+            });
+            if ok {
+                present.insert(*id);
+            }
+        }
+        present
     }
 }
 
@@ -1506,6 +1624,80 @@ mod tests {
             e.capacity_at(ux, uy),
             Fixed::ZERO,
             "an equally-viable unfertilised cell stays barren (the lift is local to the deposit)"
+        );
+    }
+
+    #[test]
+    fn a_regions_abiotic_set_derives_from_data_availability_bands_and_admits_an_alien_world() {
+        // Arc 5 T1: which abiotic sources a region offers is a DATA read (each source's availability bands
+        // over the region's env axes), not the Earth "light always, water where moist" hardcode. Proof (1):
+        // the earth_dev fixture reproduces the exact Earth triad at a moist and a dry region. Proof (2): an
+        // ALIEN registry with NO light and its own sources derives its own set with no Earth assumption.
+        let earth = AbioticSourceRegistry::earth_dev();
+        // Env vector layout [elevation, moisture, temperature, soil]; moisture is ordinal 1.
+        let moist = vec![
+            Fixed::ONE,
+            Fixed::from_ratio(6, 10),
+            Fixed::ONE,
+            Fixed::ZERO,
+        ];
+        let dry = vec![
+            Fixed::ONE,
+            Fixed::from_ratio(1, 10),
+            Fixed::ONE,
+            Fixed::ZERO,
+        ];
+        assert_eq!(
+            earth.available_in(&moist),
+            [0u16, 1].into_iter().collect(),
+            "a moist region: light (always) + water (moisture >= 0.3)"
+        );
+        assert_eq!(
+            earth.available_in(&dry),
+            [0u16, 2].into_iter().collect(),
+            "a dry region: light (always) + the dryland soil source (moisture < 0.3), not water"
+        );
+
+        // An alien world: NO light source at all; a geothermal source present only where hot (env axis 2
+        // above a threshold); a chemosynthetic source always present. No Earth axis or source is assumed.
+        let mut alien = AbioticSourceRegistry::default();
+        alien.insert_available(
+            10,
+            AbioticField::Soil,
+            true,
+            "chem.redox",
+            AbioticAvailability::default(), // always
+        );
+        alien.insert_available(
+            11,
+            AbioticField::Water,
+            true,
+            "",
+            AbioticAvailability {
+                bands: vec![AxisBand {
+                    axis: 2,
+                    min: Fixed::from_ratio(8, 10),
+                    max: None,
+                }],
+            }, // geothermal: only where the temperature axis is hot
+        );
+        let hot = vec![Fixed::ZERO, Fixed::ZERO, Fixed::ONE, Fixed::ZERO];
+        let cold = vec![
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 10),
+            Fixed::ZERO,
+        ];
+        assert_eq!(
+            alien.available_in(&hot),
+            [10u16, 11].into_iter().collect(),
+            "a hot alien region: the always-on chemosynthetic source + the geothermal source; NO light"
+        );
+        assert_eq!(
+            alien.available_in(&cold),
+            [10u16].into_iter().collect(),
+            "a cold alien region: only the chemosynthetic source; the geothermal source is absent, and light \
+             never enters because this world declares none"
         );
     }
 

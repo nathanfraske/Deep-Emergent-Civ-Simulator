@@ -40,6 +40,7 @@ use rayon::prelude::*;
 use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{generate, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef};
 use crate::clock::Steppable;
+use crate::environ::AbioticSourceRegistry;
 use crate::epoch::{run, EpochParams, EpochReport, Radiation};
 use crate::genome::IncompatibilityTable;
 use crate::lineage::SpeciesId;
@@ -115,6 +116,12 @@ pub struct LivingWorld {
     /// Carried from [`GenesisParams`] and folded into [`LivingWorld::state_hash`], so the orbit is
     /// canonical state: two worlds with the same seed but different orbits are different worlds.
     pub orbital: OrbitalElements,
+    /// The world's abiotic-source registry (Arc 5 T1): which abiotic sources exist, where each is present
+    /// (its availability bands over the env axes), and how the extract-deplete cycle draws each. The regions'
+    /// `abiotic` sets were derived from it at generation, so it is the world's own data (a Terran world uses
+    /// [`AbioticSourceRegistry::earth_dev`]; an alien world its own), and the run arms it from here rather
+    /// than a hand-written literal, closing the generation-to-run consistency gap.
+    pub abiotic: AbioticSourceRegistry,
 }
 
 impl LivingWorld {
@@ -423,7 +430,7 @@ impl LivingWorld {
 }
 
 /// Run the whole world-genesis sequence deterministically from one world seed.
-pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
+pub fn genesis(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistry) -> LivingWorld {
     let biomes = BiomeSet::dev_default();
     let map = TileMap::generate(
         seed,
@@ -444,7 +451,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
         for rx in 0..cols {
             let x0 = rx * side;
             let y0 = ry * side;
-            let region = derive_region(&map, x0, y0, side, params.generator.env_axes);
+            let region = derive_region(&map, x0, y0, side, params.generator.env_axes, abiotic);
             // A stable per-region id folds the grid coordinate; used to key the region's draws.
             let region_id = ((rx as u64) << 32) | (ry as u64 & 0xffff_ffff);
             let mut biosphere = generate(
@@ -498,6 +505,7 @@ pub fn genesis(seed: u64, params: &GenesisParams) -> LivingWorld {
         occupant_info,
         registry,
         orbital: params.orbital,
+        abiotic: abiotic.clone(),
     }
 }
 
@@ -529,13 +537,14 @@ pub struct WorldGenesis {
     regions: Vec<StagedRegion>,
     side: i32,
     gen: u64,
+    abiotic: AbioticSourceRegistry,
 }
 
 impl WorldGenesis {
     /// Begin a staged world genesis: run worldgen and seed every region's founders (generation 0),
     /// leaving the radiation to be stepped. Deterministic from the one world seed, exactly as
     /// [`genesis`].
-    pub fn new(seed: u64, params: &GenesisParams) -> WorldGenesis {
+    pub fn new(seed: u64, params: &GenesisParams, abiotic: &AbioticSourceRegistry) -> WorldGenesis {
         let biomes = BiomeSet::dev_default();
         let map = TileMap::generate(
             seed,
@@ -553,7 +562,7 @@ impl WorldGenesis {
             for rx in 0..cols {
                 let x0 = rx * side;
                 let y0 = ry * side;
-                let region = derive_region(&map, x0, y0, side, params.generator.env_axes);
+                let region = derive_region(&map, x0, y0, side, params.generator.env_axes, abiotic);
                 let region_id = ((rx as u64) << 32) | (ry as u64 & 0xffff_ffff);
                 let biosphere = generate(
                     seed,
@@ -587,6 +596,7 @@ impl WorldGenesis {
             regions,
             side,
             gen: 0,
+            abiotic: abiotic.clone(),
         }
     }
 
@@ -679,6 +689,7 @@ impl WorldGenesis {
             occupant_info,
             registry: self.registry.clone(),
             orbital: self.params.orbital,
+            abiotic: self.abiotic.clone(),
         }
     }
 
@@ -702,7 +713,14 @@ impl Steppable for WorldGenesis {
 /// terrain field over the block, plus a soil-fertility field (a moisture-derived stand-in
 /// until the soil stock lands). Abiotic sources present: light always, water when the block is
 /// moist enough for a producer to ground on.
-fn derive_region(map: &TileMap, x0: i32, y0: i32, side: i32, env_axes: usize) -> Region {
+fn derive_region(
+    map: &TileMap,
+    x0: i32,
+    y0: i32,
+    side: i32,
+    env_axes: usize,
+    sources: &AbioticSourceRegistry,
+) -> Region {
     let topo = map.topo();
     let x1 = (x0 + side).min(topo.width);
     let y1 = (y0 + side).min(topo.height);
@@ -737,13 +755,12 @@ fn derive_region(map: &TileMap, x0: i32, y0: i32, side: i32, env_axes: usize) ->
         fields.push(Fixed::from_ratio(1, 2));
     }
 
-    let mut abiotic = std::collections::BTreeSet::new();
-    abiotic.insert(0u16); // light, always available above ground
-    if m_moist >= Fixed::from_ratio(3, 10) {
-        abiotic.insert(1u16); // water, where the block is moist enough
-    } else {
-        abiotic.insert(2u16); // a dryland soil-nutrient source, so producers can still ground
-    }
+    // The abiotic sources PRESENT here derive from the world's declared registry against this region's env
+    // (Arc 5 T1): each source's availability bands are read over `fields`, so the world's own sources and
+    // presence conditions decide the set, never the Earth "light always, water where moist" hardcode. The
+    // dev-fixture registry reproduces that Earth triad exactly (light always, water where moist >= 0.3, a
+    // dryland soil source where drier), so a canonical Earth world is byte-identical.
+    let abiotic = sources.available_in(&fields);
 
     Region {
         env: EnvProfile::new(fields),
@@ -802,14 +819,14 @@ mod tests {
     #[test]
     fn genesis_replays_bit_identically() {
         let p = GenesisParams::dev_default();
-        let a = genesis(0x11FE, &p);
-        let b = genesis(0x11FE, &p);
+        let a = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let b = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         assert_eq!(
             a.state_hash(),
             b.state_hash(),
             "the same seed yields the same living world"
         );
-        let c = genesis(0x2222, &p);
+        let c = genesis(0x2222, &p, &AbioticSourceRegistry::earth_dev());
         assert_ne!(
             a.state_hash(),
             c.state_hash(),
@@ -823,10 +840,10 @@ mod tests {
         // hash identically, and the same seed under a different orbit hashes differently, so a
         // world's year and day length are part of what makes it that world.
         let mut p = GenesisParams::dev_default();
-        let earth = genesis(0x11FE, &p);
+        let earth = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         assert_eq!(
             earth.state_hash(),
-            genesis(0x11FE, &p).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
             "same seed and orbit, same hash"
         );
         // A different orbit, everything else held: a different world.
@@ -834,7 +851,7 @@ mod tests {
             orbital_period_seconds: Fixed::from_int(86_400),
             rotation_period_seconds: Fixed::from_int(3_600),
         };
-        let fast = genesis(0x11FE, &p);
+        let fast = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         assert_ne!(
             earth.state_hash(),
             fast.state_hash(),
@@ -843,7 +860,7 @@ mod tests {
         // And the different-orbit world is itself reproducible.
         assert_eq!(
             fast.state_hash(),
-            genesis(0x11FE, &p).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
             "the different-orbit world replays bit-identically"
         );
     }
@@ -854,8 +871,9 @@ mod tests {
         // completion produces a living world bit-identical to the one-shot batch genesis, so
         // watching the radiation unfold never diverges from the canonical result.
         let p = GenesisParams::dev_default();
-        let batch = genesis(0x11FE, &p);
-        let staged = WorldGenesis::new(0x11FE, &p).into_living();
+        let batch = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
+        let staged =
+            WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).into_living();
         assert_eq!(
             batch.state_hash(),
             staged.state_hash(),
@@ -866,7 +884,7 @@ mod tests {
     #[test]
     fn a_staged_genesis_can_be_watched_step_by_step() {
         let p = GenesisParams::dev_default();
-        let mut wg = WorldGenesis::new(0x11FE, &p);
+        let mut wg = WorldGenesis::new(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         assert_eq!(wg.generation(), 0);
         let founders = wg.species();
         assert!(founders > 0, "the founders are seeded before any radiation");
@@ -889,7 +907,7 @@ mod tests {
         );
         assert_eq!(
             snapf.state_hash(),
-            genesis(0x11FE, &p).state_hash(),
+            genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev()).state_hash(),
             "the fully stepped snapshot equals batch genesis"
         );
     }
@@ -897,7 +915,7 @@ mod tests {
     #[test]
     fn the_living_world_has_a_populated_ecology() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p);
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         assert!(!w.regions.is_empty(), "the map is partitioned into regions");
         assert!(w.species() > 0, "species were generated");
         assert!(w.alive() > 0, "some species survive to the dawn");
@@ -912,7 +930,7 @@ mod tests {
     #[test]
     fn the_epoch_radiated_the_founders() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p);
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         let daughters: u32 = w.regions.values().map(|r| r.report.daughters).sum();
         assert!(
             daughters > 0,
@@ -923,7 +941,7 @@ mod tests {
     #[test]
     fn occupants_are_findable_at_the_superfine_zoom() {
         let p = GenesisParams::dev_default();
-        let w = genesis(0x11FE, &p);
+        let w = genesis(0x11FE, &p, &AbioticSourceRegistry::earth_dev());
         // Some occupied tile has a promoted organism the located join can return.
         let coord = w.occupants.occupied().next().expect("an occupied tile");
         assert!(

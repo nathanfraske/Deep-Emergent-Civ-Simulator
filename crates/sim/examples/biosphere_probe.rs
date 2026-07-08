@@ -33,7 +33,11 @@ fn main() {
     };
     params.profile = WorldProfile::magical();
 
-    let world = genesis(seed, &params);
+    let world = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+    );
     let reg = BodyPlanRegistry::dev_default();
 
     println!(

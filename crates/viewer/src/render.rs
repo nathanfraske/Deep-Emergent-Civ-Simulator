@@ -441,7 +441,11 @@ mod tests {
         let mut params = GenesisParams::dev_default();
         params.width = 48;
         params.height = 32;
-        let living = genesis(0xEA27, &params);
+        let living = genesis(
+            0xEA27,
+            &params,
+            &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        );
         let (w, h, tile_px) = (240usize, 160usize, 18usize);
         // Centre on an occupied tile so at least one organism mark is drawn.
         let center = living
