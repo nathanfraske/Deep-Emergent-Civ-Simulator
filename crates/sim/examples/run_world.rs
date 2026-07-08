@@ -52,6 +52,7 @@ use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
+use civsim_sim::genesis::{genesis, GenesisParams};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, CRAFT, DIG,
     ENERGY, EXTRACT, GEOPHAGE, GRASP, RELEASE, SHELTER, TEMPERATURE, WATER,
@@ -701,6 +702,7 @@ fn viability_body() -> BodyPlan {
 ///   reserve to ride out scarcity), slow and placid.
 /// - index 2, a SMALL, thin-covered, fast and curious forager: little mass, shallow reserves, high activity
 ///   and exploration, so it works patches quickly and probes more.
+///
 /// Labelled dev fixtures; each organ's function is still DERIVED from its tissue composition, never a role
 /// tag (Principle 8). Opt-in to `full`, so the default and viability determinism pins are unchanged.
 fn diverse_body(index: usize) -> BodyPlan {
@@ -891,6 +893,9 @@ fn assemble_peoples(cfg: &Config) -> DawnPeoples {
         mortality_hazard,
         language: Some(language_genesis()),
         embodiment: Some(embodiment_genesis(cfg)),
+        // Seeded at the call site (the biosphere-into-run arc): `--scenario full` grows the living biosphere
+        // sized to the run grid; every other scenario leaves it `None` and byte-identical.
+        biosphere: None,
     }
 }
 
@@ -1675,7 +1680,34 @@ fn main() {
     let biomes = BiomeSet::dev_default();
     let map = TileMap::generate(cfg.seed, topo, &biomes, &WorldgenParams::dev_default());
 
-    let peoples = assemble_peoples(&cfg);
+    let mut peoples = assemble_peoples(&cfg);
+    // Grow the living biosphere sized to the run grid and seed it into the peoples (the biosphere-into-run
+    // arc, `--scenario full`). genesis is a pure function of the seed and builds the SAME map internally
+    // (TileMap::generate with cfg.seed over the same grid and dev-default biomes/worldgen), so its regions,
+    // occupants, and species land on the run's own coordinate space. Its PRODUCER occupants seed the food
+    // field in build_dawn_runner, so the founders forage over real located plants, not a uniform number.
+    if cfg.full {
+        let living = genesis(
+            cfg.seed,
+            &GenesisParams {
+                width: gw,
+                height: gh,
+                ..GenesisParams::dev_default()
+            },
+        );
+        let producers = living.producer_biomass(Fixed::ONE);
+        println!(
+            "  BIOSPHERE SEEDED (opt-in): {} surviving species across {} regions, {} located occupants, of \
+             which {} are food-producing plants that seed the food field the founders graze (real located \
+             producers, not a uniform number). Grown by genesis from the same seed and grid, so it shares \
+             the run's world.",
+            living.species(),
+            living.regions.len(),
+            living.occupants.len(),
+            producers.len(),
+        );
+        peoples.biosphere = Some(living);
+    }
 
     println!(
         "run_world: DEV-FIXTURE HARNESS (Profile::Development, labelled fixtures, not owner canon)"

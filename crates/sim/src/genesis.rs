@@ -117,6 +117,47 @@ pub struct LivingWorld {
 }
 
 impl LivingWorld {
+    /// The located biomass of every PRODUCER occupant, for seeding the run world's food field (the
+    /// biosphere-into-run arc): each producer token contributes `pop_capacity * its niche suitability` in
+    /// its region, so a plant stands as food where the climate suits it and the founders graze real located
+    /// producers rather than a uniform climate number. A producer is identified by the food-web PRIMITIVE
+    /// `draws_on` (drawing on an `Abiotic` source means an autotroph, the same key `trophic_label` reads),
+    /// never the trophic-LAYER tag (Principle 8), so the producer/consumer split is a reading of the web and
+    /// a carnivorous plant (which also draws on an abiotic source) still counts as a food producer. Walks
+    /// occupants in canonical coordinate order (`occupied` is `Coord3`-sorted, `occupants` id-sorted), so
+    /// the result is deterministic and worker-invariant. `pop_capacity` is the epoch's own reconstitution
+    /// scalar (a reserved value), which places the biomass on the same `[0, 1]`-ish scale as the climate
+    /// `biomass_from` it replaces.
+    pub fn producer_biomass(&self, pop_capacity: Fixed) -> Vec<(Coord3, Fixed)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let autotroph = species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)));
+                if !autotroph {
+                    continue;
+                }
+                let suit = species.niche.suitability(&rb.region.env);
+                let biomass = pop_capacity.checked_mul(suit).unwrap_or(Fixed::ZERO);
+                if biomass > Fixed::ZERO {
+                    out.push((coord, biomass));
+                }
+            }
+        }
+        out
+    }
+
     /// The total surviving species across all regions.
     pub fn alive(&self) -> u32 {
         self.regions.values().map(|r| r.report.alive).sum()
