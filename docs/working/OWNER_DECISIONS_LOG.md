@@ -8,20 +8,25 @@ entry using a derived or dev-set value.
 
 ## Open
 
-0. **The `--scenario full` biosphere-balance collapse (a PRE-EXISTING issue, diagnosed, not the edibility
-   grounding).** With the edibility grounding, the default, discovery, and viability scenarios all THRIVE
-   (they were all going extinct before); only `--scenario full` still collapses, and it collapsed identically
-   before the grounding. DIAGNOSIS (controlled A/B): the culprit is the producer food-OVERRIDE
-   (`EnvironFields::set_producer`, biosphere-into-run). Where a biosphere plant stands, its biomass sets the
-   food capacity, and the extract-deplete cycle draws the soil down in proportion to that capacity; the higher
-   producer capacity draws the soil faster than weathering plus decomposition replenish it, so the soil (and
-   the climate food the founders forage) depletes and the world crashes (disabling `set_producer` alone lets
-   full thrive: pop 33 -> 42 -> 45 -> 48). This is a multi-value nutrient-cycle balance (`draw_fraction`,
-   `weathering_rate`, `biomass_per_stock`, `pop_capacity`, the decomposition inputs), not a single derivable
-   gate, so it is surfaced for a dedicated biosphere-balance pass rather than dev-hacked here. Candidate
-   fixes to weigh: bound the producer draw to the soil's actual inflow (weathering + decomposition), or make
-   the producer biomass a genuine standing stock the plant regrows rather than a fixed capacity the extract
-   over-draws.
+0. **The `--scenario full` collapse: RE-DIAGNOSED 2026-07-08 (my earlier soil-draw diagnosis was WRONG,
+   corrected here).** With the edibility grounding, default/discovery/viability all THRIVE; only `--scenario
+   full` collapses. EARLIER (incorrect) claim: the producer food-override drives the extract cycle to
+   over-draw the soil. FALSIFIED by controlled A/B: zeroing `draw_fraction` (no soil/water draw at all) still
+   collapses full identically, so the extract DRAW is NOT the cause. THE REAL CAUSE (instrumented via
+   `take_obs_deaths`): the full/viability founders are a GRAZER + OILSEED HYBRID (viability_homeostatic =
+   `dev_grazer` energy(0)/water(1)/temperature reserves PLUS the oilseed seed reserves), and they die of
+   THIRST (death axis 1 = WATER), not starvation. `set_producer` writes each real plant's biomass as the
+   ENERGY food only at PRODUCER cells, which makes those cells an energy ATTRACTOR: the founders' forage taxis
+   pulls them to congregate on producer cells, and where those cells are dry they die of thirst. This is why
+   `MAX(producer, climate)` and bumping the producer biomass did NOT help (the cells stay an energy attractor)
+   but disabling `set_producer` DID (uniform energy, the founders spread out and reach water). So it is a
+   SPATIAL food-versus-water foraging coupling, tangled with the confused hybrid founder food setup, NOT a
+   metabolism-rate or soil-depletion issue. IMPLICATION for the owner's "not just authored oilseed eaters"
+   question: the clean fix is not a rate tweak, it is to RATIONALIZE the full-scenario founder food (forage
+   the real biosphere producers cleanly like the DEFAULT grazer world already does, retiring the oilseed
+   hybrid) and ensure the real producer food does not create a dry-cell thirst trap (a spatial energy/water
+   balance). This IS the food-web integration (`docs/working/FOODWEB_INTEGRATION_PLAN.md` slices D + I), now
+   understood to be the actual `--scenario full` fix, not a separate biosphere-balance rate pass.
 
 1. **R-UNITS-PIN: the reserve's absolute joule scale** (the `MetabolicAnchors` energy-density-to-joule
    anchor). Dev-set INTERIM value: `LocomotionParams::food_energy_density = 3000` (the forage reconciliation,

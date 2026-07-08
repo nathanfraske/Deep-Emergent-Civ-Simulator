@@ -14,6 +14,17 @@
 
 
 
+> **CORRECTION (2026-07-08, after digging into slice A): the `--scenario full` collapse is NOT the soil-draw
+> over-depletion the scope (and the earlier decisions-log item 0) assumed.** Instrumented finding: zeroing the
+> draw still collapses full; the founders die of THIRST (death axis 1 = water), not starvation. The
+> full/viability founders are a GRAZER + OILSEED HYBRID, and `set_producer` makes the real-plant energy food a
+> spatial ATTRACTOR at producer cells, so the founders congregate there and die of thirst where those cells
+> are dry (hence MAX/biomass-bump did not help, only disabling set_producer did). So slice A is really the
+> same work as slices D + I: RATIONALIZE the full-scenario founder food (forage real producers cleanly like
+> the default grazer world, retire the oilseed hybrid) and fix the spatial energy/water balance, NOT a
+> nutrient-rate tweak. Details in `OWNER_DECISIONS_LOG.md` item 0. The creature one-tick death (metabolism at
+> small body scale) remains a separate, real R-UNITS-PIN-class issue (slice B).
+
 From the ultracode scoping workflow (2026-07-08, high-effort design verified against source; the map agent hit a transient API 500, so the design read the source itself). Answers the owner's question: how to get people interacting with real creatures and life instead of seeded/authored oilseed eaters. KEY FINDING: most of this ALREADY works (the same physical_intake path feeds a person from abstract food, a real plant's own composition, or a real creature's corpse); it is blocked by the metabolism BALANCE, not missing mechanism.
 
 ## North star
