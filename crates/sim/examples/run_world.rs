@@ -1875,9 +1875,9 @@ fn main() {
             // supports, the reciprocal of the soil fertility_scale), draw_fraction (the nutrient the standing
             // biomass sequesters per tick), weathering_rate (the physical rock-to-nutrient bootstrap seed).
             let mut sources = AbioticSourceRegistry::default();
-            sources.insert(0, AbioticField::Flux, "");
-            sources.insert(1, AbioticField::WaterStock, "");
-            sources.insert(2, AbioticField::SoilStock, "bio.organic_residue");
+            sources.insert(0, AbioticField::Light, false, ""); // light: a renewable flux, not depleted
+            sources.insert(1, AbioticField::Water, true, ""); // water: a finite stock, drawn down
+            sources.insert(2, AbioticField::Soil, true, "bio.organic_residue"); // soil nutrient: a stock
             sources.biomass_per_stock = Fixed::from_int(4);
             sources.draw_fraction = Fixed::from_ratio(1, 20);
             sources.weathering_rate = Fixed::from_ratio(1, 100);

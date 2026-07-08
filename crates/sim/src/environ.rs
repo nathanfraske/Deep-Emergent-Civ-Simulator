@@ -315,25 +315,35 @@ pub struct EnvironFields {
     producer_food: Vec<Option<BTreeMap<String, Fixed>>>,
 }
 
-/// Which run field an abiotic source draws on. These are the engine's ACTUAL environmental fields; a world
-/// adds a source by adding a field and a registry row, so the id-to-field binding is DATA, not a hardcoded
-/// integer-id switch in the extraction hot path (Principle 11).
+/// Which run FIELD an abiotic source reads: the field IDENTITY, named explicitly so a source binds to the
+/// field it actually draws on, never a variant that conflates identity with depletion behaviour (FINDING-1).
+/// Whether the source DEPLETES the field is separate data ([`AbioticBinding::depletes`]), so a renewable
+/// light-flux and a finite water-stock are the SAME mechanism with different data, and (with Arc 5's
+/// data-defined field set) an alien source, geothermal or a redox gradient or a mana field, is a new field
+/// handle plus the environ field it reads rather than a rewrite of the extract dispatch (Principle 11).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AbioticField {
-    /// A renewable FLUX (a light-like rate): it caps productivity but has no stock to draw down.
-    Flux,
-    /// A depletable located STOCK in the soil-nutrient field, drawn down by class.
-    SoilStock,
-    /// A depletable located STOCK in the water field (the hydrology depth).
-    WaterStock,
+    /// The LIGHT field (the latitude-light rate). Renewable by default (a world sets `depletes` if it models
+    /// a consumable light budget).
+    Light,
+    /// The WATER field (the hydrology depth).
+    Water,
+    /// The located SOIL-NUTRIENT field, read and drawn by class.
+    Soil,
 }
 
-/// The data-defined binding of one abiotic source id to the run field it reads and the physics-floor class
-/// it supplies. Membership is data; an alien source (geothermal, a redox gradient, a mana field) is one row.
+/// The data-defined binding of one abiotic source id to the run field it reads, whether it depletes that
+/// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
 #[derive(Clone, Debug)]
 pub struct AbioticBinding {
+    /// The run field this source reads (the field identity, decoupled from the depletion behaviour below).
     pub field: AbioticField,
-    /// The physics-floor nutrient class this located stock supplies (unused for a flux).
+    /// Whether drawing on this source DEPLETES its field's stock (a finite stock) or leaves it untouched (a
+    /// renewable flux). Decoupled from the field so the flux-versus-stock choice is the world's data, not the
+    /// engine's per-variant assumption (FINDING-1): a world can declare a depletable light budget or a
+    /// renewable nutrient spring without a new mechanism.
+    pub depletes: bool,
+    /// The physics-floor nutrient class this field supplies (used only for the soil field; empty otherwise).
     pub class: String,
 }
 
@@ -361,12 +371,14 @@ impl AbioticSourceRegistry {
         self.bindings.get(&id)
     }
 
-    /// Bind a source id to a field and class (data; called at the biosphere-arming site).
-    pub fn insert(&mut self, id: u16, field: AbioticField, class: &str) {
+    /// Bind a source id to a field, whether it depletes that field, and the class it supplies (data; called
+    /// at the biosphere-arming site). A renewable flux passes `depletes = false`, a finite stock `true`.
+    pub fn insert(&mut self, id: u16, field: AbioticField, depletes: bool, class: &str) {
         self.bindings.insert(
             id,
             AbioticBinding {
                 field,
+                depletes,
                 class: class.to_string(),
             },
         );
@@ -763,14 +775,16 @@ impl EnvironFields {
                         panic!("nutrient cycle: producer source id {id} has no registry binding")
                     });
                     let supply = match binding.field {
-                        AbioticField::Flux => self.light[i],
-                        AbioticField::SoilStock => {
+                        AbioticField::Light => self.light[i],
+                        AbioticField::Soil => {
+                            // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
+                            // a general per-field replenishment handle is Arc 5).
                             if registry.weathering_rate > Fixed::ZERO {
                                 soil.deposit(coord, &binding.class, registry.weathering_rate);
                             }
                             soil.mass(coord, &binding.class)
                         }
-                        AbioticField::WaterStock => self.water.at(x, y),
+                        AbioticField::Water => self.water.at(x, y),
                     };
                     let supported = supply
                         .checked_mul(registry.biomass_per_stock)
@@ -782,17 +796,19 @@ impl EnvironFields {
                 if self.capacity.cells[i] > min_supported {
                     self.capacity.cells[i] = min_supported;
                 }
-                // Pass 2: draw down each DEPLETABLE stock (soil, water) by the realised productivity's share,
-                // so a heavily-worked cell depletes rather than reading an infinite well. A renewable flux
-                // (light) has no stock to draw. The draw reads the FINAL capped capacity, so the single-
-                // source sequence (cap, then draw) is bit-identical to the scalar path it replaces.
+                // Pass 2: draw down each DEPLETING source's field by the realised productivity's share, so a
+                // heavily-worked cell depletes rather than reading an infinite well. Whether a source depletes
+                // is its own DATA (`binding.depletes`), decoupled from the field (FINDING-1): a renewable flux
+                // leaves its field untouched, a finite stock draws down, and the world chooses which. The draw
+                // reads the FINAL capped capacity, so the single-source sequence (cap, then draw) is
+                // bit-identical to the scalar path it replaces.
                 for k in 0..self.producer_source[i].len() {
                     let id = self.producer_source[i][k];
                     let binding = registry.binding(id).unwrap_or_else(|| {
                         panic!("nutrient cycle: producer source id {id} has no registry binding")
                     });
-                    if matches!(binding.field, AbioticField::Flux) {
-                        continue; // a renewable flux has no stock to deplete
+                    if !binding.depletes {
+                        continue; // a renewable source leaves its field untouched
                     }
                     let draw_biomass = self.capacity.cells[i]
                         .checked_mul(registry.draw_fraction)
@@ -801,11 +817,11 @@ impl EnvironFields {
                         .checked_div(registry.biomass_per_stock)
                         .unwrap_or(Fixed::ZERO);
                     match binding.field {
-                        AbioticField::Flux => {}
-                        AbioticField::SoilStock => {
+                        AbioticField::Light => {} // light has no located stock to deplete
+                        AbioticField::Soil => {
                             soil.take(coord, &binding.class, draw_amt);
                         }
-                        AbioticField::WaterStock => {
+                        AbioticField::Water => {
                             self.water.take(x, y, draw_amt);
                         }
                     }
@@ -1504,8 +1520,8 @@ mod tests {
         // The registry: id 0 an abundant flux (light), id 1 a scarce soil nutrient. The draw is zeroed so
         // this isolates the CAP from the deplete, and there is no weathering bootstrap.
         let mut reg = AbioticSourceRegistry::default();
-        reg.insert(0, AbioticField::Flux, "");
-        reg.insert(1, AbioticField::SoilStock, "nutrient");
+        reg.insert(0, AbioticField::Light, false, ""); // an abundant renewable flux
+        reg.insert(1, AbioticField::Soil, true, "nutrient"); // a scarce depletable soil stock
         reg.biomass_per_stock = Fixed::from_int(4);
         reg.draw_fraction = Fixed::ZERO;
         reg.weathering_rate = Fixed::ZERO;
