@@ -49,6 +49,7 @@ use civsim_sim::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::homeostasis::{
@@ -59,7 +60,7 @@ use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::learn::{RewardLearningCalib, HARMS, HARM_ATTR, REWARDS, REWARD_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::material::MaterialField;
+use civsim_sim::material::{MaterialField, MatterCycleCalib};
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
@@ -229,6 +230,13 @@ struct Config {
     /// the seed feeds a reserve rise the reward learner credits and "extract and eat this seed" can emerge
     /// as a rewarded belief under selection. Every other run stays byte-identical.
     viability: bool,
+    /// Whether the `full` scenario is selected (`--scenario full`): the viability world PLUS the held-off
+    /// mechanisms armed onto the run-path. The biosphere (a dead being's own flesh becomes located matter
+    /// that decomposes back to soil nutrient through the matter cycle), social learning (nutrition learning,
+    /// observe-and-imitate, and granular beliefs, so a discovered technique can spread by watching a knower
+    /// rather than only by lone re-discovery), and tool affordances. Implies `viability`; every other run
+    /// leaves these dormant and byte-identical.
+    full: bool,
 }
 
 impl Config {
@@ -272,7 +280,13 @@ fn parse_config() -> Config {
     // manifest: those dial ids are not in the fixtures profile, so a full resolve would fail loud; the
     // postures we read here are separate from that). A missing file falls back to the neutral baseline.
     let loaded = scenario.as_ref().and_then(|name| {
-        let path = format!("{}/../../scenarios/{name}.toml", env!("CARGO_MANIFEST_DIR"));
+        // `full` is the viability world plus more arming, so it reuses viability's postures.
+        let file = if name == "full" {
+            "viability"
+        } else {
+            name.as_str()
+        };
+        let path = format!("{}/../../scenarios/{file}.toml", env!("CARGO_MANIFEST_DIR"));
         match Scenario::load(&path) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -309,10 +323,12 @@ fn parse_config() -> Config {
         None => (None, 1, 20, None),
     };
 
-    // The dedicated `discovery` and `viability` scenarios are the opt-ins that arm the ideation loop; every
-    // other scenario and the baseline leave it unarmed (byte-identical), so the flags key off the name.
+    // The dedicated `discovery`, `viability`, and `full` scenarios are the opt-ins that arm the ideation
+    // loop; every other scenario and the baseline leave it unarmed (byte-identical), so the flags key off
+    // the name. `full` is the viability world plus the held-off mechanisms, so it implies `viability`.
     let discovery = scenario.as_deref() == Some("discovery");
-    let viability = scenario.as_deref() == Some("viability");
+    let full = scenario.as_deref() == Some("full");
+    let viability = scenario.as_deref() == Some("viability") || full;
 
     Config {
         seed: seed.unwrap_or(1),
@@ -325,6 +341,7 @@ fn parse_config() -> Config {
         medium,
         discovery,
         viability,
+        full,
     }
 }
 
@@ -1765,6 +1782,32 @@ fn main() {
                  founder-zero. No payoff authored (breaking granite feeds no reserve); the `viability` \
                  scenario closes the loop.\n",
                 WORLD_CELLS,
+            );
+        }
+
+        // The `full` scenario arms the mechanisms held off the run-path onto the viability world.
+        if cfg.full {
+            // Biosphere: a dead being's own flesh becomes located matter (corpse_matter), the matter cycle
+            // decomposes that organic matter back to soil nutrient (matter_cycle), and the decomposer drivers
+            // set the rate (decomposer). Dev fixtures; the corpse composition is derived per-individual from
+            // the body at death, never authored.
+            runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
+            runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
+            runner.set_corpse_matter(true);
+            // Social learning + tools (on the embodiment): a discovered technique can spread by watching a
+            // knower and by co-located gossip, rather than only by lone re-discovery in each short lifetime,
+            // and a worked object can afford an action its raw form does not.
+            if let Some(emb) = runner.embodiment_mut() {
+                emb.set_nutrition_learning(true);
+                emb.set_observe_and_imitate(true);
+                emb.set_granular_beliefs(true);
+                emb.set_tool_affordances(true);
+            }
+            println!(
+                "  FULL SCENARIO ARMED (opt-in): the viability world PLUS the biosphere (a dead being's own \
+                 flesh becomes located matter that decomposes back to soil nutrient), social learning \
+                 (nutrition learning, observe-and-imitate, granular beliefs), and tool affordances. A \
+                 discovered technique can now spread by watching a knower and outlive its discoverer.\n"
             );
         }
     }
