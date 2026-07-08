@@ -43,6 +43,7 @@
 use civsim_core::{Fixed, StateHasher};
 use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
+use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::locomotion::ResourceField;
@@ -291,6 +292,70 @@ pub struct EnvironFields {
     /// with no biosphere reads the plain climate productivity and its hash is unchanged. Not folded into
     /// `state_hash` (like `fertility`): its effect enters the hash through the `capacity` it sets.
     producer: Vec<Fixed>,
+    /// The evolved abiotic SOURCE id each producer cell draws on (u16::MAX where no producer stands),
+    /// seeded once from the biosphere. The run consults a data-defined [`AbioticSourceRegistry`] to learn
+    /// which field that id reads and whether it is a depletable stock, so the extract path never switches
+    /// on the integer id (which would re-author a closed Earth source enum). Not folded into `state_hash`
+    /// like `producer`/`fertility`: its effect enters through the `capacity` the extract beat shapes.
+    producer_source: Vec<u16>,
+}
+
+/// Which run field an abiotic source draws on. These are the engine's ACTUAL environmental fields; a world
+/// adds a source by adding a field and a registry row, so the id-to-field binding is DATA, not a hardcoded
+/// integer-id switch in the extraction hot path (Principle 11).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AbioticField {
+    /// A renewable FLUX (a light-like rate): it caps productivity but has no stock to draw down.
+    Flux,
+    /// A depletable located STOCK in the soil-nutrient field, drawn down by class.
+    SoilStock,
+    /// A depletable located STOCK in the water field (the hydrology depth).
+    WaterStock,
+}
+
+/// The data-defined binding of one abiotic source id to the run field it reads and the physics-floor class
+/// it supplies. Membership is data; an alien source (geothermal, a redox gradient, a mana field) is one row.
+#[derive(Clone, Debug)]
+pub struct AbioticBinding {
+    pub field: AbioticField,
+    /// The physics-floor nutrient class this located stock supplies (unused for a flux).
+    pub class: String,
+}
+
+/// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
+/// (which evolved source id binds to which field and class) is DATA, so the run path never authors a closed
+/// Earth source enum. Carries the reserved extract-deplete conversions, surfaced with basis, never set here.
+#[derive(Clone, Debug, Default)]
+pub struct AbioticSourceRegistry {
+    bindings: BTreeMap<u16, AbioticBinding>,
+    /// RESERVED (surfaced, not set): the standing biomass a unit of drawn located stock supports. Basis: the
+    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns.
+    pub biomass_per_stock: Fixed,
+    /// RESERVED: the fraction of the supported biomass a producer sequesters from its stock per tick. Basis:
+    /// the nutrient turnover the standing biomass holds; set so a grazed cell depletes over a plausible span.
+    pub draw_fraction: Fixed,
+    /// RESERVED: the located stock a physical WEATHERING source (rock to nutrient) deposits per producer cell
+    /// per tick, the bootstrap that seeds a bare soil before any corpse decomposes. Basis: the rock-weathering
+    /// release rate the material data implies; set so a virgin world greens slowly.
+    pub weathering_rate: Fixed,
+}
+
+impl AbioticSourceRegistry {
+    /// The binding for a source id, if the world defines one.
+    pub fn binding(&self, id: u16) -> Option<&AbioticBinding> {
+        self.bindings.get(&id)
+    }
+
+    /// Bind a source id to a field and class (data; called at the biosphere-arming site).
+    pub fn insert(&mut self, id: u16, field: AbioticField, class: &str) {
+        self.bindings.insert(
+            id,
+            AbioticBinding {
+                field,
+                class: class.to_string(),
+            },
+        );
+    }
 }
 
 impl EnvironFields {
@@ -328,6 +393,7 @@ impl EnvironFields {
             downhill,
             fertility: vec![Fixed::ZERO; n],
             producer: vec![Fixed::ZERO; n],
+            producer_source: vec![u16::MAX; n],
         }
     }
 
@@ -586,6 +652,94 @@ impl EnvironFields {
         }
     }
 
+    /// Seed the evolved abiotic source id of each producer cell from the biosphere (once at world build).
+    /// Off-grid cells are dropped. See [`Self::producer_source`].
+    pub fn set_producer_source(&mut self, cells: &[(Coord3, u16)]) {
+        for s in self.producer_source.iter_mut() {
+            *s = u16::MAX;
+        }
+        for &(cell, id) in cells {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            self.producer_source[i] = id;
+        }
+    }
+
+    /// The producer EXTRACT-DEPLETE beat (the closed nutrient cycle): each producer draws its food from the
+    /// availability of the specific abiotic source its niche EVOLVED to close on (its `producer_source` id,
+    /// bound to a field by the data-defined `registry`, never an id switch), the source LIMITS its
+    /// productivity ceiling, and a depletable stock (soil, water) is DRAWN DOWN so a heavily-worked cell
+    /// depletes rather than reading an infinite well. A physical WEATHERING source (rock to soil nutrient)
+    /// seeds a bare soil stock each tick so the cycle bootstraps before any corpse decomposes. Runs after
+    /// `step_productivity` set the niche-fit `capacity` and before `regrow_supply`. Sequential row-major
+    /// fold (worker-invariant); the soil/water `take`/`deposit` are canonical, so the new state folds
+    /// reproducibly. The biomass layer is OPEN; the conserved ledger is soil+material+tissue across decay.
+    pub fn extract_producers(
+        &mut self,
+        soil: &mut SoilNutrientField,
+        registry: &AbioticSourceRegistry,
+    ) {
+        let (w, h) = (self.width, self.height);
+        for y in 0..h {
+            for x in 0..w {
+                let i = self.idx(x, y);
+                let id = self.producer_source[i];
+                let Some(binding) = registry.binding(id) else {
+                    continue;
+                };
+                match binding.field {
+                    AbioticField::Flux => {
+                        let supply = self.light[i];
+                        let supported = supply
+                            .checked_mul(registry.biomass_per_stock)
+                            .unwrap_or(Fixed::MAX);
+                        if self.capacity.cells[i] > supported {
+                            self.capacity.cells[i] = supported;
+                        }
+                    }
+                    AbioticField::SoilStock => {
+                        let coord = Coord3::ground(x, y);
+                        if registry.weathering_rate > Fixed::ZERO {
+                            soil.deposit(coord, &binding.class, registry.weathering_rate);
+                        }
+                        let supply = soil.mass(coord, &binding.class);
+                        let supported = supply
+                            .checked_mul(registry.biomass_per_stock)
+                            .unwrap_or(Fixed::MAX);
+                        if self.capacity.cells[i] > supported {
+                            self.capacity.cells[i] = supported;
+                        }
+                        let draw_biomass = self.capacity.cells[i]
+                            .checked_mul(registry.draw_fraction)
+                            .unwrap_or(Fixed::ZERO);
+                        let draw_mass = draw_biomass
+                            .checked_div(registry.biomass_per_stock)
+                            .unwrap_or(Fixed::ZERO);
+                        soil.take(coord, &binding.class, draw_mass);
+                    }
+                    AbioticField::WaterStock => {
+                        let supply = self.water.at(x, y);
+                        let supported = supply
+                            .checked_mul(registry.biomass_per_stock)
+                            .unwrap_or(Fixed::MAX);
+                        if self.capacity.cells[i] > supported {
+                            self.capacity.cells[i] = supported;
+                        }
+                        let draw_biomass = self.capacity.cells[i]
+                            .checked_mul(registry.draw_fraction)
+                            .unwrap_or(Fixed::ZERO);
+                        let draw_amt = draw_biomass
+                            .checked_div(registry.biomass_per_stock)
+                            .unwrap_or(Fixed::ZERO);
+                        self.water.take(x, y, draw_amt);
+                    }
+                }
+            }
+        }
+    }
+
     /// The productivity derivation: set each cell's biomass CAPACITY to the Liebig minimum over water,
     /// light, temperature, and soil (`biomass_from`, the abstract-source seam the biosphere addendum
     /// replaces with real producers). The limiting factor sets the continuous productivity, no dead-zone
@@ -786,6 +940,7 @@ mod tests {
             downhill,
             fertility: vec![Fixed::ZERO; elev_tenths.len()],
             producer: vec![Fixed::ZERO; elev_tenths.len()],
+            producer_source: vec![u16::MAX; elev_tenths.len()],
         }
     }
 

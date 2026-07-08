@@ -91,6 +91,7 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
+use crate::environ::AbioticSourceRegistry;
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
@@ -1450,6 +1451,11 @@ impl Embodiment {
         &self.soil
     }
 
+    /// A mutable handle to the soil-nutrient store (the extract-deplete draw-down and the weathering seed).
+    pub fn soil_mut(&mut self) -> &mut SoilNutrientField {
+        &mut self.soil
+    }
+
     /// The per-cell organism-tissue field (biosphere directive 2): the located matter dead organisms leave,
     /// for the consumers (extraction, and cutting and the matter cycle in later slices) and the reader.
     pub fn tissue(&self) -> &TissueField {
@@ -2654,6 +2660,8 @@ pub struct Runner {
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
+    /// The data-defined abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
+    abiotic_sources: Option<AbioticSourceRegistry>,
     /// The decomposer-driver registry (decomposition-as-emergence, Principle 8), armed opt-in beside the
     /// matter cycle. `None` on a runner without it, so the matter cycle (if armed) decays at the
     /// substance's own unconditional rate exactly as before and every existing scenario is byte-identical.
@@ -2742,6 +2750,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
             corpse_matter: false,
@@ -2791,6 +2800,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
             corpse_matter: false,
@@ -2853,6 +2863,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
             corpse_matter: false,
@@ -2938,6 +2949,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
             corpse_matter: false,
@@ -3014,6 +3026,11 @@ impl Runner {
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
+    }
+
+    /// Arm the abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
+    pub fn set_abiotic_sources(&mut self, registry: AbioticSourceRegistry) {
+        self.abiotic_sources = Some(registry);
     }
 
     /// Arm the decomposer-driver registry (decomposition-as-emergence, Principle 8): the matter cycle and
@@ -3220,6 +3237,19 @@ impl Runner {
                     env.set_fertility_from(emb.soil(), mc.fertility_scale);
                 }
                 env.step(&self.field, &calib);
+            }
+        }
+        {
+            // The producer EXTRACT-DEPLETE beat (closed nutrient cycle): each producer draws its food from
+            // its evolved abiotic source, caps productivity by it, and draws down a depletable stock (soil,
+            // water) with a weathering bootstrap. After productivity set the capacity, before regrow. Opt-in
+            // (only when the biosphere armed the source registry), so an unarmed run is byte-identical.
+            if let (Some(reg), Some((env, _)), Some(emb)) = (
+                self.abiotic_sources.as_ref(),
+                self.environ.as_mut(),
+                self.embodiment.as_mut(),
+            ) {
+                env.extract_producers(emb.soil_mut(), reg);
             }
         }
         {

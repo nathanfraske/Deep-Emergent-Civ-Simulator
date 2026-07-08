@@ -52,6 +52,7 @@ use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
+use civsim_sim::environ::{AbioticField, AbioticSourceRegistry};
 use civsim_sim::genesis::{genesis, GenesisParams};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, CRAFT, DIG,
@@ -1866,6 +1867,21 @@ fn main() {
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
+            // Arm the abiotic-source binding registry (the extract-deplete cycle): bind the dev world's
+            // evolved source ids to run fields as DATA (0 light -> flux, 1 water -> depletable stock, 2 soil
+            // nutrient -> depletable stock of class bio.organic_residue), never an id switch in the hot path;
+            // an alien world binds its own sources. The three conversions are labelled dev fixtures, RESERVED
+            // with basis (they graduate to the manifest): biomass_per_stock (biomass a unit of drawn stock
+            // supports, the reciprocal of the soil fertility_scale), draw_fraction (the nutrient the standing
+            // biomass sequesters per tick), weathering_rate (the physical rock-to-nutrient bootstrap seed).
+            let mut sources = AbioticSourceRegistry::default();
+            sources.insert(0, AbioticField::Flux, "");
+            sources.insert(1, AbioticField::WaterStock, "");
+            sources.insert(2, AbioticField::SoilStock, "bio.organic_residue");
+            sources.biomass_per_stock = Fixed::from_int(4);
+            sources.draw_fraction = Fixed::from_ratio(1, 20);
+            sources.weathering_rate = Fixed::from_ratio(1, 100);
+            runner.set_abiotic_sources(sources);
             // Social learning + tools (on the embodiment): a discovered technique can spread by watching a
             // knower and by co-located gossip, rather than only by lone re-discovery in each short lifetime,
             // and a worked object can afford an action its raw form does not.

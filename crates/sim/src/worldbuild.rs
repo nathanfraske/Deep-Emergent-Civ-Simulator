@@ -429,6 +429,7 @@ pub fn build_dawn_runner(
     let mut environ = EnvironFields::from_map(map);
     if let Some(living) = &peoples.biosphere {
         environ.set_producer(&living.producer_biomass(civsim_core::Fixed::ONE));
+        environ.set_producer_source(&living.producer_sources());
     }
     runner.set_environ(environ, EnvironCalib::from_manifest(manifest)?);
     // Arm the base-level liveliness surfacing policy (the arc-promotion magnitudes), fail-loud from the
