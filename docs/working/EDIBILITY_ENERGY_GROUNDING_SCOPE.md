@@ -78,17 +78,43 @@ SAME mechanism a chemical grazer fills its energy reserve from an energy-dense s
 axis a reserve draws on) is data; the mechanism is fixed. No `bio.energy_density` in the engine's decision
 path; the Steering Audit invariant is that swapping every axis label leaves the mechanism unchanged.
 
-## Build shape (proposed)
+## Build shape (the primitive is landed; the wiring is next)
 
-1. A `laws::edible_energy` (or a physiology helper) giving the reserve gain from `(mass, food_axis_value,
-   assim, eta, body_mass_kg, body_axis_value)`, the physical form above, replacing the `satisfaction * capacity`
-   intake in BOTH `geophage` and the locomotion `INGEST`. Mass-honest: the bite mass removed equals the
-   content credited divided by `assim * eta` (the trophic step already used).
-2. Retire `biomass_per_stock` and the T3 food-value gate from the arming path; the standing-food volume the
-   producer regrows becomes a real biomass (mass = volume * plant density), and its energy is
-   `mass * plant.energy_density`.
-3. The reserve's absolute joule scale is the single R-UNITS-PIN anchor (surfaced, owner-set), not a per-food
-   fudge.
+DONE (`2b47a86`): `physiology::physical_intake(available, assim, eta, body_mass, body_storage_density, room)
+-> (content_to_eat, reserve_gain)`, the alien-clean physical form above, with its falsifier. It keys on no
+axis identity and uses the drain's own reserve bridge.
+
+REMAINING (the wiring, a multi-file hot-path change, NOT byte-neutral: it re-pins every scenario):
+
+1. **A precomputed per-being intake-params map, threaded like `drains`.** The forage `INGEST`
+   (`locomotion::step_with_field_dirs`) has no `MetabolicAnchors` and cannot cheaply compute
+   `body_mass_kg` or the per-class storage density. Mirror the `drains` map: in the runner's
+   `step_embodiment` (which has anchors + `organs`), precompute per being a small map of
+   `{ body_mass_kg, storage_density_by_class }` (the storage density is
+   `whole_body_composition_vector(&w.body, organs)[class]`, computed once per being per tick), and pass it
+   into `step_with_field_dirs` beside `drains`. The `geophage` needs no threading (it is an `Embodiment`
+   method with `self.organs` and each `w.body`).
+
+2. **Replace `satisfaction * capacity` with `physical_intake` in BOTH paths.** In the forage `INGEST` and
+   the `geophage` per-axis loop, for each reserve backed by class `C`: `available = the food's C-content`,
+   `body_storage_density = storage_density_by_class[C]` (or `whole_body_composition_vector[C]` in geophage),
+   `room = capacity - amount`, then `(eaten, gain) = physical_intake(...)`, take `eaten` of `C` from the
+   food, `ingest(axis, gain)`. The whole-body-bite pass (predation, Arc 2) sizes and credits by the same
+   primitive.
+
+3. **Retire the fudges.** Drop `AbioticSourceRegistry::biomass_per_stock` and the T3 food-value gate from the
+   arming path; the standing-food volume the producer regrows is a real biomass (`mass = volume * plant
+   density`) and its content is `mass * plant[C]`. The producer extract's `draw_fraction`/`weathering_rate`
+   are genuine ecological rates (kept, reserved-with-basis) until a kinetics-floor derivation lands.
+
+4. **Dev-calibrate viability (owner-allowed dev numbers).** The one remaining anchor is R-UNITS-PIN (the
+   reserve's absolute joule scale, in the `MetabolicAnchors`); dev-set it to a plausible scale and iterate
+   until the full dev world SURVIVES (no universal extinction), the proof-of-work. The absolute scale stays
+   the owner's to finalize.
+
+5. **Audit under the five mandatory lenses** (`AGENTIC_ADDENDUM.md` section 9): the fully-blind
+   confirmation-bias catcher, the derive-versus-author catcher, the alien-feasibility catcher, the
+   Terran-bias catcher, and the steering/Principles catcher, each verified against source.
 
 ## Why this is NOT byte-neutral, and touches an owner anchor
 
