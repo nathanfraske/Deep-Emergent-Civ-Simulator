@@ -26,7 +26,27 @@ entry using a derived or dev-set value.
 1. **R-UNITS-PIN: the reserve's absolute joule scale** (the `MetabolicAnchors` energy-density-to-joule
    anchor). Dev-set INTERIM value: `LocomotionParams::food_energy_density = 3000` (the forage reconciliation,
    calibrated so the default/discovery/viability worlds thrive). The geophage direct-fill needs no separate
-   scale. Owner sets the canonical anchor. The edibility grounding makes intake and drain both physical in the reserve's units; the ABSOLUTE
+   scale. Owner sets the canonical anchor. TWO HONEST LIMITS the end-of-arc audit confirmed, both surfaced not
+   hidden: (a) the value was tuned by watching an AGGREGATE outcome (the population trend at seed 0x5EED,
+   0xBEEF, 0xF00D) that is downstream of many OTHER simultaneously-dev-set reserved values, so "the world
+   thrives" is a dev-harness calibration that a viable world EXISTS at this point, NOT a validated proof the
+   physical model's absolute scale is correct; the owner's calibration replaces it against a real target.
+   (b) `food_energy_density` is a SINGLE GLOBAL scale applied to EVERY backing class uniformly (energy, water,
+   a mineral, a mana axis all reconciled by the same 3000), a functional simplification: the correct form is
+   PER-CLASS content (each food's own per-supply content on each class), which lands NATURALLY when T3 is
+   wired (the standing food carries the producer's own composition, so the plant's own `bio.energy_density`
+   supersedes the global scale per cell). Until then the global scale is the interim, alien-imperfect (a
+   mana-fed world's mana food is scaled by the energy reconciliation); the mechanism keys on the class as
+   data, only the reconciliation magnitude is shared.
+
+5. **The per-class physiological REQUIREMENT datum is no longer read on the physical intake path** (the audit
+   flagged this). The old satisfaction intake read `laws::satisfaction(supply, assim, requirement)`, using a
+   being's per-class per-tick REQUIREMENT to shape the fill. The physical intake fills toward the reserve's
+   ROOM (capacity minus amount) instead, so the requirement datum is not gated on the physical path (it is
+   still read on the no-physiology fallback path). This is a deliberate model change (a being eats until
+   sated, room-bounded, rather than to a per-tick requirement curve), not a silent bug, but the owner should
+   confirm the requirement datum's role is subsumed by the reserve capacity or restore it as an intake gate
+   if a distinct per-tick need is wanted. The edibility grounding makes intake and drain both physical in the reserve's units; the ABSOLUTE
    scale (how a floor `bio.energy_density` in kJ/g maps to the reserve's stored joules) is the one genuine
    units anchor. INTERIM: dev-set to the value that keeps the dev world viable, iterated against the
    survival proof. BASIS: the reserve stored energy is `capacity * body_mass_kg * bio.energy_density`; set so
