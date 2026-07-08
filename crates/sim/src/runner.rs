@@ -935,6 +935,17 @@ fn walker_exchange_rate(
 /// bands, and the locomotion RNG seed. The mechanism is fixed Rust; the controllers, the registries,
 /// the bands, and the parameters are data (Principle 11). The runner ticks this as a sub-phase after
 /// the field, and the embodiment never reaches back into the field beyond the coordinates it publishes.
+/// The high tag bit that marks a biosphere-CREATURE walker id (Arc 7). A founder mind id is minted small and
+/// sequential by the `World` registry, so setting this bit puts every creature id in a namespace PROVABLY
+/// disjoint from the founders (asserted at spawn). The lifecycle reconciliation reads it to tell a mind-less
+/// creature (retired when IT dies) apart from a founder body (retired when its MIND dies).
+pub const CREATURE_ID_TAG: u64 = 1 << 62;
+
+/// Whether a walker id belongs to a biosphere creature (Arc 7), by its high tag bit.
+pub fn is_creature(id: StableId) -> bool {
+    id.0 & CREATURE_ID_TAG != 0
+}
+
 pub struct Embodiment {
     walkers: Vec<Walker>,
     thermal: BTreeMap<StableId, BeingThermal>,
@@ -5211,6 +5222,147 @@ impl Runner {
     /// (3) every newborn mind whose race carries a body plan and has no body yet is embodied, its body
     /// expressed from its race and genome as the dawn assembly expresses a founder. A mind whose race
     /// carries no body plan stays a bodiless mind (owner ruling 2026-07-04), so the pairing is optional.
+    /// The number of LIVING biosphere-creature walkers (Arc 7): embodiment walkers whose id carries the
+    /// creature tag and are still alive. Zero without an embodiment or when no creatures were spawned. A
+    /// pure read for observability (the creature population a viewer watches), never canonical state.
+    pub fn creature_count(&self) -> usize {
+        self.embodiment
+            .as_ref()
+            .map(|e| {
+                e.walkers
+                    .iter()
+                    .filter(|w| w.alive && is_creature(w.id))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    /// The shared controller layout the embodiment's walkers express against (Arc 7), if an embodiment is
+    /// installed. A creature's forage controller MUST be built against this exact layout (not a freshly
+    /// derived one) or it would express at the wrong width, landing its forage weights on the wrong inputs.
+    pub fn embodiment_layout(&self) -> Option<ControllerLayout> {
+        self.embodiment.as_ref().map(|e| e.layout.clone())
+    }
+
+    /// Arc 7 (creatures-have-simpler-minds), first slice: spawn every biosphere CONSUMER occupant of `living`
+    /// as a living [`Walker`] that rides the SAME embodiment loop the founders do (perceive, forage,
+    /// metabolize, die), instead of depositing it as static tissue. Each creature carries its species' body
+    /// (the catalog plan, or its Arc-6 grown [`Structure`] when the world grows bodies), reserves summed from
+    /// that body, the default physiology, and a lean genome-EXPRESSED forage controller drawn from the shared
+    /// `ctrl_pool`/`ctrl_genes` the caller built from the general "seek what you lack" reaction norm (Principle
+    /// 9: no per-species behaviour is authored, and the controller keys on the being's own reserve axes). Its
+    /// id is tagged into a namespace disjoint from the founders (asserted). Behaviour SELECTION is deferred to
+    /// the reproduction slice: a creature does not reproduce yet, so a poor forager dies without descendants.
+    /// Called only behind an opt-in flag, so a run that never calls it keeps the static-tissue path and its
+    /// hash. Returns the number of creatures spawned.
+    pub fn spawn_creatures(
+        &mut self,
+        living: &crate::genesis::LivingWorld,
+        ctrl_genes: &crate::genome::GeneSet,
+        ctrl_pool: &crate::genome::GenePool,
+        ploidy: usize,
+    ) -> usize {
+        use crate::biosphere::SourceRef;
+        let Some((homeo, organs, layout, seed, thermal)) = self.embodiment.as_ref().map(|e| {
+            (
+                e.homeo.clone(),
+                e.organs.clone(),
+                e.layout.clone(),
+                e.seed,
+                // Creatures are born into the same comfort band the founders carry (a shared physical band in
+                // the dev world), read off a representative founder; a default centres it if none exist yet.
+                e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                    setpoint: Fixed::ZERO,
+                    half_band: Fixed::ONE,
+                    initial_temp: Fixed::ZERO,
+                }),
+            )
+        }) else {
+            return 0;
+        };
+        let founders: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .map(|w| w.being_ids().into_iter().collect())
+            .unwrap_or_default();
+        // Build every creature walker in canonical occupant order (occupied() is Coord3-sorted, occupants()
+        // id-sorted), reading only the shared registries, so nothing borrows self mutably yet.
+        let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
+        for coord in living.occupants.occupied() {
+            for occ in living.occupants.occupants(coord) {
+                let Some(info) = living.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = living.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                // A PRODUCER (draws on an abiotic source) is food, not an agent: only consumers become walkers.
+                if species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)))
+                {
+                    continue;
+                }
+                // Body + reserves: the species' catalog plan, or its Arc-6 grown structure (fed by the world's
+                // grown-body context). A grown species without that context cannot be embodied; skip it.
+                let (body, homeostasis, structure) = match &species.body_plan {
+                    Some(plan) => (
+                        plan.clone(),
+                        crate::homeostasis::Homeostasis::new(&homeo, plan, &organs),
+                        None,
+                    ),
+                    None => {
+                        let Some(g) = living.grown.as_ref() else {
+                            continue;
+                        };
+                        let niche_loci =
+                            species.pool.loci().saturating_sub(g.program.param_count());
+                        let s = crate::biosphere::representative_structure(
+                            info.species,
+                            &species.pool,
+                            &g.program,
+                            niche_loci,
+                            g.ploidy,
+                            g.seed,
+                        );
+                        let h = crate::homeostasis::Homeostasis::from_structure(&homeo, &s);
+                        (s.digest(), h, Some(s))
+                    }
+                };
+                let cid = StableId(occ.id.0 | CREATURE_ID_TAG);
+                assert!(
+                    !founders.contains(&cid),
+                    "Arc 7: creature id {cid:?} collides with a founder mind id (disjoint-namespace invariant)"
+                );
+                let physiology = Physiology::dev_for_registry(&homeo);
+                let genome = ctrl_pool.promote(seed, cid.0, ploidy);
+                let controller = Controller::express(ctrl_genes, &genome, &layout);
+                let mut walker = Walker::new(cid, coord, body, homeostasis, physiology, controller);
+                if let Some(s) = structure {
+                    walker = walker.with_structure(s);
+                }
+                built.push((cid, coord, walker));
+            }
+        }
+        let count = built.len();
+        let placements: Vec<(StableId, Coord3)> =
+            built.iter().map(|(c, coord, _)| (*c, *coord)).collect();
+        if let Some(emb) = self.embodiment.as_mut() {
+            for (cid, _, walker) in built {
+                emb.thermal.insert(cid, thermal);
+                emb.walkers.push(walker);
+            }
+        }
+        for (cid, coord) in placements {
+            self.index.place(OccupantId::being(cid), coord);
+        }
+        count
+    }
+
     fn reconcile_lifecycle(&mut self) {
         if self.world.is_none() || self.embodiment.is_none() {
             return;
@@ -5234,7 +5386,11 @@ impl Runner {
             }
             let world = self.world.as_mut().unwrap();
             for (id, _) in &dead {
-                world.remove_being(*id);
+                // A biosphere creature (Arc 7) has no World mind to remove; its body is retired below by its
+                // own death. A founder death propagates to end its mind.
+                if !is_creature(*id) {
+                    world.remove_being(*id);
+                }
             }
         }
         // (2) Retire every body whose mind is gone from the world, in canonical id order.
@@ -5251,8 +5407,17 @@ impl Runner {
             .unwrap()
             .walkers
             .iter()
+            .filter(|w| {
+                if is_creature(w.id) {
+                    // A creature (Arc 7) has no backing World mind by design: retire it ONLY when it dies,
+                    // never for lacking a mind, or every LIVE creature would be culled each tick.
+                    !w.alive
+                } else {
+                    // A founder body follows its mind: retire it when the mind is gone from the world.
+                    !live_minds.contains(&w.id)
+                }
+            })
             .map(|w| w.id)
-            .filter(|id| !live_minds.contains(id))
             .collect();
         // (2') Corpse matter (biosphere directive 2, organisms as usable material stuff): before a retired
         // body leaves, if corpse matter is armed, deposit the being's OWN body as located tissue where it

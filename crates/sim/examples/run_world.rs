@@ -70,14 +70,14 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, append_scalar_channel, build_dawn_runner, forage_taxis_weights,
-    nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
-    BreedingSystemRegistry, Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples,
-    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
-    ForageGains, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
-    LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
-    World,
+    append_controller_block, append_scalar_channel, build_dawn_runner, controller_gene_set,
+    forage_taxis_weights, nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel, ControllerLayout, Curve,
+    DawnPeoples, Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance,
+    EvidenceRing, ForageGains, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
+    IntrinsicBeliefs, LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId,
+    ReproductionMode, SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId,
+    ValueProfile, World,
 };
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
 
@@ -238,6 +238,11 @@ struct Config {
     /// rather than only by lone re-discovery), and tool affordances. Implies `viability`; every other run
     /// leaves these dormant and byte-identical.
     full: bool,
+    /// Whether biosphere CREATURES are spawned as living walker-agents (`--creatures`, Arc 7, requires
+    /// `--scenario full`): each consumer occupant rides the founder embodiment loop (perceive, forage,
+    /// metabolize, die) instead of being deposited as static tissue. Default off, so `--scenario full`
+    /// without it keeps the static-tissue path and its hash byte-identical.
+    creatures: bool,
 }
 
 impl Config {
@@ -257,6 +262,7 @@ fn parse_config() -> Config {
     let mut bands: Option<usize> = None;
     let mut generations: Option<u64> = None;
     let mut scenario: Option<String> = None;
+    let mut creatures = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -266,6 +272,7 @@ fn parse_config() -> Config {
             "--bands" => bands = args.next().and_then(|v| v.parse().ok()),
             "--generations" => generations = args.next().and_then(|v| v.parse().ok()),
             "--scenario" => scenario = args.next(),
+            "--creatures" => creatures = true,
             "--help" | "-h" => {
                 eprintln!(
                     "usage: run_world --seed <u64> --races <n> --bands <n> --generations <n> \
@@ -343,6 +350,7 @@ fn parse_config() -> Config {
         discovery,
         viability,
         full,
+        creatures,
     }
 }
 
@@ -1347,6 +1355,12 @@ fn snapshot(
         bands.len(),
         distinct_races.len(),
     );
+    // Arc 7: the LIVING biosphere-creature population, when creatures are armed (--creatures). A separate
+    // count from the founder people above, so the food web's lives are visible turning beside the peoples'.
+    let creatures = runner.creature_count();
+    if creatures > 0 {
+        println!("  living creatures {creatures} (Arc 7 biosphere agents that forage and die)");
+    }
 
     // Per-lineage counts, each band tagged with its founding race.
     let per_lineage: Vec<String> = bands
@@ -1878,10 +1892,63 @@ fn main() {
             // is its physics-derived body composition, eaten via the geophage by edibility and decomposed back
             // to soil, so the trophic web turns. No minted substance; content-addressed like a corpse.
             if let Some(living) = &peoples.biosphere {
-                let bodies = living.consumer_bodies(Fixed::ONE);
-                if let Some(emb) = runner.embodiment_mut() {
-                    for (coord, composition, volume) in bodies {
-                        emb.tissue_mut().deposit(coord, composition, volume);
+                if cfg.creatures {
+                    // Arc 7 (creatures-have-simpler-minds), first slice: spawn the biosphere CONSUMERS as
+                    // LIVING walker-agents instead of static tissue. Build the shared forage controller (the
+                    // general "seek what you lack" reaction norm, the SAME one the founders carry, over the
+                    // run's own reserve axes, so nothing per-species is authored) against the embodiment's OWN
+                    // layout, then hand it to the runner to assemble each consumer into a walker.
+                    if let Some(layout) = runner.embodiment_layout() {
+                        let energy_base = layout
+                            .axis_input_base(ENERGY)
+                            .expect("the layout carries an energy axis");
+                        let water_base = layout
+                            .axis_input_base(WATER)
+                            .expect("the layout carries a water axis");
+                        let temp_base = layout
+                            .axis_input_base(TEMPERATURE)
+                            .expect("the layout carries a temperature axis");
+                        let seeds = forage_taxis_weights(
+                            &layout,
+                            MOVE_OUTPUT,
+                            INGEST_OUTPUT,
+                            &[energy_base, water_base],
+                            &[temp_base],
+                            ForageGains {
+                                move_bias: TAXIS_MOVE_BIAS,
+                                here_suppress: TAXIS_HERE_SUPPRESS,
+                                heading_gain: TAXIS_HEADING_GAIN,
+                                ingest_drive: TAXIS_INGEST_DRIVE,
+                            },
+                        );
+                        let mut genes = Vec::new();
+                        let mut freqs = Vec::new();
+                        let mut effects = Vec::new();
+                        append_controller_block(
+                            &mut genes,
+                            &mut freqs,
+                            &mut effects,
+                            2,
+                            layout.weight_count(),
+                            &seeds,
+                        );
+                        let ctrl_genes = controller_gene_set(&layout);
+                        let ctrl_pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
+                            .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+                        let n = runner.spawn_creatures(living, &ctrl_genes, &ctrl_pool, 2);
+                        println!(
+                            "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
+                             now: {}); they perceive, forage, metabolize, and die on the same loop as the \
+                             founders; behaviour selection awaits the reproduction slice",
+                            runner.creature_count()
+                        );
+                    }
+                } else {
+                    let bodies = living.consumer_bodies(Fixed::ONE);
+                    if let Some(emb) = runner.embodiment_mut() {
+                        for (coord, composition, volume) in bodies {
+                            emb.tissue_mut().deposit(coord, composition, volume);
+                        }
                     }
                 }
             }
