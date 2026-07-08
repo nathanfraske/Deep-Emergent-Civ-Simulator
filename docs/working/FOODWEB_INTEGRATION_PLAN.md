@@ -25,6 +25,32 @@
 > nutrient-rate tweak. Details in `OWNER_DECISIONS_LOG.md` item 0. The creature one-tick death (metabolism at
 > small body scale) remains a separate, real R-UNITS-PIN-class issue (slice B).
 
+## THE REAL CRUX (2026-07-08, dug to the mechanism, no fixture-tuning)
+
+The `--scenario full` collapse is a genuine capability gap, not a calibration. Chain of confirmed findings:
+the founders die of THIRST; the drinkable water is hydrology-correct (precipitation pools in BASINS, low
+ground) while producers grow on their niche SLOPES, so in any real spatially-structured world FOOD and WATER
+are separated; the DEFAULT world thrives ONLY because its abstract climate food is UNIFORM (no food attractor
+competes with the water-seeking). The root: the seeded base-liveliness forage controller is a LINEAR reaction
+norm, so its MOVE heading is the weighted SUM of the source-directions of ALL its reserve axes. It therefore
+steers toward the vector AVERAGE of "food is that way" and "water is that way" and cannot PRIORITIZE the
+reserve it lacks most, because prioritization is a PRODUCT (deficit x direction) a linear controller cannot
+express. A well-fed, thirsty being at a producer cell feels the food pull and the water pull and heads for
+their average, never reaching water, and starves of thirst. This is why uniform food survives (no competing
+pull) and every "level" fix (MAX, biomass bump) failed (they keep the producer cell an attractor).
+
+DERIVE-CLEAN FIX OPTIONS (a design fork, all emergent, none a fixture):
+- (a) A general "PRIORITY-NEED DIRECTION" percept: the unit direction to the source of the being's currently
+  MOST-DEFICIENT reserve (a pure read of its own reserves + known sources, keyed on no identity). A linear
+  controller can then steer toward its biggest need, and the WEIGHT on it stays evolved. This gives the
+  linear reaction norm the one nonlinear read it needs, byte-neutral until a world declares it (percept-block
+  precedent). Smallest, most general.
+- (b) Graduate the founders/creatures to the RECURRENT controller (already built as the graduation), whose
+  hidden layer CAN express deficit x direction, seeded to prioritize. Bigger, but the general capability.
+- (c) Selection alone: let it evolve, once beings survive long enough (chicken-and-egg: they die of thirst
+  before selection can act, so this needs (a) or (b) to bootstrap).
+This is the pivotal build for a watchable living world; (a) is the recommended first move.
+
 From the ultracode scoping workflow (2026-07-08, high-effort design verified against source; the map agent hit a transient API 500, so the design read the source itself). Answers the owner's question: how to get people interacting with real creatures and life instead of seeded/authored oilseed eaters. KEY FINDING: most of this ALREADY works (the same physical_intake path feeds a person from abstract food, a real plant's own composition, or a real creature's corpse); it is blocked by the metabolism BALANCE, not missing mechanism.
 
 ## North star
