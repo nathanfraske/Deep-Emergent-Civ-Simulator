@@ -708,6 +708,54 @@ mod tests {
     }
 
     #[test]
+    fn the_morphogen_prefix_reads_loci_past_the_prefix_not_the_bookkeeping_block() {
+        // ISOLATES the Arc 6 index-alignment fix (the end-of-arc audit proved the grown-world test above could
+        // NOT discriminate it, because the dev program's param_count exceeds the niche prefix so the morphogen
+        // block leaks through even mis-aligned). A positive/negative control on `morphogen_gene_set_with_prefix`
+        // ITSELF: a genome whose first `prefix` loci carry a DIFFERENT additive effect than its morphogen loci.
+        // Expressed through the correctly-prefixed gene set, every parameter reads its OWN (morphogen) locus;
+        // expressed through the un-prefixed set (the pre-fix bug, reading position k not prefix+k), it reads the
+        // bookkeeping block instead. With no overlap (prefix == param_count) the two reads are cleanly
+        // distinct, so a regression of the prefix logic would be caught here.
+        let program = MorphogenProgram::dev_default();
+        let pc = program.param_count();
+        let prefix = pc; // the morphogen loci sit fully past the prefix: no overlap, a clean control
+                         // A pool of 2*pc fixed-frequency loci: the first pc (the "bookkeeping" prefix) carry additive effect
+                         // 1/4, the next pc (the morphogen block) carry 3/4, so which block is read is visible in the value.
+        let low = Fixed::from_ratio(1, 4);
+        let high = Fixed::from_ratio(3, 4);
+        let freqs = vec![Fixed::ONE; 2 * pc];
+        let mut effects = vec![low; pc];
+        effects.extend(vec![high; pc]);
+        let pool = GenePool::new(SchemeId(0), 8, freqs)
+            .with_additive(effects, civsim_core::GaussApprox::SumOfUniforms { k: 12 });
+        let genome = pool.promote(0xB105, 1, 1);
+
+        let aligned = express_program(
+            &program,
+            &morphogen_gene_set_with_prefix(prefix, &program),
+            &genome,
+        );
+        let misaligned = express_program(
+            &program,
+            &morphogen_gene_set_with_prefix(0, &program),
+            &genome,
+        );
+        assert_ne!(
+            aligned, misaligned,
+            "the prefix shifts which locus each morphogen parameter reads; a mis-aligned read is different"
+        );
+        // The aligned read reflects the MORPHOGEN block (the high effect), the mis-aligned the prefix block
+        // (the low effect), so every aligned parameter reads strictly greater than its mis-aligned counterpart.
+        for (a, m) in aligned.iter().zip(misaligned.iter()) {
+            assert!(
+                a > m,
+                "the prefixed parameter reads the morphogen locus (high), not the bookkeeping locus (low)"
+            );
+        }
+    }
+
+    #[test]
     fn suitability_peaks_at_the_optimum_and_falls_to_zero_past_breadth() {
         let n = Niche {
             optimum: vec![Fixed::from_ratio(5, 10)],
