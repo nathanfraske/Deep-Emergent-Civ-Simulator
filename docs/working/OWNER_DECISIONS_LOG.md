@@ -70,3 +70,31 @@ entry using a derived or dev-set value.
    coefficient `kleiber_a`, the trophic/assimilation efficiency `ingest_efficiency`, the rock-weathering and
    per-substance decomposition kinetics. These are legitimate physics-floor authored inputs (Principle 9);
    dev-set until the owner calibrates. Not fudges.
+
+7. **Arc 5 T4 residue (byte-changing, flagged not built).** `derive_region` still pads the region ENV vector
+   to a fixed four slots with a moisture-DUPLICATE soil-fertility axis (the terrain has three real generated
+   axes; the fourth is a moisture copy standing in for a real soil Stock that has not landed). Unifying the
+   niche env-axis count with the tile-axis registry and grounding the derived soil axis (a real soil field)
+   would drop that duplicate, which re-pins the biosphere, so it is deferred. The floor now carries
+   `fluid.moisture_content` with `range_hi = 0.5` (a physics-floor authored bound, Hillel saturation basis);
+   the owner may refine it.
+
+8. **Arc 6 grown-body reserved values + the selection follow-on.** `GeneratorParams.ploidy = 2` (the
+   sexual-diploid fixture; DATA, so a haploid/clonal alien is a world choice) and `morphogen_gauss` = the
+   stamped `SumOfUniforms { k: 12 }` identity (the unset sentinel `k = 0` PANICS on draw, a trap avoided).
+   Both reserved-with-basis; the owner sets the world's canonical ploidy and gauss stamp. HONEST LIMIT for the
+   owner's awareness: epoch selection applies one uniform per-species fitness scalar across every locus, so a
+   grown body's SHAPE is selected only as a side effect of regional niche fit, never because the grown
+   Structure's own capability or viability was read. A fitness term reading the Structure (so morphology is
+   selected on its own merits) is a natural next research item, surfaced not silently carried.
+
+9. **Arc 7 (creatures-have-simpler-minds) is scoped, not built.** The first slice (spawn biosphere creatures
+   as living `Walker`s reusing the founder machinery, byte-neutral behind a new flag) is fully planned in
+   `docs/working/ARC7_CREATURE_MINDS_PLAN.md`. It touches the runner lifecycle and mints new StableIds (the
+   two highest-risk areas: a creature id must be PROVABLY disjoint from founder ids, and a mind-less creature
+   needs a `reconcile_lifecycle` guard), so it is surfaced as a focused dedicated slice rather than
+   tail-of-marathon work. KEY finding for the owner: flee/chase CANNOT emerge from the first slice, because
+   the evolved controller perceives only its own reserves and the matter field, NOT other beings; a
+   being-perception percept (added to the shared `ControllerLayout`, which re-pins every walker) is the
+   prerequisite deferred slice, and it must stay a general percept + evolved controller + selection so the
+   predator-avoidance EMERGES rather than being an authored rule.
