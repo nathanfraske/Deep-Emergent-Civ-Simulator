@@ -1,5 +1,19 @@
 # Living food-web integration: people + creatures on the real biosphere (not authored oilseed)
 
+> **Owner constraint (2026-07-08): the hunt is FULLY IDENTITY-BLIND.** Any being can hunt any being or
+> plant: a creature hunting a person, a creature hunting a creature, a person hunting a creature, a person
+> hunting a PERSON (cannibalism, intraspecific predation), anything eating a rooted plant. The strike/hunt
+> (slice H) must key ONLY on body physics (a weapon organ's material/force/sharpness against a target's
+> tissue integrity) and a general being-perception percept (slice G), NEVER on species, kind, kinship,
+> people-versus-creature, or a predator/prey tag. Cannibalism and same-species predation must therefore be
+> POSSIBLE by construction (nothing excludes a co-species target) and EMERGE only when the evolved controller
+> weight on the threat/opportunity percept raises fitness, never authored in and never ruled out. This is the
+> Principle-8/9 form of the owner's point: "creatures hunting people, plants, animals, whatever, and that
+> goes into people hunting people, cannibals and whatnot." The same identity-blindness the trophic label
+> already has (kingdom from autotrophy, not a stored tag) governs the live predation loop.
+
+
+
 From the ultracode scoping workflow (2026-07-08, high-effort design verified against source; the map agent hit a transient API 500, so the design read the source itself). Answers the owner's question: how to get people interacting with real creatures and life instead of seeded/authored oilseed eaters. KEY FINDING: most of this ALREADY works (the same physical_intake path feeds a person from abstract food, a real plant's own composition, or a real creature's corpse); it is blocked by the metabolism BALANCE, not missing mechanism.
 
 ## North star
