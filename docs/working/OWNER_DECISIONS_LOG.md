@@ -8,8 +8,25 @@ entry using a derived or dev-set value.
 
 ## Open
 
+0. **The `--scenario full` biosphere-balance collapse (a PRE-EXISTING issue, diagnosed, not the edibility
+   grounding).** With the edibility grounding, the default, discovery, and viability scenarios all THRIVE
+   (they were all going extinct before); only `--scenario full` still collapses, and it collapsed identically
+   before the grounding. DIAGNOSIS (controlled A/B): the culprit is the producer food-OVERRIDE
+   (`EnvironFields::set_producer`, biosphere-into-run). Where a biosphere plant stands, its biomass sets the
+   food capacity, and the extract-deplete cycle draws the soil down in proportion to that capacity; the higher
+   producer capacity draws the soil faster than weathering plus decomposition replenish it, so the soil (and
+   the climate food the founders forage) depletes and the world crashes (disabling `set_producer` alone lets
+   full thrive: pop 33 -> 42 -> 45 -> 48). This is a multi-value nutrient-cycle balance (`draw_fraction`,
+   `weathering_rate`, `biomass_per_stock`, `pop_capacity`, the decomposition inputs), not a single derivable
+   gate, so it is surfaced for a dedicated biosphere-balance pass rather than dev-hacked here. Candidate
+   fixes to weigh: bound the producer draw to the soil's actual inflow (weathering + decomposition), or make
+   the producer biomass a genuine standing stock the plant regrows rather than a fixed capacity the extract
+   over-draws.
+
 1. **R-UNITS-PIN: the reserve's absolute joule scale** (the `MetabolicAnchors` energy-density-to-joule
-   anchor). The edibility grounding makes intake and drain both physical in the reserve's units; the ABSOLUTE
+   anchor). Dev-set INTERIM value: `LocomotionParams::food_energy_density = 3000` (the forage reconciliation,
+   calibrated so the default/discovery/viability worlds thrive). The geophage direct-fill needs no separate
+   scale. Owner sets the canonical anchor. The edibility grounding makes intake and drain both physical in the reserve's units; the ABSOLUTE
    scale (how a floor `bio.energy_density` in kJ/g maps to the reserve's stored joules) is the one genuine
    units anchor. INTERIM: dev-set to the value that keeps the dev world viable, iterated against the
    survival proof. BASIS: the reserve stored energy is `capacity * body_mass_kg * bio.energy_density`; set so
