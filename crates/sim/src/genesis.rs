@@ -245,6 +245,49 @@ impl LivingWorld {
         out
     }
 
+    /// The standing-food COMPOSITION of every PRODUCER occupant (an autotroph), for the food web's write side
+    /// (chemistry arc, T3): a producer's standing food is its OWN physics-derived `whole_body_composition_vector`
+    /// (the SAME fold a corpse and a consumer body use), so the food a grazer eats carries the plant's own
+    /// chemistry rather than one minted `bio.energy_density` class. Producer versus consumer is read from the
+    /// food-web PRIMITIVE draws_on (an Abiotic edge means an autotroph), never a kingdom tag, so a walking,
+    /// prey-eating autotroph is still a producer here. The composition is the fixed per-unit-biomass density
+    /// vector; the standing biomass VOLUME it scales is the environ's logistic productivity stock, so grazing
+    /// draws the volume and the composition rides fixed (the read-back stays a single volume, not N stocks).
+    /// The consumer of this ([`crate::environ::EnvironFields::set_producer_food`]) normalises it to a nutrient
+    /// simplex. Deterministic canonical order; a cell with two producer occupants keeps the last (as
+    /// `set_producer_food` overwrites). Mirrors [`Self::consumer_bodies`].
+    pub fn producer_compositions(
+        &self,
+    ) -> Vec<(Coord3, std::collections::BTreeMap<String, Fixed>)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let autotroph = species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)));
+                if !autotroph {
+                    continue;
+                }
+                let composition = whole_body_composition_vector(&species.body_plan, &self.registry);
+                if composition.is_empty() {
+                    continue;
+                }
+                out.push((coord, composition));
+            }
+        }
+        out
+    }
+
     /// The total surviving species across all regions.
     pub fn alive(&self) -> u32 {
         self.regions.values().map(|r| r.report.alive).sum()

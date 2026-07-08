@@ -46,6 +46,7 @@ use civsim_world::{Coord3, TileMap};
 use std::collections::BTreeMap;
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
 use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
@@ -302,6 +303,16 @@ pub struct EnvironFields {
     /// would (the min over a singleton). Not folded into `state_hash` like `producer`/`fertility`: its
     /// effect enters through the `capacity` the extract beat shapes.
     producer_source: Vec<Vec<u16>>,
+    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3): the fixed
+    /// per-unit-biomass nutrient simplex (summing to one) a producer's food carries, seeded once from the
+    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]) and normalised here. `None` where
+    /// no producer composition is seeded, in which case the standing food is the single `bio.energy_density`
+    /// class exactly as before (byte-identical). Where `Some`, `regrow_supply` writes each food axis's supply
+    /// as the logistic biomass VOLUME times that axis's density, and reads the remaining volume back as the
+    /// Liebig MINIMUM over the axes of `supply / density`, so a grazer that ate one axis shrinks the whole
+    /// plant and the composition stays a single scalar stock (never N independent stocks). Not folded into
+    /// `state_hash`: its effect enters through the food supplies it shapes, which the [`ResourceField`] folds.
+    producer_food: Vec<Option<BTreeMap<String, Fixed>>>,
 }
 
 /// Which run field an abiotic source draws on. These are the engine's ACTUAL environmental fields; a world
@@ -398,6 +409,7 @@ impl EnvironFields {
             fertility: vec![Fixed::ZERO; n],
             producer: vec![Fixed::ZERO; n],
             producer_source: vec![Vec::new(); n],
+            producer_food: vec![None; n],
         }
     }
 
@@ -672,6 +684,43 @@ impl EnvironFields {
         }
     }
 
+    /// Seed the standing-food COMPOSITION of each producer cell from the biosphere (chemistry arc, T3, once at
+    /// world build), normalising the given per-unit-biomass axis vector to a NUTRIENT SIMPLEX (the food axes
+    /// summing to one) so the standing food is the producer's own chemistry scaled by the logistic biomass
+    /// volume. The environmental axes regrow writes itself (water, salinity) are EXCLUDED, so the food
+    /// composition never fights the hydrology write. A composition with no positive food axis seeds nothing
+    /// (the cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last
+    /// occupant wins on a shared cell. See [`Self::producer_food`].
+    pub fn set_producer_food(&mut self, cells: &[(Coord3, BTreeMap<String, Fixed>)]) {
+        for f in self.producer_food.iter_mut() {
+            *f = None;
+        }
+        for (cell, comp) in cells {
+            if cell.x < 0 || cell.y < 0 || cell.x >= self.width || cell.y >= self.height {
+                continue;
+            }
+            let is_food = |a: &str| a != WATER_FRACTION && a != SALINITY;
+            let total = comp
+                .iter()
+                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
+                .fold(Fixed::ZERO, |acc, (_, v)| acc.saturating_add(*v));
+            if total <= Fixed::ZERO {
+                continue; // no positive food axis: keep the energy-density default
+            }
+            let simplex: BTreeMap<String, Fixed> = comp
+                .iter()
+                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
+                .map(|(a, v)| (a.clone(), v.checked_div(total).unwrap_or(Fixed::ZERO)))
+                .filter(|(_, v)| *v > Fixed::ZERO)
+                .collect();
+            if simplex.is_empty() {
+                continue;
+            }
+            let i = self.idx(cell.x, cell.y);
+            self.producer_food[i] = Some(simplex);
+        }
+    }
+
     /// The producer EXTRACT-DEPLETE beat (the closed nutrient cycle): each producer draws its food from the
     /// availability of the specific abiotic source its niche EVOLVED to close on (its `producer_source` id,
     /// bound to a field by the data-defined `registry`, never an id switch), the source LIMITS its
@@ -842,8 +891,19 @@ impl EnvironFields {
                 // per cell every tick: an absent tile is created empty (standing reads zero, matching the
                 // old `supply`), and the only classes the field ever bears are these three, so the stored
                 // content and its state-hash fold are unchanged. At a large grid this is the whole cost.
+                // The producer's fixed food composition on this cell (T3), if the biosphere seeded one; where
+                // none, the food is the single energy-density class exactly as before.
+                let food = self.producer_food[self.idx(x, y)].as_ref();
                 let comp = resource.composition_mut(coord);
-                let standing = comp.nutrient(ENERGY_DENSITY);
+                // The standing food VOLUME read back: with a producer composition, the remaining volume is the
+                // Liebig MINIMUM over its axes of supply/density (a grazer that ate one axis has shrunk the
+                // whole plant, and the axes stay in the composition's fixed ratio, so the stock is a single
+                // scalar, never N independent stocks); with none, the food is the single energy-density class
+                // and the volume IS its supply (byte-identical to before).
+                let standing = match food {
+                    Some(fc) => food_volume(comp, fc),
+                    None => comp.nutrient(ENERGY_DENSITY),
+                };
                 let mut stock = Stock::new(standing, cap, calib.regen_rate);
                 if cap > Fixed::ZERO {
                     // Colonization: a viable-but-empty cell gets a propagule floor so logistic regrowth
@@ -854,7 +914,21 @@ impl EnvironFields {
                     }
                 }
                 stock.step(Fixed::ZERO); // logistic regrow toward capacity (grazing already applied)
-                comp.set_nutrient(ENERGY_DENSITY, stock.amount());
+                let volume = stock.amount();
+                // Write the food supplies from the regrown VOLUME and the fixed composition (each food axis =
+                // volume times its density), so the standing food carries the producer's OWN chemistry a
+                // grazer reads; with no composition it is the single energy-density class exactly as before.
+                match food {
+                    Some(fc) => {
+                        for (axis, density) in fc {
+                            comp.set_nutrient(
+                                axis,
+                                volume.checked_mul(*density).unwrap_or(Fixed::MAX),
+                            );
+                        }
+                    }
+                    None => comp.set_nutrient(ENERGY_DENSITY, volume),
+                }
                 comp.set_nutrient(WATER_FRACTION, water);
                 comp.set_toxin(SALINITY, salinity);
             }
@@ -892,6 +966,28 @@ pub fn biomass_from(
         (temperature, Fixed::ONE, Some(calib.temp_req)),
         (soil, Fixed::ONE, Some(calib.soil_req)),
     ])
+}
+
+/// The standing food VOLUME implied by a cell's food supplies and its fixed producer composition (T3): the
+/// Liebig MINIMUM over the composition's axes of `supply / density`, so the axes stay in the fixed ratio and
+/// a grazer that depleted one axis has shrunk the WHOLE plant's volume (never N axes drifting apart into
+/// independent stocks). An empty composition or one whose densities are all non-positive reads zero.
+fn food_volume(comp: &Composition, food_comp: &BTreeMap<String, Fixed>) -> Fixed {
+    let mut vol: Option<Fixed> = None;
+    for (axis, density) in food_comp {
+        if *density <= Fixed::ZERO {
+            continue;
+        }
+        let axis_vol = comp
+            .nutrient(axis)
+            .checked_div(*density)
+            .unwrap_or(Fixed::ZERO);
+        vol = Some(match vol {
+            Some(cur) => axis_vol.min(cur),
+            None => axis_vol,
+        });
+    }
+    vol.unwrap_or(Fixed::ZERO)
 }
 
 /// The latitude light factor at a row: full at the equator, falling to zero at the poles, `1 - |y -
@@ -966,6 +1062,7 @@ mod tests {
             fertility: vec![Fixed::ZERO; elev_tenths.len()],
             producer: vec![Fixed::ZERO; elev_tenths.len()],
             producer_source: vec![Vec::new(); elev_tenths.len()],
+            producer_food: vec![None; elev_tenths.len()],
         }
     }
 
@@ -1259,6 +1356,72 @@ mod tests {
                 "the productive cell supplies energy the grazers read"
             );
         }
+    }
+
+    #[test]
+    fn standing_food_carries_the_producers_own_composition_and_grazing_draws_the_whole_volume() {
+        // Chemistry arc, T3: a producer's standing food is its OWN composition (not one minted energy class),
+        // stored as a single logistic biomass VOLUME with the composition riding as fixed densities. Two
+        // proofs: (1) the food a grazer reads stands in the producer's composition RATIO; (2) grazing ONE axis
+        // draws the VOLUME, so ALL axes shrink together (the plant loses biomass, not one nutrient leached out
+        // of it), the read-back staying a single scalar stock rather than N independent ones.
+        let map = a_map(0x7EED);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..30 {
+            e.step(&temp, &calib); // warm the hydrology so cells carry a productivity capacity
+        }
+        let (w, h) = e.dims();
+        let cell = (1..h - 1)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.capacity_at(x, y) > Fixed::ZERO)
+            .map(|(x, y)| Coord3::ground(x, y))
+            .expect("the wet world offers a productive interior cell");
+        // The producer is 60% energy, 40% a second nutrient (its fixed composition).
+        let comp: BTreeMap<String, Fixed> = [
+            (ENERGY_DENSITY.to_string(), Fixed::from_ratio(6, 10)),
+            ("bio.protein".to_string(), Fixed::from_ratio(4, 10)),
+        ]
+        .into_iter()
+        .collect();
+        e.set_producer_food(&[(cell, comp)]);
+        let mut resource = ResourceField::new();
+        for _ in 0..20 {
+            e.step(&temp, &calib);
+            e.regrow_supply(&mut resource, &calib);
+        }
+        let energy0 = resource.supply(cell, ENERGY_DENSITY);
+        let protein0 = resource.supply(cell, "bio.protein");
+        assert!(
+            energy0 > Fixed::ZERO && protein0 > Fixed::ZERO,
+            "the standing food carries both of the producer's own axes, not one minted energy class"
+        );
+        // Proof (1): the two axes are volume * density, so their ratio is the density ratio exactly (60:40,
+        // i.e. energy = 1.5 * protein).
+        assert_eq!(
+            energy0,
+            protein0.checked_mul(Fixed::from_ratio(3, 2)).unwrap(),
+            "the food axes stand in the producer's fixed 60:40 composition ratio"
+        );
+        // Proof (2): graze the ENERGY axis to nothing, then regrow once.
+        resource.take(cell, ENERGY_DENSITY, energy0);
+        e.step(&temp, &calib);
+        e.regrow_supply(&mut resource, &calib);
+        let energy1 = resource.supply(cell, ENERGY_DENSITY);
+        let protein1 = resource.supply(cell, "bio.protein");
+        assert!(
+            protein1 < protein0,
+            "grazing the energy axis shrank the WHOLE plant: the un-grazed protein axis fell too (a volume \
+             draw, not a per-axis leach)"
+        );
+        // And the composition ratio survives the graze-and-regrow (the axes never drift into independent
+        // stocks): the read-back is the single-volume Liebig minimum, so both are volume * density again.
+        assert_eq!(
+            energy1,
+            protein1.checked_mul(Fixed::from_ratio(3, 2)).unwrap(),
+            "the food axes stay in the fixed composition ratio after grazing (one volume stock, not N)"
+        );
     }
 
     #[test]

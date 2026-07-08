@@ -430,6 +430,14 @@ pub fn build_dawn_runner(
     if let Some(living) = &peoples.biosphere {
         environ.set_producer(&living.producer_biomass(civsim_core::Fixed::ONE));
         environ.set_producer_source(&living.producer_sources());
+        // T3 (standing food as the producer's OWN composition) MECHANISM is built and proven
+        // (`environ.set_producer_food` + the regrow volume read-back + the environ falsifier), but wiring it
+        // here is OWNER-GATED: seeding `living.producer_compositions()` normalises each plant to a nutrient
+        // simplex, so a structurally-dominated plant carries little digestible energy per biomass and the
+        // grazers starve (measured: the full run collapses from ~25 to ~1) until the owner sets the food-VALUE
+        // axis-conversion reserved calibration (how much biomass a unit of standing food represents, and the
+        // per-axis assimilation), which no autonomous value may fabricate. Left unwired so the demo stays
+        // byte-identical and alive; the call to arm it is `environ.set_producer_food(&living.producer_compositions())`.
     }
     runner.set_environ(environ, EnvironCalib::from_manifest(manifest)?);
     // Arm the base-level liveliness surfacing policy (the arc-promotion magnitudes), fail-loud from the
