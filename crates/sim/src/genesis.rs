@@ -158,6 +158,38 @@ impl LivingWorld {
         out
     }
 
+    /// The evolved abiotic SOURCE id each producer occupant draws on, for the extract-deplete cycle: a
+    /// producer fixes biomass from the specific abiotic source its niche evolved to close on (its
+    /// `SourceRef::Abiotic(id)`), and the run consults a DATA-DEFINED source binding to learn which field
+    /// that id reads and whether it is a depletable stock or a renewable flux. The id's MEANING is never
+    /// interpreted here (no `id == 2` soil switch, which would re-author a closed Earth triad): it is read
+    /// off the evolved food web and passed opaque to the registry, so an alien source (geothermal, a redox
+    /// gradient, a mana field) is one data row, not code. Canonical order, deterministic.
+    pub fn producer_sources(&self) -> Vec<(Coord3, u16)> {
+        let mut out = Vec::new();
+        for coord in self.occupants.occupied() {
+            for occ in self.occupants.occupants(coord) {
+                let Some(info) = self.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = self.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                let source = species.draws_on.iter().find_map(|s| match s {
+                    SourceRef::Abiotic(id) => Some(*id),
+                    _ => None,
+                });
+                if let Some(id) = source {
+                    out.push((coord, id));
+                }
+            }
+        }
+        out
+    }
+
     /// The total surviving species across all regions.
     pub fn alive(&self) -> u32 {
         self.regions.values().map(|r| r.report.alive).sum()

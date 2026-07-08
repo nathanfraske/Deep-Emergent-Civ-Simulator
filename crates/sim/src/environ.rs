@@ -82,6 +82,21 @@ impl ScalarField {
         self.cells[self.idx(x, y)]
     }
 
+    /// Draw up to `want` down from a cell's standing value (the extract-and-deplete sibling of the read): a
+    /// producer's draw on the located water depth as it fixes biomass. Clamped to what is present (never
+    /// negative), returns what was removed. This makes water a real draw-down sink; the hydrology is an OPEN
+    /// reservoir (precipitation source, evaporation and edge-outflow sink), so a draw is dimensionally clean
+    /// against the standing depth but sits OUTSIDE the conserved-matter ledger, an honest limit.
+    pub fn take(&mut self, x: i32, y: i32, want: Fixed) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height || want <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let i = self.idx(x, y);
+        let taken = want.clamp(Fixed::ZERO, self.cells[i]);
+        self.cells[i] -= taken;
+        taken
+    }
+
     /// The field extent.
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)

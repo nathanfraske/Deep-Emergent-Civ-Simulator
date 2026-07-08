@@ -892,6 +892,32 @@ impl SoilNutrientField {
         *entry = entry.saturating_add(mass);
     }
 
+    /// Remove up to `want` of a class's nutrient mass at a cell (the extract-and-deplete sibling of
+    /// [`Self::deposit`]): the draw a producer makes on the located soil-nutrient store as it fixes biomass,
+    /// so soil is finite and a heavily-worked column depletes rather than reading an infinite well (the
+    /// closed nutrient cycle). Clamped to the present mass, never negative; the class entry is removed when
+    /// it reaches zero and an emptied cell is dropped, so a drawn-then-emptied cell is byte-identical to a
+    /// never-deposited one and the `hash_into` fold is unperturbed. Returns the mass actually removed. Reads
+    /// and writes only the class string's mass, never an identity (Principle 9), so the drawn class is
+    /// whatever the world's chemistry declares, not an authored nutrient.
+    pub fn take(&mut self, cell: Coord3, class: &str, want: Fixed) -> Fixed {
+        let Some(classes) = self.cells.get_mut(&cell) else {
+            return Fixed::ZERO;
+        };
+        let Some(have) = classes.get_mut(class) else {
+            return Fixed::ZERO;
+        };
+        let taken = want.clamp(Fixed::ZERO, *have);
+        *have -= taken;
+        if *have <= Fixed::ZERO {
+            classes.remove(class);
+            if classes.is_empty() {
+                self.cells.remove(&cell);
+            }
+        }
+        taken
+    }
+
     /// The nutrient mass of a class at a cell; an unenriched cell or an absent class reads zero.
     pub fn mass(&self, cell: Coord3, class: &str) -> Fixed {
         self.cells
@@ -1024,6 +1050,62 @@ impl TissueField {
             .entry(key)
             .or_insert(Fixed::ZERO);
         *entry = entry.saturating_add(volume);
+    }
+
+    /// Remove up to `want` of AXIS `axis` from the located body matter at a cell (the eaten-and-deplete
+    /// sibling of [`Self::deposit`]): a bite of a body, drawn through the SAME edibility a grazer uses on
+    /// standing food, so predation is grazing on a located depleting body and needs no new verb. Each parcel
+    /// yields up to `volume * composition[axis]` of the axis; removing that reduces the parcel's VOLUME
+    /// proportionally, so the whole body shrinks together with its composition unchanged (a fraction of the
+    /// carcass is eaten, not one axis leached out of it). Walks parcels in canonical `TissueKey` order
+    /// (matching [`Self::parcels`] and the `hash_into` fold), drops an emptied parcel and an emptied cell so
+    /// a fully-eaten cell is byte-identical to a never-deposited one, and returns the axis mass removed
+    /// (which equals the body's loss, so the eater's gain is conservation-honest). Keyed off the axis string
+    /// alone, never an identity: what a body yields is whatever its physics-floor composition carries, so an
+    /// alien tissue enters as data (Principle 9).
+    pub fn take(&mut self, cell: Coord3, axis: &str, want: Fixed) -> Fixed {
+        if want <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        let Some(parcels) = self.cells.get_mut(&cell) else {
+            return Fixed::ZERO;
+        };
+        let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+        let mut remaining = want;
+        let mut removed = Fixed::ZERO;
+        for key in keys {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let density = key
+                .iter()
+                .find(|(a, _)| a.as_str() == axis)
+                .map(|(_, v)| *v)
+                .unwrap_or(Fixed::ZERO);
+            if density <= Fixed::ZERO {
+                continue;
+            }
+            let volume = *parcels.get(&key).unwrap();
+            let available = volume.checked_mul(density).unwrap_or(Fixed::MAX);
+            let take_axis = remaining.min(available);
+            let vol_removed = take_axis
+                .checked_div(density)
+                .unwrap_or(Fixed::ZERO)
+                .min(volume);
+            let axis_removed = vol_removed.checked_mul(density).unwrap_or(Fixed::ZERO);
+            let new_volume = volume - vol_removed;
+            if new_volume <= Fixed::ZERO {
+                parcels.remove(&key);
+            } else {
+                parcels.insert(key, new_volume);
+            }
+            removed = removed.saturating_add(axis_removed);
+            remaining -= axis_removed;
+        }
+        if parcels.is_empty() {
+            self.cells.remove(&cell);
+        }
+        removed
     }
 
     /// The parcels at a cell, reconstructed as [`TissueParcel`]s in canonical content order. An empty cell
