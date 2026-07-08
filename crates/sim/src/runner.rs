@@ -2287,17 +2287,31 @@ impl Embodiment {
         // opt-in on a non-empty tissue field).
         let body_volume = self.tissue.volume_at(coord);
         if body_volume > Fixed::ZERO {
-            // Size the bite (immutable read of the being's physiology and reserves).
+            // Grossed-up assimilation: the reserve gain a unit of a body axis's mass yields, `assim * eta`
+            // (the ingest efficiency, one when unset). A helper so the SIZING and the CREDIT agree exactly.
+            let per_mass = |assim: Fixed| -> Fixed {
+                if eta > Fixed::ZERO {
+                    assim.checked_mul(eta).unwrap_or(Fixed::MAX)
+                } else {
+                    assim
+                }
+            };
+            // Size the bite (immutable read of the being's physiology and reserves). The bite volume is the
+            // TIGHTEST room-filling volume over the body axes the eater can BOTH digest and needs; if NO such
+            // axis exists (a full or non-digesting eater), the bite is nothing, so a full eater does not
+            // destroy a carcass it cannot use.
             let bite_vol = match self.walkers.iter().find(|w| w.id == walker_id) {
                 Some(w) => {
-                    let mut v = body_volume;
+                    let mut limit: Option<Fixed> = None;
                     for axis in &self.homeo.axes {
                         let Some(sub) = axis.backing_component.as_deref() else {
                             continue;
                         };
-                        // The body's mean density on this axis (axis mass per unit body volume).
+                        // The body's mean density on this axis (axis mass per unit body volume). An overflow
+                        // (a near-fully-eaten carcass with a tiny volume) reads MAX, a maximally-dense axis
+                        // that limits the bite hard, never zero (which would drop the axis and oversize it).
                         let axis_total = self.tissue.axis_supply(coord, sub);
-                        let density = axis_total.checked_div(body_volume).unwrap_or(Fixed::ZERO);
+                        let density = axis_total.checked_div(body_volume).unwrap_or(Fixed::MAX);
                         if density <= Fixed::ZERO {
                             continue; // the body carries none of this axis
                         }
@@ -2309,39 +2323,39 @@ impl Embodiment {
                         if room <= Fixed::ZERO {
                             continue; // this reserve is full: it does not limit the bite
                         }
-                        // The volume whose assimilated axis mass fills the room: room / (density * assim * eta).
-                        let denom = density
-                            .checked_mul(assim)
-                            .and_then(|x| {
-                                if eta > Fixed::ZERO {
-                                    x.checked_mul(eta)
-                                } else {
-                                    Some(x)
-                                }
-                            })
-                            .unwrap_or(Fixed::ZERO);
+                        // The volume whose gain fills the room: room / (density * assim * eta). A denominator
+                        // overflow reads MAX, so fill_vol is a tiny (limiting) bite, never the whole body.
+                        let denom = density.checked_mul(per_mass(assim)).unwrap_or(Fixed::MAX);
                         if denom <= Fixed::ZERO {
                             continue;
                         }
-                        let fill_vol = room.checked_div(denom).unwrap_or(body_volume);
-                        v = v.min(fill_vol);
+                        let fill_vol = room.checked_div(denom).unwrap_or(Fixed::ZERO);
+                        limit = Some(match limit {
+                            Some(cur) => cur.min(fill_vol),
+                            None => fill_vol,
+                        });
                     }
-                    v
+                    limit.map(|l| l.min(body_volume)).unwrap_or(Fixed::ZERO)
                 }
                 None => Fixed::ZERO,
             };
             if bite_vol > Fixed::ZERO {
                 // One bite: remove the volume once, get the mass of every axis in it.
                 let removed = self.tissue.bite(coord, bite_vol);
+                // Credit each axis from the SHARED removed mass, tracking what each backing substance has
+                // already fed so two reserves backed by the SAME substance split its mass rather than each
+                // being credited the full amount (which would create biomass in the eater).
+                let mut consumed: BTreeMap<String, Fixed> = BTreeMap::new();
                 for axis in &self.homeo.axes {
                     let Some(sub) = axis.backing_component.as_deref() else {
                         continue;
                     };
-                    let mass = removed.get(sub).copied().unwrap_or(Fixed::ZERO);
-                    if mass <= Fixed::ZERO {
-                        continue;
+                    let total = removed.get(sub).copied().unwrap_or(Fixed::ZERO);
+                    let already = consumed.get(sub).copied().unwrap_or(Fixed::ZERO);
+                    let avail = (total - already).max(Fixed::ZERO);
+                    if avail <= Fixed::ZERO {
+                        continue; // this substance's bite mass is already spent on an earlier reserve
                     }
-                    // The assimilated gain for this axis, bounded by the reserve room so no bite overflows.
                     let (assim, room) = match self.walkers.iter().find(|w| w.id == walker_id) {
                         Some(w) => (
                             w.physiology.assimilation(sub),
@@ -2352,26 +2366,30 @@ impl Embodiment {
                     if assim <= Fixed::ZERO {
                         continue;
                     }
-                    let gain = mass
-                        .checked_mul(assim)
-                        .and_then(|m| {
-                            if eta > Fixed::ZERO {
-                                m.checked_mul(eta)
-                            } else {
-                                Some(m)
-                            }
-                        })
-                        .unwrap_or(mass)
+                    let per = per_mass(assim);
+                    let gain = avail
+                        .checked_mul(per)
+                        .unwrap_or(avail)
                         .min(room.max(Fixed::ZERO));
                     if gain <= Fixed::ZERO {
                         continue;
                     }
+                    // The mass this reserve drew to produce its gain (gain / (assim * eta)), booked against
+                    // the substance so a sibling reserve sees only the remainder.
+                    let mass_consumed = if per > Fixed::ZERO {
+                        gain.checked_div(per).unwrap_or(avail).min(avail)
+                    } else {
+                        avail
+                    };
                     if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                         w.homeostasis.ingest(axis.id, gain);
                     }
                     gained += gain;
+                    let acc = consumed.entry(sub.to_string()).or_insert(Fixed::ZERO);
+                    *acc = acc.saturating_add(mass_consumed);
                 }
-                // Feed the harm-half and byproduct trace: every axis in the bite counts as eaten.
+                // Feed the harm-half and byproduct trace: every axis in the bite counts as eaten (the full
+                // bite mass, whether or not a reserve had room for it: the body lost it either way).
                 for (axis, mass) in &removed {
                     if *mass > Fixed::ZERO {
                         let acc = eaten_volume.entry(axis.clone()).or_insert(Fixed::ZERO);
@@ -3564,10 +3582,16 @@ impl Runner {
                         }
                         None => Fixed::ONE,
                     };
+                    // The volume that breaks down: the substance's rate times the per-cell activity, CLAMPED to
+                    // the volume present. The rate is world-authored data (`bio.decomposition_rate`) with no
+                    // code-level upper bound, so an accidental rate above one (a fraction cannot exceed 100%)
+                    // must not decompose more than exists, or `volume - decomposed` would go negative and the
+                    // mass balance would CREATE matter (deposit more into the soil than the material lost).
                     let decomposed = volume
                         .checked_mul(rate)
                         .and_then(|d| d.checked_mul(factor))
-                        .unwrap_or(Fixed::ZERO);
+                        .unwrap_or(Fixed::ZERO)
+                        .min(volume);
                     if decomposed <= Fixed::ZERO {
                         continue;
                     }

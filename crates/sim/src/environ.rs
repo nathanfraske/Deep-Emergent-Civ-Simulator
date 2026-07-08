@@ -340,8 +340,10 @@ pub struct AbioticBinding {
     pub field: AbioticField,
     /// Whether drawing on this source DEPLETES its field's stock (a finite stock) or leaves it untouched (a
     /// renewable flux). Decoupled from the field so the flux-versus-stock choice is the world's data, not the
-    /// engine's per-variant assumption (FINDING-1): a world can declare a depletable light budget or a
-    /// renewable nutrient spring without a new mechanism.
+    /// engine's per-variant assumption (FINDING-1): a world can declare a renewable nutrient spring (Soil,
+    /// `depletes = false`) as readily as a finite one. Depletion draws only a field that HAS a located stock
+    /// to draw (Water, Soil); on Light the flag is presently inert because there is no light-stock field to
+    /// deplete (a consumable light budget would be a new field under Arc 5's data-defined field set).
     pub depletes: bool,
     /// The physics-floor nutrient class this field supplies (used only for the soil field; empty otherwise).
     pub class: String,
@@ -994,10 +996,13 @@ fn food_volume(comp: &Composition, food_comp: &BTreeMap<String, Fixed>) -> Fixed
         if *density <= Fixed::ZERO {
             continue;
         }
+        // The volume this axis's supply implies. An overflow (a large supply over a tiny density) means an
+        // effectively unbounded volume, so the axis is NON-LIMITING and reads MAX (the Liebig minimum ignores
+        // it); reading ZERO here would wrongly zero the WHOLE cell's standing food off one overflowing axis.
         let axis_vol = comp
             .nutrient(axis)
             .checked_div(*density)
-            .unwrap_or(Fixed::ZERO);
+            .unwrap_or(Fixed::MAX);
         vol = Some(match vol {
             Some(cur) => axis_vol.min(cur),
             None => axis_vol,

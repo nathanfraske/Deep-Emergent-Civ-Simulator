@@ -29,6 +29,7 @@ use civsim_sim::controller::Controller;
 use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE,
+    WATER,
 };
 use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::medium::{MediumField, RESPIRATORY_SURFACE};
@@ -2345,6 +2346,133 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
         ground(&runner, founder_cell),
         seam,
         "the founder's seam is untouched: it never ate"
+    );
+}
+
+#[test]
+fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_substance() {
+    // Chemistry arc, Arc 2 hardening (an audit catch): when TWO homeostatic reserves are backed by the SAME
+    // body substance, one whole-body bite must SPLIT that substance's removed mass between them, not credit
+    // each reserve the full amount (which would create biomass in the eater). Proof: a body carrying one
+    // substance, an eater whose two drained reserves both draw on it; after one bite the eater's TOTAL gain
+    // does not exceed the assimilable value of the mass the body actually lost.
+    use civsim_sim::homeostasis::HomeostaticAxisDef;
+    use civsim_sim::material::TissueField;
+
+    // Two DRAINING reserves (energy and water), BOTH backed by the same substance "flesh", plus the required
+    // non-draining TEMPERATURE axis (set each tick from the body core, never self-drains).
+    let reg = HomeostaticRegistry {
+        axes: vec![
+            HomeostaticAxisDef {
+                id: ENERGY,
+                name: "reserve-a".to_string(),
+                backing_component: Some("flesh".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 20),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: WATER,
+                name: "reserve-b".to_string(),
+                backing_component: Some("flesh".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 20),
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+            HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            },
+        ],
+    };
+    // Two tissues so both reserves have capacity to refill into.
+    let mut organs = BodyPlanRegistry::dev_default();
+    let store = organs.organs.len() as u16;
+    organs.organs.push(OrganKindDef {
+        id: store,
+        name: "flesh-store".to_string(),
+        fantasy: false,
+        composition: TissueComposition::from_pairs(&[("flesh", Fixed::ONE)]),
+    });
+    let cell = Coord3::ground(2, 2);
+
+    let mut emb = Embodiment::new(
+        reg.clone(),
+        AffordanceRegistry::dev_geophage(),
+        LocomotionParams::dev_default(),
+        0,
+        0x111D,
+    );
+    let n_in = emb.layout().n_in();
+    let mut w = vec![Fixed::ZERO; emb.layout().weight_count()];
+    w[4 * n_in + (n_in - 1)] = Fixed::ONE; // bias -> geophage activation
+    let ctrl = Controller::from_weights(n_in, emb.layout().n_out(), 0, w);
+    emb.add(
+        resting_walker(
+            1,
+            cell,
+            body((3, 4), vec![organ(store, (1, 1))]),
+            &reg,
+            &organs,
+            ctrl,
+        ),
+        band(305),
+    );
+    let mut runner =
+        Runner::with_embodiment(uniform_field(6, 6, Fixed::from_int(305)), calib(), emb);
+
+    // Drain the reserves (no food present), so both have room to refill from a bite.
+    for _ in 0..8 {
+        runner.step();
+    }
+    // Deposit a body carrying ONLY "flesh" at the eater's cell.
+    let mut tissue = TissueField::new();
+    let flesh: std::collections::BTreeMap<String, Fixed> =
+        [("flesh".to_string(), Fixed::ONE)].into_iter().collect();
+    tissue.deposit(cell, flesh, Fixed::from_int(50));
+    runner.embodiment_mut().unwrap().set_tissue(tissue);
+
+    let reserves = |r: &Runner| -> (Fixed, Fixed) {
+        let w = r
+            .embodiment()
+            .unwrap()
+            .walkers()
+            .iter()
+            .find(|w| w.id == StableId(1))
+            .unwrap();
+        (w.homeostasis.amount(ENERGY), w.homeostasis.amount(WATER))
+    };
+    let body_vol = |r: &Runner| -> Fixed { r.embodiment().unwrap().tissue().volume_at(cell) };
+    let (a0, b0) = reserves(&runner);
+    let vol0 = body_vol(&runner);
+
+    // One tick: the geophage fires exactly one whole-body bite.
+    runner.step();
+
+    let (a1, b1) = reserves(&runner);
+    let vol1 = body_vol(&runner);
+    // The eater's TOTAL gain (both reserves), adding back the same-tick drain so we measure intake alone.
+    let drain = Fixed::from_ratio(1, 20);
+    let gain_a = (a1 - a0).saturating_add(drain);
+    let gain_b = (b1 - b0).saturating_add(drain);
+    let total_gain = gain_a.saturating_add(gain_b);
+    // The body's lost mass this tick (flesh density is one, so lost mass == lost volume), times the ingest
+    // efficiency: the assimilable value of what the body actually gave up.
+    let removed = vol0 - vol1;
+    let eta = LocomotionParams::dev_default().ingest_efficiency;
+    let assimilable = removed.checked_mul(eta).unwrap_or(removed);
+    assert!(removed > Fixed::ZERO, "the eater bit the body");
+    assert!(
+        total_gain <= assimilable.saturating_add(Fixed::from_ratio(1, 1000)),
+        "the two reserves SHARED the bite's mass (total gain {total_gain:?} <= one bite's assimilable value \
+         {assimilable:?}), not double-credited"
     );
 }
 
