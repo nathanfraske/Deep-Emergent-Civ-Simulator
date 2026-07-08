@@ -1207,6 +1207,54 @@ impl TissueField {
         removed
     }
 
+    /// Take a single whole-body BITE of up to `want` VOLUME from the located body matter at a cell (predation's
+    /// whole-body bite, chemistry arc Arc 2), returning the mass of EVERY axis in the removed volume. Unlike
+    /// [`Self::take`] (which draws one named axis and removes the volume that carried it), one bite removes one
+    /// volume ONCE and credits every nutrient the eater assimilates, so a multi-axis carcass is not
+    /// over-depleted (the earlier per-axis draw removed a volume per axis, a declared-open-biomass leak). Walks
+    /// parcels in canonical order, shrinks each proportionally, drops an emptied parcel and an emptied cell so
+    /// a fully-eaten cell is byte-identical to a never-deposited one, and returns the summed per-axis mass
+    /// removed. A non-positive want or an empty cell returns an empty map. Keyed off no identity: what the bite
+    /// yields is whatever the body's own composition carries (Principle 9).
+    pub fn bite(&mut self, cell: Coord3, want: Fixed) -> BTreeMap<String, Fixed> {
+        let mut removed_axes: BTreeMap<String, Fixed> = BTreeMap::new();
+        if want <= Fixed::ZERO {
+            return removed_axes;
+        }
+        let Some(parcels) = self.cells.get_mut(&cell) else {
+            return removed_axes;
+        };
+        let keys: Vec<TissueKey> = parcels.keys().cloned().collect();
+        let mut remaining = want;
+        for key in keys {
+            if remaining <= Fixed::ZERO {
+                break;
+            }
+            let volume = *parcels.get(&key).unwrap();
+            let take_vol = remaining.min(volume);
+            if take_vol <= Fixed::ZERO {
+                continue;
+            }
+            // Every axis in the removed volume: its mass is removed_volume * density (the body's own value).
+            for (axis, density) in &key {
+                let m = take_vol.checked_mul(*density).unwrap_or(Fixed::MAX);
+                let acc = removed_axes.entry(axis.clone()).or_insert(Fixed::ZERO);
+                *acc = acc.saturating_add(m);
+            }
+            let new_volume = volume - take_vol;
+            if new_volume <= Fixed::ZERO {
+                parcels.remove(&key);
+            } else {
+                parcels.insert(key, new_volume);
+            }
+            remaining -= take_vol;
+        }
+        if parcels.is_empty() {
+            self.cells.remove(&cell);
+        }
+        removed_axes
+    }
+
     /// The total of AXIS `axis` available in the located body matter at a cell (the read the ingest measures
     /// its bite against): the sum over parcels of `volume * composition[axis]`. Zero where no body lies.
     pub fn axis_supply(&self, cell: Coord3, axis: &str) -> Fixed {
@@ -1948,6 +1996,61 @@ values = [
         );
         assert!(field.is_empty());
         assert_eq!(field.bulk_hardness(coord, &reg), Fixed::ZERO);
+    }
+
+    #[test]
+    fn a_whole_body_bite_removes_one_volume_and_credits_every_axis_where_per_axis_takes_over_deplete(
+    ) {
+        // Chemistry arc, Arc 2 (FIX-2): one whole-body bite removes ONE volume and returns the mass of EVERY
+        // axis in it, so a multi-axis carcass is not over-depleted, where the per-axis `take` (one axis, and
+        // the volume that carried it) would remove a volume PER axis, the declared-open-biomass leak the bite
+        // fixes. A body carrying two axes (exact binary densities, so the arithmetic is representable).
+        let cell = Coord3::ground(1, 1);
+        let e_density = Fixed::from_ratio(1, 2); // 0.5
+        let m_density = Fixed::from_ratio(1, 4); // 0.25
+        let body = || -> BTreeMap<String, Fixed> {
+            [
+                ("bio.energy_density".to_string(), e_density),
+                ("halite".to_string(), m_density),
+            ]
+            .into_iter()
+            .collect()
+        };
+        // The expected per-axis mass in a 10-volume bite, computed the way the mechanism does.
+        let expect_e = Fixed::from_int(10).checked_mul(e_density).unwrap();
+        let expect_m = Fixed::from_int(10).checked_mul(m_density).unwrap();
+
+        // One bite of 10 volume: removes 10 volume ONCE, credits BOTH axes.
+        let mut field = TissueField::new();
+        field.deposit(cell, body(), Fixed::from_int(100));
+        let removed = field.bite(cell, Fixed::from_int(10));
+        assert_eq!(
+            removed.get("bio.energy_density").copied().unwrap(),
+            expect_e,
+            "the bite credits the energy axis (10 volume * its density)"
+        );
+        assert_eq!(
+            removed.get("halite").copied().unwrap(),
+            expect_m,
+            "the SAME bite also credits the mineral axis: one bite, every axis"
+        );
+        assert_eq!(
+            field.volume_at(cell),
+            Fixed::from_int(90),
+            "the body lost exactly ONE bite's volume (10), not one per axis"
+        );
+
+        // Contrast: two per-axis takes (the pre-fix predation) remove TWO volumes for the same nutrition, each
+        // draw removing the volume that carried its axis (expect_e / e_density = 10, and again for the mineral).
+        let mut field2 = TissueField::new();
+        field2.deposit(cell, body(), Fixed::from_int(100));
+        field2.take(cell, "bio.energy_density", expect_e);
+        field2.take(cell, "halite", expect_m);
+        assert_eq!(
+            field2.volume_at(cell),
+            Fixed::from_int(80),
+            "two per-axis takes removed TWO volumes (the over-depletion the whole-body bite fixes)"
+        );
     }
 
     #[test]

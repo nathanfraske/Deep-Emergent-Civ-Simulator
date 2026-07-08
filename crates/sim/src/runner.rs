@@ -2223,15 +2223,14 @@ impl Embodiment {
             // reserve, an ordinary carried rock, reads zero here, so an existing scenario whose beings never
             // carry a backing substance is byte-identical.
             let cell_supply = self.material.volume(coord, &substance);
-            // Predation: a located BODY at the cell (a corpse or seeded animal) offers this axis too, eaten by
-            // the SAME edibility as loose matter (a body is food iff the eater assimilates its composition, so
-            // carnivore/herbivore/omnivore emerges, never a tag). Zero where no body lies (byte-identical).
-            let tissue_supply = self.tissue.axis_supply(coord, &substance);
             // Size the bite from the being's own physiology and the room its reserve has left (immutable).
+            // The located BODY at the cell is eaten SEPARATELY, in one whole-body bite after this loop, so a
+            // multi-axis carcass is not over-depleted (a volume per axis); this arm eats only the loose cell
+            // matter and the being's inventory, each an independent substance.
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return gained;
             };
-            let supply = cell_supply + w.carried.volume(&substance) + tissue_supply;
+            let supply = cell_supply + w.carried.volume(&substance);
             if supply <= Fixed::ZERO {
                 continue; // neither the cell nor the being's inventory holds this substance
             }
@@ -2265,17 +2264,7 @@ impl Embodiment {
             } else {
                 Fixed::ZERO
             };
-            // Take any remainder from the located body (predation depletes the carcass), after the loose
-            // cell matter and the inventory, in the same conservation-honest per-field way.
-            let from_tissue = {
-                let rem = gross - from_cell - from_carried;
-                if rem > Fixed::ZERO {
-                    self.tissue.take(coord, &substance, rem)
-                } else {
-                    Fixed::ZERO
-                }
-            };
-            let taken = from_cell + from_carried + from_tissue;
+            let taken = from_cell + from_carried;
             let gain = taken.checked_mul(eta).unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);
@@ -2285,6 +2274,111 @@ impl Embodiment {
                 let acc = eaten_volume.entry(substance.clone()).or_insert(Fixed::ZERO);
                 *acc = acc.saturating_add(taken);
                 eaten.insert(substance);
+            }
+        }
+        // PREDATION, the WHOLE-BODY BITE (chemistry arc, Arc 2): a located body at the cell is eaten in ONE
+        // volume bite that credits EVERY axis the eater assimilates, rather than a volume drawn per axis (which
+        // over-depleted a multi-axis carcass, a declared-open-biomass leak). Eaten by the SAME edibility as
+        // loose matter (a body is food iff the eater assimilates its composition, so carnivore/herbivore/
+        // omnivore emerges, never a tag). The bite VOLUME is sized so no reserve overflows: for each body axis
+        // the eater can digest and needs, the volume whose assimilated mass would fill that reserve's room, and
+        // the bite is the MINIMUM (the first reserve to fill caps it), capped by the body's available volume.
+        // Zero body -> a no-op, so a run where no corpse lies is byte-identical (the whole predation change is
+        // opt-in on a non-empty tissue field).
+        let body_volume = self.tissue.volume_at(coord);
+        if body_volume > Fixed::ZERO {
+            // Size the bite (immutable read of the being's physiology and reserves).
+            let bite_vol = match self.walkers.iter().find(|w| w.id == walker_id) {
+                Some(w) => {
+                    let mut v = body_volume;
+                    for axis in &self.homeo.axes {
+                        let Some(sub) = axis.backing_component.as_deref() else {
+                            continue;
+                        };
+                        // The body's mean density on this axis (axis mass per unit body volume).
+                        let axis_total = self.tissue.axis_supply(coord, sub);
+                        let density = axis_total.checked_div(body_volume).unwrap_or(Fixed::ZERO);
+                        if density <= Fixed::ZERO {
+                            continue; // the body carries none of this axis
+                        }
+                        let assim = w.physiology.assimilation(sub);
+                        if assim <= Fixed::ZERO {
+                            continue; // the eater cannot digest this axis
+                        }
+                        let room = w.homeostasis.capacity(axis.id) - w.homeostasis.amount(axis.id);
+                        if room <= Fixed::ZERO {
+                            continue; // this reserve is full: it does not limit the bite
+                        }
+                        // The volume whose assimilated axis mass fills the room: room / (density * assim * eta).
+                        let denom = density
+                            .checked_mul(assim)
+                            .and_then(|x| {
+                                if eta > Fixed::ZERO {
+                                    x.checked_mul(eta)
+                                } else {
+                                    Some(x)
+                                }
+                            })
+                            .unwrap_or(Fixed::ZERO);
+                        if denom <= Fixed::ZERO {
+                            continue;
+                        }
+                        let fill_vol = room.checked_div(denom).unwrap_or(body_volume);
+                        v = v.min(fill_vol);
+                    }
+                    v
+                }
+                None => Fixed::ZERO,
+            };
+            if bite_vol > Fixed::ZERO {
+                // One bite: remove the volume once, get the mass of every axis in it.
+                let removed = self.tissue.bite(coord, bite_vol);
+                for axis in &self.homeo.axes {
+                    let Some(sub) = axis.backing_component.as_deref() else {
+                        continue;
+                    };
+                    let mass = removed.get(sub).copied().unwrap_or(Fixed::ZERO);
+                    if mass <= Fixed::ZERO {
+                        continue;
+                    }
+                    // The assimilated gain for this axis, bounded by the reserve room so no bite overflows.
+                    let (assim, room) = match self.walkers.iter().find(|w| w.id == walker_id) {
+                        Some(w) => (
+                            w.physiology.assimilation(sub),
+                            w.homeostasis.capacity(axis.id) - w.homeostasis.amount(axis.id),
+                        ),
+                        None => (Fixed::ZERO, Fixed::ZERO),
+                    };
+                    if assim <= Fixed::ZERO {
+                        continue;
+                    }
+                    let gain = mass
+                        .checked_mul(assim)
+                        .and_then(|m| {
+                            if eta > Fixed::ZERO {
+                                m.checked_mul(eta)
+                            } else {
+                                Some(m)
+                            }
+                        })
+                        .unwrap_or(mass)
+                        .min(room.max(Fixed::ZERO));
+                    if gain <= Fixed::ZERO {
+                        continue;
+                    }
+                    if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
+                        w.homeostasis.ingest(axis.id, gain);
+                    }
+                    gained += gain;
+                }
+                // Feed the harm-half and byproduct trace: every axis in the bite counts as eaten.
+                for (axis, mass) in &removed {
+                    if *mass > Fixed::ZERO {
+                        let acc = eaten_volume.entry(axis.clone()).or_insert(Fixed::ZERO);
+                        *acc = acc.saturating_add(*mass);
+                        eaten.insert(axis.clone());
+                    }
+                }
             }
         }
         // The HARM-HALF (the symmetric completion of ingestion): the toxins in what was eaten harm the eater
