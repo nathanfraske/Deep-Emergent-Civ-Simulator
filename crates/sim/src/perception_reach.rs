@@ -35,9 +35,10 @@
 use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
-use civsim_physics::laws;
+use civsim_physics::{laws, PhysicsRegistry};
 use civsim_world::Coord3;
 
+use crate::material::MaterialField;
 use crate::sensorium::SenseChannelId;
 
 /// The spreading law a channel's signal propagates by. The kernel SET is fixed Rust code (the
@@ -200,23 +201,38 @@ const _: () = assert!(
 /// its representable range without a fabricated cutoff (the physics already sends a far source to zero).
 const MAX_REPRESENTABLE_SEP2: i128 = 1 << 30;
 
+/// The world-physics caps a reach computation reads beyond the source, perceiver, emitted power, and
+/// medium samples: the geometric sphere coefficient for the derived dimensionality, the irradiance cap the
+/// geometric spread saturates at, and the optical-depth cap the accumulated medium attenuation saturates
+/// at (the occlusion limit). Grouped into one value so a reach call passes a single physics-caps argument
+/// rather than three same-typed `Fixed` caps that a caller could transpose. Each field is a physics-floor
+/// datum the caller supplies (Principle 11); nothing here is authored by the reach code.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ReachBounds {
+    /// The geometric-spread sphere coefficient for the derived dimensionality (for example `4*pi` at
+    /// D=3), the surface term the emitted power divides across.
+    pub sphere_coeff: Fixed,
+    /// The irradiance cap the geometric spread saturates at (a co-located source reads this).
+    pub irrad_max: Fixed,
+    /// The optical-depth cap the accumulated medium attenuation saturates at (the occlusion limit).
+    pub tau_max: Fixed,
+}
+
 /// The received reach of a signal from a source location to a perceiver location, given the emitted power,
-/// the geometric sphere coefficient for the derived dimensionality, and the medium absorption samples
-/// along the path. Pure and OFF the run path (no live caller): the being-percept keystone consumes it, so
-/// this is byte-neutral by construction. The separation is the 3D Euclidean distance over the FULL
-/// [`Coord3`] (all three axes, the vertical `z` included, unlike the 2D horizontal index metric); the
-/// spreading is the general [`civsim_physics::laws::geometric_spread`] kernel at the derived
-/// dimensionality; and the path attenuation accumulates the medium's OWN absorption (each
-/// `(coefficient, length)` sample read from the medium, never a per-channel or per-medium-label constant),
-/// so occlusion emerges from the strata rather than an authored line-of-sight rule.
+/// the world-physics [`ReachBounds`], and the medium absorption samples along the path. Pure and OFF the
+/// run path (no live caller): the being-percept keystone consumes it, so this is byte-neutral by
+/// construction. The separation is the 3D Euclidean distance over the FULL [`Coord3`] (all three axes, the
+/// vertical `z` included, unlike the 2D horizontal index metric); the spreading is the general
+/// [`civsim_physics::laws::geometric_spread`] kernel at the derived dimensionality; and the path
+/// attenuation accumulates the medium's OWN absorption (each `(coefficient, length)` sample read from the
+/// medium, never a per-channel or per-medium-label constant), so occlusion emerges from the strata rather
+/// than an authored line-of-sight rule.
 pub fn received_reach(
     emitted_power: Fixed,
     source: Coord3,
     perceiver: Coord3,
-    sphere_coeff: Fixed,
-    irrad_max: Fixed,
+    bounds: ReachBounds,
     absorption_samples: &[(Fixed, Fixed)],
-    tau_max: Fixed,
 ) -> Reach {
     let dx = source.x as i128 - perceiver.x as i128;
     let dy = source.y as i128 - perceiver.y as i128;
@@ -233,16 +249,16 @@ pub fn received_reach(
             emitted_power,
             r,
             spreading_dimensionality(),
-            sphere_coeff,
-            irrad_max,
+            bounds.sphere_coeff,
+            bounds.irrad_max,
         )
     };
     // Accumulate the path optical depth from the medium's own absorption samples, each capped, the total
     // capped: a strongly-absorbing medium drives the depth to the cap, the occlusion limit.
     let mut optical_depth = Fixed::ZERO;
     for &(coefficient, length) in absorption_samples {
-        let segment = laws::optical_depth(coefficient, length, tau_max);
-        optical_depth = (optical_depth + segment).min(tau_max);
+        let segment = laws::optical_depth(coefficient, length, bounds.tau_max);
+        optical_depth = (optical_depth + segment).min(bounds.tau_max);
     }
     Reach {
         spread,
@@ -250,9 +266,88 @@ pub fn received_reach(
     }
 }
 
+/// Resolve the reach of a signal on a channel's [`ChannelReach`] row from a source to a perceiver: sample
+/// the medium's OWN absorption along the 3D `Coord3` path from the material field, and dispatch the
+/// spreading law by the row's kernel id, never by channel identity (the condition-4 harden-to-registry
+/// contract, so adding a kernel or a channel is a match-arm or data change, never a channel-identity
+/// branch). Pure and off the run path (no live caller): the being-percept keystone consumes it.
+///
+/// The emitted power is a PARAMETER: it is the source's own emission on the channel (a being's body, a
+/// fire's material), which the keystone resolves from the source's own material through the row's
+/// `source_power_axis`. Reading it from the cell the source stands on would conflate a being's emission
+/// with the ground under it, so it is not read here (surfaced to the gate as the emitter-power sub-fork).
+pub fn resolve_reach(
+    row: &ChannelReach,
+    emitted_power: Fixed,
+    source: Coord3,
+    perceiver: Coord3,
+    field: &MaterialField,
+    reg: &PhysicsRegistry,
+    bounds: ReachBounds,
+) -> Reach {
+    let samples = absorption_along(source, perceiver, field, reg, &row.absorption_axis);
+    match row.spreading {
+        SpreadKernel::Geometric => {
+            received_reach(emitted_power, source, perceiver, bounds, &samples)
+        }
+    }
+}
+
+/// Sample the medium's bulk absorption on `axis` along the 3D `Coord3` path from `source` to `perceiver`,
+/// one sample per cell the line crosses (the grid's own cell is the resolution, an engine bound, not a
+/// fabricated sampling rate). Each sample is `(absorption_coefficient, segment_length)`: the coefficient
+/// is the bulk axis mean of the material at that cell (an empty cell reads zero, transparent), and the
+/// length is the path length divided evenly across the steps. Occlusion emerges as a run of
+/// strongly-absorbing cells (rock at negative z) drives the accumulated optical depth up, never an
+/// authored line-of-sight rule.
+///
+/// Honest limit (flagged): this reads the [`MaterialField`], substances in a 3D `Coord3` grid, so a signal
+/// through rock occludes and through empty cells passes; the fluid medium's own absorption (air, water,
+/// carried in the 2D `MediumField`) is not sampled here, so a signal's fine attenuation through open air is
+/// not yet captured. The full volumetric medium is the flagged z-stacked-medium follow-on.
+fn absorption_along(
+    source: Coord3,
+    perceiver: Coord3,
+    field: &MaterialField,
+    reg: &PhysicsRegistry,
+    axis: &str,
+) -> Vec<(Fixed, Fixed)> {
+    let dx = perceiver.x as i128 - source.x as i128;
+    let dy = perceiver.y as i128 - source.y as i128;
+    let dz = perceiver.z as i128 - source.z as i128;
+    let sep2 = dx * dx + dy * dy + dz * dz;
+    let steps = dx.abs().max(dy.abs()).max(dz.abs());
+    if steps == 0 || sep2 > MAX_REPRESENTABLE_SEP2 {
+        // Co-located (no path), or beyond the representable separation where the spread is negligible so
+        // the path attenuation does not matter: no samples.
+        return Vec::new();
+    }
+    let r = Fixed::from_int(sep2 as i32).sqrt();
+    let seg_len = r
+        .checked_div(Fixed::from_int(steps as i32))
+        .unwrap_or(Fixed::ZERO);
+    let mut samples = Vec::with_capacity(steps as usize);
+    for i in 1..=steps {
+        let cx = (source.x as i128 + dx * i / steps) as i32;
+        let cy = (source.y as i128 + dy * i / steps) as i32;
+        let cz = (source.z as i128 + dz * i / steps) as i32;
+        let coefficient = field
+            .cell(Coord3 {
+                x: cx,
+                y: cy,
+                z: cz,
+            })
+            .map(|mix| mix.bulk_axis(reg, axis))
+            .unwrap_or(Fixed::ZERO);
+        samples.push((coefficient, seg_len));
+    }
+    samples
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::material::SubstanceMix;
 
     #[test]
     fn empty_registry_is_the_opt_out() {
@@ -313,13 +408,23 @@ mod tests {
         Fixed::from_ratio(62_832, 5_000)
     }
 
+    /// Build [`ReachBounds`] with the D=3 sphere coefficient `4*pi`, the given irradiance cap, and the
+    /// given optical-depth cap.
+    fn bounds(irrad_max: Fixed, tau_max: Fixed) -> ReachBounds {
+        ReachBounds {
+            sphere_coeff: four_pi(),
+            irrad_max,
+            tau_max,
+        }
+    }
+
     #[test]
     fn received_reach_spreads_by_the_general_kernel_over_the_3d_separation() {
         let cap = Fixed::from_int(1_000_000);
         let power = Fixed::from_int(100);
         let src = Coord3 { x: 0, y: 0, z: 0 };
         let per = Coord3 { x: 3, y: 4, z: 0 }; // sep2 = 9 + 16 = 25, r = 5
-        let reach = received_reach(power, src, per, four_pi(), cap, &[], Fixed::from_int(1000));
+        let reach = received_reach(power, src, per, bounds(cap, Fixed::from_int(1000)), &[]);
         let r = Fixed::from_int(25).sqrt();
         assert_eq!(
             reach.spread,
@@ -344,19 +449,15 @@ mod tests {
             power,
             src,
             Coord3 { x: 5, y: 0, z: 0 },
-            four_pi(),
-            cap,
+            bounds(cap, tau),
             &[],
-            tau,
         );
         let vertical = received_reach(
             power,
             src,
             Coord3 { x: 0, y: 0, z: 5 },
-            four_pi(),
-            cap,
+            bounds(cap, tau),
             &[],
-            tau,
         );
         assert_eq!(horizontal.spread, vertical.spread);
         // A vertical offset changes the reach; the 2D horizontal index metric would drop it.
@@ -364,19 +465,15 @@ mod tests {
             power,
             src,
             Coord3 { x: 3, y: 0, z: 4 },
-            four_pi(),
-            cap,
+            bounds(cap, tau),
             &[],
-            tau,
         ); // sep2 = 25
         let flat = received_reach(
             power,
             src,
             Coord3 { x: 3, y: 0, z: 0 },
-            four_pi(),
-            cap,
+            bounds(cap, tau),
             &[],
-            tau,
         ); // sep2 = 9
         assert_ne!(
             above.spread, flat.spread,
@@ -397,10 +494,8 @@ mod tests {
             power,
             src,
             per,
-            four_pi(),
-            cap,
+            bounds(cap, tau_max),
             &[(Fixed::from_int(100), Fixed::from_int(10))],
-            tau_max,
         );
         assert_eq!(
             blocked.optical_depth, tau_max,
@@ -411,10 +506,8 @@ mod tests {
             power,
             src,
             per,
-            four_pi(),
-            cap,
+            bounds(cap, tau_max),
             &[(Fixed::ZERO, Fixed::from_int(10))],
-            tau_max,
         );
         assert_eq!(clear.optical_depth, Fixed::ZERO);
     }
@@ -424,7 +517,7 @@ mod tests {
         let cap = Fixed::from_int(1_000_000);
         let power = Fixed::from_int(100);
         let c = Coord3 { x: 7, y: -2, z: 1 };
-        let reach = received_reach(power, c, c, four_pi(), cap, &[], Fixed::from_int(1000));
+        let reach = received_reach(power, c, c, bounds(cap, Fixed::from_int(1000)), &[]);
         assert_eq!(
             reach.spread, cap,
             "a co-located source reads the cap (zero distance)"
@@ -442,7 +535,7 @@ mod tests {
             y: 0,
             z: 0,
         };
-        let reach = received_reach(power, src, far, four_pi(), cap, &[], Fixed::from_int(1000));
+        let reach = received_reach(power, src, far, bounds(cap, Fixed::from_int(1000)), &[]);
         assert_eq!(reach.spread, Fixed::ZERO);
     }
 
@@ -461,12 +554,148 @@ mod tests {
         let power = Fixed::from_int(100);
         let src = Coord3 { x: 0, y: 0, z: 0 };
         let per = Coord3 { x: 6, y: 8, z: 0 }; // sep2 = 100, r = 10
-        let reach = received_reach(power, src, per, four_pi(), cap, &[], Fixed::from_int(1000));
+        let reach = received_reach(power, src, per, bounds(cap, Fixed::from_int(1000)), &[]);
         let r = Fixed::from_int(100).sqrt();
         assert_eq!(
             reach.spread,
             laws::inverse_square_falloff(power, r, four_pi(), cap),
             "at D=3 the reach spread equals inverse_square_falloff (pins hold)",
         );
+    }
+
+    // --- The run-path resolver (segment 4): read the row, sample the medium along the Coord3 path,
+    // dispatch the kernel by the row's id ---
+
+    /// A minimal self-contained floor for the resolver tests: the one optical-absorption axis the reach
+    /// samples along a path, and one strongly-absorbing substance ("rock") carrying it. Ranges and values
+    /// are stand-in test data, not owner values (the real axis lives on the chem/optics floor).
+    const TEST_FLOOR: &str = r#"
+[[axis]]
+id = "opt.absorption_coefficient"
+measures = "medium absorption per unit path (the optical-depth lever)"
+unit = "1/m"
+dimension = "-1,0,0,0"
+scale = "1/m"
+tier = 0
+range_lo = "0"
+range_hi = "1000000"
+real = "test fixture"
+
+[[substance]]
+id = "rock"
+participates_in = []
+real = "test fixture"
+values = [
+  { axis = "opt.absorption_coefficient", value = "50" },
+]
+"#;
+
+    fn test_reg() -> PhysicsRegistry {
+        PhysicsRegistry::from_toml_str(TEST_FLOOR).expect("test floor parses")
+    }
+
+    fn rock_cell() -> SubstanceMix {
+        let mut m = SubstanceMix::new();
+        m.set("rock", Fixed::from_int(1));
+        m
+    }
+
+    #[test]
+    fn resolve_reach_dispatches_by_the_row_and_an_empty_field_is_transparent() {
+        let reg = test_reg();
+        let field = MaterialField::new();
+        let row = ChannelReachRegistry::dev_terran()
+            .get(DEV_OPTICAL)
+            .expect("optical row")
+            .clone();
+        let cap = Fixed::from_int(1_000_000);
+        let tau_max = Fixed::from_int(1000);
+        let power = Fixed::from_int(100);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 3, y: 4, z: 0 }; // sep2 = 25, r = 5
+        let reach = resolve_reach(&row, power, src, per, &field, &reg, bounds(cap, tau_max));
+        // An empty field reads zero absorption at every cell along the path: transparent, no occlusion.
+        assert_eq!(
+            reach.optical_depth,
+            Fixed::ZERO,
+            "an empty material field is transparent"
+        );
+        // The spread is the geometric-kernel reach dispatched by the Geometric row, independent of the
+        // (empty) medium: it equals the direct received_reach.
+        let direct = received_reach(power, src, per, bounds(cap, tau_max), &[]);
+        assert_eq!(
+            reach.spread, direct.spread,
+            "the Geometric row dispatches to the geometric-spread reach",
+        );
+    }
+
+    #[test]
+    fn resolve_reach_occlusion_emerges_from_absorbing_cells() {
+        let reg = test_reg();
+        let mut field = MaterialField::new();
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 4, y: 0, z: 0 }; // Chebyshev steps = 4, cells (1,0,0)..(4,0,0)
+                                               // Fill every cell the path crosses with strongly-absorbing rock.
+        for x in 1..=4 {
+            field.set_cell(Coord3 { x, y: 0, z: 0 }, rock_cell());
+        }
+        let row = ChannelReachRegistry::dev_terran()
+            .get(DEV_OPTICAL)
+            .expect("optical row")
+            .clone();
+        let cap = Fixed::from_int(1_000_000);
+        let tau_max = Fixed::from_int(1000);
+        let power = Fixed::from_int(100);
+        let blocked = resolve_reach(&row, power, src, per, &field, &reg, bounds(cap, tau_max));
+        // A run of absorbing cells accumulates optical depth: occlusion emerges from the medium data, with
+        // no authored line-of-sight rule.
+        assert!(
+            blocked.optical_depth > Fixed::ZERO,
+            "a rock-filled path occludes (optical depth accumulates)"
+        );
+        // With the same geometry but an empty field, the path is transparent: the difference is the medium.
+        let empty = MaterialField::new();
+        let clear = resolve_reach(&row, power, src, per, &empty, &reg, bounds(cap, tau_max));
+        assert_eq!(clear.optical_depth, Fixed::ZERO);
+        assert_eq!(
+            blocked.spread, clear.spread,
+            "occlusion changes the optical depth, not the geometric spread"
+        );
+    }
+
+    #[test]
+    fn absorption_along_is_empty_for_a_co_located_source() {
+        let reg = test_reg();
+        let field = MaterialField::new();
+        let c = Coord3 { x: 2, y: 2, z: 2 };
+        let samples = absorption_along(c, c, &field, &reg, "opt.absorption_coefficient");
+        assert!(
+            samples.is_empty(),
+            "a co-located source has no path to sample"
+        );
+    }
+
+    #[test]
+    fn absorption_along_samples_one_coefficient_per_crossed_cell() {
+        let reg = test_reg();
+        let mut field = MaterialField::new();
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 4, y: 0, z: 0 };
+        // Only the second crossed cell (2,0,0) carries rock; the rest are empty (transparent).
+        field.set_cell(Coord3 { x: 2, y: 0, z: 0 }, rock_cell());
+        let samples = absorption_along(src, per, &field, &reg, "opt.absorption_coefficient");
+        assert_eq!(
+            samples.len(),
+            4,
+            "one sample per Chebyshev step along the path"
+        );
+        // Exactly the rock cell reads its bulk coefficient; the empty cells read zero.
+        let nonzero: Vec<Fixed> = samples
+            .iter()
+            .map(|&(c, _)| c)
+            .filter(|&c| c > Fixed::ZERO)
+            .collect();
+        assert_eq!(nonzero.len(), 1, "only the rock cell absorbs");
+        assert_eq!(nonzero[0], Fixed::from_int(50), "rock's bulk absorption");
     }
 }
