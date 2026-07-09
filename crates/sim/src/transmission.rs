@@ -780,13 +780,15 @@ mod tests {
 
     #[test]
     fn params_fail_loud_while_reserved() {
-        // The real manifest carries the three transmission ids, all reserved.
+        // drift_rate is now set (Arc 2 Mirror calibration, the base drift half-width); loss_rate and
+        // loss_practitioner_floor remain reserved, so from_manifest still fails loud on the first
+        // reserved read it makes (loss_practitioner_floor), never fabricating a value.
         let m = CalibrationManifest::load(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../calibration/reserved.toml"
         ))
         .unwrap();
-        assert!(m.is_reserved("transmission.drift_rate"));
+        assert!(m.is_set("transmission.drift_rate"));
         assert!(m.is_reserved("transmission.loss_rate"));
         assert!(m.is_reserved("transmission.loss_practitioner_floor"));
         assert_eq!(

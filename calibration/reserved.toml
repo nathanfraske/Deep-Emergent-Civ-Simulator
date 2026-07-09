@@ -433,17 +433,21 @@ source = "Part 33.3 language system; record 62.13; crates/sim/src/language.rs ph
 
 [[reserved]]
 id = "articulation.vocal_tract_scale"
-basis = "a per-race multiplier on the base resonator lengths (Race.articulation.vocal_tract_scale, crates/sim/src/race.rs), so a race with a larger resonating cavity gets longer resonators and lower formants and a smaller one higher formants, the divergence read through langmod::articulated_geometry with no race branch (Principle 9); an identity scale of one reproduces the base geometry. AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an interim per-race lever set to the race's vocal-tract size relative to the base geometry, not a permanent constant; flagged for the future derivation rather than a fabricated default"
-status = "reserved"
-value = ""
+basis = "a per-race multiplier on the base resonator lengths (Race.articulation.vocal_tract_scale, crates/sim/src/race.rs), so a race with a larger resonating cavity gets longer resonators and lower formants and a smaller one higher formants, the divergence read through langmod::articulated_geometry with no race branch (Principle 9); an identity scale of one reproduces the base geometry. AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an interim per-race lever set to the race's vocal-tract size relative to the base geometry, not a permanent constant; flagged for the future derivation rather than a fabricated default Derive-vs-author: a dimensionless per-race multiplier on the shared base resonator lengths; for the Mirror 1:1 human control it is the identity 1.0 by definition, a per-race datum not on the physics floor (the acoustic axes carry the carrier, not this scale) and not derivable"
+status = "set"
+value = "1.0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "scale"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/langmod.rs articulated_geometry; couples R-ORGAN-FLUX"
 
 [[reserved]]
 id = "articulation.hearing_resolution"
-basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value"
-status = "reserved"
-value = ""
+basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value Derive-vs-author: a per-race auditory just-noticeable frequency difference (a sensory discrimination datum, R-SENSORIUM); NOT the floor axis acoustic.frequency (the carrier Hz), a per-race sensory phenotype the engine models no deeper, not derivable today"
+status = "set"
+value = "3"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "hertz"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 
@@ -457,9 +461,11 @@ source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs pro
 
 [[reserved]]
 id = "articulation.word_min_len"
-basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant"
-status = "reserved"
-value = ""
+basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant Derive-vs-author: a language-generator structural bound (a well-formed word needs at least one producible sound), an engine/generator floor not on the physics floor and not derivable from a deeper substrate"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "count"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
 
@@ -557,9 +563,11 @@ source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PRO
 
 [[reserved]]
 id = "lang.typology_disharmony"
-basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited"
-status = "reserved"
-value = ""
+basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited Derive-vs-author: the measured cross-linguistic probability a typological parameter draws its own marginal against the harmony tilt; a world-typology datum grounded in linguistic measurement, not on the physics floor and not derivable"
+status = "set"
+value = "0.05"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 
@@ -825,9 +833,11 @@ source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel
 
 [[reserved]]
 id = "transmission.drift_rate"
-basis = "the per-race perception-and-memory copy fidelity; the half-width of the mean-zero proficiency perturbation a maximally unfaithful copier incurs, scaled per copier by copy_drift(base, memory, perception). Weber's roughly 3% just-noticeable difference is one calibration point for the perceptual resolution, not the law (design.md:2756); a real value is set per-race data through the perception model, this scalar is only the base"
-status = "reserved"
-value = ""
+basis = "the per-race perception-and-memory copy fidelity; the half-width of the mean-zero proficiency perturbation a maximally unfaithful copier incurs, scaled per copier by copy_drift(base, memory, perception). Weber's roughly 3% just-noticeable difference is one calibration point for the perceptual resolution, not the law (design.md:2756); a real value is set per-race data through the perception model, this scalar is only the base Derive-vs-author: the BASE half-width of the mean-zero proficiency perturbation a maximally-unfaithful copier incurs; per-copier drift derives FROM it via copy_drift(base,memory,perception), so this is the irreducible base, a social-transmission datum not on the physics floor"
+status = "set"
+value = "0.03"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "proficiency_per_copy"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
 
@@ -867,9 +877,11 @@ source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
 [[reserved]]
 id = "tier.belief_level_to_strength"
-basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength."
-status = "reserved"
-value = ""
+basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength. Derive-vs-author: a units-anchor identity curve between two representations of the SAME internal [0,1] belief quantity (pool knowledge level to promoted facet strength, belief.rs instantiate_strength); the linear identity reconstructs the pool level exactly (the documented calibration target), not a floor axis and not derivable from a deeper substrate"
+status = "set"
+value = "0=0,1=1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
@@ -1250,33 +1262,41 @@ source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
 [[reserved]]
 id = "controller.taxis.move_bias"
-basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the controller own activation clamp (verified crates/sim/src/controller.rs:111 clamp to [-1,1], selection clamp [0,1] at line 720); the dawn-seed magnitude that saturates the clamp so a founder disperses, not a floor axis and not a simplification of a modeled substrate; selection tunes the realised coupling from there once movement-dependent fitness exists"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.heading_gain"
-basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the runner already-normalised unit gradient direction (controller.rs:111 clamp); a unit gain reproduces that direction, larger gains only re-saturate through the clamp; not a floor axis and not derivable, and selection refines the steering the linear norm cannot express"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights forage_taxis_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.here_suppress"
-basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor matched to the unit move bias it must cancel (a unit magnitude holds the being on a forage source); not a floor axis and not a simplification of a modeled substrate; selection refines the leave-when-depleted timing"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.ingest_drive"
-basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the same [0,1] INGEST activation clamp the MOVE output uses (controller.rs selection clamp line 720); unity saturates it decisively when a source is underfoot; not a floor axis, and the reserve-room bound governs how much is drawn"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
 
@@ -1524,9 +1544,11 @@ source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/s
 
 [[reserved]]
 id = "medium.submersion_elevation"
-basis = "the waterline: the normalised [0, ONE) elevation below which a map cell is submerged and holds the submerged medium (medium.water), and at or above which it holds the emergent medium (medium.air). Set on the same normalised elevation field the biome classifier reads (crates/world/src/terrain.rs classifies ocean and coast by elevation band), so the basis is where the sea meets the land on that scale: the dev biome set's ocean band is [0, 0.40) and its coast band [0.40, 0.45), so a threshold at the ocean-band top (about 0.40) makes the submerged cells exactly the ocean cells, and a higher threshold floods the coast. The owner sets where the waterline sits for a given world's sea level; read on the canonical embodiment path by MediumField::from_map through medium_field_from_manifest, a labelled dev fixture in tests. A single-medium world (the submerged and emergent ids equal) folds to a uniform field whatever this threshold, so it binds only where two media meet"
-status = "reserved"
-value = ""
+basis = "the waterline: the normalised [0, ONE) elevation below which a map cell is submerged and holds the submerged medium (medium.water), and at or above which it holds the emergent medium (medium.air). Set on the same normalised elevation field the biome classifier reads (crates/world/src/terrain.rs classifies ocean and coast by elevation band), so the basis is where the sea meets the land on that scale: the dev biome set's ocean band is [0, 0.40) and its coast band [0.40, 0.45), so a threshold at the ocean-band top (about 0.40) makes the submerged cells exactly the ocean cells, and a higher threshold floods the coast. The owner sets where the waterline sits for a given world's sea level; read on the canonical embodiment path by MediumField::from_map through medium_field_from_manifest, a labelled dev fixture in tests. A single-medium world (the submerged and emergent ids equal) folds to a uniform field whatever this threshold, so it binds only where two media meet Derive-vs-author: a geometric world datum (the waterline) on the engine normalised [0,1) elevation field, aligned to the terrain ocean band top (verified crates/world/src/terrain.rs:190 ocean band [p(0),p(40))); a per-world sea level, an authored world datum, not a floor axis and not derivable from deeper physics"
+status = "set"
+value = "0.40"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "normalised_elevation"
 source = "R-MEDIUM (Part 62 medium substrate); owner ruling 2026-07-04 (docs/working/REAL_WORLD_UNIFICATION_HANDOFF.md §7); crates/sim/src/medium.rs MediumField::from_map, crates/sim/src/runner.rs medium_field_from_manifest; crates/world/src/terrain.rs biome elevation bands"
 
@@ -1909,9 +1931,11 @@ source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturat
 
 [[reserved]]
 id = "hydrology.saturation_cap"
-basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate"
-status = "reserved"
-value = ""
+basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate Derive-vs-author: an engine representability ceiling (category c) above any physical saturation pressure the world temperature band reaches (Earth hottest ~55C gives e_s ~0.0158 MPa; 0.05 MPa is ~3x headroom); a fail-loud bound, not a floor axis and not a physical value to derive"
+status = "set"
+value = "0.05"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
 
@@ -1933,17 +1957,21 @@ source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evapora
 
 [[reserved]]
 id = "hydrology.evaporation_wind"
-basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives"
-status = "reserved"
-value = ""
+basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives Derive-vs-author: the Dalton wind coefficient b in E=(a+b|u|)*deficit; the wind field u is passed as ZERO until step 4 (verified crates/sim/src/environ.rs:731), so the term is inert and 0 is the honest no-wind-coupling value; the real Dalton coefficient is set when the wind field arrives, not a floor axis"
+status = "set"
+value = "0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "evaporation_coefficient"
 source = "base-level liveliness step 2 (wind in step 4); crates/sim/src/environ.rs; laws::evaporation_rate"
 
 [[reserved]]
 id = "hydrology.evaporation_cap"
-basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning"
-status = "reserved"
-value = ""
+basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning Derive-vs-author: an engine representability ceiling (category c) above any physical evaporation flux the band reaches (Earth extreme pan-evaporation ~2.9e-4 kg/(m2 s); 5e-4 is ~1.7x headroom); a fail-loud bound, not a floor axis"
+status = "set"
+value = "0.0005"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "evaporation_flux"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
 
@@ -2079,9 +2107,11 @@ source = "base-level liveliness step 4; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "belief.enculturation_stubbornness"
-basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it"
-status = "reserved"
-value = ""
+basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it Derive-vs-author: the cultural-transmission fidelity of enculturation; a social datum (no physics-floor axis carries transmission fidelity, the domain is social not physical) and not derivable from a lower modeled substrate"
+status = "set"
+value = "0.5"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
 
