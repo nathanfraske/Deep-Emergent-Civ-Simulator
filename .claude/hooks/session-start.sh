@@ -27,13 +27,12 @@ todos="$(grep '^- \*\*R-' TODOS.md 2>/dev/null | head -40)"
 
 roadmap_file="docs/working/CONSENSUS_ROADMAP.md"
 if [ -f "$roadmap_file" ]; then
-  # The header grep is bounded (head -20) so a roadmap that grows many sections cannot
-  # crowd out the Tier-B frontier that follows.
-  roadmap="Sections:
-$(grep '^## ' "$roadmap_file" 2>/dev/null | head -20)
-
-Near-term frontier (Tier B):
-$(sed -n '/^## Tier B/,/^## Tier C/p' "$roadmap_file" 2>/dev/null | head -28)"
+  # The roadmap is now the lean FEATURE STATUS BOARD and nothing else (the deeper reconciliation
+  # and history live in ROADMAP_REFERENCE.md). Surface the whole board on every session start so
+  # it is READ first; the Stop gate enforces editing it IN PLACE when a segment makes progress, so
+  # it never goes stale. The Python step below clips it to the roadmap budget on a codepoint
+  # boundary with a truncation marker, so the agent knows to read the file for the rest.
+  roadmap="$(cat "$roadmap_file" 2>/dev/null)"
 else
   roadmap="(not present; create it when the ground-truth order is next reviewed)"
 fi
@@ -49,7 +48,7 @@ import json, os
 LIMIT = 9500  # safety margin under the harness's 10000-character additionalContext cap
 # Per-section budgets: each block is clipped on its own so none can starve another. The
 # top HANDOFFS entry is the priority (recover state), so it gets the largest share.
-BUDGETS = {"method": 600, "roadmap": 1500, "handoff": 4000, "todos": 1600, "verify": 800}
+BUDGETS = {"method": 500, "roadmap": 3200, "handoff": 3200, "todos": 1300, "verify": 700}
 
 def clip(s, n):
     s = s or ""
