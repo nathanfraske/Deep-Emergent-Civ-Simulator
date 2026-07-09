@@ -29,6 +29,30 @@ section.
   copy-fidelity base from a perception-resolution axis). Your call: accept as authored social data, or derive
   (build the substrate). Reversible either way.
 
+- **Temperature units seam: I authorized the worldgen temperature-to-Kelvin build (a Mirror-boot blocker).**
+  The agent found, and I verified against source (`worldgen.rs:260`, `runner.rs:443`, `fluids_floor.toml:15`),
+  that the worldgen temperature field is normalized `[0,1]` but the `therm.temperature` floor axis is absolute
+  K, the Calibrated thresholds (setpoint 310 K, etc.) are Kelvin, and the metabolism `T^4` physics needs
+  absolute temperature. So a Calibrated Mirror holds a 310 K setpoint against a `[0,1]` ambient and freezes its
+  beings instantly. I authorized building the worldgen temperature-to-Kelvin mapping
+  (`T = base + amplitude*(lat_blend - 0.5)`) this arc, because the physics forbids the alternative (normalizing
+  the thresholds). `base` and `amplitude` are RESERVED OWNER VALUES for the Mirror gate (mean surface temp
+  ~288 K, equator-to-pole swing ~±30 K; world data, surfaced not fabricated). It may rebaseline the dev pins,
+  which is legitimate here (a dev fixture becoming absolute temperature). Confirm the mechanism and set the two
+  climate values at the Mirror sign-off.
+- **Climate-productivity coarse scaffold: set with the abstract limit noted.** The coarse productivity model's
+  params (a documented stand-in for the gated real biosphere) set as its calibration; reversible when the
+  biosphere-balance calibration replaces it.
+- **`compose.max_depth` / `reuse_compression_threshold`: held reserved.** They shape emergent composition
+  DEPTH, so I kept them owner-tunable rather than authored; set them as emergence tuners if you want.
+- **`thermal_half_band` re-classification, your call.** Your Arc-4 ruling (keep `thermal_half_band` +
+  `burn_scale` reserved, build the tissue-tolerance substrate in Arc 4) stands overnight; I did NOT override
+  it. But the agent's re-triage (verified) now assesses `thermal_half_band` as a per-race thermoregulation
+  control datum, the same category as the `thermal_setpoint = 310` already set, and distinct from the
+  tissue-tolerance / denaturation substrate that is genuinely Arc 4 (that is `burn_scale`'s home). You may have
+  grouped it by name; set it now on reconsideration, or keep the Arc-4 deferral. `burn_scale` stays Arc-4
+  either way.
+
 ## Notes and observations from the night
 
 - **CI/test-speed work landed (no action needed).** Build cache + nextest merged; the 6 slow
