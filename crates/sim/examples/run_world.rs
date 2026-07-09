@@ -49,6 +49,7 @@ use civsim_sim::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::conviction_experience::FeltConvictionCalib;
 use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
@@ -330,6 +331,14 @@ struct Config {
     /// metabolize, die) instead of being deposited as static tissue. Default off, so `--scenario full`
     /// without it keeps the static-tissue path and its hash byte-identical.
     creatures: bool,
+    /// Whether the EXPERIENTIAL-CONVICTION substrate is armed (`--convictions`, OWNER_DECISIONS_LOG R2/R4/R5):
+    /// each being's own felt experience (its net reserve swings) is folded into a per-conviction record and
+    /// MOVES the relevant conviction through the AGM kernel, direction by its per-race hedonic/ascetic epistemic
+    /// polarity. Composes with any scenario (it is the same dev world plus this one learner armed, my dev
+    /// recommendations set). Default off, so every existing run leaves convictions static (only the dawn seeds
+    /// them, nothing moves them) and stays byte-identical; armed, the reported per-band axiom-0 stance drifts as
+    /// each band's lived fortune bears on its convictions (the resent-the-provider / harden-under-hardship loop).
+    convictions: bool,
 }
 
 impl Config {
@@ -350,6 +359,7 @@ fn parse_config() -> Config {
     let mut generations: Option<u64> = None;
     let mut scenario: Option<String> = None;
     let mut creatures = false;
+    let mut convictions = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -360,6 +370,7 @@ fn parse_config() -> Config {
             "--generations" => generations = args.next().and_then(|v| v.parse().ok()),
             "--scenario" => scenario = args.next(),
             "--creatures" => creatures = true,
+            "--convictions" => convictions = true,
             "--help" | "-h" => {
                 eprintln!(
                     "usage: run_world --seed <u64> --races <n> --bands <n> --generations <n> \
@@ -442,6 +453,7 @@ fn parse_config() -> Config {
         full,
         living,
         creatures,
+        convictions,
     }
 }
 
@@ -1905,6 +1917,18 @@ fn main() {
         for id in w.being_ids() {
             w.set_age(id, 20);
         }
+    }
+
+    // The experiential-conviction substrate (`--convictions`, OWNER_DECISIONS_LOG R2/R4/R5): arm the
+    // felt-conviction learner with the full RECORD-and-MOVE dev fixture, so each being's own felt experience
+    // (its net reserve swings, folded by `felt_salience`) records against the conviction it holds and MOVES it
+    // through the AGM kernel, by its per-race hedonic/ascetic epistemic polarity (hedonic by dev default). This
+    // is the ONE thing armed on top of the otherwise-identical dev world, so the reported per-band axiom-0
+    // stance, which every other run leaves STATIC (the dawn seeds it, enculturation is unarmed, so nothing
+    // moves it), now drifts as each band's lived fortune bears on its convictions. Opt-in and byte-identical
+    // when off.
+    if cfg.convictions {
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_with_move());
     }
 
     // Ideation activation slice 2 + viability arc slice C: the ARMED scenarios (`discovery`, `viability`)
