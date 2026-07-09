@@ -36,6 +36,30 @@ AbioticField field-kind registry (Agent C, my recommendation, owner-approved). H
 - **Prior reversible rulings (on the PR record and the recap).** The reach-wire general-spreading-law adoption
   (fork a), the affordance and composition fork (b) splits: all derive-first engineering rulings under the
   standing gate. Reversible; confirm or override on review.
+- **GENUINE OWNER-BLOCKERS from Agent B's affordance/composition bedrock study (your call, held).** The study
+  found (verified against source) that the honest bottom is to REUSE the already-resolved `crates/compose`
+  substrate (R-DEEPTECH-COMPOSE, unwired on the sim live path except the capability leaf), not build a new
+  composer. Wiring it needs two owner decisions:
+  1. **The morphospace fork.** Is a composite affordance the SAME morphospace as an artifact `CompositionNode`,
+     or a DISTINCT sibling? UNIFY (widen the artifact node with a perceiver operand, one library and promotion
+     path) versus DISTINCT SIBLING (reuse compose's fold/promote/open-registry kernels, keep a
+     perceiver-and-target node shape). Deciding seams: promote gate 3's reuse-compression has no affordance
+     analog, and the artifact node has no perceiver operand. The code supports either. This decides the
+     composer's node shape, so the build is held on it.
+  2. **The `SEQ_FIELD_BITS` packing ceiling** (`learn.rs:162-174`, four bits per field, 16 values). Extending
+     the belief-subject key to a conjunction may cross 16 primitives, forcing a packing widening that is NOT
+     byte-neutral and changes every existing belief subject. An owner-call before the composer is wired.
+  The composer extends Agent A's discovery/reward-belief learner (the shared bedrock) with a conjunction subject
+  key, so it is owner-blocked on the node shape and the packing and A-coupled on the learner surface. Agent B is
+  on the unblocked prep (the promote-gate-3 affordance-reuse-signal design) meanwhile.
+- **Floor-growth update (awareness, not a blocker): a third parameterized floor mechanism.** Agent C's
+  AbioticField arc, after its blind panel caught that the read-at-cell interface authors POINT-LOCALITY
+  (foreclosing a redox or gradient-fed alien energy source), generalizes the supply query with a data-selected
+  READ-SHAPE and VALUE-BACKING operator set (point, pairwise-difference for a redox reaction, finite-difference
+  for a spatial gradient). Each operator is physics (the real forms a supply takes), the selection is data; I
+  ruled it derive-first, not owner-taste, with the acceptance gate that a deep-vent chemolithotroph fed by a
+  redox difference must be a zero-Rust data row. This is the third parameterized floor mechanism (after the
+  perception substrate's spreading law and transduction family). Flagging the pattern for your eyes.
 
 ## Owner-only calls still waiting (need your ruling)
 
