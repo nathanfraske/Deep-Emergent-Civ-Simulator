@@ -60,11 +60,29 @@ substrate alive on the canonical spine. ACTIVATION, emergence-clean.
 Mirror for owner sign-off.
 
 **Arc 3: the liveliness keystones (the heart of "alive").** Each a percept or primitive keyed on the being's
-own physics; each framing-panelled before it is built.
-- **The being-perception percept.** An opt-in, hash-neutral controller input block carrying, per nearby cell,
-  occupant-derived scalars (body mass, weapon development, tissue, distance and direction), keyed on NO
-  species/identity tag. The evolved controller learns to pursue or flee under selection. Emergent target:
-  hunting, fleeing, cannibalism, cross-species, from one mechanism. KEYSTONE.
+own physics; each framing-panelled before it is built. REFRAMED (2026-07-09, after six section-11 framing
+catches showed the being-percept's cleanliness depends on unbuilt substrate): Arc 3 OPENS with the
+perception-substrate arc below, which the being-percept and the predation loop consume second. The full plan
+and the derive-first proposal are in `PERCEPTION_SUBSTRATE_ARC_PLAN.md`; the grounding study is
+`PERCEPTION_GAPS_STUDY.md`.
+- **Arc 3.0, the perception-substrate arc (precedes the being-percept).** Three slices, each framed blind
+  (section-11 fail-closed, then section-10) before code, under three hard constraints: a signal carries a
+  PHYSICAL MAGNITUDE never a valence at emit; perception keys on the being's OWN installed senses (an alien
+  lacking a sense does not perceive that channel); meaning and valence EMERGE receiver-side under selection.
+  (1) The REACH WIRE, the clean first slice: wire the existing tier-0 floor reach laws
+  (`inverse_square_falloff`, `optical_depth`, `acoustic_absorption`) to a perception read, distance derived from
+  the Path B coordinate model, no valence risk. (2) The SENSORIUM-GATED MAGNITUDE PERCEPT: gate the live Path B
+  percept on the being's own sensorium (`Sensorium::reads`), acuity and JND deriving from genome and anatomy,
+  reconciling Path B's current ungated universality. (3) The RECEIVER-SIDE VALENCE LEARNER: reuse the existing
+  felt-outcome correlation learner (`learn.rs:504-526`) so a signal's meaning is learned from the receiver's own
+  reserve delta, never stamped at emit; the two authored likelihoods at its head (`good_weight` inputs) are the
+  arc's deepest derive target. The emergence-critical core (the felt sign as the being's own reserve delta, the
+  raw percept as its own-cell quantity) already derives clean and alien-clean, so it is reused, not rebuilt.
+- **The being-perception percept (CONSUMES Arc 3.0).** An opt-in, hash-neutral controller input block carrying,
+  per nearby cell, occupant-derived scalars (body mass, weapon development, tissue, distance and direction),
+  keyed on NO species/identity tag, sensed through the perception substrate above (a physical magnitude,
+  sensorium-gated, its meaning learned receiver-side). The evolved controller learns to pursue or flee under
+  selection. Emergent target: hunting, fleeing, cannibalism, cross-species, from one mechanism. KEYSTONE.
 - **Run-path being-vs-being harm.** A STRIKE-affordance arm that resolves a being's aimed heading to a target
   occupant via the located index and wounds its body through the existing floor wound laws (`body::strike`), a
   kill leaving a corpse the hunter eats/butchers. Keyed on body physics. Predation emerges.
