@@ -34,6 +34,10 @@
 
 use std::collections::BTreeMap;
 
+use civsim_core::Fixed;
+use civsim_physics::laws;
+use civsim_world::Coord3;
+
 use crate::sensorium::SenseChannelId;
 
 /// The spreading law a channel's signal propagates by. The kernel SET is fixed Rust code (the
@@ -146,6 +150,96 @@ pub const DEV_OPTICAL: SenseChannelId = SenseChannelId(1);
 /// The acoustic dev-fixture channel.
 pub const DEV_ACOUSTIC: SenseChannelId = SenseChannelId(2);
 
+/// The reach of a signal to a perceiver: the geometrically-spread magnitude and the accumulated path
+/// optical depth. Both are reported and the `exp(-tau)` transmission transform is DEFERRED (the codebase's
+/// report-the-indicator, defer-the-transcendental convention, as [`civsim_physics::laws::optical_depth`]
+/// itself defers `exp`): a consumer applies its own perception threshold, and a large optical depth is an
+/// occluded, blocked signal. Occlusion emerges from a strongly-absorbing medium along the path, never an
+/// authored line-of-sight rule.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Reach {
+    /// The geometrically-spread received magnitude before medium attenuation.
+    pub spread: Fixed,
+    /// The accumulated optical depth of the medium along the path (larger is more attenuated; the
+    /// occlusion limit).
+    pub optical_depth: Fixed,
+}
+
+/// The spreading dimensionality a signal propagates through, READ from the world's own spatial-axis
+/// count rather than an authored constant: the world coordinate is [`Coord3`], a packed tuple of `i32`
+/// spatial axes, so its size in `i32` units IS the number of axes an unconfined signal spreads in
+/// (three today), and a differently-dimensioned coordinate would follow automatically. The engine models
+/// one unconfined bulk medium (no confinement or waveguide substrate), so an unconfined signal spreads in
+/// all its axes: D = 3.
+///
+/// Because D = 3 for every path today, the general kernel does not yet bite: [`received_reach`] spreads
+/// exactly as `inverse_square_falloff` (the general kernel reproduces it at D=3), so the four run_world
+/// pins hold and nothing existing moves. The generality becomes real only when a medium-confinement
+/// substrate lands and sets D below 3 for a surface-guided (D=2) or ducted (D=1) signal; that substrate
+/// is the flagged sibling refinement, and [`civsim_physics::laws::geometric_spread`] already handles
+/// D=2 and D=1 for when it does. Reading D structurally here, not as a per-channel `3`, keeps the
+/// derivation explicit and the confinement follow-on a data-and-substrate change rather than an edit here.
+pub const fn spreading_dimensionality() -> u32 {
+    // The number of i32 spatial axes the coordinate carries; the effective confined dimensionality of the
+    // traversed medium would be read here instead once a confinement substrate exists.
+    (core::mem::size_of::<Coord3>() / core::mem::size_of::<i32>()) as u32
+}
+
+/// The largest 3D squared separation the distance is formed exactly for; a source farther than this is
+/// negligible (its geometric spread underflows to zero), which keeps the fixed-point square root inside
+/// its representable range without a fabricated cutoff (the physics already sends a far source to zero).
+const MAX_REPRESENTABLE_SEP2: i128 = 1 << 30;
+
+/// The received reach of a signal from a source location to a perceiver location, given the emitted power,
+/// the geometric sphere coefficient for the derived dimensionality, and the medium absorption samples
+/// along the path. Pure and OFF the run path (no live caller): the being-percept keystone consumes it, so
+/// this is byte-neutral by construction. The separation is the 3D Euclidean distance over the FULL
+/// [`Coord3`] (all three axes, the vertical `z` included, unlike the 2D horizontal index metric); the
+/// spreading is the general [`civsim_physics::laws::geometric_spread`] kernel at the derived
+/// dimensionality; and the path attenuation accumulates the medium's OWN absorption (each
+/// `(coefficient, length)` sample read from the medium, never a per-channel or per-medium-label constant),
+/// so occlusion emerges from the strata rather than an authored line-of-sight rule.
+pub fn received_reach(
+    emitted_power: Fixed,
+    source: Coord3,
+    perceiver: Coord3,
+    sphere_coeff: Fixed,
+    irrad_max: Fixed,
+    absorption_samples: &[(Fixed, Fixed)],
+    tau_max: Fixed,
+) -> Reach {
+    let dx = source.x as i128 - perceiver.x as i128;
+    let dy = source.y as i128 - perceiver.y as i128;
+    let dz = source.z as i128 - perceiver.z as i128;
+    let sep2 = dx * dx + dy * dy + dz * dz;
+    let spread = if sep2 > MAX_REPRESENTABLE_SEP2 {
+        // A source beyond the representable separation is negligible: its geometric spread underflows.
+        Fixed::ZERO
+    } else {
+        // r is the square root of the 3D squared separation, exact on perfect squares and deterministic
+        // otherwise; sep2 is bounded above by MAX_REPRESENTABLE_SEP2 < i32::MAX, so the cast is lossless.
+        let r = Fixed::from_int(sep2 as i32).sqrt();
+        laws::geometric_spread(
+            emitted_power,
+            r,
+            spreading_dimensionality(),
+            sphere_coeff,
+            irrad_max,
+        )
+    };
+    // Accumulate the path optical depth from the medium's own absorption samples, each capped, the total
+    // capped: a strongly-absorbing medium drives the depth to the cap, the occlusion limit.
+    let mut optical_depth = Fixed::ZERO;
+    for &(coefficient, length) in absorption_samples {
+        let segment = laws::optical_depth(coefficient, length, tau_max);
+        optical_depth = (optical_depth + segment).min(tau_max);
+    }
+    Reach {
+        spread,
+        optical_depth,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +295,168 @@ mod tests {
         });
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
         assert!(reg.get(DEV_OPTICAL).unwrap().frequency_dependent);
+    }
+
+    // --- The reach read ---
+
+    fn four_pi() -> Fixed {
+        Fixed::from_ratio(62_832, 5_000)
+    }
+
+    #[test]
+    fn received_reach_spreads_by_the_general_kernel_over_the_3d_separation() {
+        let cap = Fixed::from_int(1_000_000);
+        let power = Fixed::from_int(100);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 3, y: 4, z: 0 }; // sep2 = 9 + 16 = 25, r = 5
+        let reach = received_reach(power, src, per, four_pi(), cap, &[], Fixed::from_int(1000));
+        let r = Fixed::from_int(25).sqrt();
+        assert_eq!(
+            reach.spread,
+            laws::geometric_spread(power, r, 3, four_pi(), cap),
+            "the reach spreads by the general kernel at the derived dimensionality (3)",
+        );
+        assert_eq!(
+            reach.optical_depth,
+            Fixed::ZERO,
+            "no absorption samples means no path attenuation",
+        );
+    }
+
+    #[test]
+    fn received_reach_includes_the_vertical_z_axis() {
+        let cap = Fixed::from_int(1_000_000);
+        let power = Fixed::from_int(100);
+        let tau = Fixed::from_int(1000);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        // A purely-vertical separation reaches like an equal-magnitude horizontal one: z is a real axis.
+        let horizontal = received_reach(
+            power,
+            src,
+            Coord3 { x: 5, y: 0, z: 0 },
+            four_pi(),
+            cap,
+            &[],
+            tau,
+        );
+        let vertical = received_reach(
+            power,
+            src,
+            Coord3 { x: 0, y: 0, z: 5 },
+            four_pi(),
+            cap,
+            &[],
+            tau,
+        );
+        assert_eq!(horizontal.spread, vertical.spread);
+        // A vertical offset changes the reach; the 2D horizontal index metric would drop it.
+        let above = received_reach(
+            power,
+            src,
+            Coord3 { x: 3, y: 0, z: 4 },
+            four_pi(),
+            cap,
+            &[],
+            tau,
+        ); // sep2 = 25
+        let flat = received_reach(
+            power,
+            src,
+            Coord3 { x: 3, y: 0, z: 0 },
+            four_pi(),
+            cap,
+            &[],
+            tau,
+        ); // sep2 = 9
+        assert_ne!(
+            above.spread, flat.spread,
+            "a vertical offset changes the reach; z is not dropped"
+        );
+    }
+
+    #[test]
+    fn received_reach_occlusion_emerges_from_a_strongly_absorbing_medium() {
+        let cap = Fixed::from_int(1_000_000);
+        let tau_max = Fixed::from_int(10);
+        let power = Fixed::from_int(100);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 10, y: 0, z: 0 };
+        // A strongly-absorbing medium drives the accumulated optical depth to the cap: the occlusion
+        // limit, emerging from the medium data, with no authored line-of-sight rule.
+        let blocked = received_reach(
+            power,
+            src,
+            per,
+            four_pi(),
+            cap,
+            &[(Fixed::from_int(100), Fixed::from_int(10))],
+            tau_max,
+        );
+        assert_eq!(
+            blocked.optical_depth, tau_max,
+            "a strongly-absorbing medium occludes"
+        );
+        // A transparent medium (zero absorption coefficient) does not attenuate.
+        let clear = received_reach(
+            power,
+            src,
+            per,
+            four_pi(),
+            cap,
+            &[(Fixed::ZERO, Fixed::from_int(10))],
+            tau_max,
+        );
+        assert_eq!(clear.optical_depth, Fixed::ZERO);
+    }
+
+    #[test]
+    fn received_reach_at_zero_separation_reads_the_geometric_cap() {
+        let cap = Fixed::from_int(1_000_000);
+        let power = Fixed::from_int(100);
+        let c = Coord3 { x: 7, y: -2, z: 1 };
+        let reach = received_reach(power, c, c, four_pi(), cap, &[], Fixed::from_int(1000));
+        assert_eq!(
+            reach.spread, cap,
+            "a co-located source reads the cap (zero distance)"
+        );
+    }
+
+    #[test]
+    fn received_reach_a_far_source_is_negligible() {
+        let cap = Fixed::from_int(1_000_000);
+        let power = Fixed::from_int(100);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        // A separation whose square exceeds the representable bound is negligible (spread underflows).
+        let far = Coord3 {
+            x: 100_000,
+            y: 0,
+            z: 0,
+        };
+        let reach = received_reach(power, src, far, four_pi(), cap, &[], Fixed::from_int(1000));
+        assert_eq!(reach.spread, Fixed::ZERO);
+    }
+
+    #[test]
+    fn spreading_dimensionality_reads_the_coordinate_axis_count() {
+        // Read structurally from Coord3 (three i32 axes), not authored: a differently-dimensioned
+        // coordinate would change this without an edit here.
+        assert_eq!(spreading_dimensionality(), 3);
+    }
+
+    #[test]
+    fn received_reach_is_byte_identical_to_inverse_square_today() {
+        // With D = 3 everywhere (no confinement substrate), the general kernel reproduces inverse-square
+        // exactly, so the reach spreads bit-for-bit as inverse_square_falloff and the pins hold.
+        let cap = Fixed::from_int(1_000_000);
+        let power = Fixed::from_int(100);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 6, y: 8, z: 0 }; // sep2 = 100, r = 10
+        let reach = received_reach(power, src, per, four_pi(), cap, &[], Fixed::from_int(1000));
+        let r = Fixed::from_int(100).sqrt();
+        assert_eq!(
+            reach.spread,
+            laws::inverse_square_falloff(power, r, four_pi(), cap),
+            "at D=3 the reach spread equals inverse_square_falloff (pins hold)",
+        );
     }
 }
