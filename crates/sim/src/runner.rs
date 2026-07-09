@@ -858,11 +858,16 @@ fn being_derived_drains(
                     physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
                 ),
             };
+            // The radiating-surface emissivity is the being's covering datum (derive-vs-author, Principle 6):
+            // the covering defines the radiative surface property for both a catalog body and a grown one, so
+            // the radiant term reads the being's own covering, not a global scalar.
+            let emissivity = physiology::covering_emissivity(&w.body, &phys.organs);
             let base = base_drain_from(
                 &w.body,
                 cap,
                 energy_density,
                 surface,
+                emissivity,
                 ambient,
                 setpoint,
                 phys.anchors.medium_h,

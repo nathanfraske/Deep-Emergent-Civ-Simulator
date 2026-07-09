@@ -124,20 +124,6 @@ pub struct BodyPlanRegistry {
     pub organs: Vec<OrganKindDef>,
 }
 
-fn defs(entries: &[(&str, bool)]) -> Vec<KindDef> {
-    entries
-        .iter()
-        .enumerate()
-        .map(|(i, &(name, fantasy))| KindDef {
-            id: i as u16,
-            name: name.to_string(),
-            fantasy,
-            geometry: std::collections::BTreeMap::new(),
-            material: std::collections::BTreeMap::new(),
-        })
-        .collect()
-}
-
 /// One kind development-fixture entry with geometry and material: (name, fantasy, geometry pairs as
 /// (form-axis id, decimal), material pairs as (mat-axis id, decimal)). The geometry and material are the
 /// crude per-kind physics a part's function is derived from; labelled fixtures grounded in the floor axes.
@@ -327,18 +313,27 @@ impl BodyPlanRegistry {
                     &[("mat.indentation_hardness", "1000")],
                 ),
             ]),
-            coverings: defs(&[
-                ("bare hide", false),
-                ("fur", false),
-                ("feathers", false),
-                ("scales", false),
-                ("chitin carapace", false),
-                ("bony plates", false),
-                ("shell", false),
+            // Coverings carry the SURFACE emissivity (`opt.emissivity`, the chem/optics floor axis) their
+            // outermost layer radiates at, so the metabolism's radiant thermoregulatory term reads the
+            // being's OWN covering datum ([`crate::physiology::covering_emissivity`]) rather than a
+            // duplicate global manifest scalar (the retired `metabolism.surface_emissivity`, which
+            // duplicated this floor axis; derive-vs-author, Principle 6). A LABELLED development fixture:
+            // uniform at 0.95 to match the retired scalar (so the radiant term is byte-identical), grounded
+            // in biological-tissue emissivity (~0.95); per-covering differentiation (bare skin ~0.98, fur or
+            // scales lower) is now DATA the mechanism supports, an owner/world calibration, never authored
+            // here. Empty geometry (a covering carries no mechanical form axis).
+            coverings: kinds(&[
+                ("bare hide", false, &[], &[("opt.emissivity", "0.95")]),
+                ("fur", false, &[], &[("opt.emissivity", "0.95")]),
+                ("feathers", false, &[], &[("opt.emissivity", "0.95")]),
+                ("scales", false, &[], &[("opt.emissivity", "0.95")]),
+                ("chitin carapace", false, &[], &[("opt.emissivity", "0.95")]),
+                ("bony plates", false, &[], &[("opt.emissivity", "0.95")]),
+                ("shell", false, &[], &[("opt.emissivity", "0.95")]),
                 // Magical.
-                ("mana-ward", true),
-                ("stone-skin", true),
-                ("phase-hide", true),
+                ("mana-ward", true, &[], &[("opt.emissivity", "0.95")]),
+                ("stone-skin", true, &[], &[("opt.emissivity", "0.95")]),
+                ("phase-hide", true, &[], &[("opt.emissivity", "0.95")]),
             ]),
             // Senses carry crude optical material (a refractive index) so an optical sense's SIGHT function
             // is derived from physics (a lens denser than the medium focuses). The optical channel is the

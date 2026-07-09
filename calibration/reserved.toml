@@ -1497,13 +1497,12 @@ value = ""
 unit = "watt_per_m2_kelvin"
 source = "Part 35 body arc, Part 41 fluids floor; crates/sim/src/physiology.rs; laws::resting_heat_loss, derive_body_exchange_rate"
 
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "the body-surface emissivity for the radiant half of the thermoregulatory heat loss (law.radiant_emission), dimensionless in [0,1]; a surface property, roughly 0.95 to 0.98 for biological tissue and most non-metallic coverings (Incropera and DeWitt emissivity tables), lower for a reflective or metallic covering, so it is a per-race / per-covering datum rather than a universal"
-status = "reserved"
-value = ""
-unit = "emissivity"
-source = "Part 35 body arc; crates/sim/src/physiology.rs; laws::resting_heat_loss (radiant_emission)"
+# RETIRED (Arc 2, derive-vs-author, Principle 6): `metabolism.surface_emissivity` was a duplicate of the
+# chem/optics floor axis `opt.emissivity` (crates/physics/data/chem_optics_floor.toml). The radiant
+# thermoregulatory term now reads the being's OWN covering datum on that floor axis
+# (physiology::covering_emissivity, per-race / per-covering differentiable) rather than a global manifest
+# scalar, so there is no reserved value here to set: it derives. The real per-covering emissivities
+# (bare skin ~0.98, fur or scales lower) are covering-material world/race DATA, not a calibration constant.
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"

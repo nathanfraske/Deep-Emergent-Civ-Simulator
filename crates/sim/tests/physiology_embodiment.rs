@@ -4852,13 +4852,6 @@ value = "10"
 unit = "h"
 source = "test"
 [[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "fixture"
-status = "set"
-value = "0.95"
-unit = "e"
-source = "test"
-[[reserved]]
 id = "metabolism.stefan_boltzmann"
 basis = "fixture"
 status = "set"

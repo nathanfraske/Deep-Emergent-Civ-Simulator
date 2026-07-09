@@ -284,13 +284,9 @@ value = "10"
 unit = "convective_coefficient"
 source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
 
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the body-surface emissivity of the radiant heat-loss law"
-status = "set"
-value = "0.95"
-unit = "emissivity"
-source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+# RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
+# being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
+# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
