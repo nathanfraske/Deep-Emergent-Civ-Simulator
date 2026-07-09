@@ -756,7 +756,10 @@ name = "Probe"
         // medium, surfaced for the owner), so it is the medium carried in the review queue.
         let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
         let venus_r = venus.resolve(&manifest).unwrap();
-        assert_eq!(venus_r.medium.as_ref().unwrap().manifest_id, "medium.dense_toxic");
+        assert_eq!(
+            venus_r.medium.as_ref().unwrap().manifest_id,
+            "medium.dense_toxic"
+        );
         assert!(
             venus_r.reserved_ids().contains(&"medium.dense_toxic"),
             "medium.dense_toxic is reserved (a non-Mirror medium in the owner's review queue)"
