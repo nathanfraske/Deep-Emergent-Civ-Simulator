@@ -8,6 +8,19 @@ entry using a derived or dev-set value.
 
 ## Open
 
+R7. **The world is 3D (`Coord3`), not 2D; perception must key on it. OWNER DIRECTIVE + CORRECTION 2026-07-09.**
+While framing the reach wire (Arc 3 slice 1), I stated the world was a 2D grid and proposed a 2D `1/r` falloff.
+The owner corrected it: the world should be 2.5D minimum (space above) with subsurface (things in the ground).
+Verified in source: the world coordinate is `Coord3 { x, y, z }` (`locomotion.rs:698`), z vertical, the material
+field carrying subsurface strata at negative z (`material.rs`, hematite at z:-2); a being carries a `Coord3`.
+The 2D I saw is only the perception/place projection: the perception path keys on an opaque flat `PlaceId`
+(`world.rs:83`), and the environmental fields are a 2D surface grid. Consequence: `inverse_square_falloff`'s
+`P/(4*pi*r^2)` is the correct 3D law over the 3D `Coord3` separation, so the reach wire keys distance on `Coord3`
+directly and bypasses `PlaceId`. Owner ruling: build the perception-substrate framework out first with the reach
+wire scoped on `Coord3` directly (the small change), and SCOPE the 3D perception-place lift (raise the whole
+perception place model from `PlaceId` to `Coord3`) now and do it NEXT after the framework. Captured in
+`PERCEPTION_SUBSTRATE_ARC_PLAN.md` (slice 1 and the sequence section).
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate

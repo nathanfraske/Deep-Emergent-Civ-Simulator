@@ -42,10 +42,15 @@ Derive-first analysis. The attenuation mechanism is fixed Rust reading floor law
 `law.inverse_square_falloff` (geometric spreading, `laws.rs:1527`), `law.optical_depth` (Beer-Lambert medium
 attenuation, `laws.rs:1581`), `law.acoustic_absorption` (Stokes, `laws.rs:1238`). These have zero live
 perception callers today (confirmed by grep); wiring them to a perception read is the slice. The distance the
-laws need is a geometric quantity computable from the coordinate model Path B already carries (`w.coord()`, the
-same coordinates the thermal field diffuses over), so distance derives from the situation, not from a new
-authored value. The emitted magnitude at the source (the power the falloff law spreads) derives from the
-emitter's own physical state (its body, its motion, its metabolism), or from a per-channel emission law.
+laws need is the 3D Euclidean separation over the world's own coordinate, which is `Coord3 { x, y, z }`
+(`locomotion.rs:698 fn coord(&self) -> Coord3`): the z axis is vertical, with the material field's subsurface
+strata at negative z and space above at positive z (owner correction, verified in source). So the separation
+derives from the situation, not from a new authored value, and it is a genuine 3D distance: `inverse_square_falloff`'s
+`P/(4*pi*r^2)` is the correct 3D geometric spreading over that separation, so a source above or below a perceiver
+attenuates by its true vertical separation. The reach reads the 3D `Coord3` directly and bypasses the flat
+opaque `PlaceId` the perception path keys on today (a 2D surface projection; lifting that projection to `Coord3`
+is a scoped follow-on, below). The emitted magnitude at the source (the power the falloff law spreads) derives
+from the emitter's own physical state (its body, its motion, its metabolism), or from a per-channel emission law.
 
 What is authored/reserved, surfaced not fabricated: nothing new should be authored inline. The medium
 attenuation reads the medium's own floor coefficients (the `MediumField` already carries these). If the emitted
@@ -57,14 +62,25 @@ geometry, not Terran chemistry), so it admits any channel. But medium attenuatio
 are channel-specific: a mana-field or redox-gradient channel need not fall off as inverse-square nor emit by
 Stefan-Boltzmann. The current floor carries `opt.source_power` and `acoustic.source_power` as two hardcoded
 channel axes, not a data-driven per-channel power-and-propagation registry. The alien-clean form reads the
-channel's OWN emission-and-propagation law as data, so a novel channel's physics is a data row. Whether to build
-that per-channel registry now, or wire the Terran channels first and flag the alien channels as data follow-ons,
-is a sequencing question for the gate.
+channel's OWN emission-and-propagation law as data, so a novel channel's physics is a data row. A sharpening the
+framing surfaced and I verified against source: the falloff laws are a CLOSED, name-dispatched code set
+(`graph.rs`, three kernels, `inverse_square_falloff` / `optical_depth` path attenuation / `acoustic_absorption`
+which forms an acoustic coefficient from a frequency), so a per-channel registry can make EMISSION data (the
+source-power axes) and can SELECT among the existing kernels, but a novel channel whose propagation is none of
+the three needs a new kernel, which is code. True propagation-law-as-data is therefore a missing-physics
+substrate (a general, data-expressible law form), not reachable by a data registry over the closed kernel set.
+The gate's hardening splits cleanly: emission-as-data is achievable now (the source-power axes); the
+propagation LAW as data is the deeper substrate to flag. Whether to wire the Terran channels first (the three
+kernels plus the two source-power axes) and flag the general-law substrate as the follow-on, or build the
+general-law substrate first, is a sequencing question for the gate.
 
-The one real floor question this slice raises: the reach laws take a distance PORT that currently borrows
+The floor question this slice raises: the reach laws take a distance PORT that currently borrows
 `mech.arm_length` (`chem_optics_floor.toml:250`), a body dimension standing in for an inter-entity separation.
-Whether to generalize that port to a first-class source-to-perceiver separation (derived from coordinates) is a
-small floor-plumbing decision to surface with the gate, because it touches the floor.
+The design supplies the 3D `Coord3` source-to-perceiver separation to that port instead. Generalizing the port
+from the arm-length axis to a first-class separation is a small floor-plumbing change, surfaced with the gate
+because it touches the floor. One further input the framing surfaced: the `acoustic_absorption` kernel takes a
+signal FREQUENCY (`laws.rs:1238`), and where a signal's frequency comes from is not established by the reach
+computation, so it is flagged (a candidate reserved value rather than a fabricated one).
 
 ## Slice 2: the sensorium-gated magnitude percept (subtle)
 
@@ -161,9 +177,17 @@ only true owner-calls). None is a fabricated value.
 ## The sequence and the discipline
 
 The order is reach wire (slice 1, the clean physics-floor magnitude), then the sensorium-gated magnitude percept
-(slice 2, admit-the-alien gating), then the receiver-side valence learner (slice 3, emergence of meaning). The
-predation loop (the strike-affordance arm and the being-vs-being harm) consumes the substrate second, once the
-three slices land.
+(slice 2, admit-the-alien gating), then the receiver-side valence learner (slice 3, emergence of meaning), which
+together are the perception-substrate framework. The reach wire (slice 1) reads the 3D `Coord3` separation
+directly and bypasses the flat `PlaceId`, so the framework does not wait on a place-model change.
+
+After the framework lands, the SCOPED next slice is the 3D perception-place lift: raise the perception path's
+place model from the opaque flat `PlaceId` (a 2D surface projection, `world.rs:83`) to the world's own
+`Coord3`, so every perception read (not the reach wire alone) keys on the true 3D location, above the surface
+and below it. The world already carries the 3D substrate (`Coord3` with subsurface strata at negative z, the
+material field indexed by it); the lift is to route perception through it rather than the surface projection.
+This is the owner's directive: scope it now, build it next after the framework is out. The predation loop (the
+strike-affordance arm and the being-vs-being harm) consumes the substrate once the framework and the lift land.
 
 Each slice is framed blind BEFORE any code: the section-11 input-bias smoke test fail-closed on the slice's
 framing, then the section-10 panel, with every decisive claim source-verified. Cadence is push per segment,
