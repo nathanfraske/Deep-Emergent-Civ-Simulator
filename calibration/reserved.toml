@@ -136,8 +136,10 @@ source = "Part 9 evidence engine; record 62.6; audit section 1f"
 [[reserved]]
 id = "absence.characteristic_lifespan_scan_ceiling"
 basis = "the age ceiling absence::characteristic_lifespan scans to (crates/sim/src/absence.rs ABSENCE_PROBE_MAX). Primarily a determinism-and-performance scan bound, but it carries a content-path role: for a race whose natural-mortality hazard never crosses the LIFESPAN_HAZARD_THRESHOLD within the scan, this ceiling becomes its characteristic lifespan and so the presumed-dead absence-window cap. Set well past any expected characteristic lifespan so it never truncates a real one; the engine default is 4096 age-cadences, raised per world for a very long-lived race so the presumed-dead ceiling is never a fabricated presumption. Deriving the ceiling from race hazard alone is impossible for a never-crossing hazard, so a finite scan bound is unavoidable and is reserved rather than hidden"
-status = "reserved"
-value = ""
+status = "set"
+value = "4096"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "age_cadences"
 source = "Part 20, Part 40; crates/sim/src/absence.rs characteristic_lifespan/absence_window"
 
@@ -346,16 +348,20 @@ source = "Part 25 genome model; record 62.5; audit section 1d"
 [[reserved]]
 id = "axiom.evidence_ring_curve"
 basis = "the memory-phenotype-to-ring-slots map: a response curve read by axiom::RingCapacityLaw over each being's own expressed Mind.memory, so a race that invests in memory tracks more evidence and a forgetful one less, derived from that race's own body with no shared human span authored. Set the (memory, slots) points that place the ring size against the memory phenotype; Miller's 7 plus or minus 2 is kept only as a candidate reference point on the curve, not a universal count. Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case."
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0=0,8=16"
 unit = "curve"
 source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
 
 [[reserved]]
 id = "axiom.evidence_ring_hard_cap"
 basis = "the performance and determinism budget: the per-tick and per-save cost of the largest evidence ring any mind may carry, a hard state-hash and replay bound independent of any race's memory. Set from the ring's per-tick scan cost and its serialized size against the population, the ceiling past which the curve is clamped no matter how much memory a being expresses; a bound found by trial, raised for deeper justification memory or lowered for compute and save size."
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "32"
 unit = "count"
 source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
 
@@ -389,7 +395,7 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.group_aggregation_rule"
-basis = "how the hold fields aggregate to a group; a culture entrenchment likely derives from member variance rather than the mean"
+basis = "how the hold fields aggregate to a group. OWNER RULING (Mirror sign-off, batch 2): author EQUAL-WEIGHTING (the plain mean over members) now, and DERIVE from member variance in the later social-depth arc (a divided group holds less firmly, so entrenchment falls with member variance). AUDIT CATCH (group E): the value is a rule/function choice (unit = rule, no decimal), and there is no live non-test consumer of this key today, so the ruling is recorded here for the social-depth arc rather than fabricating a magnitude; the variance derivation is the flagged follow-on."
 status = "reserved"
 value = ""
 unit = "rule"
@@ -397,7 +403,7 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.stubbornness_dogmatism_weight"
-basis = "the weight on dogmatism versus freezing in the Friedkin-Johnsen temperament pull the enculturation band applies (EpistemicStance::effective_stubbornness): the effective stubbornness anchor is base + (1 - base) * (w * dogmatism + (1 - w) * freezing), and w is this weight, its complement weighting freezing. Basis for deciding it: which of the two temperament fields (need for closure versus permanence of a locked belief) should drive the anchor harder, calibrated against how fast a dogmatic-but-labile mind versus a freezing-but-open mind hardens in the disagreement-persistence test; w = 0.5 reproduces the former plain mean. Reserved fail-loud rather than the bare hardcoded half it replaced (never fabricate a value); it is read through axiom::stubbornness_dogmatism_weight and installed with World::set_stubbornness_split, and the enculturation band is a no-op until it is set."
+basis = "the weight on dogmatism versus freezing in the Friedkin-Johnsen temperament pull the enculturation band applies (EpistemicStance::effective_stubbornness): the effective stubbornness anchor is base + (1 - base) * (w * dogmatism + (1 - w) * freezing), and w is this weight, its complement weighting freezing. Basis for deciding it: which of the two temperament fields (need for closure versus permanence of a locked belief) should drive the anchor harder, calibrated against how fast a dogmatic-but-labile mind versus a freezing-but-open mind hardens in the disagreement-persistence test; w = 0.5 reproduces the former plain mean. AUDIT CATCH (group E, Prime Directive 2): the live effective_stubbornness split weight (axiom.rs) is NOT fed from this manifest key today, because stubbornness_dogmatism_weight() has no non-test caller (a key-vs-wiring mismatch), so setting the owner-ruled 0.40 would not reach the live AGM band until the getter is wired into the live split. RECONCILE THE WIRING before setting: either wire the live split to read this key, or retire the key. Reserved fail-loud until reconciled (never fabricate a value)."
 status = "reserved"
 value = ""
 unit = "weight"
@@ -431,17 +437,21 @@ source = "Part 33.3 language system; record 62.13; crates/sim/src/language.rs ph
 
 [[reserved]]
 id = "articulation.vocal_tract_scale"
-basis = "a per-race multiplier on the base resonator lengths (Race.articulation.vocal_tract_scale, crates/sim/src/race.rs), so a race with a larger resonating cavity gets longer resonators and lower formants and a smaller one higher formants, the divergence read through langmod::articulated_geometry with no race branch (Principle 9); an identity scale of one reproduces the base geometry. AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an interim per-race lever set to the race's vocal-tract size relative to the base geometry, not a permanent constant; flagged for the future derivation rather than a fabricated default"
-status = "reserved"
-value = ""
+basis = "a per-race multiplier on the base resonator lengths (Race.articulation.vocal_tract_scale, crates/sim/src/race.rs), so a race with a larger resonating cavity gets longer resonators and lower formants and a smaller one higher formants, the divergence read through langmod::articulated_geometry with no race branch (Principle 9); an identity scale of one reproduces the base geometry. AUTHORED NOW, DERIVABLE LATER: this should eventually derive from the race's body plan (the resonating-cavity size, the anatomy tier / R-ORGAN-FLUX), so it is an interim per-race lever set to the race's vocal-tract size relative to the base geometry, not a permanent constant; flagged for the future derivation rather than a fabricated default Derive-vs-author: a dimensionless per-race multiplier on the shared base resonator lengths; for the Mirror 1:1 human control it is the identity 1.0 by definition, a per-race datum not on the physics floor (the acoustic axes carry the carrier, not this scale) and not derivable"
+status = "set"
+value = "1.0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "scale"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/langmod.rs articulated_geometry; couples R-ORGAN-FLUX"
 
 [[reserved]]
 id = "articulation.hearing_resolution"
-basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value"
-status = "reserved"
-value = ""
+basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value Derive-vs-author: a per-race auditory just-noticeable frequency difference (a sensory discrimination datum, R-SENSORIUM); NOT the floor axis acoustic.frequency (the carrier Hz), a per-race sensory phenotype the engine models no deeper, not derivable today"
+status = "set"
+value = "3"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "hertz"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 
@@ -455,9 +465,11 @@ source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs pro
 
 [[reserved]]
 id = "articulation.word_min_len"
-basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant"
-status = "reserved"
-value = ""
+basis = "the minimum number of producible sounds a word carries, the low end of the coining length range langmod::form_system_from_values passes to FormSystem::new (crates/sim/src/langmod.rs). A count of at least one; set from the shortest well-formed word the modality admits. AUTHORED NOW, DERIVABLE LATER: the length range should eventually derive from the inventory size against the concept count (a contrast-budget argument, so a small inventory needs longer words to name the same concepts), so it is an interim lever flagged for that derivation rather than a permanent constant Derive-vs-author: a language-generator structural bound (a well-formed word needs at least one producible sound), an engine/generator floor not on the physics floor and not derivable from a deeper substrate"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "count"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
 
@@ -489,9 +501,11 @@ source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET rec
 
 [[reserved]]
 id = "lang.l2_acquisition"
-basis = "DERIVES (2026-07-03) through language::L2AcquisitionLaw::increment_for (crates/sim/src/language.rs): the per-tick second-language proficiency increment is a DECREASING data curve read at the learner's maturation fraction (Race::maturation_fraction, raw age normalized by that race's own maturity_years). The age-of-acquisition breakpoint is therefore each race's own maturity, not the human late teens: two races with different maturity_years cross the critical period at different raw ages from this one kernel and one curve, never a per-race branch (Principle 9), and the increment slows to the curve's adult residual once the fraction saturates at one (maturity). The reserved input is this increment-by-maturation curve (parsed by require_curve as maturation_fraction=increment points, decreasing; a flat curve is the no-critical-period special case); no shared human age remains. The mechanism is fixed Rust, the curve is data (Principle 11)."
-status = "reserved"
-value = ""
+basis = "DERIVES (2026-07-03) through language::L2AcquisitionLaw::increment_for (crates/sim/src/language.rs): the per-tick second-language proficiency increment is a DECREASING data curve read at the learner's maturation fraction (Race::maturation_fraction, raw age normalized by that race's own maturity_years). The age-of-acquisition breakpoint is therefore each race's own maturity, not the human late teens: two races with different maturity_years cross the critical period at different raw ages from this one kernel and one curve, never a per-race branch (Principle 9), and the increment slows to the curve's adult residual once the fraction saturates at one (maturity). The reserved input is this increment-by-maturation curve (parsed by require_curve as maturation_fraction=increment points, decreasing; a flat curve is the no-critical-period special case); no shared human age remains. The mechanism is fixed Rust, the curve is data (Principle 11). Derive-vs-author: the DECREASING age-of-acquisition curve SHAPE the L2 increment reads at the learner maturation fraction (language.rs L2AcquisitionLaw); the breakpoint DERIVES from each race maturation, the curve shape is authored world/language data, not a floor axis"
+status = "set"
+value = "0.0=1.00,0.85=1.00,1.0=0.55,1.5=0.35"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.6 language system; record 62.7; audit section 1g; Part 20 R-AGING"
 
@@ -555,9 +569,11 @@ source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PRO
 
 [[reserved]]
 id = "lang.typology_disharmony"
-basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited"
-status = "reserved"
-value = ""
+basis = "the probability a parameter ignores the harmony tilt and draws from its own marginal, keeping a disharmonic language rare rather than unreachable; the observed per-axis disharmony is roughly 5 percent on the adposition axis (WALS 95A), already reserved in the 33.4 blockquote and now cited Derive-vs-author: the measured cross-linguistic probability a typological parameter draws its own marginal against the harmony tilt; a world-typology datum grounded in linguistic measurement, not on the physics floor and not derivable"
+status = "set"
+value = "0.05"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 
@@ -597,9 +613,11 @@ source = "Part 33.4; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "langdet.retention_memory_scale"
-basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9)."
-status = "reserved"
-value = ""
+basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9). Derive-vs-author: a per-race memory-scaling curve (Principle 11 data); for the Mirror single-human-phenotype control it is the memory-independent FLAT identity, not a floor axis and not a simplification of a modeled substrate"
+status = "set"
+value = "0.0=1.0,1.0=1.0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.4; record 62.12; audit section 1n; Part 9 belief deterioration"
 
@@ -655,9 +673,11 @@ source = "Part 33.6; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "langmod.blend_propensity"
-basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier"
-status = "reserved"
-value = ""
+basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier Derive-vs-author: a per-culture/per-being code-blend-versus-switch propensity (the form-of-mixing choice, explicitly never a transmission fidelity per its own basis); authored social data grounded in bimodal-bilingual measurement, not a floor axis and not derivable from physics"
+status = "set"
+value = "0.85"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.6; record 62.13; audit section 1o"
 
@@ -823,15 +843,17 @@ source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel
 
 [[reserved]]
 id = "transmission.drift_rate"
-basis = "the per-race perception-and-memory copy fidelity; the half-width of the mean-zero proficiency perturbation a maximally unfaithful copier incurs, scaled per copier by copy_drift(base, memory, perception). Weber's roughly 3% just-noticeable difference is one calibration point for the perceptual resolution, not the law (design.md:2756); a real value is set per-race data through the perception model, this scalar is only the base"
-status = "reserved"
-value = ""
+basis = "the per-race perception-and-memory copy fidelity; the half-width of the mean-zero proficiency perturbation a maximally unfaithful copier incurs, scaled per copier by copy_drift(base, memory, perception). Weber's roughly 3% just-noticeable difference is one calibration point for the perceptual resolution, not the law (design.md:2756); a real value is set per-race data through the perception model, this scalar is only the base Derive-vs-author: the BASE half-width of the mean-zero proficiency perturbation a maximally-unfaithful copier incurs; per-copier drift derives FROM it via copy_drift(base,memory,perception), so this is the irreducible base, a social-transmission datum not on the physics floor"
+status = "set"
+value = "0.03"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "proficiency_per_copy"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
 
 [[reserved]]
 id = "transmission.loss_rate"
-basis = "the erosion timescale a below-floor design loses proficiency at per tick; set equal to evidence.decay_rate (0.25/day) for consistency with the trace-and-memory decay the evidence subsystem already uses, since forgetting a technique and forgetting a trace are the same decay physics"
+basis = "the erosion timescale a below-floor design loses proficiency at per tick. AUDIT CATCH (group E, Prime Directive 2): the prior basis pinned this equal to evidence.decay_rate (0.25/day) for consistency, but that pin is NO LONGER VALID (evidence.decay_rate has since changed, so the equality would import an unrelated value). Re-derive from its OWN basis: the generational timescale over which a craft held below its practitioner floor fades from a lineage proficiency, set from the erosion half-life you want a lost craft to decay over, never the stale evidence-decay value and never the research-tagged number."
 status = "reserved"
 value = ""
 unit = "proficiency_per_tick"
@@ -865,9 +887,11 @@ source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
 [[reserved]]
 id = "tier.belief_level_to_strength"
-basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength."
-status = "reserved"
-value = ""
+basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength. Derive-vs-author: a units-anchor identity curve between two representations of the SAME internal [0,1] belief quantity (pool knowledge level to promoted facet strength, belief.rs instantiate_strength); the linear identity reconstructs the pool level exactly (the documented calibration target), not a floor axis and not derivable from a deeper substrate"
+status = "set"
+value = "0=0,1=1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
 
@@ -1030,7 +1054,10 @@ source = "Part 25.7-25.8; R-REPRO census tier (crates/sim/src/census.rs); pre-da
 [[reserved]]
 id = "reproduction.mutation_spread"
 basis = "the half-width of the bounded mean-zero deviation a child's inherited disposition draws around the midparent at birth: the belief innate-seed inheritance (crates/sim/src/world.rs inherited_beliefs, drawn under Phase::AXIOM_INHERIT per axis) and the mate-preference midparent inheritance (drawn under Phase::MATE_CHOICE) both take this ONE spread, so it is a single lever not two, and no second value is introduced (world.rs 1685). Basis for deciding it: the inheritance-deviation scale that keeps a lineage's disposition recognizably heritable across a generation while still admitting drift, set to the standing dispersion of the innate axiom seed the population already carries so a child resembles its parents to the same degree the axiom seeds vary within a band; explicitly not an independent fabricated magnitude. The production dawn (build_dawn_runner) arms reproduction from this surfaced value through ReproductionParams::from_manifest rather than a hardcoded inline number; a Dev run tolerates the dev-fixtures placeholder."
-status = "reserved"
+status = "set"
+value = "0.02"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
 unit = "disposition_units_half_width"
 source = "Part 25, Part 28, R-REPRO; crates/sim/src/world.rs ReproductionParams / inherited_beliefs; real-world unification step 1"
 
@@ -1077,7 +1104,7 @@ source = "Part 25.4"
 # genome.mutation_step RETIRED (2026-07-03, superseded by genome.additive_mutation_step): the
 # placeholder "size of the continuous additive perturbation" is replaced by the fail-loud Gaussian-
 # standard-deviation form genome.additive_mutation_step (line above; its basis names this retirement),
-# the value GeneticScheme.additive_mutation_step actually reads. The direction siblings .high and .low
+# the value GeneticScheme.additive_mutation_step reads. The direction siblings .high and .low
 # are retired with it (below); the seven canonical scenarios repoint their mutation-step dial to
 # genome.additive_mutation_step (and its .high/.low). Removed rather than left a dead set value that
 # no code reads, the retirement discipline the sibling derive-audit ids already follow.
@@ -1165,16 +1192,20 @@ source = "Part 25, Part 32; docs/time_and_playback.md"
 [[reserved]]
 id = "world.orbital_period_seconds"
 basis = "the length of the world's year in world-seconds (one full orbit), the physical input the life-cadence beat derives from through ticks_from_seconds over time.base_tick_seconds (crates/sim/src/clock.rs); owner-set per world rather than an Earth default: Earth's 31536000 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default. The Q32.32 range caps a representable year near 2.1e9 world-seconds."
-status = "reserved"
-value = ""
+status = "set"
+value = "31556952"
+set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+set_date = "2026-07-09"
 unit = "seconds_per_orbit"
 source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/sim/src/clock.rs ticks_from_seconds"
 
 [[reserved]]
 id = "world.rotation_period_seconds"
 basis = "the length of the world's day in world-seconds (one full rotation), the physical input a day-night calendar and diurnal cadences derive from; owner-set per world rather than an Earth default: Earth's 86400 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default."
-status = "reserved"
-value = ""
+status = "set"
+value = "86400"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "seconds_per_rotation"
 source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
 
@@ -1244,33 +1275,41 @@ source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
 
 [[reserved]]
 id = "controller.taxis.move_bias"
-basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding MOVE-activation bias weight a dawn taxis reaction norm seeds onto the controller's bias input, so a founder wants to move rather than idle on its dawn cell. Set so the clamped MOVE activation (its output is clamped to [0, 1]) saturates decisively toward moving and beats a resting-zero INGEST activation, so the founder leaves its cell and disperses along the gradient; a unit bias saturates the clamp cleanly. Selection tunes the realised coupling from there once movement-dependent fitness exists; this is only the dawn seed. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the controller own activation clamp (verified crates/sim/src/controller.rs:111 clamp to [-1,1], selection clamp [0,1] at line 720); the dawn-seed magnitude that saturates the clamp so a founder disperses, not a floor axis and not a simplification of a modeled substrate; selection tunes the realised coupling from there once movement-dependent fitness exists"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.heading_gain"
-basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding heading gain a dawn taxis reaction norm seeds onto the MOVE heading outputs from the target axis's source-direction percept, so the founder steers along the gradient the runner senses (the temperature gradient direction for thermotaxis, a resource direction for foraging). Set so the MOVE heading follows the unit gradient direction the runner already normalises; a unit gain reproduces that direction, larger gains only re-saturate the same heading through the clamp. Reads no race id; selection refines the from-either-side comfort steering (which a linear reaction norm cannot express) once the recurrent tier or mutation supplies it. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the runner already-normalised unit gradient direction (controller.rs:111 clamp); a unit gain reproduces that direction, larger gains only re-saturate through the clamp; not a floor axis and not derivable, and selection refines the steering the linear norm cannot express"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights forage_taxis_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.here_suppress"
-basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding suppression a dawn forage-taxis reaction norm seeds onto the MOVE activation from a forage source's here-flag, so a being STOPS on a source rather than wandering off it (the here-flag negates the move bias when a source is underfoot). Set so the here-flag cancels the move bias decisively; a unit magnitude against a unit bias holds the being on the source. Reads no race id; selection refines the leave-when-depleted timing (base-level liveliness step 3, the forage arm of the taxis norm). Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor matched to the unit move bias it must cancel (a unit magnitude holds the being on a forage source); not a floor axis and not a simplification of a modeled substrate; selection refines the leave-when-depleted timing"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
 
 [[reserved]]
 id = "controller.taxis.ingest_drive"
-basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture"
-status = "reserved"
-value = ""
+basis = "the founding INGEST-activation drive a dawn forage-taxis reaction norm seeds from a forage source's here-flag, so a being eats what it stands on (the here-flag drives the shared scalar INGEST output). Set so the ingest activation saturates decisively when a source is underfoot and beats the (here-suppressed) MOVE activation; a unit magnitude saturates the clamp. The reserve-room bound in the ingest arm, not a controller gate, governs how much is drawn, so a full being draws nothing without a per-axis gate the single INGEST output cannot carry across several forage axes. Reads no race id. Read by a canonical race genesis; the dev harness stands up a labelled fixture Derive-vs-author: an engine-units anchor to the same [0,1] INGEST activation clamp the MOVE output uses (controller.rs selection clamp line 720); unity saturates it decisively when a source is underfoot; not a floor axis, and the reserve-room bound governs how much is drawn"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
 
@@ -1420,8 +1459,10 @@ source = "canonical runner field layer (crates/sim/src/runner.rs); crates/physic
 [[reserved]]
 id = "field.cell_size"
 basis = "the edge length of one field cell in world-metres, the dx the derived thermal-diffusion coefficient (field.diffusion) divides by as alpha*dt/dx^2 (crates/sim/src/runner.rs derive_field_diffusion). Primarily a determinism-and-scale bound rather than a taste value: it sets the spatial resolution the temperature stencil runs at and, with the base tick, whether the derived coefficient is both representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. Basis: the world's chosen map resolution (metres per tile), set so the derived coefficient stays representable and sub-bound for the densest medium the world selects; a smaller cell raises the coefficient toward the stability rail, a larger one shrinks it toward zero. Reserved rather than derived because the map-cell size is a world-scale choice, not a physical constant"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.01"
 unit = "metres_per_cell"
 source = "canonical runner field layer (crates/sim/src/runner.rs) derive_field_diffusion; design Part 5.4/5.5"
 
@@ -1435,11 +1476,33 @@ source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 
 [[reserved]]
 id = "field.relaxation"
-basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick"
-status = "reserved"
-value = ""
+basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick Derive-vs-author: the lumped Newtonian (Held-Suarez-style) rate a cell relaxes toward its solar-and-biome baseline per tick; the engine models the field approach-to-baseline no deeper than this lumped coefficient (the radiative energy-balance kernels exist in the floor but are unwired), a coarse-model rate not a floor axis, reversible when the radiative wiring lands"
+status = "set"
+value = "0.0000694"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
+
+[[reserved]]
+id = "climate.mean_surface_temperature"
+basis = "the world's mean surface temperature in Kelvin, the offset the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature around: T = mean + range*(normalised - 1/2) (Field::from_map_absolute, crates/sim/src/runner.rs). The physics laws read absolute Kelvin (Stefan-Boltzmann T^4, the Clausius-Clapeyron saturation, the productivity temperature factor), so the worldgen's normalised [0,1] shape must be reconciled to Kelvin here rather than wearing a Kelvin label over [0,1] values. Set from the world's mean surface temperature (Earth ~288 K). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable from a deeper substrate; the dev fixture is the identity placeholder 1/2 that keeps the field the raw normalised axis (byte-neutral)"
+status = "set"
+value = "287"
+set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+set_date = "2026-07-09"
+unit = "kelvin"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "climate.latitude_temperature_range"
+basis = "the world's full equator-to-pole surface temperature span in Kelvin, the amplitude the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature by: T = mean + range*(normalised - 1/2), so the [0,1] axis spans [mean - range/2, mean + range/2] (Field::from_map_absolute). Set from the world's latitudinal temperature range (Earth ~60 K, roughly -15 C poles to 45 C equator). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable; the dev fixture is the identity placeholder 1 that keeps the field the raw normalised axis (byte-neutral)"
+status = "set"
+value = "60"
+set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+set_date = "2026-07-09"
+unit = "kelvin"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
 
 [[reserved]]
 id = "field.relaxation.low"
@@ -1452,72 +1515,83 @@ source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 [[reserved]]
 id = "field.body_exchange"
 basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate, and this stays a fail-loud fixture-fallback sentinel"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.1"
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/src/physiology.rs derive_body_exchange_rate; design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
 
 # --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
-# The three headline anchors the derivation is built on (the Kleiber coefficient a, the normalized
-# body-mass-to-kilograms bridge, and the medium convective coefficient h), plus the two the radiant
-# thermoregulatory term reads (the body-surface emissivity and the Stefan-Boltzmann constant). Each is
-# surfaced fail-loud rather than fabricated; the kernels are fixed Rust (crates/physics/src/laws.rs
-# basal_metabolic_rate, resting_heat_loss, metabolic_drain_fraction), these are the owner's to set.
-# Read together by MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
+# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a, the normalized
+# body-mass-to-kilograms bridge, and the Stefan-Boltzmann constant. Two surface properties the radiant
+# and convective terms once carried as anchors now DERIVE from the being's own data (derive-vs-author,
+# Principle 6): the radiant-surface emissivity from its covering (opt.emissivity) and the medium
+# convective coefficient h from its medium (medium.{air,water} convective_coefficient), both retired here
+# (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
+# kernels are fixed Rust (crates/physics/src/laws.rs basal_metabolic_rate, resting_heat_loss,
+# metabolic_drain_fraction), these are the owner's to set. Read together by
+# MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
 
 [[reserved]]
 id = "metabolism.kleiber_coefficient"
 basis = "the Kleiber coefficient a in the resting metabolic rate P = a*mass^(3/4) (W per kg^(3/4)), the one owner anchor of the allometric law (the 3/4 exponent is a baked universal physics affordance, West/Brown/Enquist's fractal-network derivation; Principle 9). Set to the normalization the modelled biota's resting oxygen consumption implies at the reference mass; the mammalian anchor is roughly 3.4 W/kg^(3/4) (Kleiber 1932; Savage et al. 2004), a per-race datum rather than a universal, since a cold-blooded or exotic metabolism scales the coefficient though not the exponent"
-status = "reserved"
-value = ""
+status = "set"
+value = "3.4"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "watt_per_kg_three_quarter"
 source = "Part 20, Part 41; crates/sim/src/physiology.rs; laws::basal_metabolic_rate"
 
 [[reserved]]
 id = "metabolism.body_mass_kg_scale"
 basis = "the kilograms a body carries at the normalized body_mass = 1 (the master size trait's trait-to-kilograms bridge, R-UNITS-PIN). NOT derivable: it pins where the normalized [0,1] body-mass trait lands on the physical kilogram scale the Kleiber law and the thermal mass read, so it is an owner units anchor, not a realism value. Set per the largest-taxon body mass the world's size distribution reaches at body_mass = 1"
-status = "reserved"
-value = ""
+status = "set"
+value = "70"
+set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+set_date = "2026-07-09"
 unit = "kilograms_at_body_mass_one"
 source = "Part 25.14 body plan, R-UNITS-PIN; crates/sim/src/physiology.rs"
 
-[[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "the medium convective heat-transfer coefficient h (W/(m^2*K)) the body-to-medium exchange law reads (law.convective_flux, law h*A/(m*c)), a fluids-floor medium datum, not a body property: a still gas couples slowly (natural convection ~2 to 25 W/(m^2*K)), stirred water fast (~50 to 1000+); set per the ambient medium the world runs in (Incropera and DeWitt convective coefficient tables), so a body in dense hot air or immersed in water couples faster than one in still thin air"
-status = "reserved"
-value = ""
-unit = "watt_per_m2_kelvin"
-source = "Part 35 body arc, Part 41 fluids floor; crates/sim/src/physiology.rs; laws::resting_heat_loss, derive_body_exchange_rate"
+# RETIRED (Arc 2, derive-vs-author): the metabolism now reads h from the being's medium (medium.{air,water}
+# convective_coefficient axis), read at the being's cell via MediumField::convective_at, rather than a
+# duplicate global scalar. See crates/sim/src/physiology.rs and crates/sim/src/runner.rs.
 
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "the body-surface emissivity for the radiant half of the thermoregulatory heat loss (law.radiant_emission), dimensionless in [0,1]; a surface property, roughly 0.95 to 0.98 for biological tissue and most non-metallic coverings (Incropera and DeWitt emissivity tables), lower for a reflective or metallic covering, so it is a per-race / per-covering datum rather than a universal"
-status = "reserved"
-value = ""
-unit = "emissivity"
-source = "Part 35 body arc; crates/sim/src/physiology.rs; laws::resting_heat_loss (radiant_emission)"
+# RETIRED (Arc 2, derive-vs-author, Principle 6): `metabolism.surface_emissivity` was a duplicate of the
+# chem/optics floor axis `opt.emissivity` (crates/physics/data/chem_optics_floor.toml). The radiant
+# thermoregulatory term now reads the being's OWN covering datum on that floor axis
+# (physiology::covering_emissivity, per-race / per-covering differentiable) rather than a global manifest
+# scalar, so there is no reserved value here to set: it derives. The real per-covering emissivities
+# (bare skin ~0.98, fur or scales lower) are covering-material world/race DATA, not a calibration constant.
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
 basis = "the Stefan-Boltzmann constant sigma = 5.670374e-8 W/(m^2*K^4), the universal proportionality of the radiant heat-loss law (law.radiant_emission). A CODATA physical constant, not an owner taste value, surfaced fail-loud (an authored Principle-9 physics affordance) rather than hardcoded inline; the same value the other radiant-law callers pass"
-status = "reserved"
-value = ""
+status = "set"
+value = "0.0000000567037441"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "watt_per_m2_kelvin4"
 source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
 
 [[reserved]]
 id = "metabolism.respiration_transfer_coefficient"
 basis = "the Fick membrane gas-transfer coefficient k the respiration coupling reads (law.membrane_gas_flux, flux = k*A*(c_medium - c_internal)), a per-membrane permeability datum, not a body property: it sets how fast a respiratory surface exchanges the respirable species with its medium per unit area and concentration gap (a permeable gill or lung membrane exchanges faster than a thick, low-diffusivity integument). Set per the membrane's gas permeability against the medium (Fick diffusion coefficient over membrane thickness); read on the canonical embodiment path by EmbodiedPhysiology::from_manifest, a labelled dev fixture (Fixed::ONE) in tests. The flux representability cap is an engine-mechanics bound in code (RESPIRATION_FLUX_MAX), not an owner value"
-status = "reserved"
-value = ""
+status = "set"
+value = "1"
 unit = "gas_transfer_coefficient"
 source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/src/medium.rs respire, crates/sim/src/runner.rs EmbodiedPhysiology"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate; INTERIM, see note)"
+set_date = "2026-07-09"
+note = "INTERIM delegated value to let Mirror's embodied founders breathe under Calibrated. FLAGGED FOR THE OWNER: this is a per-membrane gas permeability (Fick k = D/L, the being's respiratory-membrane diffusivity over its thickness), a biology datum, not derivable from a deeper substrate; the real value is the owner's to set per the being's membrane (a permeable gill/lung exchanges faster than a thick integument). Set to the labelled unit interim (1) so the embodied boot runs; surfaced to the reviewer for the owner's real per-membrane value."
 
 [[reserved]]
 id = "medium.submersion_elevation"
-basis = "the waterline: the normalised [0, ONE) elevation below which a map cell is submerged and holds the submerged medium (medium.water), and at or above which it holds the emergent medium (medium.air). Set on the same normalised elevation field the biome classifier reads (crates/world/src/terrain.rs classifies ocean and coast by elevation band), so the basis is where the sea meets the land on that scale: the dev biome set's ocean band is [0, 0.40) and its coast band [0.40, 0.45), so a threshold at the ocean-band top (about 0.40) makes the submerged cells exactly the ocean cells, and a higher threshold floods the coast. The owner sets where the waterline sits for a given world's sea level; read on the canonical embodiment path by MediumField::from_map through medium_field_from_manifest, a labelled dev fixture in tests. A single-medium world (the submerged and emergent ids equal) folds to a uniform field whatever this threshold, so it binds only where two media meet"
-status = "reserved"
-value = ""
+basis = "the waterline: the normalised [0, ONE) elevation below which a map cell is submerged and holds the submerged medium (medium.water), and at or above which it holds the emergent medium (medium.air). Set on the same normalised elevation field the biome classifier reads (crates/world/src/terrain.rs classifies ocean and coast by elevation band), so the basis is where the sea meets the land on that scale: the dev biome set's ocean band is [0, 0.40) and its coast band [0.40, 0.45), so a threshold at the ocean-band top (about 0.40) makes the submerged cells exactly the ocean cells, and a higher threshold floods the coast. The owner sets where the waterline sits for a given world's sea level; read on the canonical embodiment path by MediumField::from_map through medium_field_from_manifest, a labelled dev fixture in tests. A single-medium world (the submerged and emergent ids equal) folds to a uniform field whatever this threshold, so it binds only where two media meet Derive-vs-author: a geometric world datum (the waterline) on the engine normalised [0,1) elevation field, aligned to the terrain ocean band top (verified crates/world/src/terrain.rs:190 ocean band [p(0),p(40))); a per-world sea level, an authored world datum, not a floor axis and not derivable from deeper physics"
+status = "set"
+value = "0.40"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "normalised_elevation"
 source = "R-MEDIUM (Part 62 medium substrate); owner ruling 2026-07-04 (docs/working/REAL_WORLD_UNIFICATION_HANDOFF.md §7); crates/sim/src/medium.rs MediumField::from_map, crates/sim/src/runner.rs medium_field_from_manifest; crates/world/src/terrain.rs biome elevation bands"
 
@@ -1542,8 +1616,10 @@ source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 [[reserved]]
 id = "physiology.thermal_setpoint"
 basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved"
-status = "reserved"
-value = ""
+status = "set"
+value = "310"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
 
@@ -1565,9 +1641,11 @@ source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
 id = "physiology.thermal_half_band"
-basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; recommended about 8 K for a temperate race; reserved"
-status = "reserved"
-value = ""
+basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology"
+status = "set"
+value = "8"
+set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+set_date = "2026-07-09"
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
 
@@ -1589,23 +1667,27 @@ source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
 id = "medium.air"
-basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved. THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.026 (W/m/K, dry air near 300 K, the fluids/thermal floor) and specific_heat about 1005 (J/kg/K, air at constant pressure); with the density above these give a thermal diffusivity near 2.2e-5 m^2/s, real-with-source from Incropera and DeWitt, not fabricated. Reserved for the owner"
-status = "reserved"
-value = ""
+basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved. THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.026 (W/m/K, dry air near 300 K, the fluids/thermal floor) and specific_heat about 1005 (J/kg/K, air at constant pressure); with the density above these give a thermal diffusivity near 2.2e-5 m^2/s, real-with-source from Incropera and DeWitt, not fabricated. CONVECTIVE COEFFICIENT (added Arc 2, derive-vs-author, the h the metabolism reads at a being's cell for the body-to-medium heat exchange, retiring the metabolism.medium_convective_coefficient global scalar): convective_coefficient about 10 (W/m^2/K, natural convection in still air is ~2 to 25 per Incropera and DeWitt), a per-medium LUMPED datum keyed on the medium the body occupies. HONEST DERIVE-VS-AUTHOR STATUS: this retires the GLOBAL scalar in favour of per-medium DATA (an improvement, the being reads its occupied medium's h rather than one constant everywhere), but h is NOT an irreducible medium property: it is flow-dependent (h = Nu*k/L via the Nusselt boundary-layer relation), so a single per-medium h is a lumped simplification. The full derive of h from this medium's conductivity/density/specific_heat and the flow past the being's surface (the Nusselt derivation) is DEFERRED (the reviewer-approved interim: dedup the global scalar now, derive from flow later); the lumped per-medium h stands until then. Reserved for the owner"
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005,convective_coefficient=10"
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 
 [[reserved]]
 id = "medium.water"
-basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. Reserved"
-status = "reserved"
-value = ""
+basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. CONVECTIVE COEFFICIENT (added Arc 2, derive-vs-author, the h the metabolism reads at a being's cell for the body-to-medium heat exchange, retiring the metabolism.medium_convective_coefficient global scalar): convective_coefficient about 500 (W/m^2/K, forced or immersion convection in water is ~50 to 1000+ per Incropera and DeWitt, so an immersed body couples to water far faster than to still air), a per-medium LUMPED datum keyed on the medium the body occupies. HONEST DERIVE-VS-AUTHOR STATUS: as for medium.air, this retires the GLOBAL scalar in favour of per-medium DATA, but h is flow-dependent (h = Nu*k/L), so the lumped per-medium value is a simplification and the Nusselt derivation of h from this medium's k/rho/c and the flow is DEFERRED (the reviewer-approved interim). Reserved"
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 
 [[reserved]]
 id = "medium.dense_toxic"
-basis = "the crushing hot toxic atmosphere (Venus), a require_map profile; recommended density about 65 (dense enough that buoyancy lifts a light body to the cooler cloud decks), respirable_content about 0.1 (thin in anything respirable, the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, a proposed harm-axis extension mapping to the wound and edibility harm channel), in_medium_exchange_rate about 0.20 (the dense hot medium couples fast, it cooks). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.034 (W/m/K, hot dense carbon-dioxide near 700 K) and specific_heat about 850 (J/kg/K, CO2 at constant pressure); with the density above these set the world's own diffusivity from k/(rho*c), grounded in the fluids/thermal floor rather than fabricated, so Venus's field conducts on its own physics. Reserved"
+basis = "the crushing hot toxic atmosphere (Venus), a require_map profile; recommended density about 65 (dense enough that buoyancy lifts a light body to the cooler cloud decks), respirable_content about 0.1 (thin in anything respirable, the suffocation case), toxicity greater than 0 (the acid-and-carbon-dioxide air corrodes, a proposed harm-axis extension mapping to the wound and edibility harm channel), in_medium_exchange_rate about 0.20 (the dense hot medium couples fast, it cooks). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.034 (W/m/K, hot dense carbon-dioxide near 700 K) and specific_heat about 850 (J/kg/K, CO2 at constant pressure); with the density above these set the world's own diffusivity from k/(rho*c), grounded in the fluids/thermal floor rather than fabricated, so Venus's field conducts on its own physics. CONVECTIVE COEFFICIENT (added Arc 2, the h the metabolism reads at a being's cell): the medium profile now REQUIRES convective_coefficient (medium_sample reads it fail-loud), so this profile needs it set too; recommended convective_coefficient about 30 (W/m^2/K, a dense hot forced-convection atmosphere couples faster than still thin air), the same per-medium LUMPED interim as air and water with the flow-dependent Nusselt derive DEFERRED. Reserved"
 status = "reserved"
 value = ""
 unit = "medium_profile"
@@ -1875,120 +1957,149 @@ source = "Part 25.7; the low end per docs/working/TEST_WORLDS.md (Tempest)"
 [[reserved]]
 id = "hydrology.saturation_slope"
 basis = "the affine slope of the saturation vapour pressure over temperature, the Clausius-Clapeyron tangent over the simulated band (laws::saturation_vapor_pressure): it sets how much less water cold air holds, so a cold humid cell crosses saturation and precipitates. Set from the physical Clausius-Clapeyron slope at the world's reference temperature over its temperature-axis scale"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.0001048"
 unit = "mpa_per_temperature"
 source = "base-level liveliness step 2 (Part 15, Part 18); crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
 
-[[reserved]]
-id = "hydrology.saturation_t_ref"
-basis = "the reference temperature the saturation affine tangent is taken at (the midpoint of the world's habitable temperature band, so the tangent is accurate where most weather happens)"
-status = "reserved"
-value = ""
-unit = "temperature"
-source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+# RETIRED (Arc 2, derive-vs-author, Principle 6): `hydrology.saturation_t_ref` (the reference temperature
+# the saturation affine tangent is taken at, "the midpoint of the world's habitable temperature band")
+# now DERIVES from `climate.mean_surface_temperature`: the world's mean surface temperature IS the
+# habitable-band midpoint, and it is the same absolute-temperature value the field is centred on
+# (Field::from_map_absolute), so the tangent's reference is read from the world's own mean rather than a
+# duplicate reserved scalar. EnvironCalib::from_manifest reads climate.mean_surface_temperature for it.
+# The tangent's slope (hydrology.saturation_slope) and value at t_ref (hydrology.saturation_e_ref) stay
+# reserved, now anchored at the world's own mean temperature.
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"
 basis = "the saturation vapour pressure at the reference temperature, the physical saturation pressure of the world's condensing species at that temperature"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.001596"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
 
 [[reserved]]
 id = "hydrology.saturation_cap"
-basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate"
-status = "reserved"
-value = ""
+basis = "the representability cap on the saturation vapour pressure, an engine bound above any physical value the band reaches, not an owner tuning of the climate Derive-vs-author: an engine representability ceiling (category c) above any physical saturation pressure the world temperature band reaches (Earth hottest ~55C gives e_s ~0.0158 MPa; 0.05 MPa is ~3x headroom); a fail-loud bound, not a floor axis and not a physical value to derive"
+status = "set"
+value = "0.05"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
 
 [[reserved]]
 id = "hydrology.precipitation_rate"
-basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick"
-status = "reserved"
-value = ""
+basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick Derive-vs-author: the per-tick condensation efficiency (fraction of over-saturation moisture that rains out); the engine models condensation no deeper than this lumped rate (no cloud microphysics), a coarse-model rate not a floor axis"
+status = "set"
+value = "0.00000129"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "hydrology.evaporation_still"
 basis = "the still-air Dalton evaporation transfer coefficient a in E = (a + b|u|)(e_s - e_a) (laws::evaporation_rate), the base evaporation rate per unit vapour-pressure deficit with no wind. Set from the world's still-air mass-transfer coefficient"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.1"
 unit = "evaporation_coefficient"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
 
 [[reserved]]
 id = "hydrology.evaporation_wind"
-basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives"
-status = "reserved"
-value = ""
+basis = "the wind Dalton evaporation coefficient b, the added evaporation per unit wind speed and vapour-pressure deficit. Zero until the step-4 wind field lands (no wind to read yet); set from the world's wind-driven mass-transfer coefficient when wind arrives Derive-vs-author: the Dalton wind coefficient b in E=(a+b|u|)*deficit; the wind field u is passed as ZERO until step 4 (verified crates/sim/src/environ.rs:731), so the term is inert and 0 is the honest no-wind-coupling value; the real Dalton coefficient is set when the wind field arrives, not a floor axis"
+status = "set"
+value = "0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "evaporation_coefficient"
 source = "base-level liveliness step 2 (wind in step 4); crates/sim/src/environ.rs; laws::evaporation_rate"
 
 [[reserved]]
 id = "hydrology.evaporation_cap"
-basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning"
-status = "reserved"
-value = ""
+basis = "the representability cap on the evaporation flux, an engine bound above any physical evaporation the band reaches, not an owner tuning Derive-vs-author: an engine representability ceiling (category c) above any physical evaporation flux the band reaches (Earth extreme pan-evaporation ~2.9e-4 kg/(m2 s); 5e-4 is ~1.7x headroom); a fail-loud bound, not a floor axis"
+status = "set"
+value = "0.0005"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "evaporation_flux"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
 
 [[reserved]]
 id = "hydrology.routing_rate"
 basis = "the fraction of a cell's standing water that flows to its lowest neighbour per tick, the downhill advection rate: it sets how fast water drains off slopes and pools in basins. Set from the drainage timescale of the world's terrain against the base tick and cell size; below the stencil stability bound the advection is unconditionally stable"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.25"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "productivity.water_requirement"
-basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs"
-status = "reserved"
-value = ""
+basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs Derive-vs-author: the Liebig denominator for the water factor of the COARSE abstract climate-productivity model (a deliberate stand-in for the unmodelled background vegetation, environ.rs); a coarse-model calibration parameter, not a floor axis, reversible when the gated real-biosphere balance replaces the abstract model"
+status = "set"
+value = "0.15"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.light_requirement"
-basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs"
-status = "reserved"
-value = ""
+basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs Derive-vs-author: the Liebig denominator for the light factor of the COARSE abstract climate-productivity model on the normalised latitude gradient; a coarse-model parameter, not a floor axis, reversible when the real biosphere lands"
+status = "set"
+value = "0.3"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "light"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.temperature_requirement"
 basis = "the temperature a cell needs for full producer productivity, the Liebig denominator for the temperature factor: warmth supports growth up to saturation. Set from the growth-temperature scale of the world's producers (a too-hot penalty is a later refinement)"
-status = "reserved"
-value = ""
+status = "set"
+value = "298"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "temperature"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.soil_requirement"
-basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side"
-status = "reserved"
-value = ""
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold matched to soil_baseline so bare soil is non-limiting until the matter-cycle fertility field differentiates; not a floor axis, reversible"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.soil_baseline"
-basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands"
-status = "reserved"
-value = ""
+basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands Derive-vs-author: the uniform soil-nutrient supply every cell carries before the matter-cycle adds per-cell fertility; MUST equal soil_requirement so soil never limits at baseline; an engine scaffold of the coarse model, not a floor axis, reversible"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "hydrology.max_water_depth"
-basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale"
-status = "reserved"
-value = ""
+basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale Derive-vs-author: the basin holding capacity, the maximum standing water a cell retains before shedding excess, the coarse stand-in for full basin overflow (the noted hydrology limit); an engine scaffold bound not a floor axis, reversible when basin overflow is modelled"
+status = "set"
+value = "10"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
@@ -2002,17 +2113,21 @@ source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "productivity.regen_rate"
-basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer"
-status = "reserved"
-value = ""
+basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer Derive-vs-author: the logistic regrowth coefficient the standing producer biomass regrows toward the coarse productivity capacity per tick; a coarse abstract-model rate (no floor axis carries a producer regrowth rate), reversible when the real biosphere replaces it"
+status = "set"
+value = "0.00000035"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
 
 [[reserved]]
 id = "productivity.colonization"
-basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at"
-status = "reserved"
-value = ""
+basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at Derive-vs-author: the propagule floor that seeds a viable-but-empty cell so the logistic can bootstrap from an empty stock; a normalised coarse-model scaffold value, not a floor axis, reversible"
+status = "set"
+value = "0.01"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "producer_biomass"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs"
 
@@ -2029,32 +2144,40 @@ source = "base-level liveliness step 3; crates/sim/src/environ.rs"
 [[reserved]]
 id = "salinity.weathering_rate"
 basis = "the salt mass a cell gains per tick as salt leaches from rock and soil, the salinity field's source. Over many ticks it accumulates in endorheic basins (which route salt nowhere) while throughflow washes it from well-drained cells, so salt flats emerge where water evaporates faster than it drains. Set from the geochemical weathering rate of the world's terrain per base tick; larger raises the equilibrium salinity everywhere, smaller keeps salt flats rarer"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.002"
 unit = "salt_mass_per_tick"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "salinity.salt_cap"
 basis = "the maximum salt mass a cell retains, so an endorheic basin's salt saturates rather than accumulating without bound (the coarse stand-in for a salt bed's finite solubility and burial). Bounds the salinity concentration a fully-evaporated basin reaches. Set from the salt a cell of the world's terrain holds at saturation"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "2"
 unit = "salt_mass"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "salinity.dose_scale"
 basis = "the multiplier from a cell's salt concentration (salt over standing water plus the reference water) to the bio.salinity toxin dose the harm law reads against a being's heritable tolerance. Sets how lethal a given concentration is; set with the tolerance baseline and the Hill exponent so a dry salt flat's dose exceeds a naive tolerance yet a halophile's tolerance resists it"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "1"
 unit = "dose_per_concentration"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs; civsim_physics::laws::harm_class"
 
 [[reserved]]
 id = "salinity.reference_water"
 basis = "the water added to a cell's standing depth when forming the salinity concentration salt/(water + reference), so a bone-dry salt flat reads a high but finite concentration and a well-watered cell dilutes its salt. It sets the water scale at which salt is diluted to harmlessness, so a genome-reachable tolerance can resist a dry flat; larger dilutes salt faster (a gentler gradient), smaller makes a dry flat more lethal. Set from the soil-water a dry cell holds at the world's scale"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "1"
 unit = "water_depth"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
 
@@ -2066,17 +2189,21 @@ source = "base-level liveliness step 4; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "belief.enculturation_stubbornness"
-basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it"
-status = "reserved"
-value = ""
+basis = "the conserved split between a being's own conviction and its band's mean when the per-generation enculturation beat drifts an intrinsic axiom stance (World::set_stubbornness_split): a higher value holds a lineage's members closer to their own conviction, a lower value pulls them faster to the band consensus. Set from the cultural conformity pressure of the world's peoples; the split is conserved so enculturation redistributes conviction without inventing or destroying it Derive-vs-author: the cultural-transmission fidelity of enculturation; a social datum (no physics-floor axis carries transmission fidelity, the domain is social not physical) and not derivable from a lower modeled substrate"
+status = "set"
+value = "0.5"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
 
 [[reserved]]
 id = "belief.diffusion_rate"
 basis = "the per-tick rate an aggregate belief pool advances its diffusion (World::set_belief_diffusion_rate), the contagion speed of a seeded belief through a population. Set from the belief-transmission rate the world's social contact implies. Inert until a belief pool is seeded (no dawn pool is seeded this arc), so it is an armed no-op until the belief-pool seeding lands; surfaced now so the mover is armed fail-loud rather than silently unset"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.4"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"
 
@@ -2091,32 +2218,40 @@ source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim
 [[reserved]]
 id = "harm.noise_floor"
 basis = "the per-tick reserve fall below which a change is ordinary metabolic drain, not harm (the associative learner, Runner::couple_conversation through learn::is_harm_tick). Set at the largest per-tick reserve fall a resting, unharmed body incurs (the resting base_drain scaled to the tick), so only a supra-drain fall registers as the interoceptive harm signal the belief keys off. Larger ignores milder harm, smaller reads ordinary living as harm"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.01"
 unit = "ratio_per_tick"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
 
 [[reserved]]
 id = "harm.feature_granularity"
 basis = "the quantization step that buckets a raw feature amount into a perceived kind (learn::feature_bucket), the key a per-feature belief subject is minted from. Set at the sensorium's per-class just-noticeable difference for the sensed substance, so it is the acuity the perception subsystem already defines rather than a free parameter, coarse enough that ordinary spatial variation in a hazard reads as one or two kinds and fine enough to separate a harmful ground from a benign one. Larger merges distinct grounds, smaller splits one ground into a continuum the belief cannot generalise over"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "1"
 unit = "dose"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/percept.rs; crates/sim/src/sensorium.rs"
 
 [[reserved]]
 id = "harm.p_harm_given_harms"
 basis = "P(the interoceptive harm signal fires | this feature truly harms me), the first of the two likelihoods the belief-formation weight reads (learn::good_weight). Set at the fraction of ticks a naive being on a harmful cell is worn faster than it heals, the dose-and-physics harm rate the floor implies, the way trace.rs sets an observation reliability. Together with p_harm_given_benign it sets how strong a single correlation observation is (ln of their ratio)"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.9"
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
 
 [[reserved]]
 id = "harm.p_harm_given_benign"
 basis = "P(the interoceptive harm signal fires | this feature is benign), the second of the two likelihoods the belief-formation weight reads (learn::good_weight). Set at the false-attribution rate of a transient reserve dip unrelated to the feature, the way trace.rs sets a false-attribution rate; low, so a benign cell rarely earns harm evidence. Larger weakens each observation, smaller strengthens it"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.1"
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
 
@@ -2298,15 +2433,19 @@ source = "OWNER_DECISIONS_LOG R5; crates/sim/src/conviction_experience.rs; crate
 [[reserved]]
 id = "promotion.stress_threshold"
 basis = "the survival-margin level below which a being is in a narrative arc and is promoted to the individual move-by-move dialogue tier (Runner::arc_promotion_set), the lower of its energy and condition reserve levels. Set at the fraction of a reserve at which a being is meaningfully struggling, the generous default half a reserve, so a being that has burnt or been worn through half its margin is surfaced. Larger promotes more beings (more of the population reads as struggling), smaller reserves promotion for the truly desperate"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "0.5"
 unit = "reserve_level"
 source = "base-level liveliness §4; crates/sim/src/runner.rs"
 
 [[reserved]]
 id = "promotion.budget"
 basis = "the maximum beings promoted to the individual dialogue tier at once (Runner::arc_promotion_set), a performance bound: the per-tick individual-dialogue cost the frame budget allows. It defaults HIGH (liveliness over frugality, the owner ruling), the aggregate tier absorbing the rest with promote/restrict exact and conserved, so a generous budget costs compute, never fidelity. When more beings are in an arc than the budget, the most-stressed cells win. Set as an integer count from the per-tick dialogue cost the target frame budget affords"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "64"
 unit = "count"
 source = "base-level liveliness §4; crates/sim/src/runner.rs"

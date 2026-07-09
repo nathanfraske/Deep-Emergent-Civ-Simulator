@@ -35,12 +35,27 @@
 //! differ because their temperatures differ, not because of a label (Principle 9).
 //!
 //! Everything is integer, fixed-point, and draws no randomness (Principle 3). The owner anchors (the
-//! Kleiber coefficient `a`, the normalized-body-mass-to-kilograms bridge, the medium convective
-//! coefficient `h`, the surface emissivity, and the Stefan-Boltzmann constant) are reserved with their
-//! basis and are the owner's to set ([`MetabolicAnchors::from_manifest`]); the values in
-//! [`MetabolicAnchors::dev_fixture`] are labelled development fixtures, never owner canon. The caps
-//! below are representability bounds forced by Q32.32 (the engine-mechanics exemption the law kernels
-//! and `medium.rs` take), not owner realism values.
+//! Kleiber coefficient `a`, the normalized-body-mass-to-kilograms bridge, and the Stefan-Boltzmann
+//! constant) are reserved with their basis and are the owner's to set ([`MetabolicAnchors::from_manifest`]);
+//! the values in [`MetabolicAnchors::dev_fixture`] are labelled development fixtures, never owner canon. Two
+//! surface properties the radiant and convective terms once carried as global anchors now read from the
+//! being's own data rather than one scalar everywhere (derive-vs-author, Principle 6), with DIFFERENT honest
+//! statuses. The radiant-surface emissivity fully DERIVES: it is a material property of the being's covering,
+//! read from its `opt.emissivity` axis ([`covering_emissivity`]). The medium convective coefficient `h` is a
+//! partial step: it is READ from the being's occupied medium (`fluid.convective_coefficient`, at the being's
+//! cell, [`crate::medium::MediumField::convective_at`]), retiring the global scalar in favour of per-medium
+//! DATA, but `h` is NOT an irreducible medium property, it is flow-dependent (`h = Nu*k/L`, the Nusselt
+//! boundary-layer relation), so the per-medium value is a LUMPED interim and the full derive of `h` from the
+//! medium's k/rho/c and the flow past the being's surface is DEFERRED (the reviewer-approved interim). HONEST
+//! LIMIT (the two `h` consumers are not yet spatially consistent): the resting thermoregulatory DRAIN reads
+//! `h` at the being's CURRENT cell every tick ([`base_drain_from`] via [`being_derived_drains`]), while the
+//! body-temperature Newton-cooling exchange RATE caches `h` at the being's SPAWN cell
+//! ([`crate::runner::walker_exchange_rate`], stored once per being). Under a spatially-uniform medium (the
+//! current dev fixtures carry a uniform `h`) they agree; on a world with spatially-varying `h` a being that
+//! moves between media has a current-cell drain and a stale spawn-cell exchange rate until the rate is
+//! recomputed, which is deferred with the same per-cell-flow work. The caps below are representability bounds
+//! forced by Q32.32 (the engine-mechanics exemption the law kernels and `medium.rs` take), not owner realism
+//! values.
 //!
 //! Two honest limits stand. First, the exact reconciliation of the reserve's stored energy (the biology
 //! floor's `bio.energy_density` in kJ/g, the reserve capacity, and the body mass) to joules comparable
@@ -90,6 +105,12 @@ pub const SALINITY: &str = "bio.salinity";
 /// per unit of the tissue the whole-body work force integrates over. A tissue with none of it provides
 /// no muscle force (the absence convention).
 pub const MUSCLE_STRENGTH: &str = "mat.fracture_strength";
+/// The chem/optics-floor axis a covering carries its SURFACE emissivity on (`opt.emissivity`, the
+/// radiant-exchange fraction, dimensionless in [0, 1]; `crates/physics/data/chem_optics_floor.toml`).
+/// The radiant thermoregulatory term reads the being's covering value on this axis
+/// ([`covering_emissivity`]) rather than a duplicate global scalar; a covering with none of it radiates
+/// nothing (the absence convention, so an alien body converges on no hidden terran default; Principle 9).
+pub const OPT_EMISSIVITY: &str = "opt.emissivity";
 
 /// A representability cap for the basal metabolic rate (W). Engine-mechanics bound, not an owner value.
 const RATE_MAX: Fixed = Fixed::from_int(1_000_000_000);
@@ -113,12 +134,6 @@ pub struct MetabolicAnchors {
     /// The kilograms a body carries at `body_mass = 1` (the normalized-trait-to-kilograms bridge). An
     /// R-UNITS-PIN bridge, NOT derivable. RESERVED owner anchor.
     pub body_mass_kg_scale: Fixed,
-    /// The medium convective coefficient `h` (W/(m^2*K)) for the body-to-medium exchange, a fluids-floor
-    /// medium datum. RESERVED owner anchor.
-    pub medium_h: Fixed,
-    /// The body-surface emissivity for the radiant thermoregulatory term, dimensionless in [0, 1]. A
-    /// surface property (~0.95 for biological tissue). RESERVED.
-    pub emissivity: Fixed,
     /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant passed like the
     /// other physics constants the radiant law reads. RESERVED (a CODATA constant, an authored
     /// Principle-9 physics affordance).
@@ -135,22 +150,20 @@ impl MetabolicAnchors {
         Ok(MetabolicAnchors {
             kleiber_a: manifest.require_fixed("metabolism.kleiber_coefficient")?,
             body_mass_kg_scale: manifest.require_fixed("metabolism.body_mass_kg_scale")?,
-            medium_h: manifest.require_fixed("metabolism.medium_convective_coefficient")?,
-            emissivity: manifest.require_fixed("metabolism.surface_emissivity")?,
             sigma: manifest.require_fixed("metabolism.stefan_boltzmann")?,
         })
     }
 
     /// A labelled DEVELOPMENT FIXTURE, not owner canon: a plausible temperate-mammal Kleiber coefficient,
-    /// a mid-size kilogram bridge, an air convective coefficient, a biological-tissue emissivity, and the
-    /// CODATA Stefan-Boltzmann constant. For tests and examples only; a canonical run reads
+    /// a mid-size kilogram bridge, and the CODATA Stefan-Boltzmann constant. Two surface properties are no
+    /// longer anchors: the radiant term's emissivity derives from the being's covering
+    /// ([`covering_emissivity`]) and the medium convective coefficient `h` from the being's medium
+    /// ([`crate::medium::MediumField::convective_at`]). For tests and examples only; a canonical run reads
     /// [`MetabolicAnchors::from_manifest`].
     pub fn dev_fixture() -> MetabolicAnchors {
         MetabolicAnchors {
             kleiber_a: Fixed::from_ratio(1, 100),
             body_mass_kg_scale: Fixed::from_int(100),
-            medium_h: Fixed::from_int(10),
-            emissivity: Fixed::from_ratio(95, 100),
             sigma: Fixed::from_ratio(567, 10_000_000_000),
         }
     }
@@ -293,7 +306,14 @@ pub fn whole_body_composition_vector(
 ) -> BTreeMap<String, Fixed> {
     // Each part's (development weight, its own axis map), gathered so the axis union and the per-axis
     // weighted mean read the SAME source. Organs read their tissue composition; the covering and weapons
-    // read their material map directly (organ_composition would alias their kind id onto an organ).
+    // read their material map directly (organ_composition would alias their kind id onto an organ). The
+    // CONTRIBUTOR SET is deliberately organs, covering, and weapons only: senses and locomotion are NOT
+    // contributors. This is load-bearing for what the corpse deposits: the senses carry optical axes
+    // (`opt.refractive_index`, `crate::anatomy` sense kinds), and were they added as contributors those
+    // axes would enter this vector. The `opt.*` axis-union skip below already keeps optical axes out of the
+    // deposited matter, so senses contribute nothing even if added, but a future change to the contributor
+    // set (or a new non-optical axis on a sense) must be conscious of this coupling rather than break the
+    // matter vector silently.
     let mut contributors: Vec<(Fixed, &BTreeMap<String, Fixed>)> = Vec::new();
     for organ in &plan.organs {
         if let Some(comp) = registry.organ_composition(organ.kind) {
@@ -312,10 +332,17 @@ pub fn whole_body_composition_vector(
             contributors.push((weapon.development, &kd.material));
         }
     }
-    // The axis union over every contributor.
+    // The axis union over every contributor. The deposited vector is the body's MATTER (the mechanical,
+    // thermal, and biological composition the world forages, works, and decomposes); an optical SURFACE
+    // coefficient (`opt.*`, such as a covering's `opt.emissivity`, read at the radiating surface by the
+    // metabolism, not depositable bulk matter) is excluded, keeping the matter vector free of the optical
+    // axes senses and coverings carry, the same way senses are excluded as contributors above.
     let mut axes: BTreeSet<&str> = BTreeSet::new();
     for (_, map) in &contributors {
         for key in map.keys() {
+            if key.starts_with("opt.") {
+                continue;
+            }
             axes.insert(key.as_str());
         }
     }
@@ -352,12 +379,31 @@ pub fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
         .unwrap_or(Fixed::ZERO)
 }
 
+/// A being's radiating-surface emissivity: the `opt.emissivity` its covering material declares, or ZERO if
+/// the covering carries none (the substrate absence convention, so an alien body whose covering declares no
+/// emissivity radiates nothing rather than converging on a hidden terran default; Principle 9). The radiant
+/// thermoregulatory term reads THIS rather than a global manifest scalar, so the emissivity is the being's
+/// OWN covering-material datum (the chem/optics floor axis [`OPT_EMISSIVITY`]), per-race differentiable and
+/// read from the same covering the corpse deposit carries, not a duplicate constant (derive-vs-author,
+/// Principle 6; the retired `metabolism.surface_emissivity` duplicated this floor axis). The covering is
+/// resolved by `plan.covering.kind` against the registry coverings, the same way
+/// [`whole_body_composition_vector`] does.
+pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixed {
+    registry
+        .coverings
+        .iter()
+        .find(|k| k.id == plan.covering.kind)
+        .map(|cov| cov.mat(OPT_EMISSIVITY))
+        .unwrap_or(Fixed::ZERO)
+}
+
 /// The derived resting drain FRACTION of the energy reserve per tick, composing the physics laws: the
 /// Kleiber basal rate over the body mass plus the thermoregulatory heat loss over the whole-body surface
 /// (the body held at its resting set point against the ambient medium), bridged to a fraction of the
 /// reserve's stored energy. This replaces the authored `base_metabolic_drain`: two bodies diverge from
 /// mass, tissue, medium, and temperature alone. `energy_capacity` is the being's energy-reserve capacity
-/// (the caller passes `homeostasis.capacity(ENERGY)`); `tick` is the tick length in seconds.
+/// (the caller passes `homeostasis.capacity(ENERGY)`); `tick` is the tick length in seconds. The radiant
+/// term's emissivity is read from the being's covering ([`covering_emissivity`]).
 #[allow(clippy::too_many_arguments)]
 pub fn derive_base_drain(
     plan: &BodyPlan,
@@ -375,6 +421,7 @@ pub fn derive_base_drain(
         energy_capacity,
         energy_density,
         whole_body_surface(plan, organs),
+        covering_emissivity(plan, organs),
         ambient_temp,
         setpoint,
         medium_h,
@@ -383,18 +430,20 @@ pub fn derive_base_drain(
     )
 }
 
-/// The base drain over EXPLICIT composition scalars (the exposed surface and per-mass energy density),
-/// supplied by the caller from either a catalog organ set ([`derive_base_drain`]) or a GROWN body's grown
-/// tissue ([`crate::morphogen::Structure::composition_sum`] / `whole_body_energy_density`), so a fully grown
-/// body pays its thermoregulatory and basal drain off its own tissue rather than the empty digest's zeros
-/// (emergent-anatomy Step 3, the derived-physiology grow). The math is identical; only the source of the
-/// surface and energy density differs.
+/// The base drain over EXPLICIT composition scalars (the exposed surface, the per-mass energy density, and
+/// the radiating-surface emissivity), supplied by the caller from either a catalog organ set
+/// ([`derive_base_drain`]) or a GROWN body's grown tissue ([`crate::morphogen::Structure::composition_sum`] /
+/// `whole_body_energy_density`), so a fully grown body pays its thermoregulatory and basal drain off its own
+/// tissue rather than the empty digest's zeros (emergent-anatomy Step 3, the derived-physiology grow). The
+/// `emissivity` is the being's covering datum ([`covering_emissivity`]), passed explicitly like `surface`.
+/// The math is identical; only the source of the surface, energy density, and emissivity differs.
 #[allow(clippy::too_many_arguments)]
 pub fn base_drain_from(
     plan: &BodyPlan,
     energy_capacity: Fixed,
     energy_density: Fixed,
     surface: Fixed,
+    emissivity: Fixed,
     ambient_temp: Fixed,
     setpoint: Fixed,
     medium_h: Fixed,
@@ -410,7 +459,7 @@ pub fn base_drain_from(
         surface,
         setpoint,
         ambient_temp,
-        anchors.emissivity,
+        emissivity,
         anchors.sigma,
         FLUX_MAX,
     );
@@ -1021,11 +1070,11 @@ mod tests {
         // The coupling is not authored from a hidden water thermal mass; the no-thermal-mass branch
         // reads rate one for both.
         assert_eq!(
-            derive_body_exchange_rate(&a, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            derive_body_exchange_rate(&a, &organs, Fixed::from_int(10), Fixed::ONE, &anchors),
             Fixed::ONE
         );
         assert_eq!(
-            derive_body_exchange_rate(&b, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            derive_body_exchange_rate(&b, &organs, Fixed::from_int(10), Fixed::ONE, &anchors),
             Fixed::ONE
         );
     }
@@ -1057,7 +1106,7 @@ mod tests {
             whole_body_energy_density(&small, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             tick,
             &anchors,
         );
@@ -1068,7 +1117,7 @@ mod tests {
             whole_body_energy_density(&large, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             tick,
             &anchors,
         );
@@ -1106,7 +1155,7 @@ mod tests {
             whole_body_energy_density(&plan, &organs),
             Fixed::from_int(250),
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             Fixed::ONE,
             &anchors,
         );
@@ -1117,7 +1166,7 @@ mod tests {
             whole_body_energy_density(&plan, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             Fixed::ONE,
             &anchors,
         );
@@ -1175,16 +1224,16 @@ mod tests {
         // Compact: the same flesh but a quarter skin (less exposed surface).
         let compact = body((1, 2), vec![organ(skin, (1, 4)), organ(flesh, (1, 4))]);
         let rate_high =
-            derive_body_exchange_rate(&high, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            derive_body_exchange_rate(&high, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
         let rate_compact =
-            derive_body_exchange_rate(&compact, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            derive_body_exchange_rate(&compact, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
         assert!(rate_high > rate_compact, "more surface, faster coupling");
         // No exchange surface: no coupling.
         assert_eq!(
             derive_body_exchange_rate(
                 &body((1, 2), vec![organ(flesh, (1, 1))]),
                 &organs,
-                anchors.medium_h,
+                Fixed::from_int(10),
                 Fixed::ONE,
                 &anchors,
             ),
@@ -1194,8 +1243,31 @@ mod tests {
     }
 
     #[test]
+    fn the_same_body_couples_faster_in_a_higher_h_medium() {
+        // The dedup's metabolic point, EXERCISED (the dev fixtures hold h uniform, so this is what proves the
+        // differentiation reaches the coupling): the SAME body couples to the medium at h*A/(m*c), so raising
+        // the medium's convective coefficient h (still air ~10 to immersion water ~500) raises the coupling.
+        // A being in air and one immersed in water therefore couple at their media's own h, the whole reason
+        // the per-medium datum replaced the global scalar.
+        let (organs, skin, flesh, _fat) = registry();
+        let anchors = MetabolicAnchors::dev_fixture();
+        let plan = body((1, 2), vec![organ(skin, (1, 1)), organ(flesh, (1, 4))]);
+        let in_air =
+            derive_body_exchange_rate(&plan, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
+        let in_water =
+            derive_body_exchange_rate(&plan, &organs, Fixed::from_int(500), Fixed::ONE, &anchors);
+        assert!(
+            in_water > in_air,
+            "the same body couples faster in the higher-h medium (immersion water over still air), \
+             so the per-medium h differentiation reaches the body-to-medium coupling"
+        );
+    }
+
+    #[test]
     fn anchors_read_from_a_set_manifest_and_fail_loud_when_reserved() {
-        // The five owner anchors load from a set manifest, and a reserved one refuses to fabricate.
+        // The three owner anchors load from a set manifest, and a reserved one refuses to fabricate. The
+        // medium convective coefficient is no longer an anchor: it is read from the being's medium
+        // (medium.rs), not this manifest, so it is absent here.
         let set = r#"
 [[reserved]]
 id = "metabolism.kleiber_coefficient"
@@ -1212,20 +1284,6 @@ value = "100"
 unit = "kg"
 source = "test"
 [[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "fixture"
-status = "set"
-value = "10"
-unit = "h"
-source = "test"
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "fixture"
-status = "set"
-value = "0.95"
-unit = "e"
-source = "test"
-[[reserved]]
 id = "metabolism.stefan_boltzmann"
 basis = "fixture"
 status = "set"
@@ -1236,7 +1294,6 @@ source = "test"
         let m = CalibrationManifest::from_toml_str(set).unwrap();
         let a = MetabolicAnchors::from_manifest(&m).unwrap();
         assert_eq!(a.body_mass_kg_scale, Fixed::from_int(100));
-        assert_eq!(a.emissivity, Fixed::from_ratio(95, 100));
         // The shipped anchors are reserved (empty), so a from_manifest read fails loud rather than
         // fabricating a number.
         let reserved = set.replace(
@@ -1272,12 +1329,17 @@ source = "test"
                 whole_body_energy_density(&plan, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
-                anchors.medium_h,
+                Fixed::from_int(10),
                 Fixed::ONE,
                 &anchors,
             );
-            let rate =
-                derive_body_exchange_rate(&plan, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            let rate = derive_body_exchange_rate(
+                &plan,
+                &organs,
+                Fixed::from_int(10),
+                Fixed::ONE,
+                &anchors,
+            );
             (base.to_bits(), rate.to_bits())
         };
         assert_eq!(

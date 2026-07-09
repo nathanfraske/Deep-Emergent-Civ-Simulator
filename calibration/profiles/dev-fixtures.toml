@@ -202,19 +202,19 @@ source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
 
 [[reserved]]
 id = "medium.air"
-basis = "FIXTURE placeholder, not the owner's value; the temperate-air medium profile, a require_map bundle of the medium Substance axes. Density, respirable content, toxicity, and in-medium exchange follow the reserved.toml recommended set; the thermal axes (conductivity 0.0262 W/m/K, specific_heat 1005 J/kg/K, density 1.2 kg/m^3) are Incropera and DeWitt dry air near 300 K, so field.diffusion derives from a real k/(rho*c) rather than a fabricated scalar"
+basis = "FIXTURE placeholder, not the owner's value; the temperate-air medium profile, a require_map bundle of the medium Substance axes. Density, respirable content, toxicity, and in-medium exchange follow the reserved.toml recommended set; the thermal axes (conductivity 0.0262 W/m/K, specific_heat 1005 J/kg/K, density 1.2 kg/m^3) are Incropera and DeWitt dry air near 300 K, so field.diffusion derives from a real k/(rho*c) rather than a fabricated scalar. The convective_coefficient (h = 10 W/m^2/K, the fluid.convective_coefficient axis the metabolism reads at a being's cell) is a UNIFORM dev fixture equal to the retired metabolism.medium_convective_coefficient value, kept the same for air and water so the dev metabolism reads h = 10 everywhere and the change is byte-neutral; a real air h (~2 to 25) is owner data (reserved.toml)"
 status = "set"
-value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005"
+value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005,convective_coefficient=10"
 unit = "medium_profile"
-source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion; crates/sim/src/medium.rs convective_at"
 
 [[reserved]]
 id = "medium.water"
-basis = "FIXTURE placeholder, not the owner's value; the liquid-water medium profile (Europa selects it). The dissolved-gas, toxicity, and immersion-coupling axes follow the reserved.toml recommended set; the thermal axes (conductivity 0.606 W/m/K, specific_heat 4186 J/kg/K, density 1000 kg/m^3) are Incropera and DeWitt liquid water near 300 K, so a water world's field.diffusion derives from water's real k/(rho*c) and conducts slower than air"
+basis = "FIXTURE placeholder, not the owner's value; the liquid-water medium profile (Europa selects it). The dissolved-gas, toxicity, and immersion-coupling axes follow the reserved.toml recommended set; the thermal axes (conductivity 0.606 W/m/K, specific_heat 4186 J/kg/K, density 1000 kg/m^3) are Incropera and DeWitt liquid water near 300 K, so a water world's field.diffusion derives from water's real k/(rho*c) and conducts slower than air. The convective_coefficient (h = 10 W/m^2/K, the fluid.convective_coefficient axis the metabolism reads at a being's cell) is a UNIFORM dev fixture equal to the retired metabolism.medium_convective_coefficient value, kept the same for air and water so the dev metabolism reads h = 10 everywhere and the change is byte-neutral; a real water h (~50 to 1000+) is owner data (reserved.toml)"
 status = "set"
-value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186"
+value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
 unit = "medium_profile"
-source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion; crates/sim/src/medium.rs convective_at"
 
 [[reserved]]
 id = "medium.submersion_elevation"
@@ -239,6 +239,22 @@ status = "set"
 value = "0.01"
 unit = "ratio_per_tick"
 source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "climate.mean_surface_temperature"
+basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY offset 1/2 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte (crates/sim/src/runner.rs Field::from_map_absolute)"
+status = "set"
+value = "0.5"
+unit = "kelvin"
+source = "dev fixture for the temperature-units reconciliation; crates/sim/src/runner.rs Field::from_map_absolute"
+
+[[reserved]]
+id = "climate.latitude_temperature_range"
+basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY amplitude 1 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte"
+status = "set"
+value = "1"
+unit = "kelvin"
+source = "dev fixture for the temperature-units reconciliation; crates/sim/src/runner.rs Field::from_map_absolute"
 
 [[reserved]]
 id = "field.body_exchange"
@@ -276,21 +292,16 @@ value = "100"
 unit = "kilograms_at_body_mass_one"
 source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
 
-[[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the medium convective heat-transfer coefficient h a dev body couples to its cell through"
-status = "set"
-value = "10"
-unit = "convective_coefficient"
-source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+# RETIRED (Arc 2, derive-vs-author): `metabolism.medium_convective_coefficient` is gone; the metabolism now
+# reads the convective coefficient h from the being's own medium (the medium.{air,water}
+# convective_coefficient axis above, read at the being's cell via MediumField::convective_at), not a
+# duplicate global anchor. The dev media carry a uniform h = 10 (the retired fixture value), so the dev
+# metabolism reads h = 10 everywhere and the change is byte-identical. See crates/sim/src/physiology.rs and
+# crates/sim/src/runner.rs.
 
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the body-surface emissivity of the radiant heat-loss law"
-status = "set"
-value = "0.95"
-unit = "emissivity"
-source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
+# RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
+# being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
+# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
@@ -354,13 +365,9 @@ value = "0.5"
 unit = "mpa_per_temperature"
 source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
-[[reserved]]
-id = "hydrology.saturation_t_ref"
-basis = "FIXTURE placeholder; the reference temperature of the saturation affine tangent"
-status = "set"
-value = "0.5"
-unit = "temperature"
-source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+# RETIRED (Arc 2, derive-vs-author): `hydrology.saturation_t_ref` now derives from
+# `climate.mean_surface_temperature` (the dev identity value 0.5 is unchanged, so the dev hydrology is
+# byte-identical). See crates/sim/src/environ.rs EnvironCalib::from_manifest.
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"

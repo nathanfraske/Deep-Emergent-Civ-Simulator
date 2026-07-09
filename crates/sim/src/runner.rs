@@ -424,23 +424,43 @@ impl Field {
         }
     }
 
-    /// The field seeded from a generated map's per-tile temperatures (the baseline it relaxes toward).
-    /// The map's worldgen calibration is the caller's concern: owner-set on a canonical run, a
-    /// labelled fixture in a test. This function fabricates nothing.
-    pub fn from_map(map: &TileMap) -> Field {
+    /// The field seeded from a generated map's per-tile temperatures, mapping the worldgen's NORMALISED
+    /// `[0, 1]` temperature axis to the ABSOLUTE temperature the physics reads: `T = mean + range *
+    /// (normalised - 1/2)`. This is the temperature-to-Kelvin calibration (derive-vs-author, Principle 6):
+    /// the worldgen axis is a normalised SHAPE (a latitude blend plus noise), while the metabolism and
+    /// hydrology laws read absolute temperature (Stefan-Boltzmann's `T^4` needs Kelvin), so the two are
+    /// reconciled HERE from owner climate data rather than by a fabricated constant or a Kelvin-labelled
+    /// `[0, 1]` field. `mean` is the world's mean surface temperature and `range` its full equator-to-pole
+    /// span, both owner world data. The IDENTITY `mean = 1/2, range = 1` leaves the field equal to the raw
+    /// normalised axis (the labelled dev fixture, byte-neutral). The biome classifier reads the raw
+    /// normalised map axes at generation time, so it is unaffected by this reconciliation.
+    pub fn from_map_absolute(map: &TileMap, mean: Fixed, range: Fixed) -> Field {
         let topo = map.topo();
         let (w, h) = (topo.width, topo.height);
+        let half = Fixed::from_ratio(1, 2);
         let mut baseline = Vec::with_capacity((w as usize) * (h as usize));
         for y in 0..h {
             for x in 0..w {
-                let t = map
+                let norm = map
                     .tile(Coord3::new(x, y, 0))
                     .map(|t| t.temperature())
                     .expect("every in-bounds cell has a tile");
-                baseline.push(t);
+                // T = mean + range * (normalised - 1/2). Exact identity at mean = 1/2, range = 1; a
+                // degenerate overflow (an unrepresentably wide range) routes the offset to zero, so the
+                // cell reads the mean rather than a wrapped temperature (the codebase's degenerate-input
+                // convention).
+                let offset = range.checked_mul(norm - half).unwrap_or(Fixed::ZERO);
+                baseline.push(mean.saturating_add(offset));
             }
         }
         Field::new(w, h, baseline)
+    }
+
+    /// The field seeded from a map with the IDENTITY temperature calibration (the field equals the raw
+    /// normalised worldgen axis), the labelled dev and test path. A calibrated run reads the owner's mean
+    /// and range through [`Field::from_map_absolute`]; see [`crate::build_dawn_runner`].
+    pub fn from_map(map: &TileMap) -> Field {
+        Field::from_map_absolute(map, Fixed::from_ratio(1, 2), Fixed::ONE)
     }
 
     #[inline]
@@ -757,8 +777,9 @@ fn medium_field_from_manifest(
     ))
 }
 
-/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content` and `density`
-/// axes) from the manifest, fail-loud if the profile is reserved or missing either axis.
+/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content`, `density`, and
+/// `convective_coefficient` axes) from the manifest, fail-loud if the profile is reserved or missing any
+/// axis.
 fn medium_sample(
     manifest: &CalibrationManifest,
     medium_id: &str,
@@ -776,6 +797,7 @@ fn medium_sample(
     Ok(medium::MediumSample {
         respirable: axis("respirable_content")?,
         density: axis("density")?,
+        convective_coefficient: axis("convective_coefficient")?,
     })
 }
 
@@ -858,14 +880,25 @@ fn being_derived_drains(
                     physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
                 ),
             };
+            // The radiating-surface emissivity is the being's covering datum (derive-vs-author, Principle 6):
+            // the covering defines the radiative surface property for both a catalog body and a grown one, so
+            // the radiant term reads the being's own covering, not a global scalar.
+            let emissivity = physiology::covering_emissivity(&w.body, &phys.organs);
+            // The medium convective coefficient h is the being's OWN medium datum, read at the cell it stands
+            // in (derive-vs-author, Principle 6): the thermoregulatory heat loss couples to
+            // fluid.convective_coefficient of the medium the body occupies, not a duplicate global scalar, so
+            // a body in still air and one immersed in water couple at their media's own h.
+            let medium_cell = w.coord();
+            let medium_h = phys.medium.convective_at(medium_cell.x, medium_cell.y);
             let base = base_drain_from(
                 &w.body,
                 cap,
                 energy_density,
                 surface,
+                emissivity,
                 ambient,
                 setpoint,
-                phys.anchors.medium_h,
+                medium_h,
                 phys.tick_seconds,
                 &phys.anchors,
             );
@@ -906,25 +939,34 @@ fn being_derived_drains(
 /// The body-to-medium thermal exchange rate for a being, reading its GROWN tissue's exposed surface and
 /// specific heat directly when it carries a grown structure (emergent-anatomy Step 3, the derived-physiology
 /// grow), and its catalog organs otherwise. So a fully grown body couples to the medium off its own tissue,
-/// with no catalog organs; a catalog body is byte-identical to the prior read.
+/// with no catalog organs; a catalog body is byte-identical to the prior read. The medium convective
+/// coefficient `medium_h` is the being's own medium datum, read by the caller at the cell it stands in
+/// (derive-vs-author, Principle 6), not a duplicate global scalar. HONEST LIMIT (spatial consistency): this
+/// rate is computed once and cached per being (`body_exchange_rate`), so `medium_h` here is read at the
+/// being's SPAWN cell, whereas the resting drain reads `h` at the being's CURRENT cell every tick
+/// (`being_derived_drains`). Under a spatially-uniform medium (the dev fixtures carry a uniform `h`) the two
+/// agree; on a world with spatially-varying `h` a being that moves between media carries a stale spawn-cell
+/// exchange rate until it is recomputed, deferred with the per-cell-flow (Nusselt) work, so the interim is
+/// documented rather than silently inconsistent.
 fn walker_exchange_rate(
     body: &BodyPlan,
     structure: &Option<Structure>,
     phys: &EmbodiedPhysiology,
+    medium_h: Fixed,
 ) -> Fixed {
     match structure {
         Some(s) => body_exchange_rate_from(
             body,
             s.composition_sum(physiology::CONVECTIVE_SURFACE),
             s.composition_mean(physiology::TISSUE_SPECIFIC_HEAT),
-            phys.anchors.medium_h,
+            medium_h,
             phys.tick_seconds,
             &phys.anchors,
         ),
         None => derive_body_exchange_rate(
             body,
             &phys.organs,
-            phys.anchors.medium_h,
+            medium_h,
             phys.tick_seconds,
             &phys.anchors,
         ),
@@ -3069,7 +3111,12 @@ impl Runner {
             // phase_body_exchange then couples the being at its own surface-and-thermal-mass rate rather
             // than the labelled FieldCalib.exchange scalar (Principle 9: divergence from anatomy).
             if let Some(phys) = &embodiment.physiology {
-                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
+                // The being's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                // Principle 6): the static body-to-medium exchange rate couples to the being's OWN medium
+                // datum rather than a duplicate global scalar.
+                let cell = w.coord();
+                let medium_h = phys.medium.convective_at(cell.x, cell.y);
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys, medium_h);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -3157,7 +3204,12 @@ impl Runner {
             body_temp.insert(w.id, init);
             index.place(OccupantId::being(w.id), w.coord());
             if let Some(phys) = &embodiment.physiology {
-                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
+                // The being's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                // Principle 6): the static body-to-medium exchange rate couples to the being's OWN medium
+                // datum rather than a duplicate global scalar.
+                let cell = w.coord();
+                let medium_h = phys.medium.convective_at(cell.x, cell.y);
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys, medium_h);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -5849,7 +5901,10 @@ impl Runner {
                         }
                         None => Physiology::dev_for_registry(&emb.homeo),
                     };
-                    let exchange_rate = walker_exchange_rate(&body, &structure, phys);
+                    // The newborn's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                    // Principle 6): its static body-to-medium exchange rate couples to its OWN medium datum.
+                    let medium_h = phys.medium.convective_at(coord.x, coord.y);
+                    let exchange_rate = walker_exchange_rate(&body, &structure, phys, medium_h);
                     let mut walker =
                         Walker::new(id, coord, body, homeostasis, physiology, controller);
                     // The newborn's heritable EXPLORATION and DELIBERATION propensities, expressed from its
@@ -6437,15 +6492,12 @@ source = "test"
         let anchors = MetabolicAnchors::dev_fixture();
         let high_body = make((1, 1)); // full skin: large surface
         let compact_body = make((1, 8)); // little skin: small surface
+                                         // A labelled test h (the retired dev medium_h value, now read from the medium at a being's cell).
+        let test_h = Fixed::from_int(10);
         let rate_high =
-            derive_body_exchange_rate(&high_body, &organs, anchors.medium_h, Fixed::ONE, &anchors);
-        let rate_compact = derive_body_exchange_rate(
-            &compact_body,
-            &organs,
-            anchors.medium_h,
-            Fixed::ONE,
-            &anchors,
-        );
+            derive_body_exchange_rate(&high_body, &organs, test_h, Fixed::ONE, &anchors);
+        let rate_compact =
+            derive_body_exchange_rate(&compact_body, &organs, test_h, Fixed::ONE, &anchors);
         assert!(
             rate_high > rate_compact,
             "the high-surface body couples faster"

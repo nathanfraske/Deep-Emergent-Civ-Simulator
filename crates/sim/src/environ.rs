@@ -186,7 +186,13 @@ impl EnvironCalib {
     pub fn from_manifest(m: &CalibrationManifest) -> Result<EnvironCalib, CalibrationError> {
         Ok(EnvironCalib {
             sat_slope: m.require_fixed("hydrology.saturation_slope")?,
-            sat_t_ref: m.require_fixed("hydrology.saturation_t_ref")?,
+            // The saturation tangent's reference temperature DERIVES from the world's mean surface
+            // temperature (the habitable-band midpoint the tangent is most accurate around), the same
+            // absolute-temperature value the temperature field is centred on (Field::from_map_absolute),
+            // rather than a duplicate reserved scalar (derive-vs-author, Principle 6; the retired
+            // hydrology.saturation_t_ref duplicated it). The tangent's slope and value at t_ref stay the
+            // owner's reserved calibration, now anchored at the world's own mean temperature.
+            sat_t_ref: m.require_fixed("climate.mean_surface_temperature")?,
             sat_e_ref: m.require_fixed("hydrology.saturation_e_ref")?,
             sat_es_cap: m.require_fixed("hydrology.saturation_cap")?,
             precip_rate: m.require_fixed("hydrology.precipitation_rate")?,

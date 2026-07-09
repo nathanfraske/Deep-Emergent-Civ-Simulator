@@ -196,7 +196,14 @@ fn two_body_plans_diverge_in_energy_drain_and_time_to_death_from_anatomy_alone()
     // irrelevant here (no respiration axis), so a uniform field over the runner's extent.
     emb.set_physiology(EmbodiedPhysiology::dev_fixture(
         organs,
-        MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        MediumField::uniform(
+            10,
+            10,
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::from_int(10),
+            Fixed::ZERO,
+        ),
     ));
 
     let mut runner = Runner::with_embodiment(
@@ -315,7 +322,14 @@ fn the_coupled_physiology_runner_replays_and_matches_the_scheduler() {
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         // A slightly colder field than the set point, so the thermoregulatory term is live (the base
         // drain reads the live body temperature each tick) rather than a thermoneutral constant.
@@ -396,7 +410,14 @@ fn the_interoceptive_delta_fold_is_deterministic_and_scheduler_invariant() {
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
     };
@@ -475,7 +496,14 @@ fn the_material_substrate_folds_into_state_hash_and_stays_deterministic() {
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
     };
@@ -555,7 +583,14 @@ fn a_carried_load_folds_into_state_hash_and_stays_deterministic() {
         emb.add(w, band(setpoint));
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(300)), calib(), emb)
     };
@@ -634,7 +669,14 @@ fn a_being_picks_up_and_puts_down_matter_bounded_by_its_grown_strength() {
         }
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         emb
     };
@@ -758,7 +800,14 @@ fn a_being_grasps_matter_only_through_an_evolved_controller_weight() {
     emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
     emb.set_physiology(EmbodiedPhysiology::dev_fixture(
         organs,
-        MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        MediumField::uniform(
+            10,
+            10,
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::from_int(10),
+            Fixed::ZERO,
+        ),
     ));
 
     let mut runner =
@@ -878,7 +927,14 @@ fn a_being_mines_bonded_rock_only_when_it_decides_to_and_can_fracture_it() {
         });
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -1067,7 +1123,14 @@ values = [
         });
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -1255,7 +1318,14 @@ values = [
         });
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -1431,7 +1501,14 @@ values = [
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -1603,7 +1680,14 @@ values = [
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         if arm_strike {
             emb.set_strike(StrikeParams::dev_fixture());
@@ -1793,7 +1877,14 @@ values = [
         emb.set_craft_params(CraftParams::dev_fixture());
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         if arm_wear {
             // The stroke distance is the dev fixture; with the flint coefficient each use abrades roughly half
@@ -2008,7 +2099,14 @@ values = [
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         emb.set_breakage(arm_breakage);
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
@@ -2183,7 +2281,14 @@ values = [
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         emb.set_breakage(arm_breakage);
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
@@ -2981,7 +3086,14 @@ values = [
         emb.set_material(MaterialField::new());
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
     };
@@ -3149,7 +3261,14 @@ values = [
         emb.set_material(MaterialField::new());
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                8,
+                8,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb)
     };
@@ -3315,7 +3434,14 @@ values = [
     emb.set_craft_params(CraftParams::dev_fixture()); // small edge, tool volume 1
     emb.set_physiology(EmbodiedPhysiology::dev_fixture(
         organs,
-        MediumField::uniform(8, 8, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+        MediumField::uniform(
+            8,
+            8,
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::from_int(10),
+            Fixed::ZERO,
+        ),
     ));
     let mut runner =
         Runner::with_embodiment(uniform_field(8, 8, Fixed::from_int(310)), calib(), emb);
@@ -3413,7 +3539,14 @@ fn a_being_digs_a_pit_lowering_the_terrain_only_through_an_evolved_weight() {
         });
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(10, 10, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                10,
+                10,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -3633,7 +3766,14 @@ fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_run
         });
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(w, h, Fixed::ONE, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                w,
+                h,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         let mut r =
             Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(305)), calib(), emb);
@@ -3797,7 +3937,14 @@ fn an_oxygen_demanding_fire_burns_in_air_and_starves_in_an_anoxic_medium() {
         // starves it. Density and temperature are irrelevant to the oxidiser read.
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs,
-            MediumField::uniform(w, h, respirable, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                w,
+                h,
+                respirable,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         let mut r =
             Runner::with_embodiment(uniform_field(w, h, Fixed::from_int(600)), calib(), emb);
@@ -4692,7 +4839,14 @@ fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
         );
         emb.set_physiology(EmbodiedPhysiology::dev_fixture(
             organs.clone(),
-            MediumField::uniform(6, 6, respirable, Fixed::ZERO, Fixed::ZERO),
+            MediumField::uniform(
+                6,
+                6,
+                respirable,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                Fixed::ZERO,
+            ),
         ));
         let mut runner =
             Runner::with_embodiment(uniform_field(6, 6, Fixed::from_int(setpoint)), calib(), emb);
@@ -4790,6 +4944,7 @@ fn beings_respire_the_medium_of_their_own_cell_through_the_runner() {
         h,
         respirable,
         vec![Fixed::ZERO; (w * h) as usize],
+        vec![Fixed::from_int(10); (w * h) as usize],
         vec![Fixed::from_int(setpoint); (w * h) as usize],
     );
     emb.set_physiology(EmbodiedPhysiology::dev_fixture(organs, medium));
@@ -4845,20 +5000,6 @@ value = "100"
 unit = "kg"
 source = "test"
 [[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "fixture"
-status = "set"
-value = "10"
-unit = "h"
-source = "test"
-[[reserved]]
-id = "metabolism.surface_emissivity"
-basis = "fixture"
-status = "set"
-value = "0.95"
-unit = "e"
-source = "test"
-[[reserved]]
 id = "metabolism.stefan_boltzmann"
 basis = "fixture"
 status = "set"
@@ -4890,14 +5031,14 @@ source = "test"
 id = "medium.water"
 basis = "fixture"
 status = "set"
-value = "density=1000,respirable_content=0.3,conductivity=0.606,specific_heat=4186"
+value = "density=1000,respirable_content=0.3,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
 unit = "medium_profile"
 source = "test"
 [[reserved]]
 id = "medium.air"
 basis = "fixture"
 status = "set"
-value = "density=1.2,respirable_content=9,conductivity=0.0262,specific_heat=1005"
+value = "density=1.2,respirable_content=9,conductivity=0.0262,specific_heat=1005,convective_coefficient=10"
 unit = "medium_profile"
 source = "test"
 "#;
