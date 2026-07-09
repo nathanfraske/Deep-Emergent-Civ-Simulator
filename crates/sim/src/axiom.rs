@@ -264,6 +264,18 @@ pub struct EpistemicStance {
     pub freezing: Fixed,
     /// Knowledge as fixed versus evolving: the default entrenchment a new belief gets.
     pub certainty: Fixed,
+    /// The EXPERIENTIAL POLARITY: how this mind's own felt experience bears on the DIRECTION a conviction
+    /// moves (Branch 2 of the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md`
+    /// R2/R5). A per-race innate epistemic disposition, the sibling of [`EpistemicStance::dogmatism`] (a
+    /// P9-legal authored input, not an authored cultural outcome). POSITIVE is hedonic (a being embraces the
+    /// conviction-pole its lived experience found GOOD to hold and erodes the pole it found bad); NEGATIVE is
+    /// ascetic (a being embraces the pole it found BAD to hold, so felt hardship VALIDATES a conviction, the
+    /// martyr / costly-signal mode); ZERO means felt experience does not move convictions at all. It never
+    /// reads which pole "means" what: it multiplies the pole-referenced felt association (which flips sign
+    /// under a pole relabel), so the whole coupling is relabel-invariant (R5). Defaults to the hedonic `+1` in
+    /// [`EpistemicStance::new`]; a race sets its own with [`EpistemicStance::with_experiential_polarity`], so a
+    /// hedonic race and an ascetic race are data rows and asceticism is representable rather than foreclosed.
+    pub experiential_polarity: Fixed,
 }
 
 impl EpistemicStance {
@@ -292,7 +304,19 @@ impl EpistemicStance {
             seizing,
             freezing,
             certainty,
+            // Hedonic default (+1): felt-good embraces a conviction, felt-bad erodes it. A race overrides this
+            // innate epistemic disposition with `with_experiential_polarity` (an ascetic race sets it negative).
+            experiential_polarity: Fixed::ONE,
         }
+    }
+
+    /// Set this stance's EXPERIENTIAL POLARITY (Branch 2, R5), the per-race innate disposition governing how a
+    /// being's own felt experience moves a conviction: positive hedonic, negative ascetic, zero no coupling.
+    /// A builder over [`EpistemicStance::new`], so a race declares its epistemology as data without a new
+    /// constructor argument (the default is hedonic `+1`).
+    pub fn with_experiential_polarity(mut self, polarity: Fixed) -> Self {
+        self.experiential_polarity = polarity;
+        self
     }
 
     /// The (normalized) weight this stance gives a source mode, or zero if it weights that
@@ -436,6 +460,54 @@ impl Axiom {
             }
         } else {
             Appraisal::Assimilated { pressure: signed }
+        }
+    }
+
+    /// Move this axiom under the being's OWN FELT EXPERIENCE (Branch 2 of the learned experience-to-conviction
+    /// coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5), the credit-assignment half. `association` is the
+    /// being's pole-referenced accumulated felt-valence while holding this axiom
+    /// ([`crate::conviction_experience::ConvictionExperience::association`]); `sign(association)` names which
+    /// pole the being's lived experience favoured (relabel-invariant). `polarity` is the being's per-race
+    /// epistemic-polarity disposition ([`EpistemicStance::experiential_polarity`]): positive hedonic, negative
+    /// ascetic, zero no coupling. The felt drive is `polarity * association`, and the evidence points toward the
+    /// pole `sign(drive)` (the +1 or -1 extreme) with pressure `|drive|`. If the pressure clears the
+    /// entrenchment `threshold` the stance ACCOMMODATES toward that pole by `plasticity * pressure`, the SAME
+    /// AGM step [`Axiom::appraise`] uses (so the entrenchment gate, the bounded move, and the revelation jump
+    /// all carry over); otherwise it is ASSIMILATED (no move). RELABEL-INVARIANT by construction: negating the
+    /// axis's pole convention flips this stance's sign, which flips `association` (it is pole-referenced), so
+    /// `drive` and the target pole flip together and the being's physical trajectory is unchanged, the engine
+    /// never reading which pole "means" what (the third framing panel's ruling). A being that HELD a conviction
+    /// and SUFFERED under it (a negative pole-referenced association for a positive stance) is, when hedonic,
+    /// moved AWAY from that pole (the felt-hardship-erodes-the-conviction outcome), and when ascetic, moved
+    /// TOWARD it, so which outcome occurs is the race's own disposition, never a coded route. A pure
+    /// deterministic update given its inputs; does not touch the evidence ring (the felt channel is distinct
+    /// from the social/observed evidence [`Axiom::appraise`] accumulates).
+    pub fn apply_felt_experience(
+        &mut self,
+        association: Fixed,
+        polarity: Fixed,
+        threshold: Fixed,
+        plasticity: Fixed,
+    ) -> Appraisal {
+        let drive = polarity.checked_mul(association).unwrap_or(Fixed::ZERO);
+        let pressure = drive.abs();
+        if drive == Fixed::ZERO || pressure <= threshold {
+            return Appraisal::Assimilated { pressure: drive };
+        }
+        let pole = if drive >= Fixed::ZERO {
+            Fixed::ONE
+        } else {
+            Fixed::ZERO - Fixed::ONE
+        };
+        let step = plasticity.mul(pressure).clamp(Fixed::ZERO, Fixed::ONE);
+        let from = self.stance;
+        let to = (self.stance + step.mul(pole - self.stance))
+            .clamp(Fixed::ZERO - Fixed::ONE, Fixed::ONE);
+        self.stance = to;
+        Appraisal::Accommodated {
+            from,
+            to,
+            pressure: drive,
         }
     }
 
@@ -1103,6 +1175,126 @@ mod tests {
             }
             _ => panic!("expected a revelation jump (accommodation)"),
         }
+    }
+
+    #[test]
+    fn felt_experience_erodes_a_conviction_suffered_under_when_hedonic() {
+        // Branch 2 (R5): a being HOLDS a positive-pole conviction and SUFFERS under it (a negative
+        // pole-referenced association, from Branch 1). A HEDONIC being (polarity +1) is moved AWAY from that
+        // pole: the felt hardship erodes the conviction it was suffering under (the resent-the-provider
+        // outcome). The move clears a low entrenchment gate; the stance falls from +0.8 toward the -pole.
+        let mut a = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        let low_gate = Fixed::from_ratio(1, 100);
+        let outcome = a.apply_felt_experience(
+            Fixed::ZERO - Fixed::from_ratio(1, 2), // suffered while holding the +pole -> negative association
+            Fixed::ONE,                            // hedonic
+            low_gate,
+            Fixed::ONE, // full plasticity
+        );
+        match outcome {
+            Appraisal::Accommodated { from, to, .. } => {
+                assert_eq!(from, Fixed::from_ratio(8, 10));
+                assert!(
+                    to < from,
+                    "the hedonic being's conviction eroded away from the pole it suffered under"
+                );
+            }
+            _ => panic!("expected the conviction to move (accommodation)"),
+        }
+    }
+
+    #[test]
+    fn felt_experience_reinforces_the_same_conviction_when_ascetic() {
+        // The mirror (R5, the fork's ascetic mode): the IDENTICAL felt hardship on the IDENTICAL conviction, for
+        // an ASCETIC being (polarity -1), moves the stance the OTHER way, TOWARD the pole it suffered under, so
+        // felt hardship VALIDATES the conviction (the martyr / costly-signal mode). Which outcome occurs is the
+        // being's own epistemic disposition, never a coded route: the same experience, opposite belief change.
+        let mut a = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        let low_gate = Fixed::from_ratio(1, 100);
+        let outcome = a.apply_felt_experience(
+            Fixed::ZERO - Fixed::from_ratio(1, 2), // same negative association
+            Fixed::ZERO - Fixed::ONE,              // ascetic
+            low_gate,
+            Fixed::ONE,
+        );
+        match outcome {
+            Appraisal::Accommodated { from, to, .. } => {
+                assert!(
+                    to > from,
+                    "the ascetic being's conviction hardened toward the pole it suffered under"
+                );
+            }
+            _ => panic!("expected the conviction to move (accommodation)"),
+        }
+    }
+
+    #[test]
+    fn felt_experience_move_is_relabel_invariant() {
+        // The panel's FORMAL TEST (R5): negating the axis's pole convention must leave the being's physical
+        // trajectory unchanged. Relabel flips the stance sign AND the pole-referenced association sign together;
+        // the resulting stance must be the exact negative of the un-relabelled result, and nothing else changes.
+        let gate = Fixed::from_ratio(1, 100);
+        let mut normal = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        normal.apply_felt_experience(
+            Fixed::ZERO - Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            gate,
+            Fixed::ONE,
+        );
+        // The relabelled world: the same being's stance and its association both negate (the association is
+        // pole-referenced, so it flips with the pole convention), the polarity is unchanged (it is a per-race
+        // disposition, not about any one axis's labels).
+        let mut relabelled = axiom(Fixed::ZERO - Fixed::from_ratio(8, 10), 0, 3);
+        relabelled.apply_felt_experience(
+            Fixed::from_ratio(1, 2), // -(-1/2), the association flips with the relabel
+            Fixed::ONE,
+            gate,
+            Fixed::ONE,
+        );
+        assert_eq!(
+            normal.stance,
+            Fixed::ZERO - relabelled.stance,
+            "the relabelled being's stance is the exact negative: the move reads no absolute pole meaning"
+        );
+    }
+
+    #[test]
+    fn felt_experience_assimilates_below_the_gate_and_on_zero_polarity() {
+        // Below the entrenchment gate the felt evidence is absorbed without moving the stance (belief
+        // perseverance), and a being with zero experiential polarity has no felt-to-conviction coupling at all
+        // (the honest default: felt experience does not move its convictions).
+        let mut below = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        let high_gate = Fixed::from_int(10);
+        assert!(matches!(
+            below.apply_felt_experience(
+                Fixed::ZERO - Fixed::from_ratio(1, 2),
+                Fixed::ONE,
+                high_gate,
+                Fixed::ONE
+            ),
+            Appraisal::Assimilated { .. }
+        ));
+        assert_eq!(
+            below.stance,
+            Fixed::from_ratio(8, 10),
+            "below the gate the stance does not move"
+        );
+
+        let mut inert = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        assert!(matches!(
+            inert.apply_felt_experience(
+                Fixed::ZERO - Fixed::from_ratio(1, 2),
+                Fixed::ZERO,
+                Fixed::from_ratio(1, 100),
+                Fixed::ONE
+            ),
+            Appraisal::Assimilated { .. }
+        ));
+        assert_eq!(
+            inert.stance,
+            Fixed::from_ratio(8, 10),
+            "zero polarity is no coupling"
+        );
     }
 
     #[test]

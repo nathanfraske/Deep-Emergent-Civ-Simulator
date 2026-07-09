@@ -1426,6 +1426,15 @@ impl World {
         self.intrinsic.get(&id)
     }
 
+    /// A being's intrinsic beliefs by id for MUTATION (the felt-experience conviction move, Branch 2 of the
+    /// learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5): the runner reads
+    /// the being's per-race epistemic polarity and its accumulated felt association and moves the relevant axiom
+    /// stance through [`crate::axiom::Axiom::apply_felt_experience`]. The being need already hold beliefs; a
+    /// belief-less being yields `None`.
+    pub fn intrinsic_of_mut(&mut self, id: StableId) -> Option<&mut IntrinsicBeliefs> {
+        self.intrinsic.get_mut(&id)
+    }
+
     /// Set a being's intrinsic beliefs (used by the dawn seeding, by later inheritance, and by
     /// tools and tests). The being need not already hold beliefs.
     pub fn set_intrinsic(&mut self, id: StableId, beliefs: IntrinsicBeliefs) {

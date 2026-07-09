@@ -3980,6 +3980,9 @@ impl Runner {
         // embodiment step so the reserve delta reflects this tick, matching the scheduled placement; inert and
         // byte-identical unless the felt-conviction learner is armed.
         self.fold_conviction_experience();
+        // Move each being's convictions under its accumulated felt experience (Branch 2), after the record is
+        // folded; a no-op unless the learner is armed WITH move parameters, so it is byte-identical otherwise.
+        self.apply_conviction_moves();
         {
             let _g = crate::profile::scope(crate::profile::P_WORLD);
             // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
@@ -4108,6 +4111,62 @@ impl Runner {
             let held: Vec<(AxiomAxisId, Fixed)> =
                 intr.axioms.iter().map(|a| (a.axis, a.stance)).collect();
             w.conviction_experience.fold(felt, &held, calib.retention);
+        }
+    }
+
+    /// Move each being's convictions under its own accumulated felt experience (Branch 2, the credit-assignment
+    /// half of the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5). Runs
+    /// after [`fold_conviction_experience`] (so it consumes this tick's updated record) only when the learner is
+    /// armed WITH move parameters (the RECORD-only calib leaves this a no-op, so Branch 1 stays inert). For each
+    /// being that holds convictions and a nonzero per-race epistemic polarity, each held axiom is moved through
+    /// [`crate::axiom::Axiom::apply_felt_experience`]: the felt drive is `polarity * association` (the being's
+    /// pole-referenced felt record times its hedonic-or-ascetic disposition), the evidence points to the pole
+    /// `sign(drive)`, and the stance accommodates if the drive clears the reserved entrenchment gate. The move
+    /// is relabel-invariant (it reads no absolute pole meaning, R5) and its polarity is a per-race innate
+    /// disposition (P9-legal), so "felt hardship erodes the conviction" for a hedonic race and "validates it"
+    /// for an ascetic one, each an emergent per-race outcome. Reads the embodiment (each walker's record) and
+    /// mutates the world (the intrinsic beliefs) through disjoint field borrows, in canonical walker order,
+    /// drawing no RNG, so it replays and is worker-count invariant. Byte-identical unless a world opts into the
+    /// move leg.
+    fn apply_conviction_moves(&mut self) {
+        let move_params = match self.felt_conviction_learning.and_then(|c| c.move_params) {
+            Some(m) => m,
+            None => return,
+        };
+        let emb = match self.embodiment.as_ref() {
+            Some(e) => e,
+            None => return,
+        };
+        let world = match self.world.as_mut() {
+            Some(w) => w,
+            None => return,
+        };
+        for w in emb.walkers.iter() {
+            if !w.alive || w.conviction_experience.is_empty() {
+                continue;
+            }
+            let intr = match world.intrinsic_of_mut(w.id) {
+                Some(i) => i,
+                None => continue,
+            };
+            // The being's per-race epistemic polarity: zero means felt experience does not move its convictions
+            // (the honest default for a race that opts out); positive hedonic, negative ascetic.
+            let polarity = intr.epistemic.experiential_polarity;
+            if polarity == Fixed::ZERO {
+                continue;
+            }
+            for ax in intr.axioms.iter_mut() {
+                let association = w.conviction_experience.association(ax.axis);
+                if association == Fixed::ZERO {
+                    continue;
+                }
+                ax.apply_felt_experience(
+                    association,
+                    polarity,
+                    move_params.threshold,
+                    move_params.plasticity,
+                );
+            }
         }
     }
 
@@ -4654,6 +4713,9 @@ impl Runner {
             // Fold each being's felt experience into its per-conviction record (Branch 1), after the embodiment
             // step, matching step_inner; inert and byte-identical unless the felt-conviction learner is armed.
             self.fold_conviction_experience();
+            // Move each being's convictions under its accumulated felt experience (Branch 2), matching
+            // step_inner; a no-op unless the learner is armed WITH move parameters (byte-identical otherwise).
+            self.apply_conviction_moves();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
@@ -10012,6 +10074,173 @@ values = [
         assert_eq!(
             stance_now, held_stance,
             "Branch 1 is inert: the conviction stance is unchanged by the recording (Branch 2 moves it)"
+        );
+    }
+
+    #[test]
+    fn sustained_hardship_erodes_a_hedonic_beings_conviction_and_hardens_an_ascetic_ones() {
+        // Branch 2 (credit-assignment) of the learned experience-to-conviction coupling
+        // (`docs/working/OWNER_DECISIONS_LOG.md` R2/R5), the money shot: two beings hold the IDENTICAL positive
+        // conviction and suffer the IDENTICAL sustained hardship, and their convictions move in OPPOSITE
+        // directions purely because of their per-race EPISTEMIC POLARITY. The HEDONIC being (polarity +1, the
+        // default) is moved AWAY from the pole it suffered under: its faith erodes (the resent-the-provider
+        // outcome). The ASCETIC being (polarity -1) is moved TOWARD that pole: its felt hardship VALIDATES the
+        // conviction (the martyr / costly-signal mode). Neither direction is coded: the engine never reads which
+        // pole "means" what (the move is relabel-invariant), and which epistemology a being has is its race's
+        // own innate disposition. Same experience, opposite belief change, emergent from disposition.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_experience::FeltConvictionCalib;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+        let held_stance = Fixed::from_ratio(8, 10);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::from_ratio(1, 50),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // Two beings, identical but for their race's experiential polarity: hedonic (+1) versus ascetic (-1).
+        let beliefs = |polarity: Fixed| IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance: held_stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 0,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: held_stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            )
+            .with_experiential_polarity(polarity),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([(AccessChannelId(1), Fixed::from_int(4))]),
+        );
+        let hedonic = world.spawn(Fixed::ONE);
+        let ascetic = world.spawn(Fixed::ONE);
+        world.set_place(hedonic, 0);
+        world.set_place(ascetic, 1);
+        world.set_intrinsic(hedonic, beliefs(Fixed::ONE));
+        world.set_intrinsic(ascetic, beliefs(Fixed::ZERO - Fixed::ONE));
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let layout = emb.layout().clone();
+        for id in [hedonic, ascetic] {
+            emb.add(
+                Walker::new(
+                    id,
+                    Coord3::ground(2, 2 + id.0 as i32 % 4),
+                    body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    naive_physiology(),
+                    Controller::zeros(&layout),
+                ),
+                band(),
+            );
+        }
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Arm the felt-conviction learner WITH the move leg (Branch 1 + Branch 2).
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_with_move());
+        for _ in 0..12 {
+            runner.step();
+        }
+
+        let stance_of = |r: &Runner, id: StableId| -> Fixed {
+            r.world()
+                .unwrap()
+                .intrinsic_of(id)
+                .unwrap()
+                .axioms
+                .iter()
+                .find(|a| a.axis == AXIS)
+                .unwrap()
+                .stance
+        };
+        let hedonic_now = stance_of(&runner, hedonic);
+        let ascetic_now = stance_of(&runner, ascetic);
+        assert!(
+            hedonic_now < held_stance,
+            "the hedonic being's conviction eroded under sustained hardship (from {held_stance:?} to {hedonic_now:?})"
+        );
+        assert!(
+            ascetic_now > held_stance,
+            "the ascetic being's conviction HARDENED under the same hardship (from {held_stance:?} to {ascetic_now:?})"
         );
     }
 

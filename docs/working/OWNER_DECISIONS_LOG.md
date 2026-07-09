@@ -52,6 +52,45 @@ R2. **How first-hand felt experience feeds a being's convictions: the LEARNED-CO
    28 consolidation happens when it is built. Reserved: the interoceptive-signal-to-salience scale (basis: the
    existing salience range of social events), owner's to set.
 
+R5. **Branch-2 (credit-assignment) framing CORRECTED by a third blind framing panel (2026-07-08); one OPEN
+   fork surfaced for the owner.** The move half of the R2 substrate. The first-cut framing decided the pole a
+   conviction moves toward by comparing the sign of its accumulated felt-experience association A (Branch 1) to
+   the sign of its current stance s (same sign = confirm, strengthen toward the current pole; opposite = erode,
+   flip toward the other). A fully-blind six-agent framing panel (three types, three models, de-narrivatized,
+   none seeing the conclusion) UNANIMOUSLY (6 of 6, none "sound-as-is") caught it, and I verified the algebra
+   against source: the comparison is VACUOUS. In both branches the kernel target reduces to `sign(A)` (same-sign:
+   target = sign(s) = sign(A); opposite-sign: target = -sign(s) = sign(A)), so s never affects the direction.
+   The actual rule is "reserves rose this span -> move the stance toward the numerically +1 pole; reserves fell
+   -> toward -1," for every axis and every world. That AUTHORS the axis's meaning: it fixes the +numbered pole
+   as the thriving/good pole everywhere, the exact "read the meaning of a symbol/axis" the template case forbids
+   (P9 / the value-authoring line). The panel's FORMAL TEST (the load-bearing tool): the move must be INVARIANT
+   under relabeling an axis (negating which pole is +1 must leave every being's physical trajectory unchanged);
+   the first-cut fails it, a correct move must pass it. THE CORRECTED FRAMING (mandatory, all six): make the move
+   relabel-invariant by making the association POLE-REFERENCED. Branch 1's accumulator changes its engagement
+   weight from `|stance|` to the SIGNED stance, so `A = sum(felt.valence * intensity * stance)` and `sign(A)` is
+   a per-being LEARNED, relabel-invariant fact ("which pole was good to hold, for me"); Branch 2 then feeds the
+   AGM kernel `toward = sign(A)`'s pole, magnitude `|A|`, gated by entrenchment. Under relabel, stance -> -stance
+   so A -> -A and the target tracks the SAME physical pole (invariant, meaning-free). This captures the owner's
+   target: a being that HELD "providence is benevolent" and SUFFERED accrues A pointing away from that pole and
+   erodes/flips toward its opposite (resentment), whichever numeric sign the world gave the poles. THE OPEN FORK
+   (gp-sonnet's deeper catch, surfaced for the owner): even relabel-invariant, `target = sign(A)` hardcodes ONE
+   epistemic polarity, "felt-good confirms a conviction, felt-bad erodes it," which forecloses the real cultural
+   mode where felt HARDSHIP VALIDATES a conviction (asceticism, martyrdom, costly-signal belief). The fix is a
+   per-being (or per-race) epistemic-polarity disposition `p` mediating the move (`target = sign(p * A)`): p>0
+   hedonic, p<0 ascetic, so which epistemology a being/lineage has EMERGES rather than being authored. Options
+   the owner is deciding between: (a) p as a per-race innate EPISTEMIC DISPOSITION (a field on `EpistemicStance`,
+   the sibling of dogmatism, P9-legal authored input, hedonic default, per-race variable, seeded and inherited
+   like the axiom seeds); (b) p as a per-individual HERITABLE genome-expressed trait, founder-zero, selected
+   (gp-sonnet's strict reading, fullest emergence, but the coupling only fires once selection lifts p); (c) a
+   hedonic always-on base now (like the floor-grounded harm/reward learners) with the ascetic-p generalization
+   flagged as a follow-on. Reserved either way: the move threshold/rate (basis: the axiom kernel's existing
+   entrenchment and plasticity), and p's default and range. The relabel-invariance fix is not optional and is
+   built regardless; only the polarity fork awaits the owner. OWNER CHOSE (a) 2026-07-08: p is a per-race innate
+   EPISTEMIC DISPOSITION (a field on `EpistemicStance`, the sibling of dogmatism), a P9-legal authored input
+   with a hedonic default and per-race variation, seeded at the dawn and inherited like the axiom seeds, so a
+   hedonic race and an ascetic race are data rows and asceticism is representable without foreclosure. Built on
+   this basis.
+
 R4. **Branch-1 (correlation-record) framing CORRECTED by a second blind framing panel (2026-07-08).** The R2
    substrate's Branch 1. The first-cut framing defined a conviction's eligibility for felt-experience
    association as (evolved controller weight x stance value), glossed as "the degree the conviction influenced

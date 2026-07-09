@@ -1218,7 +1218,7 @@ mod tests {
             &[],
             &[],
             &[],
-            &vec![Fixed::ZERO; 2],
+            &[Fixed::ZERO; 2],
         );
         let (lit_out, _) = founder.evaluate(&input, &[]);
         let (dark_out, _) = founder.evaluate(&dark, &[]);

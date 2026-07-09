@@ -649,8 +649,10 @@ mod tests {
         );
 
         // An ALIEN with the IDENTICAL delta magnitudes on entirely different reserves (a mana pool and a heat
-        // store) folds to the identical felt experience: no axis identity is read (Principle 9).
-        let alien = felt_salience(vec![Fixed::ZERO - quarter, Fixed::ZERO - eighth].into_iter());
+        // store), supplied through an owned Vec rather than an array, folds to the identical felt experience: no
+        // axis identity and no container shape is read (Principle 9).
+        let alien_deltas: Vec<Fixed> = vec![Fixed::ZERO - quarter, Fixed::ZERO - eighth];
+        let alien = felt_salience(alien_deltas);
         assert_eq!(
             alien, hardship,
             "the same deltas give the same felt experience whatever the reserves mean"

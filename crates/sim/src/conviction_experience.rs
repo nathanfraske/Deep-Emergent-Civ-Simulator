@@ -12,13 +12,17 @@
 //!
 //! The mechanism is a leaky signed accumulator per conviction axis. Each felt event folds the being's
 //! felt-experience summary (valence times intensity) into the accumulator of each conviction it CURRENTLY
-//! holds, engagement-weighted by the conviction's strength (`|stance|`), with a retention decay so the record
-//! tracks RECENT lived valence and can un-form (defeasible, the harm learner's own property). It reads NO
-//! behaviour weight, so it is weight-agnostic: a founder whose convictions do not yet drive behaviour, and a
-//! sessile being with no locomotion, still learn the association from the same felt reserve swings (the R4
-//! correction of the first-cut `weight x stance` framing, which a fully-blind panel unanimously caught as a
-//! static, motility-parasitic mask). It keys on no axis meaning (`crate::axiom::AxiomAxisId` alone, the
-//! Steering Audit), so an alien's convictions and reserves fold through the identical call (Principle 9).
+//! holds, weighted by the SIGNED stance (POLE-REFERENCED), with a retention decay so the record tracks RECENT
+//! lived valence and can un-form (defeasible, the harm learner's own property). Because the weight is the
+//! signed stance, `sign(A)` is a relabel-invariant learned fact ("which pole was good to hold, for me"):
+//! under a relabel of the axis (swapping which pole is +1) the stance flips sign, the accumulator flips sign,
+//! and Branch 2's move tracks the SAME physical pole, so the engine never reads which pole "means" what (the
+//! third framing panel's ruling, R5). It reads NO behaviour weight, so it is weight-agnostic: a founder whose
+//! convictions do not yet drive behaviour, and a sessile being with no locomotion, still learn the association
+//! from the same felt reserve swings (the R4 correction of the first-cut `weight x stance` framing, which a
+//! fully-blind panel unanimously caught as a static, motility-parasitic mask). It keys on no axis meaning
+//! (`crate::axiom::AxiomAxisId` alone, the Steering Audit), so an alien's convictions and reserves fold through
+//! the identical call (Principle 9).
 //!
 //! It is INERT: recording an association changes no conviction and no behaviour (Branch 2, the credit
 //! assignment, consumes it to move a conviction). It is EMPTY by default, so a being that holds no conviction,
@@ -59,8 +63,10 @@ impl ConvictionExperience {
     }
 
     /// The accumulated felt-experience association for a conviction axis (Branch 2 reads this to decide how a
-    /// conviction moves): positive if the being's recent lived experience while holding the conviction was
-    /// net-good, negative if net-bad, zero if the being never held it or the record washed out.
+    /// conviction moves): POLE-REFERENCED, so `sign(A)` names which pole the being's recent lived experience
+    /// favoured (positive if the being tended to thrive while holding the +pole or suffer while holding the
+    /// -pole, negative for the mirror), and zero if the being never held it or the record washed out. This is
+    /// relabel-invariant (it flips sign with a pole relabel), so no absolute pole meaning is read (R5).
     pub fn association(&self, axis: AxiomAxisId) -> Fixed {
         self.assoc.get(&axis).copied().unwrap_or(Fixed::ZERO)
     }
@@ -75,8 +81,9 @@ impl ConvictionExperience {
     /// identity). `held` is the being's currently-held convictions as `(axis, stance)` pairs (from its
     /// intrinsic beliefs). `retention` is the leak (below one): every existing accumulator decays by it first
     /// (so a conviction no longer held, and an old lived valence, fade, and the record stays defeasible), then
-    /// each held conviction gains `felt.valence * felt.intensity * |stance|`, engagement-weighted by the
-    /// conviction's strength. Prunes accumulators that reach zero, so the record stays bounded and
+    /// each held conviction gains `felt.valence * felt.intensity * stance` (the SIGNED, pole-referenced stance,
+    /// so `sign(A)` names which pole the being's experience favoured, relabel-invariant, R5). Prunes
+    /// accumulators that reach zero, so the record stays bounded and
     /// empty-neutral. Reads NO behaviour weight (weight-agnostic, R4) and changes no conviction (inert). A pure
     /// deterministic fold in canonical axis order, drawing no randomness; arithmetic saturates rather than
     /// wrapping so an extreme run of felt events cannot panic under the release overflow checks.
@@ -97,13 +104,18 @@ impl ConvictionExperience {
             .checked_mul(felt.intensity)
             .unwrap_or(Fixed::ZERO);
         for &(axis, stance) in held {
-            // Engagement is the conviction's strength: a more strongly held conviction is more at stake in the
-            // being's experience. An unheld (zero-stance) conviction is not at stake, so nothing is credited.
-            let engagement = stance.abs();
-            if engagement == Fixed::ZERO {
+            // POLE-REFERENCED engagement: the SIGNED stance (not its magnitude), so the accumulator records the
+            // correlation between the felt valence and WHICH POLE the being held. This makes `sign(A)` a
+            // relabel-invariant learned fact ("which pole was good to hold, for me"): under a relabel of the
+            // axis (swapping which pole is +1) the stance flips sign, so the increment and the whole accumulator
+            // flip sign, and Branch 2's move tracks the SAME physical pole, so the engine never reads which pole
+            // "means" what (the third framing panel's ruling, R5). The magnitude still scales with |stance|, so
+            // a more strongly held conviction accrues a stronger association. An unheld (zero-stance) conviction
+            // is not at stake, so nothing is credited.
+            if stance == Fixed::ZERO {
                 continue;
             }
-            let increment = signed.checked_mul(engagement).unwrap_or(Fixed::ZERO);
+            let increment = signed.checked_mul(stance).unwrap_or(Fixed::ZERO);
             let entry = self.assoc.entry(axis).or_insert(Fixed::ZERO);
             *entry = entry.checked_add(increment).unwrap_or(*entry);
             // A cancellation back to exactly zero drops the axis, keeping the record empty-neutral.
@@ -124,8 +136,27 @@ impl ConvictionExperience {
     }
 }
 
-/// The reserved calibration the felt-conviction learner (Branch 1) reads: the retention (leak) applied to each
-/// conviction-experience accumulator per felt event. The mechanism is fixed Rust; this number is the owner's.
+/// The MOVE parameters for Branch 2 (the credit-assignment half, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5):
+/// the gate the felt drive must clear to move a conviction and the step it then takes. Present only when a
+/// world opts into the felt-experience-MOVES-conviction leg; absent, the learner only RECORDS (Branch 1, inert).
+#[derive(Clone, Copy, Debug)]
+pub struct ConvictionMoveParams {
+    /// The entrenchment gate the felt drive `|polarity * association|` must clear to move a conviction (below
+    /// it the felt evidence is absorbed without moving the stance, belief perseverance). RESERVED. Basis: the
+    /// axiom kernel's own entrenchment-threshold curve (`axiom.entrenchment_curve`) read at the axiom's rank is
+    /// the canonical gate; this flat value is the dev interim for a baseline rank, the entrenchment-scaled gate
+    /// the faithful refinement.
+    pub threshold: Fixed,
+    /// The step scale of the felt-experience move: the fraction of the gap to the target pole closed per unit
+    /// of cleared pressure, the same role plasticity plays in [`crate::axiom::Axiom::appraise`]. RESERVED.
+    /// Basis: the belief-plasticity phenotype the axiom kernel already uses (`Mind::plasticity`); this value is
+    /// the dev interim.
+    pub plasticity: Fixed,
+}
+
+/// The reserved calibration the felt-conviction learner reads: the retention (leak) applied to each
+/// conviction-experience accumulator per felt event (Branch 1), and optionally the MOVE parameters that let
+/// the record actually move a conviction (Branch 2). The mechanism is fixed Rust; these numbers are the owner's.
 #[derive(Clone, Copy, Debug)]
 pub struct FeltConvictionCalib {
     /// The retention (leak) per felt event, below one, so the association tracks RECENT lived valence and stays
@@ -135,17 +166,37 @@ pub struct FeltConvictionCalib {
     /// rather than actions or features). A retention of one would never forget (non-defeasible); a small one
     /// would forget within a few ticks (no lifetime integration).
     pub retention: Fixed,
+    /// The Branch-2 MOVE parameters, or `None` to RECORD only (Branch 1, inert: the association accumulates and
+    /// folds into the hash but moves no conviction). `Some` opts a world into the felt-experience-moves-belief
+    /// leg, gated by the being's per-race epistemic polarity ([`crate::axiom::EpistemicStance`]).
+    pub move_params: Option<ConvictionMoveParams>,
 }
 
 impl FeltConvictionCalib {
-    /// A labelled DEV fixture (not owner data), for the example and test paths that build without a manifest:
-    /// a mild leak (fifteen-sixteenths) so many felt events accumulate over a life while old experience fades,
-    /// matching the reward learner's eligibility-decay order. The owner sets the canonical retention via the
-    /// calibration manifest when the felt-conviction learner is armed on a Calibrated world (the reserved key,
-    /// a follow-on shared with the other opt-in learners whose calibs are still dev-fixtures).
+    /// A labelled DEV fixture (not owner data) for the RECORD-only leg (Branch 1, inert): a mild leak
+    /// (fifteen-sixteenths) so many felt events accumulate over a life while old experience fades, matching the
+    /// reward learner's eligibility-decay order, and NO move (a conviction is recorded against but not moved).
+    /// The owner sets the canonical values via the calibration manifest when the learner is armed on a
+    /// Calibrated world (the reserved keys, a follow-on shared with the other opt-in learners' dev-fixture
+    /// calibs).
     pub fn dev_default() -> FeltConvictionCalib {
         FeltConvictionCalib {
             retention: Fixed::from_ratio(15, 16),
+            move_params: None,
+        }
+    }
+
+    /// A labelled DEV fixture (not owner data) for the full RECORD-and-MOVE leg (Branch 1 + Branch 2): the
+    /// record retention above plus a low move gate and a moderate step, so a being whose accumulated felt
+    /// association clears the gate has the relevant conviction moved by its per-race epistemic polarity. Dev
+    /// values; the owner sets the canonical gate (the entrenchment curve) and step (the plasticity phenotype).
+    pub fn dev_with_move() -> FeltConvictionCalib {
+        FeltConvictionCalib {
+            retention: Fixed::from_ratio(15, 16),
+            move_params: Some(ConvictionMoveParams {
+                threshold: Fixed::from_ratio(1, 100),
+                plasticity: Fixed::from_ratio(1, 4),
+            }),
         }
     }
 }
@@ -170,27 +221,59 @@ mod tests {
     }
 
     #[test]
-    fn a_felt_event_accumulates_signed_by_valence_and_engagement_weighted_by_strength() {
-        // The Branch-1 record: a felt-negative event on a held conviction accrues a NEGATIVE association,
-        // scaled by the conviction's strength; a felt-positive one a positive association. Weight-agnostic
-        // by construction: the fold reads no behaviour weight at all (the R4 correction).
+    fn a_felt_event_accumulates_signed_by_valence_and_scaled_by_stance_strength() {
+        // The Branch-1 record: a felt-negative event on a POSITIVELY-held conviction accrues a NEGATIVE
+        // association, scaled by the conviction's strength; the stronger the stance, the stronger the record.
+        // Weight-agnostic by construction: the fold reads no behaviour weight at all (the R4 correction).
         let mut e = ConvictionExperience::new();
         let held = [
-            (AxiomAxisId(0), Fixed::from_ratio(8, 10)), // strongly held
-            (AxiomAxisId(1), Fixed::from_ratio(2, 10)), // weakly held
+            (AxiomAxisId(0), Fixed::from_ratio(8, 10)), // strongly held, +pole
+            (AxiomAxisId(1), Fixed::from_ratio(2, 10)), // weakly held, +pole
         ];
         e.fold(felt(-1, Fixed::ONE), &held, Fixed::ONE); // retention one to isolate the increment
         assert!(
             e.association(AxiomAxisId(0)) < Fixed::ZERO,
-            "hardship while holding conviction 0 accrues a negative association"
+            "hardship while holding the +pole of conviction 0 accrues a negative association"
         );
         assert!(
             e.association(AxiomAxisId(1)) < Fixed::ZERO,
-            "hardship while holding conviction 1 accrues a negative association"
+            "hardship while holding the +pole of conviction 1 accrues a negative association"
         );
         assert!(
             e.association(AxiomAxisId(0)) < e.association(AxiomAxisId(1)),
             "the more strongly held conviction accrues the stronger (more negative) association"
+        );
+    }
+
+    #[test]
+    fn the_association_is_pole_referenced_and_relabel_invariant() {
+        // The R5 correction: the accumulator weights by the SIGNED stance, so the SAME felt-negative event
+        // accrues an OPPOSITE-sign association for a being holding the -pole versus the +pole. This is what
+        // makes sign(A) name "which pole was good to hold" (relabel-invariant), never an absolute pole meaning.
+        let mut plus = ConvictionExperience::new();
+        let mut minus = ConvictionExperience::new();
+        plus.fold(
+            felt(-1, Fixed::ONE),
+            &[(AxiomAxisId(0), Fixed::ONE)],
+            Fixed::ONE,
+        );
+        minus.fold(
+            felt(-1, Fixed::ONE),
+            &[(AxiomAxisId(0), Fixed::ZERO - Fixed::ONE)],
+            Fixed::ONE,
+        );
+        assert!(
+            plus.association(AxiomAxisId(0)) < Fixed::ZERO,
+            "suffering while holding the +pole favours the -pole (negative A)"
+        );
+        assert!(
+            minus.association(AxiomAxisId(0)) > Fixed::ZERO,
+            "suffering while holding the -pole favours the +pole (positive A): the mirror, relabel-invariant"
+        );
+        assert_eq!(
+            plus.association(AxiomAxisId(0)),
+            Fixed::ZERO - minus.association(AxiomAxisId(0)),
+            "the two are exact negatives: a pole relabel flips the record's sign and nothing else"
         );
     }
 
