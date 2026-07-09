@@ -198,6 +198,44 @@ alien-scalar collection is invisible to the hash on an Earth run that declares n
 clean part is built byte-neutral and proven against all four pins; any behaviour-changing step states its
 intended hash change with its reason. Section-9 five-lens audit before every push.
 
+## Segment 2 blind framing panel (verified) — a reframe the gate must rule on
+
+Segment 1 is signed off and merged-rebased (pins re-verified on the merged tree). Before writing segment 2, I
+ran the section-10 blind framing panel on the pairwise-difference construction (the one segment 1's own panel
+proposed and the gate pre-approved). Six diverse panelists; CONVERGENT (1 reframe-needed, 5
+significant-flaw-fixable, none sound). The finding, verified against source: the "pairwise-difference operator on
+two concentration fields" framing itself authors three things a world must decide.
+
+1. STOICHIOMETRY authored 1:1. Draining each participating field through the same global `draw_fraction` and
+   `biomass_per_stock` hardcodes a 1:1 donor:acceptor consumption. Real redox is reaction-specific and can be
+   multi-participant. Fix: a per-(field, role) stoichiometric coefficient as world data on the binding.
+2. The stock->biomass conversion `biomass_per_stock` is a single registry-global whose basis is the reciprocal
+   of a SOIL fertility scale (environ.rs), applied to a dimensionally incommensurable redox stock (joules of
+   free energy versus moles of nutrient). Fix: per-source conversion, grounded in that field's own floor units.
+3. A bare subtraction of two concentration fields is neither the free-energy yield (Nernst-corrected) nor the
+   total available power (co-limitation by the scarcer reactant). The strongest panelist's decisive point,
+   confirmed against source: co-limitation is ALREADY the engine's Liebig-minimum over the source set, which
+   segment 1 delivers (a producer binding {donor, acceptor} field-kinds is capped by the scarcer, the
+   `productivity_is_the_liebig_minimum_over_the_evolved_source_set` test); the redox-specific thing is the YIELD,
+   and the floor ALREADY carries `law.battery_emf` (EMF = E_cathode - E_anode over `chem.standard_potential`),
+   so the yield DERIVES from the floor, not a hardcoded operator.
+
+The verified reframing. A redox chemolithotroph decomposes into: (a) co-limitation = existing Liebig-min
+(segment 1, zero new code); (b) thermodynamic yield = derived from the floor `law.battery_emf` over the
+participants' `chem.standard_potential`, with the EMF-to-biomass coupling a reserved value surfaced with basis
+(a thermodynamic-efficiency bound), never fabricated; (c) reaction-specific stoichiometry = per-(field, role)
+coefficients as world data; (d) stock-to-biomass conversion = per-source, not a soil-derived global. The bespoke
+"difference operator on concentration fields" is dropped: it reinvents co-limitation wrong and misplaces the
+redox character, which belongs in the yield.
+
+This is a design-intent fork for the gate and, where it touches the floor coupling and modeling depth, the
+owner: (i) the EMF-to-biomass coupling reserved value (owner's, derived against a floor efficiency bound); (ii)
+modeling depth (the standard EMF as a per-source constant versus a full Nernst concentration-dependent yield);
+(iii) confirmation to drop the bespoke difference operator in favour of the Liebig-min-plus-floor-yield form.
+Unblocked and buildable byte-neutral regardless of the fork (correct improvements the audit and panel both name):
+the per-source stock-to-biomass conversion and the per-(field, role) stoichiometric coefficients. Surfaced to the
+gate; holding at doc-only for segment 2 until it rules.
+
 ## Files
 
 - Edit surface: `crates/sim/src/environ.rs` (the enum, the two matches, the `EnvironFields` struct, tests).
