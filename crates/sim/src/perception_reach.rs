@@ -185,6 +185,16 @@ pub const fn spreading_dimensionality() -> u32 {
     (core::mem::size_of::<Coord3>() / core::mem::size_of::<i32>()) as u32
 }
 
+// The structural read above is a byte-size axis count, correct only while Coord3 is a packed tuple of i32
+// spatial axes. This compile-time assertion turns a shape change (a non-i32 field, an added axis, or
+// padding) into a BUILD ERROR rather than a silently-wrong dimensionality (gate hardening note): whoever
+// changes Coord3 is forced to update the derivation here.
+const _: () = assert!(
+    core::mem::size_of::<Coord3>() == 3 * core::mem::size_of::<i32>(),
+    "Coord3 must be three packed i32 axes for the structural spreading-dimensionality read; \
+     update spreading_dimensionality() if its shape changes",
+);
+
 /// The largest 3D squared separation the distance is formed exactly for; a source farther than this is
 /// negligible (its geometric spread underflows to zero), which keeps the fixed-point square root inside
 /// its representable range without a fabricated cutoff (the physics already sends a far source to zero).
