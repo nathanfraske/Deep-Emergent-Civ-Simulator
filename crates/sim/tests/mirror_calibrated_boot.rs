@@ -43,15 +43,18 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     build_dawn_runner, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
-    BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples, DominanceMode, GeneDef,
-    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, EpistemicStance, EvidenceRing,
+    BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples, DominanceMode,
+    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
     IntrinsicBeliefs, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
     SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{FlatBounded, TileMap};
 
 /// The real reserved manifest, the owner's calibration of record.
-const RESERVED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../calibration/reserved.toml");
+const RESERVED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../calibration/reserved.toml"
+);
 
 /// The Mirror scenario file, the grounded baseline world.
 const MIRROR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/mirror.toml");
@@ -235,9 +238,14 @@ fn boot(profile: Profile, seed: u64) -> Result<Runner, CalibrationError> {
 /// of this test maps the next reserved value the owner must set for Mirror to boot.
 fn describe(e: &CalibrationError) -> String {
     match e {
-        CalibrationError::Reserved(id) => format!("RESERVED calibration key still blocking boot: {id}"),
+        CalibrationError::Reserved(id) => {
+            format!("RESERVED calibration key still blocking boot: {id}")
+        }
         CalibrationError::UnsatisfiedRequirements(ids) => {
-            format!("profile gate refused: reserved required keys: {}", ids.join(", "))
+            format!(
+                "profile gate refused: reserved required keys: {}",
+                ids.join(", ")
+            )
         }
         CalibrationError::BadValue { id, detail } => format!("bad value for {id}: {detail}"),
         CalibrationError::Unknown(id) => format!("unknown calibration key: {id}"),
