@@ -25,14 +25,23 @@
 //! one default regardless of scenario (the gap [`WorldStructure`] closes: the map was
 //! [`WorldgenParams::dev_default`] for every scenario alike).
 //!
-//! HONEST LIMIT (flagged, not hidden): the Earth structure's biome bands and worldgen params are
-//! still the labelled DEV FIXTURE ([`WorldgenParams::dev_default`], [`BiomeSet::dev_default`]), not
-//! owner-reserved manifest values. This slice makes the structure SELECTION scenario data; moving the
-//! biome/worldgen MAGNITUDES into the calibration manifest as reserved-with-basis values (so a
-//! `Profile::Calibrated` world reads them fail-loud like its other dials) is a follow-on, sibling to
-//! the Arc-2 calibration pass. And [`crate::worldgen::AXIS_ELEVATION`]'s role-to-ordinal binding stays
-//! an engine convention, so a truly alien axis layout is not yet a data row here (the worldgen module
-//! flags this).
+//! HONEST LIMITS (flagged, not hidden; the end-of-arc audit sharpened these):
+//! - The Earth structure's biome bands and worldgen params are still the labelled DEV FIXTURE
+//!   ([`WorldgenParams::dev_default`], [`BiomeSet::dev_default`]), not owner-reserved manifest values.
+//!   This slice makes the structure SELECTION scenario data, but the terrain MAGNITUDES stay hardcoded,
+//!   so they ESCAPE the fail-loud reserved-value gate every other dial gets: even under
+//!   `Profile::Calibrated` a world reads these Earth biome/worldgen numbers rather than refusing until the
+//!   owner sets them. Moving them into the calibration manifest as reserved-with-basis values is a
+//!   follow-on, sibling to the Arc-2 calibration pass.
+//! - A structure is a fixed-Rust registry arm, not yet a TOML DATA ROW, so an alien world's terrain is a
+//!   code addition here (unlike a medium, which is a manifest profile). Full data-declared structure needs
+//!   serde on the worldgen/biome types (`Fixed` carries none today); a reasonable follow-on.
+//! - A scenario that declares no structure DEFAULTS to "earth" (a Terran default). This is deliberate: it
+//!   keeps the map byte-identical to the pre-loader `dev_default` generation for every existing scenario;
+//!   a non-Terran world must declare its structure. Making the default fail-loud (require an explicit
+//!   structure) once every scenario declares one is a later tightening.
+//! - [`crate::worldgen::AXIS_ELEVATION`]'s role-to-ordinal binding stays an engine convention, so a truly
+//!   alien axis layout is not yet a data row here (the worldgen module flags this).
 
 use crate::terrain::BiomeSet;
 use crate::worldgen::WorldgenParams;

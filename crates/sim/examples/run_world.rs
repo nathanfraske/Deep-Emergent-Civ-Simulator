@@ -1070,6 +1070,16 @@ fn resolve_medium(
     // The declared structure resolves independently of the manifest (it is a registry name, not a
     // reserved dial), so carry it through both the primary and the neutral-fallback resolution, and the
     // map is built from `resolution.world_structure()` rather than `dev_default` regardless of scenario.
+    // Check it explicitly first: an unregistered structure would otherwise surface as a misleading
+    // medium/manifest error in the fallback path (both the primary and fallback carry the bad structure),
+    // so fail here with a message that names the offending structure.
+    if let Some(s) = structure {
+        assert!(
+            civsim_world::WorldStructure::is_registered(s),
+            "run_world: the scenario declares an unknown world structure {s:?}; \
+             registered structures resolve through WorldStructure::resolve"
+        );
+    }
     let structure_line = structure
         .as_deref()
         .map(|s| format!("structure = \"{s}\"\n"))

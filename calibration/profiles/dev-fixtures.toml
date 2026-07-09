@@ -581,10 +581,12 @@ source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"
 # --- the opt-in learners threaded onto the canonical build path (Arc 1 gap b): the appetitive reward
 # learner, the discovery sampler, and the felt-conviction learner read their calibration fail-loud from the
 # manifest, so a scenario that declares a feature arms it here rather than the run_world example arming a
-# dev_default post-hoc. These fixtures stand up the same magnitudes the *::dev_default fixtures carry, so a
-# Development run reads them from the manifest byte-for-byte; the canonical reserved.toml entries stay
-# reserved (they fail loud under Calibrated, which maps Arc 2). discovery.surprise_threshold derives from
-# reward.noise_floor (its own basis), so it needs no separate fixture.
+# dev_default post-hoc. Each fixture below carries the SAME magnitude its *::dev_default fixture uses, so a
+# Development from_manifest read reproduces that field exactly; the canonical reserved.toml entries stay
+# reserved (they fail loud under Calibrated, which maps Arc 2). ONE deliberate exception: DiscoveryCalib's
+# surprise_threshold is NOT a fixture here because from_manifest DERIVES it from reward.noise_floor (its own
+# basis), so a from_manifest DiscoveryCalib reads surprise_threshold = reward.noise_floor (0.01), which
+# differs from DiscoveryCalib::dev_default's standalone 0.5; every other field reproduces dev_default exactly.
 
 [[reserved]]
 id = "reward.noise_floor"

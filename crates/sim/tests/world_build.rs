@@ -2112,24 +2112,115 @@ fn build_dawn_runner_arms_only_the_learners_the_scenario_declares() {
         runner_off.felt_conviction_learning().is_none(),
         "the felt-conviction learner is NOT armed when undeclared"
     );
+
+    // Each learner is gated INDEPENDENTLY: declaring reward alone arms only the reward learner, leaving
+    // discovery and convictions unarmed (proving the three `if` gates are separate, not coupled).
+    let reward_only = Scenario::from_toml_str(
+        "[scenario]\nid = \"w\"\nname = \"W\"\n[features]\nreward = true\n",
+    )
+    .unwrap()
+    .resolve(&manifest)
+    .unwrap();
+    let runner_reward = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &reward_only,
+        &map,
+        &peoples(),
+        0x2E,
+    )
+    .unwrap();
+    assert!(
+        runner_reward.reward_learning().is_some(),
+        "reward alone arms the reward learner"
+    );
+    assert!(
+        runner_reward.discovery().is_none() && runner_reward.felt_conviction_learning().is_none(),
+        "reward alone leaves discovery and convictions unarmed (independent gating)"
+    );
+}
+
+#[test]
+fn build_dawn_runner_propagates_a_reserved_feature_calib_fail_loud() {
+    // The feature-block fail-loud, end to end (Arc 1 gap b): arming a feature whose OWN calibration value is
+    // reserved refuses at the feature arming itself, not at an earlier gate. The manifest is the dev fixtures
+    // with just `felt_conviction.retention` blanked (reserved), so every pre-feature read still succeeds and
+    // the build reaches the convictions arming, where FeltConvictionCalib::from_manifest fails loud. The SAME
+    // manifest builds fine when the scenario declares no features (the reserved value is never read), which is
+    // the gating that keeps a feature-off world building.
+    let fixtures = std::fs::read_to_string(FIXTURES).unwrap();
+    // `0.9375` is felt_conviction.retention's unique value in the dev fixtures; blanking it reserves the key.
+    let retention_reserved = fixtures.replace("value = \"0.9375\"", "value = \"\"");
+    assert_ne!(
+        retention_reserved, fixtures,
+        "the retention value must exist to blank"
+    );
+    let manifest = CalibrationManifest::from_toml_str(&retention_reserved).unwrap();
+    let map = a_map(0xB0);
+
+    // convictions declared: the build reaches FeltConvictionCalib::from_manifest and refuses on the reserved
+    // retention (never fabricating a default).
+    let armed = Scenario::from_toml_str(
+        "[scenario]\nid = \"w\"\nname = \"W\"\n[features]\nconvictions = true\n",
+    )
+    .unwrap()
+    .resolve(&manifest)
+    .unwrap();
+    assert!(
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &armed,
+            &map,
+            &peoples(),
+            0x2E,
+        )
+        .is_err(),
+        "arming convictions with a reserved felt_conviction.retention fails loud at the feature block"
+    );
+
+    // convictions NOT declared: the reserved retention is never read, so the same manifest builds.
+    let unarmed = a_scenario(None).resolve(&manifest).unwrap();
+    assert!(
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &unarmed,
+            &map,
+            &peoples(),
+            0x2E,
+        )
+        .is_ok(),
+        "a feature-off world never reads the reserved feature value, so it builds"
+    );
 }
 
 #[test]
 fn a_scenario_refuses_to_build_under_calibrated_while_values_are_reserved() {
-    // The handoff's Arc-1 proof step: a scenario built under Profile::Calibrated against the real reserved
-    // manifest REFUSES while any required value it reads is still reserved (never fabricating one), which is
-    // exactly what maps the remaining calibration work to Arc 2. The same build succeeds under Development,
-    // where the dev fixtures supply labelled placeholders, so the refusal is the calibration gate, not a
-    // structural failure. The refusal fires before any feature arming (World::from_manifest is the first
-    // step), so it holds for a feature-off scenario too.
+    // The handoff's Arc-1 proof step: a [features]-declaring scenario built under Profile::Calibrated against
+    // the real reserved manifest REFUSES while any required value it reads is still reserved (never fabricating
+    // one), which is exactly what maps the remaining calibration work to Arc 2. HONEST SCOPE (do not overclaim):
+    // the refusal here fires at the FIRST gate, World::from_manifest's base required set (evidence/gossip/orbit/
+    // tick), which precedes the feature arming, so this test proves the loader refuses under Calibrated but NOT
+    // that the feature block itself is fail-loud; that end-to-end claim is proven separately by
+    // `build_dawn_runner_propagates_a_reserved_feature_calib_fail_loud` (which reaches the feature arming) and
+    // by the per-calib unit tests. The same scenario builds under Development, where the dev fixtures supply
+    // labelled placeholders, so the refusal is the calibration gate, not a structural failure.
     let reserved = CalibrationManifest::load(RESERVED).expect("the reserved manifest loads");
-    let resolution = a_scenario(None).resolve(&reserved).unwrap();
+    let features_on = Scenario::from_toml_str(
+        "[scenario]\nid = \"w\"\nname = \"W\"\n\
+         [features]\nreward = true\ndiscovery = true\nconvictions = true\n",
+    )
+    .unwrap();
     let map = a_map(0xB0);
     let refused = build_dawn_runner(
         &reserved,
         &channels(),
         Profile::Calibrated,
-        &resolution,
+        &features_on.resolve(&reserved).unwrap(),
         &map,
         &peoples(),
         0x2E,
@@ -2139,15 +2230,14 @@ fn a_scenario_refuses_to_build_under_calibrated_while_values_are_reserved() {
         "Profile::Calibrated refuses to build while required values are reserved (the fail-loud gate that maps Arc 2)"
     );
 
-    // The identical build succeeds under Development against the dev fixtures.
+    // The identical features-declaring scenario builds under Development against the dev fixtures.
     let dev = manifest();
-    let dev_resolution = a_scenario(None).resolve(&dev).unwrap();
     assert!(
         build_dawn_runner(
             &dev,
             &channels(),
             Profile::Development,
-            &dev_resolution,
+            &features_on.resolve(&dev).unwrap(),
             &map,
             &peoples(),
             0x2E,
