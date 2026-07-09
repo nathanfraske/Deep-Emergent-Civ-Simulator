@@ -577,3 +577,115 @@ status = "set"
 value = "64"
 unit = "count"
 source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"
+
+# --- the opt-in learners threaded onto the canonical build path (Arc 1 gap b): the appetitive reward
+# learner, the discovery sampler, and the felt-conviction learner read their calibration fail-loud from the
+# manifest, so a scenario that declares a feature arms it here rather than the run_world example arming a
+# dev_default post-hoc. These fixtures stand up the same magnitudes the *::dev_default fixtures carry, so a
+# Development run reads them from the manifest byte-for-byte; the canonical reserved.toml entries stay
+# reserved (they fail loud under Calibrated, which maps Arc 2). discovery.surprise_threshold derives from
+# reward.noise_floor (its own basis), so it needs no separate fixture.
+
+[[reserved]]
+id = "reward.noise_floor"
+basis = "FIXTURE placeholder; the per-tick reserve RISE below which a change is ordinary metabolic recovery, not reward (the reward learner, the sign-mirror of harm.noise_floor)"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.feature_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a candidate's perceived feature into a kind, the same acuity the harm learner buckets on"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_rewards"
+basis = "FIXTURE placeholder; P(the reward signal fires | this action pays off), the reward mirror of harm.p_harm_given_harms"
+status = "set"
+value = "0.9"
+unit = "probability"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_neutral"
+basis = "FIXTURE placeholder; P(the reward signal fires | this action is neutral), the false-attribution rate, the reward mirror of harm.p_harm_given_benign"
+status = "set"
+value = "0.1"
+unit = "probability"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.eligibility_decay"
+basis = "FIXTURE placeholder; the temporal-difference lambda the reward eligibility trace decays by each tick, so a reserve rise felt some ticks after an action still credits it"
+status = "set"
+value = "0.5"
+unit = "ratio_per_tick"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "discovery.exploration_floor"
+basis = "FIXTURE placeholder; the baseline probability of trying a non-top-belief binding, so a being still explores when it already has a rewarded habit (the exploration-versus-exploitation floor)"
+status = "set"
+value = "0.25"
+unit = "weight_ratio"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "discovery.surprise_gain"
+basis = "FIXTURE placeholder; the exploration variance gain, how much a unit of surprise lifts a being's effective exploration propensity above its heritable base (multiplicative, so founder-zero holds)"
+status = "set"
+value = "1"
+unit = "lift_ratio"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "discovery.target_value_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a candidate's perceived affordance value into a coarse kind, read only when a world arms granular beliefs"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "planning.depth_cap"
+basis = "FIXTURE placeholder; the maximum number of beliefs a being's deliberative plan considers toward a goal, a per-tick cognition budget"
+status = "set"
+value = "8"
+unit = "count"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/planning.rs"
+
+[[reserved]]
+id = "planning.hop_cap"
+basis = "FIXTURE placeholder; the longest inferential chain a being follows when it plans through its relational beliefs, a per-tick cognition budget"
+status = "set"
+value = "4"
+unit = "count"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/planning.rs"
+
+[[reserved]]
+id = "felt_conviction.retention"
+basis = "FIXTURE placeholder; the retention (leak) per felt event applied to each conviction-experience accumulator, so the record tracks recent lived valence and stays defeasible (~11-tick half-life, deliberately slower than the reward learner's action-eligibility decay)"
+status = "set"
+value = "0.9375"
+unit = "ratio_per_tick"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"
+
+[[reserved]]
+id = "felt_conviction.move_threshold"
+basis = "FIXTURE placeholder; the entrenchment gate the felt drive must clear to move a conviction (the flat dev interim of the entrenchment-scaled gate)"
+status = "set"
+value = "0.01"
+unit = "stance_scale"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"
+
+[[reserved]]
+id = "felt_conviction.move_plasticity"
+basis = "FIXTURE placeholder; the step scale of the felt-experience move, the fraction of the gap to the target pole closed per unit of cleared pressure (the dev interim of the belief-plasticity phenotype)"
+status = "set"
+value = "0.25"
+unit = "ratio"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"

@@ -212,6 +212,18 @@ impl CalibrationManifest {
         })
     }
 
+    /// A required non-negative count, for a reserved value whose shape is a `usize` budget (a cognition
+    /// depth cap, a ring size). Reads the integer through [`Self::require_i64`] and refuses a negative
+    /// value fail-loud rather than wrapping it, so a mis-signed count is a build error, not a silent
+    /// enormous cap.
+    pub fn require_usize(&self, id: &str) -> Result<usize, CalibrationError> {
+        let v = self.require_i64(id)?;
+        usize::try_from(v).map_err(|_| CalibrationError::BadValue {
+            id: id.to_string(),
+            detail: format!("count must be non-negative, got {v}"),
+        })
+    }
+
     /// A required fixed-point value, parsed from a decimal string without ever
     /// going through floating point, so the result is exact and deterministic.
     pub fn require_fixed(&self, id: &str) -> Result<Fixed, CalibrationError> {

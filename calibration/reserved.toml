@@ -2243,6 +2243,35 @@ value = ""
 unit = "count"
 source = "relational-belief substrate arc 2; crates/sim/src/planning.rs"
 
+# --- experiential-conviction substrate (OWNER_DECISIONS_LOG R2/R4/R5/R6): the felt-conviction learner's
+# fail-loud manifest read (R6b), threaded onto the canonical build path (Arc 1 gap b). The mechanism is fixed
+# Rust (record via ConvictionExperience::fold; move via the AGM kernel gated by the per-race epistemic
+# polarity); these three magnitudes are the owner's, surfaced with their basis, never fabricated.
+
+[[reserved]]
+id = "felt_conviction.retention"
+basis = "the retention (leak) below one applied to each per-conviction felt-experience accumulator per felt event (conviction_experience::ConvictionExperience::fold), so the record tracks RECENT lived valence and stays defeasible (a run of opposite-valence experience erodes an earlier record). Set at the LIFETIME-INTEGRATION window the owner wants a felt-experience record to span, deliberately SLOWER than the reward learner's action-eligibility decay (reward.eligibility_decay), because a conviction record must integrate felt valence over many ticks of a LIFE, not lag a single action. Nearer one never forgets (non-defeasible), a small one forgets within a few ticks (no lifetime integration)"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "OWNER_DECISIONS_LOG R4/R6b; crates/sim/src/conviction_experience.rs"
+
+[[reserved]]
+id = "felt_conviction.move_threshold"
+basis = "the entrenchment gate the felt drive |polarity * association| must clear to move a conviction (below it the felt evidence is absorbed without moving the stance, belief perseverance). Set at the axiom kernel's own entrenchment-threshold curve (axiom.entrenchment_curve) read at the axiom's rank, the canonical entrenchment-scaled gate; this flat scalar is the interim for a baseline rank until the rank-scaled gate (R6a) is wired. Larger holds a conviction firmer against felt experience, smaller lets a weaker felt record move it"
+status = "reserved"
+value = ""
+unit = "stance_scale"
+source = "OWNER_DECISIONS_LOG R5/R6a; crates/sim/src/conviction_experience.rs; axiom.entrenchment_curve"
+
+[[reserved]]
+id = "felt_conviction.move_plasticity"
+basis = "the step scale of the felt-experience move: the fraction of the gap to the target pole closed per unit of cleared pressure, the same role plasticity plays in axiom::Axiom::appraise. Set at the belief-plasticity phenotype the axiom kernel already uses (Mind::plasticity) so the felt move and the evidential move share one step scale; this flat scalar is the interim until it reads the per-being phenotype. Larger moves a conviction farther per felt event, smaller inches it"
+status = "reserved"
+value = ""
+unit = "ratio"
+source = "OWNER_DECISIONS_LOG R5; crates/sim/src/conviction_experience.rs; crates/sim/src/axiom.rs"
+
 # --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
 # Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.
 # The deliberation weight is FOUNDER-ZERO (Principle 9: goal-directed pursuit emerges by selection, never a

@@ -33,6 +33,7 @@
 //! Per-axis divergence still emerges from WHEN each conviction is held relative to the being's lived valence.
 
 use crate::axiom::AxiomAxisId;
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::physiology::FeltExperience;
 use civsim_core::{Fixed, StateHasher};
 use std::collections::BTreeMap;
@@ -177,12 +178,30 @@ pub struct FeltConvictionCalib {
 }
 
 impl FeltConvictionCalib {
+    /// Read the felt-conviction learner's calibration fail-loud from the manifest (Principle 11), the shared
+    /// follow-on the arc audit named (OWNER_DECISIONS_LOG R6b): a reserved value left unset refuses to build
+    /// rather than running on a fabricated default, so a Calibrated world arms this learner only once the owner
+    /// has set the values it needs. Reads the full RECORD-and-MOVE leg (Branch 1 + Branch 2): the record
+    /// retention plus the move gate and step, so a Calibrated world that arms convictions moves them by its
+    /// per-race epistemic polarity. The move threshold and plasticity are the flat dev interim of the
+    /// entrenchment-scaled gate and the belief-plasticity phenotype (see [`ConvictionMoveParams`]); the
+    /// entrenchment-rank-scaled refinement (R6a) supersedes the flat threshold when built.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<FeltConvictionCalib, CalibrationError> {
+        Ok(FeltConvictionCalib {
+            retention: m.require_fixed("felt_conviction.retention")?,
+            move_params: Some(ConvictionMoveParams {
+                threshold: m.require_fixed("felt_conviction.move_threshold")?,
+                plasticity: m.require_fixed("felt_conviction.move_plasticity")?,
+            }),
+        })
+    }
+
     /// A labelled DEV fixture (not owner data) for the RECORD-only leg (Branch 1, inert): a mild leak
     /// (fifteen-sixteenths, an ~11-tick half-life for lifetime integration, deliberately slower than the reward
     /// learner's `1/2` action-eligibility decay) so many felt events accumulate over a life while old experience
-    /// fades, and NO move (a conviction is recorded against but not moved). No `from_manifest` yet: like the
-    /// sibling opt-in learners still on dev fixtures (`DiscoveryCalib`), a fail-loud manifest read is the shared
-    /// follow-on for when a Calibrated world first arms this learner (no production scenario arms it today).
+    /// fades, and NO move (a conviction is recorded against but not moved). The canonical RECORD-and-MOVE read
+    /// is [`Self::from_manifest`]; this record-only fixture stands up Branch 1 alone for the test and harness
+    /// paths that build without a manifest.
     pub fn dev_default() -> FeltConvictionCalib {
         FeltConvictionCalib {
             retention: Fixed::from_ratio(15, 16),
@@ -208,12 +227,57 @@ impl FeltConvictionCalib {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calibration::CalibrationManifest;
 
     fn felt(valence: i32, intensity: Fixed) -> FeltExperience {
         FeltExperience {
             intensity,
             valence: Fixed::from_int(valence),
         }
+    }
+
+    #[test]
+    fn felt_conviction_calib_reads_the_record_and_move_legs_from_the_manifest() {
+        // The felt-conviction learner reads its calibration fail-loud from the manifest (Arc 1 gap b, R6b),
+        // producing the full RECORD-and-MOVE leg. The decimal fixtures reproduce the dev_with_move fixture
+        // exactly (from_ratio and the manifest decimal parser share one truncating division).
+        let m = CalibrationManifest::from_toml_str(
+            r#"
+[[reserved]]
+id = "felt_conviction.retention"
+basis = "b"
+status = "set"
+value = "0.9375"
+source = "s"
+[[reserved]]
+id = "felt_conviction.move_threshold"
+basis = "b"
+status = "set"
+value = "0.01"
+source = "s"
+[[reserved]]
+id = "felt_conviction.move_plasticity"
+basis = "b"
+status = "set"
+value = "0.25"
+source = "s"
+"#,
+        )
+        .unwrap();
+        let c = FeltConvictionCalib::from_manifest(&m).unwrap();
+        assert_eq!(c.retention, Fixed::from_ratio(15, 16));
+        let mp = c
+            .move_params
+            .expect("from_manifest arms the record-and-move leg");
+        assert_eq!(mp.threshold, Fixed::from_ratio(1, 100));
+        assert_eq!(mp.plasticity, Fixed::from_ratio(1, 4));
+
+        // Fail-loud: a still-reserved move value refuses rather than fabricating a default.
+        let missing = CalibrationManifest::from_toml_str(
+            "[[reserved]]\nid = \"felt_conviction.retention\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.9375\"\nsource = \"s\"\n",
+        )
+        .unwrap();
+        assert!(FeltConvictionCalib::from_manifest(&missing).is_err());
     }
 
     #[test]
