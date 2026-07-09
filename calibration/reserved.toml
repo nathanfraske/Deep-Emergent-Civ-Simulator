@@ -1577,10 +1577,13 @@ source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emis
 [[reserved]]
 id = "metabolism.respiration_transfer_coefficient"
 basis = "the Fick membrane gas-transfer coefficient k the respiration coupling reads (law.membrane_gas_flux, flux = k*A*(c_medium - c_internal)), a per-membrane permeability datum, not a body property: it sets how fast a respiratory surface exchanges the respirable species with its medium per unit area and concentration gap (a permeable gill or lung membrane exchanges faster than a thick, low-diffusivity integument). Set per the membrane's gas permeability against the medium (Fick diffusion coefficient over membrane thickness); read on the canonical embodiment path by EmbodiedPhysiology::from_manifest, a labelled dev fixture (Fixed::ONE) in tests. The flux representability cap is an engine-mechanics bound in code (RESPIRATION_FLUX_MAX), not an owner value"
-status = "reserved"
-value = ""
+status = "set"
+value = "1"
 unit = "gas_transfer_coefficient"
 source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/src/medium.rs respire, crates/sim/src/runner.rs EmbodiedPhysiology"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate; INTERIM, see note)"
+set_date = "2026-07-09"
+note = "INTERIM delegated value to let Mirror's embodied founders breathe under Calibrated. FLAGGED FOR THE OWNER: this is a per-membrane gas permeability (Fick k = D/L, the being's respiratory-membrane diffusivity over its thickness), a biology datum, not derivable from a deeper substrate; the real value is the owner's to set per the being's membrane (a permeable gill/lung exchanges faster than a thick integument). Set to the labelled unit interim (1) so the embodied boot runs; surfaced to the reviewer for the owner's real per-membrane value."
 
 [[reserved]]
 id = "medium.submersion_elevation"
@@ -1675,8 +1678,10 @@ source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/me
 [[reserved]]
 id = "medium.water"
 basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. CONVECTIVE COEFFICIENT (added Arc 2, derive-vs-author, the h the metabolism reads at a being's cell for the body-to-medium heat exchange, retiring the metabolism.medium_convective_coefficient global scalar): convective_coefficient about 500 (W/m^2/K, forced or immersion convection in water is ~50 to 1000+ per Incropera and DeWitt, so an immersed body couples to water far faster than to still air), a per-medium LUMPED datum keyed on the medium the body occupies. HONEST DERIVE-VS-AUTHOR STATUS: as for medium.air, this retires the GLOBAL scalar in favour of per-medium DATA, but h is flow-dependent (h = Nu*k/L), so the lumped per-medium value is a simplification and the Nusselt derivation of h from this medium's k/rho/c and the flow is DEFERRED (the reviewer-approved interim). Reserved"
-status = "reserved"
-value = ""
+status = "set"
+set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_date = "2026-07-09"
+value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
 

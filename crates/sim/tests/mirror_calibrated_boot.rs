@@ -26,27 +26,33 @@
 //! (they follow the `determinism_harness.rs` / `world_build.rs` pattern: build twice from one seed
 //! and compare `state_hash` after N ticks, and sweep the worker count for a bit-identical trace).
 //!
-//! The peoples here are a synthetic labelled fixture, not owner data: the world-build `from_manifest`
-//! read-set does not depend on peoples specifics (the population is seeded after the calibrations are
-//! armed), so a synthetic dawn exercises exactly the same reserved-value reads Mirror's real dawn
-//! would. This file sets no calibration value; setting them is the owner's, through the
-//! reserved-values panel.
+//! The peoples here are a synthetic labelled fixture, not owner data, but they are now EMBODIED: each
+//! founding race carries a mobile body plan and the dawn carries an [`EmbodimentGenesis`], so the
+//! embodiment-gated physiology reads arm and a boot proves a full embodied Mirror stands up under the
+//! calibrated profile (rather than a disembodied cognition-only dawn). The world-build `from_manifest`
+//! read-set therefore now covers the embodiment path Mirror's real dawn would drive; while any of it
+//! is still reserved the test FAILS LOUD and names the first blocking key. This file sets no
+//! calibration value; setting them is the owner's, through the reserved-values panel.
 
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, GaussApprox};
+use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::calibration::{CalibrationError, CalibrationManifest, Profile};
+use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
+use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     build_dawn_runner, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
     BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples, DominanceMode,
-    EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme,
-    IntrinsicBeliefs, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
+    EmbodimentGenesis, EpistemicStance, EvidenceRing, GeneDef, GeneEffect, GeneId, GenePool,
+    GeneSet, GeneticScheme, IntrinsicBeliefs, PersonalityProfile, PersonalityRegistry, Race,
+    RaceId, ReproductionMode, SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId,
+    ValueProfile,
 };
 use civsim_world::{FlatBounded, TileMap};
 
@@ -179,14 +185,41 @@ fn a_personality() -> PersonalityProfile {
     }])
 }
 
-/// A synthetic dawn: two races on two bands, a personality profile each, a binary breeding system,
-/// no mortality hazard, no language genesis, no embodiment, no biosphere. Because there is no
-/// embodiment genesis, the embodiment-gated physiology reads are not exercised (they arm only when
-/// `peoples.embodiment` is `Some`); this dawn drives the always-fired read-set exactly.
+/// A mobile development body plan (the thermal-coupling fixture copied from `world_build.rs`), so a
+/// founder's walker has an anatomy to derive its physiology and thermoregulate from. Labelled
+/// fixture, not owner data.
+fn mobile_body() -> BodyPlan {
+    BodyPlan {
+        body_mass: Fixed::from_ratio(1, 2),
+        encephalization: Fixed::from_ratio(1, 2),
+        diet_breadth: Fixed::from_ratio(1, 2),
+        weapons: vec![],
+        covering: Part {
+            kind: 0,
+            development: Fixed::from_ratio(1, 2),
+        },
+        senses: vec![],
+        locomotion: vec![1],
+        organs: vec![],
+        temperament: Temperament {
+            boldness: Fixed::from_ratio(1, 2),
+            exploration: Fixed::from_ratio(1, 2),
+            activity: Fixed::from_ratio(3, 4),
+            sociability: Fixed::from_ratio(1, 2),
+            aggression: Fixed::from_ratio(1, 4),
+        },
+    }
+}
+
+/// A synthetic EMBODIED dawn: two races on two bands, each carrying a mobile body plan, a personality
+/// profile each, a binary breeding system, no mortality hazard, no language genesis, no biosphere, and
+/// an embodiment genesis. Because `peoples.embodiment` is `Some`, the embodiment-gated physiology reads
+/// arm and are exercised, so a boot proves a full embodied Mirror stands up under the calibrated
+/// profile (or fail-louds on the next reserved physiology key). Labelled fixture, not owner data.
 fn synthetic_peoples() -> DawnPeoples {
     let mut races = BTreeMap::new();
-    races.insert(RaceId(0), a_race(0));
-    races.insert(RaceId(1), a_race(1));
+    races.insert(RaceId(0), a_race(0).with_body_plan(mobile_body()));
+    races.insert(RaceId(1), a_race(1).with_body_plan(mobile_body()));
     let bands = vec![
         BandSpec {
             race: RaceId(0),
@@ -211,7 +244,16 @@ fn synthetic_peoples() -> DawnPeoples {
         personality,
         mortality_hazard: None,
         language: None,
-        embodiment: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: HomeostaticRegistry::dev_thermal(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
         biosphere: None,
     }
 }
