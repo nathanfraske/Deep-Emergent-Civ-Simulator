@@ -9,11 +9,22 @@ section.
 
 ## Owner-only calls still waiting (need your ruling)
 
-- **Mirror dial-set sign-off (the gate).** Mirror is the one owner-GATED world. When the agent completes its
-  Earth-1:1 calibration it presents the full dial-set (every value with basis + source) and I hold it here for
-  your sign-off. I will NOT let Mirror be treated as canonical without you. Sub-item flagged by the agent: the
-  orbital year is set to 31536000 s (365.0 d, Julian convention); the tropical year is ~31556952 s (365.2422
-  d). The agent leans tropical for a strict 1:1 Earth. Your call at the sign-off.
+- **Mirror dial-set sign-off (the gate) — READY.** The agent completed the Earth-1:1 calibration: 34
+  derive-audited values set (each with `set_by` + basis + source + a why-not-derivable clause), the temperature
+  seam closed, all four run_world pins holding, 950 sim tests green (manifest 90 set / 131 reserved). Mirror is
+  the one owner-GATED world and I have NOT treated it canonical. Your morning actions:
+  1. Approve (or adjust) the 34-value dial-set (in `calibration/reserved.toml`, marked `set_by = "Arc 2 Mirror
+     calibration (cited, pending owner sign-off)"`).
+  2. Set the two climate values the temperature build reserved: `climate.mean_surface_temperature` (~288 K) and
+     `climate.latitude_temperature_range` (~60 K full equator-to-pole).
+  3. Rule on the ~40 `escalate_owner` design choices (the agent is compiling a decision-list with a
+     recommendation each, so you can pass through them in one go).
+  4. Decide the orbital year: it is set to 31536000 s (365.0 d, Julian); the tropical year is ~31556952 s
+     (365.2422 d). The agent leans tropical for a strict 1:1 Earth.
+  Plus the derive-vs-author items in the interim-calls section below (the social-transmission values,
+  `thermal_half_band`). Once you sign off, I merge Arc 2 and we transition to Arc 3 (the liveliness keystones,
+  framing-panelled). The units-mechanism wiring is deferred (non-blocking, forward-looking); the medium
+  convective-coefficient dedup the agent is building overnight (your "dedup now" ruling).
 
 ## Interim calls I made overnight (proceed-with; reversible; confirm or override in the morning)
 
