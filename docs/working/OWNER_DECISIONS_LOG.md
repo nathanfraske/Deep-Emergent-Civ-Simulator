@@ -91,6 +91,31 @@ R5. **Branch-2 (credit-assignment) framing CORRECTED by a third blind framing pa
    hedonic race and an ascetic race are data rows and asceticism is representable without foreclosure. Built on
    this basis.
 
+R6. **The experiential-conviction arc PASSED the mandatory five-lens audit; follow-on refinements surfaced.**
+   The whole arc (Prereq A felt_salience, Prereq B the conviction-percept threading, Branch 1 the correlation
+   record, Branch 2 the conviction move) was audited by the five standing lenses plus correctness (six blind
+   panelists, then adversarial per-finding verification, 19 agents), each finding re-verified against source.
+   VERDICT: SOUND. The load-bearing claims held under blind scrutiny (relabel-invariance of the Branch-2 move,
+   byte-neutral opt-in, weight-agnostic Branch 1, felt_salience alien-clean, the rising-reserve valence
+   convention is the floor-wide normalized-level convention not a Terran more-is-better assumption). Confirmed
+   findings were fixed (a determinism-contract RES_WORLD phase-access omission; the felt-move overflow/abs
+   robustness; the retention doc's inaccurate basis; the flat-gate "entrenchment" overclaim) or answered with
+   tests (the per-race polarity proven through the real dawn-seeding and inheritance path; a hedonic-being
+   reinforce test showing the move turns on the lived correlation, not only the polarity knob). FOLLOW-ON
+   REFINEMENTS the owner may want, none blocking (recorded here so they are not lost): (a) the ENTRENCHMENT-RANK
+   -SCALED felt move gate (today the felt move uses a flat gate and does not read the axiom's entrenchment rank,
+   so a labile and a calcified conviction are equally movable by felt experience; the rank-scaled gate over the
+   reserved entrenchment curve is the faithful refinement); (b) a from_manifest fail-loud calibration read for
+   FeltConvictionCalib (the shared follow-on with the other opt-in learners' dev-fixture calibs, due when a
+   Calibrated production scenario first arms the learner; none does today); (c) felt_salience is a NET
+   reserve-health primitive, so reserve-neutral churn (trading one reserve for another) reads calm and the felt
+   intensity scales with how many reserve axes a world declares; a churn-sensitive or per-axis-normalized felt
+   measure is a refinement of the Prereq-A primitive; (d) run_world's dev races all use the hedonic polarity
+   default (the ascetic path is proven by test through the dawn, but no dev scenario yet declares an ascetic
+   race to watch it in a run). The Part 28 design-doc consolidation (a Part 62 record and the Decided-and-
+   reserved blockquote, per R2's "the design-doc Part 28 consolidation happens when it is built") is the
+   remaining formal step, surfaced for when the owner wants the arc folded into the canonical design document.
+
 R4. **Branch-1 (correlation-record) framing CORRECTED by a second blind framing panel (2026-07-08).** The R2
    substrate's Branch 1. The first-cut framing defined a conviction's eligibility for felt-experience
    association as (evolved controller weight x stance value), glossed as "the degree the conviction influenced
