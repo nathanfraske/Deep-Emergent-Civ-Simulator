@@ -61,24 +61,34 @@ AbioticField field-kind registry (Agent C, my recommendation, owner-approved). H
   redox difference must be a zero-Rust data row. This is the third parameterized floor mechanism (after the
   perception substrate's spreading law and transduction family). Flagging the pattern for your eyes.
 
-- **OWNER-BLOCKER touching your own R-AGING directive (held, with my strong recommendation).** Agent B's blind
-  smoke test on the lifespan-from-anatomy framing caught, and I verified against source, that your stated method
-  conflicts with the absolute value-authoring line. The mass-LONGEVITY / rate-of-living relation is contested
-  Terran biology that fails across taxa (birds, bats, naked mole-rats outlive a fixed-energy-per-gram budget)
-  and is NOT a physics law, so authoring a longevity constant in the floor would author a biological OUTCOME
-  (how long a being lives), which Principle 9 and the value-line forbid; Kleiber's metabolism-from-mass is a
-  real scaling law but does not lend the longevity relation its credibility; and "repair capacity" (named in the
-  directive) is an absent substrate (`body.rs:31`, only per-part `PartCondition.integrity`). The fork:
-  - **(A) your stated method:** derive lifespan from an allometric longevity constant in the floor. It authors a
-    contested Terran-biology outcome (value-line and P9 tension) and imposes one Terran exponent on every world.
-  - **(B) my recommendation, lifespan EMERGES:** no authored longevity law; a being ages because metabolic wear
-    accumulates on its own `PartCondition.integrity`, reserves deplete, and insult lands, and it dies when
-    integrity or reserves cross the failure boundary the floor already defines. Lifespan is a DESCRIPTION of when
-    a body fails under its own dynamics and selection, and an alien fails on its own physics. This honours your
-    deeper intent ("derive from the body") more faithfully than the allometric constant and retires the authored
-    per-race number exactly as you directed. Same emergence pattern as the rest of the effort.
-  I did not override your explicit directive; I hold it and recommend (B). Agent B is grounding (B) read-only so
-  it is build-ready on your ruling.
+- **OWNER-BLOCKER: your R-AGING directive (held; my first framing here was CORRECTED by a section-11 self-audit).**
+  Agent B's blind smoke test flagged this, and a section-11 audit of MY OWN framing of the decision then caught
+  (both verified against source) that my first characterisation ("authoring an allometric longevity constant
+  violates the value-line, recommend the emergent form") was overstated and biased toward (B). The correction:
+  the project ALREADY authors Kleiber's allometric coefficient `kleiber_a` as a RESERVED floor anchor
+  (`physiology.rs:132`), so an allometric scaling coefficient is not categorically a value-line violation. And
+  (B) is NOT authoring-free: it authors a metabolic-wear rate and a repair rate, and needs substrate that does
+  not exist today (integrity is wound-derived only; no metabolic-wear or repair mechanism). So BOTH options
+  author floor constants, and the honest fork is which floor physics is more defensible:
+  - **(A):** author an allometric longevity coefficient that sets lifespan directly from mass. Cheap; has the
+    allometric-coefficient precedent (Kleiber); but sets the OUTCOME (lifespan) directly and imposes one exponent
+    on every world.
+  - **(B):** author a metabolic-wear rate and a repair rate; lifespan EMERGES as when a body's integrity and
+    reserves cross the failure boundary. More emergence-shaped (author the rate, let the outcome emerge, like
+    Kleiber's metabolic rate feeding emergent outcomes), and an alien fails on its own physics; but it authors
+    two rates, needs the wear-and-repair substrate built (more work), and needs the failure-boundary path wired.
+  My honest lean is still (B) for being emergence-shaped, but on those grounds, NOT "A is a violation." I am
+  developing the full true-complete-versus-cheap-win brief for all three decisions in a section-11-de-biased
+  workflow and will present it. I did not override your directive; held for your ruling.
+- **Agent C AbioticField (Arc 5) register items, held with basis.** C's segment-2 blind panel dropped a bespoke
+  difference operator I had pre-approved (it authored Terran choices) in favour of the existing Liebig-minimum
+  plus the existing floor law `law.battery_emf` for the redox yield (verified). Two items for you:
+  1. The EMF-to-biomass coupling reserved value (biomass per unit free energy). Basis: a floor
+     thermodynamic-efficiency bound; reserved fail-loud until you set it or it derives from the bound.
+  2. Modeling depth (true-complete versus cheap-win): the standard EMF as a per-source constant (cheaper) versus
+     a full Nernst concentration-dependent yield (more-complete floor physics, since the fields carry the
+     concentrations). C builds the byte-neutral parts (per-source conversion, per-role stoichiometry) as segment
+     2 now; the floor-EMF yield is segment 3 pending these.
 
 ## Owner-only calls still waiting (need your ruling)
 
