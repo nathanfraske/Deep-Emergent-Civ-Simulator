@@ -45,6 +45,7 @@
 pub mod celestial;
 pub mod lod;
 pub mod noise;
+pub mod structure;
 pub mod terrain;
 pub mod topology;
 pub mod view;
@@ -52,6 +53,7 @@ pub mod worldgen;
 
 pub use celestial::OrbitalElements;
 pub use lod::{ChunkCoord, NodeSummary, QuadTree, CHUNK};
+pub use structure::{WorldStructure, EARTH_STRUCTURE};
 pub use terrain::{BiomeDef, BiomeId, BiomeSet, Rgb};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
 pub use view::Camera;

@@ -41,7 +41,9 @@ use crate::axiom::RingCapacityLaw;
 use crate::breeding::BreedingSystemRegistry;
 use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::controller::Controller;
+use crate::conviction_experience::FeltConvictionCalib;
 use crate::decision::Curve;
+use crate::discovery::DiscoveryCalib;
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
 use crate::genesis::LivingWorld;
@@ -53,7 +55,7 @@ use crate::langmod::{
 use crate::language::{
     DriftParams, FeatureDimId, FormSystem, LangId, Language, LanguageParams, ProductionModalityId,
 };
-use crate::learn::HarmLearningCalib;
+use crate::learn::{HarmLearningCalib, RewardLearningCalib};
 use crate::locomotion::{LocomotionParams, Walker};
 use crate::morphogen::{express_program, grow};
 use crate::percept::PerceptRegistry;
@@ -452,8 +454,33 @@ pub fn build_dawn_runner(
     runner.set_liveliness(LivelinessCalib::from_manifest(manifest)?);
     // Arm the experiential associative learner's calibrations (harm-learning arc slice b) the same way,
     // so a canonical run reads the harm-noise floor, feature granularity, and harm likelihoods fail-loud
-    // rather than the dev fixture.
+    // rather than the dev fixture. Harm-learning is always armed (inert without a declared toxin percept),
+    // so it needs no feature flag.
     runner.set_harm_learning(HarmLearningCalib::from_manifest(manifest)?);
+
+    // Arm the OPT-IN learners the scenario declares (the loader arc, gap b), each fail-loud from the manifest
+    // (Principle 11): a scenario that declares a feature `true` arms its learner from the reserved values (so
+    // under Calibrated it refuses until the owner has set them, which maps the remaining calibration work);
+    // a scenario that declares none arms nothing here and its world is byte-identical to the pre-loader build.
+    // Each is gated on its own flag, so which learners a world runs is scenario DATA rather than a hardcoded
+    // opt-in in the run harness. Reward and discovery normally travel together (the discovery sampler biases
+    // by reward beliefs), but each is gated independently so a world can arm the reward learner alone.
+    if resolution.features.reward {
+        runner.set_reward_learning(RewardLearningCalib::from_manifest(manifest)?);
+    }
+    if resolution.features.discovery {
+        runner.set_discovery(DiscoveryCalib::from_manifest(manifest)?);
+    }
+    if resolution.features.convictions {
+        runner.set_felt_conviction_learning(FeltConvictionCalib::from_manifest(manifest)?);
+    }
+    // Tool affordances are an embodiment property, so they arm only when the world built an embodiment; a
+    // disembodied world declaring the flag simply has nothing to arm it on.
+    if resolution.features.tools {
+        if let Some(emb) = runner.embodiment_mut() {
+            emb.set_tool_affordances(true);
+        }
+    }
     Ok(runner)
 }
 

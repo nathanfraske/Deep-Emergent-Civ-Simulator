@@ -6,6 +6,9 @@ id = "mirror"
 name = "Mirror"
 summary = "As grounded in our reality as the engine allows: a few races, real physics and biology, no magic."
 grounding = "real"
+# The grounded Earth terrain triad (elevation/moisture/temperature). The loader builds the map from this
+# resolved structure rather than a scenario-blind default (the loader arc, gap a).
+structure = "earth"
 
 [races]
 count = "few"

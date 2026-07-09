@@ -3374,6 +3374,21 @@ impl Runner {
         self.discovery = Some(calib);
     }
 
+    /// The armed reward learner, if any (a pure read, for the loader-feature tests and readers).
+    pub fn reward_learning(&self) -> Option<&RewardLearningCalib> {
+        self.reward_learning.as_ref()
+    }
+
+    /// The armed discovery sampler calibration, if any (a pure read, for the loader-feature tests and readers).
+    pub fn discovery(&self) -> Option<&DiscoveryCalib> {
+        self.discovery.as_ref()
+    }
+
+    /// The armed felt-conviction learner, if any (a pure read, for the loader-feature tests and readers).
+    pub fn felt_conviction_learning(&self) -> Option<&FeltConvictionCalib> {
+        self.felt_conviction_learning.as_ref()
+    }
+
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
     pub fn environ(&self) -> Option<&EnvironFields> {
         self.environ.as_ref().map(|(f, _)| f)

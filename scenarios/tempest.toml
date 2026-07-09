@@ -7,6 +7,8 @@ id = "tempest"
 name = "Tempest"
 summary = "Our physics, no magic, but everything that drives change and produces extremes pushed high; the results are meant to be wild."
 grounding = "real"
+# The grounded Earth terrain triad; Tempest's extremity is in its cranked dials, not its terrain shape.
+structure = "earth"
 
 [races]
 count = "several"

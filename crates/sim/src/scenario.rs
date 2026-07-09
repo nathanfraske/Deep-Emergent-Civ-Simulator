@@ -36,6 +36,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use civsim_world::{WorldStructure, EARTH_STRUCTURE};
 use serde::{Deserialize, Serialize};
 
 use crate::calibration::{CalibrationError, CalibrationManifest, ReservedValue};
@@ -73,6 +74,16 @@ pub struct ScenarioMeta {
     /// temperate air.
     #[serde(default)]
     pub medium: Option<String>,
+    /// The world's terrain STRUCTURE, selected categorically by name (for example "earth"): a
+    /// [`civsim_world::WorldStructure`] (the worldgen generation spec plus the biome set), resolved
+    /// through [`ScenarioResolution::world_structure`]. Like the medium this is a selected input, not
+    /// a `real`/`high`/`low` dial, because a structure is a coherent bundle (its biome classifier reads
+    /// the axes its worldgen spec generates). `None` defaults to the grounded Earth triad
+    /// ([`civsim_world::EARTH_STRUCTURE`]); a name the structure registry does not carry fails loud on
+    /// resolve, like a dangling medium. This closes the loader gap where the map was built from
+    /// `dev_default` regardless of scenario.
+    #[serde(default)]
+    pub structure: Option<String>,
 }
 
 /// The seeded sentient-race posture (design Part 20), as owner-given categorical choices.
@@ -113,6 +124,39 @@ pub struct MagicPosture {
     pub affinity_weight: Option<String>,
 }
 
+/// The opt-in learners a scenario arms (the loader arc, gap b). Each is a data flag the world-build path
+/// reads to arm the corresponding learner fail-loud from the manifest, so which learners a world runs is
+/// scenario DATA rather than a hardcoded opt-in in the run harness. Every flag defaults off, so a scenario
+/// that declares no features arms nothing and its world is byte-identical to the pre-loader build. The
+/// mechanisms are fixed Rust and their calibrations are reserved manifest values (Principle 11); this block
+/// only selects which are armed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub struct ScenarioFeatures {
+    /// Arm the appetitive REWARD learner ([`crate::learn::RewardLearningCalib`]): a being credits a felt
+    /// reserve rise to the action that produced it, forming a "this pays off" belief.
+    #[serde(default)]
+    pub reward: bool,
+    /// Arm the DISCOVERY / ideation sampler ([`crate::discovery::DiscoveryCalib`]): a being proposes a
+    /// candidate action each tick, biased by its own reward beliefs. The sampler reads reward beliefs, so a
+    /// world arming discovery normally arms `reward` too (an unrewarded discovery world still runs, but has
+    /// no rewarded habit to exploit). HONEST LIMIT (flagged, not hidden): arming discovery does NOT by itself
+    /// produce multi-hop tool reasoning, because the relational-belief producer (`consider_relation`, the "A
+    /// yields X" edges the planner's `plan_chain` walks) has no run-path caller yet; that run-path
+    /// relation-formation seam is an Arc-3 item, so "discovery armed" means a being proposes and enacts single
+    /// actions, not that it reasons through tool chains.
+    #[serde(default)]
+    pub discovery: bool,
+    /// Arm the experiential FELT-CONVICTION learner ([`crate::conviction_experience::FeltConvictionCalib`]),
+    /// the RECORD-and-MOVE leg: a being's own felt experience records against the convictions it holds and
+    /// moves them by its per-race epistemic polarity (OWNER_DECISIONS_LOG R2/R4/R5).
+    #[serde(default)]
+    pub convictions: bool,
+    /// Arm TOOL affordances on the embodiment (a worked object affords an action its raw form does not). Read
+    /// only when the world builds an embodiment; a disembodied world ignores it.
+    #[serde(default)]
+    pub tools: bool,
+}
+
 /// A parsed scenario: the data-of-record for a test world.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Scenario {
@@ -124,6 +168,9 @@ pub struct Scenario {
     /// The magic posture.
     #[serde(default)]
     pub magic: MagicPosture,
+    /// The opt-in learners this scenario arms (the loader arc, gap b). Defaults to none armed.
+    #[serde(default)]
+    pub features: ScenarioFeatures,
     /// The direction each change-and-extremes dial is pushed, by reserved dial id.
     #[serde(default)]
     pub dials: BTreeMap<String, Direction>,
@@ -205,10 +252,25 @@ impl Scenario {
             }
             None => None,
         };
+        // The world's terrain structure is selected by name, defaulting to the grounded Earth triad
+        // when the scenario declares none. A name the structure registry does not carry fails loud like
+        // a dangling medium (never a silent default), so a typo or an unbuilt structure refuses.
+        let structure = self
+            .scenario
+            .structure
+            .clone()
+            .unwrap_or_else(|| EARTH_STRUCTURE.to_string());
+        if !WorldStructure::is_registered(&structure) {
+            return Err(CalibrationError::Unknown(format!(
+                "world structure '{structure}'"
+            )));
+        }
         Ok(ScenarioResolution {
             scenario: self.scenario.id.clone(),
             dials,
             medium,
+            structure,
+            features: self.features,
         })
     }
 }
@@ -271,6 +333,14 @@ pub struct ScenarioResolution {
     /// The scenario's ambient medium, resolved to its manifest profile, or `None` for the
     /// default temperate air.
     pub medium: Option<ResolvedMedium>,
+    /// The world's terrain structure NAME (for example "earth"), validated to resolve against the
+    /// [`WorldStructure`] registry at resolve time, so [`world_structure`](Self::world_structure)
+    /// cannot dangle. Defaults to [`EARTH_STRUCTURE`] when the scenario declares none.
+    pub structure: String,
+    /// The opt-in learners this scenario arms (the loader arc, gap b). The world-build path arms each
+    /// declared learner fail-loud from the manifest; a resolution with none declared arms nothing and is
+    /// byte-identical to the pre-loader build.
+    pub features: ScenarioFeatures,
 }
 
 impl ScenarioResolution {
@@ -315,6 +385,22 @@ impl ScenarioResolution {
         self.medium
             .as_ref()
             .map_or(DEFAULT_MEDIUM_ID, |m| m.manifest_id.as_str())
+    }
+
+    /// The world's resolved terrain structure (the worldgen spec plus the biome set the map generates
+    /// from). The name was validated to resolve at resolve time, so this cannot dangle; the caller
+    /// builds the [`civsim_world::TileMap`] from it instead of the pre-loader `dev_default` used for
+    /// every scenario alike. The structure DEFINITIONS are authored Principle-9 inputs (terrain is a
+    /// gameplay input, not an emergent outcome); the SELECTION is this scenario datum.
+    pub fn world_structure(&self) -> WorldStructure {
+        WorldStructure::resolve(&self.structure).unwrap_or_else(|| {
+            // Unreachable: resolve() rejected an unregistered structure. Named rather than
+            // silently defaulted so a future registry regression surfaces here loudly.
+            panic!(
+                "structure '{}' was validated at resolve time but is not registered",
+                self.structure
+            )
+        })
     }
 
     /// The manifest id a given base dial resolves to under this scenario, or `None` if the scenario
@@ -741,5 +827,61 @@ name = "Probe"
             Some(Direction::Real),
             "Crucible does not crank the mutation clock"
         );
+    }
+
+    #[test]
+    fn the_structure_selection_resolves_and_defaults_to_earth() {
+        // The map is built from the scenario's resolved world structure (the loader arc, gap a), so the
+        // resolution must carry a validated structure name that never dangles. The manifest is irrelevant
+        // to structure (it is a registry name, not a reserved dial), so an empty one suffices.
+        let manifest = CalibrationManifest::from_toml_str("").unwrap();
+
+        // A scenario declaring no structure defaults to the Earth triad, and world_structure() resolves.
+        let neutral = Scenario::from_toml_str("[scenario]\nid = \"n\"\nname = \"N\"\n").unwrap();
+        let r = neutral.resolve(&manifest).unwrap();
+        assert_eq!(
+            r.structure, EARTH_STRUCTURE,
+            "no structure defaults to earth"
+        );
+        let _ = r.world_structure(); // cannot dangle (would panic if it did)
+
+        // An explicit earth declaration resolves to the same registered structure.
+        let earth = Scenario::from_toml_str(
+            "[scenario]\nid = \"e\"\nname = \"E\"\nstructure = \"earth\"\n",
+        )
+        .unwrap();
+        assert_eq!(earth.resolve(&manifest).unwrap().structure, EARTH_STRUCTURE);
+
+        // A structure the registry does not carry fails loud, like a dangling medium, rather than
+        // silently defaulting to earth.
+        let bad = Scenario::from_toml_str(
+            "[scenario]\nid = \"b\"\nname = \"B\"\nstructure = \"patchy-basins\"\n",
+        )
+        .unwrap();
+        assert!(
+            bad.resolve(&manifest).is_err(),
+            "an unregistered structure is a dangling reference"
+        );
+    }
+
+    #[test]
+    fn the_canonical_worlds_that_declare_a_structure_resolve_it() {
+        // Mirror, Tempest, and Crucible declare `structure = "earth"` explicitly (the buildable-now
+        // worlds); every other canonical world defaults to earth. All resolve.
+        let manifest = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenarios/");
+        for world in ["mirror", "tempest", "crucible"] {
+            let s = Scenario::load(format!("{dir}{world}.toml")).unwrap();
+            assert_eq!(
+                s.scenario.structure.as_deref(),
+                Some(EARTH_STRUCTURE),
+                "{world} declares the earth structure"
+            );
+            assert_eq!(s.resolve(&manifest).unwrap().structure, EARTH_STRUCTURE);
+        }
     }
 }

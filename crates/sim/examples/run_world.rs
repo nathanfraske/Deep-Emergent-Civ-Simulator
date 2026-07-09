@@ -81,7 +81,7 @@ use civsim_sim::{
     SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
     World,
 };
-use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, WorldgenParams};
+use civsim_world::{Coord3, FlatBounded, TileMap};
 
 // --- dev-harness scaffolding (documented departures from the pure world-build path) ---
 
@@ -299,6 +299,11 @@ struct Config {
     pool_ne: u32,
     /// The ambient medium name, if the scenario selects one the dev-fixtures manifest carries.
     medium: Option<String>,
+    /// The world's terrain structure name, if the scenario declares one (the loader arc, gap a). `None`
+    /// defaults to the grounded Earth triad. The map is generated from the resolved structure rather
+    /// than `dev_default` regardless of scenario; every current dev scenario is the Earth structure, so
+    /// this leaves their maps byte-identical.
+    structure: Option<String>,
     /// Whether the dedicated opt-in `discovery` scenario is selected (`--scenario discovery`): the only
     /// run that ARMS the ideation / experiential-discovery loop (the evolve-channel loci seeded at
     /// genesis, an inert fracturable material field, the affordance-percept registry, and the discovery
@@ -405,7 +410,7 @@ fn parse_config() -> Config {
     // The scenario nudges: count -> race count, diversity -> divergence step, the
     // effective-population-size dial -> founder pool Ne, and the selected medium (only when the
     // dev-fixtures manifest carries a profile for it).
-    let (posture_races, diversity_step, pool_ne, medium) = match &loaded {
+    let (posture_races, diversity_step, pool_ne, medium, structure) = match &loaded {
         Some(s) => {
             let races_from_count = match s.races.count.as_str() {
                 "few" => 2,
@@ -424,9 +429,10 @@ fn parse_config() -> Config {
                 .medium
                 .clone()
                 .filter(|m| m == "water" || m == "air");
-            (Some(races_from_count), step, ne, medium)
+            let structure = s.scenario.structure.clone();
+            (Some(races_from_count), step, ne, medium, structure)
         }
-        None => (None, 1, 20, None),
+        None => (None, 1, 20, None, None),
     };
 
     // The dedicated `discovery`, `viability`, and `full` scenarios are the opt-ins that arm the ideation
@@ -448,6 +454,7 @@ fn parse_config() -> Config {
         diversity_step,
         pool_ne,
         medium,
+        structure,
         discovery,
         viability,
         full,
@@ -1055,17 +1062,44 @@ fn assemble_peoples(cfg: &Config) -> DawnPeoples {
 /// medium end to end (a world of water conducts heat at its own rate). The full scenario's dials stay
 /// unresolved on purpose (see [`parse_config`]). Falls back to the default air medium if the named
 /// medium does not resolve.
-fn resolve_medium(manifest: &CalibrationManifest, medium: &Option<String>) -> ScenarioResolution {
+fn resolve_medium(
+    manifest: &CalibrationManifest,
+    medium: &Option<String>,
+    structure: &Option<String>,
+) -> ScenarioResolution {
+    // The declared structure resolves independently of the manifest (it is a registry name, not a
+    // reserved dial), so carry it through both the primary and the neutral-fallback resolution, and the
+    // map is built from `resolution.world_structure()` rather than `dev_default` regardless of scenario.
+    // Check it explicitly first: an unregistered structure would otherwise surface as a misleading
+    // medium/manifest error in the fallback path (both the primary and fallback carry the bad structure),
+    // so fail here with a message that names the offending structure.
+    if let Some(s) = structure {
+        assert!(
+            civsim_world::WorldStructure::is_registered(s),
+            "run_world: the scenario declares an unknown world structure {s:?}; \
+             registered structures resolve through WorldStructure::resolve"
+        );
+    }
+    let structure_line = structure
+        .as_deref()
+        .map(|s| format!("structure = \"{s}\"\n"))
+        .unwrap_or_default();
     let toml = match medium {
-        Some(m) => format!("[scenario]\nid = \"run\"\nname = \"Run\"\nmedium = \"{m}\"\n"),
-        None => "[scenario]\nid = \"run\"\nname = \"Run\"\n".to_string(),
+        Some(m) => {
+            format!("[scenario]\nid = \"run\"\nname = \"Run\"\nmedium = \"{m}\"\n{structure_line}")
+        }
+        None => format!("[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}"),
     };
     let scenario = Scenario::from_toml_str(&toml).expect("the inline scenario parses");
     scenario.resolve(manifest).unwrap_or_else(|_| {
-        Scenario::from_toml_str("[scenario]\nid = \"run\"\nname = \"Run\"\n")
-            .unwrap()
-            .resolve(manifest)
-            .expect("the neutral scenario resolves against the dev-fixtures manifest")
+        // The medium did not resolve against the dev-fixtures manifest; drop to the neutral air default
+        // but keep the declared structure.
+        Scenario::from_toml_str(&format!(
+            "[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}"
+        ))
+        .unwrap()
+        .resolve(manifest)
+        .expect("the neutral scenario resolves against the dev-fixtures manifest")
     })
 }
 
@@ -1820,7 +1854,7 @@ fn main() {
     let cfg = parse_config();
     let manifest = manifest();
     let channels = channels();
-    let resolution = resolve_medium(&manifest, &cfg.medium);
+    let resolution = resolve_medium(&manifest, &cfg.medium, &cfg.structure);
 
     // A generated world large enough that the founding bands land on distinct cells. Grid size is
     // overridable for profiling sweeps (CIVSIM_W / CIVSIM_H); it defaults to the fixture size. The founding
@@ -1835,8 +1869,14 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(WORLD_H);
     let topo = FlatBounded::new(gw, gh, 1);
-    let biomes = BiomeSet::dev_default();
-    let map = TileMap::generate(cfg.seed, topo, &biomes, &WorldgenParams::dev_default());
+    // The map is generated from the scenario's resolved world STRUCTURE (the loader arc, gap a), not
+    // `dev_default` regardless of scenario. Every current dev scenario declares (or defaults to) the
+    // Earth structure, which resolves to the dev-default triad, so their maps stay byte-identical.
+    // COUPLING (flagged): genesis below builds its own map internally with `dev_default`; that stays
+    // consistent while the structure is Earth. A non-Earth structure must be threaded into
+    // `GenesisParams` so genesis and the run share one terrain (a follow-on with the first exotic world).
+    let structure = resolution.world_structure();
+    let map = TileMap::generate(cfg.seed, topo, &structure.biomes, &structure.worldgen);
 
     let mut peoples = assemble_peoples(&cfg);
     // Grow the living biosphere sized to the run grid and seed it into the peoples (the biosphere-into-run

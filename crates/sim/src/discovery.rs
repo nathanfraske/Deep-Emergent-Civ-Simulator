@@ -45,6 +45,7 @@
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
 
 use crate::agent::Mind;
+use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::InferenceParams;
 use crate::homeostasis::AffordanceId;
 use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
@@ -160,6 +161,25 @@ pub struct DiscoveryCalib {
 }
 
 impl DiscoveryCalib {
+    /// Read the discovery-sampler calibrations fail-loud from the manifest (Principle 11): a reserved value
+    /// left unset refuses to build rather than running on a fabricated default, so a Calibrated world arms the
+    /// discovery loop only once the owner has set the values it needs (that fail-loud is what maps the
+    /// remaining calibration work). The surprise threshold DERIVES from the interoceptive noise floor already
+    /// defined for reward (`reward.noise_floor`), the exact quantity `discovery.surprise_threshold`'s own basis
+    /// names ("the interoceptive noise floor already defined for reward and harm"), so the two agree by
+    /// construction rather than through a second reserved key. The plan depth and hop caps are the shared
+    /// `planning.*` cognition budgets, read as counts.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<DiscoveryCalib, CalibrationError> {
+        Ok(DiscoveryCalib {
+            exploration_floor: m.require_fixed("discovery.exploration_floor")?,
+            surprise_threshold: m.require_fixed("reward.noise_floor")?,
+            surprise_gain: m.require_fixed("discovery.surprise_gain")?,
+            plan_depth_cap: m.require_usize("planning.depth_cap")?,
+            plan_hop_cap: m.require_usize("planning.hop_cap")?,
+            target_value_granularity: m.require_fixed("discovery.target_value_granularity")?,
+        })
+    }
+
     /// A labelled dev fixture for the unit tests and the pre-wire scenarios: a modest exploration floor, so
     /// a believed-good action is preferred but an unproven one is still tried a fraction of the time, and a
     /// surprise threshold and gain that let a mispredicted action lift exploration. The manifest values are
@@ -288,8 +308,75 @@ pub fn sample_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calibration::CalibrationManifest;
     use crate::homeostasis::{EXTRACT, GRASP, STRIKE};
     use crate::learn::{sequence_subject, RewardLearningCalib, NEUTRAL};
+
+    #[test]
+    fn discovery_calib_reads_the_manifest_and_derives_surprise_from_reward_noise() {
+        // The discovery sampler reads its calibration fail-loud from the manifest (Arc 1 gap b); the surprise
+        // threshold DERIVES from reward.noise_floor (its own basis) rather than a second reserved key.
+        let m = CalibrationManifest::from_toml_str(
+            r#"
+[[reserved]]
+id = "discovery.exploration_floor"
+basis = "b"
+status = "set"
+value = "0.25"
+source = "s"
+[[reserved]]
+id = "reward.noise_floor"
+basis = "b"
+status = "set"
+value = "0.01"
+source = "s"
+[[reserved]]
+id = "discovery.surprise_gain"
+basis = "b"
+status = "set"
+value = "1"
+source = "s"
+[[reserved]]
+id = "discovery.target_value_granularity"
+basis = "b"
+status = "set"
+value = "1"
+source = "s"
+[[reserved]]
+id = "planning.depth_cap"
+basis = "b"
+status = "set"
+value = "8"
+source = "s"
+[[reserved]]
+id = "planning.hop_cap"
+basis = "b"
+status = "set"
+value = "4"
+source = "s"
+"#,
+        )
+        .unwrap();
+        let c = DiscoveryCalib::from_manifest(&m).unwrap();
+        assert_eq!(c.exploration_floor, Fixed::from_ratio(1, 4));
+        assert_eq!(
+            c.surprise_threshold,
+            m.require_fixed("reward.noise_floor").unwrap(),
+            "surprise threshold derives from the reward noise floor"
+        );
+        assert_eq!(c.surprise_gain, Fixed::ONE);
+        assert_eq!(c.plan_depth_cap, 8);
+        assert_eq!(c.plan_hop_cap, 4);
+        assert_eq!(c.target_value_granularity, Fixed::ONE);
+
+        // Fail-loud: without the reward noise floor the surprise threshold cannot derive, so the build refuses
+        // rather than fabricating a default.
+        let missing = CalibrationManifest::from_toml_str(
+            "[[reserved]]\nid = \"discovery.exploration_floor\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"0.25\"\nsource = \"s\"\n",
+        )
+        .unwrap();
+        assert!(DiscoveryCalib::from_manifest(&missing).is_err());
+    }
 
     fn params() -> InferenceParams {
         InferenceParams {
