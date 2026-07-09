@@ -94,6 +94,47 @@ Build dependencies surfaced: a new floor transduction primitive (a parameterized
 percept-class-to-channel binding; the anatomy-to-sense transduction generalized beyond optical. Posted to the
 gate for its ruling before any code.
 
+BUILT + AUDITED slice-2 (sensorium-gated magnitude percept), 2026-07-09 (Agent A, gate ACCEPTED the framing
+under 5 conditions and signed off to build). Built in four byte-neutral off-path segments: the transduction
+and discrimination floor family (`physics/laws.rs`: `ResponseLaw {Linear, Power, LogCompressive}` +
+`transduce`, `DiscriminationLaw {AbsoluteStep, WeberRelative}` + `discriminate`, the Linear/AbsoluteStep
+defaults byte-identical to `m*gain`/`feature_bucket`, condition 1); the percept module (`perception_percept.rs`:
+`sense` = transduce then threshold then discriminate, `perceive` folding the read/not-read gate into the one
+being-derived threshold, condition 3); the derivation (the optical gain derives from the eye's REFRACT
+focusing capability, non-optical reserved fail-loud, no placeholder borrow, condition 2); the
+percept-class-to-channel binding keyed on the stable class string (condition 4). All four run_world pins hold
+bit-exact (default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The mandatory section-9
+five-lens audit (6 blind panelists) returned 9 findings, all verified against source and hardened: two majors
+(the binding keyed on the POSITIONAL `PerceptId` rather than the stable class string, re-keyed on the class;
+the optical derivation equated light-sensing with a refracting lens, reworded to the honest lens-eye limit
+with lensless light detection a data row and a light-absorption floor capability the flagged deeper build);
+and minors/nits flagged (the monotone-only response family with saturating Naka-Rushton/Hill and non-monotone
+tuned responses named as floor-extension follow-ons; the class->channel binding a world-data interim that
+should derive from the substance's per-channel floor coupling; the single-valued/global binding
+multiplicity limit; a test gap filled).
+
+The gate ruled fork (a) for the KEYSTONE (not slice 2): the optical-vs-reserved distinction becomes an
+explicit per-sense transduction-KIND marker on the anatomy as DATA (`Optical` / `ReservedKernel` / ...), the
+harden-to-registry pattern, retiring the `opt.refractive_index = 1.05` placeholder borrow on non-optical
+senses. Two keystone conditions the gate set: it edits `anatomy.rs` (a shared file, sequence the ADD with
+Agent B's lifespan arc #113); and retiring the placeholder must be byte-neutral or a stated hash change
+(verify no live consumer reads the non-optical senses' placeholder index).
+
+Reserved for calibration, surfaced with basis, never fabricated (`ReservedSenseParams`, the per-sense params
+the anatomy does not yet derive; the anatomy derives only the optical gain today): the `response` law a
+sense's transduction follows (basis: the modality's established psychophysics); the `shape` exponent or
+compression (basis: the modality's measured response curve); the `discrimination` law (basis: Weber's law
+holds across most senses, so magnitude-relative is the usual case); the `step` just-noticeable difference
+(basis: the sensorium's per-channel resolution, once it derives from anatomy); the `threshold` detection
+floor (basis: the organ's noise floor). The deeper derive targets flagged to the owner: the per-channel
+anatomy-transduction kernel (would derive these five from the body); a light-absorption floor capability
+(would derive lensless and absorptive optical sensing); the substance-per-channel coupling (would derive
+the class->channel binding); the saturating and non-monotone response laws (would extend the family). One
+item surfaced to the gate for its ruling: whether to add the saturating Naka-Rushton/Hill response law to
+the floor family now (the dominant real transducer nonlinearity) or defer it as a flagged follow-on; the
+gate registered the floor-growth pattern (this arc adds the spreading law and the transduction family) in
+the owner-blocker register for the owner's awareness.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
