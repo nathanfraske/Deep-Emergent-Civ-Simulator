@@ -30,7 +30,10 @@ section.
   Plus the derive-vs-author items in the interim-calls section below (the social-transmission values,
   `thermal_half_band`). Once you sign off, I merge Arc 2 and we transition to Arc 3 (the liveliness keystones,
   framing-panelled). The units-mechanism wiring is deferred (non-blocking, forward-looking); the medium
-  convective-coefficient dedup the agent is building overnight (your "dedup now" ruling).
+  convective-coefficient dedup landed byte-neutral (your "dedup now" ruling; the agent re-ran all four pins
+  itself). **The branch is fully ready: the §9 five-lens arc audit ran clean on the §11-de-biased packet, its
+  findings (all on the medium-h dedup's framing and test coverage, no behaviour bug) hardened byte-neutral, and
+  I did the arc-completion review. Your Mirror sign-off is the only remaining gate before the merge.**
 
 ## Interim calls I made overnight (proceed-with; reversible; confirm or override in the morning)
 
