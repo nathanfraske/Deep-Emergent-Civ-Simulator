@@ -27,5 +27,7 @@ section.
   `nightly-full` job (nightly schedule + manual dispatch). First cut used `#[ignore]` + `--run-ignored
   all`, which wrongly swept in the `#[ignore]d` unimplemented Stage-N placeholder tests (they
   `unimplemented!()` and panic by design) and failed nightly-full; corrected to the filterset, which
-  never touches `#[ignore]`. The fast PR lane was green throughout. Validating the corrected nightly
-  lane now.
+  never touches `#[ignore]`. The fast PR lane was green throughout. VALIDATED: fast PR lane test run
+  is now ~52 s (1304 passed, 8 skipped = the 6 slow evolve tests + 2 `#[ignore]`d placeholders), down
+  from the ~10-minute evolve tail; nightly-full is green running the full set, placeholders correctly
+  skipped. Nothing owed here; noted for context only.
