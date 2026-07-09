@@ -10,6 +10,11 @@ bind every step.
 We communicate through the PR. Read this before starting, and re-read it and the PR comments before starting
 every new segment.
 
+- **First action: create a branch off `main` (e.g. `claude/mirror-canonical-pipeline`) and open a PR to `main`,
+  then do all work there.** Read the "Feature status board" in `docs/working/CONSENSUS_ROADMAP.md` first to
+  know what is and is not built. Then start Arc 1 (the loader). Post a first comment on the PR naming the arc
+  you are starting so I can find it.
+
 - **Work in segments, push after each.** After you finish a coherent segment (a slice or a whole arc), commit,
   run the verification (below), and PUSH to the PR branch. Do not batch many arcs into one silent push; push
   each segment so I can review it while you build the next.
