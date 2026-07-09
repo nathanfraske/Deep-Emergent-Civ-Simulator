@@ -1590,6 +1590,110 @@ pub fn geometric_spread(
     }
 }
 
+/// The monotone response law a being's sensory channel transduces a received magnitude by: a physics-floor
+/// family of established sensory psychophysics (Principle 9), where the mechanism is fixed Rust and the
+/// SELECTION and its parameters are the being's own data (Principle 11). A lineage whose sense compresses,
+/// expands, or responds linearly is a different variant or a different shape value, a data row, never a code
+/// rewrite (admit-the-alien). [`ResponseLaw::Linear`] is the degenerate default: [`transduce`] under it
+/// reproduces `magnitude * gain` bit-for-bit, so the family strictly generalizes a plain linear sensitivity.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ResponseLaw {
+    /// Linear: `activation = gain * magnitude`. The degenerate default, bit-identical to a plain
+    /// multiplicative sensitivity.
+    Linear,
+    /// Stevens power law: `activation = gain * magnitude^shape`. `shape < 1` compresses (a
+    /// diminishing-returns sense), `shape > 1` expands. Near `shape = 1` it approximates Linear (through the
+    /// transcendental path, not bit-identically, so Linear is the default for the exact linear case).
+    Power,
+    /// Fechner logarithm: `activation = gain * ln(1 + shape * magnitude)`. Compresses a wide dynamic range,
+    /// zero at zero magnitude, `shape` sets the compression.
+    LogCompressive,
+}
+
+/// Transduce a received magnitude into an internal activation through a being's own monotone response law,
+/// clamped to `[0, activation_max]`. Pure and deterministic (the fixed-point `ln`/`powf` are the pinned
+/// integer transcendentals). The response SHAPE is the being's data, never the mechanism: `Linear` with a
+/// gain is the degenerate default and reproduces `magnitude * gain` bit-for-bit (a strict generalization),
+/// so a logarithmic, power-law, or (with a threshold the caller applies) thresholded sense is a data row,
+/// not a rewrite. A non-positive magnitude has no percept and reads zero.
+pub fn transduce(
+    magnitude: Fixed,
+    law: ResponseLaw,
+    gain: Fixed,
+    shape: Fixed,
+    activation_max: Fixed,
+) -> Fixed {
+    if magnitude <= ZERO {
+        return ZERO;
+    }
+    let raw = match law {
+        ResponseLaw::Linear => magnitude.checked_mul(gain).unwrap_or(activation_max),
+        ResponseLaw::Power => match magnitude.powf(shape).checked_mul(gain) {
+            Some(a) => a,
+            None => activation_max,
+        },
+        ResponseLaw::LogCompressive => {
+            let scaled = match shape.checked_mul(magnitude) {
+                Some(x) => x,
+                None => return activation_max,
+            };
+            match (Fixed::ONE + scaled).ln().checked_mul(gain) {
+                Some(a) => a,
+                None => activation_max,
+            }
+        }
+    };
+    raw.clamp(ZERO, activation_max)
+}
+
+/// The discrimination law a being quantizes a transduced activation into a discrete perceptual bucket by: a
+/// physics-floor family for how finely a being tells two signals apart (Principle 9), the SELECTION and the
+/// step its own data (Principle 11). [`DiscriminationLaw::AbsoluteStep`] is the degenerate default:
+/// [`discriminate`] under it reproduces a uniform floor quantization bit-for-bit, strictly generalizing an
+/// absolute just-noticeable difference. The bucket is the stable key a downstream per-feature belief is
+/// minted from, so which signals count as the same perceived kind derives from the being's own sense, never
+/// an authored taxonomy.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum DiscriminationLaw {
+    /// A uniform absolute step: `bucket = floor(activation / step)`. Equal intervals; the degenerate
+    /// default.
+    AbsoluteStep,
+    /// A Weber-relative step: equal RATIOS, not equal intervals (a magnitude-relative just-noticeable
+    /// difference). `bucket = floor(ln(activation) / ln(1 + step))`, so a fixed fractional change spans one
+    /// bucket at any magnitude.
+    WeberRelative,
+}
+
+/// Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
+/// law. Deterministic. A non-positive step (a misconfiguration) reads bucket zero, the same fail-safe the
+/// percept subsystem's uniform bucket uses. `AbsoluteStep` reproduces `floor(activation / step)` bit-for-bit
+/// (a strict generalization of the absolute just-noticeable difference).
+pub fn discriminate(activation: Fixed, law: DiscriminationLaw, step: Fixed) -> i64 {
+    if step.to_bits() <= 0 {
+        return 0;
+    }
+    match law {
+        DiscriminationLaw::AbsoluteStep => activation
+            .checked_div(step)
+            .map(|q| q.to_int() as i64)
+            .unwrap_or(0),
+        DiscriminationLaw::WeberRelative => {
+            if activation <= ZERO {
+                return 0;
+            }
+            let den = (Fixed::ONE + step).ln();
+            if den.to_bits() <= 0 {
+                return 0;
+            }
+            activation
+                .ln()
+                .checked_div(den)
+                .map(|q| q.to_int() as i64)
+                .unwrap_or(0)
+        }
+    }
+}
+
 /// Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
 /// bounded fraction of the incident so no overflow forms; the absorbed is the residual (R+T+A=1),
 /// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
@@ -2173,6 +2277,161 @@ mod tests {
         assert_eq!(
             geometric_spread(p, Fixed::from_int(100_000), 3, four_pi, irrad_max),
             Fixed::ZERO,
+        );
+    }
+
+    // --- Perception: the transduction response family and the discrimination family ---
+
+    #[test]
+    fn transduce_linear_default_reproduces_magnitude_times_gain() {
+        // The degenerate default is a strict generalization: Linear reproduces `magnitude * gain`
+        // bit-for-bit in the non-overflow regime (the shape parameter is ignored), so wiring a plain
+        // linear sensitivity through the family changes no bit.
+        let cap = cap(1_000_000);
+        let shape_ignored = Fixed::from_int(3);
+        for &m in &[
+            Fixed::from_int(1),
+            Fixed::from_int(50),
+            Fixed::from_ratio(3, 2),
+        ] {
+            for &g in &[
+                Fixed::from_int(1),
+                Fixed::from_int(4),
+                Fixed::from_ratio(1, 2),
+            ] {
+                assert_eq!(
+                    transduce(m, ResponseLaw::Linear, g, shape_ignored, cap),
+                    m.mul(g).min(cap),
+                    "Linear transduction must be byte-identical to magnitude * gain",
+                );
+            }
+        }
+        // The clamp bites at the activation ceiling.
+        assert_eq!(
+            transduce(
+                Fixed::from_int(10),
+                ResponseLaw::Linear,
+                Fixed::from_int(10),
+                shape_ignored,
+                Fixed::from_int(50)
+            ),
+            Fixed::from_int(50),
+            "the activation is clamped to activation_max",
+        );
+    }
+
+    #[test]
+    fn discriminate_absolute_step_reproduces_the_uniform_bucket() {
+        // AbsoluteStep reproduces `floor(activation / step)` bit-for-bit, the same formula (and the same
+        // non-positive-step fail-safe) the percept subsystem's feature_bucket uses.
+        let step = Fixed::from_ratio(1, 4);
+        for &v in &[
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 8),
+            Fixed::from_int(1),
+            Fixed::from_ratio(9, 4),
+        ] {
+            let expected = v.checked_div(step).map(|q| q.to_int() as i64).unwrap_or(0);
+            assert_eq!(
+                discriminate(v, DiscriminationLaw::AbsoluteStep, step),
+                expected
+            );
+        }
+        // A non-positive step reads bucket zero (the misconfiguration fail-safe).
+        assert_eq!(
+            discriminate(
+                Fixed::from_int(5),
+                DiscriminationLaw::AbsoluteStep,
+                Fixed::ZERO
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn transduce_all_laws_are_monotone_and_zero_at_zero() {
+        let cap = cap(1_000_000);
+        let gain = Fixed::from_int(2);
+        // Every law reads zero at zero magnitude (no percept from no signal).
+        for law in [
+            ResponseLaw::Linear,
+            ResponseLaw::Power,
+            ResponseLaw::LogCompressive,
+        ] {
+            assert_eq!(
+                transduce(Fixed::ZERO, law, gain, Fixed::from_ratio(1, 2), cap),
+                Fixed::ZERO
+            );
+        }
+        // Every law is monotone increasing in the magnitude.
+        for law in [
+            ResponseLaw::Linear,
+            ResponseLaw::Power,
+            ResponseLaw::LogCompressive,
+        ] {
+            let a = transduce(Fixed::from_int(2), law, gain, Fixed::from_ratio(1, 2), cap);
+            let b = transduce(Fixed::from_int(8), law, gain, Fixed::from_ratio(1, 2), cap);
+            assert!(
+                b > a,
+                "transduction is monotone increasing in the magnitude"
+            );
+        }
+    }
+
+    #[test]
+    fn transduce_power_and_log_compress_a_wide_range() {
+        // A compressive law (Stevens power with shape < 1, or Fechner log) grows sub-linearly: doubling
+        // the input less than doubles the activation, unlike the linear default.
+        let cap = cap(1_000_000);
+        let gain = Fixed::ONE;
+        let m = Fixed::from_int(16);
+        for law in [ResponseLaw::Power, ResponseLaw::LogCompressive] {
+            let shape = Fixed::from_ratio(1, 2);
+            let at_m = transduce(m, law, gain, shape, cap);
+            let at_2m = transduce(m.mul(Fixed::from_int(2)), law, gain, shape, cap);
+            assert!(
+                at_2m < at_m.mul(Fixed::from_int(2)),
+                "a compressive law grows sub-linearly (doubling input less than doubles activation)",
+            );
+        }
+        // The linear default does NOT compress: doubling the input doubles the activation.
+        let lin_m = transduce(m, ResponseLaw::Linear, gain, Fixed::ONE, cap);
+        let lin_2m = transduce(
+            m.mul(Fixed::from_int(2)),
+            ResponseLaw::Linear,
+            gain,
+            Fixed::ONE,
+            cap,
+        );
+        assert_eq!(lin_2m, lin_m.mul(Fixed::from_int(2)));
+    }
+
+    #[test]
+    fn discriminate_weber_bucket_step_is_bounded_across_magnitude_unlike_absolute() {
+        // Weber-relative quantizes on equal RATIOS, so a doubling advances the bucket by a near-constant
+        // (bounded) amount at any magnitude (the continuous ratio ln(2)/ln(1+step) is constant; flooring
+        // leaves it constant within one bucket). The absolute step instead advances by a GROWING amount at
+        // high magnitude. That contrast is the Weber property.
+        let step = Fixed::from_ratio(1, 2);
+        let weber =
+            |v: i32| discriminate(Fixed::from_int(v), DiscriminationLaw::WeberRelative, step);
+        let abs = |v: i32| discriminate(Fixed::from_int(v), DiscriminationLaw::AbsoluteStep, step);
+        let w_low = weber(8) - weber(4);
+        let w_high = weber(256) - weber(128);
+        assert!(
+            (w_low - w_high).abs() <= 1,
+            "the Weber increment per doubling stays near-constant across magnitude (low {w_low}, high {w_high})",
+        );
+        let a_low = abs(8) - abs(4);
+        let a_high = abs(256) - abs(128);
+        assert!(
+            a_high > a_low,
+            "the absolute-step increment per doubling grows with magnitude (low {a_low}, high {a_high})",
+        );
+        // A non-positive activation reads bucket zero.
+        assert_eq!(
+            discriminate(Fixed::ZERO, DiscriminationLaw::WeberRelative, step),
+            0
         );
     }
 
