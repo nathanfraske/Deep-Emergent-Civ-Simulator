@@ -78,7 +78,7 @@ concern is closed.
   deposits an EXTERNAL `SoilNutrientField` (class-keyed, owned by the embodiment, passed `&mut`).
 - Layer 3 (bedrock): the located stocks are HARDCODED, heterogeneously-typed members. Light/water/salt are
   intrinsic fields on the environment grid (a `Vec<Fixed>` or `ScalarField`), each stepped by its own FIXED
-  physics stencil (`step_hydrology`, `step_salinity`, `step_productivity`) — these are floor subsystems, P9-
+  physics stencil (`step_hydrology`, `step_salinity`, `step_productivity`), these are floor subsystems, P9-
   legal authored physics. Soil is an external multi-class store. There is NOWHERE to put a NEW located field
   (mana, geothermal, redox), so a new energy source cannot be a data row today: it would need a new struct
   member AND a new match arm.
@@ -92,7 +92,7 @@ pure data rows: a `ScalarField` in the collection plus a binding, no new struct 
 
 ## The storage-model fork (the one design call, surfaced for the gate)
 
-Each located field has a STORAGE MODEL. Two exist today, and they are genuinely different beasts:
+Each located field has a STORAGE MODEL. Two exist today, and they are materially different beasts:
 
 1. INTRINSIC per-cell scalar (`ScalarField` / `Vec<Fixed>`): light, water, salt. Owned by `EnvironFields`,
    each stepped by a fixed physics stencil. Read is `field.at(cell)`; deplete is `field.take(cell, want)`.
@@ -101,8 +101,8 @@ Each located field has a STORAGE MODEL. Two exist today, and they are genuinely 
    `soil.take(cell, class, want)`; it also takes a weathering `deposit`.
 
 The proposal keeps the STORAGE-MODEL DISPATCH (which storage shape backs a field) as a SMALL FIXED Rust enum
-— a bounded engine-layer mechanism, sibling to `ConditionSource` in decompose.rs and to `ScalarField` being
-a fixed representation — while the FIELD-KIND MEMBERSHIP (which energy fields a world runs, each one's physics,
+(a bounded engine-layer mechanism, sibling to `ConditionSource` in decompose.rs and to `ScalarField` being
+a fixed representation) while the FIELD-KIND MEMBERSHIP (which energy fields a world runs, each one's physics,
 each one's presence bands) is data. A new energy field that fits an existing storage model (another per-cell
 scalar) is ZERO code. A field-kind needing a NOVEL storage model (neither a per-cell scalar nor a class-keyed
 store) is a bounded Rust change, the same accepted cost the enum already carried and that the ARC5 plan
@@ -112,7 +112,7 @@ needs a new reader").
 The question I am surfacing for the gate, because it is emergence-critical and I must not decide it alone:
 
 - Is the fixed storage-model enum a legitimate bounded engine mechanism (my read: yes, by the `ConditionSource`
-  precedent and P11 — the MECHANISM is fixed Rust, the MEMBERSHIP is data), or is it a closed set re-authored
+  precedent and P11: the MECHANISM is fixed Rust, the MEMBERSHIP is data), or is it a closed set re-authored
   one level down that would foreclose a plausible alien energy field?
 - Is a per-cell scalar the honest floor representation of a located energy supply? A real alien source could be
   a directional flux, a between-cell gradient/difference (a redox gradient is literally a difference between
@@ -147,7 +147,7 @@ that a gradient-, flux-, or difference-fed being cannot be expressed against as 
 Source-verified nuance that sharpens the finding: the CORE already unlocks part of the chemolithotroph case.
 The Liebig-min over the evolved source SET (environ.rs:895-921) means a producer binding BOTH a donor
 field-kind AND an acceptor field-kind is capped by the scarcer, which IS reactant co-limitation (you cannot
-react faster than the scarcer reactant allows), a pure data row under the core. What the core genuinely CANNOT
+react faster than the scarcer reactant allows), a pure data row under the core. What the core truly CANNOT
 express, and what the panel correctly exposes, is (a) thermodynamic YIELD as a pairwise DIFFERENCE (delta-E,
 which is a subtraction, not a minimum), and (b) a between-cell spatial GRADIENT or directional flux.
 
@@ -177,7 +177,7 @@ potential DIFFERENCE is demonstrated as a pure data row (field-kind rows + bindi
 needs a Rust change, the interface is still authoring point-locality and the enum has not earned its place.
 
 HONEST LIMIT, kept not hidden: the value-backing set and the read-shape/combinator vocabulary are bounded
-engine mechanisms; a genuinely novel one (a new storage topology, a new spatial operator) is a bounded, rare,
+engine mechanisms; a truly novel one (a new storage topology, a new spatial operator) is a bounded, rare,
 accepted Rust cost, the SAME cost `ConditionSource` carries, but the sets are documented implemented-not-
 exhaustive, never asserted closed.
 
@@ -198,7 +198,7 @@ alien-scalar collection is invisible to the hash on an Earth run that declares n
 clean part is built byte-neutral and proven against all four pins; any behaviour-changing step states its
 intended hash change with its reason. Section-9 five-lens audit before every push.
 
-## Segment 2 blind framing panel (verified) — a reframe the gate must rule on
+## Segment 2 blind framing panel (verified): a reframe the gate must rule on
 
 Segment 1 is signed off and merged-rebased (pins re-verified on the merged tree). Before writing segment 2, I
 ran the section-10 blind framing panel on the pairwise-difference construction (the one segment 1's own panel
@@ -235,6 +235,34 @@ modeling depth (the standard EMF as a per-source constant versus a full Nernst c
 Unblocked and buildable byte-neutral regardless of the fork (correct improvements the audit and panel both name):
 the per-source stock-to-biomass conversion and the per-(field, role) stoichiometric coefficients. Surfaced to the
 gate; holding at doc-only for segment 2 until it rules.
+
+## Segment 2 built (gate signed off the reframe)
+
+The gate confirmed the reframe, dropped the bespoke difference operator, and signed off segment 2 as the two
+byte-neutral parts, holding the two owner-register items (the EMF-to-biomass coupling reserved value; the
+standard-EMF versus full-Nernst modeling depth) for segment 3. Built: `AbioticBinding` gained
+`biomass_per_stock: Option<Fixed>` (the per-source cap conversion) and `stock_per_biomass: Option<Fixed>` (the
+per-source stoichiometric drawdown), both defaulting to the registry-global so every Terran binding is
+byte-identical. In the reframe each reactant is a separate source id already Liebig-min co-limited by segment 1,
+so there is no role enum: "per-(field, role)" collapses to per-binding. `extract_producers` Pass 1 caps by the
+per-source-or-global conversion and Pass 2 draws each field by its own coefficient (the `None` stoichiometry
+falls back to the reciprocal of the effective conversion, today's implicit 1:1). A new `set_source_conversion`
+arms them and fails loud on a per-source conversion of zero (symmetric with the global's unset guard; a zero
+stoichiometry stays legal, the catalyst case).
+
+Proven: the four pins hold byte-identical, `extract_producers`'s signature is unchanged, worker-invariant, 22
+environ tests (four new: per-source conversion overrides the global; a donor+acceptor pair is Liebig co-limited
+by the scarcer AND drawn 2:1 by its own stoichiometry, a redox chemolithotroph as a pure data row; the Pass-2
+draw uses the per-source conversion; a zero conversion fails loud), full sim suite green, fmt and clippy clean.
+
+Section-9 five-lens audit: thirteen clean-notes confirming byte-neutrality (bit-identical under the None
+defaults), the value-authoring line (no hardcoded per-source number in the content path), the reframe
+correctness (co-limitation is the existing Liebig-minimum, non-1:1 drawdown per source), and no panic or overflow
+(including a per-source `Some(0)` and a zero conversion). Findings hardened before push: the untested Pass-2
+per-source branch got a test; the zero per-source conversion now fails loud; `draw_fraction` staying global is
+named as the honest remaining limit; and the one confirmed minor, that an alien `DataScalar` omitting its
+conversion silently borrows the soil-derived global (opt-out, not closed), is now surfaced as an explicit honest
+limit at its site, closed when the source declares its own conversion or segment 3 derives it from the floor.
 
 ## Files
 

@@ -426,6 +426,28 @@ pub struct AbioticBinding {
     /// Where in a region this source is PRESENT (Arc 5 T1): the availability rule over the region's env axes.
     /// Empty (the default) means always present, so a source inserted without a rule keeps the old behaviour.
     pub availability: AbioticAvailability,
+    /// PER-SOURCE stock-to-biomass CONVERSION (Arc 5 segment 2): the biomass a unit of THIS field's stock
+    /// supports, the cap conversion the extract beat applies in Pass 1. `None` falls back to the registry-global
+    /// [`AbioticSourceRegistry::biomass_per_stock`], so a source that does not set it keeps the old behaviour
+    /// (byte-neutral). Decoupled per-source because a joule of redox free energy and a mole of soil nutrient are
+    /// dimensionally incommensurable: one global (whose basis is a SOIL fertility scale) cannot honestly convert
+    /// both (the section-10 panel finding). RESERVED per source, surfaced not fabricated: a world sets it, or for
+    /// a redox source it DERIVES from the floor `law.battery_emf` yield (segment 3, gated on the owner's
+    /// EMF-to-biomass coupling); the basis is that field's own floor units. HONEST LIMIT (opt-out, not yet
+    /// closed): an ALIEN `DataScalar` source that OMITS its conversion silently borrows the soil-derived global,
+    /// re-applying the incommensurable Terran scale it is meant to escape. The seam is closed only when the source
+    /// declares its own conversion (here) or segment 3 derives it from the floor; a future segment may REQUIRE an
+    /// alien source to declare or derive rather than defaulting to soil, which stays byte-neutral (no Earth source
+    /// is a `DataScalar`).
+    pub biomass_per_stock: Option<Fixed>,
+    /// PER-SOURCE STOICHIOMETRIC drawdown (Arc 5 segment 2): the units of THIS field's stock CONSUMED per unit
+    /// of supported biomass, the amount Pass 2 draws down. `None` falls back to the reciprocal of the effective
+    /// conversion (`draw_biomass / biomass_per_stock`), today's implicit 1:1 behaviour (byte-neutral). Decoupled
+    /// per-source because a real redox reaction consumes its reactants in a reaction-specific ratio, not 1:1
+    /// (the section-10 panel finding): a producer closing on a donor AND an acceptor (each its own source id,
+    /// Liebig-min co-limited by segment 1) draws each down by its OWN coefficient. RESERVED per source with the
+    /// same basis as the conversion; `Some(0)` models a catalyst (enabling but not consumed).
+    pub stock_per_biomass: Option<Fixed>,
 }
 
 /// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
@@ -435,10 +457,15 @@ pub struct AbioticBinding {
 pub struct AbioticSourceRegistry {
     bindings: BTreeMap<u16, AbioticBinding>,
     /// RESERVED (surfaced, not set): the standing biomass a unit of drawn located stock supports. Basis: the
-    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns.
+    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns. This is
+    /// the FALLBACK default (Arc 5 segment 2): a source that declares its own [`AbioticBinding::biomass_per_stock`]
+    /// converts on its own terms; only a source with `None` borrows this global, so a Terran world is byte-neutral.
     pub biomass_per_stock: Fixed,
     /// RESERVED: the fraction of the supported biomass a producer sequesters from its stock per tick. Basis:
     /// the nutrient turnover the standing biomass holds; set so a grazed cell depletes over a plausible span.
+    /// HONEST LIMIT (Arc 5 segment 2 scope): this per-tick TURNOVER fraction stays registry-global even after the
+    /// stock conversion and the stoichiometric drawdown became per-source, so two heterogeneous fields on one
+    /// world share one turnover rate; a per-source turnover is a later refinement, not built.
     pub draw_fraction: Fixed,
     /// RESERVED: the located stock a physical WEATHERING source (rock to nutrient) deposits per producer cell
     /// per tick, the bootstrap that seeds a bare soil before any corpse decomposes. Basis: the rock-weathering
@@ -495,8 +522,37 @@ impl AbioticSourceRegistry {
                 depletes,
                 class: class.to_string(),
                 availability,
+                biomass_per_stock: None,
+                stock_per_biomass: None,
             },
         );
+    }
+
+    /// Set the PER-SOURCE stock-to-biomass conversion and/or stoichiometric drawdown of an already-bound source
+    /// (Arc 5 segment 2). `None` on either leaves that dimension at the registry-global fallback (byte-neutral).
+    /// This is how a world declares that a mana or redox field converts and depletes on its OWN terms rather than
+    /// borrowing the soil-derived global: a joule of redox free energy and a mole of soil nutrient are
+    /// dimensionally incommensurable (Principle 11). A no-op if the id is unbound. FAILS LOUD at config time on a
+    /// per-source conversion of zero (a field that supports zero biomass per unit stock is a config error that
+    /// would silently starve the producer, exactly the sentinel the global assert guards; `stock_per_biomass` of
+    /// zero is NOT an error, it is the legitimate catalyst case, enabling but not consumed).
+    pub fn set_source_conversion(
+        &mut self,
+        id: u16,
+        biomass_per_stock: Option<Fixed>,
+        stock_per_biomass: Option<Fixed>,
+    ) {
+        if let Some(v) = biomass_per_stock {
+            assert!(
+                v > Fixed::ZERO,
+                "abiotic source {id}: a per-source biomass_per_stock must be positive (zero would silently \
+                 starve the producer); leave it None to use the registry-global fallback"
+            );
+        }
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.biomass_per_stock = biomass_per_stock;
+            b.stock_per_biomass = stock_per_biomass;
+        }
     }
 
     /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
@@ -1015,9 +1071,14 @@ impl EnvironFields {
                                 .at(x, y),
                         },
                     };
-                    let supported = supply
-                        .checked_mul(registry.biomass_per_stock)
-                        .unwrap_or(Fixed::MAX);
+                    // The stock-to-biomass conversion is per-source (Arc 5 segment 2), falling back to the
+                    // registry-global when the source does not declare its own (byte-neutral for Earth): a
+                    // redox stock and a soil stock are dimensionally incommensurable, so one soil-derived global
+                    // cannot honestly convert both.
+                    let bps = binding
+                        .biomass_per_stock
+                        .unwrap_or(registry.biomass_per_stock);
+                    let supported = supply.checked_mul(bps).unwrap_or(Fixed::MAX);
                     if supported < min_supported {
                         min_supported = supported;
                     }
@@ -1042,9 +1103,18 @@ impl EnvironFields {
                     let draw_biomass = self.capacity.cells[i]
                         .checked_mul(registry.draw_fraction)
                         .unwrap_or(Fixed::ZERO);
-                    let draw_amt = draw_biomass
-                        .checked_div(registry.biomass_per_stock)
-                        .unwrap_or(Fixed::ZERO);
+                    // The stock DRAWN per unit biomass is per-source STOICHIOMETRY (Arc 5 segment 2): a redox
+                    // reaction consumes its reactants in a reaction-specific ratio, not 1:1, so a producer
+                    // closing on a donor and an acceptor (each its own source id, Liebig-min co-limited) draws
+                    // each by its OWN coefficient. `None` falls back to the reciprocal of this source's effective
+                    // conversion (draw_biomass / bps), today's implicit 1:1 draw (byte-identical for Earth).
+                    let bps = binding
+                        .biomass_per_stock
+                        .unwrap_or(registry.biomass_per_stock);
+                    let draw_amt = match binding.stock_per_biomass {
+                        Some(spb) => draw_biomass.checked_mul(spb).unwrap_or(Fixed::ZERO),
+                        None => draw_biomass.checked_div(bps).unwrap_or(Fixed::ZERO),
+                    };
                     match binding.field {
                         AbioticField::Light => {} // light has no located stock to deplete
                         AbioticField::Soil => {
@@ -2035,6 +2105,201 @@ mod tests {
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
         e.extract_producers(&mut soil, &reg); // panics: field 99 was never declared
+    }
+
+    #[test]
+    fn a_source_converts_stock_to_biomass_by_its_own_per_source_rate_not_the_global() {
+        // Arc 5 segment 2 (per-source conversion): the stock-to-biomass conversion is PER-SOURCE, so a world
+        // declares that its alien field converts on its own terms rather than borrowing the soil-derived global
+        // (a joule of redox free energy and a mole of soil nutrient are incommensurable). Two runs on the SAME
+        // field value differ only in the source's per-source biomass_per_stock, and the capped productivity
+        // tracks the per-source rate, not the registry-global.
+        let map = a_map(0xC0FFEE);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 7;
+        let source_id: u16 = 3;
+        let field_level = Fixed::from_ratio(1, 4);
+
+        let run = |per_source_bps: Option<Fixed>| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4); // the registry-global (the fallback)
+            reg.draw_fraction = Fixed::ZERO; // isolate the cap from the draw
+            reg.weathering_rate = Fixed::ZERO;
+            reg.set_source_conversion(source_id, per_source_bps, None);
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            e.extract_producers(&mut soil, &reg);
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // None: the source uses the registry-global (4), so the cap is field_level * 4.
+        let global_cap = run(None);
+        assert_eq!(
+            global_cap,
+            field_level.checked_mul(Fixed::from_int(4)).unwrap(),
+            "with no per-source rate the source falls back to the registry-global conversion (byte-neutral)"
+        );
+        // A per-source rate of 10 (its OWN floor units) caps at field_level * 10, NOT the global 4: the
+        // conversion is per-source, so the incommensurable-global seam is closed.
+        let per_source_cap = run(Some(Fixed::from_int(10)));
+        assert_eq!(
+            per_source_cap,
+            field_level.checked_mul(Fixed::from_int(10)).unwrap(),
+            "the source converts by its OWN per-source rate, not the soil-derived registry-global"
+        );
+        assert!(
+            per_source_cap > global_cap,
+            "the per-source rate overrides the global: {per_source_cap:?} > {global_cap:?}"
+        );
+    }
+
+    #[test]
+    fn the_draw_uses_the_per_source_conversion_not_the_global_when_no_stoichiometry_is_set() {
+        // Arc 5 segment 2 (Pass-2 coverage the audit flagged): when a source sets a per-source conversion but NO
+        // stoichiometric coefficient, the deplete draw falls back to the reciprocal of THAT source's conversion
+        // (draw_biomass / per_source_bps), not the registry-global. Proven by drawing a field down and checking
+        // the removed amount equals draw_biomass / per_source_bps, which differs from draw_biomass / global.
+        let map = a_map(0xD3A);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 8;
+        let source_id: u16 = 4;
+        let field_level = Fixed::from_ratio(1, 2);
+        let per_source_bps = Fixed::from_int(10);
+        let global_bps = Fixed::from_int(4);
+        let draw_fraction = Fixed::from_ratio(1, 2);
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), true, "");
+        reg.biomass_per_stock = global_bps;
+        reg.draw_fraction = draw_fraction;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.set_source_conversion(source_id, Some(per_source_bps), None); // per-source bps, None stoich
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg);
+
+        let cap = e.capacity_at(cell.x, cell.y); // = field_level * per_source_bps
+        let draw_biomass = cap.checked_mul(draw_fraction).unwrap();
+        let drawn = field_level - e.data_field_at(field_id, cell.x, cell.y).unwrap();
+        assert_eq!(
+            drawn,
+            draw_biomass.checked_div(per_source_bps).unwrap(),
+            "the None-stoichiometry draw uses THIS source's per-source conversion (draw_biomass / per_source_bps)"
+        );
+        assert_ne!(
+            drawn,
+            draw_biomass.checked_div(global_bps).unwrap(),
+            "the draw does NOT use the registry-global conversion (that was the untested Pass-2 branch)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "must be positive")]
+    fn a_zero_per_source_conversion_fails_loud_rather_than_silently_starving() {
+        // Arc 5 segment 2 fail-loud (the audit's asymmetry finding): a per-source biomass_per_stock of zero is a
+        // config error that would silently cap every producer on it to zero biomass, so set_source_conversion
+        // panics at config time, symmetric with the registry-global's own unset guard. (A zero stock_per_biomass
+        // is NOT an error, it is the catalyst case, tested separately by its absence of a panic here.)
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(1, AbioticField::DataScalar(5), true, "");
+        reg.set_source_conversion(1, Some(Fixed::ZERO), None); // panics: zero conversion
+    }
+
+    #[test]
+    fn a_donor_and_acceptor_are_co_limited_and_drawn_by_their_own_stoichiometry() {
+        // Arc 5 segment 2 (per-source stoichiometry) composed with segment 1's Liebig co-limitation: a redox
+        // chemolithotroph closes on a reduced DONOR field AND an oxidized ACCEPTOR field, each its OWN source id.
+        // Two claims: (1) CO-LIMITATION is already delivered by the Liebig-minimum over the source set (the cap
+        // is bound by the scarcer reactant, segment 1); (2) each reactant is DRAWN DOWN by its OWN stoichiometric
+        // coefficient, not a shared 1:1 amount, so a reaction that consumes twice as much donor as acceptor is a
+        // pure data row (no bespoke difference operator; the redox character is co-limitation + per-source data).
+        let map = a_map(0x5ED0C0);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let donor_field: u16 = 10;
+        let acceptor_field: u16 = 11;
+        let donor_src: u16 = 100;
+        let acceptor_src: u16 = 101;
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(donor_src, AbioticField::DataScalar(donor_field), true, "");
+        reg.insert(
+            acceptor_src,
+            AbioticField::DataScalar(acceptor_field),
+            true,
+            "",
+        );
+        reg.biomass_per_stock = Fixed::from_int(2);
+        reg.draw_fraction = Fixed::from_ratio(1, 2); // a visible per-tick draw
+        reg.weathering_rate = Fixed::ZERO;
+        // The donor is consumed at twice the acceptor's stoichiometric rate (2:1), each its own per-source data.
+        let donor_stoich = Fixed::from_int(1);
+        let acceptor_stoich = Fixed::from_ratio(1, 2);
+        reg.set_source_conversion(donor_src, None, Some(donor_stoich));
+        reg.set_source_conversion(acceptor_src, None, Some(acceptor_stoich));
+
+        // The acceptor is the SCARCER reactant, so it should bind the productivity (co-limitation).
+        let donor_level = Fixed::from_int(2);
+        let acceptor_level = Fixed::from_ratio(1, 2);
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![donor_src, acceptor_src])]);
+        e.set_data_field(donor_field, ScalarField::uniform(w, h, donor_level));
+        e.set_data_field(acceptor_field, ScalarField::uniform(w, h, acceptor_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg);
+
+        // (1) Co-limitation: the cap is the SCARCER (acceptor) supported biomass, not the donor's.
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            acceptor_level.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the scarcer reactant (acceptor) binds the productivity: the Liebig minimum co-limits (segment 1)"
+        );
+        assert!(
+            cap < donor_level.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the abundant donor alone would support more; co-limitation holds it to the acceptor"
+        );
+        // (2) Per-source stoichiometry: each reactant drawn by capacity*draw_fraction*its_own_stoich.
+        let draw_biomass = cap.checked_mul(reg.draw_fraction).unwrap();
+        let donor_remaining = e.data_field_at(donor_field, cell.x, cell.y).unwrap();
+        let acceptor_remaining = e.data_field_at(acceptor_field, cell.x, cell.y).unwrap();
+        assert_eq!(
+            donor_remaining,
+            donor_level - draw_biomass.checked_mul(donor_stoich).unwrap(),
+            "the donor is drawn down by its OWN stoichiometric coefficient"
+        );
+        assert_eq!(
+            acceptor_remaining,
+            acceptor_level - draw_biomass.checked_mul(acceptor_stoich).unwrap(),
+            "the acceptor is drawn down by its OWN coefficient (2:1 vs the donor, not a shared 1:1 amount)"
+        );
+        let donor_drawn = donor_level - donor_remaining;
+        let acceptor_drawn = acceptor_level - acceptor_remaining;
+        assert_eq!(
+            donor_drawn,
+            acceptor_drawn.checked_mul(Fixed::from_int(2)).unwrap(),
+            "the donor is consumed at twice the acceptor's rate: reaction-specific stoichiometry, a data row"
+        );
     }
 
     #[test]
