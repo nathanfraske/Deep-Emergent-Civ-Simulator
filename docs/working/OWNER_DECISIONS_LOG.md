@@ -21,6 +21,23 @@ wire scoped on `Coord3` directly (the small change), and SCOPE the 3D perception
 perception place model from `PlaceId` to `Coord3`) now and do it NEXT after the framework. Captured in
 `PERCEPTION_SUBSTRATE_ARC_PLAN.md` (slice 1 and the sequence section).
 
+RESOLVED slice-1 (reach wire) framing, 2026-07-09 (blind section-11 then section-10 panel, 6/6
+significant-flaw-fixable, unanimous; gate accepted fork (a)). The reach wire is: for a signal on channel c
+from a source `Coord3` to a perceiver `Coord3`, a received physical scalar computed as a general
+dimensionality-parameterized geometric-spreading kernel (D derives from the traversed path/medium geometry,
+3D bulk to `1/d^2`, a 2D surface to `1/d`, a duct to no spreading; D reserved fail-loud with its geometry
+basis where it cannot yet derive, never fabricated) applied to the emitted power and the 3D separation, then
+attenuated by the medium's own `opt.absorption_coefficient` sampled along the `Coord3` segment (so occlusion
+emerges from the strata, no authored line-of-sight). Channel c is a data-registry row naming its kernel and
+axis ids (dispatch by named id, never a code branch on channel identity). The received value is a pure
+per-perceiver read (P10). Five build conditions from the gate: D derives or is reserved fail-loud; the general
+kernel is byte-identical to `inverse_square_falloff` at D=3; absorption reads the medium axis, never a label;
+the registry dispatches by id; the non-geometric propagation-law-as-data stays flagged as the deeper
+substrate. The general geometric-spreading kernel at any integer dimensionality is legitimate floor authoring
+(physics is an authored floor input, Principle 9), subsuming inverse-square. Section-11 caveat: an earlier
+frequency clause over-committed (stated body-resonance as settled); the body-resonance-reserved ruling for the
+acoustic frequency stands, judged alien-safe on the clean axis.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
