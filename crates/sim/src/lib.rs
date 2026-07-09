@@ -102,6 +102,7 @@ pub mod material_percept;
 pub mod medium;
 pub mod morphogen;
 pub mod percept;
+pub mod perception_reach;
 pub mod personality;
 pub mod physiology;
 pub mod planning;
