@@ -29,17 +29,16 @@ section.
   copy-fidelity base from a perception-resolution axis). Your call: accept as authored social data, or derive
   (build the substrate). Reversible either way.
 
-- **Temperature units seam: I authorized the worldgen temperature-to-Kelvin build (a Mirror-boot blocker).**
-  The agent found, and I verified against source (`worldgen.rs:260`, `runner.rs:443`, `fluids_floor.toml:15`),
-  that the worldgen temperature field is normalized `[0,1]` but the `therm.temperature` floor axis is absolute
-  K, the Calibrated thresholds (setpoint 310 K, etc.) are Kelvin, and the metabolism `T^4` physics needs
-  absolute temperature. So a Calibrated Mirror holds a 310 K setpoint against a `[0,1]` ambient and freezes its
-  beings instantly. I authorized building the worldgen temperature-to-Kelvin mapping
-  (`T = base + amplitude*(lat_blend - 0.5)`) this arc, because the physics forbids the alternative (normalizing
-  the thresholds). `base` and `amplitude` are RESERVED OWNER VALUES for the Mirror gate (mean surface temp
-  ~288 K, equator-to-pole swing ~±30 K; world data, surfaced not fabricated). It may rebaseline the dev pins,
-  which is legitimate here (a dev fixture becoming absolute temperature). Confirm the mechanism and set the two
-  climate values at the Mirror sign-off.
+- **Temperature units seam: BUILT (be00b26), byte-neutral, two climate values reserved for your gate.** The
+  agent found, and I verified against source (`worldgen.rs:260`, `runner.rs:443`, `fluids_floor.toml:15`), that
+  the worldgen temperature field is normalized `[0,1]` but the `therm.temperature` floor axis is absolute K and
+  the metabolism `T^4` physics needs Kelvin, so a Calibrated Mirror froze its beings instantly. I authorized
+  the fix and the agent built it (`Field::from_map_absolute`: `T = mean + range*(normalised - 1/2)`). It is
+  byte-neutral BY CONSTRUCTION: the dev fixtures set `mean = 1/2`, `range = 1`, an exact identity that
+  reproduces the old `[0,1]` field, so no pin moved (provable, no run needed). The Calibrated profile reserves
+  `climate.mean_surface_temperature` and `climate.latitude_temperature_range` for you. Nothing owed but the two
+  values at the Mirror sign-off: mean surface temp ~288 K and full equator-to-pole range ~60 K (±30 K). World
+  data, surfaced not fabricated.
 - **Climate-productivity coarse scaffold: set with the abstract limit noted.** The coarse productivity model's
   params (a documented stand-in for the gated real biosphere) set as its calibration; reversible when the
   biosphere-balance calibration replaces it.
