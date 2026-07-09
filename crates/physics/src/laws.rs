@@ -1594,8 +1594,19 @@ pub fn geometric_spread(
 /// family of established sensory psychophysics (Principle 9), where the mechanism is fixed Rust and the
 /// SELECTION and its parameters are the being's own data (Principle 11). A lineage whose sense compresses,
 /// expands, or responds linearly is a different variant or a different shape value, a data row, never a code
-/// rewrite (admit-the-alien). [`ResponseLaw::Linear`] is the degenerate default: [`transduce`] under it
-/// reproduces `magnitude * gain` bit-for-bit, so the family strictly generalizes a plain linear sensitivity.
+/// rewrite. [`ResponseLaw::Linear`] is the degenerate default: [`transduce`] under it reproduces
+/// `magnitude * gain` bit-for-bit, so the family strictly generalizes a plain linear sensitivity.
+///
+/// SCOPE and its flagged limits (the slice-2 audit named these): the family is the MONOTONE, unbounded
+/// responses (linear, power-law expansive or compressive, logarithmic), and [`transduce`] clamps every one
+/// to `activation_max`, so the ceiling is a hard clip rather than a smooth saturation. Two response shapes
+/// real receptors exhibit are NOT yet in the family, so they are flagged floor extensions (a new variant
+/// plus its law, the strict-generalization pattern), not authored elsewhere: a SATURATING response
+/// (Naka-Rushton or Hill, `activation = gain * m^n / (k^n + m^n)`, the dominant real transducer nonlinearity
+/// and the natural shape for a finite-ceiling mana or redox receptor), and a NON-MONOTONE tuned or band-pass
+/// response (a receptor with a preferred magnitude, peaking then falling). Until those variants land, a
+/// saturating or tuned sense is not a data row under this family; the admit-the-alien claim holds for the
+/// monotone shapes only.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ResponseLaw {
     /// Linear: `activation = gain * magnitude`. The degenerate default, bit-identical to a plain

@@ -39,7 +39,6 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 use civsim_physics::laws::{self, DiscriminationLaw, ResponseLaw};
 
-use crate::percept::PerceptId;
 use crate::sensorium::SenseChannelId;
 
 /// One channel's transduction as the being's OWN data: the response law and its parameters, the
@@ -213,20 +212,31 @@ pub struct ReservedSenseParams {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TransductionUnbuilt;
 
-/// Derive the OPTICAL channel's transduction from the being's own body: the gain is the being's optical
-/// focusing capability (the REFRACT read of its eye's refractive contrast against the medium, a
-/// physics-derived sensitivity that is zero for a being with no optical transducer and rises with a keener
-/// lens), and the remaining parameters are the reserved per-sense values. This is the one channel whose
-/// transduction the anatomy supplies a physics derivation for today (condition 2, condition-5's "wire
-/// optical now"); the gain flows from the eye's genome-expressed material, so a being's optical sensitivity
-/// arises from its evolved body, never an authored per-being number. Pure and off the run path.
+/// Derive the OPTICAL channel's transduction for a LENS eye from the being's own body: the gain is the
+/// being's optical focusing capability (the REFRACT read of its eye's refractive contrast against the
+/// medium, a physics-derived sensitivity that rises with a keener lens), and the remaining parameters are
+/// the reserved per-sense values. The gain flows from the eye's genome-expressed material, so an
+/// image-forming eye's optical sensitivity arises from its evolved body, never an authored per-being number.
+/// Pure and off the run path.
+///
+/// HONEST LIMIT the slice-2 audit named (flagged, not a defect in the alien-as-data sense): the REFRACT
+/// capability measures refractive FOCUSING, so this derivation covers a lens or image-forming eye only. A
+/// lensless light detector whose transducing tissue matches the medium's refractive index (a pigment-cup
+/// eyespot, a flat photoreceptor sheet, an absorptive or photosynthetic light organ) has zero refractive
+/// contrast, so it derives zero optical gain here and would be modelled blind by this path alone. Such a
+/// being is still admissible as DATA (a caller declares its [`ChannelTransduction`] directly), so the alien
+/// is a data row, not a rewrite; what is reserved is the DERIVATION for it. A light-ABSORPTION capability
+/// (an absorbed-flux read, distinct from refractive focusing) is the flagged deeper build that would let
+/// lensless and absorptive light sensing derive from the body too, a sibling of the per-channel
+/// anatomy-transduction kernel. Until it lands, this derivation is honestly the lens-eye path.
 pub fn derive_optical_transduction(
     optical_capability: Fixed,
     reserved: ReservedSenseParams,
 ) -> ChannelTransduction {
     ChannelTransduction {
         response: reserved.response,
-        // DERIVED: the eye's normalized focusing power is its sensitivity on the optical channel.
+        // DERIVED: the eye's normalized refractive focusing power is its sensitivity on the optical
+        // channel (the lens-eye path; a lensless absorptive detector is the flagged deeper build).
         gain: optical_capability,
         shape: reserved.shape,
         discrimination: reserved.discrimination,
@@ -239,74 +249,96 @@ pub fn derive_optical_transduction(
 /// is optical-only today, so an acoustic, chemical, field, or mana channel has no physics derivation, and
 /// its anatomy sense carries a PLACEHOLDER optical index that must not be borrowed as a stand-in sensitivity
 /// (the Terran default the value-authoring line forbids). This returns [`TransductionUnbuilt`] rather than a
-/// fabricated transduction, so a caller cannot silently produce a wrong non-optical percept. The caller
-/// distinguishes an optical channel from a reserved one by the sense's KIND, never by its placeholder index;
-/// the per-channel anatomy-transduction kernel that would derive these is the deeper build.
+/// fabricated transduction, so a caller cannot silently produce a wrong non-optical percept.
+///
+/// The caller distinguishes an optical channel from a reserved one by the sense's KIND, never by its
+/// placeholder index. That KIND is not yet data-carried in the anatomy: the gate ruled it becomes an
+/// explicit per-sense transduction-KIND marker (`Optical` / `ReservedKernel` / ...) on the anatomy at
+/// keystone time (the harden-to-registry pattern the sibling reach substrate uses, so a sense with no kernel
+/// is `ReservedKernel` and flips to its derived kernel when that kernel lands), retiring the placeholder
+/// index. Building that marker is the keystone's edit to `anatomy.rs` (a shared file, sequenced with Agent
+/// B), and the per-channel anatomy-transduction kernel that would derive the reserved parameters is the
+/// deeper build.
 pub fn reserve_nonoptical_transduction() -> Result<ChannelTransduction, TransductionUnbuilt> {
     Err(TransductionUnbuilt)
 }
 
 // --- Segment 4: binding the substance-class percept vocabulary to the sensorium's channels (condition 4) ---
 
-/// The binding from a perceivable feature (a [`crate::percept::PerceptId`], the biology-floor substance
-/// class a being senses) to the sense [`SenseChannelId`] a being perceives it through. This reconciles the
-/// two vocabularies the perception substrate carries: the percept subsystem keys features by a substance
-/// class string, the sensorium keys perception by an opaque channel id, and this map joins them so a
-/// feature's magnitude can be gated through the being's transduction on the channel that senses it.
-/// Data-defined and extensible (Principle 11): which channel senses which class is the world's data (a
-/// scent class binds a chemical channel, a warmth class a thermal channel), never a hardcode. EMPTY by
+/// The binding from a perceivable feature (a biology-floor substance CLASS STRING, the stable identity a
+/// [`crate::percept::PerceptDef`] carries) to the sense [`SenseChannelId`] a being perceives it through.
+/// This reconciles the two vocabularies the perception substrate carries: the percept subsystem names
+/// features by a substance class string, the sensorium keys perception by an opaque channel id, and this map
+/// joins them so a feature's magnitude can be gated through the being's transduction on the channel that
+/// senses it. It keys on the class STRING, not the [`crate::percept::PerceptId`], because the id is a
+/// positional controller slot ("the percept's slot in the controller's feature input block, in registry
+/// order") that shifts if a world reorders or grows its percept registry, whereas the class string is the
+/// substance's stable identity. Data-defined and extensible (Principle 11): which channel senses which class
+/// is the world's data (a scent class binds a chemical channel, a warmth class a thermal channel). EMPTY by
 /// default, so a world that declares no bindings routes no feature through a channel.
+///
+/// Two honest limits, flagged (from the slice-2 section-9 audit):
+/// - DERIVE TARGET: which channel can detect which substance is a PHYSICAL consequence (a substance a
+///   channel's field couples to is detectable through it: one that absorbs light optically, a volatile one
+///   chemically), so this world-data table is an interim form. Deriving the binding from the substance's own
+///   floor coupling per channel is the flagged deeper build, a sibling of the per-channel
+///   anatomy-transduction kernel.
+/// - MULTIPLICITY: the binding is single-valued and world-global (one channel per class, shared by all
+///   beings). A feature that couples to more than one channel (salinity by taste and by a chemoreceptor),
+///   or two races that sense a shared feature through different modalities, is a flagged generalization to a
+///   multi-channel and per-lineage binding, not built here.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PerceptChannelBinding {
-    channels: BTreeMap<PerceptId, SenseChannelId>,
+    channels: BTreeMap<String, SenseChannelId>,
 }
 
 impl PerceptChannelBinding {
-    /// An empty binding: no feature is bound to a channel.
+    /// An empty binding: no feature class is bound to a channel.
     pub fn empty() -> PerceptChannelBinding {
         PerceptChannelBinding {
             channels: BTreeMap::new(),
         }
     }
 
-    /// Bind a feature to the channel a being perceives it through (or replace an existing binding).
-    pub fn bind(&mut self, feature: PerceptId, channel: SenseChannelId) {
-        self.channels.insert(feature, channel);
+    /// Bind a feature CLASS to the channel a being perceives it through (or replace an existing binding).
+    pub fn bind(&mut self, class: &str, channel: SenseChannelId) {
+        self.channels.insert(class.to_string(), channel);
     }
 
-    /// The channel a feature is perceived through, if one is bound (else the feature routes through no
+    /// The channel a feature class is perceived through, if one is bound (else the class routes through no
     /// channel and is not sensed by the sensorium-gated path).
-    pub fn channel_of(&self, feature: PerceptId) -> Option<SenseChannelId> {
-        self.channels.get(&feature).copied()
+    pub fn channel_of(&self, class: &str) -> Option<SenseChannelId> {
+        self.channels.get(class).copied()
     }
 
-    /// Iterate the bindings in canonical (ascending feature id) order.
-    pub fn iter(&self) -> impl Iterator<Item = (&PerceptId, &SenseChannelId)> {
+    /// Iterate the bindings in canonical (lexicographic class) order.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &SenseChannelId)> {
         self.channels.iter()
     }
 
-    /// Whether no feature is bound to a channel.
+    /// Whether no feature class is bound to a channel.
     pub fn is_empty(&self) -> bool {
         self.channels.is_empty()
     }
 }
 
-/// Perceive a feature's magnitude through the being's sensorium: look up the sense channel the feature is
-/// bound to, then form the sensorium-gated percept on that channel through the being's own transduction
-/// ([`perceive`]). `None` if the feature is bound to no channel (a world that does not route the feature
+/// Perceive a feature CLASS's magnitude through the being's sensorium: look up the sense channel the class
+/// is bound to, then form the sensorium-gated percept on that channel through the being's own transduction
+/// ([`perceive`]). `None` if the class is bound to no channel (a world that does not route the feature
 /// through a sense), or the being does not sense that channel, or the signal is sub-threshold. Pure and off
 /// the run path (no live caller): the being-percept keystone consumes it, so byte-neutral by construction.
 /// This is the join that lets the substance-class percept vocabulary reach the sensorium's per-channel
-/// transduction without either subsystem hardcoding the other's keys.
+/// transduction without either subsystem hardcoding the other's keys, keyed on the stable class rather than
+/// the positional percept slot.
 pub fn perceive_feature(
     binding: &PerceptChannelBinding,
     registry: &TransductionRegistry,
-    feature: PerceptId,
+    class: &str,
     magnitude: Fixed,
     activation_max: Fixed,
     default_open: Option<&ChannelTransduction>,
 ) -> Option<MagnitudePercept> {
-    let channel = binding.channel_of(feature)?;
+    let channel = binding.channel_of(class)?;
     perceive(registry, channel, magnitude, activation_max, default_open)
 }
 
@@ -465,9 +497,12 @@ mod tests {
     }
 
     #[test]
-    fn a_being_with_no_optical_transducer_derives_zero_gain() {
-        // A being whose eye does not focus (zero capability) derives zero optical gain, so it forms no
-        // percept on the optical channel: blindness emerges from the anatomy, never an authored flag.
+    fn a_being_with_no_focusing_eye_derives_zero_optical_gain() {
+        // A being whose eye does not FOCUS (zero refractive capability) derives zero optical gain through
+        // the lens-eye path, so it forms no percept on the optical channel from this derivation alone. The
+        // absence of focusing emerges from the anatomy, never an authored flag. (Honest limit, flagged on
+        // the function: a lensless light detector also reads zero here and is a data row until the
+        // light-absorption capability derives it; this path is the lens eye.)
         let t = derive_optical_transduction(Fixed::ZERO, reserved());
         assert_eq!(t.gain, Fixed::ZERO);
         let cap = Fixed::from_int(1_000_000);
@@ -486,64 +521,89 @@ mod tests {
         assert_eq!(reserve_nonoptical_transduction(), Err(TransductionUnbuilt));
     }
 
-    // --- Segment 4: the percept-class-to-channel binding ---
+    // --- Segment 4: the percept-class-to-channel binding (keyed on the stable class string) ---
 
-    const FEATURE: PerceptId = PerceptId(7);
-    const UNBOUND: PerceptId = PerceptId(9);
+    const SALT: &str = "bio.salinity";
+    const WARMTH: &str = "bio.warmth";
 
     #[test]
-    fn a_feature_routes_through_its_bound_channel_to_the_sensorium() {
+    fn a_feature_class_routes_through_its_bound_channel_to_the_sensorium() {
         // The join: a substance-class feature's magnitude reaches the sensorium's per-channel transduction
-        // through the binding, so a being perceives the feature only if it senses the bound channel.
+        // through the binding, so a being perceives the class only if it senses the bound channel.
         let cap = Fixed::from_int(1_000_000);
         let mut binding = PerceptChannelBinding::empty();
-        binding.bind(FEATURE, CH);
+        binding.bind(SALT, CH);
         let mut reg = TransductionRegistry::empty();
         reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
 
-        let p = perceive_feature(&binding, &reg, FEATURE, Fixed::from_int(5), cap, None)
-            .expect("the feature is bound to a sensed channel");
+        let p = perceive_feature(&binding, &reg, SALT, Fixed::from_int(5), cap, None)
+            .expect("the class is bound to a sensed channel");
         // The percept is exactly what perceiving the magnitude on the bound channel gives.
         let direct = perceive(&reg, CH, Fixed::from_int(5), cap, None).unwrap();
         assert_eq!(p, direct);
     }
 
     #[test]
-    fn an_unbound_feature_is_not_sensed() {
-        // A feature bound to no channel routes through no sense (a world that does not wire the feature to
-        // a channel), so no percept forms even if the being senses every channel.
+    fn an_unbound_class_is_not_sensed() {
+        // A class bound to no channel routes through no sense (a world that does not wire the class to a
+        // channel), so no percept forms even if the being senses every channel.
         let cap = Fixed::from_int(1_000_000);
         let mut binding = PerceptChannelBinding::empty();
-        binding.bind(FEATURE, CH);
+        binding.bind(SALT, CH);
         let mut reg = TransductionRegistry::empty();
         reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
         assert!(
-            perceive_feature(&binding, &reg, UNBOUND, Fixed::from_int(5), cap, None).is_none(),
-            "a feature bound to no channel is not sensed"
+            perceive_feature(&binding, &reg, WARMTH, Fixed::from_int(5), cap, None).is_none(),
+            "a class bound to no channel is not sensed"
         );
     }
 
     #[test]
-    fn a_feature_bound_to_an_unsensed_channel_forms_no_percept() {
-        // The feature is bound, but the being does not sense that channel (its registry lacks it and is
+    fn a_class_bound_to_an_unsensed_channel_forms_no_percept() {
+        // The class is bound, but the being does not sense that channel (its registry lacks it and is
         // non-empty), so the sensorium gate stops it.
         let cap = Fixed::from_int(1_000_000);
         let mut binding = PerceptChannelBinding::empty();
-        binding.bind(FEATURE, OTHER);
+        binding.bind(SALT, OTHER);
         let mut reg = TransductionRegistry::empty();
         reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
         assert!(
-            perceive_feature(&binding, &reg, FEATURE, Fixed::from_int(5), cap, None).is_none(),
-            "a feature bound to a channel the being does not sense forms no percept"
+            perceive_feature(&binding, &reg, SALT, Fixed::from_int(5), cap, None).is_none(),
+            "a class bound to a channel the being does not sense forms no percept"
         );
     }
 
     #[test]
-    fn the_binding_walks_in_canonical_feature_id_order() {
+    fn perceive_feature_passes_the_default_open_convention_through_the_binding() {
+        // The adversarial combination the audit named: a bound class, a being with an EMPTY sensorium, and
+        // a supplied default_open. The class resolves to its channel, then the empty sensorium senses it
+        // through the default-open transduction; with no default it perceives nothing.
+        let cap = Fixed::from_int(1_000_000);
         let mut binding = PerceptChannelBinding::empty();
-        binding.bind(UNBOUND, CH);
-        binding.bind(FEATURE, OTHER);
-        let ids: Vec<u16> = binding.iter().map(|(f, _)| f.0).collect();
-        assert_eq!(ids, vec![7, 9], "canonical ascending feature id order");
+        binding.bind(SALT, CH);
+        let empty = TransductionRegistry::empty();
+        let open = linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE);
+        assert!(
+            perceive_feature(&binding, &empty, SALT, Fixed::from_int(5), cap, Some(&open))
+                .is_some(),
+            "an empty sensorium senses the bound class through the default-open transduction"
+        );
+        assert!(
+            perceive_feature(&binding, &empty, SALT, Fixed::from_int(5), cap, None).is_none(),
+            "an empty sensorium with no default-open perceives nothing even for a bound class"
+        );
+    }
+
+    #[test]
+    fn the_binding_walks_in_canonical_class_order() {
+        let mut binding = PerceptChannelBinding::empty();
+        binding.bind(WARMTH, CH);
+        binding.bind(SALT, OTHER);
+        let classes: Vec<&str> = binding.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            classes,
+            vec!["bio.salinity", "bio.warmth"],
+            "canonical lexicographic class order"
+        );
     }
 }
