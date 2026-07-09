@@ -161,10 +161,14 @@ pub struct ConvictionMoveParams {
 pub struct FeltConvictionCalib {
     /// The retention (leak) per felt event, below one, so the association tracks RECENT lived valence and stays
     /// defeasible (a run of opposite-valence experience erodes an earlier record). RESERVED. Basis: the
-    /// eligibility-decay and evidence-ring retention the reward and harm learners already use, set on the same
-    /// order for consistency (the felt-conviction record is the reward/harm learner's sibling over convictions
-    /// rather than actions or features). A retention of one would never forget (non-defeasible); a small one
-    /// would forget within a few ticks (no lifetime integration).
+    /// LIFETIME-INTEGRATION window the owner wants a felt-experience record to span. It is deliberately SLOWER
+    /// than the reward learner's action-eligibility decay (`reward.eligibility_decay`, a dev `1/2`, a within-a-
+    /// few-ticks credit window for crediting an action to a reserve change), because a conviction record must
+    /// integrate a being's felt valence over MANY ticks of its LIFE, not lag a single action; the dev `15/16`
+    /// gives an ~11-tick half-life as a placeholder, and the owner sets it to the lived-experience span desired.
+    /// A retention of one would never forget (non-defeasible); a small one would forget within a few ticks (no
+    /// lifetime integration). This is the sibling of the reward/harm learners in ROLE (a felt-signal-driven
+    /// learner) but not in the numeric value of any one of their fields.
     pub retention: Fixed,
     /// The Branch-2 MOVE parameters, or `None` to RECORD only (Branch 1, inert: the association accumulates and
     /// folds into the hash but moves no conviction). `Some` opts a world into the felt-experience-moves-belief
@@ -174,11 +178,11 @@ pub struct FeltConvictionCalib {
 
 impl FeltConvictionCalib {
     /// A labelled DEV fixture (not owner data) for the RECORD-only leg (Branch 1, inert): a mild leak
-    /// (fifteen-sixteenths) so many felt events accumulate over a life while old experience fades, matching the
-    /// reward learner's eligibility-decay order, and NO move (a conviction is recorded against but not moved).
-    /// The owner sets the canonical values via the calibration manifest when the learner is armed on a
-    /// Calibrated world (the reserved keys, a follow-on shared with the other opt-in learners' dev-fixture
-    /// calibs).
+    /// (fifteen-sixteenths, an ~11-tick half-life for lifetime integration, deliberately slower than the reward
+    /// learner's `1/2` action-eligibility decay) so many felt events accumulate over a life while old experience
+    /// fades, and NO move (a conviction is recorded against but not moved). No `from_manifest` yet: like the
+    /// sibling opt-in learners still on dev fixtures (`DiscoveryCalib`), a fail-loud manifest read is the shared
+    /// follow-on for when a Calibrated world first arms this learner (no production scenario arms it today).
     pub fn dev_default() -> FeltConvictionCalib {
         FeltConvictionCalib {
             retention: Fixed::from_ratio(15, 16),

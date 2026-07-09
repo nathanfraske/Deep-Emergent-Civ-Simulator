@@ -4121,7 +4121,9 @@ impl Runner {
     /// being that holds convictions and a nonzero per-race epistemic polarity, each held axiom is moved through
     /// [`crate::axiom::Axiom::apply_felt_experience`]: the felt drive is `polarity * association` (the being's
     /// pole-referenced felt record times its hedonic-or-ascetic disposition), the evidence points to the pole
-    /// `sign(drive)`, and the stance accommodates if the drive clears the reserved entrenchment gate. The move
+    /// `sign(drive)`, and the stance accommodates if the drive clears the reserved move gate (a flat dev
+    /// threshold today; the entrenchment-rank-scaled gate is the reserved refinement, see `apply_felt_experience`).
+    /// The move
     /// is relabel-invariant (it reads no absolute pole meaning, R5) and its polarity is a per-race innate
     /// disposition (P9-legal), so "felt hardship erodes the conviction" for a hedonic race and "validates it"
     /// for an ascetic one, each an emergent per-race outcome. Reads the embodiment (each walker's record) and
@@ -4675,9 +4677,19 @@ impl Runner {
         sys.insert(SYS_FIELD, access(&[], &[RES_FIELD]));
         sys.insert(SYS_BODY, access(&[RES_FIELD, RES_INDEX], &[RES_BODY]));
         if self.embodiment.is_some() {
+            // RES_WORLD is declared here too because the embodiment phase now READS the world (the Branch-1
+            // felt-conviction fold reads each being's intrinsic beliefs, `fold_conviction_experience`) and
+            // WRITES it (the Branch-2 conviction move mutates the axiom stances, `apply_conviction_moves`),
+            // OWNER_DECISIONS_LOG R2/R5. This is redundant with the existing RES_BEING write-write conflict that
+            // already serializes SYS_EMBODIMENT before SYS_WORLD (the only other RES_WORLD toucher), so it adds
+            // no scheduling edge and the composite stays bit-identical; it keeps the access declaration honest so
+            // a future RES_WORLD-touching phase is serialized correctly rather than silently racing.
             sys.insert(
                 SYS_EMBODIMENT,
-                access(&[RES_FIELD], &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING]),
+                access(
+                    &[RES_FIELD, RES_WORLD],
+                    &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING, RES_WORLD],
+                ),
             );
         }
         if self.world.is_some() {

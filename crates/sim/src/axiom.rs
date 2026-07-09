@@ -470,18 +470,25 @@ impl Axiom {
     /// pole the being's lived experience favoured (relabel-invariant). `polarity` is the being's per-race
     /// epistemic-polarity disposition ([`EpistemicStance::experiential_polarity`]): positive hedonic, negative
     /// ascetic, zero no coupling. The felt drive is `polarity * association`, and the evidence points toward the
-    /// pole `sign(drive)` (the +1 or -1 extreme) with pressure `|drive|`. If the pressure clears the
-    /// entrenchment `threshold` the stance ACCOMMODATES toward that pole by `plasticity * pressure`, the SAME
-    /// AGM step [`Axiom::appraise`] uses (so the entrenchment gate, the bounded move, and the revelation jump
-    /// all carry over); otherwise it is ASSIMILATED (no move). RELABEL-INVARIANT by construction: negating the
-    /// axis's pole convention flips this stance's sign, which flips `association` (it is pole-referenced), so
-    /// `drive` and the target pole flip together and the being's physical trajectory is unchanged, the engine
-    /// never reading which pole "means" what (the third framing panel's ruling). A being that HELD a conviction
-    /// and SUFFERED under it (a negative pole-referenced association for a positive stance) is, when hedonic,
-    /// moved AWAY from that pole (the felt-hardship-erodes-the-conviction outcome), and when ascetic, moved
-    /// TOWARD it, so which outcome occurs is the race's own disposition, never a coded route. A pure
-    /// deterministic update given its inputs; does not touch the evidence ring (the felt channel is distinct
-    /// from the social/observed evidence [`Axiom::appraise`] accumulates).
+    /// pole `sign(drive)` (the +1 or -1 extreme) with pressure `|drive|`. If the pressure clears the move
+    /// `threshold` the stance ACCOMMODATES toward that pole by `plasticity * pressure`, the SAME bounded AGM
+    /// accommodate step [`Axiom::appraise`] uses (the revelation jump carries over); otherwise it is ASSIMILATED
+    /// (no move). NOTE (honest limit): unlike [`Axiom::appraise`], which reads the entrenchment-rank-scaled gate
+    /// (`entrenchment_threshold` over the reserved curve), this takes a caller-supplied FLAT gate and does NOT
+    /// yet read `self.entrenchment`, so a labile and a calcified conviction are equally movable by felt
+    /// experience; the entrenchment-rank-scaled felt gate is the faithful refinement (reserved). RELABEL-
+    /// INVARIANT by construction: negating the axis's pole convention flips this stance's sign, which flips
+    /// `association` (it is pole-referenced), so `drive` and the target pole flip together and the being's
+    /// physical trajectory is unchanged, the engine never reading which pole "means" what (the third framing
+    /// panel's ruling). A being that HELD a conviction and SUFFERED under it (a negative pole-referenced
+    /// association for a positive stance) is, when hedonic, moved AWAY from that pole (the felt-hardship-erodes-
+    /// the-conviction outcome), and when ascetic, moved TOWARD it, so which outcome occurs is the race's own
+    /// disposition, never a coded route. A pure deterministic update given its inputs; does not touch the
+    /// evidence ring (the felt channel is distinct from the social/observed evidence [`Axiom::appraise`]
+    /// accumulates). SATURATING: an extreme drive that overflows the fixed-point product saturates to the
+    /// maximum pressure in the correct direction (an amplified-sensitivity or extreme-experience alien MOVES,
+    /// rather than reading the overflow as no-move), and the magnitude never touches `Fixed::MIN`, so the
+    /// release overflow checks cannot panic.
     pub fn apply_felt_experience(
         &mut self,
         association: Fixed,
@@ -489,7 +496,16 @@ impl Axiom {
         threshold: Fixed,
         plasticity: Fixed,
     ) -> Appraisal {
-        let drive = polarity.checked_mul(association).unwrap_or(Fixed::ZERO);
+        // The felt drive, saturating on overflow to the extreme in the product's own sign direction rather than
+        // to zero (the saturating discipline `felt_salience` uses), and never to `Fixed::MIN` so the `abs` below
+        // cannot panic (`ZERO - MAX` is `MIN + 1`, safely negatable).
+        let drive = polarity.checked_mul(association).unwrap_or_else(|| {
+            if (polarity >= Fixed::ZERO) == (association >= Fixed::ZERO) {
+                Fixed::MAX
+            } else {
+                Fixed::ZERO - Fixed::MAX
+            }
+        });
         let pressure = drive.abs();
         if drive == Fixed::ZERO || pressure <= threshold {
             return Appraisal::Assimilated { pressure: drive };
@@ -1197,6 +1213,32 @@ mod tests {
                 assert!(
                     to < from,
                     "the hedonic being's conviction eroded away from the pole it suffered under"
+                );
+            }
+            _ => panic!("expected the conviction to move (accommodation)"),
+        }
+    }
+
+    #[test]
+    fn felt_experience_reinforces_a_conviction_thrived_under_when_hedonic() {
+        // The complement of the erode test, holding the polarity FIXED and flipping the LIVED experience: the
+        // SAME hedonic being (polarity +1) whose pole-referenced association is POSITIVE (it thrived while
+        // holding this pole) is moved FURTHER out along its current pole (reinforced), not eroded. So the move
+        // DIRECTION turns on the being's own lived correlation (the emergent Branch-1 input), not only on the
+        // authored polarity knob: same disposition, opposite experience, opposite belief change.
+        let mut a = axiom(Fixed::from_ratio(8, 10), 0, 3);
+        let low_gate = Fixed::from_ratio(1, 100);
+        let outcome = a.apply_felt_experience(
+            Fixed::from_ratio(1, 2), // thrived while holding the +pole -> POSITIVE association
+            Fixed::ONE,              // hedonic (identical to the erode test)
+            low_gate,
+            Fixed::ONE,
+        );
+        match outcome {
+            Appraisal::Accommodated { from, to, .. } => {
+                assert!(
+                    to > from,
+                    "the hedonic being's conviction was reinforced by thriving under it (from {from:?} to {to:?})"
                 );
             }
             _ => panic!("expected the conviction to move (accommodation)"),
