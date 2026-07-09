@@ -49,6 +49,11 @@ const FIXTURES: &str = concat!(
     "/../../calibration/profiles/dev-fixtures.toml"
 );
 
+const RESERVED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../calibration/reserved.toml"
+);
+
 fn manifest() -> CalibrationManifest {
     CalibrationManifest::load(FIXTURES).expect("the dev-fixtures profile loads")
 }
@@ -2038,5 +2043,116 @@ fn a_fully_grown_bodys_derived_physiology_is_read_from_its_grown_tissue() {
         survivors(true),
         0,
         "the same race whose genome grows an exchange surface pays the thermoregulatory drain the run reads off that grown tissue, and does not outlast the run"
+    );
+}
+
+#[test]
+fn build_dawn_runner_arms_only_the_learners_the_scenario_declares() {
+    // The loader arc, gap b: the world-build path arms each opt-in learner fail-loud from the manifest,
+    // GATED by the scenario [features] block, so which learners a world runs is scenario DATA. A scenario
+    // that declares a feature arms its learner; one that declares none arms nothing, which is what keeps a
+    // feature-off world byte-identical to the pre-loader build.
+    let manifest = manifest();
+    let map = a_map(0xB0);
+
+    // Declares all three calibration learners: the build succeeds (the dev fixtures carry their values) and
+    // each learner is armed.
+    let on = Scenario::from_toml_str(
+        "[scenario]\nid = \"w\"\nname = \"W\"\n\
+         [features]\nreward = true\ndiscovery = true\nconvictions = true\n",
+    )
+    .unwrap()
+    .resolve(&manifest)
+    .unwrap();
+    let runner_on = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &on,
+        &map,
+        &peoples(),
+        0x2E,
+    )
+    .expect("a features-declaring dawn assembles under Development");
+    assert!(
+        runner_on.reward_learning().is_some(),
+        "the reward learner is armed when declared"
+    );
+    assert!(
+        runner_on.discovery().is_some(),
+        "the discovery sampler is armed when declared"
+    );
+    assert!(
+        runner_on.felt_conviction_learning().is_some(),
+        "the felt-conviction learner is armed when declared"
+    );
+
+    // Declares no features: nothing is armed on the canonical path (the gating that keeps a feature-off
+    // world byte-identical).
+    let off = a_scenario(None).resolve(&manifest).unwrap();
+    let runner_off = build_dawn_runner(
+        &manifest,
+        &channels(),
+        Profile::Development,
+        &off,
+        &map,
+        &peoples(),
+        0x2E,
+    )
+    .unwrap();
+    assert!(
+        runner_off.reward_learning().is_none(),
+        "the reward learner is NOT armed when the scenario declares no feature"
+    );
+    assert!(
+        runner_off.discovery().is_none(),
+        "the discovery sampler is NOT armed when undeclared"
+    );
+    assert!(
+        runner_off.felt_conviction_learning().is_none(),
+        "the felt-conviction learner is NOT armed when undeclared"
+    );
+}
+
+#[test]
+fn a_scenario_refuses_to_build_under_calibrated_while_values_are_reserved() {
+    // The handoff's Arc-1 proof step: a scenario built under Profile::Calibrated against the real reserved
+    // manifest REFUSES while any required value it reads is still reserved (never fabricating one), which is
+    // exactly what maps the remaining calibration work to Arc 2. The same build succeeds under Development,
+    // where the dev fixtures supply labelled placeholders, so the refusal is the calibration gate, not a
+    // structural failure. The refusal fires before any feature arming (World::from_manifest is the first
+    // step), so it holds for a feature-off scenario too.
+    let reserved = CalibrationManifest::load(RESERVED).expect("the reserved manifest loads");
+    let resolution = a_scenario(None).resolve(&reserved).unwrap();
+    let map = a_map(0xB0);
+    let refused = build_dawn_runner(
+        &reserved,
+        &channels(),
+        Profile::Calibrated,
+        &resolution,
+        &map,
+        &peoples(),
+        0x2E,
+    );
+    assert!(
+        refused.is_err(),
+        "Profile::Calibrated refuses to build while required values are reserved (the fail-loud gate that maps Arc 2)"
+    );
+
+    // The identical build succeeds under Development against the dev fixtures.
+    let dev = manifest();
+    let dev_resolution = a_scenario(None).resolve(&dev).unwrap();
+    assert!(
+        build_dawn_runner(
+            &dev,
+            &channels(),
+            Profile::Development,
+            &dev_resolution,
+            &map,
+            &peoples(),
+            0x2E,
+        )
+        .is_ok(),
+        "the same scenario builds under Development, so the Calibrated refusal is the calibration gate"
     );
 }

@@ -124,6 +124,39 @@ pub struct MagicPosture {
     pub affinity_weight: Option<String>,
 }
 
+/// The opt-in learners a scenario arms (the loader arc, gap b). Each is a data flag the world-build path
+/// reads to arm the corresponding learner fail-loud from the manifest, so which learners a world runs is
+/// scenario DATA rather than a hardcoded opt-in in the run harness. Every flag defaults off, so a scenario
+/// that declares no features arms nothing and its world is byte-identical to the pre-loader build. The
+/// mechanisms are fixed Rust and their calibrations are reserved manifest values (Principle 11); this block
+/// only selects which are armed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub struct ScenarioFeatures {
+    /// Arm the appetitive REWARD learner ([`crate::learn::RewardLearningCalib`]): a being credits a felt
+    /// reserve rise to the action that produced it, forming a "this pays off" belief.
+    #[serde(default)]
+    pub reward: bool,
+    /// Arm the DISCOVERY / ideation sampler ([`crate::discovery::DiscoveryCalib`]): a being proposes a
+    /// candidate action each tick, biased by its own reward beliefs. The sampler reads reward beliefs, so a
+    /// world arming discovery normally arms `reward` too (an unrewarded discovery world still runs, but has
+    /// no rewarded habit to exploit). HONEST LIMIT (flagged, not hidden): arming discovery does NOT by itself
+    /// produce multi-hop tool reasoning, because the relational-belief producer (`consider_relation`, the "A
+    /// yields X" edges the planner's `plan_chain` walks) has no run-path caller yet; that run-path
+    /// relation-formation seam is an Arc-3 item, so "discovery armed" means a being proposes and enacts single
+    /// actions, not that it reasons through tool chains.
+    #[serde(default)]
+    pub discovery: bool,
+    /// Arm the experiential FELT-CONVICTION learner ([`crate::conviction_experience::FeltConvictionCalib`]),
+    /// the RECORD-and-MOVE leg: a being's own felt experience records against the convictions it holds and
+    /// moves them by its per-race epistemic polarity (OWNER_DECISIONS_LOG R2/R4/R5).
+    #[serde(default)]
+    pub convictions: bool,
+    /// Arm TOOL affordances on the embodiment (a worked object affords an action its raw form does not). Read
+    /// only when the world builds an embodiment; a disembodied world ignores it.
+    #[serde(default)]
+    pub tools: bool,
+}
+
 /// A parsed scenario: the data-of-record for a test world.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Scenario {
@@ -135,6 +168,9 @@ pub struct Scenario {
     /// The magic posture.
     #[serde(default)]
     pub magic: MagicPosture,
+    /// The opt-in learners this scenario arms (the loader arc, gap b). Defaults to none armed.
+    #[serde(default)]
+    pub features: ScenarioFeatures,
     /// The direction each change-and-extremes dial is pushed, by reserved dial id.
     #[serde(default)]
     pub dials: BTreeMap<String, Direction>,
@@ -234,6 +270,7 @@ impl Scenario {
             dials,
             medium,
             structure,
+            features: self.features,
         })
     }
 }
@@ -300,6 +337,10 @@ pub struct ScenarioResolution {
     /// [`WorldStructure`] registry at resolve time, so [`world_structure`](Self::world_structure)
     /// cannot dangle. Defaults to [`EARTH_STRUCTURE`] when the scenario declares none.
     pub structure: String,
+    /// The opt-in learners this scenario arms (the loader arc, gap b). The world-build path arms each
+    /// declared learner fail-loud from the manifest; a resolution with none declared arms nothing and is
+    /// byte-identical to the pre-loader build.
+    pub features: ScenarioFeatures,
 }
 
 impl ScenarioResolution {
