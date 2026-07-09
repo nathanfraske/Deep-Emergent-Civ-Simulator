@@ -35,11 +35,14 @@
 //! differ because their temperatures differ, not because of a label (Principle 9).
 //!
 //! Everything is integer, fixed-point, and draws no randomness (Principle 3). The owner anchors (the
-//! Kleiber coefficient `a`, the normalized-body-mass-to-kilograms bridge, the medium convective
-//! coefficient `h`, the surface emissivity, and the Stefan-Boltzmann constant) are reserved with their
-//! basis and are the owner's to set ([`MetabolicAnchors::from_manifest`]); the values in
-//! [`MetabolicAnchors::dev_fixture`] are labelled development fixtures, never owner canon. The caps
-//! below are representability bounds forced by Q32.32 (the engine-mechanics exemption the law kernels
+//! Kleiber coefficient `a`, the normalized-body-mass-to-kilograms bridge, and the Stefan-Boltzmann
+//! constant) are reserved with their basis and are the owner's to set ([`MetabolicAnchors::from_manifest`]);
+//! the values in [`MetabolicAnchors::dev_fixture`] are labelled development fixtures, never owner canon. Two
+//! surface properties the radiant and convective terms once carried as anchors now DERIVE from the being's
+//! own data rather than a global scalar (derive-vs-author, Principle 6): the radiant-surface emissivity from
+//! its covering ([`covering_emissivity`]) and the medium convective coefficient `h` from its medium's
+//! `fluid.convective_coefficient` axis, read at the being's cell ([`crate::medium::MediumField::convective_at`]).
+//! The caps below are representability bounds forced by Q32.32 (the engine-mechanics exemption the law kernels
 //! and `medium.rs` take), not owner realism values.
 //!
 //! Two honest limits stand. First, the exact reconciliation of the reserve's stored energy (the biology
@@ -119,12 +122,6 @@ pub struct MetabolicAnchors {
     /// The kilograms a body carries at `body_mass = 1` (the normalized-trait-to-kilograms bridge). An
     /// R-UNITS-PIN bridge, NOT derivable. RESERVED owner anchor.
     pub body_mass_kg_scale: Fixed,
-    /// The medium convective coefficient `h` (W/(m^2*K)) for the body-to-medium exchange, a fluids-floor
-    /// medium datum. RESERVED owner anchor. FLAGGED (derive-vs-author, Principle 6): this duplicates the
-    /// floor axis `fluid.convective_coefficient`; the boundary-layer Nusselt derivation that would read `h`
-    /// from the medium's fluid data rather than a metabolism scalar is deferred to Arc 4 (the owner's scope
-    /// call), so it stays a reserved anchor for now, unlike the sibling emissivity which now derives.
-    pub medium_h: Fixed,
     /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant passed like the
     /// other physics constants the radiant law reads. RESERVED (a CODATA constant, an authored
     /// Principle-9 physics affordance).
@@ -141,21 +138,20 @@ impl MetabolicAnchors {
         Ok(MetabolicAnchors {
             kleiber_a: manifest.require_fixed("metabolism.kleiber_coefficient")?,
             body_mass_kg_scale: manifest.require_fixed("metabolism.body_mass_kg_scale")?,
-            medium_h: manifest.require_fixed("metabolism.medium_convective_coefficient")?,
             sigma: manifest.require_fixed("metabolism.stefan_boltzmann")?,
         })
     }
 
     /// A labelled DEVELOPMENT FIXTURE, not owner canon: a plausible temperate-mammal Kleiber coefficient,
-    /// a mid-size kilogram bridge, an air convective coefficient, and the CODATA Stefan-Boltzmann constant.
-    /// The radiant term's emissivity is no longer an anchor; it derives from the being's covering
-    /// ([`covering_emissivity`]). For tests and examples only; a canonical run reads
+    /// a mid-size kilogram bridge, and the CODATA Stefan-Boltzmann constant. Two surface properties are no
+    /// longer anchors: the radiant term's emissivity derives from the being's covering
+    /// ([`covering_emissivity`]) and the medium convective coefficient `h` from the being's medium
+    /// ([`crate::medium::MediumField::convective_at`]). For tests and examples only; a canonical run reads
     /// [`MetabolicAnchors::from_manifest`].
     pub fn dev_fixture() -> MetabolicAnchors {
         MetabolicAnchors {
             kleiber_a: Fixed::from_ratio(1, 100),
             body_mass_kg_scale: Fixed::from_int(100),
-            medium_h: Fixed::from_int(10),
             sigma: Fixed::from_ratio(567, 10_000_000_000),
         }
     }
@@ -1055,11 +1051,11 @@ mod tests {
         // The coupling is not authored from a hidden water thermal mass; the no-thermal-mass branch
         // reads rate one for both.
         assert_eq!(
-            derive_body_exchange_rate(&a, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            derive_body_exchange_rate(&a, &organs, Fixed::from_int(10), Fixed::ONE, &anchors),
             Fixed::ONE
         );
         assert_eq!(
-            derive_body_exchange_rate(&b, &organs, anchors.medium_h, Fixed::ONE, &anchors),
+            derive_body_exchange_rate(&b, &organs, Fixed::from_int(10), Fixed::ONE, &anchors),
             Fixed::ONE
         );
     }
@@ -1091,7 +1087,7 @@ mod tests {
             whole_body_energy_density(&small, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             tick,
             &anchors,
         );
@@ -1102,7 +1098,7 @@ mod tests {
             whole_body_energy_density(&large, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             tick,
             &anchors,
         );
@@ -1140,7 +1136,7 @@ mod tests {
             whole_body_energy_density(&plan, &organs),
             Fixed::from_int(250),
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             Fixed::ONE,
             &anchors,
         );
@@ -1151,7 +1147,7 @@ mod tests {
             whole_body_energy_density(&plan, &organs),
             setpoint,
             setpoint,
-            anchors.medium_h,
+            Fixed::from_int(10),
             Fixed::ONE,
             &anchors,
         );
@@ -1209,16 +1205,16 @@ mod tests {
         // Compact: the same flesh but a quarter skin (less exposed surface).
         let compact = body((1, 2), vec![organ(skin, (1, 4)), organ(flesh, (1, 4))]);
         let rate_high =
-            derive_body_exchange_rate(&high, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            derive_body_exchange_rate(&high, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
         let rate_compact =
-            derive_body_exchange_rate(&compact, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            derive_body_exchange_rate(&compact, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
         assert!(rate_high > rate_compact, "more surface, faster coupling");
         // No exchange surface: no coupling.
         assert_eq!(
             derive_body_exchange_rate(
                 &body((1, 2), vec![organ(flesh, (1, 1))]),
                 &organs,
-                anchors.medium_h,
+                Fixed::from_int(10),
                 Fixed::ONE,
                 &anchors,
             ),
@@ -1229,7 +1225,9 @@ mod tests {
 
     #[test]
     fn anchors_read_from_a_set_manifest_and_fail_loud_when_reserved() {
-        // The five owner anchors load from a set manifest, and a reserved one refuses to fabricate.
+        // The three owner anchors load from a set manifest, and a reserved one refuses to fabricate. The
+        // medium convective coefficient is no longer an anchor: it is read from the being's medium
+        // (medium.rs), not this manifest, so it is absent here.
         let set = r#"
 [[reserved]]
 id = "metabolism.kleiber_coefficient"
@@ -1244,13 +1242,6 @@ basis = "fixture"
 status = "set"
 value = "100"
 unit = "kg"
-source = "test"
-[[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "fixture"
-status = "set"
-value = "10"
-unit = "h"
 source = "test"
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
@@ -1298,12 +1289,17 @@ source = "test"
                 whole_body_energy_density(&plan, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
-                anchors.medium_h,
+                Fixed::from_int(10),
                 Fixed::ONE,
                 &anchors,
             );
-            let rate =
-                derive_body_exchange_rate(&plan, &organs, anchors.medium_h, Fixed::ONE, &anchors);
+            let rate = derive_body_exchange_rate(
+                &plan,
+                &organs,
+                Fixed::from_int(10),
+                Fixed::ONE,
+                &anchors,
+            );
             (base.to_bits(), rate.to_bits())
         };
         assert_eq!(

@@ -124,7 +124,7 @@ fn two_bodies_diverge_in_derived_drain_and_exchange_from_composition_and_mass_al
         whole_body_energy_density(&big_dense, &organs),
         ambient,
         setpoint,
-        anchors.medium_h,
+        Fixed::from_int(10),
         tick,
         &anchors,
     );
@@ -135,13 +135,14 @@ fn two_bodies_diverge_in_derived_drain_and_exchange_from_composition_and_mass_al
         whole_body_energy_density(&small_watery, &organs),
         ambient,
         setpoint,
-        anchors.medium_h,
+        Fixed::from_int(10),
         tick,
         &anchors,
     );
-    let rate_big = derive_body_exchange_rate(&big_dense, &organs, anchors.medium_h, tick, &anchors);
+    let rate_big =
+        derive_body_exchange_rate(&big_dense, &organs, Fixed::from_int(10), tick, &anchors);
     let rate_small =
-        derive_body_exchange_rate(&small_watery, &organs, anchors.medium_h, tick, &anchors);
+        derive_body_exchange_rate(&small_watery, &organs, Fixed::from_int(10), tick, &anchors);
 
     assert_ne!(
         drain_big.to_bits(),
@@ -182,7 +183,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         whole_body_energy_density(&plan, &organs),
         Fixed::from_int(270),
         Fixed::from_int(330),
-        anchors.medium_h,
+        Fixed::from_int(10),
         tick,
         &anchors,
     );
@@ -193,7 +194,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         whole_body_energy_density(&plan, &organs),
         Fixed::from_int(330),
         Fixed::from_int(270),
-        anchors.medium_h,
+        Fixed::from_int(10),
         tick,
         &anchors,
     );
@@ -210,7 +211,7 @@ fn a_hot_body_in_the_cold_and_its_mirror_diverge_from_temperature_alone() {
         whole_body_energy_density(&plan, &organs),
         Fixed::from_int(310),
         Fixed::from_int(310),
-        anchors.medium_h,
+        Fixed::from_int(10),
         tick,
         &anchors,
     );
@@ -241,12 +242,13 @@ fn identical_physics_derive_identical_results_and_replay_bit_for_bit() {
                 whole_body_energy_density(p, &organs),
                 Fixed::from_int(270),
                 Fixed::from_int(310),
-                anchors.medium_h,
+                Fixed::from_int(10),
                 Fixed::ONE,
                 &anchors,
             )
             .to_bits(),
-            derive_body_exchange_rate(p, &organs, anchors.medium_h, Fixed::ONE, &anchors).to_bits(),
+            derive_body_exchange_rate(p, &organs, Fixed::from_int(10), Fixed::ONE, &anchors)
+                .to_bits(),
         )
     };
     assert_eq!(

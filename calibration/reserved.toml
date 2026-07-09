@@ -1508,12 +1508,15 @@ unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/src/physiology.rs derive_body_exchange_rate; design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
 
 # --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
-# The three headline anchors the derivation is built on (the Kleiber coefficient a, the normalized
-# body-mass-to-kilograms bridge, and the medium convective coefficient h), plus the two the radiant
-# thermoregulatory term reads (the body-surface emissivity and the Stefan-Boltzmann constant). Each is
-# surfaced fail-loud rather than fabricated; the kernels are fixed Rust (crates/physics/src/laws.rs
-# basal_metabolic_rate, resting_heat_loss, metabolic_drain_fraction), these are the owner's to set.
-# Read together by MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
+# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a, the normalized
+# body-mass-to-kilograms bridge, and the Stefan-Boltzmann constant. Two surface properties the radiant
+# and convective terms once carried as anchors now DERIVE from the being's own data (derive-vs-author,
+# Principle 6): the radiant-surface emissivity from its covering (opt.emissivity) and the medium
+# convective coefficient h from its medium (medium.{air,water} convective_coefficient), both retired here
+# (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
+# kernels are fixed Rust (crates/physics/src/laws.rs basal_metabolic_rate, resting_heat_loss,
+# metabolic_drain_fraction), these are the owner's to set. Read together by
+# MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
 
 [[reserved]]
 id = "metabolism.kleiber_coefficient"
@@ -1533,13 +1536,9 @@ value = ""
 unit = "kilograms_at_body_mass_one"
 source = "Part 25.14 body plan, R-UNITS-PIN; crates/sim/src/physiology.rs"
 
-[[reserved]]
-id = "metabolism.medium_convective_coefficient"
-basis = "the medium convective heat-transfer coefficient h (W/(m^2*K)) the body-to-medium exchange law reads (law.convective_flux, law h*A/(m*c)), a fluids-floor medium datum, not a body property: a still gas couples slowly (natural convection ~2 to 25 W/(m^2*K)), stirred water fast (~50 to 1000+); set per the ambient medium the world runs in (Incropera and DeWitt convective coefficient tables), so a body in dense hot air or immersed in water couples faster than one in still thin air"
-status = "reserved"
-value = ""
-unit = "watt_per_m2_kelvin"
-source = "Part 35 body arc, Part 41 fluids floor; crates/sim/src/physiology.rs; laws::resting_heat_loss, derive_body_exchange_rate"
+# RETIRED (Arc 2, derive-vs-author): the metabolism now reads h from the being's medium (medium.{air,water}
+# convective_coefficient axis), read at the being's cell via MediumField::convective_at, rather than a
+# duplicate global scalar. See crates/sim/src/physiology.rs and crates/sim/src/runner.rs.
 
 # RETIRED (Arc 2, derive-vs-author, Principle 6): `metabolism.surface_emissivity` was a duplicate of the
 # chem/optics floor axis `opt.emissivity` (crates/physics/data/chem_optics_floor.toml). The radiant
@@ -1646,7 +1645,7 @@ source = "worksheet §3b; Part 20 physiology"
 
 [[reserved]]
 id = "medium.air"
-basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved. THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.026 (W/m/K, dry air near 300 K, the fluids/thermal floor) and specific_heat about 1005 (J/kg/K, air at constant pressure); with the density above these give a thermal diffusivity near 2.2e-5 m^2/s, real-with-source from Incropera and DeWitt, not fabricated. Reserved for the owner"
+basis = "the temperate-air ambient medium (Mirror and the grounded worlds default), a require_map profile of the medium Substance axes; recommended density about 1.2 (kg per cubic metre scale), respirable_content about 9 (an air-oxygen analogue on the dissolved-gas scale), toxicity 0, in_medium_exchange_rate about 0.05 (slow body-to-air coupling); the respiratory_surface scale stays reserved. THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.026 (W/m/K, dry air near 300 K, the fluids/thermal floor) and specific_heat about 1005 (J/kg/K, air at constant pressure); with the density above these give a thermal diffusivity near 2.2e-5 m^2/s, real-with-source from Incropera and DeWitt, not fabricated. CONVECTIVE COEFFICIENT (added Arc 2, derive-vs-author, the h the metabolism reads at a being's cell for the body-to-medium heat exchange, retiring the metabolism.medium_convective_coefficient global scalar): convective_coefficient about 10 (W/m^2/K, natural convection in still air is ~2 to 25 per Incropera and DeWitt), a per-medium datum keyed on the medium the body occupies. Reserved for the owner"
 status = "reserved"
 value = ""
 unit = "medium_profile"
@@ -1654,7 +1653,7 @@ source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/me
 
 [[reserved]]
 id = "medium.water"
-basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. Reserved"
+basis = "the cold vent-water ambient medium (Europa), a require_map profile; recommended density about 1000, respirable_content about 0.3 (low dissolved gas, so a large gill surface is needed), toxicity 0, in_medium_exchange_rate about 0.20 (fast immersion coupling); buoyancy is load-bearing (a dense body sinks to the vents, a light one rises to the ice). THERMAL AXES (added 2026-07-03, the levers field.diffusion derives from through k/(rho*c)): conductivity about 0.6 (W/m/K, liquid water near 300 K) and specific_heat about 4186 (J/kg/K); with the density above these give a thermal diffusivity near 1.4e-7 m^2/s, real-with-source from Incropera and DeWitt, so water conducts heat far slower per unit than air from its k/(rho*c) alone. CONVECTIVE COEFFICIENT (added Arc 2, derive-vs-author, the h the metabolism reads at a being's cell for the body-to-medium heat exchange, retiring the metabolism.medium_convective_coefficient global scalar): convective_coefficient about 500 (W/m^2/K, forced or immersion convection in water is ~50 to 1000+ per Incropera and DeWitt, so an immersed body couples to water far faster than to still air), a per-medium datum keyed on the medium the body occupies. Reserved"
 status = "reserved"
 value = ""
 unit = "medium_profile"

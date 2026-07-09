@@ -114,18 +114,24 @@ pub fn dev_respiration() -> HomeostaticRegistry {
     }
 }
 
-/// The content of one medium class, the two axes a [`MediumField`] cell carries that a body reads
-/// against its own anatomy: the respirable content (the `c_medium` the Fick respiration law reads) and
-/// the density (the `rho_medium` the buoyancy law reads). A sample is data, not a label: `medium.water`
-/// and `medium.air` are the same pair over different axis values (Principle 9), so the folding rule that
-/// assigns a sample to a cell keys off physics, never a medium name. The medium's own temperature is not
-/// carried here: a cell's temperature is the map tile's worldgen temperature (see [`MediumField::from_map`]).
+/// The content of one medium class, the axes a [`MediumField`] cell carries that a body reads against its
+/// own anatomy: the respirable content (the `c_medium` the Fick respiration law reads), the density (the
+/// `rho_medium` the buoyancy law reads), and the convective coefficient (the `h` the body-to-medium heat
+/// exchange reads). A sample is data, not a label: `medium.water` and `medium.air` are the same triple over
+/// different axis values (Principle 9), so the folding rule that assigns a sample to a cell keys off
+/// physics, never a medium name. The medium's own temperature is not carried here: a cell's temperature is
+/// the map tile's worldgen temperature (see [`MediumField::from_map`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MediumSample {
     /// The respirable content of the medium (the `c_medium` term of the Fick respiration law).
     pub respirable: Fixed,
     /// The density of the medium (the `rho_medium` term of the buoyancy law).
     pub density: Fixed,
+    /// The convective heat-transfer coefficient of the medium (the `h` term of the body-to-medium
+    /// exchange, `fluid.convective_coefficient`, W/(m^2*K)). A being's metabolism reads this at its cell
+    /// rather than a duplicate global scalar, so a body couples to the medium it stands in (derive-vs-author,
+    /// Principle 6): still air couples slowly, stirred water fast, from the medium's own datum.
+    pub convective_coefficient: Fixed,
 }
 
 /// A per-cell ambient-medium field: the medium each map cell holds, as its respirable content and its
@@ -140,6 +146,7 @@ pub struct MediumField {
     height: i32,
     respirable: Vec<Fixed>,
     density: Vec<Fixed>,
+    convective: Vec<Fixed>,
     temperature: Vec<Fixed>,
 }
 
@@ -152,18 +159,21 @@ impl MediumField {
         height: i32,
         respirable: Vec<Fixed>,
         density: Vec<Fixed>,
+        convective: Vec<Fixed>,
         temperature: Vec<Fixed>,
     ) -> MediumField {
         assert!(width > 0 && height > 0, "a field has positive extent");
         let n = (width as usize) * (height as usize);
         assert_eq!(respirable.len(), n, "respirable is width*height long");
         assert_eq!(density.len(), n, "density is width*height long");
+        assert_eq!(convective.len(), n, "convective is width*height long");
         assert_eq!(temperature.len(), n, "temperature is width*height long");
         MediumField {
             width,
             height,
             respirable,
             density,
+            convective,
             temperature,
         }
     }
@@ -174,6 +184,7 @@ impl MediumField {
         height: i32,
         respirable: Fixed,
         density: Fixed,
+        convective: Fixed,
         temperature: Fixed,
     ) -> MediumField {
         let n = (width as usize) * (height as usize);
@@ -182,6 +193,7 @@ impl MediumField {
             height,
             vec![respirable; n],
             vec![density; n],
+            vec![convective; n],
             vec![temperature; n],
         )
     }
@@ -214,6 +226,7 @@ impl MediumField {
         let n = (w.max(0) as usize) * (h.max(0) as usize);
         let mut respirable = Vec::with_capacity(n);
         let mut density = Vec::with_capacity(n);
+        let mut convective = Vec::with_capacity(n);
         let mut temperature = Vec::with_capacity(n);
         for y in 0..h {
             for x in 0..w {
@@ -227,10 +240,11 @@ impl MediumField {
                 };
                 respirable.push(sample.respirable);
                 density.push(sample.density);
+                convective.push(sample.convective_coefficient);
                 temperature.push(tile.temperature());
             }
         }
-        MediumField::new(w, h, respirable, density, temperature)
+        MediumField::new(w, h, respirable, density, convective, temperature)
     }
 
     fn idx(&self, x: i32, y: i32) -> Option<usize> {
@@ -253,6 +267,17 @@ impl MediumField {
     pub fn density_at(&self, x: i32, y: i32) -> Fixed {
         self.idx(x, y)
             .map(|i| self.density[i])
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// The convective heat-transfer coefficient `h` of the medium at a cell (`fluid.convective_coefficient`,
+    /// W/(m^2*K)). Off the field there is no medium and this reads zero (no medium, no convective coupling),
+    /// the substrate's absence convention, matching [`Self::respirable_at`]. The metabolism reads this at a
+    /// being's cell for the body-to-medium heat exchange rather than a duplicate global scalar
+    /// (derive-vs-author, Principle 6).
+    pub fn convective_at(&self, x: i32, y: i32) -> Fixed {
+        self.idx(x, y)
+            .map(|i| self.convective[i])
             .unwrap_or(Fixed::ZERO)
     }
 
@@ -570,6 +595,7 @@ mod tests {
             1,
             vec![Fixed::ONE, Fixed::from_ratio(1, 5)], // rich then poor respirable content
             vec![Fixed::from_int(998), Fixed::from_ratio(1225, 1000)], // water then air density
+            vec![Fixed::from_int(10); 2],              // uniform convective coefficient
             vec![Fixed::from_int(290), Fixed::from_int(290)], // both temperate
         )
     }
@@ -625,6 +651,7 @@ mod tests {
             1,
             vec![Fixed::ONE, Fixed::from_ratio(9, 10)],
             vec![Fixed::from_int(998), Fixed::from_ratio(1225, 1000)],
+            vec![Fixed::from_int(10); 2],
             vec![Fixed::from_int(290), Fixed::from_int(290)],
         );
         assert!(
@@ -710,6 +737,7 @@ mod tests {
         MediumSample {
             respirable: Fixed::from_ratio(3, 10),
             density: Fixed::from_int(1000),
+            convective_coefficient: Fixed::from_int(10),
         }
     }
 
@@ -717,6 +745,7 @@ mod tests {
         MediumSample {
             respirable: Fixed::from_int(9),
             density: Fixed::from_ratio(12, 10),
+            convective_coefficient: Fixed::from_int(10),
         }
     }
 
@@ -890,6 +919,7 @@ mod tests {
                 Fixed::from_int(3000),         // lava: denser than the body, it floats
                 Fixed::from_ratio(1225, 1000), // air: far lighter, it falls
             ],
+            vec![Fixed::from_int(10); 3], // convective coefficient irrelevant to buoyancy
             vec![
                 Fixed::from_int(290),
                 Fixed::from_int(1500),
@@ -1019,6 +1049,7 @@ mod tests {
             1,
             Fixed::ZERO,
             Fixed::from_int(3000),
+            Fixed::from_int(10),
             Fixed::from_int(1200),
         );
         assert!(

@@ -777,8 +777,9 @@ fn medium_field_from_manifest(
     ))
 }
 
-/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content` and `density`
-/// axes) from the manifest, fail-loud if the profile is reserved or missing either axis.
+/// Read one medium profile's [`crate::medium::MediumSample`] (the `respirable_content`, `density`, and
+/// `convective_coefficient` axes) from the manifest, fail-loud if the profile is reserved or missing any
+/// axis.
 fn medium_sample(
     manifest: &CalibrationManifest,
     medium_id: &str,
@@ -796,6 +797,7 @@ fn medium_sample(
     Ok(medium::MediumSample {
         respirable: axis("respirable_content")?,
         density: axis("density")?,
+        convective_coefficient: axis("convective_coefficient")?,
     })
 }
 
@@ -882,6 +884,12 @@ fn being_derived_drains(
             // the covering defines the radiative surface property for both a catalog body and a grown one, so
             // the radiant term reads the being's own covering, not a global scalar.
             let emissivity = physiology::covering_emissivity(&w.body, &phys.organs);
+            // The medium convective coefficient h is the being's OWN medium datum, read at the cell it stands
+            // in (derive-vs-author, Principle 6): the thermoregulatory heat loss couples to
+            // fluid.convective_coefficient of the medium the body occupies, not a duplicate global scalar, so
+            // a body in still air and one immersed in water couple at their media's own h.
+            let medium_cell = w.coord();
+            let medium_h = phys.medium.convective_at(medium_cell.x, medium_cell.y);
             let base = base_drain_from(
                 &w.body,
                 cap,
@@ -890,7 +898,7 @@ fn being_derived_drains(
                 emissivity,
                 ambient,
                 setpoint,
-                phys.anchors.medium_h,
+                medium_h,
                 phys.tick_seconds,
                 &phys.anchors,
             );
@@ -931,25 +939,28 @@ fn being_derived_drains(
 /// The body-to-medium thermal exchange rate for a being, reading its GROWN tissue's exposed surface and
 /// specific heat directly when it carries a grown structure (emergent-anatomy Step 3, the derived-physiology
 /// grow), and its catalog organs otherwise. So a fully grown body couples to the medium off its own tissue,
-/// with no catalog organs; a catalog body is byte-identical to the prior read.
+/// with no catalog organs; a catalog body is byte-identical to the prior read. The medium convective
+/// coefficient `medium_h` is the being's own medium datum, read by the caller at the cell it stands in
+/// (derive-vs-author, Principle 6), not a duplicate global scalar.
 fn walker_exchange_rate(
     body: &BodyPlan,
     structure: &Option<Structure>,
     phys: &EmbodiedPhysiology,
+    medium_h: Fixed,
 ) -> Fixed {
     match structure {
         Some(s) => body_exchange_rate_from(
             body,
             s.composition_sum(physiology::CONVECTIVE_SURFACE),
             s.composition_mean(physiology::TISSUE_SPECIFIC_HEAT),
-            phys.anchors.medium_h,
+            medium_h,
             phys.tick_seconds,
             &phys.anchors,
         ),
         None => derive_body_exchange_rate(
             body,
             &phys.organs,
-            phys.anchors.medium_h,
+            medium_h,
             phys.tick_seconds,
             &phys.anchors,
         ),
@@ -3094,7 +3105,12 @@ impl Runner {
             // phase_body_exchange then couples the being at its own surface-and-thermal-mass rate rather
             // than the labelled FieldCalib.exchange scalar (Principle 9: divergence from anatomy).
             if let Some(phys) = &embodiment.physiology {
-                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
+                // The being's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                // Principle 6): the static body-to-medium exchange rate couples to the being's OWN medium
+                // datum rather than a duplicate global scalar.
+                let cell = w.coord();
+                let medium_h = phys.medium.convective_at(cell.x, cell.y);
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys, medium_h);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -3182,7 +3198,12 @@ impl Runner {
             body_temp.insert(w.id, init);
             index.place(OccupantId::being(w.id), w.coord());
             if let Some(phys) = &embodiment.physiology {
-                let rate = walker_exchange_rate(&w.body, &w.structure, phys);
+                // The being's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                // Principle 6): the static body-to-medium exchange rate couples to the being's OWN medium
+                // datum rather than a duplicate global scalar.
+                let cell = w.coord();
+                let medium_h = phys.medium.convective_at(cell.x, cell.y);
+                let rate = walker_exchange_rate(&w.body, &w.structure, phys, medium_h);
                 body_exchange_rate.insert(w.id, rate);
             }
         }
@@ -5874,7 +5895,10 @@ impl Runner {
                         }
                         None => Physiology::dev_for_registry(&emb.homeo),
                     };
-                    let exchange_rate = walker_exchange_rate(&body, &structure, phys);
+                    // The newborn's medium convective coefficient h, read at its spawn cell (derive-vs-author,
+                    // Principle 6): its static body-to-medium exchange rate couples to its OWN medium datum.
+                    let medium_h = phys.medium.convective_at(coord.x, coord.y);
+                    let exchange_rate = walker_exchange_rate(&body, &structure, phys, medium_h);
                     let mut walker =
                         Walker::new(id, coord, body, homeostasis, physiology, controller);
                     // The newborn's heritable EXPLORATION and DELIBERATION propensities, expressed from its
@@ -6462,15 +6486,12 @@ source = "test"
         let anchors = MetabolicAnchors::dev_fixture();
         let high_body = make((1, 1)); // full skin: large surface
         let compact_body = make((1, 8)); // little skin: small surface
+                                         // A labelled test h (the retired dev medium_h value, now read from the medium at a being's cell).
+        let test_h = Fixed::from_int(10);
         let rate_high =
-            derive_body_exchange_rate(&high_body, &organs, anchors.medium_h, Fixed::ONE, &anchors);
-        let rate_compact = derive_body_exchange_rate(
-            &compact_body,
-            &organs,
-            anchors.medium_h,
-            Fixed::ONE,
-            &anchors,
-        );
+            derive_body_exchange_rate(&high_body, &organs, test_h, Fixed::ONE, &anchors);
+        let rate_compact =
+            derive_body_exchange_rate(&compact_body, &organs, test_h, Fixed::ONE, &anchors);
         assert!(
             rate_high > rate_compact,
             "the high-surface body couples faster"
