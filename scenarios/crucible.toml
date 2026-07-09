@@ -15,6 +15,10 @@ id = "crucible"
 name = "Crucible"
 summary = "A world where war is the emergent equilibrium: a scatter of fertile basins in a vast lethal waste, many divergent peoples pressed into few contested zones with nowhere to expand but into each other. Scarcity, isolation, and hardened in-group creeds make perpetual conflict the outcome, sharpened by a scarce and dangerous war-magic. War falls out of the physics, it is not handed to the world."
 grounding = "real"
+# Runs on the Earth triad for now; the patchy-basin ("greenwells in a lethal waste") terrain mode is a
+# flagged substrate arc (WORLD_SUBSTRATE_READINESS.md), added to the structure registry when built. Until
+# then Crucible's scarcity is approximated through its cranked dials, not its terrain shape.
+structure = "earth"
 
 [races]
 count = "many"                  # many peoples pressed into few habitable zones
