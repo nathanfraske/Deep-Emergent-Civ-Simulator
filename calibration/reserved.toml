@@ -395,7 +395,7 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.group_aggregation_rule"
-basis = "how the hold fields aggregate to a group; a culture entrenchment likely derives from member variance rather than the mean"
+basis = "how the hold fields aggregate to a group. OWNER RULING (Mirror sign-off, batch 2): author EQUAL-WEIGHTING (the plain mean over members) now, and DERIVE from member variance in the later social-depth arc (a divided group holds less firmly, so entrenchment falls with member variance). AUDIT CATCH (group E): the value is a rule/function choice (unit = rule, no decimal), and there is no live non-test consumer of this key today, so the ruling is recorded here for the social-depth arc rather than fabricating a magnitude; the variance derivation is the flagged follow-on."
 status = "reserved"
 value = ""
 unit = "rule"
@@ -403,7 +403,7 @@ source = "Part 28 axiom model; record 62.4; audit section 1c"
 
 [[reserved]]
 id = "axiom.stubbornness_dogmatism_weight"
-basis = "the weight on dogmatism versus freezing in the Friedkin-Johnsen temperament pull the enculturation band applies (EpistemicStance::effective_stubbornness): the effective stubbornness anchor is base + (1 - base) * (w * dogmatism + (1 - w) * freezing), and w is this weight, its complement weighting freezing. Basis for deciding it: which of the two temperament fields (need for closure versus permanence of a locked belief) should drive the anchor harder, calibrated against how fast a dogmatic-but-labile mind versus a freezing-but-open mind hardens in the disagreement-persistence test; w = 0.5 reproduces the former plain mean. Reserved fail-loud rather than the bare hardcoded half it replaced (never fabricate a value); it is read through axiom::stubbornness_dogmatism_weight and installed with World::set_stubbornness_split, and the enculturation band is a no-op until it is set."
+basis = "the weight on dogmatism versus freezing in the Friedkin-Johnsen temperament pull the enculturation band applies (EpistemicStance::effective_stubbornness): the effective stubbornness anchor is base + (1 - base) * (w * dogmatism + (1 - w) * freezing), and w is this weight, its complement weighting freezing. Basis for deciding it: which of the two temperament fields (need for closure versus permanence of a locked belief) should drive the anchor harder, calibrated against how fast a dogmatic-but-labile mind versus a freezing-but-open mind hardens in the disagreement-persistence test; w = 0.5 reproduces the former plain mean. AUDIT CATCH (group E, Prime Directive 2): the live effective_stubbornness split weight (axiom.rs) is NOT fed from this manifest key today, because stubbornness_dogmatism_weight() has no non-test caller (a key-vs-wiring mismatch), so setting the owner-ruled 0.40 would not reach the live AGM band until the getter is wired into the live split. RECONCILE THE WIRING before setting: either wire the live split to read this key, or retire the key. Reserved fail-loud until reconciled (never fabricate a value)."
 status = "reserved"
 value = ""
 unit = "weight"
@@ -853,7 +853,7 @@ source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability;
 
 [[reserved]]
 id = "transmission.loss_rate"
-basis = "the erosion timescale a below-floor design loses proficiency at per tick; set equal to evidence.decay_rate (0.25/day) for consistency with the trace-and-memory decay the evidence subsystem already uses, since forgetting a technique and forgetting a trace are the same decay physics"
+basis = "the erosion timescale a below-floor design loses proficiency at per tick. AUDIT CATCH (group E, Prime Directive 2): the prior basis pinned this equal to evidence.decay_rate (0.25/day) for consistency, but that pin is NO LONGER VALID (evidence.decay_rate has since changed, so the equality would import an unrelated value). Re-derive from its OWN basis: the generational timescale over which a craft held below its practitioner floor fades from a lineage proficiency, set from the erosion half-life you want a lost craft to decay over, never the stale evidence-decay value and never the research-tagged number."
 status = "reserved"
 value = ""
 unit = "proficiency_per_tick"
@@ -1104,7 +1104,7 @@ source = "Part 25.4"
 # genome.mutation_step RETIRED (2026-07-03, superseded by genome.additive_mutation_step): the
 # placeholder "size of the continuous additive perturbation" is replaced by the fail-loud Gaussian-
 # standard-deviation form genome.additive_mutation_step (line above; its basis names this retirement),
-# the value GeneticScheme.additive_mutation_step actually reads. The direction siblings .high and .low
+# the value GeneticScheme.additive_mutation_step reads. The direction siblings .high and .low
 # are retired with it (below); the seven canonical scenarios repoint their mutation-step dial to
 # genome.additive_mutation_step (and its .high/.low). Removed rather than left a dead set value that
 # no code reads, the retirement discipline the sibling derive-audit ids already follow.
