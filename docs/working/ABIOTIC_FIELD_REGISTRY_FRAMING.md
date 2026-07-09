@@ -121,9 +121,71 @@ The question I am surfacing for the gate, because it is emergence-critical and I
   stencils), so the intrinsic-scalar model covers the three named targets; the honest limit is that a
   fundamentally novel storage shape is a bounded Rust change, stated plainly, not hidden.
 
-I have run the section-11 input-bias smoke test on my own construction (fail-closed) and a section-10 blind
-framing panel; the synthesized result is appended once verified against source. I will not write code until the
-gate rules on this framing.
+## Blind panel result (section-11 smoke test + section-10 panel), verified against source
+
+I ran the section-11 input-bias smoke test on my OWN construction first (fail-closed). It surfaced exactly one
+risk: "does every plausible alien energy field reduce to a per-cell located scalar?" I flagged it, then
+UNDER-WEIGHTED it by asserting the three named targets all fit the intrinsic-scalar model. The section-10 blind
+panel (which cannot see my rationalization) then nailed that under-weighted risk as the actual defect. The
+smoke test caught the scent; the blind panel caught the seam. This is the honest account.
+
+The section-10 panel: six diverse panelists (three agent types, three models); five returned verdicts (one
+dropped on a model safeguard flag, not a substantive result). CONVERGENT: 4x significant-flaw-fixable, 1x
+minor-improvement, none sound-as-is, none reframe-needed. The core (opaque field-kind id, data-defined field
+collection, Liebig-min/deplete/deposit mechanism fixed in Rust, membership + physics + presence bands as data)
+is unanimously sound and a real improvement. The seam is NOT the storage-model enum I invited them to attack.
+
+THE VERIFIED FINDING: the uniform interface `read/deplete-AT-CELL` authors POINT-LOCALITY as the definition of
+an energy supply. Verified against source: the read arms (environ.rs:903-914) all read a per-cell scalar or
+class-keyed store at the producer's OWN cell, and the deplete arms (environ.rs:945-953) draw down only the
+producer's own cell (single-location, no cross-cell coupling). My "a redox gradient is a per-cell scalar" claim
+is false by the redox gradient's own definition: a chemolithotroph draws power from a POTENTIAL DIFFERENCE
+between an electron donor (reduced, e.g. H2S) and an acceptor (oxidized, e.g. O2), a between-quantity (and, at
+a vent, between-location) difference, not a value at one cell. Point-locality is a fixed Terran-shaped category
+that a gradient-, flux-, or difference-fed being cannot be expressed against as DATA (admit-the-alien / P8).
+
+Source-verified nuance that sharpens the finding: the CORE already unlocks part of the chemolithotroph case.
+The Liebig-min over the evolved source SET (environ.rs:895-921) means a producer binding BOTH a donor
+field-kind AND an acceptor field-kind is capped by the scarcer, which IS reactant co-limitation (you cannot
+react faster than the scarcer reactant allows), a pure data row under the core. What the core genuinely CANNOT
+express, and what the panel correctly exposes, is (a) thermodynamic YIELD as a pairwise DIFFERENCE (delta-E,
+which is a subtraction, not a minimum), and (b) a between-cell spatial GRADIENT or directional flux.
+
+THE CORRECTED FRAMING (my synthesis of the five, source-verified). Keep the accepted core unchanged. Replace
+the single hardcoded point-read with a supply QUERY generalized off the per-cell-stock ontology: "given the
+producer's location and a field-kind's OWN declared state, yield the available draw and apply the
+deplete/deposit," so the Liebig-min mechanism never learns which spatial shape it consulted. A field-kind's
+binding declares, as DATA, HOW that query is computed, via two bounded, orthogonal engine dimensions, each a
+P9-legitimate physics-floor law operator (the same class the engine already uses to STEP fields and to
+Liebig-min the source set), never a high-level or Terran fact:
+
+- a VALUE BACKING (storage model: intrinsic per-cell scalar; external class-keyed store), documented as
+  implemented-not-exhaustive (an environment-owned nodal/graph-keyed backing for leyline nodes or ore veins is a
+  foreseeable near-term addition, gp-sonnet's unsampled quadrant), never asserted closed; and
+- a READ-SHAPE / ARITY+COMBINATOR (point value; finite-difference/gradient over a declared neighbourhood;
+  directional projection; pairwise-DIFFERENCE over an ordered list of (field, role) pairs; joint presence),
+  the data-selected spatial/combinator operator that was the actual hidden foreclosure.
+
+Then a redox chemolithotroph is a DATA ROW: [donor field, acceptor field] + a pairwise-difference combinator
+(both per-cell scalars, the honest two-quantity chemistry, no fudged single "redox field", no neighbourhood
+access) for the thermodynamic yield; or a redox-potential field + a finite-difference read-shape for a true
+between-cell spatial gradient. The world declares which. Zero Rust; the alien is data. The point-local read is
+ONE operator among the set, never THE interface.
+
+THE ACCEPTANCE GATE (Plan-opus, adopted): the arc is not done until a deep-vent chemolithotroph fed by a redox
+potential DIFFERENCE is demonstrated as a pure data row (field-kind rows + binding, zero Rust). If it still
+needs a Rust change, the interface is still authoring point-locality and the enum has not earned its place.
+
+HONEST LIMIT, kept not hidden: the value-backing set and the read-shape/combinator vocabulary are bounded
+engine mechanisms; a genuinely novel one (a new storage topology, a new spatial operator) is a bounded, rare,
+accepted Rust cost, the SAME cost `ConditionSource` carries, but the sets are documented implemented-not-
+exhaustive, never asserted closed.
+
+This is a SCOPE EXPANSION over my opener (the interface generalization plus a read-shape/combinator vocabulary,
+not only the field-kind collection) and it carries a mechanism fork (read-shape spatial operator vs
+arity+combinator multi-field vs both). It is still incrementally byte-neutral and keeps `extract_producers`'s
+signature stable. Surfaced to the gate for the formal ruling and the scope call. I will not write code until the
+gate rules.
 
 ## Determinism and byte-neutrality plan
 
