@@ -739,25 +739,27 @@ name = "Probe"
         ))
         .unwrap();
 
-        // Europa breathes cold water; the medium resolves to its manifest profile, which is
-        // reserved (surfaced for the owner), so it is carried in the review queue.
+        // Europa breathes cold water; the medium resolves to its manifest profile. medium.water is now
+        // SET (Mirror's ocean, the owner Mirror sign-off), so it resolves to a set profile rather than a
+        // reserved one.
         let europa = Scenario::load(format!("{dir}europa.toml")).unwrap();
         assert_eq!(europa.scenario.medium.as_deref(), Some("water"));
         let r = europa.resolve(&manifest).unwrap();
         let med = r.medium.as_ref().expect("Europa selects a medium");
         assert_eq!(med.manifest_id, "medium.water");
-        assert!(r.reserved_ids().contains(&"medium.water"));
+        assert!(
+            !r.reserved_ids().contains(&"medium.water"),
+            "medium.water is set (Mirror's ocean, owner sign-off), so the selection resolves to a set profile"
+        );
 
-        // Venus breathes a dense toxic atmosphere.
+        // Venus breathes a dense toxic atmosphere; that profile is still RESERVED (a non-Mirror world's
+        // medium, surfaced for the owner), so it is the medium carried in the review queue.
         let venus = Scenario::load(format!("{dir}venus.toml")).unwrap();
-        assert_eq!(
-            venus
-                .resolve(&manifest)
-                .unwrap()
-                .medium
-                .unwrap()
-                .manifest_id,
-            "medium.dense_toxic"
+        let venus_r = venus.resolve(&manifest).unwrap();
+        assert_eq!(venus_r.medium.as_ref().unwrap().manifest_id, "medium.dense_toxic");
+        assert!(
+            venus_r.reserved_ids().contains(&"medium.dense_toxic"),
+            "medium.dense_toxic is reserved (a non-Mirror medium in the owner's review queue)"
         );
 
         // The canonical worlds name no medium: temperate air is the default.
