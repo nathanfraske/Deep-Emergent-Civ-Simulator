@@ -17,7 +17,17 @@ section.
 
 ## Interim calls I made overnight (proceed-with; reversible; confirm or override in the morning)
 
-- (none yet)
+- **Two social-transmission values authored flat (your derive-vs-author ruling wanted).** In Arc 2 segment
+  `002cbfc` the agent set two SOCIAL values, classifying them as "social data not on the physics floor, not
+  derivable from a lower substrate": `transmission.drift_rate` (0.03, the copy-fidelity BASE, grounded in
+  Weber's ~3% JND; per-copier drift already derives from it via `copy_drift(base, memory, perception)`, so
+  only the base is authored) and `enculturation.stubbornness_split` (0.40, the conserved own-conviction-vs-
+  band-mean split, flat). I ACCEPTED both as authored-with-basis to keep the agent moving (byte-neutral, cited,
+  defensibly classified, pins confirmed). But per your rule I did not take "not derivable" at face value:
+  because you are deepening the substrate this arc, these are the candidates to DERIVE from per-being
+  cognition/personality (a being's enculturation-resistance from its own conviction-strength/personality; the
+  copy-fidelity base from a perception-resolution axis). Your call: accept as authored social data, or derive
+  (build the substrate). Reversible either way.
 
 ## Notes and observations from the night
 
