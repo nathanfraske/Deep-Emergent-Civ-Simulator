@@ -72,10 +72,15 @@ pub struct ChannelReach {
     /// `opt.absorption_coefficient`), sampled along the traversed segment so occlusion emerges from the
     /// medium rather than an authored line-of-sight rule.
     pub absorption_axis: String,
-    /// Whether the absorption coefficient forms from the signal's frequency (the acoustic case, via
-    /// [`civsim_physics::laws::acoustic_absorption`]) rather than being read from the medium directly.
-    /// The frequency itself derives from the emitter's own body resonance (segment 3), never an authored
-    /// channel constant.
+    /// Whether the absorption coefficient forms from the signal's frequency (the acoustic case, where the
+    /// coefficient is [`civsim_physics::laws::acoustic_absorption`] of a frequency that derives from the
+    /// emitter's own body resonance) rather than being read from the medium directly. This
+    /// frequency-dependent absorption path is a RESERVED follow-on: neither the emitter body-resonance
+    /// frequency source nor the acoustic-law application is wired in slice 1. Until that segment lands the
+    /// field is honoured fail-loud, not silently: [`resolve_reach`] asserts a row is not
+    /// `frequency_dependent`, so a row that declares it fails loudly rather than reading the medium axis as
+    /// if the channel were frequency-independent (Prime Directive 3, reserved fail-loud). No shipped row
+    /// sets it until the frequency source and the acoustic-law application are built.
     pub frequency_dependent: bool,
 }
 
@@ -122,10 +127,18 @@ impl ChannelReachRegistry {
 
     /// A labelled DEVELOPMENT FIXTURE: the two channels the physics floor already carries source-power
     /// axes for, an optical channel and an acoustic channel. Both spread by the same general geometric
-    /// law (the dimensionality derives from the path, not the channel); the optical absorption reads
-    /// the medium axis directly, the acoustic absorption forms from the signal frequency. Not owner
-    /// data; the minimum a reach run needs to exercise the two floor source-power axes. The real
-    /// channel set is the world's data.
+    /// law (the dimensionality derives from the path, not the channel), and both read their path
+    /// absorption directly from the medium axis. Not owner data; the minimum a reach run needs to
+    /// exercise the two floor source-power axes. The real channel set is the world's data.
+    ///
+    /// Two honest fixture limits. First, both rows set `frequency_dependent: false`: the
+    /// frequency-dependent acoustic absorption path (the coefficient forming from the signal frequency) is
+    /// a reserved follow-on not wired in slice 1, and a fixture that shipped `frequency_dependent: true`
+    /// would trip the [`resolve_reach`] fail-loud assert, so the fixture stays resolvable. Second, the
+    /// acoustic row reuses the OPTICAL absorption axis (`opt.absorption_coefficient`): the physics floor
+    /// carries no acoustic absorption axis yet, so this dev channel stands in with the one absorption axis
+    /// the floor has. The real acoustic channel binds its own acoustic absorption axis once the floor
+    /// grows one (a flagged floor gap, not a slice-1 deliverable).
     pub fn dev_terran() -> ChannelReachRegistry {
         let mut reg = ChannelReachRegistry::empty();
         reg.insert(ChannelReach {
@@ -139,8 +152,10 @@ impl ChannelReachRegistry {
             channel: DEV_ACOUSTIC,
             spreading: SpreadKernel::Geometric,
             source_power_axis: "acoustic.source_power".to_string(),
+            // The floor carries no acoustic absorption axis yet; this dev channel reuses the optical one
+            // as a labelled stand-in (a flagged floor gap). A real acoustic channel binds its own axis.
             absorption_axis: "opt.absorption_coefficient".to_string(),
-            frequency_dependent: true,
+            frequency_dependent: false,
         });
         reg
     }
@@ -169,17 +184,21 @@ pub struct Reach {
 /// The spreading dimensionality a signal propagates through, READ from the world's own spatial-axis
 /// count rather than an authored constant: the world coordinate is [`Coord3`], a packed tuple of `i32`
 /// spatial axes, so its size in `i32` units IS the number of axes an unconfined signal spreads in
-/// (three today), and a differently-dimensioned coordinate would follow automatically. The engine models
-/// one unconfined bulk medium (no confinement or waveguide substrate), so an unconfined signal spreads in
-/// all its axes: D = 3.
+/// (three today). The read is `size_of::<Coord3>() / size_of::<i32>()`, so it tracks the coordinate's own
+/// axis count rather than a literal `3`. The compile-time assert below pins the packed-`i32` ASSUMPTION
+/// the read depends on (that the coordinate is N packed `i32` axes with no padding or non-`i32` field): if
+/// the coordinate's shape changes, the assert makes it a build error, a deliberate re-check of this
+/// derivation rather than a silent miscount. A pure axis-count change (an added spatial axis) would then
+/// be a one-line assert bump, not a rewrite of the perception path. The engine models one unconfined bulk
+/// medium (no confinement or waveguide substrate), so an unconfined signal spreads in all its axes: D = 3.
 ///
 /// Because D = 3 for every path today, the general kernel does not yet bite: [`received_reach`] spreads
-/// exactly as `inverse_square_falloff` (the general kernel reproduces it at D=3), so the four run_world
-/// pins hold and nothing existing moves. The generality becomes real only when a medium-confinement
-/// substrate lands and sets D below 3 for a surface-guided (D=2) or ducted (D=1) signal; that substrate
-/// is the flagged sibling refinement, and [`civsim_physics::laws::geometric_spread`] already handles
-/// D=2 and D=1 for when it does. Reading D structurally here, not as a per-channel `3`, keeps the
-/// derivation explicit and the confinement follow-on a data-and-substrate change rather than an edit here.
+/// exactly as `inverse_square_falloff` (the general kernel reproduces it at D=3). The generality becomes
+/// real only when a medium-confinement substrate lands and sets D below 3 for a surface-guided (D=2) or
+/// ducted (D=1) signal; that substrate is the flagged sibling refinement, and
+/// [`civsim_physics::laws::geometric_spread`] already handles D=2 and D=1 for when it does. Reading D
+/// structurally here, not as a per-channel `3`, keeps the derivation explicit and the confinement
+/// follow-on a data-and-substrate change rather than an edit here.
 pub const fn spreading_dimensionality() -> u32 {
     // The number of i32 spatial axes the coordinate carries; the effective confined dimensionality of the
     // traversed medium would be read here instead once a confinement substrate exists.
@@ -196,10 +215,16 @@ const _: () = assert!(
      update spreading_dimensionality() if its shape changes",
 );
 
-/// The largest 3D squared separation the distance is formed exactly for; a source farther than this is
-/// negligible (its geometric spread underflows to zero), which keeps the fixed-point square root inside
-/// its representable range without a fabricated cutoff (the physics already sends a far source to zero).
-const MAX_REPRESENTABLE_SEP2: i128 = 1 << 30;
+/// The largest 3D squared separation the distance is formed for, DERIVED from the fixed-point cast bound
+/// rather than authored: the squared separation is cast to `i32` before [`Fixed::from_int`], so its
+/// representable ceiling is `i32::MAX`. This is a numerical representability guard, not a perception
+/// horizon: at the D=3 spreading the whole engine runs today, the geometric-spread denominator
+/// (`sphere_coeff * distance^2`) already overflows its own `checked_mul` and returns zero far below this
+/// ceiling (empirically around a squared separation of 2^28 at `sphere_coeff = 4*pi`), so clamping a
+/// larger separation to zero here changes no D=3 result: the physics has already sent that source to zero.
+/// A confinement substrate that lets D fall below 3 (a ducted D=1 signal does not attenuate geometrically)
+/// would revisit this bound alongside that substrate; it is not yet reached, since D=3 for every path.
+const MAX_REPRESENTABLE_SEP2: i128 = i32::MAX as i128;
 
 /// The world-physics caps a reach computation reads beyond the source, perceiver, emitted power, and
 /// medium samples: the geometric sphere coefficient for the derived dimensionality, the irradiance cap the
@@ -254,11 +279,13 @@ pub fn received_reach(
         )
     };
     // Accumulate the path optical depth from the medium's own absorption samples, each capped, the total
-    // capped: a strongly-absorbing medium drives the depth to the cap, the occlusion limit.
+    // capped: a strongly-absorbing medium drives the depth to the cap, the occlusion limit. The running
+    // sum uses `saturating_add` before the cap because `Fixed`'s `+` is unchecked: a large `tau_max` cap
+    // could overflow the raw i64 accumulator before the `.min` clamps it, so saturate then clamp.
     let mut optical_depth = Fixed::ZERO;
     for &(coefficient, length) in absorption_samples {
         let segment = laws::optical_depth(coefficient, length, bounds.tau_max);
-        optical_depth = (optical_depth + segment).min(bounds.tau_max);
+        optical_depth = optical_depth.saturating_add(segment).min(bounds.tau_max);
     }
     Reach {
         spread,
@@ -276,6 +303,12 @@ pub fn received_reach(
 /// fire's material), which the keystone resolves from the source's own material through the row's
 /// `source_power_axis`. Reading it from the cell the source stands on would conflate a being's emission
 /// with the ground under it, so it is not read here (surfaced to the gate as the emitter-power sub-fork).
+///
+/// Fail-loud on a reserved path: a `frequency_dependent` row cannot be resolved in slice 1 (the emitter
+/// body-resonance frequency source and the [`civsim_physics::laws::acoustic_absorption`] application are
+/// not wired), so this asserts the row is frequency-independent rather than silently reading its medium
+/// axis as if it were (Prime Directive 3, reserved fail-loud). The assert never fires today: no shipped
+/// row sets `frequency_dependent`, and the function has no live caller.
 pub fn resolve_reach(
     row: &ChannelReach,
     emitted_power: Fixed,
@@ -285,6 +318,12 @@ pub fn resolve_reach(
     reg: &PhysicsRegistry,
     bounds: ReachBounds,
 ) -> Reach {
+    assert!(
+        !row.frequency_dependent,
+        "frequency-dependent absorption is a reserved follow-on (the emitter body-resonance frequency \
+         source and laws::acoustic_absorption are not wired in slice 1); a channel row must set \
+         frequency_dependent = false until that segment lands"
+    );
     let samples = absorption_along(source, perceiver, field, reg, &row.absorption_axis);
     match row.spreading {
         SpreadKernel::Geometric => {
@@ -301,10 +340,23 @@ pub fn resolve_reach(
 /// strongly-absorbing cells (rock at negative z) drives the accumulated optical depth up, never an
 /// authored line-of-sight rule.
 ///
-/// Honest limit (flagged): this reads the [`MaterialField`], substances in a 3D `Coord3` grid, so a signal
-/// through rock occludes and through empty cells passes; the fluid medium's own absorption (air, water,
-/// carried in the 2D `MediumField`) is not sampled here, so a signal's fine attenuation through open air is
-/// not yet captured. The full volumetric medium is the flagged z-stacked-medium follow-on.
+/// Endpoint convention: the walk samples cells `i` in `1..=steps`, so it includes the perceiver's own
+/// cell (`i = steps`) and excludes the source's own cell (`i = 0`). The signal is attenuated by the medium
+/// it arrives THROUGH, up to and including the cell it arrives at; the source's own cell is where the
+/// signal originates, so its medium is not on the arrival path. This is a modelling convention, pinned by
+/// test, not a physical inevitability.
+///
+/// Honest limits (flagged, two):
+/// - MEDIUM KIND: this reads the [`MaterialField`], substances in a 3D `Coord3` grid, so a signal through
+///   rock occludes and through empty cells passes; the fluid medium's own absorption (the ambient
+///   [`crate::medium::MediumField`]) is not sampled here. So a being whose dominant occluder IS its fluid
+///   (a water-dweller, an atmosphere-swimmer) has that fluid treated as transparent, which understates its
+///   occlusion. The full volumetric medium is the flagged z-stacked-medium follow-on.
+/// - AGGREGATION: the per-cell coupling is the volume-weighted bulk mean ([`crate::material::SubstanceMix::bulk_axis`]), the
+///   linear mixing the material substrate uses everywhere. A channel whose occlusion is NOT a linear
+///   volume-mean of the cell (a threshold occluder, a saturating or max-dominated medium) cannot be
+///   expressed by the row today, which carries no aggregation selector. The data-expressible
+///   aggregation-kernel form is the flagged sibling of the [`SpreadKernel`] registry, not built here.
 fn absorption_along(
     source: Coord3,
     perceiver: Coord3,
@@ -368,8 +420,9 @@ mod tests {
         let acoustic = reg.get(DEV_ACOUSTIC).expect("acoustic row present");
         assert_eq!(acoustic.source_power_axis, "acoustic.source_power");
         assert!(
-            acoustic.frequency_dependent,
-            "the acoustic absorption forms from the signal frequency",
+            !acoustic.frequency_dependent,
+            "the dev acoustic row is a resolvable direct-medium-read channel; the frequency-dependent \
+             absorption path is a reserved follow-on, so no shipped row sets it",
         );
         assert!(reg.get(SenseChannelId(99)).is_none());
     }
@@ -404,8 +457,13 @@ mod tests {
 
     // --- The reach read ---
 
+    // The D=3 sphere coefficient, derived from the exact `Fixed::PI` constant rather than a truncated
+    // decimal literal. Passed identically to both kernels in the byte-identity tests, so it drives no
+    // absolute-value assertion; deriving it from PI keeps the test constant honest.
     fn four_pi() -> Fixed {
-        Fixed::from_ratio(62_832, 5_000)
+        Fixed::from_int(4)
+            .checked_mul(Fixed::PI)
+            .expect("4*pi is representable")
     }
 
     /// Build [`ReachBounds`] with the D=3 sphere coefficient `4*pi`, the given irradiance cap, and the
@@ -529,7 +587,9 @@ mod tests {
         let cap = Fixed::from_int(1_000_000);
         let power = Fixed::from_int(100);
         let src = Coord3 { x: 0, y: 0, z: 0 };
-        // A separation whose square exceeds the representable bound is negligible (spread underflows).
+        // A separation whose square exceeds the representable cast bound is clamped to zero; well within
+        // that bound the geometric-spread denominator has already overflowed its checked_mul and returned
+        // zero on its own, so a far source reads zero either way.
         let far = Coord3 {
             x: 100_000,
             y: 0,
@@ -548,8 +608,12 @@ mod tests {
 
     #[test]
     fn received_reach_is_byte_identical_to_inverse_square_today() {
-        // With D = 3 everywhere (no confinement substrate), the general kernel reproduces inverse-square
-        // exactly, so the reach spreads bit-for-bit as inverse_square_falloff and the pins hold.
+        // Byte-NEUTRALITY of this slice comes from the module having no live caller, not from this
+        // identity (the run_world pins hold because nothing calls this code). What this identity buys is
+        // FORWARD safety: when the being-percept keystone wires this in at D=3, the reach spreads bit-for-
+        // bit as inverse_square_falloff, so it introduces no new spreading behaviour versus the law the
+        // rest of the engine already uses. With D=3 everywhere (no confinement substrate) the general
+        // kernel reproduces inverse-square exactly.
         let cap = Fixed::from_int(1_000_000);
         let power = Fixed::from_int(100);
         let src = Coord3 { x: 0, y: 0, z: 0 };
@@ -697,5 +761,67 @@ values = [
             .collect();
         assert_eq!(nonzero.len(), 1, "only the rock cell absorbs");
         assert_eq!(nonzero[0], Fixed::from_int(50), "rock's bulk absorption");
+    }
+
+    #[test]
+    fn absorption_along_includes_the_perceiver_cell_and_excludes_the_source_cell() {
+        // Pin the endpoint convention: cells i in 1..=steps, so the perceiver's own cell is sampled and
+        // the source's own cell is not. Rock in only the source cell reads transparent; rock in only the
+        // perceiver cell occludes.
+        let reg = test_reg();
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 4, y: 0, z: 0 };
+
+        let mut source_only = MaterialField::new();
+        source_only.set_cell(src, rock_cell());
+        let s = absorption_along(src, per, &source_only, &reg, "opt.absorption_coefficient");
+        assert!(
+            s.iter().all(|&(c, _)| c == Fixed::ZERO),
+            "the source's own cell is excluded from the path samples"
+        );
+
+        let mut perceiver_only = MaterialField::new();
+        perceiver_only.set_cell(per, rock_cell());
+        let p = absorption_along(
+            src,
+            per,
+            &perceiver_only,
+            &reg,
+            "opt.absorption_coefficient",
+        );
+        assert_eq!(
+            p.iter().filter(|&&(c, _)| c > Fixed::ZERO).count(),
+            1,
+            "the perceiver's own cell is included in the path samples"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "frequency-dependent absorption is a reserved follow-on")]
+    fn resolve_reach_fails_loud_on_a_frequency_dependent_row() {
+        // The reserved fail-loud: a row that declares frequency_dependent cannot be resolved in slice 1
+        // (no frequency source, no acoustic-law wiring), so resolve_reach asserts rather than silently
+        // reading the medium axis as if the channel were frequency-independent.
+        let reg = test_reg();
+        let field = MaterialField::new();
+        let row = ChannelReach {
+            channel: DEV_ACOUSTIC,
+            spreading: SpreadKernel::Geometric,
+            source_power_axis: "acoustic.source_power".to_string(),
+            absorption_axis: "opt.absorption_coefficient".to_string(),
+            frequency_dependent: true,
+        };
+        let cap = Fixed::from_int(1_000_000);
+        let src = Coord3 { x: 0, y: 0, z: 0 };
+        let per = Coord3 { x: 3, y: 4, z: 0 };
+        let _ = resolve_reach(
+            &row,
+            Fixed::from_int(100),
+            src,
+            per,
+            &field,
+            &reg,
+            bounds(cap, Fixed::from_int(1000)),
+        );
     }
 }

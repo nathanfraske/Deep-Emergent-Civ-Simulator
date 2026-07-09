@@ -38,6 +38,34 @@ substrate. The general geometric-spreading kernel at any integer dimensionality 
 frequency clause over-committed (stated body-resonance as settled); the body-resonance-reserved ruling for the
 acoustic frequency stands, judged alien-safe on the clean axis.
 
+BUILT + AUDITED slice-1 (reach wire), 2026-07-09 (Agent A, PR #109 `claude/liveliness-arc`). The reach wire
+is built in four byte-neutral off-path segments: the general `geometric_spread` kernel (`physics/laws.rs`,
+byte-identical to `inverse_square_falloff` at D=3, proven by test), the channel reach registry
+(`perception_reach.rs`, dispatch by the row's named kernel id, never channel identity), the reach read
+(`received_reach`: 3D `Coord3` separation with the vertical z, structural dimensionality, medium-sampled
+optical depth), and the run-path resolver (`resolve_reach`/`absorption_along`: reads the row, samples the
+medium's own absorption along the `Coord3` line, dispatches by kernel id). All four run_world pins hold
+bit-exact (default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82), corroborated by a caller
+sweep (zero run-path callers). The mandatory section-9 five-lens audit ran (6 blind panelists across 3 types
+and 3 models, adversarial per-finding verify): 13 findings, all verified against source and hardened. The one
+MAJOR: `resolve_reach` silently ignored the row's `frequency_dependent` field, so the acoustic dev row would
+resolve to a frequency-independent read of the OPTICAL absorption axis. Hardened to implement the framing's
+already-approved "reserved fail-loud": `resolve_reach` now asserts a row is not `frequency_dependent` (the
+emitter body-resonance frequency source and the acoustic-law application are a reserved follow-on, not wired
+in slice 1), so a frequency-dependent row fails loudly rather than reading the medium axis as if it were
+frequency-independent; no shipped row sets the flag; a `#[should_panic]` test proves the fail-loud. The nits
+hardened: `MAX_REPRESENTABLE_SEP2` derived from the `i32` cast bound rather than a magic `1<<30` (and the
+comment corrected: the guard is a representability clamp, and the D=3 kernel already overflows its own
+denominator to zero far below it, so it clips no result); the optical-depth accumulator uses `saturating_add`
+before the cap (an unchecked `Fixed +` could overflow a large `tau_max`); the medium-aggregation is flagged
+as the volume-mean-only limit with the aggregation-kernel-as-data follow-on named; the fluid-medium limit
+reworded medium-agnostic (a fluid-dweller's dominant occluder); the endpoint sampling convention documented
+and pinned by test; two doc precisions (byte-neutrality is from the absent caller, not the D=3 identity; the
+`bulk_axis` doc de-Terran-ised). Reserved for calibration, surfaced not fabricated: the acoustic absorption
+axis the floor does not yet carry (the dev acoustic row reuses the optical axis as a labelled stand-in, a
+flagged floor gap); the confinement substrate that would set D below 3 (the geometric kernel already handles
+D=2/D=1); the frequency-dependent absorption path and its body-resonance frequency source.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
