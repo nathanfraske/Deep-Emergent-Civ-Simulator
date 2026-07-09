@@ -61,6 +61,25 @@ AbioticField field-kind registry (Agent C, my recommendation, owner-approved). H
   redox difference must be a zero-Rust data row. This is the third parameterized floor mechanism (after the
   perception substrate's spreading law and transduction family). Flagging the pattern for your eyes.
 
+- **OWNER-BLOCKER touching your own R-AGING directive (held, with my strong recommendation).** Agent B's blind
+  smoke test on the lifespan-from-anatomy framing caught, and I verified against source, that your stated method
+  conflicts with the absolute value-authoring line. The mass-LONGEVITY / rate-of-living relation is contested
+  Terran biology that fails across taxa (birds, bats, naked mole-rats outlive a fixed-energy-per-gram budget)
+  and is NOT a physics law, so authoring a longevity constant in the floor would author a biological OUTCOME
+  (how long a being lives), which Principle 9 and the value-line forbid; Kleiber's metabolism-from-mass is a
+  real scaling law but does not lend the longevity relation its credibility; and "repair capacity" (named in the
+  directive) is an absent substrate (`body.rs:31`, only per-part `PartCondition.integrity`). The fork:
+  - **(A) your stated method:** derive lifespan from an allometric longevity constant in the floor. It authors a
+    contested Terran-biology outcome (value-line and P9 tension) and imposes one Terran exponent on every world.
+  - **(B) my recommendation, lifespan EMERGES:** no authored longevity law; a being ages because metabolic wear
+    accumulates on its own `PartCondition.integrity`, reserves deplete, and insult lands, and it dies when
+    integrity or reserves cross the failure boundary the floor already defines. Lifespan is a DESCRIPTION of when
+    a body fails under its own dynamics and selection, and an alien fails on its own physics. This honours your
+    deeper intent ("derive from the body") more faithfully than the allometric constant and retires the authored
+    per-race number exactly as you directed. Same emergence pattern as the rest of the effort.
+  I did not override your explicit directive; I hold it and recommend (B). Agent B is grounding (B) read-only so
+  it is build-ready on your ruling.
+
 ## Owner-only calls still waiting (need your ruling)
 
 - **Mirror dial-set sign-off (the gate): READY (RESOLVED, signed off, Arc 2 merged as #108).** The agent completed the Earth-1:1 calibration: 34
