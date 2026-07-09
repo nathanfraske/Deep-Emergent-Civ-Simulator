@@ -306,7 +306,14 @@ pub fn whole_body_composition_vector(
 ) -> BTreeMap<String, Fixed> {
     // Each part's (development weight, its own axis map), gathered so the axis union and the per-axis
     // weighted mean read the SAME source. Organs read their tissue composition; the covering and weapons
-    // read their material map directly (organ_composition would alias their kind id onto an organ).
+    // read their material map directly (organ_composition would alias their kind id onto an organ). The
+    // CONTRIBUTOR SET is deliberately organs, covering, and weapons only: senses and locomotion are NOT
+    // contributors. This is load-bearing for what the corpse deposits: the senses carry optical axes
+    // (`opt.refractive_index`, `crate::anatomy` sense kinds), and were they added as contributors those
+    // axes would enter this vector. The `opt.*` axis-union skip below already keeps optical axes out of the
+    // deposited matter, so senses contribute nothing even if added, but a future change to the contributor
+    // set (or a new non-optical axis on a sense) must be conscious of this coupling rather than break the
+    // matter vector silently.
     let mut contributors: Vec<(Fixed, &BTreeMap<String, Fixed>)> = Vec::new();
     for organ in &plan.organs {
         if let Some(comp) = registry.organ_composition(organ.kind) {
