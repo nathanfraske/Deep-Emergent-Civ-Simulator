@@ -80,7 +80,13 @@ The design supplies the 3D `Coord3` source-to-perceiver separation to that port 
 from the arm-length axis to a first-class separation is a small floor-plumbing change, surfaced with the gate
 because it touches the floor. One further input the framing surfaced: the `acoustic_absorption` kernel takes a
 signal FREQUENCY (`laws.rs:1238`), and where a signal's frequency comes from is not established by the reach
-computation, so it is flagged (a candidate reserved value rather than a fabricated one).
+computation, so it is flagged (a candidate reserved value rather than a fabricated one). As BUILT, the reach
+wire carries `frequency_dependent` on the channel row but treats the whole frequency-dependent absorption path
+(the body-resonance frequency source plus the `acoustic_absorption` application) as a RESERVED follow-on: the
+section-9 audit caught the resolver silently ignoring the field, and it now FAILS LOUD on a frequency-dependent
+row rather than reading the medium axis as if frequency-independent. The dev acoustic row is a resolvable
+direct-medium-read stand-in (it reuses the optical absorption axis, a flagged floor gap, because the floor
+carries no acoustic absorption axis yet).
 
 ## Slice 2: the sensorium-gated magnitude percept (subtle)
 
