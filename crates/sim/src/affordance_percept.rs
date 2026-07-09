@@ -394,6 +394,172 @@ impl AffordancePerceptRegistry {
     }
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Composition-substrate arc, Tier B: the single-axis TRANSDUCTION, the data-declarable "sensor" form.
+//
+// The blind framing panel (docs/working/AFFORDANCE_COMPOSITION_SUBSTRATE_FRAMING.md) split the affordance
+// substrate along the authoring line. A SINGLE-AXIS transduction reads ONE floor axis of the perceived
+// target and normalizes it against a reference sourced from the PERCEIVER's own body or a cited physics-floor
+// constant. That is declaring a SENSOR (a P9 sensory-physics disposition a world may author as data), never
+// an affordance. The MULTI-AXIS COMPOSITION that would bundle transductions into a purpose-laden percept must
+// EMERGE from a learner over these primitives under selection (the template case: the bundling is the
+// correlational fact that must arise, never be authored); that is Tier C, routed through the discovery loop
+// (discovery.rs:61-63, "NO coded primitive-to-affordance pairing ... a technique emerges"), NOT built here.
+// Valence and meaning are receiver-side, never in the transduction.
+//
+// HONEST BOUNDS (roadmap R-XXX candidates, not closed here): this touches only the P11 "which fold over
+// EXISTING axes" ceiling. It does NOT touch the READABLE-AXIS ceiling (a being whose native affordance needs
+// an axis the floor does not model still forces the develop-the-floor path), nor the COMBINATOR-SET ceiling
+// (the closed kernel set below). Alien-admission stays gated by floor-axis coverage.
+// ---------------------------------------------------------------------------------------------------------
+
+/// Where a transduction's reference level comes from. A typed enum with NO numeric-literal field, so a free
+/// literal terminal is UNREPRESENTABLE (the value-authoring line enforced by the TYPE, not by a runtime
+/// check): a reference is EITHER the perceiver's own body axis (keyed on the being's own data, so a small body
+/// and a large body reference differently and an alien body differs as data) OR a cited physics-floor
+/// constant (read from the floor, never typed in). Each variant holds an id (an axis or constant name), never
+/// a [`Fixed`] value, so no author can write a bare number into a declared transduction.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ReferenceSource {
+    /// The perceiver's OWN body axis, read from the perceiving being's own data (its delivered-stress
+    /// capacity, a limb dimension, and so on). Holds the axis id, resolved against the being's body at
+    /// evaluation; never a stored value. This is what closes the perceiver-independent-reference seam.
+    PerceiverBodyAxis(String),
+    /// A cited physics-floor constant (a named floor law constant or axis reference), resolved against the
+    /// floor at evaluation. Holds the constant id, never a stored value, so the floor stays the one authored
+    /// place and a transduction cannot smuggle a literal.
+    FloorConstant(String),
+}
+
+/// The fixed-Rust transform a single-axis transduction applies. A CLOSED set (the combinator-set ceiling,
+/// flagged as a roadmap seam): the MATH is Rust, which kernel a transduction uses is data. One kernel today,
+/// the general form of the existing fracture-potential read; the set grows only when a new physically
+/// grounded transform is added, exactly as `AffordancePerceptKind` and `civsim_compose::CombinatorKernel` are
+/// closed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TransductionKernel {
+    /// The reference OVER the target-axis magnitude, clamped to `[0, 1]`: the general form of
+    /// [`AffordancePerceptKind::FracturePotential`] with the reference keyed on the perceiver rather than a
+    /// shared scale, so a target whose axis is small relative to the perceiver's reference reads near one and
+    /// one far larger reads near zero. An absent target axis reads zero (nothing to sense).
+    ReferenceOverAxis,
+}
+
+/// A single-axis affordance transduction, declared as DATA: which floor axis to read on the target, where its
+/// reference comes from ([`ReferenceSource`], never a literal), and which fixed-Rust [`TransductionKernel`] to
+/// apply. Declaring one of these is declaring a SENSOR, not an affordance (see the module note above).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SingleAxisTransduction {
+    /// The floor axis read on the perceived target (the matter underfoot or a held object).
+    pub target_axis: String,
+    /// Where the reference level is sourced (the perceiver's own body, or a cited floor constant). Never a
+    /// literal: the type forbids it.
+    pub reference: ReferenceSource,
+    /// The fixed-Rust transform applied to the target magnitude and the reference.
+    pub kernel: TransductionKernel,
+}
+
+impl SingleAxisTransduction {
+    /// Evaluate this transduction to a `[0, 1]` scalar. Pure and RNG-free (Principles 9, 10). The three
+    /// readers supply the only values that enter: `target` reads a floor axis on the perceived matter or
+    /// object; `own_body` reads an axis on the PERCEIVER's own body (so the reference keys on the being's own
+    /// data, and an alien body differs as data); `floor_const` resolves a cited floor constant. No value is
+    /// stored on the transduction itself, so nothing an author typed in can reach the result: the reference is
+    /// always a resolved read, never a baked number (the value-authoring line, enforced by the type). The
+    /// type forbids a STORED literal; it does not constrain what the resolver closures return, so the sensor's
+    /// honesty also rests on the live-wire contract that the closures read floor and own-body data (a
+    /// deferred, coordinated `runner.rs` follow-on, verified when wired).
+    ///
+    /// A zero target magnitude reads zero (the clean degrade, "nothing to sense"), which conflates an axis
+    /// the target does not carry with an axis genuinely valued at zero, matching the existing
+    /// [`AffordancePerceptKind::FracturePotential`] convention; a resolver returns [`Fixed::ZERO`] for both.
+    pub fn transduce(
+        &self,
+        target: &impl Fn(&str) -> Fixed,
+        own_body: &impl Fn(&str) -> Fixed,
+        floor_const: &impl Fn(&str) -> Fixed,
+    ) -> Fixed {
+        let magnitude = target(&self.target_axis);
+        let reference = match &self.reference {
+            ReferenceSource::PerceiverBodyAxis(axis) => own_body(axis),
+            ReferenceSource::FloorConstant(id) => floor_const(id),
+        };
+        match self.kernel {
+            TransductionKernel::ReferenceOverAxis => {
+                if magnitude <= Fixed::ZERO {
+                    return Fixed::ZERO; // no target-axis magnitude present, nothing to sense
+                }
+                // magnitude > 0 here, so a `checked_div` None is an OVERFLOW (an out-of-range quotient),
+                // never a zero divisor, and the true quotient's sign is the reference's. Saturate toward the
+                // clamp bound in the true direction: a large positive ratio to one, a large negative to zero.
+                // The bounds are the clamp's own, not an authored value.
+                let saturated = if reference >= Fixed::ZERO {
+                    Fixed::ONE
+                } else {
+                    Fixed::ZERO
+                };
+                reference
+                    .checked_div(magnitude)
+                    .unwrap_or(saturated)
+                    .clamp(Fixed::ZERO, Fixed::ONE)
+            }
+        }
+    }
+}
+
+/// The transduction registry: which single-axis transductions a world's beings run, in canonical order, the
+/// data-declarable sibling of [`AffordancePerceptRegistry`] for the Tier-B sensor form. EMPTY by default
+/// (opt-in, hash-neutral): a world that declares none carries no transduction block. This is the ISOLATED
+/// mechanism; the live run-path wire that feeds a being's own body into the read (a `runner.rs` signature and
+/// call-site change, behaviour-changing) is the coordinated follow-on, not built here.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct TransductionRegistry {
+    transductions: Vec<SingleAxisTransduction>,
+}
+
+impl TransductionRegistry {
+    /// The empty registry (the opt-in default).
+    pub fn empty() -> TransductionRegistry {
+        TransductionRegistry {
+            transductions: Vec::new(),
+        }
+    }
+
+    /// Build from a list of declared transductions, in canonical order.
+    pub fn from_transductions(transductions: Vec<SingleAxisTransduction>) -> TransductionRegistry {
+        TransductionRegistry { transductions }
+    }
+
+    /// The declared transductions, in canonical order.
+    pub fn transductions(&self) -> &[SingleAxisTransduction] {
+        &self.transductions
+    }
+
+    /// The number of declared transductions.
+    pub fn len(&self) -> usize {
+        self.transductions.len()
+    }
+
+    /// Whether the registry declares none (the opt-in default).
+    pub fn is_empty(&self) -> bool {
+        self.transductions.is_empty()
+    }
+
+    /// Evaluate every declared transduction against one target and the perceiver's own body, in canonical
+    /// order. Pure and RNG-free; the readers are the only inputs (see [`SingleAxisTransduction::transduce`]).
+    pub fn transduce_all(
+        &self,
+        target: &impl Fn(&str) -> Fixed,
+        own_body: &impl Fn(&str) -> Fixed,
+        floor_const: &impl Fn(&str) -> Fixed,
+    ) -> Vec<Fixed> {
+        self.transductions
+            .iter()
+            .map(|t| t.transduce(target, own_body, floor_const))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,6 +928,226 @@ values = [
             def.kind,
             AffordancePerceptKind::Sharpness,
             "the def carries the kernel handle, the only thing perceive() reads; there is no name field"
+        );
+    }
+
+    #[test]
+    fn perceiver_keyed_reference_makes_a_large_body_read_differently_than_a_small_one() {
+        // Tier B, the perceiver-keyed reference proven: the SAME matter transduces DIFFERENTLY for a small
+        // body and a large body, because the reference is read from the perceiving being's OWN body, not a
+        // shared embodiment-wide scale. This is what closes the perceiver-independent-reference seam and
+        // admits the alien as data (a different body is a different reference, no rewrite).
+        let t = SingleAxisTransduction {
+            target_axis: "mat.fracture_strength".to_string(),
+            reference: ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+            kernel: TransductionKernel::ReferenceOverAxis,
+        };
+        let rock = |axis: &str| {
+            if axis == "mat.fracture_strength" {
+                Fixed::from_int(20)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let small_body = |axis: &str| {
+            if axis == "body.delivered_stress" {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let large_body = |axis: &str| {
+            if axis == "body.delivered_stress" {
+                Fixed::from_int(20)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let no_const = |_: &str| Fixed::ZERO;
+
+        let small = t.transduce(&rock, &small_body, &no_const);
+        let large = t.transduce(&rock, &large_body, &no_const);
+        // reference over strength: small body 5/20 is one quarter; large body 20/20 saturates to one (the
+        // giant finds the rock fully actionable, the small body only a quarter), monotone in the perceiver's
+        // own capacity, by its own data.
+        assert_eq!(small, Fixed::from_ratio(1, 4));
+        assert_eq!(large, Fixed::ONE);
+        assert!(
+            large > small,
+            "a stronger body reads the same matter as more actionable, keyed on its own body"
+        );
+    }
+
+    #[test]
+    fn the_reference_is_a_resolved_read_never_a_stored_literal() {
+        // The value-authoring line enforced by the TYPE: [`ReferenceSource`] holds an id, never a `Fixed`, so
+        // a reference is always RESOLVED at evaluation, never a baked number. Proven behaviourally here: the
+        // same transduction against two different floor-constant resolvers yields two different results, so no
+        // literal is stored on the transduction. The ABSENCE of a literal is a compile-time guarantee: no
+        // `ReferenceSource` variant and no field accepts a `Fixed`, so an author cannot write a bare number.
+        let t = SingleAxisTransduction {
+            target_axis: "mat.fracture_strength".to_string(),
+            reference: ReferenceSource::FloorConstant("floor.reference_stress".to_string()),
+            kernel: TransductionKernel::ReferenceOverAxis,
+        };
+        let rock = |axis: &str| {
+            if axis == "mat.fracture_strength" {
+                Fixed::from_int(20)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let no_body = |_: &str| Fixed::ZERO;
+        let floor_low = |id: &str| {
+            if id == "floor.reference_stress" {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let floor_high = |id: &str| {
+            if id == "floor.reference_stress" {
+                Fixed::from_int(20)
+            } else {
+                Fixed::ZERO
+            }
+        };
+
+        let low = t.transduce(&rock, &no_body, &floor_low);
+        let high = t.transduce(&rock, &no_body, &floor_high);
+        assert_eq!(low, Fixed::from_ratio(1, 4));
+        assert_eq!(high, Fixed::ONE);
+        assert!(
+            high > low,
+            "the reference is read from the floor resolver, not baked into the transduction"
+        );
+    }
+
+    #[test]
+    fn transduce_degrades_cleanly_and_stays_in_the_unit_interval() {
+        // Absent target axis (magnitude zero) reads zero (nothing to sense); a reference far exceeding the
+        // axis clamps to one; every result stays in [0, 1].
+        let t = SingleAxisTransduction {
+            target_axis: "mat.fracture_strength".to_string(),
+            reference: ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+            kernel: TransductionKernel::ReferenceOverAxis,
+        };
+        let strong = |axis: &str| {
+            if axis == "body.delivered_stress" {
+                Fixed::from_int(1000)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let absent = |_: &str| Fixed::ZERO; // no target axis present
+        let soft = |axis: &str| {
+            if axis == "mat.fracture_strength" {
+                Fixed::from_int(1)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let none_const = |_: &str| Fixed::ZERO;
+
+        assert_eq!(
+            t.transduce(&absent, &strong, &none_const),
+            Fixed::ZERO,
+            "no target-axis magnitude, nothing to sense"
+        );
+        let saturated = t.transduce(&soft, &strong, &none_const);
+        assert_eq!(
+            saturated,
+            Fixed::ONE,
+            "a reference far above the axis saturates to one"
+        );
+        assert!(
+            saturated >= Fixed::ZERO && saturated <= Fixed::ONE,
+            "the transduction stays in the unit interval"
+        );
+    }
+
+    #[test]
+    fn reference_over_axis_saturation_is_sign_aware_on_overflow() {
+        // The overflow fallback saturates toward the clamp bound in the TRUE direction: a large positive ratio
+        // (a positive reference over a near-zero magnitude, whose quotient overflows the fixed-point range)
+        // reads one, and a large NEGATIVE ratio (a negative reference, which the type permits from a signed
+        // axis) reads zero, never a spurious one. This exercises the `checked_div` None (overflow) branch the
+        // other tests do not reach, and pins the sign-aware saturation.
+        let tiny = Fixed::from_ratio(1, 1_000_000_000); // small enough that a small reference overflows the ratio
+        let target = move |_: &str| tiny;
+        let t = SingleAxisTransduction {
+            target_axis: "mat.fracture_strength".to_string(),
+            reference: ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+            kernel: TransductionKernel::ReferenceOverAxis,
+        };
+        let none_const = |_: &str| Fixed::ZERO;
+        let positive_ref = |_: &str| Fixed::from_int(10);
+        let negative_ref = |_: &str| Fixed::from_int(-10);
+        assert_eq!(
+            t.transduce(&target, &positive_ref, &none_const),
+            Fixed::ONE,
+            "a large positive ratio saturates to one"
+        );
+        assert_eq!(
+            t.transduce(&target, &negative_ref, &none_const),
+            Fixed::ZERO,
+            "a large negative ratio saturates to zero, not a spurious one (sign-aware overflow)"
+        );
+    }
+
+    #[test]
+    fn the_transduction_registry_is_opt_in_and_canonically_ordered() {
+        // Opt-in default: an empty registry transduces an empty vector (hash-neutral). A populated one
+        // evaluates its declared transductions in canonical order, each keyed on its own reference source.
+        let empty = TransductionRegistry::empty();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        let no = |_: &str| Fixed::ZERO;
+        assert!(empty.transduce_all(&no, &no, &no).is_empty());
+
+        let reg = TransductionRegistry::from_transductions(vec![
+            SingleAxisTransduction {
+                target_axis: "mat.fracture_strength".to_string(),
+                reference: ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+                kernel: TransductionKernel::ReferenceOverAxis,
+            },
+            SingleAxisTransduction {
+                target_axis: "mat.compressive_strength".to_string(),
+                reference: ReferenceSource::FloorConstant("floor.reference_stress".to_string()),
+                kernel: TransductionKernel::ReferenceOverAxis,
+            },
+        ]);
+        assert_eq!(reg.len(), 2);
+        let target = |axis: &str| match axis {
+            "mat.fracture_strength" => Fixed::from_int(20),
+            "mat.compressive_strength" => Fixed::from_int(10),
+            _ => Fixed::ZERO,
+        };
+        let body = |axis: &str| {
+            if axis == "body.delivered_stress" {
+                Fixed::from_int(20)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let konst = |id: &str| {
+            if id == "floor.reference_stress" {
+                Fixed::from_int(5)
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let out = reg.transduce_all(&target, &body, &konst);
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0],
+            Fixed::ONE,
+            "fracture: own-body reference 20 over strength 20 saturates to one"
+        );
+        assert_eq!(
+            out[1],
+            Fixed::from_ratio(1, 2),
+            "compressive: floor reference 5 over strength 10 is one half"
         );
     }
 }
