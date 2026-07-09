@@ -1476,6 +1476,22 @@ unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
 
 [[reserved]]
+id = "climate.mean_surface_temperature"
+basis = "the world's mean surface temperature in Kelvin, the offset the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature around: T = mean + range*(normalised - 1/2) (Field::from_map_absolute, crates/sim/src/runner.rs). The physics laws read absolute Kelvin (Stefan-Boltzmann T^4, the Clausius-Clapeyron saturation, the productivity temperature factor), so the worldgen's normalised [0,1] shape must be reconciled to Kelvin here rather than wearing a Kelvin label over [0,1] values. Set from the world's mean surface temperature (Earth ~288 K). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable from a deeper substrate; the dev fixture is the identity placeholder 1/2 that keeps the field the raw normalised axis (byte-neutral)"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "climate.latitude_temperature_range"
+basis = "the world's full equator-to-pole surface temperature span in Kelvin, the amplitude the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature by: T = mean + range*(normalised - 1/2), so the [0,1] axis spans [mean - range/2, mean + range/2] (Field::from_map_absolute). Set from the world's latitudinal temperature range (Earth ~60 K, roughly -15 C poles to 45 C equator). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable; the dev fixture is the identity placeholder 1 that keeps the field the raw normalised axis (byte-neutral)"
+status = "reserved"
+value = ""
+unit = "kelvin"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
 id = "field.relaxation.low"
 basis = "the near-static end Europa pulls, the rate a cell relaxes to its solar-and-biome baseline, near zero under lightless ice with almost no forcing; recommended about 0.005; reserved; the baseline is field.relaxation"
 status = "reserved"

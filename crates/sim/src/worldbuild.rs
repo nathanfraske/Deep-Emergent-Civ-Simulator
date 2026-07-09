@@ -390,10 +390,19 @@ pub fn build_dawn_runner(
         world.set_mortality_hazard(hazard.clone());
     }
 
-    // Derive the field from the scenario's selected medium (increment 1, WP2): the diffusion
+    // Seed the temperature field from the map, reconciling the worldgen's NORMALISED [0,1] temperature
+    // axis to the ABSOLUTE temperature the physics reads (derive-vs-author, Principle 6): the metabolism
+    // and hydrology laws need Kelvin (Stefan-Boltzmann's T^4), so the world's mean surface temperature and
+    // its full equator-to-pole span are read fail-loud from the manifest and mapped in, rather than
+    // leaving a Kelvin-labelled [0,1] field. The dev fixtures carry the IDENTITY (mean 1/2, range 1), so a
+    // Development build keeps the raw normalised field byte-for-byte; a calibrated world reads the owner's
+    // Kelvin climate data.
+    let temp_mean = manifest.require_fixed("climate.mean_surface_temperature")?;
+    let temp_range = manifest.require_fixed("climate.latitude_temperature_range")?;
+    let field = Field::from_map_absolute(map, temp_mean, temp_range);
+    // Derive the field diffusion from the scenario's selected medium (increment 1, WP2): the diffusion
     // coefficient is the medium's k/(rho*c) over the cell and tick, so a world of air and a world of
     // water conduct heat at their own physics rate rather than a free scalar.
-    let field = Field::from_map(map);
     let calib = FieldCalib::from_resolution(manifest, resolution)?;
 
     // Compose the armed world onto the field runner. Both constructors refuse a world carrying an

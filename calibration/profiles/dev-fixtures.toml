@@ -241,6 +241,22 @@ unit = "ratio_per_tick"
 source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
 
 [[reserved]]
+id = "climate.mean_surface_temperature"
+basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY offset 1/2 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte (crates/sim/src/runner.rs Field::from_map_absolute)"
+status = "set"
+value = "0.5"
+unit = "kelvin"
+source = "dev fixture for the temperature-units reconciliation; crates/sim/src/runner.rs Field::from_map_absolute"
+
+[[reserved]]
+id = "climate.latitude_temperature_range"
+basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY amplitude 1 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte"
+status = "set"
+value = "1"
+unit = "kelvin"
+source = "dev fixture for the temperature-units reconciliation; crates/sim/src/runner.rs Field::from_map_absolute"
+
+[[reserved]]
 id = "field.body_exchange"
 basis = "FIXTURE placeholder, not the owner's value; the fixture-fallback body-to-environment convective coupling per tick for a being placed without a body (a canonical run derives the per-being rate through physiology::derive_body_exchange_rate)"
 status = "set"

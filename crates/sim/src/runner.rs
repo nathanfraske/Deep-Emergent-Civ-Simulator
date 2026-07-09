@@ -424,23 +424,43 @@ impl Field {
         }
     }
 
-    /// The field seeded from a generated map's per-tile temperatures (the baseline it relaxes toward).
-    /// The map's worldgen calibration is the caller's concern: owner-set on a canonical run, a
-    /// labelled fixture in a test. This function fabricates nothing.
-    pub fn from_map(map: &TileMap) -> Field {
+    /// The field seeded from a generated map's per-tile temperatures, mapping the worldgen's NORMALISED
+    /// `[0, 1]` temperature axis to the ABSOLUTE temperature the physics reads: `T = mean + range *
+    /// (normalised - 1/2)`. This is the temperature-to-Kelvin calibration (derive-vs-author, Principle 6):
+    /// the worldgen axis is a normalised SHAPE (a latitude blend plus noise), while the metabolism and
+    /// hydrology laws read absolute temperature (Stefan-Boltzmann's `T^4` needs Kelvin), so the two are
+    /// reconciled HERE from owner climate data rather than by a fabricated constant or a Kelvin-labelled
+    /// `[0, 1]` field. `mean` is the world's mean surface temperature and `range` its full equator-to-pole
+    /// span, both owner world data. The IDENTITY `mean = 1/2, range = 1` leaves the field equal to the raw
+    /// normalised axis (the labelled dev fixture, byte-neutral). The biome classifier reads the raw
+    /// normalised map axes at generation time, so it is unaffected by this reconciliation.
+    pub fn from_map_absolute(map: &TileMap, mean: Fixed, range: Fixed) -> Field {
         let topo = map.topo();
         let (w, h) = (topo.width, topo.height);
+        let half = Fixed::from_ratio(1, 2);
         let mut baseline = Vec::with_capacity((w as usize) * (h as usize));
         for y in 0..h {
             for x in 0..w {
-                let t = map
+                let norm = map
                     .tile(Coord3::new(x, y, 0))
                     .map(|t| t.temperature())
                     .expect("every in-bounds cell has a tile");
-                baseline.push(t);
+                // T = mean + range * (normalised - 1/2). Exact identity at mean = 1/2, range = 1; a
+                // degenerate overflow (an unrepresentably wide range) routes the offset to zero, so the
+                // cell reads the mean rather than a wrapped temperature (the codebase's degenerate-input
+                // convention).
+                let offset = range.checked_mul(norm - half).unwrap_or(Fixed::ZERO);
+                baseline.push(mean.saturating_add(offset));
             }
         }
         Field::new(w, h, baseline)
+    }
+
+    /// The field seeded from a map with the IDENTITY temperature calibration (the field equals the raw
+    /// normalised worldgen axis), the labelled dev and test path. A calibrated run reads the owner's mean
+    /// and range through [`Field::from_map_absolute`]; see [`crate::build_dawn_runner`].
+    pub fn from_map(map: &TileMap) -> Field {
+        Field::from_map_absolute(map, Fixed::from_ratio(1, 2), Fixed::ONE)
     }
 
     #[inline]
