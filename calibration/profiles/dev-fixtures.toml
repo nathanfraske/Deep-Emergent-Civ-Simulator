@@ -366,13 +366,9 @@ value = "0.5"
 unit = "mpa_per_temperature"
 source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
-[[reserved]]
-id = "hydrology.saturation_t_ref"
-basis = "FIXTURE placeholder; the reference temperature of the saturation affine tangent"
-status = "set"
-value = "0.5"
-unit = "temperature"
-source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+# RETIRED (Arc 2, derive-vs-author): `hydrology.saturation_t_ref` now derives from
+# `climate.mean_surface_temperature` (the dev identity value 0.5 is unchanged, so the dev hydrology is
+# byte-identical). See crates/sim/src/environ.rs EnvironCalib::from_manifest.
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"

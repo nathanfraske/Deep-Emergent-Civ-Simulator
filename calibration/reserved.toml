@@ -1937,13 +1937,14 @@ value = ""
 unit = "mpa_per_temperature"
 source = "base-level liveliness step 2 (Part 15, Part 18); crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
 
-[[reserved]]
-id = "hydrology.saturation_t_ref"
-basis = "the reference temperature the saturation affine tangent is taken at (the midpoint of the world's habitable temperature band, so the tangent is accurate where most weather happens)"
-status = "reserved"
-value = ""
-unit = "temperature"
-source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+# RETIRED (Arc 2, derive-vs-author, Principle 6): `hydrology.saturation_t_ref` (the reference temperature
+# the saturation affine tangent is taken at, "the midpoint of the world's habitable temperature band")
+# now DERIVES from `climate.mean_surface_temperature`: the world's mean surface temperature IS the
+# habitable-band midpoint, and it is the same absolute-temperature value the field is centred on
+# (Field::from_map_absolute), so the tangent's reference is read from the world's own mean rather than a
+# duplicate reserved scalar. EnvironCalib::from_manifest reads climate.mean_surface_temperature for it.
+# The tangent's slope (hydrology.saturation_slope) and value at t_ref (hydrology.saturation_e_ref) stay
+# reserved, now anchored at the world's own mean temperature.
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"
