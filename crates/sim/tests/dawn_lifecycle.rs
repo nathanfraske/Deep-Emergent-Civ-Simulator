@@ -288,3 +288,88 @@ fn two_seeds_differ_only_where_rng_enters() {
     assert_eq!(a.1, b.1, "the sect structure is seed-independent");
     assert_eq!(a.2, b.2, "the population count matches");
 }
+
+#[test]
+fn a_races_experiential_polarity_seeds_at_the_dawn_and_a_child_inherits_it() {
+    // OWNER_DECISIONS_LOG R5: the experiential-conviction polarity (the felt-experience-to-conviction
+    // disposition, hedonic vs ascetic) is a per-race data row, "a field on EpistemicStance, seeded at the dawn
+    // and inherited like the axiom seeds." This proves that end to end through the REAL seed_dawn_populations
+    // and birth paths (not only the direct set_intrinsic path the runner move test uses): a race that declares
+    // an ASCETIC polarity in its intrinsic seed has its dawn founders born ascetic, and a child of two ascetic
+    // founders inherits it, so a hedonic race and an ascetic race are genuinely different data rows and
+    // asceticism is reachable in a real run, not foreclosed by the hedonic default of EpistemicStance::new.
+    let ascetic = Fixed::ZERO - Fixed::ONE;
+    // A race identical to a_race() but whose intrinsic seed carries the ascetic epistemic polarity.
+    let mut seed_beliefs = beliefs(Fixed::from_ratio(1, 2));
+    seed_beliefs.epistemic = seed_beliefs.epistemic.with_experiential_polarity(ascetic);
+    let genes = GeneSet {
+        genes: vec![GeneDef {
+            id: GeneId(0),
+            effects: vec![GeneEffect {
+                channel: Channel::Cognition(CognitionChannel::ReasoningAcuity),
+                weight: Fixed::ONE,
+            }],
+            dominance: DominanceMode::additive(),
+        }],
+    };
+    let pool = GenePool::new(SchemeId(0), 20, vec![Fixed::from_ratio(1, 2)]);
+    let scheme = GeneticScheme {
+        id: SchemeId(0),
+        reproduction: ReproductionMode::SexualDiploid,
+        linkage_groups: Vec::new(),
+        mutation_rate: Fixed::ZERO,
+        additive_mutation_step: Fixed::ZERO,
+        gauss: civsim_core::GaussApprox::default(),
+    };
+    let race = Race::new(
+        RaceId(0),
+        genes,
+        pool,
+        scheme,
+        seed_beliefs,
+        Fixed::from_int(2),
+        Fixed::ZERO,
+        80,
+        18,
+    );
+
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), race.clone());
+    let bands = [BandSpec {
+        race: RaceId(0),
+        place: 1,
+        members: 4,
+    }];
+    let mut w = World::new(params(), params(), AccessWeights::default()).with_seed(0xA5CE);
+    let founders = w.seed_dawn_populations(&races, &bands, &dev_ring_law());
+    assert!(founders.len() >= 2, "the dawn seeded the band");
+    for &id in &founders {
+        assert_eq!(
+            w.intrinsic_of(id).unwrap().epistemic.experiential_polarity,
+            ascetic,
+            "the dawn seeds the race's own ascetic polarity onto each founder (a per-race data row)"
+        );
+    }
+
+    // A child of two ascetic founders inherits the ascetic polarity through the real birth path.
+    let child = w
+        .birth(
+            &race,
+            founders[0],
+            founders[1],
+            &founders,
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 50),
+            0,
+            &dev_ring_law(),
+        )
+        .expect("the two mature founders bear a child");
+    assert_eq!(
+        w.intrinsic_of(child)
+            .unwrap()
+            .epistemic
+            .experiential_polarity,
+        ascetic,
+        "the child inherits its parents' ascetic polarity (inherited like the axiom seeds)"
+    );
+}

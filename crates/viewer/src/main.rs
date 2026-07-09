@@ -81,7 +81,12 @@ fn snapshot(argv: &[String]) {
     params.width = parse(argv.get(4), 96);
     params.height = parse(argv.get(5), 64);
     params.profile = world_profile(argv.get(6));
-    let living = genesis(seed, &params);
+    let living = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     let biomes = BiomeSet::dev_default();
     let center = populated_center(&living, params.width, params.height);
     let (w, h, tile_px) = (720usize, 480usize, 18usize);
@@ -183,7 +188,12 @@ fn render_cmd(argv: &[String]) {
     params.width = parse(argv.get(5), 256);
     params.height = parse(argv.get(6), 192);
     params.profile = world_profile(argv.get(7));
-    let living = genesis(seed, &params);
+    let living = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     let biomes = BiomeSet::dev_default();
     if mode == "superfine" {
         let center = populated_center(&living, params.width, params.height);
@@ -211,7 +221,12 @@ fn stats_cmd(argv: &[String]) {
     params.width = parse(argv.get(3), 256);
     params.height = parse(argv.get(4), 192);
     params.profile = world_profile(argv.get(5));
-    let living = genesis(seed, &params);
+    let living = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     let daughters: u32 = living.regions.values().map(|r| r.report.daughters).sum();
     let extinctions: u32 = living.regions.values().map(|r| r.report.extinctions).sum();
     println!(
@@ -236,7 +251,12 @@ fn radiate_cmd(argv: &[String]) {
     params.width = parse(argv.get(3), 96);
     params.height = parse(argv.get(4), 64);
     params.profile = world_profile(argv.get(5));
-    let mut wg = WorldGenesis::new(seed, &params);
+    let mut wg = WorldGenesis::new(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     println!(
         "staged genesis: {} regions, {} founder species over {} generations",
         wg.snapshot().regions.len(),
@@ -267,7 +287,12 @@ fn radiate_cmd(argv: &[String]) {
     }
     // Confirm the stepped world matches the one-shot batch genesis bit for bit.
     let stepped = wg.snapshot();
-    let batch = genesis(seed, &params);
+    let batch = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     let ok = stepped.state_hash() == batch.state_hash();
     println!(
         "final living-world hash {:032x}  ({} batch genesis)",
@@ -347,7 +372,12 @@ fn main() {
     params.height = height;
     params.profile = world_profile(argv.get(base + 3));
     eprintln!("staging world genesis (worldgen + founders; the radiation runs live)...");
-    let mut wg = WorldGenesis::new(seed, &params);
+    let mut wg = WorldGenesis::new(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     // Demo mode has no interactive control, so run the radiation to completion up front and
     // showcase the finished, matured world with the auto-zoom.
     if demo_secs.is_some() {

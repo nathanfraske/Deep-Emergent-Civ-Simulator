@@ -369,7 +369,8 @@ pub fn superfine(
                     .map
                     .tile(coord)
                     .map(|t| {
-                        let physics = physics_terrain_color(t.elevation, t.moisture, t.temperature);
+                        let physics =
+                            physics_terrain_color(t.elevation(), t.moisture(), t.temperature());
                         blend(physics, biomes.color(t.biome), 46, 255) // about 18% biome accent
                     })
                     .unwrap_or(bg)
@@ -441,7 +442,12 @@ mod tests {
         let mut params = GenesisParams::dev_default();
         params.width = 48;
         params.height = 32;
-        let living = genesis(0xEA27, &params);
+        let living = genesis(
+            0xEA27,
+            &params,
+            &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+            None,
+        );
         let (w, h, tile_px) = (240usize, 160usize, 18usize);
         // Centre on an occupied tile so at least one organism mark is drawn.
         let center = living

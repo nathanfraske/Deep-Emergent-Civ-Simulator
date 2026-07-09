@@ -71,7 +71,7 @@ impl Terrain for MapTerrain<'_> {
 
     fn cost(&self, c: Coord3) -> Fixed {
         match self.map.tile(c) {
-            Some(t) => Fixed::ONE + t.elevation, // higher ground is costlier to cross
+            Some(t) => Fixed::ONE + t.elevation(), // higher ground is costlier to cross
             None => Fixed::from_int(100),
         }
     }

@@ -430,6 +430,96 @@ pub fn base_drain_from(
     )
 }
 
+/// The ALIEN-CLEAN physical intake (the R-PHYS-BIO edibility measure): the reserve-amount a being gains by
+/// eating a food's content on a reserve's OWN backing class, and the content it eats to do so. This is the
+/// intake counterpart to [`derive_base_drain`] and uses the SAME size-scaled reserve bridge: one unit of
+/// reserve amount is worth `body_mass * body_storage_density` of physical content (for the energy reserve,
+/// `mass_kg * bio.energy_density` joules), so eating `content` of the class, assimilated (`assim`) and passed
+/// at the trophic efficiency (`eta`), raises the reserve by `content * assim * eta / (body_mass *
+/// body_storage_density)`. The being eats only enough to fill its `room` (bounded by what is `available`), so
+/// no bite overflows the reserve, and the reserve fills by the food's PHYSICAL content, never a made-up
+/// biomass number. Keyed on NO axis identity: the same mechanism fills a chemical-energy reserve from an
+/// energy-dense seed and a thaumic reserve from a mana-bearing plant (Principle 9), the class and the storage
+/// density being the being's own data. A being whose body stores none of the class (`body_storage_density <=
+/// 0`), a zero body mass, a non-digester (`assim <= 0`), or a full reserve (`room <= 0`) eats nothing.
+/// Returns `(content_to_eat, reserve_gain)`, the gain bounded by `room`.
+pub fn physical_intake(
+    available: Fixed,
+    assim: Fixed,
+    eta: Fixed,
+    body_mass: Fixed,
+    body_storage_density: Fixed,
+    room: Fixed,
+) -> (Fixed, Fixed) {
+    let num = assim.checked_mul(eta).unwrap_or(Fixed::ZERO); // assimilated, trophic-passed content -> reserve
+    let denom = body_mass
+        .checked_mul(body_storage_density)
+        .unwrap_or(Fixed::ZERO); // reserve-unit content worth
+    if available <= Fixed::ZERO || room <= Fixed::ZERO || num <= Fixed::ZERO || denom <= Fixed::ZERO
+    {
+        return (Fixed::ZERO, Fixed::ZERO);
+    }
+    // The content that would exactly fill the room: room * denom / num. An overflow means the room is
+    // effectively unbounded relative to the content, so eat everything available.
+    let content_to_fill = room
+        .checked_mul(denom)
+        .and_then(|x| x.checked_div(num))
+        .unwrap_or(Fixed::MAX);
+    let eaten = available.min(content_to_fill);
+    // The reserve gain from the eaten content, capped at the room (the division can round up by a fixed-point
+    // ulp, so the min keeps the reserve from a one-tick overfill).
+    let gain = eaten
+        .checked_mul(num)
+        .and_then(|x| x.checked_div(denom))
+        .unwrap_or(room)
+        .min(room);
+    (eaten, gain)
+}
+
+/// A being's summarized FIRST-HAND FELT EXPERIENCE over a window: its own reserves' movement folded into an
+/// intensity (how much its total reserve health changed) and a signed valence (whether it improved or
+/// worsened). See [`felt_salience`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FeltExperience {
+    /// How intense the felt change was: the absolute net movement of the being's total reserve health over
+    /// the window, in reserve-fraction units. A calm window (reserves roughly held) reads near zero.
+    pub intensity: Fixed,
+    /// The signed valence of the change: `+1` if the being's total reserve health ROSE over the window, `-1`
+    /// if it FELL (a falling reserve is negative, the floor sign of hardship), `0` if unchanged. This is a
+    /// floor fact about the being's own body, carrying NO axis and NO pole: which conviction the experience
+    /// bears on, and in which direction, is a per-being LEARNED coupling ABOVE this primitive, never authored
+    /// here (the blind framing panel's ruling, `docs/working/OWNER_DECISIONS_LOG.md` R2).
+    pub valence: Fixed,
+}
+
+/// The ALIEN-CLEAN felt-experience measure: fold a being's own signed reserve level-changes (the floor's
+/// interoceptive deltas, [`crate::homeostasis::ReserveMemory::delta`]) into one [`FeltExperience`]. This is
+/// the floor input the learned experience-to-conviction coupling reads: the intensity is the absolute net
+/// change in the being's total reserve health, the valence its sign. Keyed on NO axis identity: it sums the
+/// signed level-changes over WHATEVER reserves the being's physiology declares, so a photosynthetic being's
+/// light-charge, a silicon body's heat store, and a grazer's energy and water fold through the same call and
+/// the alien is a data row (Principle 9). It authors nothing above the floor: it emits only how much the
+/// being's reserves moved and in which net direction, never which belief that bears on, so the coupling that
+/// routes this felt signal to a conviction (and gives it a direction on that conviction) stays a learned,
+/// per-being fact the layer above discovers rather than a mapping this primitive stamps (OWNER_DECISIONS_LOG
+/// R2, the corrected framing the blind framing panel converged on). A pure function; the net saturates rather
+/// than wrapping, so an extreme swing cannot panic under the release overflow checks.
+pub fn felt_salience(reserve_deltas: impl IntoIterator<Item = Fixed>) -> FeltExperience {
+    let mut net = Fixed::ZERO;
+    for d in reserve_deltas {
+        net = net.saturating_add(d);
+    }
+    let valence = match net.cmp(&Fixed::ZERO) {
+        std::cmp::Ordering::Greater => Fixed::ONE,
+        std::cmp::Ordering::Less => Fixed::ZERO - Fixed::ONE,
+        std::cmp::Ordering::Equal => Fixed::ZERO,
+    };
+    FeltExperience {
+        intensity: net.abs(),
+        valence,
+    }
+}
+
 /// The derived exertion drain coupling: the added fraction of the energy reserve drained per tick per
 /// unit of exertion, from the mechanical work power a full-exertion body sustains (`force * velocity`),
 /// bridged to a reserve fraction. This replaces the authored `exertion_drain_coupling`;
@@ -536,6 +626,138 @@ mod tests {
     use crate::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
     use crate::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
 
+    #[test]
+    fn felt_salience_folds_reserve_deltas_alien_clean_with_no_axis_or_pole() {
+        // The felt-experience primitive keys on NO axis identity: it folds an iterator of signed reserve
+        // level-changes into (intensity, valence), so the SAME call summarizes a grazer's energy+water and a
+        // thaumic being's mana+heat identically when their deltas match. A falling total is negative (the
+        // floor sign of hardship); a rising total positive; a net-calm window near zero.
+        let quarter = Fixed::from_ratio(1, 4);
+        let eighth = Fixed::from_ratio(1, 8);
+
+        // A grazer whose energy fell 1/4 and water fell 1/8: total reserve health fell 3/8, valence negative.
+        let hardship = felt_salience([Fixed::ZERO - quarter, Fixed::ZERO - eighth]);
+        assert_eq!(
+            hardship.valence,
+            Fixed::ZERO - Fixed::ONE,
+            "falling reserves feel negative"
+        );
+        assert_eq!(
+            hardship.intensity,
+            Fixed::from_ratio(3, 8),
+            "intensity is the absolute net fall"
+        );
+
+        // An ALIEN with the IDENTICAL delta magnitudes on entirely different reserves (a mana pool and a heat
+        // store), supplied through an owned Vec rather than an array, folds to the identical felt experience: no
+        // axis identity and no container shape is read (Principle 9).
+        let alien_deltas: Vec<Fixed> = vec![Fixed::ZERO - quarter, Fixed::ZERO - eighth];
+        let alien = felt_salience(alien_deltas);
+        assert_eq!(
+            alien, hardship,
+            "the same deltas give the same felt experience whatever the reserves mean"
+        );
+
+        // A rising total feels positive; a net-calm window (equal-and-opposite swings) feels nothing at all,
+        // carrying no valence to hand any conviction, so the layer above has nothing to route until real net
+        // change is felt.
+        assert_eq!(
+            felt_salience([quarter, eighth]).valence,
+            Fixed::ONE,
+            "rising reserves feel positive"
+        );
+        let calm = felt_salience([quarter, Fixed::ZERO - quarter]);
+        assert_eq!(
+            calm.valence,
+            Fixed::ZERO,
+            "an equal-and-opposite window has no net valence"
+        );
+        assert_eq!(calm.intensity, Fixed::ZERO, "and no net intensity");
+
+        // An extreme swing saturates rather than panicking under the release overflow checks.
+        let _ = felt_salience([Fixed::MAX, Fixed::MAX]);
+    }
+
+    #[test]
+    fn physical_intake_is_alien_clean_and_fills_by_physical_content_not_a_biomass_number() {
+        // The R-PHYS-BIO edibility measure keys on NO axis identity: the reserve fills by the food's physical
+        // content through the being's own storage bridge, so the SAME call fills a chemical-energy reserve
+        // from an energy-dense food and a thaumic reserve from a mana-bearing food, given the same physical
+        // quantities. Proof: two callers with identical numbers (one thinking "joules", one "mana") get the
+        // identical (eaten, gain); the mechanism never reads bio.energy_density or any Earth axis.
+        let assim = Fixed::from_ratio(8, 10);
+        let eta = Fixed::from_ratio(1, 2);
+        let body_mass = Fixed::from_int(60);
+        let storage_density = Fixed::from_int(5); // reserve-unit content worth = 60 * 5 = 300
+                                                  // A large room and abundant food: the being eats only what fills the room, and the gain equals room.
+        let room = Fixed::from_int(30);
+        let plenty = Fixed::from_int(100000);
+        let energy_reserve = physical_intake(plenty, assim, eta, body_mass, storage_density, room);
+        let mana_reserve = physical_intake(plenty, assim, eta, body_mass, storage_density, room);
+        assert_eq!(
+            energy_reserve, mana_reserve,
+            "the intake is alien-clean: identical physical quantities give an identical result whatever the \
+             backing class means (energy or mana)"
+        );
+        let (eaten, gain) = energy_reserve;
+        // Abundant food fills the reserve to its room, never past it (the round-trip through two divisions can
+        // lose a fixed-point ulp, so gain is at or just under room, never above).
+        let ulp = Fixed::from_ratio(1, 1000);
+        assert!(
+            gain <= room && gain >= room - ulp,
+            "abundant food fills the reserve to its room ({gain:?} ~ {room:?}), never past it"
+        );
+        // The eaten content is room * (body_mass * storage_density) / (assim * eta) = 30*300/0.4 = 22500.
+        assert_eq!(
+            eaten,
+            room.checked_mul(body_mass.checked_mul(storage_density).unwrap())
+                .unwrap()
+                .checked_div(assim.checked_mul(eta).unwrap())
+                .unwrap(),
+            "the content eaten is the physical amount whose assimilated value fills the room"
+        );
+        // Round-trip: the gain from the eaten content is the physical conversion, not a fabricated number.
+        assert_eq!(
+            gain,
+            eaten
+                .checked_mul(assim.checked_mul(eta).unwrap())
+                .unwrap()
+                .checked_div(body_mass.checked_mul(storage_density).unwrap())
+                .unwrap(),
+            "gain = eaten * assim * eta / (body_mass * storage_density): the drain's own reserve bridge"
+        );
+
+        // Scarce food: the being eats all that is available and gains proportionally less than a full room.
+        let scarce = Fixed::from_int(300); // worth 300 * 0.4 / 300 = 0.4 reserve amount
+        let (eaten_s, gain_s) =
+            physical_intake(scarce, assim, eta, body_mass, storage_density, room);
+        assert_eq!(
+            eaten_s, scarce,
+            "when food is scarce the being eats all of it"
+        );
+        assert!(
+            gain_s < room && gain_s > Fixed::ZERO,
+            "a scarce bite fills the reserve partway"
+        );
+
+        // A being that stores none of the class (no reserve of that kind) or cannot digest it eats nothing.
+        assert_eq!(
+            physical_intake(plenty, assim, eta, body_mass, Fixed::ZERO, room),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a body that stores none of the class has no reserve of that kind and eats none"
+        );
+        assert_eq!(
+            physical_intake(plenty, Fixed::ZERO, eta, body_mass, storage_density, room),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a non-digester of the class gains nothing"
+        );
+        assert_eq!(
+            physical_intake(plenty, assim, eta, body_mass, storage_density, Fixed::ZERO),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a full reserve draws nothing"
+        );
+    }
+
     fn temperament() -> Temperament {
         Temperament {
             boldness: Fixed::from_ratio(1, 2),
@@ -601,6 +823,34 @@ mod tests {
             composition: TissueComposition::from_pairs(&[(ENERGY_DENSITY, Fixed::ONE)]),
         });
         (reg, skin, flesh, fat)
+    }
+
+    #[test]
+    fn the_food_energy_density_reconciliation_keeps_forage_intake_in_the_survivable_regime() {
+        // Regression guard for R-UNITS-PIN (the end-of-arc audit flagged the "world thrives" proof as a manual
+        // eyeball of a non-canonical example, with NO test protecting the calibration): the forage
+        // reconciliation `food_energy_density` must keep a foraging being's per-tick intake gain a MEANINGFUL
+        // fraction of its reserve room, not the near-zero gain the un-reconciled physical bridge gives (the
+        // body_mass * storage_density denominator is ~1500x the raw standing-food supply, the mismatch that
+        // starved the world before the reconciliation). If the scale regresses out of the survivable regime,
+        // this fails, so a silent change to the dev value can no longer pass CI unnoticed. This is a unit-level
+        // guard; a scenario-level cohort-survival test is the follow-on (OWNER_DECISIONS_LOG item 6).
+        let food_ed = crate::locomotion::LocomotionParams::dev_default().food_energy_density;
+        let assim = Fixed::ONE;
+        let eta = Fixed::from_ratio(1, 2);
+        let body_mass = Fixed::from_int(60); // a representative body mass (kg)
+        let storage_density = Fixed::from_int(25); // a representative tissue energy density
+        let supply = Fixed::from_ratio(1, 2); // a plausible standing-food supply the forager reads off the field
+        let room = Fixed::ONE; // a drained unit reserve
+        let content = supply.checked_mul(food_ed).unwrap();
+        let (_eaten, gain) = physical_intake(content, assim, eta, body_mass, storage_density, room);
+        // The reconciled gain fills at least a quarter of the drained reserve in one forage tick (survivable);
+        // at food_ed = 1 (un-reconciled) the gain is ~1e-4 * room and this guard trips.
+        assert!(
+            gain >= room.checked_div(Fixed::from_int(4)).unwrap(),
+            "the reconciled forage intake gain {gain:?} must fill a survivable fraction of the reserve room \
+             {room:?}; a regression of food_energy_density out of the survivable regime trips this guard"
+        );
     }
 
     #[test]

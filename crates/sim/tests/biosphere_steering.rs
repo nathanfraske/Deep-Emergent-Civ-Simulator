@@ -90,7 +90,7 @@ fn species(layer: u16, body_plan: BodyPlan, draws_on: Vec<SourceRef>) -> Species
             optimum: vec![Fixed::from_ratio(1, 2); 4],
             breadth: vec![Fixed::from_ratio(3, 10); 4],
         },
-        body_plan,
+        body_plan: Some(body_plan),
         draws_on,
         pool: GenePool::new(SchemeId(0), 100, vec![Fixed::from_ratio(1, 2); 8]),
         extinct: false,

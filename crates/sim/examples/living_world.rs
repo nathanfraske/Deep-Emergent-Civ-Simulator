@@ -50,7 +50,12 @@ fn main() {
         .unwrap_or(0x11FE);
 
     let params = GenesisParams::dev_default();
-    let world = genesis(seed, &params);
+    let world = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
 
     println!(
         "seed 0x{seed:X}  world {}x{}  regions {}  species {} (alive {})  living-world hash {:032x}",

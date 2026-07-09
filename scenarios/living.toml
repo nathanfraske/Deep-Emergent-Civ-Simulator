@@ -1,0 +1,31 @@
+# Living: the opt-in scenario for the HONEST living world. Run with
+# `cargo run --release --example run_world -- --scenario living`. The founders are plain dev_grazer grazers
+# (no oilseed hybrid, no discovery loop) foraging the REAL biosphere's producer occupants for their own
+# physics-derived food value, and they are steered by a RECURRENT controller pre-adapted at the dawn.
+#
+# The world: the run grows the living biosphere (genesis) over its own map, so real producer plants stand
+# on their niche cells and their own composition seeds the food field a founder forages (Arc 5 T3,
+# set_producer_food, filled by the edibility grounding's physical_intake). Drinkable water pools in the
+# hydrology basins while producers grow on their niche slopes, so food and water are SEPARATED in space.
+# Surviving that means PRIORITISING whichever reserve is scarcer right now, a deficit-times-direction
+# product a linear reaction norm cannot express. So the founders carry a recurrent controller, and it is
+# pre-adapted once at the dawn by evolving it against the food-versus-water viability challenge on the
+# founders' own dev_grazer physiology (the run's own emergent selection, run up front so a naive population
+# is not starved of thirst before selection can act).
+#
+# The emergence line holds: the behaviour is NOT authored. The dawn bootstrap scores VIABILITY only (total
+# reserve maintained), and HOW to keep the reserves up (which way to go when, whether to shuttle between
+# food and water) emerges from the evolved network and selection. No forage rule, no predator/prey tag, no
+# authored food value: a plant's food value is its own physics-derived composition. Survival is reported
+# plainly (population trajectory and cause of death), never tuned to force it. The living-hunt (a being-
+# perception percept and the identity-blind strike) is the owner-gated follow-on, not armed here.
+
+[scenario]
+id = "living"
+name = "Living"
+summary = "The honest living world: dev_grazer founders foraging the real biosphere's producer plants for their own physics-derived food value, steered by a recurrent controller pre-adapted at the dawn so they can prioritise the scarcer of spatially-separated food and water. No oilseed, no authored behaviour, no authored food value; survival is reported plainly, never tuned."
+grounding = "real"
+
+[races]
+count = "several"    # a handful of founding peoples, enough for drift and divergence to run
+diversity = "low"    # a calm world to watch the recurrent grazers persist on real plants, not a stressed one

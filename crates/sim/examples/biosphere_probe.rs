@@ -33,7 +33,12 @@ fn main() {
     };
     params.profile = WorldProfile::magical();
 
-    let world = genesis(seed, &params);
+    let world = genesis(
+        seed,
+        &params,
+        &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+        None,
+    );
     let reg = BodyPlanRegistry::dev_default();
 
     println!(
@@ -73,7 +78,10 @@ fn main() {
             }
             let label = trophic_label(&map, id);
             *labels.entry(label).or_default() += 1;
-            let bp = &sp.body_plan;
+            let bp = sp
+                .body_plan
+                .as_ref()
+                .expect("biosphere_probe runs a catalog-tier world");
             let weapons: Vec<&str> = bp
                 .weapons
                 .iter()

@@ -49,10 +49,10 @@ use civsim_sim::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::conviction_experience::FeltConvictionCalib;
 use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
-use civsim_sim::environ::{AbioticField, AbioticSourceRegistry};
 use civsim_sim::genesis::{genesis, GenesisParams};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, CRAFT, DIG,
@@ -71,11 +71,12 @@ use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
-    append_controller_block, append_scalar_channel, build_dawn_runner, forage_taxis_weights,
-    nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
-    BreedingSystemRegistry, Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples,
-    Direction, DominanceKind, DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing,
-    ForageGains, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
+    append_controller_block, append_scalar_channel, build_dawn_runner, controller_gene_set,
+    evolve_forage_controller, forage_taxis_weights, nsm_gloss, Articulation, Axiom, AxiomAxisId,
+    BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel,
+    Controller, ControllerLayout, ControllerParamId, Curve, DawnPeoples, Direction, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, EvolveParams, ForageGains,
+    GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs,
     LanguageGenesis, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
     SchemeId, SourceModeId, ToleranceAxisId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
     World,
@@ -136,6 +137,70 @@ const TAXIS_INGEST_DRIVE: Fixed = Fixed::ONE;
 /// the salt tolerance a naive-to-halophile founding pool spans; reserved as `tolerance.salinity_baseline`).
 /// Selection near a salt flat and mutation carry the heritable adaptation from here.
 const TOLERANCE_SEED_EFFECT: Fixed = Fixed::ONE;
+
+// --- the living-world scenario (`--scenario living`): honest grazers on the real biosphere, foraging real
+// producer food, steered by a RECURRENT controller pre-adapted at the dawn. The recurrent net is the
+// general nonlinear substrate the spatially-structured world needs: food and water pool in different places
+// (producers on niche slopes, drinkable water in hydrology basins), so a being must PRIORITISE whichever
+// reserve is scarcer now (a deficit-times-direction product a LINEAR reaction norm cannot express, proven in
+// the ISOLATED fixture in `crates/sim/src/evolve.rs`). Labelled DEV FIXTURES; the behaviour is NOT authored:
+// the pre-adaptation is selection in a SYNTHETIC food-vs-water PROXY fixture (viability the only score) run
+// once up front as a WARM START, not the real world's own emergent selection. Whether that warm start
+// TRANSFERS to the real run is an open honest question the scenario measures (it does not, robustly, yet:
+// see the run-matched-bootstrap seam in HANDOFFS/TODOS). ---
+
+/// DEV FIXTURE: the recurrent controller's hidden width for the living scenario. Basis: the smallest hidden
+/// state that expresses the conditional (deficit-gated) foraging the food-vs-water trap needs, proven at
+/// this width by the crux falsifiers (`a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_
+/// better_than_a_linear_one`, `the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology`). Reserved
+/// as `behavior.controller_hidden` for a canonical build; here a labelled fixture.
+const LIVING_HIDDEN: usize = 4;
+/// DEV FIXTURE: the dawn-bootstrap population size, generations, and per-episode ticks. The pre-adaptation
+/// budget the grazer-transfer falsifier validated (evolved health far above random on held-out food-vs-water
+/// at the founders' own `dev_grazer` physiology). Larger than the crux wiring check so the transfer holds;
+/// reserved as `behavior.selection_pop_size`/`selection_generations`/`episode_ticks` for a canonical build.
+const LIVING_BOOTSTRAP_POP: usize = 40;
+const LIVING_BOOTSTRAP_GENS: u32 = 36;
+const LIVING_BOOTSTRAP_TICKS: u32 = 400;
+/// A distinct salt for the dawn-bootstrap RNG stream, so the pre-adaptation search is its own deterministic
+/// stream keyed off the run seed rather than colliding with a founder-genesis draw at counter zero.
+const LIVING_BOOTSTRAP_SALT: u64 = 0xB007_57A2_0000_0001;
+
+/// Whether the `living` scenario uses the RECURRENT dawn-bootstrapped controller (the default) or, with
+/// `CIVSIM_LIVING_LINEAR` set, the LINEAR base-liveliness forage controller. A dev A/B lever to compare the
+/// two representations on the IDENTICAL real biosphere run (the isolated fixture proved the recurrent one
+/// higher, but the transfer to the real run is the honest test). Not owner canon; the recurrent path is the
+/// intended one.
+fn living_recurrent() -> bool {
+    std::env::var("CIVSIM_LIVING_LINEAR").is_err()
+}
+
+/// The dawn forage bootstrap for the living scenario: evolve a RECURRENT forage controller against the
+/// food-versus-water viability challenge on the founders' OWN `dev_grazer` physiology (so the pre-adaptation
+/// transfers to the reserves they will carry), express the fittest genome against `layout`, and return its
+/// weight vector as controller-block seeds (`ControllerParamId(k)` -> the evolved weight `k`). Seeding a
+/// founder pool with these makes founders enter the run PRE-ADAPTED to keep multiple spatially-separated
+/// reserves up, escaping the chicken-and-egg that starves a naive population of thirst before selection can
+/// act. Nothing is authored: the physics scores viability and conditional foraging is what survives. The
+/// `layout` must be the no-percept recurrent grazer layout the run installs (so the weight indices align);
+/// a pure function of the seed. Run once per run (reads no race id, Principle 9), reused across races.
+fn recurrent_forage_seeds(layout: &ControllerLayout, seed: u64) -> Vec<(ControllerParamId, Fixed)> {
+    let reg = HomeostaticRegistry::dev_grazer();
+    let mut params = EvolveParams::dev_default();
+    params.pop_size = LIVING_BOOTSTRAP_POP;
+    params.generations = LIVING_BOOTSTRAP_GENS;
+    params.episode_ticks = LIVING_BOOTSTRAP_TICKS;
+    let genome = evolve_forage_controller(layout, &reg, &params, seed ^ LIVING_BOOTSTRAP_SALT);
+    let genes = controller_gene_set(layout);
+    let controller = Controller::express(&genes, &genome, layout);
+    controller
+        .weights()
+        .iter()
+        .enumerate()
+        .map(|(k, &w)| (ControllerParamId(k as u32), w))
+        .collect()
+}
+
 /// DEV FIXTURE: the per-locus per-generation structural mutation rate, opened off zero so the founding
 /// controller weights drift and the movement-dependent fitness a later step gives them has a heritable
 /// gradient to select on (basis: the reserved `genome.mutation_rates` baseline; small so it explores
@@ -177,6 +242,20 @@ fn env_variance() -> Fixed {
 /// (a founder would read a feature slot as its move bias and never forage), so this must carry the same
 /// percepts the run does.
 fn dawn_layout(cfg: &Config) -> ControllerLayout {
+    // The `living` scenario is the RECURRENT, NO-PERCEPT grazer layout: a positive hidden width (so the
+    // conditional foraging the food-vs-water trap needs can be expressed), the dev-grazer axes and default
+    // affordances, and NO percept block. The no-percept shape MUST match both the dawn-bootstrap scoring
+    // path (`evolve::reserve_conflict_survival` builds `ControllerLayout::new(reg, dev_default, hidden)`)
+    // and the run embodiment (`embodiment_genesis` installs an empty tolerance registry for living, so the
+    // rebuilt layout carries no feature block), or the evolved recurrent weights land in the wrong slots.
+    // Salt-sensing is a separable later percept bootstrap, so living defers the salinity percept.
+    if cfg.living && living_recurrent() {
+        return ControllerLayout::new(
+            &HomeostaticRegistry::dev_grazer(),
+            &AffordanceRegistry::dev_default(),
+            LIVING_HIDDEN,
+        );
+    }
     // The layout MUST match the registries the embodiment genesis installs, or the seeded forage weights
     // land in the wrong slots and the founders never forage. The viability embodiment adds the seed-energy
     // axis and the geophage affordance, so its layout is wider; sizing the forage seed against the default
@@ -239,6 +318,27 @@ struct Config {
     /// rather than only by lone re-discovery), and tool affordances. Implies `viability`; every other run
     /// leaves these dormant and byte-identical.
     full: bool,
+    /// Whether the `living` scenario is selected (`--scenario living`): the HONEST living world. Founders
+    /// are plain `dev_grazer` grazers (no oilseed hybrid, no discovery loop) foraging the REAL biosphere's
+    /// producer occupants for their real food value, steered by a RECURRENT controller pre-adapted at the
+    /// dawn so they can prioritise the scarcer of spatially-separated food and water. The biosphere, the
+    /// real-plant food field, the matter cycle, and corpse deposit are armed; the oilseed viability
+    /// machinery and the salinity percept are NOT (salt-sensing is a separable later percept bootstrap).
+    /// Distinct from `full` and does NOT imply `viability`; every other run stays byte-identical.
+    living: bool,
+    /// Whether biosphere CREATURES are spawned as living walker-agents (`--creatures`, Arc 7, requires
+    /// `--scenario full`): each consumer occupant rides the founder embodiment loop (perceive, forage,
+    /// metabolize, die) instead of being deposited as static tissue. Default off, so `--scenario full`
+    /// without it keeps the static-tissue path and its hash byte-identical.
+    creatures: bool,
+    /// Whether the EXPERIENTIAL-CONVICTION substrate is armed (`--convictions`, OWNER_DECISIONS_LOG R2/R4/R5):
+    /// each being's own felt experience (its net reserve swings) is folded into a per-conviction record and
+    /// MOVES the relevant conviction through the AGM kernel, direction by its per-race hedonic/ascetic epistemic
+    /// polarity. Composes with any scenario (it is the same dev world plus this one learner armed, my dev
+    /// recommendations set). Default off, so every existing run leaves convictions static (only the dawn seeds
+    /// them, nothing moves them) and stays byte-identical; armed, the reported per-band axiom-0 stance drifts as
+    /// each band's lived fortune bears on its convictions (the resent-the-provider / harden-under-hardship loop).
+    convictions: bool,
 }
 
 impl Config {
@@ -258,6 +358,8 @@ fn parse_config() -> Config {
     let mut bands: Option<usize> = None;
     let mut generations: Option<u64> = None;
     let mut scenario: Option<String> = None;
+    let mut creatures = false;
+    let mut convictions = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -267,6 +369,8 @@ fn parse_config() -> Config {
             "--bands" => bands = args.next().and_then(|v| v.parse().ok()),
             "--generations" => generations = args.next().and_then(|v| v.parse().ok()),
             "--scenario" => scenario = args.next(),
+            "--creatures" => creatures = true,
+            "--convictions" => convictions = true,
             "--help" | "-h" => {
                 eprintln!(
                     "usage: run_world --seed <u64> --races <n> --bands <n> --generations <n> \
@@ -328,9 +432,12 @@ fn parse_config() -> Config {
     // The dedicated `discovery`, `viability`, and `full` scenarios are the opt-ins that arm the ideation
     // loop; every other scenario and the baseline leave it unarmed (byte-identical), so the flags key off
     // the name. `full` is the viability world plus the held-off mechanisms, so it implies `viability`.
+    // `living` is a SEPARATE honest world (real biosphere + recurrent controller, no oilseed/discovery), so
+    // it does NOT imply `viability` or arm the ideation loop.
     let discovery = scenario.as_deref() == Some("discovery");
     let full = scenario.as_deref() == Some("full");
     let viability = scenario.as_deref() == Some("viability") || full;
+    let living = scenario.as_deref() == Some("living");
 
     Config {
         seed: seed.unwrap_or(1),
@@ -344,6 +451,9 @@ fn parse_config() -> Config {
         discovery,
         viability,
         full,
+        living,
+        creatures,
+        convictions,
     }
 }
 
@@ -355,7 +465,15 @@ fn parse_config() -> Config {
 /// differ), an innate belief stance pushed off the baseline, and a body plan (so each founder
 /// embodies as a located, thermoregulating body). Every value is a labelled fixture. The mechanism
 /// reads no race id: the races diverge only through this per-index data (Principle 9).
-fn full_race(index: usize, cfg: &Config) -> Race {
+///
+/// `living_seeds`, when present (the `living` scenario), are the pre-adapted RECURRENT forage weights from
+/// the dawn bootstrap ([`recurrent_forage_seeds`]), seeded onto the controller block INSTEAD of the linear
+/// forage taxis. Reads no race id: the same bootstrap seeds every race (Principle 9).
+fn full_race(
+    index: usize,
+    cfg: &Config,
+    living_seeds: Option<&[(ControllerParamId, Fixed)]>,
+) -> Race {
     let i = index as i64;
     let step = cfg.diversity_step;
 
@@ -415,37 +533,46 @@ fn full_race(index: usize, cfg: &Config) -> Race {
     freqs.push(Fixed::from_ratio(1, 2));
     effects.push(TOLERANCE_SEED_EFFECT);
 
-    // Base-level liveliness step 3: append the founding controller gene block seeding a FORAGE reaction
-    // norm over the dev-grazer registry, so a founder walks toward known food and water, stops on a source
-    // to ingest it, and steers along the temperature comfort gradient the runner senses (energy and water
-    // are the forage axes, temperature the steer axis; dev-default's MOVE is directional output 0, INGEST
-    // scalar output 3). The axis input bases come from the layout, so they follow the registry's data, not
-    // a magic constant. The full controller substrate is seeded (a gene per weight), with the taxis
-    // magnitudes carried in the pool additive spine; every other weight starts at zero and can mutate on.
-    // Reads no race id: the seeds are the same for every race (Principle 9).
+    // Base-level liveliness step 3: append the founding controller gene block. The `living` scenario seeds
+    // the pre-adapted RECURRENT forage weights from the dawn bootstrap (deficit-gated conditional foraging
+    // the linear norm cannot express); every other scenario seeds a LINEAR FORAGE reaction norm over the
+    // dev-grazer registry, so a founder walks toward known food and water, stops on a source to ingest it,
+    // and steers along the temperature comfort gradient the runner senses (energy and water are the forage
+    // axes, temperature the steer axis; dev-default's MOVE is directional output 0, INGEST scalar output 3).
+    // The axis input bases come from the layout, so they follow the registry's data, not a magic constant.
+    // The full controller substrate is seeded (a gene per weight); an unseeded weight starts at zero and can
+    // mutate on. Reads no race id: the seeds are the same for every race (Principle 9).
     let layout = dawn_layout(cfg);
-    let energy_base = layout
-        .axis_input_base(ENERGY)
-        .expect("the dev-grazer layout carries an energy axis");
-    let water_base = layout
-        .axis_input_base(WATER)
-        .expect("the dev-grazer layout carries a water axis");
-    let temp_base = layout
-        .axis_input_base(TEMPERATURE)
-        .expect("the dev-grazer layout carries a temperature axis");
-    let seeds = forage_taxis_weights(
-        &layout,
-        MOVE_OUTPUT,
-        INGEST_OUTPUT,
-        &[energy_base, water_base],
-        &[temp_base],
-        ForageGains {
-            move_bias: TAXIS_MOVE_BIAS,
-            here_suppress: TAXIS_HERE_SUPPRESS,
-            heading_gain: TAXIS_HEADING_GAIN,
-            ingest_drive: TAXIS_INGEST_DRIVE,
-        },
-    );
+    let seeds = match living_seeds {
+        // The pre-adapted recurrent controller: seed EVERY weight with its evolved value, so a founder
+        // expresses the whole dawn-bootstrapped network (not just the nonzero taxis weights the linear seed
+        // carries). The seeds were expressed against this same no-percept recurrent `layout`.
+        Some(s) => s.to_vec(),
+        None => {
+            let energy_base = layout
+                .axis_input_base(ENERGY)
+                .expect("the dev-grazer layout carries an energy axis");
+            let water_base = layout
+                .axis_input_base(WATER)
+                .expect("the dev-grazer layout carries a water axis");
+            let temp_base = layout
+                .axis_input_base(TEMPERATURE)
+                .expect("the dev-grazer layout carries a temperature axis");
+            forage_taxis_weights(
+                &layout,
+                MOVE_OUTPUT,
+                INGEST_OUTPUT,
+                &[energy_base, water_base],
+                &[temp_base],
+                ForageGains {
+                    move_bias: TAXIS_MOVE_BIAS,
+                    here_suppress: TAXIS_HERE_SUPPRESS,
+                    heading_gain: TAXIS_HEADING_GAIN,
+                    ingest_drive: TAXIS_INGEST_DRIVE,
+                },
+            )
+        }
+    };
     // SexualDiploid (below), so ploidy two.
     append_controller_block(
         &mut genes,
@@ -833,6 +960,17 @@ fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
             BodyPlanRegistry::dev_default(),
         )
     };
+    // The `living` scenario runs the RECURRENT controller (a positive hidden width, so deficit-gated
+    // conditional foraging can be expressed) with NO salinity percept, so the rebuilt embodiment layout is
+    // the no-percept recurrent grazer layout the dawn bootstrap and the founder seeds were sized against (an
+    // empty tolerance registry declares no percept, `PerceptRegistry::from_tolerances`). Salt-sensing is a
+    // separable later percept bootstrap. Every other scenario keeps the reaction-norm controller (hidden 0)
+    // and the salinity percept, so their layouts and hashes are unchanged.
+    let (tolerances, controller_hidden) = if cfg.living && living_recurrent() {
+        (ToleranceRegistry::default(), LIVING_HIDDEN)
+    } else {
+        (ToleranceRegistry::dev_salinity(), 0)
+    };
     EmbodimentGenesis {
         homeostatic,
         affordances,
@@ -840,8 +978,9 @@ fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
         organs,
         // The heritable salinity-tolerance class (base-level liveliness step 4), so a founder carries a
         // salt resistance expressed from its genome and a lineage near a salt flat adapts by selection.
-        tolerances: ToleranceRegistry::dev_salinity(),
-        controller_hidden: 0,
+        // Empty under `living` (the salinity percept is deferred there).
+        tolerances,
+        controller_hidden,
         submerged_medium_id: "medium.water".to_string(),
         emergent_medium_id: "medium.air".to_string(),
     }
@@ -852,9 +991,21 @@ fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
 /// lineages diverge in isolation), a language genesis and an embodiment genesis so both signals run
 /// live, and a mild raw-age mortality hazard so the population turns over and deaths are observable.
 fn assemble_peoples(cfg: &Config) -> DawnPeoples {
+    // The living scenario evolves the pre-adapted recurrent forage controller ONCE at the dawn (a pure
+    // function of the run seed, reading no race id, Principle 9) and reuses its weights to seed every race,
+    // so the founders enter the run pre-adapted to the food-vs-water trap. Every other scenario carries no
+    // bootstrap (the linear taxis seed is built per-race in `full_race`).
+    let living_seeds = if cfg.living && living_recurrent() {
+        Some(recurrent_forage_seeds(&dawn_layout(cfg), cfg.seed))
+    } else {
+        None
+    };
     let mut races = BTreeMap::new();
     for index in 0..cfg.races {
-        races.insert(RaceId(index as u32), full_race(index, cfg));
+        races.insert(
+            RaceId(index as u32),
+            full_race(index, cfg, living_seeds.as_deref()),
+        );
     }
 
     // Round-robin the bands across the races and place each at a distinct cell. When bands outnumber
@@ -1348,6 +1499,12 @@ fn snapshot(
         bands.len(),
         distinct_races.len(),
     );
+    // Arc 7: the LIVING biosphere-creature population, when creatures are armed (--creatures). A separate
+    // count from the founder people above, so the food web's lives are visible turning beside the peoples'.
+    let creatures = runner.creature_count();
+    if creatures > 0 {
+        println!("  living creatures {creatures} (Arc 7 biosphere agents that forage and die)");
+    }
 
     // Per-lineage counts, each band tagged with its founding race.
     let per_lineage: Vec<String> = bands
@@ -1683,11 +1840,12 @@ fn main() {
 
     let mut peoples = assemble_peoples(&cfg);
     // Grow the living biosphere sized to the run grid and seed it into the peoples (the biosphere-into-run
-    // arc, `--scenario full`). genesis is a pure function of the seed and builds the SAME map internally
-    // (TileMap::generate with cfg.seed over the same grid and dev-default biomes/worldgen), so its regions,
-    // occupants, and species land on the run's own coordinate space. Its PRODUCER occupants seed the food
-    // field in build_dawn_runner, so the founders forage over real located plants, not a uniform number.
-    if cfg.full {
+    // arc, `--scenario full` and `--scenario living`). genesis is a pure function of the seed and builds the
+    // SAME map internally (TileMap::generate with cfg.seed over the same grid and dev-default biomes/
+    // worldgen), so its regions, occupants, and species land on the run's own coordinate space. Its PRODUCER
+    // occupants seed the food field in build_dawn_runner, so the founders forage over real located plants,
+    // not a uniform number.
+    if cfg.full || cfg.living {
         let living = genesis(
             cfg.seed,
             &GenesisParams {
@@ -1695,6 +1853,10 @@ fn main() {
                 height: gh,
                 ..GenesisParams::dev_default()
             },
+            // The world's abiotic sources: the Earth-triad dev fixture (Arc 5 T1). An alien world declares
+            // its own; the run arms this same registry via worldbuild, so generation and run agree by data.
+            &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
+            None,
         );
         let producers = living.producer_biomass(Fixed::ONE);
         println!(
@@ -1755,6 +1917,18 @@ fn main() {
         for id in w.being_ids() {
             w.set_age(id, 20);
         }
+    }
+
+    // The experiential-conviction substrate (`--convictions`, OWNER_DECISIONS_LOG R2/R4/R5): arm the
+    // felt-conviction learner with the full RECORD-and-MOVE dev fixture, so each being's own felt experience
+    // (its net reserve swings, folded by `felt_salience`) records against the conviction it holds and MOVES it
+    // through the AGM kernel, by its per-race hedonic/ascetic epistemic polarity (hedonic by dev default). This
+    // is the ONE thing armed on top of the otherwise-identical dev world, so the reported per-band axiom-0
+    // stance, which every other run leaves STATIC (the dawn seeds it, enculturation is unarmed, so nothing
+    // moves it), now drifts as each band's lived fortune bears on its convictions. Opt-in and byte-identical
+    // when off.
+    if cfg.convictions {
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_with_move());
     }
 
     // Ideation activation slice 2 + viability arc slice C: the ARMED scenarios (`discovery`, `viability`)
@@ -1867,29 +2041,71 @@ fn main() {
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
-            // Arm the abiotic-source binding registry (the extract-deplete cycle): bind the dev world's
-            // evolved source ids to run fields as DATA (0 light -> flux, 1 water -> depletable stock, 2 soil
-            // nutrient -> depletable stock of class bio.organic_residue), never an id switch in the hot path;
-            // an alien world binds its own sources. The three conversions are labelled dev fixtures, RESERVED
-            // with basis (they graduate to the manifest): biomass_per_stock (biomass a unit of drawn stock
-            // supports, the reciprocal of the soil fertility_scale), draw_fraction (the nutrient the standing
-            // biomass sequesters per tick), weathering_rate (the physical rock-to-nutrient bootstrap seed).
-            let mut sources = AbioticSourceRegistry::default();
-            sources.insert(0, AbioticField::Light, false, ""); // light: a renewable flux, not depleted
-            sources.insert(1, AbioticField::Water, true, ""); // water: a finite stock, drawn down
-            sources.insert(2, AbioticField::Soil, true, "bio.organic_residue"); // soil nutrient: a stock
-            sources.biomass_per_stock = Fixed::from_int(4);
-            sources.draw_fraction = Fixed::from_ratio(1, 20);
-            sources.weathering_rate = Fixed::from_ratio(1, 100);
-            runner.set_abiotic_sources(sources);
+            // The abiotic-source binding registry (the extract-deplete cycle) is now armed by worldbuild from
+            // the SAME registry the biosphere was generated against (Arc 5 T1, `LivingWorld::abiotic`), so the
+            // ids the producers evolved to draw on and the run's bindings agree by data, not by a hand-written
+            // literal kept in sync by comment. Nothing to arm here.
             // Seed the biosphere CONSUMERS as located body matter (predation + the matter cycle): each animal
             // is its physics-derived body composition, eaten via the geophage by edibility and decomposed back
             // to soil, so the trophic web turns. No minted substance; content-addressed like a corpse.
             if let Some(living) = &peoples.biosphere {
-                let bodies = living.consumer_bodies(Fixed::ONE);
-                if let Some(emb) = runner.embodiment_mut() {
-                    for (coord, composition, volume) in bodies {
-                        emb.tissue_mut().deposit(coord, composition, volume);
+                if cfg.creatures {
+                    // Arc 7 (creatures-have-simpler-minds), first slice: spawn the biosphere CONSUMERS as
+                    // LIVING walker-agents instead of static tissue. Build the shared forage controller (the
+                    // general "seek what you lack" reaction norm, the SAME one the founders carry, over the
+                    // run's own reserve axes, so nothing per-species is authored) against the embodiment's OWN
+                    // layout, then hand it to the runner to assemble each consumer into a walker.
+                    if let Some(layout) = runner.embodiment_layout() {
+                        let energy_base = layout
+                            .axis_input_base(ENERGY)
+                            .expect("the layout carries an energy axis");
+                        let water_base = layout
+                            .axis_input_base(WATER)
+                            .expect("the layout carries a water axis");
+                        let temp_base = layout
+                            .axis_input_base(TEMPERATURE)
+                            .expect("the layout carries a temperature axis");
+                        let seeds = forage_taxis_weights(
+                            &layout,
+                            MOVE_OUTPUT,
+                            INGEST_OUTPUT,
+                            &[energy_base, water_base],
+                            &[temp_base],
+                            ForageGains {
+                                move_bias: TAXIS_MOVE_BIAS,
+                                here_suppress: TAXIS_HERE_SUPPRESS,
+                                heading_gain: TAXIS_HEADING_GAIN,
+                                ingest_drive: TAXIS_INGEST_DRIVE,
+                            },
+                        );
+                        let mut genes = Vec::new();
+                        let mut freqs = Vec::new();
+                        let mut effects = Vec::new();
+                        append_controller_block(
+                            &mut genes,
+                            &mut freqs,
+                            &mut effects,
+                            2,
+                            layout.weight_count(),
+                            &seeds,
+                        );
+                        let ctrl_genes = controller_gene_set(&layout);
+                        let ctrl_pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
+                            .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+                        let n = runner.spawn_creatures(living, &ctrl_genes, &ctrl_pool, 2);
+                        println!(
+                            "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
+                             now: {}); they perceive, forage, metabolize, and die on the same loop as the \
+                             founders; behaviour selection awaits the reproduction slice",
+                            runner.creature_count()
+                        );
+                    }
+                } else {
+                    let bodies = living.consumer_bodies(Fixed::ONE);
+                    if let Some(emb) = runner.embodiment_mut() {
+                        for (coord, composition, volume) in bodies {
+                            emb.tissue_mut().deposit(coord, composition, volume);
+                        }
                     }
                 }
             }
@@ -1907,6 +2123,42 @@ fn main() {
                  flesh becomes located matter that decomposes back to soil nutrient), social learning \
                  (nutrition learning, observe-and-imitate, granular beliefs), and tool affordances. A \
                  discovered technique can now spread by watching a knower and outlive its discoverer.\n"
+            );
+        }
+    }
+
+    // The `living` scenario: the HONEST living world. The biosphere is grown and its producer biomass,
+    // sources, and abiotic-source registry are already armed by build_dawn_runner (the biosphere Option was
+    // Some). `living` does NOT enter the `armed()`/`full` block above, so it arms here the ecology pieces
+    // that block would (the SAME pre-existing dev fixtures `full` uses) PLUS the one piece `full` left
+    // owner-gated:
+    //   (1) REAL-PLANT FOOD (the piece `full` left owner-gated): seed the food field from each producer
+    //       occupant's OWN physics-derived composition (Arc 5 T3, `set_producer_food`), so a founder's INGEST
+    //       fills its energy reserve by the plant's real content through `physiology::physical_intake` (the
+    //       edibility grounding), not by a uniform climate number. The edibility grounding superseded the
+    //       food-VALUE calibration that gated it, so it is armed here and its effect on survival is REPORTED
+    //       by the snapshots (population trajectory + cause of death), never tuned to force survival.
+    //   (2) the MATTER CYCLE + DECOMPOSER, so a dead being's flesh decomposes back to soil nutrient and the
+    //       producers' draw is replenished; and (3) CORPSE deposit, so a death leaves real located matter.
+    // Not armed: the oilseed viability machinery, the discovery loop, and (for this first milestone) social
+    // learning and tools; the milestone is whether the recurrent grazers persist on real plants.
+    if cfg.living {
+        if let Some(living) = &peoples.biosphere {
+            let comps = living.producer_compositions();
+            if let Some(env) = runner.environ_mut() {
+                env.set_producer_food(&comps);
+            }
+            runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
+            runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
+            runner.set_corpse_matter(true);
+            println!(
+                "  LIVING SCENARIO ARMED (opt-in): honest dev_grazer founders (no oilseed hybrid), steered \
+                 by a RECURRENT controller pre-adapted at the dawn (hidden width {LIVING_HIDDEN}; bootstrap \
+                 pop {LIVING_BOOTSTRAP_POP} x {LIVING_BOOTSTRAP_GENS} gens x {LIVING_BOOTSTRAP_TICKS} ticks, \
+                 viability the only score), foraging {} real producer occupants for their own physics-derived \
+                 food value; matter cycle + decomposer + corpse deposit armed. Survival is REPORTED \
+                 below (population trajectory + cause of death), never tuned to force it.\n",
+                comps.len(),
             );
         }
     }

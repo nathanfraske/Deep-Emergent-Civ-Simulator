@@ -220,14 +220,14 @@ impl MediumField {
                 let tile = map
                     .tile(Coord3::new(x, y, 0))
                     .expect("every in-bounds cell has a tile");
-                let sample = if tile.elevation < submersion_elevation {
+                let sample = if tile.elevation() < submersion_elevation {
                     submerged
                 } else {
                     emergent
                 };
                 respirable.push(sample.respirable);
                 density.push(sample.density);
-                temperature.push(tile.temperature);
+                temperature.push(tile.temperature());
             }
         }
         MediumField::new(w, h, respirable, density, temperature)
@@ -732,7 +732,7 @@ mod tests {
         let (mut lo, mut hi) = (Fixed::from_int(2), Fixed::ZERO - Fixed::from_int(2));
         for y in 0..topo.height {
             for x in 0..topo.width {
-                let e = map.tile(Coord3::new(x, y, 0)).unwrap().elevation;
+                let e = map.tile(Coord3::new(x, y, 0)).unwrap().elevation();
                 lo = lo.min(e);
                 hi = hi.max(e);
             }
@@ -747,7 +747,7 @@ mod tests {
         let mut saw_air = false;
         for y in 0..topo.height {
             for x in 0..topo.width {
-                let elev = map.tile(Coord3::new(x, y, 0)).unwrap().elevation;
+                let elev = map.tile(Coord3::new(x, y, 0)).unwrap().elevation();
                 let (expect_respirable, expect_density) = if elev < submersion {
                     saw_water = true;
                     (water().respirable, water().density)
@@ -759,7 +759,7 @@ mod tests {
                 assert_eq!(field.density_at(x, y), expect_density);
                 assert_eq!(
                     field.temperature_at(x, y),
-                    map.tile(Coord3::new(x, y, 0)).unwrap().temperature,
+                    map.tile(Coord3::new(x, y, 0)).unwrap().temperature(),
                     "the cell's temperature is the map tile's worldgen temperature"
                 );
             }

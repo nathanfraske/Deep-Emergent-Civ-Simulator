@@ -43,7 +43,7 @@
 //! hash-changing slice. The geometry-to-value mapping grounds each axis in the floor's own range, but the
 //! per-axis sub-ranges a segment uses are labelled dev fixtures until the floor registry supplies them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityRefs, CapabilityVector, FunctionLawId,
@@ -355,6 +355,51 @@ impl Structure {
         self.composition_mean("bio.energy_density")
     }
 
+    /// The whole-body composition VECTOR of a grown body (Arc 6): the per-axis composition the matter cycle
+    /// and edibility read, generalizing [`Structure::composition_mean`] across every axis the grown tissue
+    /// carries, exactly as [`crate::physiology::whole_body_composition_vector`] generalizes
+    /// `whole_body_energy_density`/`body_density` over a catalog organ set. The axis union is taken over every
+    /// segment's material map; per axis the value is the mean over the segments that CARRY it (value above
+    /// zero), the plain mean because every grown segment shares the same development weight (so the
+    /// development-weighted mean the catalog path uses reduces to it here). An axis no segment carries is
+    /// absent (the absence convention), so a grown body with no metabolic energy or no water simply omits
+    /// those axes rather than reading a Terran default, which lets a silicon or mana-fed body be a data row.
+    /// The number of segments the grown body bears (Arc 6), a coarse size read for a reduced-fidelity
+    /// description of a grown species (which has no named parts).
+    pub fn segment_count(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn whole_body_composition_vector(&self) -> BTreeMap<String, Fixed> {
+        let mut axes: BTreeSet<&str> = BTreeSet::new();
+        for seg in &self.segments {
+            for key in seg.material.keys() {
+                axes.insert(key.as_str());
+            }
+        }
+        let mut vector: BTreeMap<String, Fixed> = BTreeMap::new();
+        for axis in axes {
+            let mut sum = Fixed::ZERO;
+            let mut count = 0i32;
+            for seg in &self.segments {
+                let v = seg.mat(axis);
+                if v > Fixed::ZERO {
+                    sum = sum.saturating_add(v);
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                let mean = sum
+                    .checked_div(Fixed::from_int(count))
+                    .unwrap_or(Fixed::ZERO);
+                if mean > Fixed::ZERO {
+                    vector.insert(axis.to_string(), mean);
+                }
+            }
+        }
+        vector
+    }
+
     /// The best locomotor limb the structure bears: the greatest LOCOMOTE capability any segment reads and
     /// that segment's leg length (`mech.arm_length`), the two the grown-limb ground speed
     /// ([`crate::locomotion::locomotion_speed_structure`]) reads. A structure whose every segment reads zero
@@ -456,18 +501,40 @@ pub fn express_program(program: &MorphogenProgram, genes: &GeneSet, genome: &Gen
 
 /// A founder gene set for a morphogen program: one unit-weight locus per growth parameter, feeding
 /// [`Channel::Morphogen`], mirroring [`crate::evolve::controller_gene_set`]. A founder pool built over
-/// this evolves the body's shape exactly as the controller weights evolve.
+/// this evolves the body's shape exactly as the controller weights evolve. The morphogen block sits at the
+/// FRONT of the gene set (no prefix loci); use [`morphogen_gene_set_with_prefix`] when the pool carries other
+/// loci ahead of the morphogen block.
 pub fn morphogen_gene_set(program: &MorphogenProgram) -> GeneSet {
-    let genes = (0..program.param_count())
-        .map(|k| GeneDef {
+    morphogen_gene_set_with_prefix(0, program)
+}
+
+/// A morphogen gene set whose parameter loci sit AFTER `prefix_loci` other loci (Arc 6): the gene set is
+/// `prefix_loci` no-effect placeholder genes followed by one unit-weight [`Channel::Morphogen`] gene per
+/// growth parameter. Because [`GeneSet::express`] indexes alleles by Vec POSITION (not gene id), a pool that
+/// carries niche or other bookkeeping loci before its morphogen block must express through this prefixed set
+/// so each parameter reads its OWN locus; the placeholder genes carry no channel effect, so express skips
+/// them and they contribute nothing. This is the index-alignment fix the biosphere generator (whose species
+/// pool carries `p.loci` niche loci ahead of the morphogen block) needs to avoid silently reading the wrong
+/// locus for every parameter.
+pub fn morphogen_gene_set_with_prefix(prefix_loci: usize, program: &MorphogenProgram) -> GeneSet {
+    let mut genes: Vec<GeneDef> = Vec::with_capacity(prefix_loci + program.param_count());
+    for k in 0..prefix_loci {
+        genes.push(GeneDef {
             id: GeneId(k as u32),
+            effects: Vec::new(),
+            dominance: DominanceMode::additive(),
+        });
+    }
+    for k in 0..program.param_count() {
+        genes.push(GeneDef {
+            id: GeneId((prefix_loci + k) as u32),
             effects: vec![GeneEffect {
                 channel: Channel::Morphogen(MorphogenParamId(k as u32)),
                 weight: Fixed::ONE,
             }],
             dominance: DominanceMode::additive(),
-        })
-        .collect();
+        });
+    }
     GeneSet { genes }
 }
 

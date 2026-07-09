@@ -86,8 +86,11 @@ use crate::affordance_percept::{
     tool_capability, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
+use crate::axiom::AxiomAxisId;
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
+use crate::conviction_experience::FeltConvictionCalib;
+use crate::conviction_percept::ConvictionPerceptRegistry;
 use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
@@ -117,7 +120,7 @@ use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
-    derive_exertion_coupling, whole_body_composition_vector, MetabolicAnchors,
+    derive_exertion_coupling, felt_salience, whole_body_composition_vector, MetabolicAnchors,
 };
 use crate::planning::plan_chain;
 use crate::scenario::ScenarioResolution;
@@ -432,7 +435,7 @@ impl Field {
             for x in 0..w {
                 let t = map
                     .tile(Coord3::new(x, y, 0))
-                    .map(|t| t.temperature)
+                    .map(|t| t.temperature())
                     .expect("every in-bounds cell has a tile");
                 baseline.push(t);
             }
@@ -935,6 +938,17 @@ fn walker_exchange_rate(
 /// bands, and the locomotion RNG seed. The mechanism is fixed Rust; the controllers, the registries,
 /// the bands, and the parameters are data (Principle 11). The runner ticks this as a sub-phase after
 /// the field, and the embodiment never reaches back into the field beyond the coordinates it publishes.
+/// The high tag bit that marks a biosphere-CREATURE walker id (Arc 7). A founder mind id is minted small and
+/// sequential by the `World` registry, so setting this bit puts every creature id in a namespace PROVABLY
+/// disjoint from the founders (asserted at spawn). The lifecycle reconciliation reads it to tell a mind-less
+/// creature (retired when IT dies) apart from a founder body (retired when its MIND dies).
+pub const CREATURE_ID_TAG: u64 = 1 << 62;
+
+/// Whether a walker id belongs to a biosphere creature (Arc 7), by its high tag bit.
+pub fn is_creature(id: StableId) -> bool {
+    id.0 & CREATURE_ID_TAG != 0
+}
+
 pub struct Embodiment {
     walkers: Vec<Walker>,
     thermal: BTreeMap<StableId, BeingThermal>,
@@ -973,6 +987,18 @@ pub struct Embodiment {
     /// material block) to opt a world into sensing the substances underfoot (the spent-hull trace and its
     /// siblings). The membership is the material-floor's data, so a new sensible substance is a data edit.
     material_percepts: MaterialPerceptRegistry,
+    /// The CONVICTION-percept registry: which of a being's own conviction axes (axiom-axis stances) are
+    /// exposed to its behaviour controller as input channels (Prereq B for the learned
+    /// experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2). EMPTY by default, so the
+    /// controller layout carries no conviction block and every run hash is unchanged; the world-build installs
+    /// a non-empty registry ([`Embodiment::set_conviction_percepts`], which rebuilds the layout to feed the
+    /// conviction block) to opt a world into letting a being's convictions bias its embodied behaviour. When
+    /// non-empty, the runner writes each being's own STANCE on each exposed conviction axis (read from its
+    /// intrinsic beliefs) into the block each tick, and only a heritable weight lifted off founder-zero by
+    /// selection turns a conviction into a behaviour bias (Principle 8): whether and how a conviction sways
+    /// action EMERGES rather than being an authored conviction-to-action rule. The membership keys on the
+    /// axiom-axis id alone, never a named institution or religion (the Steering Audit bites here).
+    conviction_percepts: ConvictionPerceptRegistry,
     /// Whether the controller layout feeds the belief-derived ATTRACTION-direction input (the
     /// lifetime/demography keystone, pillar 2, trace slice C3). FALSE by default, so the layout carries no
     /// attraction block and every run hash is unchanged; the world-build opts in ([`Embodiment::set_attraction`],
@@ -1187,6 +1213,7 @@ impl Embodiment {
             tolerances: ToleranceRegistry::default(),
             percepts: PerceptRegistry::empty(),
             material_percepts: MaterialPerceptRegistry::empty(),
+            conviction_percepts: ConvictionPerceptRegistry::empty(),
             attraction: false,
             nutrition_learning: false,
             place_reward_learning: true,
@@ -1229,6 +1256,21 @@ impl Embodiment {
     /// emergent pattern the feature block established.
     pub fn set_material_percepts(&mut self, material_percepts: MaterialPerceptRegistry) {
         self.material_percepts = material_percepts;
+        self.rebuild_layout();
+    }
+
+    /// Install the CONVICTION-percept registry and REBUILD the controller layout to feed its conviction block
+    /// (Prereq B for the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2).
+    /// Set BEFORE the embodiment's beings are built, exactly like [`set_material_percepts`]: the beings'
+    /// controllers are expressed against [`Embodiment::layout`], so a conviction channel added after they exist
+    /// would leave their weight vectors the wrong length. With an empty registry this is a no-op that leaves the
+    /// layout and every run hash unchanged (opt-in). The new conviction weights a founder then expresses are
+    /// zero (unseeded channels), so a conviction moves no behaviour until selection lifts a weight off zero:
+    /// whether and how a conviction sways action EMERGES from selection over the evolved weight, never an
+    /// authored conviction-to-action rule (Principle 8, the emergent pattern the feature, appetitive, material,
+    /// and attraction blocks established). The registry keys on the axiom-axis id alone (the Steering Audit).
+    pub fn set_conviction_percepts(&mut self, conviction_percepts: ConvictionPerceptRegistry) {
+        self.conviction_percepts = conviction_percepts;
         self.rebuild_layout();
     }
 
@@ -1381,17 +1423,20 @@ impl Embodiment {
         self.affordance_refs = Some(refs);
     }
 
-    /// Rebuild the controller layout from the current percept registry and appetitive flag (both opt-in,
-    /// both feeding an input block the founder weights ignore until selection lifts them). Called by
-    /// [`set_percepts`] and [`set_appetitive`], so the two flags compose: setting one preserves the other.
+    /// Rebuild the controller layout from the current percept registry, appetitive flag, material percepts,
+    /// attraction flag, and conviction percepts (all opt-in, each feeding an input block the founder weights
+    /// ignore until selection lifts them). Called by [`set_percepts`], [`set_appetitive`],
+    /// [`set_material_percepts`], [`set_attraction`], and [`set_conviction_percepts`], so the flags compose:
+    /// setting one preserves the others.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_appetitive_material_and_attraction(
+        self.layout = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
             &self.homeo,
             &self.afford,
             &self.percepts,
             self.appetitive,
             &self.material_percepts,
             self.attraction,
+            &self.conviction_percepts,
             self.layout.hidden(),
         );
     }
@@ -2234,28 +2279,24 @@ impl Embodiment {
             if supply <= Fixed::ZERO {
                 continue; // neither the cell nor the being's inventory holds this substance
             }
-            let frac = laws::satisfaction(
-                supply,
-                w.physiology.assimilation(&substance),
-                w.physiology.requirement(&substance),
-            );
-            let cap = w.homeostasis.capacity(axis_id);
-            let room = cap - w.homeostasis.amount(axis_id);
-            let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
-            if target_gain <= Fixed::ZERO {
-                continue; // the reserve is full: draw nothing, deplete nothing
+            // R-PHYS-BIO edibility: the located matter the reserve is backed by (a mineral, a seed) DIRECTLY
+            // fills that reserve, so the being eats enough of it to fill the room and its reserve rises by the
+            // eaten amount assimilated (its own digestibility of the substance) and trophic-passed, not by a
+            // saturating satisfaction fill. A direct-fill reserve (the substance IS the reserve content) takes
+            // the unit bridge (`body_mass = storage_density = ONE`), so the gain is `eaten * assim * eta`
+            // bounded by room; alien-clean, keyed on the substance the reserve draws on, never a chemistry.
+            let assim = w.physiology.assimilation(&substance);
+            let room = w.homeostasis.capacity(axis_id) - w.homeostasis.amount(axis_id);
+            let (want, _) =
+                physiology::physical_intake(supply, assim, eta, Fixed::ONE, Fixed::ONE, room);
+            if want <= Fixed::ZERO {
+                continue; // the reserve is full or the being cannot digest this substance
             }
-            let gross = if eta > Fixed::ZERO {
-                target_gain.checked_div(eta).unwrap_or(target_gain)
-            } else {
-                target_gain
-            };
-            // Take the gross bite from the cell first, then from what the being carries, and deposit the
-            // assimilated part in the reserve (each field mutated on its own, conservation-honest as the
-            // forage ingest is): the cell loses what it held, the inventory the rest, and the being gains the
-            // total times the efficiency.
-            let from_cell = self.material.take(coord, &substance, gross);
-            let remaining = gross - from_cell;
+            // Take the wanted amount from the cell first, then from what the being carries (each field mutated
+            // on its own, conservation-honest as the forage ingest is), and gain the assimilated, trophic-
+            // passed part of what was ACTUALLY taken (the take may clamp to what is present).
+            let from_cell = self.material.take(coord, &substance, want);
+            let remaining = want - from_cell;
             let from_carried = if remaining > Fixed::ZERO {
                 match self.walkers.iter_mut().find(|w| w.id == walker_id) {
                     Some(w) => w.carried.take(&substance, remaining),
@@ -2265,7 +2306,16 @@ impl Embodiment {
                 Fixed::ZERO
             };
             let taken = from_cell + from_carried;
-            let gain = taken.checked_mul(eta).unwrap_or(taken);
+            let gain = taken
+                .checked_mul(assim)
+                .and_then(|x| {
+                    if eta > Fixed::ZERO {
+                        x.checked_mul(eta)
+                    } else {
+                        Some(x)
+                    }
+                })
+                .unwrap_or(taken);
             if let Some(w) = self.walkers.iter_mut().find(|w| w.id == walker_id) {
                 w.homeostasis.ingest(axis_id, gain);
             }
@@ -2883,6 +2933,16 @@ pub struct Runner {
     /// replays bit-for-bit. Armed via [`Runner::set_discovery`]; a proposal is sampled each tick from the
     /// being's binding graph, biased by its own reward beliefs, under the counter-keyed `HYPOTHESIZE` phase.
     discovery: Option<DiscoveryCalib>,
+    /// The FELT-CONVICTION learner's calibration (Branch 1 of the learned experience-to-conviction coupling,
+    /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), armed OPT-IN. `None` by default, so a runner with no
+    /// felt-conviction learner never snapshots reserves for it nor folds any felt experience into a being's
+    /// conviction-experience record, the record stays empty and folds nothing, and every existing scenario
+    /// replays bit-for-bit. Armed via [`Runner::set_felt_conviction_learning`]; each tick, after the embodiment
+    /// step, each being's own felt-experience summary ([`crate::physiology::felt_salience`] over its reserve
+    /// deltas) is folded into the accumulator of each conviction it holds (from its intrinsic beliefs),
+    /// weight-agnostically (it reads no behaviour weight, the R4 correction) and inertly (Branch 2 consumes the
+    /// record to move a conviction; Branch 1 only records).
+    felt_conviction_learning: Option<FeltConvictionCalib>,
     /// The graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture), armed
     /// OPT-IN. `None` by default, so a runner with no coupling installs no vigor into its world, the
     /// reproduce beat takes no eligibility draw, and every existing scenario and the crucible replay
@@ -2923,6 +2983,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -2974,6 +3035,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3038,6 +3100,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3125,6 +3188,7 @@ impl Runner {
             harm_learning: HarmLearningCalib::dev_default(),
             reward_learning: None,
             discovery: None,
+            felt_conviction_learning: None,
             reproductive_vigor: None,
         }
     }
@@ -3274,6 +3338,19 @@ impl Runner {
         self.reward_learning = Some(calib);
     }
 
+    /// Arm the FELT-CONVICTION learner (Branch 1 of the learned experience-to-conviction coupling,
+    /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4). OPT-IN: unarmed (the default), no being's reserves are
+    /// snapshotted for it and no felt experience is folded into any conviction-experience record, so the record
+    /// stays empty and the run is byte-identical; armed, each tick the runner snapshots each being's reserves
+    /// before the embodiment step and, after it, folds the being's own felt-experience summary
+    /// ([`crate::physiology::felt_salience`]) into the accumulator of each conviction it holds, decayed by the
+    /// reserved retention. Weight-agnostic (reads no behaviour weight, the R4 correction) and inert (records
+    /// only; Branch 2 consumes the record to move a conviction). Requires the world to carry the being's
+    /// intrinsic beliefs; a being with none records nothing.
+    pub fn set_felt_conviction_learning(&mut self, calib: FeltConvictionCalib) {
+        self.felt_conviction_learning = Some(calib);
+    }
+
     /// Arm the graded reproductive-vigor coupling (the viability-spread demonstration's dev fixture; the
     /// canonical coupling is reserved). OPT-IN: unarmed (the default), the runner installs no vigor into
     /// its world, the reproduce beat takes no eligibility draw, and the run is byte-identical; armed,
@@ -3300,6 +3377,14 @@ impl Runner {
     /// The environmental field stack, if armed (a pure read, for the field-state reader and tests).
     pub fn environ(&self) -> Option<&EnvironFields> {
         self.environ.as_ref().map(|(f, _)| f)
+    }
+
+    /// The environmental field stack for a post-build mutation of its producer occupants (a caller that
+    /// arms a scenario's real-plant food after the runner is built, e.g. the living-world harness writing
+    /// `set_producer_food` from the biosphere's own producer compositions). The calibration is left as
+    /// armed; only the field data is exposed. `None` when no environ is armed.
+    pub fn environ_mut(&mut self) -> Option<&mut EnvironFields> {
+        self.environ.as_mut().map(|(f, _)| f)
     }
 
     /// Place a being on the map at a coordinate with an initial body temperature.
@@ -3578,7 +3663,20 @@ impl Runner {
                                 .map(|p| p.medium.respirable_at(cell.x, cell.y))
                                 .unwrap_or(Fixed::ONE);
                             let life_stock = self.life_stock_at(*cell, substance);
-                            driver.activity_at(temperature, barrier, moisture, oxygen, life_stock)
+                            // The per-cell condition PROFILE (Arc 5 T6): the source-to-value slice a Conditions
+                            // row folds its world-declared axes against. The Terran runner supplies all three
+                            // (moisture, respirable, warmth-above-barrier), so a world arming the Earth triad
+                            // reads byte-identical to the pre-T6 kernel; a world declaring fewer or other axes
+                            // reads only what it declares.
+                            let profile = [
+                                (crate::decompose::ConditionSource::Moisture, moisture),
+                                (crate::decompose::ConditionSource::Respirable, oxygen),
+                                (
+                                    crate::decompose::ConditionSource::WarmthAboveBarrier,
+                                    crate::decompose::warmth_above_barrier(temperature, barrier),
+                                ),
+                            ];
+                            driver.activity_at(&profile, life_stock)
                         }
                         None => Fixed::ONE,
                     };
@@ -3865,6 +3963,10 @@ impl Runner {
             let _g = crate::profile::scope(crate::profile::P_BODY);
             self.phase_body_exchange();
         }
+        // Snapshot reserves for the felt-conviction learner BEFORE the embodiment step, so this tick's
+        // interoceptive delta is readable after it even when no other experiential learner triggers the
+        // embodiment-step snapshot (Branch 1; a no-op unless the learner is armed, matching the scheduled path).
+        self.snapshot_reserves_for_conviction();
         if self.embodiment.is_some() {
             let _g = crate::profile::scope(crate::profile::P_EMB);
             self.step_embodiment();
@@ -3874,6 +3976,13 @@ impl Runner {
         // the world coupling, matching the scheduled SYS_EMBODIMENT placement so both orders advance the
         // trace identically even for a world-less embodiment runner.
         self.advance_eligibility_traces();
+        // Fold each being's felt experience into its per-conviction association record (Branch 1), after the
+        // embodiment step so the reserve delta reflects this tick, matching the scheduled placement; inert and
+        // byte-identical unless the felt-conviction learner is armed.
+        self.fold_conviction_experience();
+        // Move each being's convictions under its accumulated felt experience (Branch 2), after the record is
+        // folded; a no-op unless the learner is armed WITH move parameters, so it is byte-identical otherwise.
+        self.apply_conviction_moves();
         {
             let _g = crate::profile::scope(crate::profile::P_WORLD);
             // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
@@ -3926,6 +4035,139 @@ impl Runner {
                             .record(step_belief_subject(&step, granular));
                     }
                 }
+            }
+        }
+    }
+
+    /// Snapshot each being's reserve levels BEFORE the embodiment step when the felt-conviction learner is
+    /// armed (Branch 1, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), so [`fold_conviction_experience`] can read
+    /// this tick's interoceptive delta even when no other experiential learner (the harm/reward percept and
+    /// eligibility signals that otherwise trigger the snapshot inside the embodiment step) is armed. A no-op
+    /// unless the learner is armed, so an opted-out run never snapshots and folds nothing (byte-identical);
+    /// idempotent with the embodiment-step snapshot (both record the same top-of-tick levels), so arming it
+    /// alongside the harm/reward learners changes no hash. Runs in canonical walker order, drawing no RNG.
+    fn snapshot_reserves_for_conviction(&mut self) {
+        if self.felt_conviction_learning.is_none() {
+            return;
+        }
+        if let Some(emb) = self.embodiment.as_mut() {
+            let homeo = &emb.homeo;
+            for w in emb.walkers.iter_mut() {
+                w.reserve_memory.snapshot(homeo, &w.homeostasis);
+            }
+        }
+    }
+
+    /// Fold each being's felt experience into its per-conviction association record (Branch 1 of the learned
+    /// experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4). After the embodiment
+    /// step (so the reserve deltas reflect this tick's metabolism and intake), each being's felt-experience
+    /// summary ([`crate::physiology::felt_salience`] over its OWN reserve deltas, keyed on no axis identity) is
+    /// folded into the accumulator of each conviction it currently holds (its intrinsic-belief axioms),
+    /// engagement-weighted by the conviction's strength and decayed by the reserved retention. Reads NO
+    /// behaviour weight (weight-agnostic, the R4 correction of the first-cut framing a blind panel caught) and
+    /// changes no conviction and no behaviour (inert; Branch 2 consumes the record). Only when the learner is
+    /// armed AND the world carries the being's intrinsic beliefs; unarmed or belief-less, the record stays empty
+    /// and folds nothing, so an opted-out run is byte-identical. Runs in canonical walker order, drawing no RNG,
+    /// so it replays and is worker-count invariant. Reads the world (intrinsic beliefs) and the embodiment
+    /// (walkers) through disjoint field borrows.
+    fn fold_conviction_experience(&mut self) {
+        let calib = match self.felt_conviction_learning {
+            Some(c) => c,
+            None => return,
+        };
+        let world = match self.world.as_ref() {
+            Some(w) => w,
+            None => return,
+        };
+        let emb = match self.embodiment.as_mut() {
+            Some(e) => e,
+            None => return,
+        };
+        // The homeostatic axis ids, read once so the walker loop's mutable borrow does not conflict with the
+        // registry read; the felt summary folds the being's own signed per-axis reserve deltas.
+        let axis_ids: Vec<crate::homeostasis::HomeostaticAxisId> =
+            emb.homeo.axes.iter().map(|a| a.id).collect();
+        for w in emb.walkers.iter_mut() {
+            if !w.alive {
+                continue;
+            }
+            let intr = match world.intrinsic_of(w.id) {
+                Some(i) => i,
+                None => continue,
+            };
+            if intr.axioms.is_empty() {
+                continue;
+            }
+            // The being's own felt-experience summary: fold its signed per-axis reserve deltas (the same
+            // interoceptive deltas the harm and reward learners read) into one (intensity, valence), keyed on no
+            // axis identity so an alien's reserves fold identically (Prereq A).
+            let felt = felt_salience(
+                axis_ids
+                    .iter()
+                    .map(|&axis| w.reserve_memory.delta(axis, &w.homeostasis)),
+            );
+            // The being's currently-held convictions as (axis, stance) pairs; the fold reads their strengths
+            // (|stance|) as the engagement weight and no behaviour weight at all.
+            let held: Vec<(AxiomAxisId, Fixed)> =
+                intr.axioms.iter().map(|a| (a.axis, a.stance)).collect();
+            w.conviction_experience.fold(felt, &held, calib.retention);
+        }
+    }
+
+    /// Move each being's convictions under its own accumulated felt experience (Branch 2, the credit-assignment
+    /// half of the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5). Runs
+    /// after [`fold_conviction_experience`] (so it consumes this tick's updated record) only when the learner is
+    /// armed WITH move parameters (the RECORD-only calib leaves this a no-op, so Branch 1 stays inert). For each
+    /// being that holds convictions and a nonzero per-race epistemic polarity, each held axiom is moved through
+    /// [`crate::axiom::Axiom::apply_felt_experience`]: the felt drive is `polarity * association` (the being's
+    /// pole-referenced felt record times its hedonic-or-ascetic disposition), the evidence points to the pole
+    /// `sign(drive)`, and the stance accommodates if the drive clears the reserved move gate (a flat dev
+    /// threshold today; the entrenchment-rank-scaled gate is the reserved refinement, see `apply_felt_experience`).
+    /// The move
+    /// is relabel-invariant (it reads no absolute pole meaning, R5) and its polarity is a per-race innate
+    /// disposition (P9-legal), so "felt hardship erodes the conviction" for a hedonic race and "validates it"
+    /// for an ascetic one, each an emergent per-race outcome. Reads the embodiment (each walker's record) and
+    /// mutates the world (the intrinsic beliefs) through disjoint field borrows, in canonical walker order,
+    /// drawing no RNG, so it replays and is worker-count invariant. Byte-identical unless a world opts into the
+    /// move leg.
+    fn apply_conviction_moves(&mut self) {
+        let move_params = match self.felt_conviction_learning.and_then(|c| c.move_params) {
+            Some(m) => m,
+            None => return,
+        };
+        let emb = match self.embodiment.as_ref() {
+            Some(e) => e,
+            None => return,
+        };
+        let world = match self.world.as_mut() {
+            Some(w) => w,
+            None => return,
+        };
+        for w in emb.walkers.iter() {
+            if !w.alive || w.conviction_experience.is_empty() {
+                continue;
+            }
+            let intr = match world.intrinsic_of_mut(w.id) {
+                Some(i) => i,
+                None => continue,
+            };
+            // The being's per-race epistemic polarity: zero means felt experience does not move its convictions
+            // (the honest default for a race that opts out); positive hedonic, negative ascetic.
+            let polarity = intr.epistemic.experiential_polarity;
+            if polarity == Fixed::ZERO {
+                continue;
+            }
+            for ax in intr.axioms.iter_mut() {
+                let association = w.conviction_experience.association(ax.axis);
+                if association == Fixed::ZERO {
+                    continue;
+                }
+                ax.apply_felt_experience(
+                    association,
+                    polarity,
+                    move_params.threshold,
+                    move_params.plasticity,
+                );
             }
         }
     }
@@ -4435,9 +4677,19 @@ impl Runner {
         sys.insert(SYS_FIELD, access(&[], &[RES_FIELD]));
         sys.insert(SYS_BODY, access(&[RES_FIELD, RES_INDEX], &[RES_BODY]));
         if self.embodiment.is_some() {
+            // RES_WORLD is declared here too because the embodiment phase now READS the world (the Branch-1
+            // felt-conviction fold reads each being's intrinsic beliefs, `fold_conviction_experience`) and
+            // WRITES it (the Branch-2 conviction move mutates the axiom stances, `apply_conviction_moves`),
+            // OWNER_DECISIONS_LOG R2/R5. This is redundant with the existing RES_BEING write-write conflict that
+            // already serializes SYS_EMBODIMENT before SYS_WORLD (the only other RES_WORLD toucher), so it adds
+            // no scheduling edge and the composite stays bit-identical; it keeps the access declaration honest so
+            // a future RES_WORLD-touching phase is serialized correctly rather than silently racing.
             sys.insert(
                 SYS_EMBODIMENT,
-                access(&[RES_FIELD], &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING]),
+                access(
+                    &[RES_FIELD, RES_WORLD],
+                    &[RES_FIELD, RES_BODY, RES_INDEX, RES_BEING, RES_WORLD],
+                ),
             );
         }
         if self.world.is_some() {
@@ -4456,6 +4708,9 @@ impl Runner {
         } else if sid == SYS_BODY {
             self.phase_body_exchange();
         } else if sid == SYS_EMBODIMENT {
+            // Snapshot reserves for the felt-conviction learner before the embodiment step, matching step_inner
+            // (Branch 1; a no-op unless armed), so the interoceptive delta is readable after the step.
+            self.snapshot_reserves_for_conviction();
             self.step_embodiment();
             // Recouple the hydrology to this tick's digging, exactly as step_inner does after
             // step_embodiment (material-substrate item 5): a pure fold touching only the environmental
@@ -4467,6 +4722,12 @@ impl Runner {
             // embodiment is) rather than inside SYS_WORLD keeps a world-less embodiment runner bit-identical
             // to the pinned order, closing the couple_conversation sibling of the vigor divergence at its root.
             self.advance_eligibility_traces();
+            // Fold each being's felt experience into its per-conviction record (Branch 1), after the embodiment
+            // step, matching step_inner; inert and byte-identical unless the felt-conviction learner is armed.
+            self.fold_conviction_experience();
+            // Move each being's convictions under its accumulated felt experience (Branch 2), matching
+            // step_inner; a no-op unless the learner is armed WITH move parameters (byte-identical otherwise).
+            self.apply_conviction_moves();
         } else if sid == SYS_WORLD {
             // The conversation-movement coupling and env belief source run here (base-level liveliness
             // step 5), after SYS_EMBODIMENT (serialized by the RES_BEING edge), exactly as step_inner runs
@@ -4705,6 +4966,48 @@ impl Runner {
                 .collect(),
             _ => BTreeMap::new(),
         };
+        // (0b''') Belief to percept, the CONVICTION stance (Prereq B for the learned experience-to-conviction
+        // coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2): each being's own STANCE on each exposed
+        // conviction axis, in the registry's canonical axis order, written into the controller's conviction
+        // input block so it senses "where do I stand on this conviction". Present only when the embodiment opts
+        // in (a non-empty `conviction_percepts` registry) and the world carries the being's intrinsic beliefs.
+        // A being that holds no axiom on an exposed axis reads zero on that channel (it takes no stance, a
+        // clean degrade), and the evolved conviction weights (founder-zero) must be lifted by selection before a
+        // stance moves the decision, so a conviction-biased behaviour EMERGES rather than being an authored
+        // conviction-to-action rule (Principle 8). Read before the mutable embodiment borrow, drawing no RNG,
+        // the exact discipline the appetitive and attraction percepts use.
+        let conviction: BTreeMap<StableId, Vec<Fixed>> = match self.embodiment.as_ref() {
+            Some(emb) if !emb.conviction_percepts.is_empty() => match self.world.as_ref() {
+                Some(world) => {
+                    let axes = emb.conviction_percepts.axes();
+                    // Parallel (arc 4): each entry is a pure read of the being's own intrinsic beliefs, keyed by
+                    // w.id and drawing no RNG; the filter_map collect into a BTreeMap is order-free, so it is
+                    // bit-identical at any thread count.
+                    emb.walkers
+                        .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
+                        .filter_map(|w| {
+                            let intr = world.intrinsic_of(w.id)?;
+                            // The being's own signed stance on each exposed conviction axis, in the registry's
+                            // canonical order; an axis it holds no axiom on reads zero (it takes no stance).
+                            let stances: Vec<Fixed> = axes
+                                .iter()
+                                .map(|&axis| {
+                                    intr.axioms
+                                        .iter()
+                                        .find(|a| a.axis == axis)
+                                        .map(|a| a.stance)
+                                        .unwrap_or(Fixed::ZERO)
+                                })
+                                .collect();
+                            Some((w.id, stances))
+                        })
+                        .collect()
+                }
+                None => BTreeMap::new(),
+            },
+            _ => BTreeMap::new(),
+        };
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -4857,6 +5160,17 @@ impl Runner {
                 },
                 None => return,
             };
+        // (0d) Physics to physiology, the INTAKE bridge (R-PHYS-BIO edibility measure): the being's metabolic
+        // anchors, so the forage INGEST can fill a reserve by the food's PHYSICAL content (converted through
+        // the being's own body mass and its storage density on the reserve's backing class, the same bridge
+        // the drain uses) rather than a saturating fill-to-capacity. `None` (no physiology) leaves the INGEST
+        // on the pre-grounding satisfaction measure. Alien-clean: the intake reads the being's OWN composition
+        // per backing class, never `bio.energy_density` (computed inside the INGEST from `organs` + `w.body`).
+        let intake_anchors: Option<MetabolicAnchors> = self
+            .embodiment
+            .as_ref()
+            .and_then(|e| e.physiology.as_ref())
+            .map(|p| p.anchors);
         let Some(emb) = self.embodiment.as_mut() else {
             return;
         };
@@ -4972,12 +5286,14 @@ impl Runner {
             &field_dirs,
             &field_signed,
             &drains,
+            intake_anchors,
             &emb.percepts,
             &emb.material_percepts,
             &emb.material,
             &load_factors,
             &appetitive,
             &attraction,
+            &conviction,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -5181,6 +5497,147 @@ impl Runner {
     /// (3) every newborn mind whose race carries a body plan and has no body yet is embodied, its body
     /// expressed from its race and genome as the dawn assembly expresses a founder. A mind whose race
     /// carries no body plan stays a bodiless mind (owner ruling 2026-07-04), so the pairing is optional.
+    /// The number of LIVING biosphere-creature walkers (Arc 7): embodiment walkers whose id carries the
+    /// creature tag and are still alive. Zero without an embodiment or when no creatures were spawned. A
+    /// pure read for observability (the creature population a viewer watches), never canonical state.
+    pub fn creature_count(&self) -> usize {
+        self.embodiment
+            .as_ref()
+            .map(|e| {
+                e.walkers
+                    .iter()
+                    .filter(|w| w.alive && is_creature(w.id))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    /// The shared controller layout the embodiment's walkers express against (Arc 7), if an embodiment is
+    /// installed. A creature's forage controller MUST be built against this exact layout (not a freshly
+    /// derived one) or it would express at the wrong width, landing its forage weights on the wrong inputs.
+    pub fn embodiment_layout(&self) -> Option<ControllerLayout> {
+        self.embodiment.as_ref().map(|e| e.layout.clone())
+    }
+
+    /// Arc 7 (creatures-have-simpler-minds), first slice: spawn every biosphere CONSUMER occupant of `living`
+    /// as a living [`Walker`] that rides the SAME embodiment loop the founders do (perceive, forage,
+    /// metabolize, die), instead of depositing it as static tissue. Each creature carries its species' body
+    /// (the catalog plan, or its Arc-6 grown [`Structure`] when the world grows bodies), reserves summed from
+    /// that body, the default physiology, and a lean genome-EXPRESSED forage controller drawn from the shared
+    /// `ctrl_pool`/`ctrl_genes` the caller built from the general "seek what you lack" reaction norm (Principle
+    /// 9: no per-species behaviour is authored, and the controller keys on the being's own reserve axes). Its
+    /// id is tagged into a namespace disjoint from the founders (asserted). Behaviour SELECTION is deferred to
+    /// the reproduction slice: a creature does not reproduce yet, so a poor forager dies without descendants.
+    /// Called only behind an opt-in flag, so a run that never calls it keeps the static-tissue path and its
+    /// hash. Returns the number of creatures spawned.
+    pub fn spawn_creatures(
+        &mut self,
+        living: &crate::genesis::LivingWorld,
+        ctrl_genes: &crate::genome::GeneSet,
+        ctrl_pool: &crate::genome::GenePool,
+        ploidy: usize,
+    ) -> usize {
+        use crate::biosphere::SourceRef;
+        let Some((homeo, organs, layout, seed, thermal)) = self.embodiment.as_ref().map(|e| {
+            (
+                e.homeo.clone(),
+                e.organs.clone(),
+                e.layout.clone(),
+                e.seed,
+                // Creatures are born into the same comfort band the founders carry (a shared physical band in
+                // the dev world), read off a representative founder; a default centres it if none exist yet.
+                e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                    setpoint: Fixed::ZERO,
+                    half_band: Fixed::ONE,
+                    initial_temp: Fixed::ZERO,
+                }),
+            )
+        }) else {
+            return 0;
+        };
+        let founders: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .map(|w| w.being_ids().into_iter().collect())
+            .unwrap_or_default();
+        // Build every creature walker in canonical occupant order (occupied() is Coord3-sorted, occupants()
+        // id-sorted), reading only the shared registries, so nothing borrows self mutably yet.
+        let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
+        for coord in living.occupants.occupied() {
+            for occ in living.occupants.occupants(coord) {
+                let Some(info) = living.occupant_info.get(&occ) else {
+                    continue;
+                };
+                let Some(rb) = living.regions.get(&info.region) else {
+                    continue;
+                };
+                let Some(species) = rb.biosphere.species.get(info.species) else {
+                    continue;
+                };
+                // A PRODUCER (draws on an abiotic source) is food, not an agent: only consumers become walkers.
+                if species
+                    .draws_on
+                    .iter()
+                    .any(|s| matches!(s, SourceRef::Abiotic(_)))
+                {
+                    continue;
+                }
+                // Body + reserves: the species' catalog plan, or its Arc-6 grown structure (fed by the world's
+                // grown-body context). A grown species without that context cannot be embodied; skip it.
+                let (body, homeostasis, structure) = match &species.body_plan {
+                    Some(plan) => (
+                        plan.clone(),
+                        crate::homeostasis::Homeostasis::new(&homeo, plan, &organs),
+                        None,
+                    ),
+                    None => {
+                        let Some(g) = living.grown.as_ref() else {
+                            continue;
+                        };
+                        let niche_loci =
+                            species.pool.loci().saturating_sub(g.program.param_count());
+                        let s = crate::biosphere::representative_structure(
+                            info.species,
+                            &species.pool,
+                            &g.program,
+                            niche_loci,
+                            g.ploidy,
+                            g.seed,
+                        );
+                        let h = crate::homeostasis::Homeostasis::from_structure(&homeo, &s);
+                        (s.digest(), h, Some(s))
+                    }
+                };
+                let cid = StableId(occ.id.0 | CREATURE_ID_TAG);
+                assert!(
+                    !founders.contains(&cid),
+                    "Arc 7: creature id {cid:?} collides with a founder mind id (disjoint-namespace invariant)"
+                );
+                let physiology = Physiology::dev_for_registry(&homeo);
+                let genome = ctrl_pool.promote(seed, cid.0, ploidy);
+                let controller = Controller::express(ctrl_genes, &genome, &layout);
+                let mut walker = Walker::new(cid, coord, body, homeostasis, physiology, controller);
+                if let Some(s) = structure {
+                    walker = walker.with_structure(s);
+                }
+                built.push((cid, coord, walker));
+            }
+        }
+        let count = built.len();
+        let placements: Vec<(StableId, Coord3)> =
+            built.iter().map(|(c, coord, _)| (*c, *coord)).collect();
+        if let Some(emb) = self.embodiment.as_mut() {
+            for (cid, _, walker) in built {
+                emb.thermal.insert(cid, thermal);
+                emb.walkers.push(walker);
+            }
+        }
+        for (cid, coord) in placements {
+            self.index.place(OccupantId::being(cid), coord);
+        }
+        count
+    }
+
     fn reconcile_lifecycle(&mut self) {
         if self.world.is_none() || self.embodiment.is_none() {
             return;
@@ -5204,7 +5661,11 @@ impl Runner {
             }
             let world = self.world.as_mut().unwrap();
             for (id, _) in &dead {
-                world.remove_being(*id);
+                // A biosphere creature (Arc 7) has no World mind to remove; its body is retired below by its
+                // own death. A founder death propagates to end its mind.
+                if !is_creature(*id) {
+                    world.remove_being(*id);
+                }
             }
         }
         // (2) Retire every body whose mind is gone from the world, in canonical id order.
@@ -5221,8 +5682,17 @@ impl Runner {
             .unwrap()
             .walkers
             .iter()
+            .filter(|w| {
+                if is_creature(w.id) {
+                    // A creature (Arc 7) has no backing World mind by design: retire it ONLY when it dies,
+                    // never for lacking a mind, or every LIVE creature would be culled each tick.
+                    !w.alive
+                } else {
+                    // A founder body follows its mind: retire it when the mind is gone from the world.
+                    !live_minds.contains(&w.id)
+                }
+            })
             .map(|w| w.id)
-            .filter(|id| !live_minds.contains(id))
             .collect();
         // (2') Corpse matter (biosphere directive 2, organisms as usable material stuff): before a retired
         // body leaves, if corpse matter is armed, deposit the being's OWN body as located tissue where it
@@ -5497,6 +5967,13 @@ impl Runner {
                 // leaves an opted-out run's hash unchanged.
                 if !w.eligibility_trace.is_empty() {
                     w.eligibility_trace.hash_into(&mut h);
+                }
+                // The conviction-experience record (Branch 1 of the learned experience-to-conviction coupling,
+                // OWNER_DECISIONS_LOG R2/R4): new per-being dynamic state, folded after the eligibility trace in
+                // canonical (axis, association) order. Empty for a being with no felt-conviction learner armed
+                // (never folded), so it folds nothing and leaves an opted-out run's hash unchanged.
+                if !w.conviction_experience.is_empty() {
+                    w.conviction_experience.hash_into(&mut h);
                 }
                 // The discovery proposal (ideation arc, piece 2, slice 2c): the candidate action the being is
                 // about to test, folded as its canonical sequence subject after the eligibility trace. `None`
@@ -9215,6 +9692,567 @@ values = [
             x_of(&runner, stayer),
             3,
             "the stayer, unable to act on the belief, stayed put (founder-zero attraction weight)"
+        );
+    }
+
+    #[test]
+    fn a_beings_conviction_biases_its_behaviour_only_through_an_evolved_conviction_weight() {
+        // Prereq B THREADING slice (the learned experience-to-conviction coupling,
+        // `docs/working/OWNER_DECISIONS_LOG.md` R2): the runner reads each being's own STANCE on the exposed
+        // conviction axis (from its intrinsic beliefs) and feeds it into the controller's conviction block each
+        // tick, so a conviction CAN bias embodied behaviour. Three beings share the IDENTICAL controller weight
+        // that routes the conviction stance to a MOVE heading; two hold OPPOSITE stances on the axis and steer
+        // in OPPOSITE directions (proving the stance itself is threaded and read, not a constant), while the
+        // third (a founder with a blank controller) does not move on its conviction at all. So whether and which
+        // way a conviction sways action rides on the stance times an EVOLVED weight, and a conviction-biased
+        // behaviour EMERGES (Principle 8): no authored conviction-to-action rule, only the stance and the weight.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_percept::ConvictionPerceptRegistry;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        // The exposed conviction axis: a bare id, its meaning the world's data (the Steering Audit bites here).
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // Two inert axes (no drain, no death floor): nothing competes with the conviction-driven heading and
+        // no being dies over the run, so the only thing steering is the conviction stance times its weight.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: CONDITION,
+                    name: "condition".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::from_int(30),
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // A being's intrinsic beliefs holding a single axiom on the exposed axis, at the given signed stance.
+        let beliefs = |stance: Fixed| IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 1,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            ),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([
+                (AccessChannelId(1), Fixed::from_int(4)),
+                (AccessChannelId(3), Fixed::from_int(2)),
+            ]),
+        );
+        let east_leaner = world.spawn(Fixed::ONE);
+        let west_leaner = world.spawn(Fixed::ONE);
+        let founder = world.spawn(Fixed::ONE);
+        world.set_place(east_leaner, 0);
+        world.set_place(west_leaner, 1);
+        world.set_place(founder, 2);
+        // The east-leaner holds a POSITIVE stance, the west-leaner the NEGATIVE mirror, the founder a positive
+        // stance it cannot act on (its blank controller ignores it). The dawn seeds intrinsic beliefs; here we
+        // set them directly so the leg under test is the threading, not the seeding.
+        world.set_intrinsic(east_leaner, beliefs(Fixed::ONE));
+        world.set_intrinsic(west_leaner, beliefs(Fixed::ZERO - Fixed::ONE));
+        world.set_intrinsic(founder, beliefs(Fixed::ONE));
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Arm the conviction percept BEFORE the controllers are expressed, so the grown layout carries the
+        // conviction block the leaners' weight targets (one channel for AXIS).
+        emb.set_conviction_percepts(ConvictionPerceptRegistry::from_axes(&[AXIS]));
+        let layout = emb.layout().clone();
+        assert_eq!(layout.n_conviction(), 1, "one exposed conviction channel");
+        // The leaner controller: it wants to move (MOVE act, output 0, from the bias) and routes its MOVE dx
+        // (output 1) from the conviction input, so its heading is +x scaled by its stance (a positive stance
+        // steers east, a negative one west). MOVE dy (output 2) stays zero. The reaction-norm weight for
+        // (output o, input i) sits at o * n_in + i (the attraction test's convention).
+        let cbase = layout.conviction_input_base();
+        let n_in = layout.n_in();
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[n_in - 1] = Fixed::ONE; // MOVE act (output 0) from the bias.
+        w[n_in + cbase] = Fixed::ONE; // MOVE dx (output 1) from the conviction stance input.
+        let leaner_ctrl =
+            || Controller::from_weights(n_in, layout.n_out(), layout.hidden(), w.clone());
+        let blank = Controller::zeros(&layout);
+
+        // All three start at x = 4, one row apart so they never share a cell, on an 8x8 uniform field.
+        emb.add(
+            Walker::new(
+                east_leaner,
+                Coord3::ground(4, 1),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                leaner_ctrl(),
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                west_leaner,
+                Coord3::ground(4, 3),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                leaner_ctrl(),
+            ),
+            band(),
+        );
+        emb.add(
+            Walker::new(
+                founder,
+                Coord3::ground(4, 5),
+                body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology(),
+                blank,
+            ),
+            band(),
+        );
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        for _ in 0..10 {
+            runner.step();
+        }
+
+        let x_of = |r: &Runner, id: StableId| -> i32 {
+            r.embodiment()
+                .unwrap()
+                .walkers()
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| w.coord().x)
+                .unwrap_or(-1)
+        };
+        // Same weight, opposite stances: the east-leaner steered EAST and the west-leaner WEST, so the stance
+        // itself is threaded and read (the direction follows the being's own conviction, not a constant).
+        assert!(
+            x_of(&runner, east_leaner) > 4,
+            "the east-leaner's positive conviction steered it east (x = {})",
+            x_of(&runner, east_leaner)
+        );
+        assert!(
+            x_of(&runner, west_leaner) < 4,
+            "the west-leaner's negative conviction steered it west (x = {})",
+            x_of(&runner, west_leaner)
+        );
+        // The founder holds a conviction too, but its blank controller cannot act on it, so it stays put: a
+        // conviction moves no behaviour until selection lifts a weight off zero (Principle 8, founder-inert).
+        assert_eq!(
+            x_of(&runner, founder),
+            4,
+            "the founder's conviction moves nothing (founder-zero conviction weight)"
+        );
+    }
+
+    #[test]
+    fn sustained_hardship_records_a_negative_conviction_experience_weight_agnostically_and_inertly()
+    {
+        // Branch 1 (correlation-record) of the learned experience-to-conviction coupling
+        // (`docs/working/OWNER_DECISIONS_LOG.md` R2/R4): a being that HOLDS a conviction and SUFFERS (its
+        // reserves fall tick after tick) accrues a NEGATIVE felt-experience association with that conviction,
+        // learned by correlation over its own life. Two properties the blind framing panel demanded, proven
+        // here: (a) WEIGHT-AGNOSTIC, no conviction percept is armed, so the conviction never touches the being's
+        // behaviour, yet the association still forms from the felt reserve swings alone (the R4 correction of
+        // the first-cut behaviour-weight-gated framing); (b) INERT, the conviction's own stance is UNCHANGED,
+        // Branch 1 only records (Branch 2 consumes the record to move a conviction). The felt signal is the
+        // being's own interoceptive delta (its draining energy), keyed on no axis identity.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_experience::FeltConvictionCalib;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // ENERGY drains a flat fraction each tick with no food to refill it, so the being's reserves fall and it
+        // feels sustained hardship (felt valence negative). TEMPERATURE is inert (no drain), so the net felt
+        // signal is the energy fall. A low death floor keeps it alive across the window.
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::from_ratio(1, 50),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let held_stance = Fixed::from_ratio(8, 10);
+        let beliefs = IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance: held_stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 1,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: held_stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            ),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([(AccessChannelId(1), Fixed::from_int(4))]),
+        );
+        let sufferer = world.spawn(Fixed::ONE);
+        world.set_place(sufferer, 0);
+        world.set_intrinsic(sufferer, beliefs);
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // NO conviction percept armed: the conviction never enters the controller, so the being's behaviour is
+        // wholly independent of it. If an association still forms, it did so weight-agnostically (the R4 fix).
+        let layout = emb.layout().clone();
+        emb.add(
+            Walker::new(
+                sufferer,
+                Coord3::ground(2, 2),
+                body,
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                naive_physiology,
+                Controller::zeros(&layout),
+            ),
+            band(),
+        );
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Arm the felt-conviction learner (Branch 1). No reward learner, no percepts: the ONLY experiential
+        // learner is the felt-conviction one, so it must drive its own reserve snapshot (the pre-step pass).
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_default());
+        for _ in 0..8 {
+            runner.step();
+        }
+
+        let emb_ref = runner.embodiment().unwrap();
+        let w = emb_ref
+            .walkers()
+            .iter()
+            .find(|w| w.id == sufferer)
+            .expect("the sufferer is still embodied");
+        // (a) A negative association accrued: sustained hardship while holding the conviction correlated the
+        // felt-negative valence with it, weight-agnostically (no percept, no behaviour coupling).
+        assert!(
+            w.conviction_experience.association(AXIS) < Fixed::ZERO,
+            "sustained hardship recorded a negative felt-experience association with the held conviction (got {:?})",
+            w.conviction_experience.association(AXIS)
+        );
+        // (b) Inert: the conviction's own stance is UNCHANGED. Branch 1 records; it does not move the conviction.
+        let stance_now = runner
+            .world()
+            .unwrap()
+            .intrinsic_of(sufferer)
+            .unwrap()
+            .axioms
+            .iter()
+            .find(|a| a.axis == AXIS)
+            .unwrap()
+            .stance;
+        assert_eq!(
+            stance_now, held_stance,
+            "Branch 1 is inert: the conviction stance is unchanged by the recording (Branch 2 moves it)"
+        );
+    }
+
+    #[test]
+    fn sustained_hardship_erodes_a_hedonic_beings_conviction_and_hardens_an_ascetic_ones() {
+        // Branch 2 (credit-assignment) of the learned experience-to-conviction coupling
+        // (`docs/working/OWNER_DECISIONS_LOG.md` R2/R5), the money shot: two beings hold the IDENTICAL positive
+        // conviction and suffer the IDENTICAL sustained hardship, and their convictions move in OPPOSITE
+        // directions purely because of their per-race EPISTEMIC POLARITY. The HEDONIC being (polarity +1, the
+        // default) is moved AWAY from the pole it suffered under: its faith erodes (the resent-the-provider
+        // outcome). The ASCETIC being (polarity -1) is moved TOWARD that pole: its felt hardship VALIDATES the
+        // conviction (the martyr / costly-signal mode). Neither direction is coded: the engine never reads which
+        // pole "means" what (the move is relabel-invariant), and which epistemology a being has is its race's
+        // own innate disposition. Same experience, opposite belief change, emergent from disposition.
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::axiom::{
+            Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
+        };
+        use crate::conviction_experience::FeltConvictionCalib;
+        use crate::edibility::Physiology;
+        use crate::evidence::InferenceParams;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
+        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::value::{ValueAxisId, ValueProfile};
+
+        const AXIS: AxiomAxisId = AxiomAxisId(0);
+        let held_stance = Fixed::from_ratio(8, 10);
+
+        let bp = InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::from_ratio(1, 50),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                },
+            ],
+        };
+        let body = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let naive_physiology = || Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: BTreeMap::new(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // Two beings, identical but for their race's experiential polarity: hedonic (+1) versus ascetic (-1).
+        let beliefs = |polarity: Fixed| IntrinsicBeliefs {
+            values: ValueProfile::with([(ValueAxisId(0), 1)]),
+            axioms: vec![Axiom {
+                axis: AXIS,
+                stance: held_stance,
+                strength: Fixed::from_ratio(1, 2),
+                confidence: Fixed::from_ratio(1, 2),
+                entrenchment: 0,
+                salience: Fixed::from_ratio(1, 2),
+                stubbornness: Fixed::from_ratio(1, 8),
+                innate_seed: held_stance,
+                evidence: EvidenceRing::new(3),
+            }],
+            epistemic: EpistemicStance::new(
+                [(SourceModeId(1), Fixed::ONE)],
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            )
+            .with_experiential_polarity(polarity),
+        };
+
+        let mut world = World::new(
+            bp,
+            bp,
+            AccessWeights::from_pairs([(AccessChannelId(1), Fixed::from_int(4))]),
+        );
+        let hedonic = world.spawn(Fixed::ONE);
+        let ascetic = world.spawn(Fixed::ONE);
+        world.set_place(hedonic, 0);
+        world.set_place(ascetic, 1);
+        world.set_intrinsic(hedonic, beliefs(Fixed::ONE));
+        world.set_intrinsic(ascetic, beliefs(Fixed::ZERO - Fixed::ONE));
+
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        let layout = emb.layout().clone();
+        for id in [hedonic, ascetic] {
+            emb.add(
+                Walker::new(
+                    id,
+                    Coord3::ground(2, 2 + id.0 as i32 % 4),
+                    body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    naive_physiology(),
+                    Controller::zeros(&layout),
+                ),
+                band(),
+            );
+        }
+
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Arm the felt-conviction learner WITH the move leg (Branch 1 + Branch 2).
+        runner.set_felt_conviction_learning(FeltConvictionCalib::dev_with_move());
+        for _ in 0..12 {
+            runner.step();
+        }
+
+        let stance_of = |r: &Runner, id: StableId| -> Fixed {
+            r.world()
+                .unwrap()
+                .intrinsic_of(id)
+                .unwrap()
+                .axioms
+                .iter()
+                .find(|a| a.axis == AXIS)
+                .unwrap()
+                .stance
+        };
+        let hedonic_now = stance_of(&runner, hedonic);
+        let ascetic_now = stance_of(&runner, ascetic);
+        assert!(
+            hedonic_now < held_stance,
+            "the hedonic being's conviction eroded under sustained hardship (from {held_stance:?} to {hedonic_now:?})"
+        );
+        assert!(
+            ascetic_now > held_stance,
+            "the ascetic being's conviction HARDENED under the same hardship (from {held_stance:?} to {ascetic_now:?})"
         );
     }
 

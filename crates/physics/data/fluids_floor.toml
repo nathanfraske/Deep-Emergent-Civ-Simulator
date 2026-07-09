@@ -143,6 +143,24 @@ range_lo = "0"
 range_hi = "0.01"
 real = "psychrometric saturation tables (saturation ~7.4 kPa at 40C); a resident moisture state sibling to therm.temperature"
 
+[[axis]]
+# Arc 5 T4: the floor identity for the terrain WETNESS field the worldgen carries and the biosphere niche and
+# decomposition read (crates/world worldgen `moisture`, previously unmoored fractal noise with NO floor axis).
+# NOT a reuse of fluid.vapor_pressure above: that is a partial PRESSURE in MPa (the vapour phase the water
+# cycle transports), a physically distinct quantity from this DIMENSIONLESS volumetric water-content fraction
+# (how wet the ground is). The two coexist as the water cycle's transport state (vapor_pressure) and its
+# stored state (moisture_content). range_hi is a physics-FLOOR authored bound (Principle 9), set with basis,
+# owner may refine: the saturation volumetric water content of soil.
+id = "fluid.moisture_content"
+measures = "volumetric water content of the ground, the dimensionless wetness fraction terrain and biosphere read"
+unit = "m^3/m^3"
+dimension = "0,0,0,0"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "0.5"
+real = "Hillel, Environmental Soil Physics: field capacity ~0.3 and saturation ~0.5 volumetric water content for a loam; a bone-dry soil reads 0, a saturated soil ~0.5; a world with a different solvent or no water declares its own wetness axis as data"
+
 # --- Respirable-medium axes (R-MEDIUM: the gas a body exchanges with the medium it sits in) ---
 
 [[axis]]

@@ -33,11 +33,12 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // axes, so it merges onto the mechanical floor and the whole revalidates.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
-    // 38 mechanical + 20 fluids axes; 20 + 18 laws; 2 + 2 substances (the three acoustic
-    // channel-physics axes and the acoustic_absorption and tube_resonance laws are the 2026-07-03 add).
+    // 38 mechanical + 21 fluids axes; 20 + 18 laws; 2 + 2 substances (the three acoustic
+    // channel-physics axes and the acoustic_absorption and tube_resonance laws are the 2026-07-03 add;
+    // fluid.moisture_content, the terrain-wetness floor identity, is the Arc 5 T4 add).
     assert_eq!(
         reg.axis_count(),
-        58,
+        59,
         "the mechanical and fluids axes together"
     );
     assert_eq!(reg.law_count(), 39, "the wave-1 and wave-2 fluid laws");

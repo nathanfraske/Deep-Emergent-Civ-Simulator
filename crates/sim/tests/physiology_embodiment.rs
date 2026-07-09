@@ -3562,7 +3562,7 @@ fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_run
     // then tips it below its lowest neighbour and into a basin, so the dig is the sole cause of the flip (a
     // clean causal separation, robust to the generated elevation). The margin is read from the exposed tile
     // elevations, so the test picks a cell a realistic scoop can clear.
-    let elev = |x: i32, y: i32| map.tile(Coord3::ground(x, y)).unwrap().elevation;
+    let elev = |x: i32, y: i32| map.tile(Coord3::ground(x, y)).unwrap().elevation();
     let margin = |x: i32, y: i32| -> Option<Fixed> {
         let here = elev(x, y);
         let low = [
