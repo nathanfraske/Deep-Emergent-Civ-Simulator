@@ -39,6 +39,7 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 use civsim_physics::laws::{self, DiscriminationLaw, ResponseLaw};
 
+use crate::percept::PerceptId;
 use crate::sensorium::SenseChannelId;
 
 /// One channel's transduction as the being's OWN data: the response law and its parameters, the
@@ -245,6 +246,70 @@ pub fn reserve_nonoptical_transduction() -> Result<ChannelTransduction, Transduc
     Err(TransductionUnbuilt)
 }
 
+// --- Segment 4: binding the substance-class percept vocabulary to the sensorium's channels (condition 4) ---
+
+/// The binding from a perceivable feature (a [`crate::percept::PerceptId`], the biology-floor substance
+/// class a being senses) to the sense [`SenseChannelId`] a being perceives it through. This reconciles the
+/// two vocabularies the perception substrate carries: the percept subsystem keys features by a substance
+/// class string, the sensorium keys perception by an opaque channel id, and this map joins them so a
+/// feature's magnitude can be gated through the being's transduction on the channel that senses it.
+/// Data-defined and extensible (Principle 11): which channel senses which class is the world's data (a
+/// scent class binds a chemical channel, a warmth class a thermal channel), never a hardcode. EMPTY by
+/// default, so a world that declares no bindings routes no feature through a channel.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PerceptChannelBinding {
+    channels: BTreeMap<PerceptId, SenseChannelId>,
+}
+
+impl PerceptChannelBinding {
+    /// An empty binding: no feature is bound to a channel.
+    pub fn empty() -> PerceptChannelBinding {
+        PerceptChannelBinding {
+            channels: BTreeMap::new(),
+        }
+    }
+
+    /// Bind a feature to the channel a being perceives it through (or replace an existing binding).
+    pub fn bind(&mut self, feature: PerceptId, channel: SenseChannelId) {
+        self.channels.insert(feature, channel);
+    }
+
+    /// The channel a feature is perceived through, if one is bound (else the feature routes through no
+    /// channel and is not sensed by the sensorium-gated path).
+    pub fn channel_of(&self, feature: PerceptId) -> Option<SenseChannelId> {
+        self.channels.get(&feature).copied()
+    }
+
+    /// Iterate the bindings in canonical (ascending feature id) order.
+    pub fn iter(&self) -> impl Iterator<Item = (&PerceptId, &SenseChannelId)> {
+        self.channels.iter()
+    }
+
+    /// Whether no feature is bound to a channel.
+    pub fn is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+}
+
+/// Perceive a feature's magnitude through the being's sensorium: look up the sense channel the feature is
+/// bound to, then form the sensorium-gated percept on that channel through the being's own transduction
+/// ([`perceive`]). `None` if the feature is bound to no channel (a world that does not route the feature
+/// through a sense), or the being does not sense that channel, or the signal is sub-threshold. Pure and off
+/// the run path (no live caller): the being-percept keystone consumes it, so byte-neutral by construction.
+/// This is the join that lets the substance-class percept vocabulary reach the sensorium's per-channel
+/// transduction without either subsystem hardcoding the other's keys.
+pub fn perceive_feature(
+    binding: &PerceptChannelBinding,
+    registry: &TransductionRegistry,
+    feature: PerceptId,
+    magnitude: Fixed,
+    activation_max: Fixed,
+    default_open: Option<&ChannelTransduction>,
+) -> Option<MagnitudePercept> {
+    let channel = binding.channel_of(feature)?;
+    perceive(registry, channel, magnitude, activation_max, default_open)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,5 +484,66 @@ mod tests {
         // Condition 2: a non-optical channel has no anatomy derivation and its placeholder optical index
         // must not be borrowed, so it is reserved fail-loud rather than fabricated.
         assert_eq!(reserve_nonoptical_transduction(), Err(TransductionUnbuilt));
+    }
+
+    // --- Segment 4: the percept-class-to-channel binding ---
+
+    const FEATURE: PerceptId = PerceptId(7);
+    const UNBOUND: PerceptId = PerceptId(9);
+
+    #[test]
+    fn a_feature_routes_through_its_bound_channel_to_the_sensorium() {
+        // The join: a substance-class feature's magnitude reaches the sensorium's per-channel transduction
+        // through the binding, so a being perceives the feature only if it senses the bound channel.
+        let cap = Fixed::from_int(1_000_000);
+        let mut binding = PerceptChannelBinding::empty();
+        binding.bind(FEATURE, CH);
+        let mut reg = TransductionRegistry::empty();
+        reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
+
+        let p = perceive_feature(&binding, &reg, FEATURE, Fixed::from_int(5), cap, None)
+            .expect("the feature is bound to a sensed channel");
+        // The percept is exactly what perceiving the magnitude on the bound channel gives.
+        let direct = perceive(&reg, CH, Fixed::from_int(5), cap, None).unwrap();
+        assert_eq!(p, direct);
+    }
+
+    #[test]
+    fn an_unbound_feature_is_not_sensed() {
+        // A feature bound to no channel routes through no sense (a world that does not wire the feature to
+        // a channel), so no percept forms even if the being senses every channel.
+        let cap = Fixed::from_int(1_000_000);
+        let mut binding = PerceptChannelBinding::empty();
+        binding.bind(FEATURE, CH);
+        let mut reg = TransductionRegistry::empty();
+        reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
+        assert!(
+            perceive_feature(&binding, &reg, UNBOUND, Fixed::from_int(5), cap, None).is_none(),
+            "a feature bound to no channel is not sensed"
+        );
+    }
+
+    #[test]
+    fn a_feature_bound_to_an_unsensed_channel_forms_no_percept() {
+        // The feature is bound, but the being does not sense that channel (its registry lacks it and is
+        // non-empty), so the sensorium gate stops it.
+        let cap = Fixed::from_int(1_000_000);
+        let mut binding = PerceptChannelBinding::empty();
+        binding.bind(FEATURE, OTHER);
+        let mut reg = TransductionRegistry::empty();
+        reg.insert(CH, linear(Fixed::ONE, Fixed::ZERO, Fixed::ONE));
+        assert!(
+            perceive_feature(&binding, &reg, FEATURE, Fixed::from_int(5), cap, None).is_none(),
+            "a feature bound to a channel the being does not sense forms no percept"
+        );
+    }
+
+    #[test]
+    fn the_binding_walks_in_canonical_feature_id_order() {
+        let mut binding = PerceptChannelBinding::empty();
+        binding.bind(UNBOUND, CH);
+        binding.bind(FEATURE, OTHER);
+        let ids: Vec<u16> = binding.iter().map(|(f, _)| f.0).collect();
+        assert_eq!(ids, vec![7, 9], "canonical ascending feature id order");
     }
 }
