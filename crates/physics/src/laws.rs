@@ -1547,6 +1547,49 @@ pub fn inverse_square_falloff(
     }
 }
 
+/// General geometric spreading `E = power / (sphere_coeff * distance^(D-1))`, the
+/// dimensionality-parameterized form of a stimulus's geometric spatial reach. A point source's
+/// intensity spreads over the surface of a `(D-1)`-sphere of radius `distance` in `D`-dimensional
+/// space, whose area is `sphere_coeff * distance^(D-1)`; `sphere_coeff` is the `(D-1)`-sphere surface
+/// coefficient the caller supplies (`4*pi` for a 3D bulk, `2*pi` for a 2D surface, the duct coefficient
+/// for a 1D line). At `dimensionality == 3` with `sphere_coeff == 4*pi` this reproduces
+/// [`inverse_square_falloff`] exactly (byte-identical: the same `distance^2` and the same divide); at
+/// `dimensionality == 2` it is `1/distance`; at `dimensionality == 1` the exponent is zero, so there is
+/// no radial spreading (a duct). The dimensionality DERIVES from the geometry of the space the signal
+/// traverses and is never an authored per-channel constant (the reach-substrate value-authoring rule).
+/// A source so distant that the staged product overflows is negligible (zero); a source at zero
+/// distance, or any zero denominator, reads the cap.
+pub fn geometric_spread(
+    power: Fixed,
+    distance: Fixed,
+    dimensionality: u32,
+    sphere_coeff: Fixed,
+    irrad_max: Fixed,
+) -> Fixed {
+    // distance^(D-1): the signal spreads over the surface of a (D-1)-sphere of radius = distance. The
+    // staged multiply carries the same overflow-to-zero discipline as inverse_square_falloff, so a
+    // distant source is negligible rather than wrapping. At D = 3 this yields distance^2 exactly, so
+    // the divide below matches inverse_square_falloff bit for bit.
+    let mut spread = Fixed::ONE;
+    for _ in 0..dimensionality.saturating_sub(1) {
+        spread = match spread.checked_mul(distance) {
+            Some(x) => x,
+            None => return ZERO,
+        };
+    }
+    let denom = match sphere_coeff.checked_mul(spread) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    if denom == ZERO {
+        return irrad_max;
+    }
+    match power.checked_div(denom) {
+        Some(e) => e.min(irrad_max),
+        None => irrad_max,
+    }
+}
+
 /// Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
 /// bounded fraction of the incident so no overflow forms; the absorbed is the residual (R+T+A=1),
 /// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
@@ -2069,6 +2112,68 @@ mod tests {
 
     fn cap(v: i32) -> Fixed {
         Fixed::from_int(v)
+    }
+
+    // --- Reach: geometric spreading ---
+
+    #[test]
+    fn geometric_spread_reproduces_inverse_square_at_dimension_three() {
+        // The exact 4*pi is immaterial to the identity (both kernels receive the same coefficient);
+        // a realistic value keeps the fixture honest. 62832/5000 = 12.5664, four pi to four places.
+        let four_pi = Fixed::from_ratio(62_832, 5_000);
+        let irrad_max = cap(1_000_000);
+        for &p in &[
+            Fixed::from_int(1),
+            Fixed::from_int(100),
+            Fixed::from_ratio(1, 2),
+        ] {
+            for &r in &[Fixed::from_int(1), Fixed::from_int(5), Fixed::from_int(37)] {
+                assert_eq!(
+                    geometric_spread(p, r, 3, four_pi, irrad_max),
+                    inverse_square_falloff(p, r, four_pi, irrad_max),
+                    "geometric_spread at D=3 must be byte-identical to inverse_square_falloff",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn geometric_spread_is_one_over_r_in_2d_and_flat_in_1d() {
+        let two_pi = Fixed::from_ratio(31_416, 5_000);
+        let irrad_max = cap(1_000_000);
+        let p = Fixed::from_int(100);
+        let r = Fixed::from_int(4);
+        // 2D surface: E = P / (2*pi*r), the 1/r geometric spreading.
+        let denom_2d = two_pi.checked_mul(r).unwrap();
+        assert_eq!(
+            geometric_spread(p, r, 2, two_pi, irrad_max),
+            p.checked_div(denom_2d).unwrap().min(irrad_max),
+        );
+        // 1D duct: the exponent is zero, so there is no radial spreading; the value does not fall off
+        // with distance.
+        let line_coeff = Fixed::from_int(2);
+        let near = geometric_spread(p, r, 1, line_coeff, irrad_max);
+        let far = geometric_spread(p, Fixed::from_int(400), 1, line_coeff, irrad_max);
+        assert_eq!(near, p.checked_div(line_coeff).unwrap().min(irrad_max));
+        assert_eq!(near, far, "a 1D duct does not attenuate with distance");
+    }
+
+    #[test]
+    fn geometric_spread_caps_at_zero_distance_and_vanishes_when_distant() {
+        let four_pi = Fixed::from_ratio(62_832, 5_000);
+        let irrad_max = cap(1_000_000);
+        let p = Fixed::from_int(100);
+        // Zero distance: the denominator is zero, so the read is the cap.
+        assert_eq!(
+            geometric_spread(p, Fixed::ZERO, 3, four_pi, irrad_max),
+            irrad_max,
+        );
+        // A source far enough that distance^2 overflows the representable product is negligible (zero),
+        // the same overflow-to-zero behaviour as inverse_square_falloff.
+        assert_eq!(
+            geometric_spread(p, Fixed::from_int(100_000), 3, four_pi, irrad_max),
+            Fixed::ZERO,
+        );
     }
 
     // --- Biology ---
