@@ -10,6 +10,12 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Nightly full suite: the slow evolutionary-selection tests are excluded from the per-PR lane by a
+  # nextest filterset (NOT #[ignore], so the unimplemented Stage-N placeholders stay untouched) and
+  # run in full here. workflow_dispatch allows a manual run to validate the lane.
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
 
 jobs:
   verify-docs:
@@ -35,14 +41,59 @@ jobs:
 
   rust:
     name: build, format, lint, test
+    # The per-PR lane skips the nightly schedule (nightly-full covers it more thoroughly there).
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      # The slow evolutionary-selection tests (nextest flagged them >60s, one >9min); excluded from
+      # the per-PR lane by this filterset and run in full in nightly-full. Excluded by NAME, never
+      # #[ignore]d, so the #[ignore]d unimplemented Stage-N placeholder tests are never swept in.
+      SLOW_TESTS: "test(a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one) | test(the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology) | test(bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor) | test(a_recurrent_controller_graduates_the_plumbing_and_evolves) | test(behaviour_evolves_under_homeostatic_selection) | test(the_evolved_best_follows_the_water_percept_in_every_direction)"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show
+      # Cache the cargo registry and target dir across runs. The dominant CI cost was a
+      # cold full-workspace recompile on every push (clippy --all-targets, then the test
+      # build); warm cache skips most of it.
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # nextest parallelises tests across one global pool (faster than cargo's
+      # per-binary-sequential run) and emits a SLOW marker for any test over 60s, so the
+      # slow tests are visible in the log and can be trimmed. It does not run doctests, so
+      # those run separately below.
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - name: Test (per-PR lane; the slow evolutionary tests run in nightly-full)
+        run: cargo nextest run --workspace -E "not ($SLOW_TESTS)"
+      - name: Doctests
+        run: cargo test --workspace --doc
+
+  nightly-full:
+    name: nightly full test suite (incl. slow tests)
+    # Runs on the nightly schedule and on a manual dispatch, never on a push/PR, so the expensive
+    # evolutionary-selection proofs still gate daily without sitting on the per-PR critical path.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned toolchain
         run: rustup show
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      # The full suite: all non-ignored tests INCLUDING the slow evolutionary tests the PR lane
+      # filters out. The #[ignore]d Stage-N placeholders stay ignored (never run, not faked).
+      - name: Full test suite (incl. the slow evolutionary tests)
+        run: cargo nextest run --workspace
+      - name: Doctests
+        run: cargo test --workspace --doc
