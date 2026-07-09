@@ -7,9 +7,39 @@ to proceed, and log it here. Only a truly owner-only or hard-to-reverse decision
 place to review what happened overnight and what still needs your ruling. Newest entries at the top of each
 section.
 
+## 2026-07-09 (standing mediator/manager directive): current effort held items and awareness
+
+The owner designated me mediator/manager for their absence (loop every piece to bedrock, HOLD genuine
+owner-blockers with basis, keep building the unblocked substrate, sequence the agents). The Mirror sign-off
+below is RESOLVED (owner signed off batches 1-3, applied, Arc 2 merged as #108). Current effort: the
+perception-substrate arc (Agent A, #109), the affordance/composition substrate (Agent B, #111), and the
+AbioticField field-kind registry (Agent C, my recommendation, owner-approved). Held and awareness items:
+
+- **Floor growth (awareness, not a blocker).** The perception substrate is adding TWO parameterized floor
+  laws: the general dimensionality-spreading law (slice 1, subsumes the hardcoded inverse-square) and the
+  transduction-response family (slice 2, a monotone response law: linear, Fechner-log, Stevens-power, Weber).
+  Both are Principle-9-legal (physics and psychophysics are authored floor inputs), grounded in real science,
+  parameterized-and-derived (per-being parameters derive from genome and anatomy via `GeneSet::express`, or
+  reserve fail-loud where the anatomy-to-sense transduction is not built), and byte-neutral (dead substrate
+  until the keystone). I RULED both as derive-first engineering, not owner decisions. Flagging the PATTERN of
+  floor additions for your eyes: confirm the derive-first-floor-law approach, or rule that floor additions
+  should route to you.
+- **Reserved-with-basis values accumulating (standard discipline, your set on return).** Non-optical sense
+  transduction parameters (fail-loud, basis: the per-channel anatomy-to-sense transduction, never the borrowed
+  `opt.refractive_index`); the acoustic absorption axis (the floor carries none; the reach dev row uses the
+  optical axis as a labelled stand-in, flagged); the confinement substrate (sets D below 3 for surface/duct
+  signals); the affordance transduction parameters and discrimination law. Each surfaced with basis, none
+  fabricated.
+- **The 3-agent expansion (owner-approved).** Agent C on the AbioticField field-kind registry (open the closed
+  `{Light,Water,Soil}` enum at `environ.rs:325` into a data registry; unblocks chemosynthesis, geothermal/redox,
+  mana). Disjoint from A (perception) and B (affordance); I gate and sequence it.
+- **Prior reversible rulings (on the PR record and the recap).** The reach-wire general-spreading-law adoption
+  (fork a), the affordance and composition fork (b) splits: all derive-first engineering rulings under the
+  standing gate. Reversible; confirm or override on review.
+
 ## Owner-only calls still waiting (need your ruling)
 
-- **Mirror dial-set sign-off (the gate) — READY.** The agent completed the Earth-1:1 calibration: 34
+- **Mirror dial-set sign-off (the gate): READY (RESOLVED, signed off, Arc 2 merged as #108).** The agent completed the Earth-1:1 calibration: 34
   derive-audited values set (each with `set_by` + basis + source + a why-not-derivable clause), the temperature
   seam closed, all four run_world pins holding, 950 sim tests green (manifest 90 set / 131 reserved). Mirror is
   the one owner-GATED world and I have NOT treated it canonical. Your morning actions:
@@ -68,7 +98,7 @@ section.
   `burn_scale` reserved, build the tissue-tolerance substrate in Arc 4) stands overnight; I did NOT override
   it. But the agent's re-triage (verified) now assesses `thermal_half_band` as a per-race thermoregulation
   control datum, the same category as the `thermal_setpoint = 310` already set, and distinct from the
-  tissue-tolerance / denaturation substrate that is genuinely Arc 4 (that is `burn_scale`'s home). You may have
+  tissue-tolerance / denaturation substrate that is truly Arc 4 (that is `burn_scale`'s home). You may have
   grouped it by name; set it now on reconsideration, or keep the Arc-4 deferral. `burn_scale` stays Arc-4
   either way.
 
