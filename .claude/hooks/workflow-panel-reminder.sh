@@ -66,9 +66,16 @@ sys.stderr.write(
     "confirmation-bias, derive-vs-author, alien-feasibility, Terran-bias, steering/Principles.\n"
     "  section 10 the blind FRAMING panel: critique a design-framing STATEMENT against the "
     "principles alone (diverse types + models, blind, de-narrativized) BEFORE it is built.\n"
+    "  section 11 the INPUT-BIAS SMOKE TEST (required on any load-bearing panel): a dedicated agent "
+    "on the STRONGEST model (Opus, maximum reasoning) audits the panel construction ITSELF, the packet "
+    "or statement, the prompts, and the lens set, plus what you are hoping it concludes, for "
+    "confirmation-bias shaping. Its charge is the negation of yours: what would a hostile outsider "
+    "check that this setup omits? A panel that only looks for what you want shares your blind spot and "
+    "reports clean, so do not trust a sound verdict until the smoke test has cleared the inputs.\n"
     "Confirm your workflow covers the relevant standing types (and, for a world-content audit, "
-    "all five section 9 lenses run as independent panelists with per-finding verify). Then add a "
-    "comment line containing `panels-reviewed` near the top of the script and re-invoke.\n"
+    "all five section 9 lenses run as independent panelists with per-finding verify; for any "
+    "load-bearing panel, the section 11 smoke test on the construction before the verdict is trusted). "
+    "Then add a comment line containing `panels-reviewed` near the top of the script and re-invoke.\n"
 )
 sys.exit(2)
 '
