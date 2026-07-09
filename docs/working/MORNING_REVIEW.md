@@ -21,4 +21,11 @@ section.
 
 ## Notes and observations from the night
 
-- (none yet)
+- **CI/test-speed work landed (no action needed).** Build cache + nextest merged; the 6 slow
+  `evolve::tests` (one >9 min) no longer sit on the per-PR critical path. They are excluded from the
+  PR lane by a nextest filterset (job env `SLOW_TESTS` in `ci.yml`) and run in full in a new
+  `nightly-full` job (nightly schedule + manual dispatch). First cut used `#[ignore]` + `--run-ignored
+  all`, which wrongly swept in the `#[ignore]d` unimplemented Stage-N placeholder tests (they
+  `unimplemented!()` and panic by design) and failed nightly-full; corrected to the filterset, which
+  never touches `#[ignore]`. The fast PR lane was green throughout. Validating the corrected nightly
+  lane now.
