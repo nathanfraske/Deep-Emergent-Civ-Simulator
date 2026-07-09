@@ -140,7 +140,9 @@ pub enum AffordancePerceptKind {
     /// purpose-laden COMPOSITE (it runs the Pierce capability over the tool's geometry and hardness), so
     /// "piercing is a salient affordance" is AUTHORED as a percept rather than EMERGING from primitives
     /// (contact area, hardness, applied stress) composed by the ideation loop (Principle 8, admit-the-alien).
-    /// To fix, bar or relocate it so the salience emerges; a gated piece, not built here.
+    /// It also reads only a WIELDED tool and returns zero for a being whose pierce-capable geometry is its own
+    /// body (claws, teeth), a further tool-user assumption folded into the same seam. To fix, bar or relocate
+    /// it so the salience emerges; a gated piece, not built here.
     Sharpness,
 }
 
@@ -207,6 +209,14 @@ impl AffordancePerceptKind {
         }
     }
 
+    /// The full closed kernel set, in canonical order, so [`Self::from_name`] can derive from [`Self::name`]
+    /// over it (the two cannot diverge) and a total round-trip test covers every kernel. A new variant must be
+    /// added here; [`Self::name`]'s exhaustive match forces it a name at the same time.
+    pub const ALL: [AffordancePerceptKind; 2] = [
+        AffordancePerceptKind::FracturePotential,
+        AffordancePerceptKind::Sharpness,
+    ];
+
     /// This kernel's STABLE STRING NAME, the id world data resolves against to SELECT this kernel into a
     /// registry ([`AffordancePerceptRegistry::from_names`]), in the style of `civsim_compose::FunctionLawDef`'s
     /// `name`. The name is a RESOLUTION KEY only: it is consumed when the registry is built and is NOT stored
@@ -214,7 +224,7 @@ impl AffordancePerceptKind {
     /// no downstream consumer (the controller, the discovery loop) can branch on it (the opaque-slot
     /// invariant, the template case: a high-level name must never drive behaviour). Renaming a kernel is a
     /// data-vocabulary change, never a behaviour change. The match is exhaustive, so a new variant forces a
-    /// name here (and a matching arm in [`Self::from_name`]).
+    /// name here, and [`Self::from_name`] derives from this over [`Self::ALL`], so the two cannot diverge.
     pub fn name(self) -> &'static str {
         match self {
             AffordancePerceptKind::FracturePotential => "fracture_potential",
@@ -222,16 +232,16 @@ impl AffordancePerceptKind {
         }
     }
 
-    /// Resolve a kernel from its stable string name ([`Self::name`]), the inverse [`AffordancePerceptRegistry::from_names`]
-    /// uses. `None` for an unknown name, so the registry constructor FAILS LOUD rather than silently drop a
-    /// percept a world declared (never a silent plausible default). A name is not a new kernel: the kernel set
-    /// is closed Rust, so a name that resolves to nothing is a data error, not a request to author a kernel.
+    /// Resolve a kernel from its stable string name, the inverse of [`Self::name`] that
+    /// [`AffordancePerceptRegistry::from_names`] uses. Derived by matching the name against [`Self::name`] over
+    /// [`Self::ALL`], so `name` and `from_name` cannot disagree by construction (no hand-kept parallel arm).
+    /// `None` for an unknown name, so the registry constructor FAILS LOUD rather than silently drop a percept a
+    /// world declared (never a silent plausible default). A name is not a new kernel: the kernel set is closed
+    /// Rust, so a name that resolves to nothing is a data error, not a request to author a kernel.
     pub fn from_name(name: &str) -> Option<AffordancePerceptKind> {
-        match name {
-            "fracture_potential" => Some(AffordancePerceptKind::FracturePotential),
-            "sharpness" => Some(AffordancePerceptKind::Sharpness),
-            _ => None,
-        }
+        AffordancePerceptKind::ALL
+            .into_iter()
+            .find(|kind| kind.name() == name)
     }
 }
 
@@ -302,8 +312,9 @@ impl AffordancePerceptRegistry {
     }
 
     /// Build from a list of kinds, ids assigned by position (canonical order), exactly as
-    /// [`crate::percept::PerceptRegistry::from_classes`] slots the raw-feature channels. The membership is
-    /// data: a world adds a sensible affordance percept by naming another kind, never by a code change.
+    /// [`crate::percept::PerceptRegistry::from_classes`] slots the raw-feature channels. Which of the fixed
+    /// kernels a world SELECTS and in what order is data (see [`Self::from_names`] for the name path); adding a
+    /// NEW kind of kernel is a code change, not a data edit, tracked as the composition-substrate seam.
     pub fn from_kinds(kinds: &[AffordancePerceptKind]) -> AffordancePerceptRegistry {
         AffordancePerceptRegistry {
             percepts: kinds
@@ -689,7 +700,8 @@ values = [
     fn from_names_selects_the_existing_kernels_and_is_byte_identical_to_from_kinds() {
         // The data-source path: a world NAMES which of the fixed kernels its beings perceive, and the result
         // is the SAME registry the enum-valued constructor builds, so the string name is a resolution key
-        // only and nothing of it survives into what the run path reads (the opaque-slot invariant, verified).
+        // only and nothing of it survives into the stored registry (the name-does-not-persist half of the
+        // opaque-slot invariant; the downstream-reads-by-slot half holds in discovery.rs, not here).
         let by_name = AffordancePerceptRegistry::from_names(&["fracture_potential", "sharpness"])
             .expect("known kernel names resolve");
         let by_kind = AffordancePerceptRegistry::from_kinds(&[
@@ -726,14 +738,12 @@ values = [
 
     #[test]
     fn every_kernel_name_round_trips_and_the_def_carries_no_name_to_branch_on() {
-        // name() and from_name() are inverse over the whole kernel set; if a kernel is added to the enum,
-        // name()'s exhaustive match forces it a name and this list must grow with it. The resolved def
-        // exposes only the opaque slot id and the kernel handle, never the name string, so a downstream
-        // consumer has no name to branch on (the template-case guard, enforced structurally by the type).
-        for kind in [
-            AffordancePerceptKind::FracturePotential,
-            AffordancePerceptKind::Sharpness,
-        ] {
+        // name() and from_name() are inverse over the WHOLE kernel set: the loop runs over
+        // AffordancePerceptKind::ALL, from which from_name() derives, so the coverage is total over the
+        // declared set and a name()/from_name() mismatch on a future kernel is impossible by construction. The
+        // resolved def exposes only the opaque slot id and the kernel handle, never the name string, so a
+        // downstream consumer has no name to branch on (the template-case guard, enforced by the type).
+        for kind in AffordancePerceptKind::ALL {
             assert_eq!(
                 AffordancePerceptKind::from_name(kind.name()),
                 Some(kind),

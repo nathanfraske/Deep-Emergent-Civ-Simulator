@@ -2314,7 +2314,9 @@ source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src
 # derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
 # when the affordance-percept block is wired onto the run path. Each is a physics reference scale, not a
 # per-affordance table: an affordance scalar is DERIVED from the matter's own axes against these
-# references (Principle 8/9), so a new sensible affordance percept is a data edit. ---
+# references (Principle 8/9). Which of the fixed kernels a world SELECTS is data
+# (AffordancePerceptRegistry::from_names); adding a NEW kind of kernel is a code change, not a data edit,
+# tracked as the composition-substrate seam in docs/working/CONSENSUS_ROADMAP.md. ---
 
 [[reserved]]
 id = "affordance_percept.reference_stress"
