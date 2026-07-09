@@ -10,8 +10,9 @@ on:
   push:
     branches: ["**"]
   pull_request:
-  # Nightly full suite (the slow evolutionary-selection tests are #[ignore]d off the per-PR lane
-  # and run here instead). workflow_dispatch allows a manual run to validate the lane.
+  # Nightly full suite: the slow evolutionary-selection tests are excluded from the per-PR lane by a
+  # nextest filterset (NOT #[ignore], so the unimplemented Stage-N placeholders stay untouched) and
+  # run in full here. workflow_dispatch allows a manual run to validate the lane.
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
@@ -43,6 +44,11 @@ jobs:
     # The per-PR lane skips the nightly schedule (nightly-full covers it more thoroughly there).
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    env:
+      # The slow evolutionary-selection tests (nextest flagged them >60s, one >9min); excluded from
+      # the per-PR lane by this filterset and run in full in nightly-full. Excluded by NAME, never
+      # #[ignore]d, so the #[ignore]d unimplemented Stage-N placeholder tests are never swept in.
+      SLOW_TESTS: "test(a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one) | test(the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology) | test(bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor) | test(a_recurrent_controller_graduates_the_plumbing_and_evolves) | test(behaviour_evolves_under_homeostatic_selection) | test(the_evolved_best_follows_the_water_percept_in_every_direction)"
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned toolchain
@@ -64,8 +70,8 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
-      - name: Test
-        run: cargo nextest run --workspace
+      - name: Test (per-PR lane; the slow evolutionary tests run in nightly-full)
+        run: cargo nextest run --workspace -E "not ($SLOW_TESTS)"
       - name: Doctests
         run: cargo test --workspace --doc
 
@@ -85,8 +91,9 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
-      # Everything the PR lane runs PLUS the #[ignore]d slow tests (--run-ignored all).
-      - name: Full test suite (including ignored)
-        run: cargo nextest run --workspace --run-ignored all
+      # The full suite: all non-ignored tests INCLUDING the slow evolutionary tests the PR lane
+      # filters out. The #[ignore]d Stage-N placeholders stay ignored (never run, not faked).
+      - name: Full test suite (incl. the slow evolutionary tests)
+        run: cargo nextest run --workspace
       - name: Doctests
         run: cargo test --workspace --doc
