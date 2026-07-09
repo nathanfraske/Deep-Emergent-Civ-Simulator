@@ -23,10 +23,15 @@
 //! Each channel is a `[0, 1]` scalar DERIVED from the physics floor over the matter's own material axes,
 //! never an `IsTree` or `IsAxe` kind tag (Principle 9), keyed by the physics quantity the kernel reads.
 //! The kernel SET is fixed Rust ([`AffordancePerceptKind`], a closed enum in the style of
-//! `civsim_compose::CapabilityKernel`); the MEMBERSHIP (which scalars a world perceives) is the registry's
-//! data, so a new sensible affordance percept is a data edit, never a code branch (Principle 11). Empty by
-//! default, so a world that declares none carries no affordance-percept block and every run hash is
-//! unchanged (the opt-in, hash-neutral pattern the feature block established).
+//! `civsim_compose::CapabilityKernel`); which of those kernels a world's beings SELECT and in what order is
+//! the registry's data, declarable by kernel NAME ([`AffordancePerceptRegistry::from_names`], Principle 11).
+//! The honest bound, from the blind framing panel: naming makes the SELECTION among the existing kernels
+//! world-declarable; it does NOT make the affordance space or the kernels' CONTENTS world-declared or
+//! alien-clean, and adding a NEW kind of derivation is a code change (a new variant plus its physics). A
+//! being whose native affordance no existing kernel computes needs that code change, tracked as the
+//! composition-substrate seam in `docs/working/CONSENSUS_ROADMAP.md`. Empty by default, so a world that
+//! declares none carries no affordance-percept block and every run hash is unchanged (the opt-in,
+//! hash-neutral pattern the feature block established).
 //!
 //! This slice is READ only: the derivation and the registry sit off the run path (nothing perceives yet,
 //! and `state_hash` folds nothing), so every existing scenario replays bit-for-bit. Piece 2's binding
@@ -71,6 +76,11 @@ pub struct AffordancePerceptRefs {
     /// material the axis admits (which would read every ordinary rock and soil as equally, trivially
     /// breakable and discriminate nothing). Surfaced with its basis, never fabricated: the value graduates
     /// from the manifest once the owner sets it, and the derivation stays inert until it does.
+    ///
+    /// SEAM (flagged, roadmap "World liveliness and agency"; R-XXX candidate): this reference is
+    /// PERCEIVER-INDEPENDENT, one embodiment-wide "ordinary actor" scale rather than the perceiving being's
+    /// own delivered stress, so a mite and a giant sense identical breakability. To admit the alien it should
+    /// key on the PERCEIVER's own data; a gated, behaviour-changing piece (not byte-neutral), not built here.
     pub reference_stress: Fixed,
     /// The reserved capability reference levels the sharpness kernel's Pierce read uses (the reference
     /// strike force, target hardness, and penetration references `civsim_compose::CapabilityRefs` carries),
@@ -94,8 +104,16 @@ impl AffordancePerceptRefs {
 }
 
 /// The closed set of physics-derived affordance scalars a being can perceive over nearby matter. Fixed
-/// Rust, one variant per kernel, mirroring `civsim_compose::CapabilityKernel`; which kernels a world runs
-/// is the registry's data below.
+/// Rust, one variant per kernel, mirroring `civsim_compose::CapabilityKernel`; which of these kernels a
+/// world's beings SELECT, and in what order, is the registry's data below (by name via
+/// [`AffordancePerceptRegistry::from_names`]).
+///
+/// SEAM (flagged, roadmap "World liveliness and agency"; R-XXX candidate): this CLOSED type-set caps the
+/// emergent affordance/technique/culture space, because the discovery loop can only propose actions built
+/// from the percepts this set contains, so a photosynthetic, mana, or redox being cannot express its native
+/// affordances as DATA today (Principle 8/11, admit-the-alien). Opening it needs a data-expressible
+/// DERIVATION substrate (a composable algebra over floor axes so a new affordance formula is data, sibling
+/// to the function-law catalogue), a deeper piece NOT built here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AffordancePerceptKind {
     /// FRACTURE-POTENTIAL: how breakable the matter is. Its greatest fracture strength (the hardest
@@ -117,6 +135,12 @@ pub enum AffordancePerceptKind {
     /// small contact area), the same intrinsic geometry the tool's worked capability reads; whether that edge
     /// affords a CUT is its SHEAR capability and whether the cut BITES is the enact's physics, so a being
     /// senses the sharpness of what it holds on physics, never an `IsAxe` tag (Principle 9).
+    ///
+    /// SEAM (flagged, roadmap "World liveliness and agency"; R-XXX candidate): this kernel is a
+    /// purpose-laden COMPOSITE (it runs the Pierce capability over the tool's geometry and hardness), so
+    /// "piercing is a salient affordance" is AUTHORED as a percept rather than EMERGING from primitives
+    /// (contact area, hardness, applied stress) composed by the ideation loop (Principle 8, admit-the-alien).
+    /// To fix, bar or relocate it so the salience emerges; a gated piece, not built here.
     Sharpness,
 }
 
@@ -180,6 +204,33 @@ impl AffordancePerceptKind {
         match self {
             AffordancePerceptKind::FracturePotential => AXIS_FRACTURE,
             AffordancePerceptKind::Sharpness => AXIS_CONTACT_AREA,
+        }
+    }
+
+    /// This kernel's STABLE STRING NAME, the id world data resolves against to SELECT this kernel into a
+    /// registry ([`AffordancePerceptRegistry::from_names`]), in the style of `civsim_compose::FunctionLawDef`'s
+    /// `name`. The name is a RESOLUTION KEY only: it is consumed when the registry is built and is NOT stored
+    /// on the resulting [`AffordancePerceptDef`], which carries the opaque slot id and the kernel handle, so
+    /// no downstream consumer (the controller, the discovery loop) can branch on it (the opaque-slot
+    /// invariant, the template case: a high-level name must never drive behaviour). Renaming a kernel is a
+    /// data-vocabulary change, never a behaviour change. The match is exhaustive, so a new variant forces a
+    /// name here (and a matching arm in [`Self::from_name`]).
+    pub fn name(self) -> &'static str {
+        match self {
+            AffordancePerceptKind::FracturePotential => "fracture_potential",
+            AffordancePerceptKind::Sharpness => "sharpness",
+        }
+    }
+
+    /// Resolve a kernel from its stable string name ([`Self::name`]), the inverse [`AffordancePerceptRegistry::from_names`]
+    /// uses. `None` for an unknown name, so the registry constructor FAILS LOUD rather than silently drop a
+    /// percept a world declared (never a silent plausible default). A name is not a new kernel: the kernel set
+    /// is closed Rust, so a name that resolves to nothing is a data error, not a request to author a kernel.
+    pub fn from_name(name: &str) -> Option<AffordancePerceptKind> {
+        match name {
+            "fracture_potential" => Some(AffordancePerceptKind::FracturePotential),
+            "sharpness" => Some(AffordancePerceptKind::Sharpness),
+            _ => None,
         }
     }
 }
@@ -264,6 +315,36 @@ impl AffordancePerceptRegistry {
                 })
                 .collect(),
         }
+    }
+
+    /// Build from a list of stable kernel NAMES, resolving each against the fixed kernel set
+    /// ([`AffordancePerceptKind::from_name`]) and assigning ids by position (canonical order), the
+    /// DATA-SOURCE path the enum-valued [`Self::from_kinds`] lacks: today a world can only name its percepts
+    /// in Rust, so this lets world DATA declare which of the existing kernels its beings SELECT and in what
+    /// order (Principle 11). FAILS LOUD on an unknown name (the error names the offending kernel) rather than
+    /// dropping it, so a typo in world data cannot silently reduce a being's perception.
+    ///
+    /// The scope, stated plainly (the blind framing panel caught the overclaim it corrects): this makes the
+    /// SELECTION and ORDER among the EXISTING kernels world-declarable data. It does NOT make the affordance
+    /// space or the kernels' CONTENTS world-declared or alien-clean: the kernel SET stays fixed Rust, so a
+    /// being whose native affordance no existing kernel computes still needs a new kernel (a code change),
+    /// tracked as the composition-substrate seam in the roadmap. The names resolve to enum kinds and are then
+    /// DISCARDED; the result is byte-identical to the registry [`Self::from_kinds`] builds for the same
+    /// kernels in the same order, so no name survives into what the run path reads (the opaque-slot invariant).
+    pub fn from_names(names: &[&str]) -> Result<AffordancePerceptRegistry, String> {
+        let mut kinds = Vec::with_capacity(names.len());
+        for &name in names {
+            match AffordancePerceptKind::from_name(name) {
+                Some(kind) => kinds.push(kind),
+                None => {
+                    return Err(format!(
+                        "unknown affordance-percept kernel name {name:?}; the kernels are fixed Rust and a \
+                         new one is a code change, not a data name"
+                    ))
+                }
+            }
+        }
+        Ok(AffordancePerceptRegistry::from_kinds(&kinds))
     }
 
     /// The declared percepts, in canonical id order.
@@ -601,6 +682,76 @@ values = [
         assert!(
             energy > Fixed::ZERO,
             "oilseed carries a positive bio.energy_density, the nutrition the loop's payoff draws on"
+        );
+    }
+
+    #[test]
+    fn from_names_selects_the_existing_kernels_and_is_byte_identical_to_from_kinds() {
+        // The data-source path: a world NAMES which of the fixed kernels its beings perceive, and the result
+        // is the SAME registry the enum-valued constructor builds, so the string name is a resolution key
+        // only and nothing of it survives into what the run path reads (the opaque-slot invariant, verified).
+        let by_name = AffordancePerceptRegistry::from_names(&["fracture_potential", "sharpness"])
+            .expect("known kernel names resolve");
+        let by_kind = AffordancePerceptRegistry::from_kinds(&[
+            AffordancePerceptKind::FracturePotential,
+            AffordancePerceptKind::Sharpness,
+        ]);
+        assert_eq!(
+            by_name, by_kind,
+            "the name path yields the identical opaque-slot registry the enum path does"
+        );
+        // The declared ORDER is the slot order: a different declared order is a different registry, so the
+        // world's ordering choice is data, and it maps into the canonical slot ids by position.
+        let reordered = AffordancePerceptRegistry::from_names(&["sharpness", "fracture_potential"])
+            .expect("known names resolve");
+        assert_ne!(
+            reordered, by_kind,
+            "a different declared order assigns different slots, so order is world-declared data"
+        );
+    }
+
+    #[test]
+    fn from_names_fails_loud_on_an_unknown_name() {
+        // Never a silent plausible default: a name that resolves to no fixed kernel is an error naming the
+        // offending kernel, so a typo in world data cannot silently drop a percept. A name is not a request
+        // to author a kernel; the kernel set is closed Rust.
+        let err =
+            AffordancePerceptRegistry::from_names(&["fracture_potential", "levitation_potential"])
+                .expect_err("an unknown kernel name fails loud");
+        assert!(
+            err.contains("levitation_potential"),
+            "the error names the offending kernel, not a silent drop: {err}"
+        );
+    }
+
+    #[test]
+    fn every_kernel_name_round_trips_and_the_def_carries_no_name_to_branch_on() {
+        // name() and from_name() are inverse over the whole kernel set; if a kernel is added to the enum,
+        // name()'s exhaustive match forces it a name and this list must grow with it. The resolved def
+        // exposes only the opaque slot id and the kernel handle, never the name string, so a downstream
+        // consumer has no name to branch on (the template-case guard, enforced structurally by the type).
+        for kind in [
+            AffordancePerceptKind::FracturePotential,
+            AffordancePerceptKind::Sharpness,
+        ] {
+            assert_eq!(
+                AffordancePerceptKind::from_name(kind.name()),
+                Some(kind),
+                "{} round-trips through name()/from_name()",
+                kind.name()
+            );
+        }
+        let reg = AffordancePerceptRegistry::from_names(&["sharpness"]).expect("resolves");
+        let def = reg.percepts()[0];
+        assert_eq!(
+            def.id,
+            AffordancePerceptId(0),
+            "the def carries the opaque slot id"
+        );
+        assert_eq!(
+            def.kind,
+            AffordancePerceptKind::Sharpness,
+            "the def carries the kernel handle, the only thing perceive() reads; there is no name field"
         );
     }
 }
