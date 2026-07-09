@@ -10,6 +10,11 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Nightly full suite (the slow evolutionary-selection tests are #[ignore]d off the per-PR lane
+  # and run here instead). workflow_dispatch allows a manual run to validate the lane.
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
 
 jobs:
   verify-docs:
@@ -35,6 +40,8 @@ jobs:
 
   rust:
     name: build, format, lint, test
+    # The per-PR lane skips the nightly schedule (nightly-full covers it more thoroughly there).
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,5 +66,27 @@ jobs:
           tool: nextest
       - name: Test
         run: cargo nextest run --workspace
+      - name: Doctests
+        run: cargo test --workspace --doc
+
+  nightly-full:
+    name: nightly full test suite (incl. slow tests)
+    # Runs on the nightly schedule and on a manual dispatch, never on a push/PR, so the expensive
+    # evolutionary-selection proofs still gate daily without sitting on the per-PR critical path.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      # Everything the PR lane runs PLUS the #[ignore]d slow tests (--run-ignored all).
+      - name: Full test suite (including ignored)
+        run: cargo nextest run --workspace --run-ignored all
       - name: Doctests
         run: cargo test --workspace --doc

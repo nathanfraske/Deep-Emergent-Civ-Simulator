@@ -1265,6 +1265,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology() {
         // The transfer de-risk: the bootstrap must pre-adapt the physiology the RUN's founders actually carry
         // (dev_grazer: lethal energy + water, plus neutral temperature/condition), not only the minimal crux
@@ -1303,6 +1304,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one() {
         // The pivotal test for the recurrent-controller foundation (the living-world crux): energy food and
         // water lie in OPPOSITE directions, so surviving requires PRIORITISING whichever reserve is scarcer
@@ -1521,6 +1523,7 @@ source = "t"
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn behaviour_evolves_under_homeostatic_selection() {
         // The proof: from random controllers, homeostatic-survival selection produces beings that
         // survive, from a random start, without water-seeking being authored anywhere.
@@ -1545,6 +1548,7 @@ source = "t"
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn the_evolved_best_follows_the_water_percept_in_every_direction() {
         // The emergent behaviour, repaired from a former east-only check. From a random start under
         // the symmetric scorer, homeostatic-survival selection produces a forager that heads toward
@@ -1819,6 +1823,7 @@ source = "t"
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn a_recurrent_controller_graduates_the_plumbing_and_evolves() {
         // The graduation: the same expression, selection, and mutation plumbing runs a small
         // recurrent network (a hidden state) rather than a reaction norm, its topology fixed Rust
@@ -2236,6 +2241,7 @@ source = "t"
     }
 
     #[test]
+    #[ignore = "slow evolutionary-selection test; runs in the nightly full-suite lane (ci.yml nightly-full: cargo nextest run --run-ignored all), off the per-PR critical path"]
     fn bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor() {
         // The capstone of R-MEDIUM increment 2d: from random controllers, homeostatic-survival selection
         // in a world with BOTH lethal-cold and lethal-hot regions produces a recurrent controller that
