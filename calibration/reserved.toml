@@ -497,9 +497,11 @@ source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET rec
 
 [[reserved]]
 id = "lang.l2_acquisition"
-basis = "DERIVES (2026-07-03) through language::L2AcquisitionLaw::increment_for (crates/sim/src/language.rs): the per-tick second-language proficiency increment is a DECREASING data curve read at the learner's maturation fraction (Race::maturation_fraction, raw age normalized by that race's own maturity_years). The age-of-acquisition breakpoint is therefore each race's own maturity, not the human late teens: two races with different maturity_years cross the critical period at different raw ages from this one kernel and one curve, never a per-race branch (Principle 9), and the increment slows to the curve's adult residual once the fraction saturates at one (maturity). The reserved input is this increment-by-maturation curve (parsed by require_curve as maturation_fraction=increment points, decreasing; a flat curve is the no-critical-period special case); no shared human age remains. The mechanism is fixed Rust, the curve is data (Principle 11)."
-status = "reserved"
-value = ""
+basis = "DERIVES (2026-07-03) through language::L2AcquisitionLaw::increment_for (crates/sim/src/language.rs): the per-tick second-language proficiency increment is a DECREASING data curve read at the learner's maturation fraction (Race::maturation_fraction, raw age normalized by that race's own maturity_years). The age-of-acquisition breakpoint is therefore each race's own maturity, not the human late teens: two races with different maturity_years cross the critical period at different raw ages from this one kernel and one curve, never a per-race branch (Principle 9), and the increment slows to the curve's adult residual once the fraction saturates at one (maturity). The reserved input is this increment-by-maturation curve (parsed by require_curve as maturation_fraction=increment points, decreasing; a flat curve is the no-critical-period special case); no shared human age remains. The mechanism is fixed Rust, the curve is data (Principle 11). Derive-vs-author: the DECREASING age-of-acquisition curve SHAPE the L2 increment reads at the learner maturation fraction (language.rs L2AcquisitionLaw); the breakpoint DERIVES from each race maturation, the curve shape is authored world/language data, not a floor axis"
+status = "set"
+value = "0.0=1.00,0.85=1.00,1.0=0.55,1.5=0.35"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.6 language system; record 62.7; audit section 1g; Part 20 R-AGING"
 
@@ -607,9 +609,11 @@ source = "Part 33.4; record 62.12; audit section 1n"
 
 [[reserved]]
 id = "langdet.retention_memory_scale"
-basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9)."
-status = "reserved"
-value = ""
+basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9). Derive-vs-author: a per-race memory-scaling curve (Principle 11 data); for the Mirror single-human-phenotype control it is the memory-independent FLAT identity, not a floor axis and not a simplification of a modeled substrate"
+status = "set"
+value = "0.0=1.0,1.0=1.0"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.4; record 62.12; audit section 1n; Part 9 belief deterioration"
 
@@ -665,9 +669,11 @@ source = "Part 33.6; record 62.13; audit section 1o"
 
 [[reserved]]
 id = "langmod.blend_propensity"
-basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier"
-status = "reserved"
-value = ""
+basis = "the cross-modal code-blend propensity per culture and per being; basis the measured blend-versus-switch rate, addressee and register dependent; a form-of-mixing knob that drives only the blend-or-switch choice and never a transmission-fidelity multiplier Derive-vs-author: a per-culture/per-being code-blend-versus-switch propensity (the form-of-mixing choice, explicitly never a transmission fidelity per its own basis); authored social data grounded in bimodal-bilingual measurement, not a floor axis and not derivable from physics"
+status = "set"
+value = "0.85"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.6; record 62.13; audit section 1o"
 
@@ -1461,9 +1467,11 @@ source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
 
 [[reserved]]
 id = "field.relaxation"
-basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick"
-status = "reserved"
-value = ""
+basis = "the rate a cell relaxes toward its solar-and-biome baseline per tick, set by the day-night and seasonal forcing timescale over the base tick Derive-vs-author: the lumped Newtonian (Held-Suarez-style) rate a cell relaxes toward its solar-and-biome baseline per tick; the engine models the field approach-to-baseline no deeper than this lumped coefficient (the radiative energy-balance kernels exist in the floor but are unwired), a coarse-model rate not a floor axis, reversible when the radiative wiring lands"
+status = "set"
+value = "0.0000694"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
 
@@ -1941,9 +1949,11 @@ source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturat
 
 [[reserved]]
 id = "hydrology.precipitation_rate"
-basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick"
-status = "reserved"
-value = ""
+basis = "the fraction of the moisture-over-saturation excess that condenses to standing water per tick, the precipitation efficiency: it sets how fast supersaturated moisture becomes rain. Set from the precipitation timescale against the base tick Derive-vs-author: the per-tick condensation efficiency (fraction of over-saturation moisture that rains out); the engine models condensation no deeper than this lumped rate (no cloud microphysics), a coarse-model rate not a floor axis"
+status = "set"
+value = "0.00000129"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs"
 
@@ -1985,17 +1995,21 @@ source = "base-level liveliness step 2; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "productivity.water_requirement"
-basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs"
-status = "reserved"
-value = ""
+basis = "the standing-water supply a cell needs for full producer productivity, the Liebig satisfaction denominator for the water factor: below it water limits growth in proportion, at or above it water is not limiting. Set from the water a unit of the world's producer biomass needs Derive-vs-author: the Liebig denominator for the water factor of the COARSE abstract climate-productivity model (a deliberate stand-in for the unmodelled background vegetation, environ.rs); a coarse-model calibration parameter, not a floor axis, reversible when the gated real-biosphere balance replaces the abstract model"
+status = "set"
+value = "0.15"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.light_requirement"
-basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs"
-status = "reserved"
-value = ""
+basis = "the latitude-light supply a cell needs for full producer productivity, the Liebig denominator for the light factor: it sets how strongly the pole-to-equator light gradient limits growth. Set from the light a unit of the world's producer biomass needs Derive-vs-author: the Liebig denominator for the light factor of the COARSE abstract climate-productivity model on the normalised latitude gradient; a coarse-model parameter, not a floor axis, reversible when the real biosphere lands"
+status = "set"
+value = "0.3"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "light"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
 
@@ -2011,25 +2025,31 @@ source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; 
 
 [[reserved]]
 id = "productivity.soil_requirement"
-basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side"
-status = "reserved"
-value = ""
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold matched to soil_baseline so bare soil is non-limiting until the matter-cycle fertility field differentiates; not a floor axis, reversible"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
 
 [[reserved]]
 id = "productivity.soil_baseline"
-basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands"
-status = "reserved"
-value = ""
+basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands Derive-vs-author: the uniform soil-nutrient supply every cell carries before the matter-cycle adds per-cell fertility; MUST equal soil_requirement so soil never limits at baseline; an engine scaffold of the coarse model, not a floor axis, reversible"
+status = "set"
+value = "1"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "hydrology.max_water_depth"
-basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale"
-status = "reserved"
-value = ""
+basis = "the basin holding capacity, the maximum standing water a cell retains before the excess is shed: it bounds a basin to a lake rather than an unbounded accumulation, the coarse stand-in for a full basin overflowing until evaporation scales with surface depth (the noted hydrology limit). Set from the volume a cell of the world's terrain holds at its scale Derive-vs-author: the basin holding capacity, the maximum standing water a cell retains before shedding excess, the coarse stand-in for full basin overflow (the noted hydrology limit); an engine scaffold bound not a floor axis, reversible when basin overflow is modelled"
+status = "set"
+value = "10"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
@@ -2043,17 +2063,21 @@ source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
 
 [[reserved]]
 id = "productivity.regen_rate"
-basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer"
-status = "reserved"
-value = ""
+basis = "the producer-biomass regrowth rate: the logistic (Part 15 Stock) regeneration coefficient the standing food stock regrows toward the productivity capacity each tick. It, the trophic ingest efficiency, and the metabolic drain together fix the carrying capacity (the population settles where its draw meets the regrowth), so set from the net primary productivity turnover of the world's producers per base tick: larger regrows a grazed patch faster and carries more grazers, smaller makes food scarcer Derive-vs-author: the logistic regrowth coefficient the standing producer biomass regrows toward the coarse productivity capacity per tick; a coarse abstract-model rate (no floor axis carries a producer regrowth rate), reversible when the real biosphere replaces it"
+status = "set"
+value = "0.00000035"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
 
 [[reserved]]
 id = "productivity.colonization"
-basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at"
-status = "reserved"
-value = ""
+basis = "the colonization propagule floor: the small standing producer biomass a viable-but-empty cell establishes so logistic regrowth (which is zero from an empty stock) can bootstrap, the seed-rain a habitable cell receives. It lets a dry-start world green as the hydrology fills and a grazed-out patch recover rather than dying forever. Set small relative to the productivity capacity (a fraction of a cell's ceiling), from the propagule density the world's producers disperse at Derive-vs-author: the propagule floor that seeds a viable-but-empty cell so the logistic can bootstrap from an empty stock; a normalised coarse-model scaffold value, not a floor axis, reversible"
+status = "set"
+value = "0.01"
+set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
+set_date = "2026-07-09"
 unit = "producer_biomass"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs"
 
