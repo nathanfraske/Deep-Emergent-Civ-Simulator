@@ -71,6 +71,14 @@ section.
 
 ## Notes and observations from the night
 
+- **The section-11 input-bias smoke test you directed caught a real biased audit (validation).** When the agent
+  ran its end-of-arc §9 five-lens audit, it first ran the §11 smoke test on the audit's own construction. The
+  smoke test returned BIASED and failed CLOSED: the agent's first audit packet handed the panel the conclusions
+  ("byte-neutral / all pins hold") and the load-bearing pivots as told facts instead of source questions. The
+  smoke test's spot-checks found the claims TRUE, but it correctly gated the SETUP not the outcome, so the agent
+  killed that run and re-launched the audit on a de-biased packet (conclusions stripped, pivots re-posed as
+  source questions). That clean §9 run is in flight; I review its verdict as the arc-completion gate. This is
+  the exact failure mode you built section 11 to catch, working in practice on the agent's own audit.
 - **CI/test-speed work landed (no action needed).** Build cache + nextest merged; the 6 slow
   `evolve::tests` (one >9 min) no longer sit on the per-PR critical path. They are excluded from the
   PR lane by a nextest filterset (job env `SLOW_TESTS` in `ci.yml`) and run in full in a new
