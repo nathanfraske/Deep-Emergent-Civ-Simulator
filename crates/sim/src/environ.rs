@@ -319,14 +319,28 @@ pub struct EnvironFields {
     /// plant and the composition stays a single scalar stock (never N independent stocks). Not folded into
     /// `state_hash`: its effect enters through the food supplies it shapes, which the [`ResourceField`] folds.
     producer_food: Vec<Option<BTreeMap<String, Fixed>>>,
+    /// The WORLD-DECLARED located scalar energy fields keyed by field-kind id (Arc 5, the data-defined field
+    /// set): the intrinsic per-cell scalar an alien source reads through [`AbioticField::DataScalar`] (a
+    /// chemosynthetic redox potential, a geothermal flux, a mana field). Each is a [`ScalarField`] on the same
+    /// grid, read (and, if the binding depletes, drawn down) through the SAME point mechanism as water, so a new
+    /// energy field is a data row plus a binding, never a code change (Principle 8, 11). EMPTY on every Terran
+    /// world (which uses only the intrinsic light/water/soil backings), so both its extract path and its hash
+    /// fold are byte-identical to the pre-Arc-5 run. Folded into `state_hash` in id order after salt: an empty
+    /// collection folds NOTHING (byte-neutral), while a world that declares and depletes an alien field folds it,
+    /// so divergence in it is caught exactly as water and salt are.
+    data_fields: BTreeMap<u16, ScalarField>,
 }
 
-/// Which run FIELD an abiotic source reads: the field IDENTITY, named explicitly so a source binds to the
-/// field it actually draws on, never a variant that conflates identity with depletion behaviour (FINDING-1).
-/// Whether the source DEPLETES the field is separate data ([`AbioticBinding::depletes`]), so a renewable
-/// light-flux and a finite water-stock are the SAME mechanism with different data, and (with Arc 5's
-/// data-defined field set) an alien source, geothermal or a redox gradient or a mana field, is a new field
-/// handle plus the environ field it reads rather than a rewrite of the extract dispatch (Principle 11).
+/// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
+/// from the READ-SHAPE, [`ReadShape`], that says HOW the draw is derived, and from whether it DEPLETES,
+/// [`AbioticBinding::depletes`], so a renewable light-flux and a finite water-stock are the SAME mechanism with
+/// different data, FINDING-1). The three named members are the engine's INTRINSIC floor subsystems, each a
+/// per-cell located quantity stepped by a fixed physics stencil (light, hydrology, soil nutrient); they are a
+/// bounded engine set, documented implemented-not-exhaustive (an environment-owned nodal or graph-keyed backing
+/// would be a bounded-Rust addition), never asserted closed. [`AbioticField::DataScalar`] is the OPEN arm that
+/// realizes Arc 5's data-defined field set (Principle 8, 11): a world-declared located scalar (a chemosynthetic,
+/// geothermal, or mana energy field) is a `ScalarField` row in [`EnvironFields::data_fields`] plus a binding
+/// naming its id, never a new enum variant, so the alien is a DATA ROW rather than a rewrite of the dispatch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AbioticField {
     /// The LIGHT field (the latitude-light rate). Renewable by default (a world sets `depletes` if it models
@@ -336,6 +350,32 @@ pub enum AbioticField {
     Water,
     /// The located SOIL-NUTRIENT field, read and drawn by class.
     Soil,
+    /// A WORLD-DECLARED located scalar field (Arc 5): the intrinsic per-cell scalar the world adds to
+    /// [`EnvironFields::data_fields`] under this id, read and (if it depletes) drawn down through the SAME point
+    /// mechanism as water. The OPEN membership: a chemosynthetic, geothermal, or mana source is this data row
+    /// plus a binding, no new enum variant (Principle 8, 11). A source whose available draw is a between-quantity
+    /// DIFFERENCE (a redox donor/acceptor) or a between-cell GRADIENT still reads scalar field(s), not a new
+    /// backing kind, but through a different [`ReadShape`] operator; the difference case ALSO needs the binding
+    /// to name more than one field (an ordered field/role list), a binding-arity extension the later segment
+    /// adds alongside the `ReadShape::Difference` variant. Segment 1 provisions the single-field point read.
+    DataScalar(u16),
+}
+
+/// The SPATIAL READ-SHAPE of an abiotic source (Arc 5): HOW its available draw is derived from the located
+/// field(s) its binding names, decoupled from the value BACKING ([`AbioticField`]). The section-10 blind panel
+/// identified this as the real generalization axis: the pre-Arc-5 dispatch read the value AT the producer's own
+/// cell and thereby AUTHORED point-locality as the definition of a supply, foreclosing a source whose energy is
+/// a between-quantity difference (a redox chemolithotroph draws on a donor/acceptor potential DIFFERENCE, not a
+/// value at one cell) or a between-cell gradient. Here a point read is ONE operator among a data-selected set,
+/// never the definition of a supply. Each variant is a fixed-Rust physics operator (the mechanism, the same
+/// class the field stencils already use); which one a source uses is data (Principle 11). Segment 1 implements
+/// `Point` only (the byte-neutral Earth read); the difference and gradient operators are the following segments.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ReadShape {
+    /// The value AT the producer's own cell (the point read of the backing). The Earth default, byte-identical
+    /// to the pre-Arc-5 match.
+    #[default]
+    Point,
 }
 
 /// One AVAILABILITY BAND on an abiotic source (chemistry arc, Arc 5 T1): the source is present in a region
@@ -366,8 +406,14 @@ pub struct AbioticAvailability {
 /// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
 #[derive(Clone, Debug)]
 pub struct AbioticBinding {
-    /// The run field this source reads (the field identity, decoupled from the depletion behaviour below).
+    /// The value backing this source reads (which located field, decoupled from the depletion behaviour below
+    /// and from the read-shape). See [`AbioticField`].
     pub field: AbioticField,
+    /// HOW the available draw is derived from the backing (Arc 5): a point read of the value at the producer's
+    /// cell, or (later segments) a between-quantity difference or a between-cell gradient. Decoupled from the
+    /// backing so a source's spatial shape is the world's data, not baked into the read. Defaults to
+    /// [`ReadShape::Point`], the byte-neutral Earth read. See [`ReadShape`].
+    pub read_shape: ReadShape,
     /// Whether drawing on this source DEPLETES its field's stock (a finite stock) or leaves it untouched (a
     /// renewable flux). Decoupled from the field so the flux-versus-stock choice is the world's data, not the
     /// engine's per-variant assumption (FINDING-1): a world can declare a renewable nutrient spring (Soil,
@@ -425,10 +471,27 @@ impl AbioticSourceRegistry {
         class: &str,
         availability: AbioticAvailability,
     ) {
+        self.insert_shaped(id, field, ReadShape::Point, depletes, class, availability);
+    }
+
+    /// Bind a source id with an explicit READ-SHAPE (Arc 5): the general inserter [`Self::insert`] and
+    /// [`Self::insert_available`] delegate here with [`ReadShape::Point`] (the byte-neutral Earth read); a
+    /// source whose available draw is a between-quantity difference or a between-cell gradient passes its own
+    /// shape, so the spatial operator is the world's data (Principle 11), never baked into the extract dispatch.
+    pub fn insert_shaped(
+        &mut self,
+        id: u16,
+        field: AbioticField,
+        read_shape: ReadShape,
+        depletes: bool,
+        class: &str,
+        availability: AbioticAvailability,
+    ) {
         self.bindings.insert(
             id,
             AbioticBinding {
                 field,
+                read_shape,
                 depletes,
                 class: class.to_string(),
                 availability,
@@ -548,6 +611,7 @@ impl EnvironFields {
             producer: vec![Fixed::ZERO; n],
             producer_source: vec![Vec::new(); n],
             producer_food: vec![None; n],
+            data_fields: BTreeMap::new(),
         }
     }
 
@@ -859,6 +923,27 @@ impl EnvironFields {
         }
     }
 
+    /// Declare (or replace) a world's located SCALAR energy field under a field-kind id (Arc 5, the data-defined
+    /// field set): the data-row path an [`AbioticField::DataScalar`] binding reads. An alien source (a
+    /// chemosynthetic redox potential, a geothermal flux, a mana field) is this call plus a binding, never a new
+    /// enum variant (Principle 8, 11). The field must match the environ extent. Seeded at world build (or stepped
+    /// by the world's own stencil); read and depleted through the same point mechanism as water. Idempotent on
+    /// re-seed. A Terran world calls this never, so its `data_fields` stays empty and its run is byte-identical.
+    pub fn set_data_field(&mut self, id: u16, field: ScalarField) {
+        assert_eq!(
+            field.dims(),
+            (self.width, self.height),
+            "a data energy field matches the environ extent"
+        );
+        self.data_fields.insert(id, field);
+    }
+
+    /// The value of a world-declared located energy field at a cell (Arc 5), or `None` if the world declared no
+    /// field under this id. A pure read for the field reader and tests; mutates nothing.
+    pub fn data_field_at(&self, id: u16, x: i32, y: i32) -> Option<Fixed> {
+        self.data_fields.get(&id).map(|f| f.at(x, y))
+    }
+
     /// The producer EXTRACT-DEPLETE beat (the closed nutrient cycle): each producer draws its food from the
     /// availability of the specific abiotic source its niche EVOLVED to close on (its `producer_source` id,
     /// bound to a field by the data-defined `registry`, never an id switch), the source LIMITS its
@@ -900,17 +985,35 @@ impl EnvironFields {
                     let binding = registry.binding(id).unwrap_or_else(|| {
                         panic!("nutrient cycle: producer source id {id} has no registry binding")
                     });
-                    let supply = match binding.field {
-                        AbioticField::Light => self.light[i],
-                        AbioticField::Soil => {
-                            // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
-                            // a general per-field replenishment handle is Arc 5).
-                            if registry.weathering_rate > Fixed::ZERO {
-                                soil.deposit(coord, &binding.class, registry.weathering_rate);
+                    // The available draw of this source at the cell, derived from its backing under its
+                    // READ-SHAPE (Arc 5). Segment 1 implements the POINT read (the value at the producer's own
+                    // cell); the difference and gradient operators are the following segments. For the Earth
+                    // backings under Point this is byte-identical to the pre-Arc-5 match.
+                    let supply = match binding.read_shape {
+                        ReadShape::Point => match binding.field {
+                            AbioticField::Light => self.light[i],
+                            AbioticField::Soil => {
+                                // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
+                                // a general per-field replenishment handle is Arc 5).
+                                if registry.weathering_rate > Fixed::ZERO {
+                                    soil.deposit(coord, &binding.class, registry.weathering_rate);
+                                }
+                                soil.mass(coord, &binding.class)
                             }
-                            soil.mass(coord, &binding.class)
-                        }
-                        AbioticField::Water => self.water.at(x, y),
+                            AbioticField::Water => self.water.at(x, y),
+                            // A world-declared located scalar (mana, geothermal, a redox potential): read its
+                            // per-cell value. A binding to a field the world never declared is a config error:
+                            // fail loud (matching the unbound-source-id panic) rather than silently starve.
+                            AbioticField::DataScalar(fid) => self
+                                .data_fields
+                                .get(&fid)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "nutrient cycle: producer source binds DataScalar field {fid} but the world declared no such field"
+                                    )
+                                })
+                                .at(x, y),
+                        },
                     };
                     let supported = supply
                         .checked_mul(registry.biomass_per_stock)
@@ -949,6 +1052,22 @@ impl EnvironFields {
                         }
                         AbioticField::Water => {
                             self.water.take(x, y, draw_amt);
+                        }
+                        // A world-declared located scalar depletes through the same point draw as water. An
+                        // undeclared field FAILS LOUD here exactly as the Pass-1 read does (Pass 1 has already
+                        // panicked on it, so this is unreachable, but the symmetry removes the asymmetric silent
+                        // no-op the audit flagged: if the two passes ever decouple, a missing draw fails loud
+                        // rather than silently starving the ledger). A renewable source never enters this loop
+                        // (guarded by `depletes` above).
+                        AbioticField::DataScalar(fid) => {
+                            self.data_fields
+                                .get_mut(&fid)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "nutrient cycle: producer source binds DataScalar field {fid} but the world declared no such field"
+                                    )
+                                })
+                                .take(x, y, draw_amt);
                         }
                     }
                 }
@@ -1086,6 +1205,13 @@ impl EnvironFields {
         self.water.hash_into(h);
         self.capacity.hash_into(h);
         self.salt.hash_into(h);
+        // The world-declared located energy fields (Arc 5), folded in id order (BTreeMap iterates sorted) after
+        // salt. An EMPTY collection (every Terran world) folds nothing, so the Earth hash is byte-identical; a
+        // world that declares a data field folds it, so divergence in a depleted alien stock is caught exactly
+        // as water and salt are. No count prefix is written, so an empty collection contributes zero bytes.
+        for f in self.data_fields.values() {
+            f.hash_into(h);
+        }
     }
 }
 
@@ -1208,6 +1334,7 @@ mod tests {
             producer: vec![Fixed::ZERO; elev_tenths.len()],
             producer_source: vec![Vec::new(); elev_tenths.len()],
             producer_food: vec![None; elev_tenths.len()],
+            data_fields: BTreeMap::new(),
         }
     }
 
@@ -1761,6 +1888,153 @@ mod tests {
             flux_then_soil < flux_only,
             "adding a scarcer source can only lower the ceiling, never raise it above the flux-only cap"
         );
+    }
+
+    #[test]
+    fn a_world_declared_energy_field_is_a_pure_data_row_that_caps_and_depletes() {
+        // Arc 5 segment 1 (the OPEN arm): a producer draws energy from a WORLD-DECLARED located scalar field
+        // (AbioticField::DataScalar), the alien-as-data proof. No light, water, or soil is involved; the source
+        // is a `ScalarField` the world seeded plus a binding naming its id, zero new Rust. Two claims: (1) the
+        // declared field's per-cell value CAPS the producer's productivity through the same Liebig math (point
+        // read-shape); (2) a depleting binding DRAWS THE FIELD DOWN, so a heavily-worked cell exhausts its alien
+        // stock exactly as it would water. This is a chemosynthetic/geothermal/mana energy source as a data row.
+        let map = a_map(0x0A11E7);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 7; // an opaque field-kind id, not one of the Earth backings
+        let source_id: u16 = 42; // the evolved source id the producer closes on
+
+        // The registry: one source (id 42) bound to the world's declared scalar field (id 7), depleting. No
+        // light/water/soil binding exists at all, so nothing Earth-shaped can leak into the result.
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), true, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::from_ratio(1, 2); // a heavy draw so depletion is visible in one beat
+        reg.weathering_rate = Fixed::ZERO; // no soil bootstrap; the alien field is the only supply
+
+        // A helper: seed a producer with a large biomass (so the pre-cap capacity is high and the alien field is
+        // what binds), declare the energy field at the given uniform level, run the extract beat once, and
+        // return (capped capacity, remaining field value) at the cell.
+        let run = |field_level: Fixed| -> (Fixed, Fixed) {
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+            e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
+            let mut soil = SoilNutrientField::new();
+            e.extract_producers(&mut soil, &reg);
+            (
+                e.capacity_at(cell.x, cell.y),
+                e.data_field_at(field_id, cell.x, cell.y).unwrap(),
+            )
+        };
+
+        let scarce = Fixed::from_ratio(1, 10);
+        let abundant = Fixed::from_int(2);
+        let (cap_scarce, remain_scarce) = run(scarce);
+        let (cap_abundant, _remain_abundant) = run(abundant);
+
+        // (1) The declared field caps the productivity: a scarcer field supports less biomass, exactly as a
+        // scarce water or soil stock would, through the same `supply * biomass_per_stock` Liebig math.
+        assert!(
+            cap_scarce > Fixed::ZERO,
+            "the alien field supports some biomass"
+        );
+        assert_eq!(
+            cap_scarce,
+            scarce.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the world-declared field's value caps the productivity (point read-shape, Liebig math)"
+        );
+        assert!(
+            cap_abundant > cap_scarce,
+            "more of the declared field supports more biomass: {cap_abundant:?} > {cap_scarce:?}"
+        );
+        // (2) The depleting binding drew the alien field DOWN at the worked cell (it started at `scarce`).
+        assert!(
+            remain_scarce < scarce,
+            "a depleting source draws the world-declared field down, so a worked cell exhausts its alien \
+             stock: {remain_scarce:?} < {scarce:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_data_field_collection_folds_nothing_so_the_earth_hash_is_unchanged() {
+        // Byte-neutrality guard for Arc 5 segment 1: the data_fields collection folds into `state_hash` only its
+        // members, with no count prefix, so an EMPTY collection (every Terran world) contributes zero bytes and
+        // the hash is identical to a stack that carries no such field at all. Declaring one field then changes
+        // the hash (the fold is real), proving the empty case is a true no-op rather than an accidental omission.
+        let map = a_map(0xE0F0);
+        let calib = EnvironCalib::dev_fixture();
+        let temp = Field::from_map(&map);
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..8 {
+            e.step(&temp, &calib);
+        }
+        // (1) The DIRECT empty-neutrality proof: the full `hash_into` (which folds the empty data_fields) equals a
+        // manual fold of ONLY the pre-Arc-5 dynamic fields (water, capacity, salt) in the same order. So the
+        // empty collection contributed ZERO bytes, and the Earth hash is byte-identical to the pre-change fold,
+        // not merely "the fold is observable". (The four run_world pins prove this end-to-end; this pins it here.)
+        let full = {
+            let mut h = StateHasher::new();
+            e.hash_into(&mut h);
+            h.finish()
+        };
+        let pre_arc5 = {
+            let mut h = StateHasher::new();
+            e.water.hash_into(&mut h);
+            e.capacity.hash_into(&mut h);
+            e.salt.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            full, pre_arc5,
+            "an empty data_fields collection folds NOTHING: the Arc-5 hash equals the pre-Arc-5 water+capacity+salt \
+             fold byte for byte (no count prefix, zero bytes for the empty case)"
+        );
+        // (2) And the fold is REAL: declaring one field changes the hash, so the empty no-op is a guarantee, not
+        // an omission that would silently hide divergence in a depleted alien stock.
+        let with_field = {
+            let mut e2 = EnvironFields::from_map(&map);
+            let (w, h_) = e2.dims();
+            e2.set_data_field(3, ScalarField::uniform(w, h_, Fixed::from_int(1)));
+            for _ in 0..8 {
+                e2.step(&temp, &calib);
+            }
+            let mut h = StateHasher::new();
+            e2.hash_into(&mut h);
+            h.finish()
+        };
+        assert_ne!(
+            full, with_field,
+            "a declared data field folds into the hash (so a depleted alien stock cannot pass replay while \
+             hiding divergence)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "declared no such field")]
+    fn a_producer_bound_to_an_undeclared_energy_field_fails_loud() {
+        // Arc 5 segment 1 fail-loud guarantee: a producer whose evolved source binds an AbioticField::DataScalar
+        // the world never declared is a config error, and the extract read pass PANICS naming the field, rather
+        // than silently reading zero and starving the producer (which would mask a broken world spec). Mirrors
+        // the unbound-source-id panic. This exercises the guarantee the audit flagged as untested.
+        let map = a_map(0xBAD1);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(5, AbioticField::DataScalar(99), false, ""); // field 99 is never declared
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        let mut e = EnvironFields::from_map(&map);
+        e.set_producer(&[(cell, Fixed::from_int(10))]);
+        e.set_producer_source(&[(cell, vec![5])]);
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg); // panics: field 99 was never declared
     }
 
     #[test]
