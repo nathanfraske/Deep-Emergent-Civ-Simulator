@@ -66,6 +66,34 @@ axis the floor does not yet carry (the dev acoustic row reuses the optical axis 
 flagged floor gap); the confinement substrate that would set D below 3 (the geometric kernel already handles
 D=2/D=1); the frequency-dependent absorption path and its body-resonance frequency source.
 
+FRAMED slice-2 (sensorium-gated magnitude percept), 2026-07-09 (Agent A, PENDING gate ruling). Blind
+section-11 smoke test caught my first construction BIASED (a "carries no valence, category, label, or
+meaning" clause pre-answered the panel, when the just-noticeable-difference quantization the clause called
+category-free is the operation that mints the downstream belief-category grid, verified at
+`percept.rs::feature_bucket`; and I had scoped out the transduction-derivation risk the arc plan names as the
+slice's real risk). Rebuilt, section-11 re-run cleared it MINOR_ISSUES, the three named fixes applied. The
+section-10 blind panel (6 seats, 5 valid, Fable errored on safeguards) returned 5/5 significant-flaw-fixable,
+UNANIMOUS on the class: the framing authored the transduction and quantization SHAPE (linear scale, uniform
+absolute quantization step, no detection threshold) into fixed mechanism code, when the value-authoring line
+(Principle 6/11) and admit-the-alien require it to be per-being DATA, so a logarithmic, power-law, thresholded,
+or Weber-scaled sense is a data row rather than a code rewrite. Verified against source: the existing perceive
+beat scales salience by acuity linearly (`world.rs`), `feature_bucket` quantizes at an absolute step
+(`percept.rs`), and the floor carries no parameterizable transduction primitive, so the concern is grounded.
+The corrected framing (my synthesis, for the gate to rule): a being forms a percept on channel c when the
+received magnitude m, mapped through a general monotone transduction PRIMITIVE parameterized by the being's
+OWN response parameters (a gain, and where its body carries them a compression parameter and a detection
+threshold), clears the being's own threshold; the percept is then quantized by the being's OWN discrimination
+law (absolute or magnitude-relative) into the bucket that keys belief-minting. Linear gain, no threshold, and
+a uniform absolute step are degenerate DEFAULTS of the family, never the fixed form. Perceptibility is one
+being-derived quantity (the read/not-read gate and the sensitivity collapse into the threshold, absence
+meaning zero sensitivity, the pre-sensorium default-open convention a distinct explicit case, folding
+panelist plan-sonnet's two-gates catch). The transduction parameters and discrimination law DERIVE from the
+being's genome and anatomy via the same expression machinery that produces `mind.acuity`; until that
+derivation and the floor transduction primitive are built, they are authored per-being data flagged reserved.
+Build dependencies surfaced: a new floor transduction primitive (a parameterized monotone response law); the
+percept-class-to-channel binding; the anatomy-to-sense transduction generalized beyond optical. Posted to the
+gate for its ruling before any code.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
