@@ -274,7 +274,11 @@ impl MediumField {
     /// W/(m^2*K)). Off the field there is no medium and this reads zero (no medium, no convective coupling),
     /// the substrate's absence convention, matching [`Self::respirable_at`]. The metabolism reads this at a
     /// being's cell for the body-to-medium heat exchange rather than a duplicate global scalar
-    /// (derive-vs-author, Principle 6).
+    /// (derive-vs-author, Principle 6). Note the off-field zero differs from the retired global scalar (which
+    /// had no spatial extent and applied everywhere), but a [`MediumField`] built by [`Self::from_map`] covers
+    /// every in-bounds map cell, so a being placed on the map always reads an in-field `h`, never the
+    /// off-field zero; the zero is the defensive absence value for an out-of-bounds read that a placed being
+    /// never triggers (confirmed by byte-neutrality, the beings on the dev path read their in-field `h`).
     pub fn convective_at(&self, x: i32, y: i32) -> Fixed {
         self.idx(x, y)
             .map(|i| self.convective[i])
@@ -701,6 +705,37 @@ mod tests {
             field.density_at(5, 5),
             Fixed::ZERO,
             "off the field, no density"
+        );
+    }
+
+    #[test]
+    fn convective_coefficient_is_read_per_medium_at_the_cell() {
+        // The dedup's whole point, EXERCISED (the dev fixtures hold h uniform for byte-neutrality, so a
+        // uniform field cannot show the differentiation; this field carries a DIFFERENT h per cell). A being
+        // reads its OCCUPIED medium's convective h, so a still-air cell (low h) and a stirred-water cell
+        // (high h) present different body-to-medium coupling, not one global scalar.
+        let field = MediumField::new(
+            2,
+            1,
+            vec![Fixed::ONE, Fixed::ONE],
+            vec![Fixed::from_int(1), Fixed::from_int(1)],
+            vec![Fixed::from_int(10), Fixed::from_int(500)], // air-like h then water-like h
+            vec![Fixed::from_int(290), Fixed::from_int(290)],
+        );
+        assert_eq!(
+            field.convective_at(0, 0),
+            Fixed::from_int(10),
+            "the air cell's h, read at the being's cell"
+        );
+        assert_eq!(
+            field.convective_at(1, 0),
+            Fixed::from_int(500),
+            "the water cell's h, so an immersed body couples faster from the medium's own datum"
+        );
+        assert_eq!(
+            field.convective_at(-1, 0),
+            Fixed::ZERO,
+            "off the field, no medium, no convective coupling (the absence convention)"
         );
     }
 

@@ -941,7 +941,13 @@ fn being_derived_drains(
 /// grow), and its catalog organs otherwise. So a fully grown body couples to the medium off its own tissue,
 /// with no catalog organs; a catalog body is byte-identical to the prior read. The medium convective
 /// coefficient `medium_h` is the being's own medium datum, read by the caller at the cell it stands in
-/// (derive-vs-author, Principle 6), not a duplicate global scalar.
+/// (derive-vs-author, Principle 6), not a duplicate global scalar. HONEST LIMIT (spatial consistency): this
+/// rate is computed once and cached per being (`body_exchange_rate`), so `medium_h` here is read at the
+/// being's SPAWN cell, whereas the resting drain reads `h` at the being's CURRENT cell every tick
+/// (`being_derived_drains`). Under a spatially-uniform medium (the dev fixtures carry a uniform `h`) the two
+/// agree; on a world with spatially-varying `h` a being that moves between media carries a stale spawn-cell
+/// exchange rate until it is recomputed, deferred with the per-cell-flow (Nusselt) work, so the interim is
+/// documented rather than silently inconsistent.
 fn walker_exchange_rate(
     body: &BodyPlan,
     structure: &Option<Structure>,

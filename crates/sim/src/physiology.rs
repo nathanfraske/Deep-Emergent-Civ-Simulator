@@ -38,12 +38,24 @@
 //! Kleiber coefficient `a`, the normalized-body-mass-to-kilograms bridge, and the Stefan-Boltzmann
 //! constant) are reserved with their basis and are the owner's to set ([`MetabolicAnchors::from_manifest`]);
 //! the values in [`MetabolicAnchors::dev_fixture`] are labelled development fixtures, never owner canon. Two
-//! surface properties the radiant and convective terms once carried as anchors now DERIVE from the being's
-//! own data rather than a global scalar (derive-vs-author, Principle 6): the radiant-surface emissivity from
-//! its covering ([`covering_emissivity`]) and the medium convective coefficient `h` from its medium's
-//! `fluid.convective_coefficient` axis, read at the being's cell ([`crate::medium::MediumField::convective_at`]).
-//! The caps below are representability bounds forced by Q32.32 (the engine-mechanics exemption the law kernels
-//! and `medium.rs` take), not owner realism values.
+//! surface properties the radiant and convective terms once carried as global anchors now read from the
+//! being's own data rather than one scalar everywhere (derive-vs-author, Principle 6), with DIFFERENT honest
+//! statuses. The radiant-surface emissivity fully DERIVES: it is a material property of the being's covering,
+//! read from its `opt.emissivity` axis ([`covering_emissivity`]). The medium convective coefficient `h` is a
+//! partial step: it is READ from the being's occupied medium (`fluid.convective_coefficient`, at the being's
+//! cell, [`crate::medium::MediumField::convective_at`]), retiring the global scalar in favour of per-medium
+//! DATA, but `h` is NOT an irreducible medium property, it is flow-dependent (`h = Nu*k/L`, the Nusselt
+//! boundary-layer relation), so the per-medium value is a LUMPED interim and the full derive of `h` from the
+//! medium's k/rho/c and the flow past the being's surface is DEFERRED (the reviewer-approved interim). HONEST
+//! LIMIT (the two `h` consumers are not yet spatially consistent): the resting thermoregulatory DRAIN reads
+//! `h` at the being's CURRENT cell every tick ([`base_drain_from`] via [`being_derived_drains`]), while the
+//! body-temperature Newton-cooling exchange RATE caches `h` at the being's SPAWN cell
+//! ([`crate::runner::walker_exchange_rate`], stored once per being). Under a spatially-uniform medium (the
+//! current dev fixtures carry a uniform `h`) they agree; on a world with spatially-varying `h` a being that
+//! moves between media has a current-cell drain and a stale spawn-cell exchange rate until the rate is
+//! recomputed, which is deferred with the same per-cell-flow work. The caps below are representability bounds
+//! forced by Q32.32 (the engine-mechanics exemption the law kernels and `medium.rs` take), not owner realism
+//! values.
 //!
 //! Two honest limits stand. First, the exact reconciliation of the reserve's stored energy (the biology
 //! floor's `bio.energy_density` in kJ/g, the reserve capacity, and the body mass) to joules comparable
@@ -1220,6 +1232,27 @@ mod tests {
             ),
             Fixed::ZERO,
             "no convective surface, no coupling"
+        );
+    }
+
+    #[test]
+    fn the_same_body_couples_faster_in_a_higher_h_medium() {
+        // The dedup's metabolic point, EXERCISED (the dev fixtures hold h uniform, so this is what proves the
+        // differentiation reaches the coupling): the SAME body couples to the medium at h*A/(m*c), so raising
+        // the medium's convective coefficient h (still air ~10 to immersion water ~500) raises the coupling.
+        // A being in air and one immersed in water therefore couple at their media's own h, the whole reason
+        // the per-medium datum replaced the global scalar.
+        let (organs, skin, flesh, _fat) = registry();
+        let anchors = MetabolicAnchors::dev_fixture();
+        let plan = body((1, 2), vec![organ(skin, (1, 1)), organ(flesh, (1, 4))]);
+        let in_air =
+            derive_body_exchange_rate(&plan, &organs, Fixed::from_int(10), Fixed::ONE, &anchors);
+        let in_water =
+            derive_body_exchange_rate(&plan, &organs, Fixed::from_int(500), Fixed::ONE, &anchors);
+        assert!(
+            in_water > in_air,
+            "the same body couples faster in the higher-h medium (immersion water over still air), \
+             so the per-medium h differentiation reaches the body-to-medium coupling"
         );
     }
 
