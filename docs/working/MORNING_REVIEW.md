@@ -17,8 +17,14 @@ section.
      calibration (cited, pending owner sign-off)"`).
   2. Set the two climate values the temperature build reserved: `climate.mean_surface_temperature` (~288 K) and
      `climate.latitude_temperature_range` (~60 K full equator-to-pole).
-  3. Rule on the ~40 `escalate_owner` design choices (the agent is compiling a decision-list with a
-     recommendation each, so you can pass through them in one go).
+  3. Rule on the ~40 `escalate_owner` design choices: the agent posted a grouped one-pass decision-list on
+     PR #108 (groups A non-Mirror dials, B engine/determinism bounds, C playtest/gameplay, D units/convention,
+     E AUDIT CATCHES), each with a recommendation. **Group E is highest priority: 5 places the agent caught
+     errors in the calibration research** (`loss_practitioner_floor = 50` is a genetic Ne~50 analogy not a
+     skill figure; `loss_rate`'s consistency pin is invalidated; `stubbornness_dogmatism_weight` is a
+     key-vs-wiring mismatch; `emergent_proxy_weights` uniform-1 is flagged; `group_aggregation_rule` may
+     derive from member variance). Do NOT set those at the research-tagged values. I verified two of the five
+     against source and both hold.
   4. Decide the orbital year: it is set to 31536000 s (365.0 d, Julian); the tropical year is ~31556952 s
      (365.2422 d). The agent leans tropical for a strict 1:1 Earth.
   Plus the derive-vs-author items in the interim-calls section below (the social-transmission values,
