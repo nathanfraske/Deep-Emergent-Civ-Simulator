@@ -176,6 +176,75 @@ pub fn perceive(
     sense(magnitude, transduction, activation_max)
 }
 
+// --- Segment 3: deriving a being's transduction from its body, or reserving it fail-loud (condition 2) ---
+
+/// The per-sense transduction parameters that have NO anatomy derivation yet, RESERVED for the owner and
+/// surfaced with basis rather than fabricated (Prime Directive 3). The anatomy today derives only the
+/// optical GAIN (from the eye's refractive focusing, [`derive_optical_transduction`]); the response SHAPE,
+/// the discrimination law and its step, and the detection threshold need a per-channel anatomy-to-sense
+/// transduction kernel that is not built (the gate's condition-5 deeper derive target), so a world supplies
+/// them as reserved values until that kernel lands. Each carries its basis in the audit log.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ReservedSenseParams {
+    /// Reserved: the response law a sense organ's transduction follows. Basis: established sensory
+    /// psychophysics for the modality (Terran vision is near power-law or logarithmic), read from the
+    /// per-channel anatomy-transduction kernel once built.
+    pub response: ResponseLaw,
+    /// Reserved: the response shape (the Stevens exponent or Fechner compression). Basis: the modality's
+    /// measured response curve.
+    pub shape: Fixed,
+    /// Reserved: the discrimination law. Basis: Weber's law holds across most senses, so the magnitude-
+    /// relative step is the usual case, the absolute step the degenerate one.
+    pub discrimination: DiscriminationLaw,
+    /// Reserved: the discrimination step (the just-noticeable difference). Basis: the sensorium already
+    /// carries a per-channel resolution; the step derives from it once the sense's resolution itself
+    /// derives from anatomy.
+    pub step: Fixed,
+    /// Reserved: the detection threshold. Basis: the minimum activation the sense registers, a floor the
+    /// anatomy-transduction kernel sets from the organ's noise.
+    pub threshold: Fixed,
+}
+
+/// The marker that a channel's transduction cannot be produced: its anatomy-to-sense derivation is not
+/// built, so the transduction is RESERVED fail-loud. A caller that receives this must not fabricate a
+/// transduction (and in particular must not borrow the sense's placeholder optical index, the Terran
+/// default condition 2 forbids); the per-channel anatomy-transduction kernel is the deeper build.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TransductionUnbuilt;
+
+/// Derive the OPTICAL channel's transduction from the being's own body: the gain is the being's optical
+/// focusing capability (the REFRACT read of its eye's refractive contrast against the medium, a
+/// physics-derived sensitivity that is zero for a being with no optical transducer and rises with a keener
+/// lens), and the remaining parameters are the reserved per-sense values. This is the one channel whose
+/// transduction the anatomy supplies a physics derivation for today (condition 2, condition-5's "wire
+/// optical now"); the gain flows from the eye's genome-expressed material, so a being's optical sensitivity
+/// arises from its evolved body, never an authored per-being number. Pure and off the run path.
+pub fn derive_optical_transduction(
+    optical_capability: Fixed,
+    reserved: ReservedSenseParams,
+) -> ChannelTransduction {
+    ChannelTransduction {
+        response: reserved.response,
+        // DERIVED: the eye's normalized focusing power is its sensitivity on the optical channel.
+        gain: optical_capability,
+        shape: reserved.shape,
+        discrimination: reserved.discrimination,
+        step: reserved.step,
+        threshold: reserved.threshold,
+    }
+}
+
+/// Reserve a NON-OPTICAL channel's transduction fail-loud (condition 2). The anatomy-to-sense transduction
+/// is optical-only today, so an acoustic, chemical, field, or mana channel has no physics derivation, and
+/// its anatomy sense carries a PLACEHOLDER optical index that must not be borrowed as a stand-in sensitivity
+/// (the Terran default the value-authoring line forbids). This returns [`TransductionUnbuilt`] rather than a
+/// fabricated transduction, so a caller cannot silently produce a wrong non-optical percept. The caller
+/// distinguishes an optical channel from a reserved one by the sense's KIND, never by its placeholder index;
+/// the per-channel anatomy-transduction kernel that would derive these is the deeper build.
+pub fn reserve_nonoptical_transduction() -> Result<ChannelTransduction, TransductionUnbuilt> {
+    Err(TransductionUnbuilt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +367,57 @@ mod tests {
             pg.activation < pl.activation,
             "a compressive (log) sense forms a smaller activation for a large magnitude"
         );
+    }
+
+    // --- Segment 3: derivation and reservation ---
+
+    fn reserved() -> ReservedSenseParams {
+        ReservedSenseParams {
+            response: ResponseLaw::Linear,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::ZERO,
+        }
+    }
+
+    #[test]
+    fn the_optical_gain_derives_from_the_focusing_capability() {
+        // The optical channel's gain IS the being's optical focusing capability (the REFRACT read); the
+        // remaining parameters are the reserved per-sense values. A keener eye derives a higher gain.
+        let dim = derive_optical_transduction(Fixed::from_ratio(1, 4), reserved());
+        let keen = derive_optical_transduction(Fixed::from_ratio(3, 4), reserved());
+        assert_eq!(
+            dim.gain,
+            Fixed::from_ratio(1, 4),
+            "gain is the focusing capability"
+        );
+        assert!(keen.gain > dim.gain, "a keener eye derives a higher gain");
+        // The reserved parameters pass through unchanged (they are the owner's, not fabricated here).
+        assert_eq!(dim.response, ResponseLaw::Linear);
+        assert_eq!(dim.discrimination, DiscriminationLaw::AbsoluteStep);
+        assert_eq!(dim.step, Fixed::ONE);
+    }
+
+    #[test]
+    fn a_being_with_no_optical_transducer_derives_zero_gain() {
+        // A being whose eye does not focus (zero capability) derives zero optical gain, so it forms no
+        // percept on the optical channel: blindness emerges from the anatomy, never an authored flag.
+        let t = derive_optical_transduction(Fixed::ZERO, reserved());
+        assert_eq!(t.gain, Fixed::ZERO);
+        let cap = Fixed::from_int(1_000_000);
+        // With a zero gain the activation is zero; a positive threshold then forms no percept.
+        let t_thresholded = ChannelTransduction {
+            threshold: Fixed::from_ratio(1, 100),
+            ..t
+        };
+        assert!(sense(Fixed::from_int(1000), &t_thresholded, cap).is_none());
+    }
+
+    #[test]
+    fn a_nonoptical_channel_is_reserved_fail_loud() {
+        // Condition 2: a non-optical channel has no anatomy derivation and its placeholder optical index
+        // must not be borrowed, so it is reserved fail-loud rather than fabricated.
+        assert_eq!(reserve_nonoptical_transduction(), Err(TransductionUnbuilt));
     }
 }
