@@ -135,6 +135,36 @@ the floor family now (the dominant real transducer nonlinearity) or defer it as 
 gate registered the floor-growth pattern (this arc adds the spreading law and the transduction family) in
 the owner-blocker register for the owner's awareness.
 
+FRAMED slice-3 (receiver-side valence learner), 2026-07-10 (Agent A, PENDING gate ruling). Blind section-11
+smoke test caught my first construction BIASED (a false-settled: I stated the noise floor "derives from a
+per-axis baseline" when it is a flat authored scalar today; an overstated "harm or benefit" when the harm
+learner is harms/benign and reward is a separate pole; a suppressed deception case: a being-signal is
+agent-emitted and manipulable unlike a substance). Rebuilt, section-11 re-run cleared it MINOR_ISSUES, and I
+folded its one new catch (the same-tick vs predictive-lag structure: the harm path carries no eligibility
+trace while the reward pole does, verified at `learn.rs`). The section-10 blind panel (6 seats) returned 6/6
+significant-flaw-fixable, UNANIMOUS: the template-case CORE is sound (it correlates a low-level (channel,
+bucket) key with a low-level reserve-fall proxy, never branching on "this is a being"), but two authored
+seams must move to derived. Verified against source: the two likelihoods `p_harm_given_harms`/`p_harm_given_benign`
+are reserved-from-manifest fixed scalars (defaults 9/10, 1/10, `learn.rs:288-289,304-305`); the floor
+dose-response harm law `harm_class` (integer-Hill, `laws.rs:132`), the per-axis drain baseline `DerivedDrain`
+(`homeostasis.rs:251`), and the harm bit `is_harm_tick` (`homeostasis.rs:1089`) all exist; the reward pole
+carries `eligibility_decay` (`learn.rs:356-362`) the harm pole lacks. The corrected framing (my synthesis, for
+the gate to rule): keep the template-case correlation core, and (1) the evidence weight DERIVES per-being and
+per-(channel, bucket) as the weight-of-evidence of P(harm-bit given the feature harms) and P(harm-bit given
+benign), each ESTIMATED from the being's own `harm_class` dose-response crossed with its own reserve-delta
+noise distribution, so an alien with a different dose-response gets a different weight, RESERVED with basis
+until the estimator is built, never a fixed global 0.9/0.1; (2) the noise floor DERIVES per-axis from
+`DerivedDrain`, and the interoceptive outcome is per-axis (a signal harmful on one reserve and beneficial on
+another can be learned); (3) the harm path carries the eligibility-decay trace the reward pole already has, so
+a lagged co-occurrence is credited and same-tick stops being an authored ceiling; (4) referential meaning (a
+signal predicting harm elsewhere or to another) is a flagged explicit open limit. The scope fork for the gate:
+how much to build in slice 3 (the likelihood estimator is the deepest design work; the per-axis noise floor
+and the eligibility trace are smaller wires) versus reserve with basis. Convergence flag (as the gate
+directed): the learner keys on `feature_subject(channel, bucket)`, the belief-subject key shared with Agent B's
+affordance composer and the owner-held `SEQ_FIELD_BITS` packing; slice 3 consumes the existing per-feature key
+without re-encoding, and whether a `SenseChannelId` fits the channel field is a packing question flagged, not
+decided. Posted to the gate for its ruling before any code.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
