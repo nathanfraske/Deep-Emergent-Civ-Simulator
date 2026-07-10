@@ -748,6 +748,28 @@ pub fn perceive_being_signal(
     Some(being_signal_subject(channel, percept.bucket))
 }
 
+/// Perceive a being-signal's MAGNITUDE (the perceiver's own transduced activation) from one emitter's resolved
+/// [`Reach`], or `None` if it does not clear the perceiver's own detection threshold. The creature-tier sibling
+/// of [`perceive_being_signal`]: where that mints the belief SUBJECT (channel and bucket) the founder keys its
+/// learned valence on, this returns the transduced ACTIVATION the mind-less creature's
+/// [`creature_being_direction`] weights its toward-pull by (mechanism B3, no belief, no bucket-keyed subject, no
+/// channel). The received magnitude is the same geometrically-spread reach attenuated by the medium's
+/// Beer-Lambert transmittance, transduced through the perceiver's OWN channel transduction and gated on its own
+/// threshold, so occlusion and perceptibility key on the creature's own sense exactly as the founder's do. Pure
+/// and RNG-free.
+pub fn perceive_being_magnitude(
+    reach: Reach,
+    transduction: &ChannelTransduction,
+    activation_max: Fixed,
+) -> Option<Fixed> {
+    let transmittance = (-reach.optical_depth).exp();
+    let magnitude = reach
+        .spread
+        .checked_mul(transmittance)
+        .unwrap_or(Fixed::ZERO);
+    sense(magnitude, transduction, activation_max).map(|percept| percept.activation)
+}
+
 /// The being-directed belief gradient (the being-percept keystone, step 3b): over the perceived emitters
 /// (each a position and the [`being_signal_subject`] the perceiver formed for it via
 /// [`perceive_being_signal`]), the summed inverse-distance vector over every emitter the perceiver holds the
@@ -1455,6 +1477,58 @@ mod tests {
             perceive_being_signal(faint, 5, &transduction, cap),
             None,
             "a sub-threshold emission is not perceived"
+        );
+    }
+
+    #[test]
+    fn perceive_being_magnitude_returns_the_transduced_activation_and_shares_the_founder_threshold()
+    {
+        use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
+        // The creature-tier magnitude perceiver reads the SAME reach through the SAME transduction the founder
+        // subject perceiver uses, but returns the transduced ACTIVATION (the creature's pull weight) rather than
+        // the belief subject. Same perceptibility gate (threshold, occlusion), no belief.
+        let transduction = ChannelTransduction {
+            response: ResponseLaw::Linear,
+            gain: Fixed::ONE,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::from_int(10),
+        };
+        let cap = Fixed::from_int(1_000_000);
+        let clear = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ZERO,
+        };
+        // The returned magnitude is exactly the transduced activation the shared `sense` produces, so the
+        // creature and the founder read one magnitude from one reach and differ only in what they key on.
+        let expected_activation = sense(Fixed::from_int(100), &transduction, cap)
+            .expect("an unoccluded strong signal is sensed")
+            .activation;
+        assert_eq!(
+            perceive_being_magnitude(clear, &transduction, cap),
+            Some(expected_activation),
+            "an above-threshold reach returns the transduced activation, the creature's pull weight"
+        );
+        // Occlusion emerges the same way: a strongly absorbing medium attenuates it below threshold, no percept.
+        let occluded = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::from_int(20),
+        };
+        assert_eq!(
+            perceive_being_magnitude(occluded, &transduction, cap),
+            None,
+            "a strongly occluded emitter falls below the creature's threshold (no pull)"
+        );
+        // A sub-threshold emission is not perceived, so it contributes no magnitude.
+        let faint = Reach {
+            spread: Fixed::from_int(1),
+            optical_depth: Fixed::ZERO,
+        };
+        assert_eq!(
+            perceive_being_magnitude(faint, &transduction, cap),
+            None,
+            "a sub-threshold emission returns no magnitude"
         );
     }
 

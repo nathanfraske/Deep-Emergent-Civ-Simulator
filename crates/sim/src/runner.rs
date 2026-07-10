@@ -104,10 +104,10 @@ use crate::homeostasis::{
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
     being_avoidance_gradient, being_signal_reward_for, being_signal_trace_observations,
-    builtin_reachable_relations, feature_observations, perceive_being_signal, reward_observations,
-    sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
-    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
-    NEUTRAL, REWARDS, REWARD_ATTR,
+    builtin_reachable_relations, creature_being_direction, feature_observations,
+    perceive_being_magnitude, perceive_being_signal, reward_observations, sequence_subject,
+    step_belief_subject, BeingPerceptField, HarmLearningCalib, RewardLearningCalib, SequenceStep,
+    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -1080,6 +1080,20 @@ pub struct Embodiment {
     /// values fail-loud from the manifest at the feature arming. Never folded into `state_hash` (it is
     /// configuration); the behaviour it drives (movement and belief) is what the hash folds when the flag is on.
     being_field: Option<BeingPerceptField>,
+    /// Whether a MIND-LESS creature (an Arc-7 `Walker` absent from the mind registry) runs the belief-free
+    /// CREATURE being-directed percept (creatures-react arc, mechanism B3). FALSE by default, so no creature
+    /// contributes a being-block entry and every run hash is unchanged (the four canonical pins carry no
+    /// creatures anyway; this keeps `full --creatures` unchanged too until the world-build arms it). When true,
+    /// AND `being_field` is installed, the runner computes each creature's magnitude-graded toward-direction
+    /// ([`crate::learn::creature_being_direction`]) over the beings it perceives through the declared
+    /// transduction and writes it into the creature's controller being block; only the creature's OWN heritable
+    /// freely-signed weight, set by selection, turns it into approach (hunting) or flight (fleeing), so the
+    /// disposition emerges (Principle 9), keyed only on the emitted signal and the creature's own sense, never on
+    /// species, kind, trophic role, or relatedness. A creature forms NO belief (it has no mind); its reaction is
+    /// pure selection on the raw percept, the gate-ruled mechanism (ii)+B3. The perceiver transduction is the
+    /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
+    /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
+    creature_being_percept: bool,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1290,6 +1304,7 @@ impl Embodiment {
             attraction: false,
             being_percept: false,
             being_field: None,
+            creature_being_percept: false,
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -1384,6 +1399,19 @@ impl Embodiment {
     /// arming, reading the reserved values fail-loud from the manifest before installing the field.
     pub fn set_being_field(&mut self, field: Option<BeingPerceptField>) {
         self.being_field = field;
+    }
+
+    /// Enable (or disable) the MIND-LESS creature being-directed percept (creatures-react arc, mechanism B3):
+    /// when true, a creature (a `Walker` absent from the mind registry) computes a magnitude-graded
+    /// toward-direction over the beings it perceives and writes it into its controller being block, so its
+    /// approach/flight toward a perceived emitter emerges from its own heritable freely-signed weight under
+    /// selection. FALSE (the default) leaves creatures byte-identical (no creature contributes a being-block
+    /// entry). This reuses the EXISTING being block, so it adds NO controller block and needs NO layout rebuild;
+    /// it requires the being-percept feature to be armed (which builds the block and installs the field), so the
+    /// perceive branch is additionally gated on `being_field` being present. A creature forms no belief; the
+    /// reaction is pure selection on the raw percept.
+    pub fn set_creature_being_percept(&mut self, enabled: bool) {
+        self.creature_being_percept = enabled;
     }
 
     /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
@@ -5266,7 +5294,7 @@ impl Runner {
         // the reach threshold rather than a spatial index; a located-index range query is the optimization
         // follow-on, not built here.
         let body_temps = &self.body_temp;
-        let (being, perceived_beings): (
+        let (mut being, perceived_beings): (
             BTreeMap<StableId, Vec<Fixed>>,
             BTreeMap<StableId, Vec<StableId>>,
         ) = match (self.embodiment.as_ref(), self.world.as_ref()) {
@@ -5363,6 +5391,92 @@ impl Runner {
             }
             _ => (BTreeMap::new(), BTreeMap::new()),
         };
+        // Creatures-react arc (mechanism B3, the live wire): a MIND-LESS creature (a `Walker` absent from the
+        // mind registry) runs the BELIEF-FREE being-directed percept. Gated on the creature feature AND the
+        // being-percept substrate (which built the being block the creature's controller reuses and installed
+        // the declared field/transduction), so a creature is armed only where the founder path already is. Each
+        // creature perceives the beings whose signal reaches it, through the declared transduction, and its
+        // magnitude-graded toward-direction ([`creature_being_direction`]) is written into the ATTRACTION pair
+        // of its being block (the avoidance pair stays zero, since a creature has no avoid/attract belief split);
+        // only the creature's OWN heritable freely-signed weight, set by selection, turns it into approach
+        // (hunting) or flight (fleeing), so the disposition emerges (Principle 9). A creature forms NO belief and
+        // is absent from `perceived_beings` (no learner), keyed only on the emitted signal and its own sense.
+        // OFF (the default) inserts nothing, so it is byte-identical; the four canonical pins carry no creatures
+        // regardless, and this leaves `full --creatures` unchanged until the world-build arms the flag.
+        if let (Some(emb), Some(world)) = (self.embodiment.as_ref(), self.world.as_ref()) {
+            // Armed only where the founder path is: the creature feature on, the being block built
+            // (`being_percept`), and the declared field and physiology present (the `if let` binds both).
+            if let (true, Some(field), Some(phys)) = (
+                emb.creature_being_percept && emb.being_percept,
+                emb.being_field.as_ref(),
+                emb.physiology.as_ref(),
+            ) {
+                let sigma = phys.anchors.sigma;
+                let registry_opt = emb.material_registry.as_ref();
+                let creature_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
+                    .walkers
+                    .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
+                    .filter_map(|w| {
+                        if world.mind(w.id).is_some() {
+                            return None; // a founder: handled by the belief-reading branch above
+                        }
+                        let here = w.coord();
+                        let mut perceived: Vec<(Coord3, Fixed)> = Vec::new();
+                        for other in &emb.walkers {
+                            if other.id == w.id {
+                                continue;
+                            }
+                            let src = other.coord();
+                            let body_temp =
+                                body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                            let emission = physiology::being_signal_emission(
+                                body_temp,
+                                field.emission_coefficient,
+                                sigma,
+                            );
+                            if emission <= Fixed::ZERO {
+                                continue;
+                            }
+                            let reach = match registry_opt {
+                                Some(reg) => resolve_reach(
+                                    &field.row,
+                                    emission,
+                                    src,
+                                    here,
+                                    &emb.material,
+                                    reg,
+                                    field.bounds,
+                                ),
+                                None => received_reach(emission, src, here, field.bounds, &[]),
+                            };
+                            if let Some(magnitude) = perceive_being_magnitude(
+                                reach,
+                                &field.transduction,
+                                field.activation_max,
+                            ) {
+                                perceived.push((src, magnitude));
+                            }
+                        }
+                        if perceived.is_empty() {
+                            return None;
+                        }
+                        let (dx, dy) = creature_being_direction(here, &perceived);
+                        // Keep only a non-zero direction (a creature that perceives no one, or a net-zero pull,
+                        // reads the founder-zero default), exactly as the founder branch gates its gradient.
+                        if dx == Fixed::ZERO && dy == Fixed::ZERO {
+                            return None;
+                        }
+                        // The toward-direction fills the ATTRACTION pair `[.., .., rx, ry]`; the avoidance pair
+                        // stays zero. The creature's freely-signed weight on the attraction slots sets the sign.
+                        Some((w.id, vec![Fixed::ZERO, Fixed::ZERO, dx, dy]))
+                    })
+                    .collect();
+                for (id, dir) in creature_dirs {
+                    being.insert(id, dir);
+                }
+            }
+        }
         self.perceived_beings = perceived_beings;
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
