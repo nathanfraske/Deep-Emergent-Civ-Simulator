@@ -90,6 +90,7 @@ pub mod genesis;
 pub mod genome;
 pub mod homeostasis;
 pub mod institution;
+pub mod insult;
 pub mod langdist;
 pub mod langmod;
 pub mod language;

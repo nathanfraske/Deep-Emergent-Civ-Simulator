@@ -34,13 +34,13 @@ use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     append_controller_block, append_morphogen_block, append_scalar_channel, build_dawn_runner,
-    express_program, grow, taxis_move_weights, Articulation, Axiom, AxiomAxisId, BandSpec,
-    BreedingSystem, BreedingSystemId, BreedingSystemRegistry, CapabilityCaps, CapabilityRefs,
-    Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind, DominanceMode,
-    EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef, GeneEffect,
-    GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis, MorphogenParamId,
-    MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId, ReproductionMode,
-    SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
+    express_program, grow, taxis_move_weights, Articulation, Axiom, AxiomAxisId, AxisSpec,
+    BandSpec, BreedingSystem, BreedingSystemId, BreedingSystemRegistry, CapabilityCaps,
+    CapabilityRefs, Channel, CognitionChannel, ControllerLayout, Curve, DawnPeoples, DominanceKind,
+    DominanceMode, EmbodimentGenesis, EpistemicStance, EvidenceRing, FunctionLawRegistry, GeneDef,
+    GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, LanguageGenesis,
+    MorphogenParamId, MorphogenProgram, PersonalityProfile, PersonalityRegistry, Race, RaceId,
+    ReproductionMode, SchemeId, SourceModeId, TraitAxisId, TraitDef, ValueAxisId, ValueProfile,
 };
 use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -1809,6 +1809,216 @@ fn an_incoherent_grown_body_is_culled_through_the_ordinary_reserve_floor_path() 
     // Determinism: the viability-cull run replays bit for bit.
     let (_, hash_b) = run(true, 0x5111);
     assert_eq!(hash_a, hash_b, "the viability-cull run replays bit for bit");
+}
+
+// --- R-AGING (c) FUNCTIONAL CHECK: aging and death EMERGE from the per-segment first-passage accumulator ---
+
+/// A homeostatic registry for the aging functional check: the grazer metabolic axes (ENERGY backed by
+/// `bio.energy_density`, WATER, TEMPERATURE, CONDITION) PLUS the derived INTEGRITY axis. The aging accrual
+/// keys its repair funding on the `bio.energy_density`-backed axis, so the grazer registry (not the
+/// temperature-only one) is required. INTEGRITY is set each tick from the aged whole-body viability, so a
+/// body worn down by accumulated damage falls through the death floor. RESERVED-with-basis death floor
+/// (the minimum viable whole-body capability), a labelled dev fixture.
+fn aging_homeo() -> HomeostaticRegistry {
+    let mut reg = HomeostaticRegistry::dev_grazer();
+    reg.axes.push(HomeostaticAxisDef {
+        id: INTEGRITY,
+        name: "integrity".to_string(),
+        backing_component: None,
+        capacity_per_mass: Fixed::ONE,
+        base_drain: Fixed::ZERO,
+        exertion_drain: Fixed::ZERO,
+        death_floor: Fixed::from_ratio(1, 8),
+    });
+    reg
+}
+
+/// A morphogen race that ARMS aging: the viability-cull race's limbed grown body (so its segments read a
+/// LOCOMOTE capability and slide a positive distance each tick, the wear insult's drive), extended so its
+/// grown tissue carries the tribology axes the Archard wear insult reads. The three added axes are
+/// DEV-FIXTURE test constants (non-canonical, never owner data): they are grown with `lo == hi` so every
+/// segment carries them deterministically without seeding new genome loci, and `mat.turnover_rate` is
+/// intentionally omitted so repair is zero and net damage is pure wear (fast, monotone aging for the
+/// check). The `mat.wear_coefficient` is on the axis's `x1e6` storage scale (matching
+/// `PhysicsRegistry::ground()`). The only per-race difference is `fracture_energy`, which sets each
+/// segment's failure tolerance (`fracture_energy * contact_area`), so a tougher race lives longer purely
+/// as an output of the tolerance-versus-wear balance.
+fn aging_race(fracture_energy: Fixed) -> Race {
+    let mut program = MorphogenProgram::dev_default();
+    let fixed = |axis: &str, v: Fixed| AxisSpec {
+        axis: axis.to_string(),
+        lo: v,
+        hi: v,
+    };
+    program
+        .material_axes
+        .push(fixed("mat.fracture_energy", fracture_energy));
+    // A soft tissue (low indentation hardness) worn by an aggressive tribological pair, so the Archard wear
+    // is fast enough that first-passage aging kills within the test window before the metabolic reserves
+    // (seeded full below) run down. Pinning hardness overrides the dev_default range so the wear rate is
+    // deterministic rather than genome-expressed. All dev-fixture, non-canonical test constants.
+    program
+        .material_axes
+        .push(fixed("mat.indentation_hardness", Fixed::ONE));
+    program
+        .material_axes
+        .push(fixed("mat.wear_coefficient", Fixed::from_int(30)));
+    program
+        .material_axes
+        .push(fixed("mat.specific_cut_energy", Fixed::ONE));
+
+    // A FULLY GROWN race (no catalog body): its metabolic reserves source from its grown tissue (the B2b
+    // metabolic-tier grow), so the energy-density and water-fraction seeded below back real energy and
+    // water reserves off the grown structure, and the being does not start empty and instantly starve.
+    let mut race = a_sexed_race(0).with_morphogen(program.clone());
+    let mut genes = race.genes.genes.clone();
+    let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
+    let mut effects = vec![Fixed::ZERO; 3];
+    // The same limb seed the viability race grows (a section modulus, arm length, and bony yield with a
+    // blunt tip), so the founder reads LOCOMOTE and its wear drive (force and slide distance) is positive;
+    // PLUS a full metabolic tissue (energy density and water fraction, the last two composition params by
+    // the `param_count() - 2` / `- 1` convention) so the founders carry ample energy and water reserves and
+    // do not starve or dehydrate before aging kills them (isolating the first-passage cause).
+    // The composition params (convective_surface, fracture_strength, specific_heat, energy_density,
+    // water_fraction) follow the geometry (2 params each) and material params, then the 2 spawn/branch
+    // params. fracture_strength IS physiology::MUSCLE_STRENGTH, so seeding it gives the being a positive
+    // muscle force (the Archard wear drive; a zero-muscle body exerts no load and never wears). Energy and
+    // water are the last two (the `param_count() - 2` / `- 1` convention), so a full metabolic tissue.
+    let comp_base = program.geometry_axes.len() * 2 + program.material_axes.len() + 2;
+    let muscle = MorphogenParamId((comp_base + 1) as u32); // composition index 1 = fracture_strength
+    let energy_density = MorphogenParamId(program.param_count() as u32 - 2);
+    let water_fraction = MorphogenParamId(program.param_count() as u32 - 1);
+    let morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
+        (MorphogenParamId(0), Fixed::ONE),
+        (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
+        (MorphogenParamId(2), Fixed::from_ratio(2, 5)),
+        (MorphogenParamId(9), Fixed::from_ratio(3, 4)),
+        (muscle, Fixed::ONE),
+        (energy_density, Fixed::ONE),
+        (water_fraction, Fixed::ONE),
+    ];
+    append_morphogen_block(
+        &mut genes,
+        &mut freqs,
+        &mut effects,
+        2,
+        program.param_count(),
+        &morph_seeds,
+    );
+    race.genes = GeneSet { genes };
+    race.pool = GenePool::new(SchemeId(0), 20, freqs)
+        .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+    race
+}
+
+/// One band of the aging race and an embodiment genesis carrying the aging-bearing registry.
+fn aging_peoples(fracture_energy: Fixed) -> DawnPeoples {
+    let mut races = BTreeMap::new();
+    races.insert(RaceId(0), aging_race(fracture_energy));
+    let mut breeding = BreedingSystemRegistry::new();
+    breeding.insert(BreedingSystem::dev_binary_anisogamy(BreedingSystemId(0)));
+    DawnPeoples {
+        races,
+        bands: vec![BandSpec {
+            race: RaceId(0),
+            place: 10,
+            members: 8,
+        }],
+        breeding,
+        personality: PersonalityRegistry::new(),
+        mortality_hazard: None,
+        language: None,
+        embodiment: Some(EmbodimentGenesis {
+            homeostatic: aging_homeo(),
+            affordances: AffordanceRegistry::dev_default(),
+            locomotion: LocomotionParams::dev_default(),
+            organs: BodyPlanRegistry::dev_default(),
+            tolerances: Default::default(),
+            controller_hidden: 0,
+            submerged_medium_id: "medium.water".to_string(),
+            emergent_medium_id: "medium.air".to_string(),
+        }),
+        biosphere: None,
+    }
+}
+
+#[test]
+fn aging_kills_by_first_passage_and_a_tougher_body_lives_longer() {
+    // R-AGING (c) FUNCTIONAL CHECK, end to end in the run loop: a grown-body race that arms aging dies
+    // from FIRST-PASSAGE per-part damage (its segments accrue Archard wear against their own tolerance,
+    // the aged whole-body viability falls, and the being is culled through the EXISTING reserve-floor
+    // path, INTEGRITY, with no vital-part predicate), and the size-longevity relation is a pure OUTPUT: a
+    // tougher race (higher grown fracture energy, so a higher per-segment failure tolerance) lives longer,
+    // never a written size-to-duration law. The tribology values are dev fixtures; the real per-tissue
+    // wear and turnover stay reserved-with-basis.
+    let manifest = manifest();
+    let resolution = a_scenario(None).resolve(&manifest).unwrap();
+    let map = a_map(0xB0);
+
+    // Run a race to `ticks` and return, per tick, the (integrity_deaths, other_deaths) counts, plus the
+    // final state hash for the determinism check.
+    let run = |fracture_energy: Fixed, seed: u64, ticks: u32| -> (Vec<(u32, u32)>, u128) {
+        let mut runner = build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            &resolution,
+            &map,
+            &aging_peoples(fracture_energy),
+            seed,
+        )
+        .expect("an aging dawn assembles");
+        // Arm the aging runtime the harness leaves unset (physiology is already installed): the material
+        // registry (for the mat.wear_coefficient storage scale) and the wear caps.
+        let emb = runner.embodiment_mut().unwrap();
+        emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
+        emb.set_wear(civsim_sim::material::WearParams::dev_fixture());
+
+        let mut timeline = Vec::new();
+        for _ in 0..ticks {
+            runner.step();
+            let deaths = runner.take_obs_deaths();
+            let integ = deaths.iter().filter(|a| **a == INTEGRITY).count() as u32;
+            let other = deaths.len() as u32 - integ;
+            if integ > 0 || other > 0 {
+                timeline.push((integ, other));
+            }
+        }
+        (timeline, runner.state_hash())
+    };
+
+    let frail_fe = Fixed::from_int(1);
+    let tough_fe = Fixed::from_int(8);
+    let (frail, frail_hash) = run(frail_fe, 0x5111, 40);
+    let (tough, _) = run(tough_fe, 0x5111, 40);
+
+    let frail_integ: u32 = frail.iter().map(|(i, _)| i).sum();
+    let frail_other: u32 = frail.iter().map(|(_, o)| o).sum();
+    let tough_integ: u32 = tough.iter().map(|(i, _)| i).sum();
+
+    // (1) Aging kills: the frail race suffers first-passage INTEGRITY deaths.
+    assert!(
+        frail_integ > 0,
+        "a loaded, aging-armed body dies of first-passage per-part damage (INTEGRITY): frail timeline {frail:?}"
+    );
+    // (2) The death is aging, not a metabolic confound: the INTEGRITY deaths dominate the frail run.
+    assert!(
+        frail_integ >= frail_other,
+        "the deaths are aging (INTEGRITY), not starvation/exposure: {frail_integ} integrity vs {frail_other} other"
+    );
+    // (3) The longevity relation is an emergent OUTPUT: the tougher race (higher failure tolerance) suffers
+    // strictly fewer aging deaths over the same window, purely from the tolerance-versus-wear balance.
+    assert!(
+        tough_integ < frail_integ,
+        "a tougher body lives longer, an emergent output never an authored law: tough {tough_integ} vs frail {frail_integ} integrity deaths"
+    );
+
+    // Determinism: the aging run replays bit for bit.
+    let (_, frail_hash_b) = run(frail_fe, 0x5111, 40);
+    assert_eq!(
+        frail_hash, frail_hash_b,
+        "the aging run replays bit for bit"
+    );
 }
 
 /// A FULLY GROWN race (emergent-anatomy Step 3, the metabolic-tier grow): a developmental program and NO
