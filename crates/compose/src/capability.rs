@@ -148,12 +148,18 @@ impl CapabilityKernel {
     /// The dimensionless capability in `[0, 1]` the part's geometry and material yield for this function
     /// against the reserved references. A pure fixed-point read: no float, no id, no RNG, so a capability
     /// is a deterministic function of the grown physics and the reserved references.
+    /// `geometry_axes` and `material_axes` are the law's DATA-declared axis-id bindings (from its
+    /// [`FunctionLawDef`] row). The IMPACT kernel reads its axes from them (the grade-path parallel of the
+    /// delivery-path contact-transfer row); the other kernels read their hardcoded contract and ignore the
+    /// lists (the flagged follow-on lifts them the same way).
     pub fn capability(
         self,
         geo: &dyn Fn(&str) -> Fixed,
         mat: &dyn Fn(&str) -> Fixed,
         refs: &CapabilityRefs,
         caps: &CapabilityCaps,
+        geometry_axes: &[String],
+        material_axes: &[String],
     ) -> Fixed {
         match self {
             CapabilityKernel::Pierce => pierce(geo, mat, refs, caps),
@@ -161,7 +167,7 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => refract(mat, refs),
             CapabilityKernel::Shear => shear(geo, mat, refs, caps),
             CapabilityKernel::Crush => crush(geo, mat, refs, caps),
-            CapabilityKernel::Impact => impact(geo, mat, refs),
+            CapabilityKernel::Impact => impact(geo, mat, refs, geometry_axes, material_axes),
         }
     }
 }
@@ -392,17 +398,24 @@ fn impact(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
+    geometry_axes: &[String],
+    material_axes: &[String],
 ) -> Fixed {
+    // The actuating-strength, cross-section, and stroke axes are read from the law's DATA-declared bindings (the
+    // grade-path parallel of the delivery-path contact-transfer row), so an alien actuator names its own axes on
+    // both paths in lockstep: the strength is material-axis 0, the cross-section geometry-axis 0, the stroke
+    // geometry-axis 1 (the order the kernel's contract declares them). A binding that names no such axis reads
+    // zero through the accessor, so the part self-gates (the absence convention), never a hardcoded id and never
+    // a fabricated blow.
+    let strength = material_axes.first().map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let cross_section = geometry_axes.first().map(|a| geo(a)).unwrap_or(Fixed::ZERO);
+    let stroke = geometry_axes.get(1).map(|a| geo(a)).unwrap_or(Fixed::ZERO);
     // The actuating force in newtons (strength stress over cross-section, promoted by the megapascal-to-newton
     // bridge), then the actuator work over the grown stroke. Passing the force through `actuator_work` rather
     // than short-circuiting on overflow keeps the stroke guard live: a part with no grown stroke reads zero even
     // when its force would overflow (a representability corner, not a full-impact ceiling).
-    let force = laws::stress_force(
-        mat("mat.fracture_strength"),
-        geo("mech.cross_section_area"),
-        ENERGY_GUARD,
-    );
-    let delivered = laws::actuator_work(force, geo("mech.stroke_length"), ENERGY_GUARD);
+    let force = laws::stress_force(strength, cross_section, ENERGY_GUARD);
+    let delivered = laws::actuator_work(force, stroke, ENERGY_GUARD);
     normalize(
         sat_sub(delivered, refs.reference_strike_energy),
         refs.reference_strike_energy,
@@ -558,6 +571,45 @@ pub struct FunctionLawDef {
     pub name: String,
     /// The kernel it computes.
     pub kernel: CapabilityKernel,
+    /// The physics-floor GEOMETRY axis ids the law's kernel reads, as DATA (Principle 11): the grade-path
+    /// parallel of the delivery-path contact-transfer row (which carries its `cross_section_axis`/`stroke_axis`
+    /// on the row), so an alien actuator names its own axes on BOTH the capability grade and the delivered-energy
+    /// paths, in lockstep, never a rewrite of one while the other is data. The IMPACT kernel reads its
+    /// cross-section (entry 0) and stroke (entry 1) from here; the other kernels still read their hardcoded
+    /// default contract (a flagged follow-on to lift them the same way), so a def whose binding equals
+    /// `kernel.geometry_axes()`, as [`FunctionLawDef::new`] populates it, reads byte-identically.
+    pub geometry_axes: Vec<String>,
+    /// The physics-floor MATERIAL axis ids the law's kernel reads, as DATA, the material sibling of
+    /// [`Self::geometry_axes`]. The IMPACT kernel reads its actuating-strength axis from the first entry.
+    pub material_axes: Vec<String>,
+}
+
+impl FunctionLawDef {
+    /// A law entry whose axis bindings are the kernel's own declared contract, the byte-neutral default: the
+    /// data-carried axis ids equal [`CapabilityKernel::geometry_axes`] / [`CapabilityKernel::material_axes`], so
+    /// a def built this way reads exactly as the hardcoded kernel did. An alien registry overrides the axis ids
+    /// by constructing the def with its own lists (the harden-to-registry contract, Principle 11).
+    pub fn new(
+        id: FunctionLawId,
+        name: impl Into<String>,
+        kernel: CapabilityKernel,
+    ) -> FunctionLawDef {
+        FunctionLawDef {
+            id,
+            name: name.into(),
+            kernel,
+            geometry_axes: kernel
+                .geometry_axes()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            material_axes: kernel
+                .material_axes()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
 }
 
 /// The function-law catalogue. Ordered by id so every walk is deterministic. The structure is fixed
@@ -619,36 +671,38 @@ impl FunctionLawRegistry {
     /// aerodynamic, insulation, chemoreception, and respiration laws.
     pub fn dev_seed() -> Self {
         let mut reg = FunctionLawRegistry::new();
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_PIERCE,
-            name: "pierce".to_string(),
-            kernel: CapabilityKernel::Pierce,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_LOCOMOTE,
-            name: "locomote".to_string(),
-            kernel: CapabilityKernel::Locomote,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_REFRACT,
-            name: "refract".to_string(),
-            kernel: CapabilityKernel::Refract,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_SHEAR,
-            name: "shear".to_string(),
-            kernel: CapabilityKernel::Shear,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_CRUSH,
-            name: "crush".to_string(),
-            kernel: CapabilityKernel::Crush,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-        });
+        // Each law's axis bindings default to its kernel's own contract (`FunctionLawDef::new`), so the IMPACT
+        // read (now off the data bindings, the delivery-path parallel) is byte-identical to the hardcoded form.
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_PIERCE,
+            "pierce",
+            CapabilityKernel::Pierce,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_LOCOMOTE,
+            "locomote",
+            CapabilityKernel::Locomote,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_REFRACT,
+            "refract",
+            CapabilityKernel::Refract,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_SHEAR,
+            "shear",
+            CapabilityKernel::Shear,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_CRUSH,
+            "crush",
+            CapabilityKernel::Crush,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+        ));
         reg
     }
 }
@@ -699,7 +753,11 @@ pub fn derive_capabilities(
 ) -> CapabilityVector {
     let mut scores = BTreeMap::new();
     for def in fns.defs() {
-        scores.insert(def.id.0, def.kernel.capability(geo, mat, refs, caps));
+        scores.insert(
+            def.id.0,
+            def.kernel
+                .capability(geo, mat, refs, caps, &def.geometry_axes, &def.material_axes),
+        );
     }
     CapabilityVector { scores }
 }
