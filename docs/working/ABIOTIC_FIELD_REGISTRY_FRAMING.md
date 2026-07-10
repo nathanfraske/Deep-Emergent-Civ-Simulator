@@ -264,6 +264,37 @@ named as the honest remaining limit; and the one confirmed minor, that an alien 
 conversion silently borrows the soil-derived global (opt-out, not closed), is now surfaced as an explicit honest
 limit at its site, closed when the source declares its own conversion or segment 3 derives it from the floor.
 
+## Segment 3 core built (the gate's interim unblock)
+
+The gate unblocked the depth-independent floor-EMF yield core (the base both standard-EMF and full-Nernst
+share) while the owner decides the depth. Built: a redox source's stock-to-biomass conversion DERIVES from its
+couple rather than a declared number. `RedoxEmf { donor_potential, acceptor_potential }` carries the two floor
+`chem.standard_potential` values; `AbioticSourceRegistry::effective_conversion` computes the galvanic EMF through
+the floor law `civsim_physics::laws::battery_emf` (`E_acceptor - E_donor`, clamped at zero so a couple whose
+standard EMF is non-positive powers no life) times the RESERVED `emf_to_biomass` coupling. Precedence: the redox
+derivation over the segment-2 per-source value over the registry-global; both extract passes route through the one
+`effective_conversion`, so Pass 1 and Pass 2 agree.
+
+The `emf_to_biomass` coupling is RESERVED, the owner's value, surfaced with the `dG = -n*F*EMF` basis and never
+fabricated: it defaults to a fail-loud sentinel (zero) that refuses to run a redox derivation rather than silently
+starving the producer. The standard potentials are floor data. So the yield is derived from the floor and the
+couple, nothing authored in the content path.
+
+Flagged not wired, the owner's depth ruling: the full-Nernst concentration adjustment (the reaction quotient Q
+from the `DataScalar` field concentrations, the `RT/nF` thermal factor) around this same core. Two honest limits
+of the standard-EMF core are surfaced at the mechanism site: the zero-clamp reads spontaneity at the standard
+state (Nernst would re-judge it at the actual concentrations), and the reserved coupling folds the per-couple
+electron count `n` into one global (a per-couple `n` is a couple-data refinement); both are the owner's
+yield-model-depth call.
+
+Proven: the four pins hold byte-identical (`redox_emf` None makes `effective_conversion` return exactly the
+segment-2 expression), `extract_producers`'s signature is unchanged, worker-invariant, 26 environ tests (four new:
+the yield equals `supply * (EMF * coupling)` and overrides the global; the redox derivation takes precedence over
+a per-source conversion; a standard-non-spontaneous couple and the EMF-zero boundary support no biomass with a
+spontaneous positive control; an unset coupling fails loud), full sim suite green, fmt and clippy clean. A
+section-9 five-lens audit was run, its findings verified against source and hardened (the precedence and
+EMF-zero-boundary tests, and the standard-state and folded-`n` honest limits surfaced at the site).
+
 ## Files
 
 - Edit surface: `crates/sim/src/environ.rs` (the enum, the two matches, the `EnvironFields` struct, tests).

@@ -378,6 +378,35 @@ pub enum ReadShape {
     Point,
 }
 
+/// A redox source's yield DERIVATION from the floor (Arc 5 segment 3, the depth-independent CORE): the biomass a
+/// chemolithotroph fixes per unit stock DERIVES from the galvanic EMF of its electron-donor/electron-acceptor
+/// couple, rather than a world-declared raw conversion. The two STANDARD POTENTIALS are floor data (the substances'
+/// own `chem.standard_potential`, the authored physics floor, P9-legal); the EMF is the floor law
+/// [`civsim_physics::laws::battery_emf`] (`E_acceptor - E_donor`, the galvanic cell EMF), clamped at zero AT
+/// STANDARD CONCENTRATIONS (a couple whose STANDARD EMF is non-positive releases no free energy and powers no life
+/// in the standard state); the yield is that EMF times the RESERVED [`AbioticSourceRegistry::emf_to_biomass`]
+/// coupling. So a redox source's conversion is neither the soil-derived global nor a fabricated per-source number:
+/// it is DERIVED from the floor and the couple (Principle 6, 11), and any redox chemistry (Terran vent
+/// sulfide/oxygen, an alien couple) is a data row of two potentials.
+///
+/// DEPTH EXTENSION, FLAGGED not wired (the owner's standard-EMF-versus-Nernst ruling): this CORE uses the STANDARD
+/// EMF, the base BOTH depths share. Full-Nernst adds a concentration adjustment to the EMF, the reaction quotient
+/// `Q` formed from the donor/acceptor `DataScalar` field CONCENTRATIONS times the thermal factor `RT/nF`, a clean
+/// parameterized add-on around this same core (a `nernst`-adjusted EMF replacing the standard EMF in the yield),
+/// not built until the owner rules the depth. HONEST LIMIT of the standard-EMF core: the zero-clamp reads
+/// spontaneity at the STANDARD state, so a couple that is standard-non-spontaneous but concentration-driven
+/// spontaneous (or the reverse) is judged only by its standard EMF until the Nernst extension re-evaluates it at
+/// the actual field concentrations; and the reserved coupling folds the per-couple electron count `n` (from
+/// `dG = -n*F*EMF`) into one registry-global, so two couples differing only in `n` share a yield-per-volt until a
+/// per-couple `n` (a couple-data refinement) is added. Both are the owner's yield-model-depth call, surfaced.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RedoxEmf {
+    /// The electron DONOR's (reductant's) standard reduction potential (floor `chem.standard_potential`).
+    pub donor_potential: Fixed,
+    /// The electron ACCEPTOR's (oxidant's) standard reduction potential (floor `chem.standard_potential`).
+    pub acceptor_potential: Fixed,
+}
+
 /// One AVAILABILITY BAND on an abiotic source (chemistry arc, Arc 5 T1): the source is present in a region
 /// only where the region's environment reads inside the HALF-OPEN interval `[min, max)` on env axis `axis`
 /// (an ORDINAL into `EnvProfile::fields`, exactly as `Niche::suitability` reads its axes, so a band never
@@ -448,6 +477,12 @@ pub struct AbioticBinding {
     /// Liebig-min co-limited by segment 1) draws each down by its OWN coefficient. RESERVED per source with the
     /// same basis as the conversion; `Some(0)` models a catalyst (enabling but not consumed).
     pub stock_per_biomass: Option<Fixed>,
+    /// A redox source's yield DERIVATION from the floor (Arc 5 segment 3): when `Some`, this source's stock-to-
+    /// biomass conversion is DERIVED from the couple's galvanic EMF times the reserved coupling (see [`RedoxEmf`]),
+    /// taking precedence over the per-source [`Self::biomass_per_stock`] and the registry-global, so a redox
+    /// source's power is neither soil-borrowed nor fabricated but read from the floor. `None` (every Terran source)
+    /// keeps the segment-2 behaviour, so the run is byte-identical.
+    pub redox_emf: Option<RedoxEmf>,
 }
 
 /// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
@@ -471,6 +506,15 @@ pub struct AbioticSourceRegistry {
     /// per tick, the bootstrap that seeds a bare soil before any corpse decomposes. Basis: the rock-weathering
     /// release rate the material data implies; set so a virgin world greens slowly.
     pub weathering_rate: Fixed,
+    /// RESERVED (Arc 5 segment 3, the EMF-to-biomass coupling, surfaced not fabricated, the OWNER's value): the
+    /// biomass a redox source supports per unit of galvanic EMF (volt) of its couple, the conversion from the
+    /// floor free-energy the couple releases to the biomass it fixes. Basis: a thermodynamic-efficiency bound
+    /// (`dG = -n * F * EMF`, so biomass-per-volt folds the electrons transferred `n`, the Faraday constant `F`,
+    /// and the fraction of free energy captured as biomass). Defaults to a fail-loud sentinel (zero): a redox
+    /// source's derived conversion REFUSES to run while it is unset (asserting, never silently starving), exactly
+    /// the sentinel discipline `biomass_per_stock` follows. A world with no redox source never reads it, so it
+    /// stays reserved and every Terran run is byte-identical.
+    pub emf_to_biomass: Fixed,
 }
 
 impl AbioticSourceRegistry {
@@ -524,6 +568,7 @@ impl AbioticSourceRegistry {
                 availability,
                 biomass_per_stock: None,
                 stock_per_biomass: None,
+                redox_emf: None,
             },
         );
     }
@@ -553,6 +598,38 @@ impl AbioticSourceRegistry {
             b.biomass_per_stock = biomass_per_stock;
             b.stock_per_biomass = stock_per_biomass;
         }
+    }
+
+    /// Declare a source's yield as a REDOX DERIVATION from the floor (Arc 5 segment 3): its stock-to-biomass
+    /// conversion is computed from the couple's galvanic EMF (the two floor standard potentials) times the reserved
+    /// [`Self::emf_to_biomass`] coupling, rather than a declared raw number (see [`RedoxEmf`]). A no-op if the id is
+    /// unbound. The couple's potentials are floor data; the coupling is the owner's reserved value, so the yield is
+    /// derived, never fabricated.
+    pub fn set_source_redox(&mut self, id: u16, donor_potential: Fixed, acceptor_potential: Fixed) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.redox_emf = Some(RedoxEmf {
+                donor_potential,
+                acceptor_potential,
+            });
+        }
+    }
+
+    /// The stock-to-biomass conversion a binding uses, resolving the Arc-5 precedence (segment 3 over 2 over the
+    /// global): a REDOX source DERIVES it from the couple's galvanic EMF ([`civsim_physics::laws::battery_emf`],
+    /// `E_acceptor - E_donor`, clamped at zero so a non-spontaneous couple powers no life) times the RESERVED
+    /// `emf_to_biomass` coupling, failing loud if that coupling is unset (the sentinel discipline, never silently
+    /// starving); otherwise the per-source [`AbioticBinding::biomass_per_stock`] if set, else the registry-global.
+    /// Byte-neutral for Earth (no redox source, no per-source override, so the global is returned unchanged).
+    fn effective_conversion(&self, binding: &AbioticBinding) -> Fixed {
+        if let Some(rx) = &binding.redox_emf {
+            assert!(
+                self.emf_to_biomass > Fixed::ZERO,
+                "redox source: emf_to_biomass coupling reserved value is unset (would starve every redox producer)"
+            );
+            let emf = laws::battery_emf(rx.acceptor_potential, rx.donor_potential).max(Fixed::ZERO);
+            return emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX);
+        }
+        binding.biomass_per_stock.unwrap_or(self.biomass_per_stock)
     }
 
     /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
@@ -1071,13 +1148,11 @@ impl EnvironFields {
                                 .at(x, y),
                         },
                     };
-                    // The stock-to-biomass conversion is per-source (Arc 5 segment 2), falling back to the
-                    // registry-global when the source does not declare its own (byte-neutral for Earth): a
-                    // redox stock and a soil stock are dimensionally incommensurable, so one soil-derived global
-                    // cannot honestly convert both.
-                    let bps = binding
-                        .biomass_per_stock
-                        .unwrap_or(registry.biomass_per_stock);
+                    // The stock-to-biomass conversion resolves the Arc-5 precedence (segment 3 redox derivation
+                    // over the segment-2 per-source value over the registry-global; byte-neutral for Earth, which
+                    // declares none of the first two): a redox source DERIVES its yield from the couple's floor
+                    // EMF, a per-source override converts on its own terms, else the soil-derived global.
+                    let bps = registry.effective_conversion(binding);
                     let supported = supply.checked_mul(bps).unwrap_or(Fixed::MAX);
                     if supported < min_supported {
                         min_supported = supported;
@@ -1107,10 +1182,9 @@ impl EnvironFields {
                     // reaction consumes its reactants in a reaction-specific ratio, not 1:1, so a producer
                     // closing on a donor and an acceptor (each its own source id, Liebig-min co-limited) draws
                     // each by its OWN coefficient. `None` falls back to the reciprocal of this source's effective
-                    // conversion (draw_biomass / bps), today's implicit 1:1 draw (byte-identical for Earth).
-                    let bps = binding
-                        .biomass_per_stock
-                        .unwrap_or(registry.biomass_per_stock);
+                    // conversion (draw_biomass / bps, the same segment-3-or-2-or-global conversion Pass 1 capped
+                    // by), today's implicit 1:1 draw (byte-identical for Earth).
+                    let bps = registry.effective_conversion(binding);
                     let draw_amt = match binding.stock_per_biomass {
                         Some(spb) => draw_biomass.checked_mul(spb).unwrap_or(Fixed::ZERO),
                         None => draw_biomass.checked_div(bps).unwrap_or(Fixed::ZERO),
@@ -2219,6 +2293,188 @@ mod tests {
         let mut reg = AbioticSourceRegistry::default();
         reg.insert(1, AbioticField::DataScalar(5), true, "");
         reg.set_source_conversion(1, Some(Fixed::ZERO), None); // panics: zero conversion
+    }
+
+    #[test]
+    fn a_redox_source_derives_its_yield_from_the_floor_emf_not_a_declared_number() {
+        // Arc 5 segment 3 (the depth-independent floor-EMF core): a chemolithotroph's stock-to-biomass conversion
+        // DERIVES from the galvanic EMF of its couple (the two floor standard potentials, through the floor law
+        // battery_emf = E_acceptor - E_donor) times the reserved emf_to_biomass coupling, rather than a declared
+        // raw number or the soil-derived global. Proof: the capped productivity equals supply * (EMF * coupling),
+        // matching the floor law exactly, and differs from what the registry-global conversion would give.
+        let map = a_map(0x5EDD00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 20;
+        let source_id: u16 = 200;
+        let field_level = Fixed::from_ratio(1, 2);
+        // A spontaneous couple: acceptor (oxidant) above donor (reductant), so EMF > 0.
+        let donor_potential = Fixed::from_ratio(2, 10);
+        let acceptor_potential = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2); // the reserved EMF-to-biomass value (a dev-fixture, owner's in canon)
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4); // the global the redox derivation must OVERRIDE
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.emf_to_biomass = coupling;
+        reg.set_source_redox(source_id, donor_potential, acceptor_potential);
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg);
+
+        let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // = 0.6
+        let derived_yield = emf.checked_mul(coupling).unwrap();
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            field_level.checked_mul(derived_yield).unwrap(),
+            "the redox source's productivity derives from the floor EMF (E_acceptor - E_donor) times the coupling"
+        );
+        assert_ne!(
+            cap,
+            field_level.checked_mul(Fixed::from_int(4)).unwrap(),
+            "the derivation OVERRIDES the registry-global conversion (the yield is read from the floor, not declared)"
+        );
+    }
+
+    #[test]
+    fn a_redox_derivation_takes_precedence_over_a_per_source_conversion() {
+        // Arc 5 segment 3 precedence: when a source carries BOTH a redox couple AND a per-source biomass_per_stock
+        // (segment 2), the redox derivation wins, so the couple's floor EMF sets the yield, not the declared
+        // per-source number. Proven by setting a per-source conversion that would give a DIFFERENT cap and showing
+        // the realised cap is the EMF-derived one, not the per-source one (and not the global).
+        let map = a_map(0x9E11);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 22;
+        let source_id: u16 = 202;
+        let field_level = Fixed::from_ratio(1, 2);
+        let donor_potential = Fixed::from_ratio(2, 10);
+        let acceptor_potential = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2);
+        let per_source_bps = Fixed::from_int(7); // a DIFFERENT per-source value the redox must override
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.emf_to_biomass = coupling;
+        reg.set_source_conversion(source_id, Some(per_source_bps), None); // segment-2 per-source value
+        reg.set_source_redox(source_id, donor_potential, acceptor_potential); // segment-3 derivation
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg);
+
+        let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // 0.6
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            field_level.checked_mul(emf.checked_mul(coupling).unwrap()).unwrap(),
+            "the redox derivation takes precedence: the cap is EMF-derived, not the per-source conversion"
+        );
+        assert_ne!(
+            cap,
+            field_level.checked_mul(per_source_bps).unwrap(),
+            "the per-source conversion (segment 2) is OVERRIDDEN by the redox derivation (segment 3)"
+        );
+    }
+
+    #[test]
+    fn a_standard_non_spontaneous_redox_couple_powers_no_life() {
+        // Arc 5 segment 3: a couple whose acceptor is not above its donor releases no free energy at the STANDARD
+        // state (standard EMF <= 0), so the yield clamps to zero and supports no biomass, emergent from the floor
+        // law rather than an authored gate. Covers both the strictly-negative case AND the EMF == 0 boundary
+        // (acceptor == donor), and a positive control (acceptor above donor yields biomass). The STANDARD-state
+        // reading is the core's honest limit: the Nernst extension (flagged, not wired) would re-judge spontaneity
+        // at the actual field concentrations, so a standard-non-spontaneous couple could turn spontaneous there.
+        let map = a_map(0xDEAD00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 21;
+        let source_id: u16 = 201;
+        let coupling = Fixed::from_int(2);
+
+        // Cap at `cell` for a couple with the given donor/acceptor standard potentials, all else fixed.
+        let cap_for = |donor: Fixed, acceptor: Fixed| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::ZERO;
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = coupling;
+            reg.set_source_redox(source_id, donor, acceptor);
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, Fixed::from_int(1)));
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            e.extract_producers(&mut soil, &reg);
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // Strictly negative standard EMF (acceptor 0.2 below donor 0.8): no biomass.
+        assert_eq!(
+            cap_for(Fixed::from_ratio(8, 10), Fixed::from_ratio(2, 10)),
+            Fixed::ZERO,
+            "a standard-non-spontaneous couple (acceptor below donor) supports no biomass"
+        );
+        // The EMF == 0 boundary (acceptor == donor): the clamp includes zero, still no biomass.
+        assert_eq!(
+            cap_for(Fixed::from_ratio(5, 10), Fixed::from_ratio(5, 10)),
+            Fixed::ZERO,
+            "the zero-EMF boundary (acceptor == donor) also supports no biomass (the clamp includes zero)"
+        );
+        // Positive control: a spontaneous couple (acceptor 0.8 above donor 0.2) DOES support biomass, so the zero
+        // above is the couple's non-spontaneity, not a dead test.
+        assert!(
+            cap_for(Fixed::from_ratio(2, 10), Fixed::from_ratio(8, 10)) > Fixed::ZERO,
+            "a spontaneous couple (acceptor above donor) supports biomass: the zero result isolates non-spontaneity"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "emf_to_biomass coupling reserved value is unset")]
+    fn a_redox_source_fails_loud_when_the_coupling_is_unset() {
+        // Arc 5 segment 3 reserved-value discipline: the EMF-to-biomass coupling is the OWNER's value, surfaced not
+        // fabricated. A redox derivation with the coupling at its fail-loud sentinel (zero, the default) REFUSES to
+        // run rather than silently starving every redox producer, exactly as the global conversion's guard does.
+        let map = a_map(0xC0DE00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(9, AbioticField::DataScalar(30), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.set_source_redox(9, Fixed::from_ratio(2, 10), Fixed::from_ratio(8, 10));
+        // reg.emf_to_biomass left at the default sentinel (zero): the derivation must fail loud.
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(10))]);
+        e.set_producer_source(&[(cell, vec![9])]);
+        e.set_data_field(30, ScalarField::uniform(w, h, Fixed::from_int(1)));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        e.extract_producers(&mut soil, &reg); // panics: coupling unset
     }
 
     #[test]
