@@ -377,3 +377,40 @@ Surfaced to the gate (it revises the spec toward more principled, and simpler); 
 - Edit surface: `crates/sim/src/environ.rs` (the enum, the two matches, the `EnvironFields` struct, tests).
 - Consumed, not edited: `crates/sim/src/material.rs` (`SoilNutrientField` interface, A's file).
 - Docs: this file; a Part-62 record and audit-log block on consolidation, per CLAUDE.md workflow 5a.
+
+## CORRECTED-T3 consumption side: the anchor supersession, and the smoke test that sharpened the scale story
+
+The seeding side (`set_producer_food` carrying real per-axis magnitudes) is signed off. The consumption side
+completes T3: where a cell bears a real producer composition, its standing supply IS the physical energy content
+at the plant's own `bio.energy_density`, so the forage INGEST (`locomotion.rs step_with_field_dirs`) eats it at
+`content = supply` directly rather than bridging through the reserved `food_energy_density` anchor (3000). A
+composition-less cell (the abstract climate-productivity default) keeps the anchor bridge, per the gate's ruling
+("keep the 3000 anchor only as the fallback"). The branch is carried by a per-cell `real_composition: Vec<bool>`
+marker on `ResourceField`, set each tick by `regrow_supply` from `producer_food.is_some()` and read by INGEST. The
+marker is NOT hashed (it is a per-tick derived read of the static `producer_food`, recomputed by `regrow_supply`
+before the graze in the scheduled order, so a restore recomputes it deterministically before use; its effect
+reaches the hash through the supply values, which ARE hashed). The four pins hold byte-identical, because the four
+tracked scenarios seed no producer food, so every cell stays unmarked and the INGEST branch is the same
+`supply * food_energy_density` as before.
+
+Two consumption stores were checked for a double-eat and confirmed disjoint: locomotion INGEST grazes the
+`ResourceField` standing food; `runner.rs ingest_located` eats `self.material` located matter plus carried
+inventory. `physiology::physical_intake` is a shared fold PRIMITIVE both call on their own store, not a second
+consumption of the same food.
+
+The section-11 input-bias smoke test on my first audit construction FAILED CLOSED, and it was right to. It caught
+that I had stated the scale story too cleanly: I had written "the real scale is ~100x below the anchor, an
+owner-gated recalibration of the drain." Verified against source, the precise mechanism is sharper. My change
+divides a real-producer cell's `content` by the full `food_energy_density` (3000), while a composition-less
+climate cell's `content` is unchanged. So in a live mixed grid (`--scenario living` seeds ~45 producer cells and
+leaves the rest of the habitable grid as climate food), two regimes coexist: a marked producer cell yields
+`volume * density` with `density` in the floor-declared `bio.energy_density` range [0, 38] kJ/g, and an unmarked
+climate cell yields `volume * 3000`. A producer cell therefore carries far less standing food value than the
+abstract climate food on the cell beside it, the branch decided by whether a producer composition was seeded. The
+pre-adapted recurrent grazers, bootstrapped at the dawn and foraging the real producer occupants, collapse by
+starvation (population 10 to 0 over two windows, 24 then 10 deaths, final hash 07d867a5). This is surfaced, never
+tuned: whether the abstract climate fallback should persist alongside real-plant food, and how the reserve/Kleiber
+drain scale reconciles with the real `bio.energy_density` intake scale (the drain side was calibrated against the
+3000 anchor, and the reserve-to-joule reconciliation is itself a documented open limit), is the owner's
+biosphere-BALANCE question. The mechanism is correct and byte-neutral; making the world thrive on real food values
+is the calibration the `worldbuild.rs` T3 owner-gate holds.

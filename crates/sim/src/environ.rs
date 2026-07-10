@@ -1305,6 +1305,12 @@ impl EnvironFields {
                 // The producer's fixed food composition on this cell (T3), if the biosphere seeded one; where
                 // none, the food is the single energy-density class exactly as before.
                 let food = self.producer_food[self.idx(x, y)].as_ref();
+                // CORRECTED-T3: mark whether this cell's food is a real producer composition (its supply is
+                // already the physical energy content at the plant's own bio.energy_density), so the forage
+                // INGEST eats it at `content = supply` rather than double-scaling through the food_energy_density
+                // anchor. A composition-less cell stays unmarked and keeps the anchor bridge (byte-identical for
+                // a run that seeds no producer food, so the four tracked pins hold).
+                resource.set_real_composition(coord, food.is_some());
                 let comp = resource.composition_mut(coord);
                 // The standing food VOLUME read back: with a producer composition, the remaining volume is the
                 // Liebig MINIMUM over its axes of supply/density (a grazer that ate one axis has shrunk the
