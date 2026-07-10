@@ -36,10 +36,14 @@
 //! What this crate deliberately does not contain: any base dimension, any quantity,
 //! or any scale. Those are the authored physics catalogue and the owner's reserved
 //! values; the tests use a small fixture catalogue, clearly marked as a fixture and
-//! not the authored set.
+//! not the authored set. The one exception is the [`fundamentals`] module: the closed
+//! table of CODATA fundamental constants, which ARE the one authored universal layer
+//! the value-authoring line permits (distinct from any owner or per-world value).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub mod fundamentals;
 
 /// An exponent on a base dimension. Small signed integer; real physical dimensions
 /// stay well within this range.

@@ -305,7 +305,7 @@ source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs Meta
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
-basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Stefan-Boltzmann constant of the radiant heat-loss law (the physical CODATA value)"
+basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Stefan-Boltzmann constant of the radiant heat-loss law (the physical CODATA value). This dev-fixtures value is the INTERIM sigma run_world reads until the units/R-UNITS-PIN arc computes the composite from the fundamentals (civsim_units::fundamentals::STEFAN_BOLTZMANN); the canonical calibration/reserved.toml entry is now a fail-loud derive sentinel. NOT removable byte-neutrally yet: run_world reads this value through MetabolicAnchors::from_manifest into radiant_emission (it folds into the four pins; empirically, removing it panics run_world), so the dev-fixtures de-dup is deferred to the units-arc compute"
 status = "set"
 value = "0.0000000567"
 unit = "stefan_boltzmann"

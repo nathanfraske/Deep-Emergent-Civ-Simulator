@@ -951,7 +951,7 @@ status = "reserved"
 value = ""
 unit = "practitioners"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
-category = "derivable"
+category = "per_world"
 
 # --- R-TIER-CONSIST: tier consistency (Part 54, record 62.9) ---
 
@@ -1667,7 +1667,7 @@ category = "per_world"
 
 [[reserved]]
 id = "field.body_exchange"
-basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate, and this stays a fail-loud fixture-fallback sentinel"
+basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate. CORRECTION (census, source-verified at runner.rs:5182): this scalar is NOT a fail-loud sentinel; it is the ACTIVELY-READ fallback rate for a being placed without a body (body_exchange_rate.get(id).unwrap_or(calib.exchange)). Whether a bodyless being should reach the exchange path at all, and whether this fallback should become a per-world datum a world owns, is a design follow-on"
 status = "set"
 set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
 set_date = "2026-07-09"
@@ -1722,13 +1722,13 @@ category = "per_world"
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
-basis = "the Stefan-Boltzmann constant sigma = 5.670374e-8 W/(m^2*K^4), the universal proportionality of the radiant heat-loss law (law.radiant_emission). A CODATA physical constant, not an owner taste value, surfaced fail-loud (an authored Principle-9 physics affordance) rather than hardcoded inline; the same value the other radiant-law callers pass"
-status = "set"
-value = "0.0000000567037441"
-set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
-set_date = "2026-07-09"
+basis = "DERIVE-TARGET (fundamentals-home): the Stefan-Boltzmann constant sigma is the CODATA COMPOSITE sigma = 2*pi^5*k_B^4/(15*h^3*c^2), COMPUTED from the fundamental constants (civsim_units::fundamentals::STEFAN_BOLTZMANN over BOLTZMANN, PLANCK, SPEED_OF_LIGHT), never authored as its own decimal. Retired from its former authored value to a fail-loud derive sentinel; the fixed-point COMPUTE is the split-out units/R-UNITS-PIN follow-on (the relation underflows Q32.32), until which a reader fails loud rather than reading a fabricated decimal"
+status = "reserved"
+value = ""
+set_by = ""
+set_date = ""
 unit = "watt_per_m2_kelvin4"
-source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
+source = "Part 41 optics floor; crates/units/src/fundamentals.rs STEFAN_BOLTZMANN; crates/sim/src/physiology.rs laws::radiant_emission"
 category = "derivable"
 
 [[reserved]]
@@ -1775,7 +1775,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.thermal_setpoint"
-basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved"
+basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar applied to every race with no RaceId branch (worldbuild.rs:553), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "310"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -1804,7 +1804,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.thermal_half_band"
-basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology"
+basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar with no RaceId branch (worldbuild.rs:554), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "8"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
