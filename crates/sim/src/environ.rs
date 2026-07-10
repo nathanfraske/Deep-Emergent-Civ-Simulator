@@ -1305,12 +1305,18 @@ impl EnvironFields {
                 // The producer's fixed food composition on this cell (T3), if the biosphere seeded one; where
                 // none, the food is the single energy-density class exactly as before.
                 let food = self.producer_food[self.idx(x, y)].as_ref();
-                // CORRECTED-T3: mark whether this cell's food is a real producer composition (its supply is
-                // already the physical energy content at the plant's own bio.energy_density), so the forage
-                // INGEST eats it at `content = supply` rather than double-scaling through the food_energy_density
-                // anchor. A composition-less cell stays unmarked and keeps the anchor bridge (byte-identical for
-                // a run that seeds no producer food, so the four tracked pins hold).
-                resource.set_real_composition(coord, food.is_some());
+                // CORRECTED-T3: mark, PER CLASS, which of this cell's nutrient classes carry a real producer
+                // composition (their supply is already the physical content at the plant's own per-substance
+                // density), so the forage INGEST eats each at `content = supply` rather than double-scaling through
+                // the food_energy_density anchor. The marked set is exactly the producer_food axes: it EXCLUDES the
+                // water mirror and the salinity dose written below, so those non-composition axes keep the anchor on
+                // a producer cell just as on a bare cell (a per-cell flag would wrongly strip the anchor off the
+                // water axis, the §9 correctness lens's catch). A cell with no producer_food marks nothing
+                // (byte-identical for a run that seeds no producer food, so the four tracked pins hold).
+                match food {
+                    Some(fc) => resource.set_real_composition(coord, fc.keys().cloned()),
+                    None => resource.set_real_composition(coord, std::iter::empty()),
+                }
                 let comp = resource.composition_mut(coord);
                 // The standing food VOLUME read back: with a producer composition, the remaining volume is the
                 // Liebig MINIMUM over its axes of supply/density (a grazer that ate one axis has shrunk the

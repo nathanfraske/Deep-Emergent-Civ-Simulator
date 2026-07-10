@@ -414,3 +414,37 @@ drain scale reconciles with the real `bio.energy_density` intake scale (the drai
 3000 anchor, and the reserve-to-joule reconciliation is itself a documented open limit), is the owner's
 biosphere-BALANCE question. The mechanism is correct and byte-neutral; making the world thrive on real food values
 is the calibration the `worldbuild.rs` T3 owner-gate holds.
+
+## The section-9 panel on the consumption side: a real latent scope leak, and the counterfactual that corrected the causal story
+
+The section-9 seven-panelist audit (five mandatory lenses, a cross-axis unit-coherence lens, a correctness/determinism
+lens), run behind a section-11 smoke test that failed closed four times until the packet was neutral and complete,
+caught two things worth acting on. Both were verified against source before I trusted them.
+
+First, a real latent scope leak. The per-cell `is_real_composition` marker gated EVERY homeostatic axis in the INGEST
+loop, including the water axis (`bio.water_fraction`), whose supply is the drinkable [0, 1] mirror `regrow_supply`
+writes on every cell and which `set_producer_food` explicitly excludes from the producer composition. So on a
+producer-food cell the marker also stripped the `food_energy_density` anchor off the water axis, scaling water intake
+there differently from a bare cell (by the anchor factor), a consequence the cell-level ruling did not intend: the
+anchor is a food-content bridge, and water is not a producer-composition axis. The fix keys the marker PER CLASS: it
+carries the set of nutrient classes the cell's `producer_food` actually holds (the food axes), so the supersession
+applies only to those, and the water mirror and any non-composition axis keep the anchor on a producer cell exactly as
+on a bare cell. Verified byte-neutral: the four pins hold bit-exact (2b7e1035 / 1873c44e / 4eea5d06 / bae5a82), and
+`--scenario living` is ALSO byte-identical (final hash 07d867a5 unchanged), because the leak was unreachable in the
+current scenarios (a being never drinks on a producer-food cell there, so the water axis never took the leaked branch).
+The fix is a correctness hardening that removes the trap for a future scenario with wet producer cells, changing no
+observed result.
+
+Second, the counterfactual that corrected my causal claim. The confirmation-bias lens flagged that I had asserted the
+`living` collapse is caused by the change without a pre-change baseline. I ran one: at the parent commit (the
+de-normalized seeding in place, the consumption anchor NOT yet superseded, so every cell including producer cells is
+consumed at the `food_energy_density` anchor), `living` ALSO collapses to zero, but it peaks at population 19 and dies
+of MIXED thirst and starvation, where the superseded version peaks at 10 and dies of PURE starvation. So the collapse
+is PRE-EXISTING (the biosphere-balance calibration the roadmap and gate already flag: body-mass scaling, metabolic
+rate, or productivity), not created by this change. Because the fixed consumption side handles water identically to the
+parent, the counterfactual cleanly isolates the food-axis supersession as the cause of the sharpening: removing the
+food double-scale on producer cells is what turns a peak-19 mixed-death collapse into a peak-10 pure-starvation one. The
+honest surfacing is therefore not "the change starves the world" but "the world was already non-viable at this body
+scale, and pricing the producer food at its real derived value without the double-scale deepens the starvation
+component," which is the same owner-gated biosphere-balance calibration, resolved at its true cause and never by
+inflating the food value.
