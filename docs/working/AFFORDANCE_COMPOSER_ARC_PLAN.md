@@ -1,0 +1,34 @@
+# Affordance composer arc: grounding, the belief-subject-hash encoding finding, and the plan (Agent B)
+
+Doc-only opener for the affordance-composer arc, the second of Agent B's two owner-ruled builds (the owner ruled the composer as the light UNIFY form; the R-AGING lifespan build is held for the owner on #113). No code here; the gate rules on the framing and the one encoding fork below before any code. Self-subscribed here as this arc's gating channel.
+
+## The arc
+
+Two pieces, sequenced. The belief-subject key is the prerequisite; the composer builds on it.
+
+1. **The belief-subject key** (`crates/sim/src/learn.rs`, the shared learner surface). Today a discovered action's belief is keyed on a SEQUENCE subject minted by `sequence_subject` (`learn.rs:205`): a canonical RNG-free BIT-PACK of up to `SEQ_MAX_STEPS = 4` steps, each field `SEQ_FIELD_BITS = 4` bits, into the reserved band `SEQUENCE_SUBJECT_BASE = (1 << 62) | (1 << 61)`. Each field distinguishes at most 16 values and saturates above 15 into a DETERMINISTIC over-merge (`learn.rs:162-174`, a flagged bound: distinct primitives above 15 would share one belief). The cap is latent today (10 primitives, ids 0..9) and will bite as tool-use and composition primitives cross 16. The owner ruled this key be re-encoded to dissolve the cap so the subject can represent an arbitrary conjunction, which the composer needs.
+
+2. **The composer** (`crates/compose`, the resolved R-DEEPTECH-COMPOSE substrate). Add ONE arm to `NodeBody` (`node.rs:61`), a transduction leaf carrying the built `SingleAxisTransduction` shape (`affordance_percept.rs`), tagged 3 in `compute_content_id` (`node.rs:135/150` tag leaf = 1, composite = 2), so every existing object-design content id stays bit-identical, and reuse `promote` / `fold` verbatim. A sensed affordance and a designed object then share one library and one selection process, and the affordance's KIND emerges through the discovery loop under selection (the `AFFORDANCE_SUBSTRATE_MAP` target), never an authored primitive-to-affordance table.
+
+## Grounding (source-verified)
+
+- The subject is used as an OPAQUE key everywhere (belief store, gossip, the eligibility trace); nothing decodes it back into its packed fields (verified: the only `SEQ_FIELD_MASK` / `SEQ_STEP_BITS` uses are inside `sequence_subject` itself).
+- The re-encoding is NOT byte-neutral (it changes every sequence-belief subject value), so it re-pins the four `run_world` hashes once. The minting function shares `learn.rs` with the receiver-side valence learner and the keystone (`feature_subject`, a sibling band, bit 62 only), which is Agent A's surface, so the re-pin is coordinated with Agent A through the gate before it lands.
+- `StateHasher` (`crates/core/src/hash.rs`) is the existing RNG-free deterministic hasher producing a `u128`; it is the hash the composer's `content_id` already uses (`node.rs:127`).
+- Cross-band disjointness (a sequence subject versus a feature subject, a being id, a landmark id) is held by the band markers in bits 61 and 62 below the landmark bit; the payload rides bits 0..60 (61 bits).
+
+## The one encoding fork, surfaced for the gate (an input-audit on the hash directive)
+
+The gate directed the key be minted by a canonical hash of the full step. Framing that blind, the section-11 smoke test (Opus at maximum reasoning, fail-closed) read the source and surfaced that a PURE hash is a lateral trade rather than a clean de-authoring, and that the source flag itself names a better first option. Verified against source:
+
+- The current bit-pack is INJECTIVE (collision-free) WITHIN its 4-step / 16-value envelope. A pure 61-bit hash regresses the common case (short sequences, today's 10-primitive alphabet) from ZERO collision to a nonzero birthday collision, a P10 silent conflation of two beings' distinct beliefs the bit-pack does not commit there. On the collision axis the pure hash is lateral (a bounded deterministic over-merge traded for an unbounded silent probabilistic one), not de-authoring.
+- The source flag names widening FIRST, hashing second (`learn.rs:168-173`: "widen `SEQ_FIELD_BITS` ... or mint the subject by a collision-resistant hash").
+- The honest synthesis is a HYBRID: an exact widened pack for every sequence that fits a generous 60-bit envelope (zero collision for all realistic sequences and conjunctions), and a hash only on OVERFLOW (the pathological beyond-envelope case), the two sub-spaces kept disjoint by a marker bit. This dissolves the cap (an over-envelope sequence still mints a subject, so arbitrary conjunctions are representable, the composer's need is met) WITHOUT the common-case P10 regression, and it confines any collision to the rare overflow. The 61-bit band budget is why this matters here where it does not for `content_id` (a full 128-bit space with negligible collision).
+- Sub-finding, the width basis: for a pure hash, the reserved digest width bounds the collision probability, but its basis (the expected number of distinct belief subjects) is an EMERGENT, world-varying quantity the change deliberately unbounds, so a single engine width gives a richer alien world a higher silent-conflation rate. The hybrid largely defuses this (collision only on overflow); a pure hash leaves it a reserved value to surface to the owner.
+- Sub-finding, the tie-break: `planning.rs:176-182` ranks plan steps by confidence, then support, then `subject.0` (canonical subject id), and `planning.rs:474+` tests that equal-confidence steps order by canonical subject id. Any re-encoding (hybrid or pure hash) changes `subject.0` and RE-SCRAMBLES this tie-break, so under exact ties a different technique wins. The tie-break is already an arbitrary deterministic ordering, so this is a behaviour re-shuffle rather than a regression, but it means the re-pin reflects real behavioural shuffling beyond a value relabel, and the re-pin evidence should exercise a gossip-to-convergence and a tie-break path if a pinned scenario does not already.
+
+My recommendation: build the HYBRID (exact in-envelope, hash-on-overflow), the strict improvement on the gate's hash directive and the source flag's own first option. The gate confirms the encoding (hybrid versus pure hash) before I frame the confirmed form blind and build.
+
+## Discipline
+
+Frame each piece blind (section-11 fail-closed, then section-10) before code; the gate gates each framing. Section-9 five-lens audit before every push. The belief-subject key re-encoding is a one-time not-byte-neutral re-pin (the intended hash change stated, the four pins re-captured), coordinated with Agent A through the gate before it lands; the composer piece is byte-neutral against the four pins (tag-3 content id leaves every existing design id bit-identical). No code until the gate rules the encoding fork and the framing.
