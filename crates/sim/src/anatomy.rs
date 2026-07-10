@@ -322,18 +322,79 @@ impl BodyPlanRegistry {
             // in biological-tissue emissivity (~0.95); per-covering differentiation (bare skin ~0.98, fur or
             // scales lower) is now DATA the mechanism supports, an owner/world calibration, never authored
             // here. Empty geometry (a covering carries no mechanical form axis).
+            // Each covering carries `mat.fracture_energy` (predation-integration slice): the covering is the
+            // OUTERMOST tissue a whole-body strike meets, so the catalog-wound coarse branch reads this via the
+            // being's own body plan (`emb.organs.kind(covering.kind)`) for its Griffith tolerance, the coarse
+            // analogue of a grown Segment's own `mat.fracture_energy`. The VALUE of each is a REAL floor value
+            // grounded off the nearest existing tissue material (`body.rs` dev tissues: hide=3, bone=8), never a
+            // fabricated magnitude: soft/keratin coverings read `hide`=3, rigid/mineral coverings read `bone`=8.
+            // A per-substance datum (three-way test category 2). RESERVED-with-basis: the only authored part is
+            // the per-covering-to-tissue ANALOGUE MAPPING (which tissue a covering resembles), the owner's to
+            // confirm; the magnitude is the analogue tissue's own floor value. Byte-neutral: nothing reads it
+            // until the coarse wound branch, armed only in `full --creatures`.
             coverings: kinds(&[
-                ("bare hide", false, &[], &[("opt.emissivity", "0.95")]),
-                ("fur", false, &[], &[("opt.emissivity", "0.95")]),
-                ("feathers", false, &[], &[("opt.emissivity", "0.95")]),
-                ("scales", false, &[], &[("opt.emissivity", "0.95")]),
-                ("chitin carapace", false, &[], &[("opt.emissivity", "0.95")]),
-                ("bony plates", false, &[], &[("opt.emissivity", "0.95")]),
-                ("shell", false, &[], &[("opt.emissivity", "0.95")]),
-                // Magical.
-                ("mana-ward", true, &[], &[("opt.emissivity", "0.95")]),
-                ("stone-skin", true, &[], &[("opt.emissivity", "0.95")]),
-                ("phase-hide", true, &[], &[("opt.emissivity", "0.95")]),
+                (
+                    "bare hide",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
+                (
+                    "fur",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
+                (
+                    "feathers",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
+                (
+                    "scales",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
+                (
+                    "chitin carapace",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                ),
+                (
+                    "bony plates",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                ),
+                (
+                    "shell",
+                    false,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                ),
+                // Magical (placeholder mechanical form until the thaumic track derives their function): a soft
+                // ward reads hide, a stone-skin reads bone, so a magically-covered being is still woundable.
+                (
+                    "mana-ward",
+                    true,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
+                (
+                    "stone-skin",
+                    true,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                ),
+                (
+                    "phase-hide",
+                    true,
+                    &[],
+                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                ),
             ]),
             // Senses carry crude optical material (a refractive index) so an optical sense's SIGHT function
             // is derived from physics (a lens denser than the medium focuses). The optical channel is the

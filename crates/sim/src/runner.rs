@@ -2500,16 +2500,23 @@ impl Embodiment {
         // among its wielded tool and its grown Structure Segments (the one delivering the most kinetic energy).
         // Reads only the part's own physics, never a race or role. Scoped so the acting walker's borrow ends
         // before the target search.
-        let (coord, acting_mass) = {
+        let (coord, acting_mass, acting_contact_area) = {
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return Fixed::ZERO;
             };
             let coord = w.coord();
             let mut acting_mass = Fixed::ZERO;
+            // The delivery part's own CONTACT AREA travels with its mass: the striker-side contact patch the
+            // blow lands over (its tool tip or its grown delivery segment's presented area). It is the coarse
+            // wound branch's contact area (a striker-target contact property, keyed on the striker's own
+            // geometry, never the target's whole-body surface, so a high-surface low-cross-section target is not
+            // spuriously unwoundable). The fine per-segment path keeps reading the struck segment's own area.
+            let mut acting_contact_area = Fixed::ZERO;
             if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
                 let m = tool.mass(reg);
                 if m > acting_mass {
                     acting_mass = m;
+                    acting_contact_area = tool.contact_area;
                 }
             }
             if let Some(structure) = w.structure.as_ref() {
@@ -2520,10 +2527,11 @@ impl Embodiment {
                     let m = seg.geo(&row.source_axis);
                     if m > acting_mass {
                         acting_mass = m;
+                        acting_contact_area = presented_contact_area(seg);
                     }
                 }
             }
-            (coord, acting_mass)
+            (coord, acting_mass, acting_contact_area)
         };
         if acting_mass <= Fixed::ZERO {
             return Fixed::ZERO; // a part with no mass delivers no blow (the absence convention)
@@ -2543,64 +2551,103 @@ impl Embodiment {
         else {
             return Fixed::ZERO; // nothing co-located to strike
         };
-        // The struck Segment INDEX: the target's LARGEST-PRESENTED (greatest `mech.contact_area`), the
-        // derive-first proxy for where a blind blow lands. Reads geometry, never `failure_tolerance`. The first
-        // segment of the greatest area wins (strictly-greater updates keep the earlier on a tie), deterministic.
-        let struck_idx = {
-            let Some(structure) = self.walkers[target_idx].structure.as_ref() else {
-                // The target presents no run-path Segments (the deep `body::Body`-to-Structure bridge is the
-                // flagged separate arc): nothing to wound here.
-                return Fixed::ZERO;
-            };
-            let mut best: Option<usize> = None;
-            let mut best_area = Fixed::ZERO;
-            for (i, seg) in structure.segments.iter().enumerate() {
-                let area = presented_contact_area(seg);
-                if best.is_none() || area > best_area {
-                    best_area = area;
-                    best = Some(i);
+        // ONE wound law, reading the TARGET's body GRANULARITY as data (predation-integration slice, the
+        // whole-body branch of the unified wound law): a target that carries a grown Structure is wounded
+        // per-Segment (the fine path, unchanged); a CATALOG target (no Structure) is wounded on the WHOLE body.
+        // Both feed the same `wound_fraction` law over the same three inputs (delivered energy, a contact area,
+        // a material fracture-energy); only the source of the contact area and fracture-energy differs by
+        // granularity, and the wound lands on the state that granularity presents (a Segment's damage, or the
+        // being's own whole-body damage). A big tough target takes a small wound either way (armor emerges).
+        match self.walkers[target_idx].structure.is_some() {
+            true => {
+                // FINE path: the struck Segment is the target's LARGEST-PRESENTED (greatest presented area), the
+                // derive-first proxy for where a blind blow lands (reads geometry, never `failure_tolerance`).
+                let struck_idx = {
+                    let structure = self.walkers[target_idx]
+                        .structure
+                        .as_ref()
+                        .expect("structure present (matched above)");
+                    let mut best: Option<usize> = None;
+                    let mut best_area = Fixed::ZERO;
+                    for (i, seg) in structure.segments.iter().enumerate() {
+                        let area = presented_contact_area(seg);
+                        if best.is_none() || area > best_area {
+                            best_area = area;
+                            best = Some(i);
+                        }
+                    }
+                    match best {
+                        Some(i) => i,
+                        None => return Fixed::ZERO, // a Structure with no Segments
+                    }
+                };
+                // The wound: the fraction of the struck segment's OWN `failure_tolerance = fracture_energy *
+                // presented contact area` (its Griffith reserve) the delivered energy reaches, added to that
+                // segment's normalized damage exactly as `Structure::accrue_aging`, so wounds and aging compose
+                // on ONE accumulator; `whole_body_viability_aged` reads the segment's integrity, the INTEGRITY
+                // axis reflects it, and the one unified cull removes the being when it floors (Principle 8).
+                let wound = {
+                    let struck = &self.walkers[target_idx]
+                        .structure
+                        .as_ref()
+                        .expect("structure present (matched above)")
+                        .segments[struck_idx];
+                    wound_fraction(
+                        delivered_energy,
+                        presented_contact_area(struck),
+                        struck.mat(FRACTURE_ENERGY_AXIS),
+                        params.energy_max,
+                    )
+                };
+                let struck = &mut self.walkers[target_idx]
+                    .structure
+                    .as_mut()
+                    .expect("structure present (matched above)")
+                    .segments[struck_idx];
+                struck.damage =
+                    Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
+                        .clamp(Fixed::ZERO, Fixed::ONE);
+                wound
+            }
+            false => {
+                // COARSE (whole-body) path for a CATALOG target: the wound is the SAME law over the STRIKER's own
+                // delivery-part contact area (a striker-target contact property, not the target's whole-body
+                // surface, so a high-surface low-cross-section body is not spuriously unwoundable) and the
+                // target's OUTERMOST tissue's `mat.fracture_energy` (the covering is the first material a
+                // whole-body blow meets), read from the target's own body plan via `organs.coverings`. A body
+                // whose covering carries NO fracture-energy (a fluid, plasma, or mana body with no
+                // fracture-bearing material) returns NO wound and routes lethality through its own reserves: the
+                // law degrades to data-absent, never a forced universal fracture death (admit-the-alien).
+                let target = &self.walkers[target_idx];
+                let outer_fracture_energy = self
+                    .organs
+                    .coverings
+                    .get(target.body.covering.kind as usize)
+                    .map(|k| k.mat(FRACTURE_ENERGY_AXIS))
+                    .unwrap_or(Fixed::ZERO);
+                if outer_fracture_energy <= Fixed::ZERO {
+                    return Fixed::ZERO; // no fracture-bearing outer material: not woundable by this law
                 }
+                let wound = wound_fraction(
+                    delivered_energy,
+                    acting_contact_area,
+                    outer_fracture_energy,
+                    params.energy_max,
+                );
+                // Accrue to the being's OWN whole-body damage. Its whole-body integrity is one minus this,
+                // written into the INTEGRITY axis by the metabolism step, so the SAME one unified cull removes it
+                // when it floors: one currency, one death path, no new death mechanic (Principle 8).
+                let target = &mut self.walkers[target_idx];
+                target.whole_body_damage = Fixed::from_bits(
+                    target
+                        .whole_body_damage
+                        .to_bits()
+                        .saturating_add(wound.to_bits()),
+                )
+                .clamp(Fixed::ZERO, Fixed::ONE);
+                wound
             }
-            match best {
-                Some(i) => i,
-                None => return Fixed::ZERO, // a Structure with no Segments
-            }
-        };
-        // The wound in Agent B's EXACT accrual convention: the fraction of the struck segment's OWN
-        // `failure_tolerance = fracture_energy * mech.contact_area` (its Griffith reserve, the same product
-        // `Segment::failure_tolerance` and `accrue_aging` use) the delivered energy reaches, NO `* 1000`, so a
-        // strike is a large one-tick increment on the SAME currency aging accrues by. A big tough segment (a
-        // large tolerance) takes a small wound, armor emerging; the acting part's concentration (the
-        // pierce-versus-blunt sub-cell wound shape) is the flagged follow-on coupled to the spatial-body-layout
-        // arc. Computed under an immutable borrow that ends before the write.
-        let wound = {
-            let struck = &self.walkers[target_idx]
-                .structure
-                .as_ref()
-                .expect("structure present (checked above)")
-                .segments[struck_idx];
-            wound_fraction(
-                delivered_energy,
-                presented_contact_area(struck),
-                struck.mat(FRACTURE_ENERGY_AXIS),
-                params.energy_max,
-            )
-        };
-        // WRITE Agent B's `Segment.damage` accumulator (piece 4, the sequencing hold now cleared): add the wound
-        // fraction to the struck segment's normalized damage, saturating on the bits then clamping to `[0, ONE]`,
-        // exactly as `Structure::accrue_aging` advances aging damage, so wounds and aging compose on ONE
-        // accumulator with no double-count. `whole_body_viability_aged` reads the segment's `integrity()` (one
-        // minus this damage), the INTEGRITY axis reflects it, and the ONE unified cull removes the being when any
-        // axis floors: one currency, one death path, no morphology predicate (Principle 8). Armed only for a
-        // STRIKE-deciding body, so no run_world scenario reaches it (byte-neutral).
-        let struck = &mut self.walkers[target_idx]
-            .structure
-            .as_mut()
-            .expect("structure present (checked above)")
-            .segments[struck_idx];
-        struck.damage = Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
-            .clamp(Fixed::ZERO, Fixed::ONE);
-        wound
+        }
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -6025,9 +6072,21 @@ impl Runner {
                 }
             }
             for w in emb.walkers.iter_mut() {
-                if let Some(s) = w.structure.as_ref() {
-                    let viability = s.whole_body_viability_aged(&fns, refs, caps);
-                    w.homeostasis.set_level(INTEGRITY, viability);
+                match w.structure.as_ref() {
+                    // A GROWN body reads its per-segment aged viability (the fine path).
+                    Some(s) => {
+                        let viability = s.whole_body_viability_aged(&fns, refs, caps);
+                        w.homeostasis.set_level(INTEGRITY, viability);
+                    }
+                    // A CATALOG body reads its WHOLE-BODY integrity, one minus its accumulated whole-body wound
+                    // damage (predation-integration slice, the coarse branch of the unified wound law). At zero
+                    // damage this is ONE (full, so an unstruck being is byte-neutral); at full damage it floors
+                    // and the SAME one unified INTEGRITY cull removes it, no new death path (Principle 8).
+                    None => {
+                        let viability =
+                            (Fixed::ONE - w.whole_body_damage).clamp(Fixed::ZERO, Fixed::ONE);
+                        w.homeostasis.set_level(INTEGRITY, viability);
+                    }
                 }
             }
         }
