@@ -1006,6 +1006,13 @@ pub fn is_creature(id: StableId) -> bool {
     id.0 & CREATURE_ID_TAG != 0
 }
 
+/// The reserved sub-bit that marks an AUTHORED PREDATOR walker id within the creature namespace
+/// (predation-integration slice). A predator carries [`CREATURE_ID_TAG`] too (so it is mind-less and
+/// retired only on death, like any creature), plus this bit, so its id is provably disjoint from a
+/// biosphere creature's (`occ.id.0 | CREATURE_ID_TAG`, whose small sequential `occ.id.0` never reaches
+/// bit 61) and from a founder's small sequential mind id (asserted at spawn).
+pub const PREDATOR_ID_BIT: u64 = 1 << 61;
+
 pub struct Embodiment {
     walkers: Vec<Walker>,
     thermal: BTreeMap<StableId, BeingThermal>,
@@ -1096,6 +1103,18 @@ pub struct Embodiment {
     /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
     /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
     creature_being_percept: bool,
+    /// The ids of AUTHORED PREDATORS: stationary ambush hazards the predation-integration slice spawns as the
+    /// environmental GIVEN a prey adapts to (fork i, gate-ruled). A predator is a mind-less `Walker` with a
+    /// PIERCE body and an always-STRIKE controller, so it wounds any prey co-located with it through the
+    /// existing `strike_occupant` and the one INTEGRITY cull; it is NON-METABOLIZING (its anatomy-derived drain
+    /// is forced to zero below, so it neither forages nor starves, a fixed hazard like a heat source, not a
+    /// modeled survivor). Its disposition is the authored P9 given; the PREY's flee/hunt sign stays founder-zero
+    /// and its adaptation is the emergent outcome once the selection substrate lands. Empty by default, so every
+    /// existing scenario (the four canonical pins and plain `full`) is byte-identical; only `full --creatures`
+    /// populates it. A being's presence here is read ONLY to zero its metabolism (it is the authored given), never
+    /// to decide any behaviour: WHO it strikes is the occupant-agnostic `strike_occupant`, keyed on co-location
+    /// and geometry, never on this set (Principle 8).
+    predators: BTreeSet<StableId>,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1314,6 +1333,7 @@ impl Embodiment {
             being_percept: false,
             being_field: None,
             creature_being_percept: false,
+            predators: BTreeSet::new(),
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -5800,6 +5820,28 @@ impl Runner {
                         .par_iter()
                         .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
+                            // An authored predator is NON-METABOLIZING (the environmental given, fork i): its
+                            // anatomy-derived drain is forced to zero on every axis, so its reserves never fall
+                            // and it never starves through the same `metabolize_derived` path every being uses,
+                            // no special death-path branch. It neither forages nor sustains on its kills (that
+                            // is the flagged follow-on); it is a fixed hazard, not a modeled survivor.
+                            if emb.predators.contains(&w.id) {
+                                let zero: BTreeMap<HomeostaticAxisId, DerivedDrain> = emb
+                                    .homeo
+                                    .axes
+                                    .iter()
+                                    .map(|a| {
+                                        (
+                                            a.id,
+                                            DerivedDrain {
+                                                base: Fixed::ZERO,
+                                                exertion: Fixed::ZERO,
+                                            },
+                                        )
+                                    })
+                                    .collect();
+                                return (w.id, zero);
+                            }
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
                             let (ambient, setpoint) = match (ambient, setpoint) {
@@ -6367,6 +6409,76 @@ impl Runner {
             self.index.place(OccupantId::being(cid), coord);
         }
         count
+    }
+
+    /// Spawn one AUTHORED PREDATOR: a stationary ambush hazard, the environmental GIVEN the predation-integration
+    /// slice adds so a prey's flee-sign becomes a real selectable pressure (fork i, gate-ruled). The predator is a
+    /// mind-less `Walker` carrying `body` (which MUST read a positive PIERCE capability, or STRIKE is never
+    /// afforded and there is no hazard to spawn) and an always-STRIKE controller expressed against the
+    /// embodiment's OWN widened layout: every weight is zero except a positive bias on the STRIKE activation, so
+    /// [`Controller::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
+    /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it wounds whatever prey is
+    /// co-located through the existing [`Embodiment::strike_occupant`] and the one INTEGRITY cull; nothing reads a
+    /// species, role, or relatedness (Principle 8). It is registered in the `predators` set so its metabolism is
+    /// forced to zero (NON-METABOLIZING: it neither forages nor starves, the authored given). It EMITS a
+    /// being-signal like any warm walker, which is REQUIRED for the prey's being-directed weight to select against
+    /// it (a signalless hazard could not, since that weight keys on the emitted signal). Deterministic: an
+    /// authored controller (no RNG), a fixed id and coord, and a thermal band read off a representative founder.
+    /// Returns the predator's id, or `None` if no embodiment is installed or the layout affords no STRIKE
+    /// (surfaced rather than silently spawning an inert hazard). Only `full --creatures` calls this.
+    pub fn spawn_predator(&mut self, coord: Coord3, body: BodyPlan) -> Option<StableId> {
+        let (homeo, organs, layout, thermal) = self.embodiment.as_ref().map(|e| {
+            (
+                e.homeo.clone(),
+                e.organs.clone(),
+                e.layout.clone(),
+                e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                    setpoint: Fixed::ZERO,
+                    half_band: Fixed::ONE,
+                    initial_temp: Fixed::ZERO,
+                }),
+            )
+        })?;
+        // The always-STRIKE controller: a single positive bias on the STRIKE activation output, every other
+        // weight zero. The STRIKE output base is read from the layout (never hardcoded, Principle 11); `None`
+        // means the layout affords no STRIKE, so there is no hazard to spawn. For the reaction norm the weight
+        // feeding output `o` from input `i` is `o * n_in + i`, and the bias input is the last slot.
+        let strike_base = layout.output_base(STRIKE)?;
+        let n_in = layout.n_in();
+        let bias = n_in - 1;
+        let mut weights = vec![Fixed::ZERO; layout.weight_count()];
+        weights[strike_base * n_in + bias] = Fixed::ONE;
+        let controller = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), weights);
+        // A collision-free id in the predator sub-namespace, asserted disjoint from founders and existing
+        // walkers (the disjoint-namespace invariant, mirroring `spawn_creatures`).
+        let founders: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .map(|w| w.being_ids().into_iter().collect())
+            .unwrap_or_default();
+        let existing: BTreeSet<StableId> = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.walkers.iter().map(|w| w.id).collect())
+            .unwrap_or_default();
+        let mut k = 0u64;
+        let pid = loop {
+            let cand = StableId(CREATURE_ID_TAG | PREDATOR_ID_BIT | k);
+            if !founders.contains(&cand) && !existing.contains(&cand) {
+                break cand;
+            }
+            k += 1;
+        };
+        let homeostasis = crate::homeostasis::Homeostasis::new(&homeo, &body, &organs);
+        let physiology = Physiology::dev_for_registry(&homeo);
+        let walker = Walker::new(pid, coord, body, homeostasis, physiology, controller);
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.thermal.insert(pid, thermal);
+            emb.walkers.push(walker);
+            emb.predators.insert(pid);
+        }
+        self.index.place(OccupantId::being(pid), coord);
+        Some(pid)
     }
 
     fn reconcile_lifecycle(&mut self) {
@@ -7247,6 +7359,117 @@ source = "test"
         assert_eq!(
             FieldCalib::from_manifest(&m).unwrap_err(),
             CalibrationError::Reserved("field.diffusion".to_string()),
+        );
+    }
+
+    #[test]
+    fn the_composed_predator_geophage_registry_preserves_move_and_ingest_and_adds_strike() {
+        // Byte-neutrality crux (predation-integration slice): STRIKE's affordance id sorts AFTER INGEST, so
+        // adding it must NOT move MOVE's or INGEST's output bases, nor the input width (STRIKE adds OUTPUTS,
+        // not inputs). The founder forage seeds key on those bases, so if they held the widened layout only
+        // grows the zero-weight vector and `full --creatures` re-pins byte-neutrally in behaviour.
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INGEST, MOVE};
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let geo = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let pred = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        assert_eq!(
+            pred.output_base(MOVE),
+            geo.output_base(MOVE),
+            "MOVE base held"
+        );
+        assert_eq!(
+            pred.output_base(INGEST),
+            geo.output_base(INGEST),
+            "INGEST base held"
+        );
+        assert_eq!(
+            pred.n_in(),
+            geo.n_in(),
+            "input width unchanged (STRIKE adds outputs, not inputs)"
+        );
+        assert!(
+            pred.output_base(STRIKE).is_some(),
+            "the composed registry affords STRIKE"
+        );
+        assert!(
+            pred.output_base(GEOPHAGE).is_some(),
+            "and still affords GEOPHAGE"
+        );
+        assert!(
+            geo.output_base(STRIKE).is_none(),
+            "the base geophage registry affords no STRIKE"
+        );
+    }
+
+    #[test]
+    fn an_always_strike_predator_controller_issues_strike_not_move() {
+        // The predator's authored controller (built exactly as `spawn_predator` builds it): a single positive
+        // bias on the STRIKE activation, every other weight zero, so it decides STRIKE every tick and never
+        // moves (a fixed ambush). This pins the winner-take-all logic the stationary hazard depends on.
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let layout = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let strike_base = layout.output_base(STRIKE).unwrap();
+        let n_in = layout.n_in();
+        let mut weights = vec![Fixed::ZERO; layout.weight_count()];
+        weights[strike_base * n_in + (n_in - 1)] = Fixed::ONE;
+        let ctrl = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), weights);
+        // A neutral input (all zero) with the always-on bias in the last slot: the predator strikes regardless
+        // of what it perceives, so its decision does not depend on any percept.
+        let mut input = vec![Fixed::ZERO; n_in];
+        input[n_in - 1] = Fixed::ONE;
+        let (out, _h) = ctrl.evaluate(&input, &[]);
+        let afforded = layout.affordance_ids();
+        let decision = layout
+            .decide(&out, &afforded)
+            .expect("the body affords something");
+        assert_eq!(
+            decision.affordance, STRIKE,
+            "the always-strike predator issues STRIKE, never MOVE"
         );
     }
 
