@@ -330,6 +330,18 @@ pub struct EnvironFields {
     /// collection folds NOTHING (byte-neutral), while a world that declares and depletes an alien field folds it,
     /// so divergence in it is caught exactly as water and salt are.
     data_fields: BTreeMap<u16, ScalarField>,
+    /// The world's DATA sky for the diurnal insolation drive (day-night arc), or `None` when the cycle is
+    /// UNARMED. Opt-in like the living scenario: while `None` the `light` field keeps the static build-time
+    /// latitude map, so a run that never arms the cycle is byte-identical and the four determinism pins hold;
+    /// while `Some`, [`Self::step`] recomputes the light each tick from the sun-angle law over this sky.
+    sky: Option<DiurnalSky>,
+    /// The private diurnal PHASE COUNTER: the number of environ steps since arming, advanced once per tick in
+    /// the insolation step. It is FIREWALLED, never exposed to the percept or any behavioural substrate, so a
+    /// diurnal rhythm can only reach a being through the cycling light and temperature MAGNITUDES it perceives
+    /// and never by reading the clock (the steering line: entrainment emerges, it is not templated). Not folded
+    /// into the state hash: its effect enters through the light field, which drives the hashed productivity
+    /// capacity; on an unarmed run it never advances, so the pins hold.
+    diurnal_tick: u64,
 }
 
 /// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
@@ -746,7 +758,46 @@ impl EnvironFields {
             producer_source: vec![Vec::new(); n],
             producer_food: vec![None; n],
             data_fields: BTreeMap::new(),
+            sky: None,
+            diurnal_tick: 0,
         }
+    }
+
+    /// Arm the DIURNAL insolation cycle (day-night arc, opt-in) with the world's data sky, so [`Self::step`]
+    /// recomputes the `light` field each tick from the sun-angle law instead of holding the static latitude map.
+    /// Unarmed (the default) the light stays static and the run is byte-identical, so the determinism pins hold;
+    /// this is armed only by a scenario that wants the cycle, like the living world. The phase counter restarts
+    /// at zero on arming (a deterministic per-scenario dawn), never read by any behavioural substrate.
+    pub fn arm_diurnal(&mut self, sky: DiurnalSky) {
+        self.sky = Some(sky);
+        self.diurnal_tick = 0;
+    }
+
+    /// Recompute the `light` field from the diurnal sun-angle law (day-night arc), advancing the private phase
+    /// counter one tick. A no-op when the cycle is unarmed (`sky` is `None`), so an unarmed run never touches the
+    /// light and is byte-identical. The phase is the counter modulo the sidereal rotation period, the orbital
+    /// phase the counter modulo the orbital period, and each cell's light is [`insolation_at`] over the world's
+    /// star-list. Deterministic (a pure fold over the counter and the cell coordinate), so it replays.
+    fn step_insolation(&mut self) {
+        let Some(sky) = self.sky.clone() else {
+            return; // the cycle is unarmed: the static latitude light stands, byte-identical.
+        };
+        let (w, h) = (self.width, self.height);
+        let diurnal_phase = Fixed::from_ratio(
+            (self.diurnal_tick % sky.rotation_period_ticks) as i64,
+            sky.rotation_period_ticks as i64,
+        );
+        let orbital_phase = Fixed::from_ratio(
+            (self.diurnal_tick % sky.orbital_period_ticks) as i64,
+            sky.orbital_period_ticks as i64,
+        );
+        for y in 0..h {
+            for x in 0..w {
+                let i = self.idx(x, y);
+                self.light[i] = insolation_at(x, y, w, h, diurnal_phase, orbital_phase, &sky);
+            }
+        }
+        self.diurnal_tick = self.diurnal_tick.saturating_add(1);
     }
 
     #[inline]
@@ -824,6 +875,7 @@ impl EnvironFields {
     /// is the runner's diffused [`Field`], sized to the same grid. The standing stock itself is regrown
     /// and grazed through [`Self::regrow_supply`] against this capacity, not here.
     pub fn step(&mut self, temp: &Field, calib: &EnvironCalib) {
+        self.step_insolation();
         self.step_hydrology(temp, calib);
         self.step_salinity(calib);
         self.step_productivity(temp, calib);
@@ -1435,6 +1487,127 @@ fn latitude_light(y: i32, height: i32) -> Fixed {
     (Fixed::ONE - Fixed::from_ratio(dist as i64, mid as i64)).clamp(Fixed::ZERO, Fixed::ONE)
 }
 
+/// A world's DATA sky for the diurnal insolation drive (Arc, day-night). One entry per star, plus the world's
+/// axial tilt and its rotation and orbital cadences in ticks. The default is the ZERO-OBLIQUITY SINGLE-STAR
+/// REFERENCE world (one star of unit luminosity, tilt 0), NOT Mirror: Mirror is Earth at its real 23.4-degree
+/// obliquity (real seasons on top of day-night), a data-row override that sets `obliquity` and per-star data.
+/// A tidally-locked, high-obliquity, or binary-star world is likewise a data row (Principles 8, 11). The
+/// membership is data and grows with the world; the sun-angle law is fixed Rust.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Star {
+    /// The star's radiant flux delivered to the world (its luminosity attenuated by the inverse-square of its
+    /// orbital distance), the L_s in the insolation sum. RESERVED, owner-set from real astronomical data; the
+    /// reference world uses unit flux so the daylit peak is 1.
+    pub luminosity: Fixed,
+    /// The star's own orbital-phase offset in `[0, 1)`, so a binary or trinary system's suns rise and set on
+    /// their own cadences rather than sharing one world phase. Zero for the single-star reference.
+    pub phase_offset: Fixed,
+}
+
+/// The world's DATA sky: the star-list and the orbital geometry the diurnal insolation reads. Fixed Rust law,
+/// data membership; the default is the zero-obliquity single-star reference world.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiurnalSky {
+    /// Ticks per SIDEREAL rotation (one spin against the fixed stars), the diurnal phase period.
+    pub rotation_period_ticks: u64,
+    /// Ticks per orbit, so the SYNODIC (solar) day derives from the sidereal spin minus the orbital advance,
+    /// and the tidally-locked case (rotation equals orbit) comes out as a permanent day face.
+    pub orbital_period_ticks: u64,
+    /// The world's axial tilt in radians; 0 is the reference world (no seasons, poles dark). The declination
+    /// derives from this and the orbital phase, so a tilted world gets seasons and polar day/night as data.
+    pub obliquity: Fixed,
+    /// The data star-list. One unit-luminosity star at zero phase offset is the single-star reference.
+    pub stars: Vec<Star>,
+}
+
+impl DiurnalSky {
+    /// The zero-obliquity SINGLE-STAR REFERENCE world (not Mirror): one unit-luminosity star, no tilt. A clean
+    /// pure-diurnal cycle. `rotation_period_ticks` is the day length in ticks (from the world's own rotation
+    /// period through the seconds-to-ticks bridge); `orbital_period_ticks` its year.
+    pub fn reference(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        DiurnalSky {
+            rotation_period_ticks: rotation_period_ticks.max(1),
+            orbital_period_ticks: orbital_period_ticks.max(1),
+            obliquity: Fixed::ZERO,
+            stars: vec![Star {
+                luminosity: Fixed::ONE,
+                phase_offset: Fixed::ZERO,
+            }],
+        }
+    }
+}
+
+/// The instantaneous insolation at a cell (day-night sun-angle law): the sum over the world's data star-list of
+/// each star's flux times the clamped cosine of the sun's zenith angle,
+/// `insolation = sum_s L_s * max(0, cos theta_s)`, with
+/// `cos theta_s = sin(lat) sin(decl) + cos(lat) cos(decl) cos(hour)` (the standard solar-zenith geometry). The
+/// latitude derives from the row (equator 0, poles +/- pi/2), the hour angle is the SYNODIC solar angle
+/// `2*pi*(phase + longitude - orbital_phase + star_offset)` from the per-cell longitude (the column) and the
+/// diurnal and orbital phases (so a tidally-locked world's day face is fixed), and the declination
+/// `obliquity * sin(2*pi*orbital_phase)` gives seasons and polar day/night from the world's tilt. At the
+/// zero-obliquity single-star reference this reduces to `cos(lat) cos(hour)`: a clean day-night swing that is
+/// correctly dark at the poles (no tilt, the sun never clears the horizon there). A pure function of the cell,
+/// the phases, and the world's own sky data (Principles 8, 9: no label, no authored outcome); deterministic
+/// fixed-point CORDIC trig.
+fn insolation_at(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    diurnal_phase: Fixed,
+    orbital_phase: Fixed,
+    sky: &DiurnalSky,
+) -> Fixed {
+    let mid = height / 2;
+    if mid <= 0 || width <= 0 {
+        // A degenerate strip has no latitude structure: read the summed daylit flux so a test fixture is lit.
+        return sky
+            .stars
+            .iter()
+            .fold(Fixed::ZERO, |a, s| a.saturating_add(s.luminosity));
+    }
+    // Latitude in [-pi/2, pi/2]: the equator row (mid) is 0, the poles are +/- pi/2.
+    let lat = Fixed::from_ratio((mid - y) as i64, mid as i64)
+        .checked_mul(Fixed::HALF_PI)
+        .unwrap_or(Fixed::ZERO);
+    let longitude = Fixed::from_ratio(x as i64, width as i64); // [0, 1) around the world
+    let two_pi = Fixed::PI.saturating_add(Fixed::PI);
+    // The declination from the world's tilt and its orbital position (0 at the reference world).
+    let decl = sky
+        .obliquity
+        .checked_mul(
+            two_pi
+                .checked_mul(orbital_phase)
+                .unwrap_or(Fixed::ZERO)
+                .sin(),
+        )
+        .unwrap_or(Fixed::ZERO);
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    let (sin_decl, cos_decl) = decl.sin_cos();
+    let mut total = Fixed::ZERO;
+    for star in &sky.stars {
+        // The synodic (solar) hour angle: the sidereal diurnal phase plus the cell's longitude, minus the
+        // orbital advance (so successive noons track the star, not the fixed stars), plus the star's own offset.
+        let hour_frac = diurnal_phase
+            .saturating_add(longitude)
+            .saturating_add(star.phase_offset)
+            - orbital_phase;
+        let hour = two_pi.checked_mul(hour_frac).unwrap_or(Fixed::ZERO);
+        // cos(zenith) = sin(lat)sin(decl) + cos(lat)cos(decl)cos(hour).
+        let term_pole = sin_lat.checked_mul(sin_decl).unwrap_or(Fixed::ZERO);
+        let term_day = cos_lat
+            .checked_mul(cos_decl)
+            .unwrap_or(Fixed::ZERO)
+            .checked_mul(hour.cos())
+            .unwrap_or(Fixed::ZERO);
+        let cos_zenith = term_pole.saturating_add(term_day);
+        // max(0, cos zenith): the night side (sun below the horizon) delivers no flux.
+        let lit = cos_zenith.max(Fixed::ZERO);
+        total = total.saturating_add(star.luminosity.checked_mul(lit).unwrap_or(Fixed::ZERO));
+    }
+    total
+}
+
 /// Precompute each cell's downhill routing target: the index of the strictly-lowest of its four
 /// neighbours (ties and no-lower-neighbour resolved deterministically), or the cell itself when no
 /// neighbour is strictly lower (a basin). A pure fold over the frozen elevation, so the routing carries
@@ -1497,6 +1670,8 @@ mod tests {
             producer_source: vec![Vec::new(); elev_tenths.len()],
             producer_food: vec![None; elev_tenths.len()],
             data_fields: BTreeMap::new(),
+            sky: None,
+            diurnal_tick: 0,
         }
     }
 
@@ -1536,6 +1711,44 @@ mod tests {
             latitude_light(1, 5) > latitude_light(0, 5),
             "light rises toward the equator"
         );
+    }
+
+    #[test]
+    fn the_sun_angle_law_swings_day_to_night_at_the_equator_and_leaves_the_poles_dark() {
+        // The zero-obliquity single-star reference sky: one unit star, no tilt, a 100-tick day.
+        let sky = DiurnalSky::reference(100, 36500);
+        let (w, h) = (10, 5); // equator row is y=2 (mid); poles are y=0 and y=4.
+        let orbital = Fixed::ZERO; // one day is a negligible slice of the year; hold the orbital phase.
+                                   // At the equator, column x=0, diurnal phase 0 puts the sun overhead (hour angle 0): full flux ~1.
+        let noon = insolation_at(0, 2, w, h, Fixed::ZERO, orbital, &sky);
+        assert!(
+            noon > Fixed::from_ratio(9, 10),
+            "the equator at local noon is fully lit, got {noon:?}"
+        );
+        // Half a rotation later the same cell faces away (hour angle pi): the night side reads zero.
+        let midnight = insolation_at(0, 2, w, h, Fixed::from_ratio(1, 2), orbital, &sky);
+        assert_eq!(
+            midnight,
+            Fixed::ZERO,
+            "the equator at local midnight is dark, got {midnight:?}"
+        );
+        // Dawn/dusk (quarter turn, hour angle pi/2) is the terminator: near zero, below noon.
+        let dusk = insolation_at(0, 2, w, h, Fixed::from_ratio(1, 4), orbital, &sky);
+        assert!(
+            dusk < noon && dusk <= Fixed::from_ratio(1, 100),
+            "the terminator is dim, got {dusk:?}"
+        );
+        // A pole under zero obliquity never clears the horizon: dark at every phase (physically correct here).
+        // cos(pi/2) is a sub-part-per-billion fixed-point CORDIC residual rather than exact zero, so the pole is
+        // negligibly (not bit-exactly) lit; bound it rather than assert an exact zero the trig cannot deliver.
+        let eps = Fixed::from_ratio(1, 1_000_000);
+        for p in [0, 1, 2, 3] {
+            let pole = insolation_at(0, 0, w, h, Fixed::from_ratio(p, 4), orbital, &sky);
+            assert!(
+                pole < eps,
+                "a zero-tilt pole is dark at phase {p}/4, got {pole:?}"
+            );
+        }
     }
 
     #[test]
