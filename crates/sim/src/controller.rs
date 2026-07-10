@@ -241,6 +241,35 @@ impl ControllerLayout {
         ControllerLayout::with_percepts_and_appetitive(homeo, afford, percept, false, hidden)
     }
 
+    /// As [`with_percepts`], plus the being-directed input block when `being` is true (the being-percept
+    /// keystone, step 6): the percept layout with no appetitive, material, attraction, or conviction block
+    /// but with the being block. A harness that seeds a genome against a layout (a flat `o * n_in + i`
+    /// weight index, [`taxis_move_weights`]) must build that layout at the SAME width the run embodiment
+    /// expresses against, or the seeded weights land in the wrong slots. An embodiment that arms only the
+    /// being block ([`crate::runner::Embodiment::set_being_percept`], with no appetitive, material,
+    /// attraction, or conviction block) rebuilds its layout through the full builder with exactly those
+    /// flags, so this convenience builds the matching layout for the seeding side. Delegates to the full
+    /// builder; a `being = false` call is identical to [`with_percepts`].
+    pub fn with_percepts_and_being(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        being: bool,
+        hidden: usize,
+    ) -> ControllerLayout {
+        ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
+            homeo,
+            afford,
+            percept,
+            false,
+            &MaterialPerceptRegistry::empty(),
+            false,
+            &ConvictionPerceptRegistry::empty(),
+            being,
+            hidden,
+        )
+    }
+
     /// Build a layout that also feeds an APPETITIVE belief block, one channel per affordance in canonical
     /// id order (ideation / experiential-discovery arc, piece 1, the belief-to-behaviour feedback). The
     /// block sits AFTER the feature block and before the bias, so the per-axis input bases
