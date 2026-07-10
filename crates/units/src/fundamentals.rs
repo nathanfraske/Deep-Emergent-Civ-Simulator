@@ -117,8 +117,10 @@ pub const FUNDAMENTALS: [Fundamental; 6] = [
 /// (AGENTIC_ADDENDUM section 9). This records the DERIVE RELATION (the formula and the fundamentals it reads);
 /// the fixed-point COMPUTE is the split-out units / R-UNITS-PIN follow-on, because forming the relation (for
 /// sigma, `k_B^4 / h^3`) underflows Q32.32 without the scaled-exponent representation that arc builds. The
-/// `value` is the known CODATA magnitude, carried only so a drift-check can confirm the recorded relation and
-/// the stored fundamentals reproduce it.
+/// `value` is the known CODATA magnitude, carried only so a drift-check can confirm the stored fundamentals
+/// reproduce it. The `formula` string is the human-readable and units-arc record of the relation (that arc
+/// parses it to compute); a test cross-checks it against the `fundamentals` list so the two cannot drift
+/// apart, but the drift-check itself validates the VALUE through an independent re-encoding of the relation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Composite {
     /// The symbol, for example `sigma`.
@@ -188,8 +190,11 @@ mod tests {
             .parse()
             .expect("the composite's recorded value parses");
         let relative = (derived - recorded).abs() / recorded;
+        // The stored fundamentals reproduce sigma to ~3.3e-11; the bound is tight enough to catch any
+        // mistyped fundamental (which perturbs sigma by orders of magnitude) with headroom over the achieved
+        // agreement, and does not depend on the recorded value's last digit.
         assert!(
-            relative < 1e-6,
+            relative < 1e-8,
             "sigma derived from the fundamentals ({derived:e}) drifts from the recorded CODATA value ({recorded:e}), relative {relative:e}"
         );
     }
@@ -204,6 +209,57 @@ mod tests {
                     comp.symbol
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_composite_formula_and_its_fundamentals_list_agree() {
+        // The `formula` string and the `fundamentals` list are both load-bearing for the units-arc compute,
+        // so they must not drift apart: every declared fundamental appears in the formula (no padded list),
+        // and every fundamental whose symbol appears in the formula is declared (no missing list entry). The
+        // symbol matching is a substring test, which suits the current symbol set (`k_B`, `h`, `c`, and the
+        // rest are distinct within each formula); a future symbol that is a substring of another would need a
+        // tokenizing check.
+        for comp in COMPOSITES {
+            for symbol in comp.fundamentals {
+                assert!(
+                    comp.formula.contains(symbol),
+                    "composite {}: declared fundamental {symbol} is absent from the formula '{}'",
+                    comp.symbol,
+                    comp.formula
+                );
+            }
+            for f in FUNDAMENTALS {
+                if comp.formula.contains(f.symbol) {
+                    assert!(
+                        comp.fundamentals.contains(&f.symbol),
+                        "composite {}: the formula reads {} but it is not in the declared fundamentals list",
+                        comp.symbol,
+                        f.symbol
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_fundamental_value_parses_finite_and_positive() {
+        // A magnitude guard over ALL six fundamentals, not only the three the sigma drift-check consumes: a
+        // raw fundamental has no internal derivation to check a wrong DIGIT against (that is human review
+        // against the recorded provenance), but a malformed, non-finite, or non-positive value is a defect a
+        // cheap self-consistent test catches for the whole table.
+        for f in FUNDAMENTALS {
+            let v: f64 = f.value.parse().unwrap_or_else(|_| {
+                panic!(
+                    "fundamental {} value '{}' does not parse",
+                    f.symbol, f.value
+                )
+            });
+            assert!(
+                v.is_finite() && v > 0.0,
+                "fundamental {} value {v:e} is not finite and positive",
+                f.symbol
+            );
         }
     }
 
