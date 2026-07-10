@@ -12,6 +12,8 @@ Of the 224 entries: **210 STAY** in place and **14 MOVE** (7 relocate to per-wor
 
 The anti-steering guard held: 210 of 224 entries legitimately STAY, most as genuine category-2 per-world control set-points and per-race data, and no value was culled because the list "should" get shorter. Every MOVE is grounded in the value's own three-way-test category, and many of the moves confirm a STEER FLAG the entry's own basis already carries (the trust anchors, the calcification rate, the sensory granularities, the Kleiber coefficient), so the census is applying the locked test to flags the manifest already surfaced, never inventing a cull.
 
+POST-CENSUS UPDATE (2026-07-10, #128): Agent B's per-agent census blind-check surfaced two entries the census had marked STAY that are, on their own basis, derive-from-sibling cases: row 118 `behavior.selection_generations` (its basis: set equal to `biosphere.predawn_generations`) and row 190 `productivity.soil_baseline` (its basis: MUST equal `productivity.soil_requirement`). Both were RETIRED from the manifest and now DERIVE from their sibling (the same pattern as `hydrology.saturation_t_ref` and the Stefan-Boltzmann sigma), byte-neutral on the four pins. So the effective tally is two further derive-moves beyond the snapshot above: 208 STAY and 16 MOVE (7 relocate, 9 derive), with the two entries leaving the 224-entry manifest.
+
 ## The 14 MOVE verdicts (source-verified)
 
 ### Relocate to per-world / per-race data (7): a contingent Terran anchor authored as a global
@@ -163,7 +165,7 @@ This census is posted for the gate's adversarial confirmation: does each of the 
 | 115 | `behavior.controller_target_mutations` | per_world | stays | high |
 | 116 | `behavior.controller_mutation_step_fraction` | per_world | stays | high |
 | 117 | `behavior.selection_pop_size` | per_world | stays | high |
-| 118 | `behavior.selection_generations` | per_world | stays | medium |
+| 118 | `behavior.selection_generations` | per_world | derive (retired post-census; #128) | medium |
 | 119 | `behavior.episode_ticks` | per_world | stays | high |
 | 120 | `body.tissue_properties` | per_world | stays | high |
 | 121 | `body.damage_caps` | per_world | stays | medium |
@@ -235,7 +237,7 @@ This census is posted for the gate's adversarial confirmation: does each of the 
 | 187 | `productivity.light_requirement` | per_world | stays | high |
 | 188 | `productivity.temperature_requirement` | per_world | stays | high |
 | 189 | `productivity.soil_requirement` | per_world | stays | high |
-| 190 | `productivity.soil_baseline` | per_world | stays | medium |
+| 190 | `productivity.soil_baseline` | per_world | derive (retired post-census; #128) | medium |
 | 191 | `hydrology.max_water_depth` | per_world | stays | high |
 | 192 | `productivity.regen_rate` | per_world | stays | high |
 | 193 | `productivity.colonization` | per_world | stays | high |

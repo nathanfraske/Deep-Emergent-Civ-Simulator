@@ -159,7 +159,8 @@ const LIVING_HIDDEN: usize = 4;
 /// DEV FIXTURE: the dawn-bootstrap population size, generations, and per-episode ticks. The pre-adaptation
 /// budget the grazer-transfer falsifier validated (evolved health far above random on held-out food-vs-water
 /// at the founders' own `dev_grazer` physiology). Larger than the crux wiring check so the transfer holds;
-/// reserved as `behavior.selection_pop_size`/`selection_generations`/`episode_ticks` for a canonical build.
+/// reserved as `behavior.selection_pop_size`/`episode_ticks` for a canonical build (the generations budget
+/// derives from `biosphere.predawn_generations`).
 const LIVING_BOOTSTRAP_POP: usize = 40;
 const LIVING_BOOTSTRAP_GENS: u32 = 36;
 const LIVING_BOOTSTRAP_TICKS: u32 = 400;
