@@ -67,7 +67,7 @@ use civsim_sim::material::{MaterialField, MatterCycleCalib, StrikeParams};
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
-use civsim_sim::runner::{ReproductiveVigorCalib, Runner};
+use civsim_sim::runner::{CreatureSelectionParams, ReproductiveVigorCalib, Runner};
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
@@ -2298,6 +2298,27 @@ fn main() {
                         let ctrl_genes = controller_gene_set(&layout);
                         let ctrl_pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
                             .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+                        // Arm the in-run creature reproduction and behaviour-selection substrate (step 2, fork
+                        // 2a) BEFORE spawning creatures, so each creature is MINTED with the bounded controller
+                        // perturbation (the bootstrap variance seed that breaks the founder-zero deadlock), and
+                        // co-located reserve-eligible creatures then breed each cadence, so the WHOLE creature
+                        // controller is selected in the populated world (the SOLO loci, forage and metabolism,
+                        // become selectable in-run; the being-directed flee/hunt weights stay latent until the 2b
+                        // percept-feature floor arc, the frame-blind's blocking dependency). Labelled DEV FIXTURES
+                        // standing up the reserved `creature_selection.*` slots: mint spread 0.05 lifts a
+                        // founder-zero weight off zero without saturating the activation clamp of one; eligibility
+                        // reserve 0.5 marks a well-fed forager; offspring spread 0.02 is set equal to
+                        // `reproduction.mutation_spread`. Behaviour-changing: it re-pins `full --creatures`.
+                        if let Some(emb) = runner.embodiment_mut() {
+                            emb.set_creature_selection(Some(CreatureSelectionParams {
+                                mint_perturbation_spread: Fixed::from_decimal_str("0.05")
+                                    .expect("mint perturbation spread literal"),
+                                reproduction_eligibility_reserve: Fixed::from_decimal_str("0.5")
+                                    .expect("reproduction eligibility literal"),
+                                offspring_mutation_spread: Fixed::from_decimal_str("0.02")
+                                    .expect("offspring mutation spread literal"),
+                            }));
+                        }
                         let n = runner.spawn_creatures(living, &ctrl_genes, &ctrl_pool, 2);
                         // Creatures-react arc (mechanism B3, the LIVE WIRE): arm the mind-less creature
                         // being-directed percept, so each spawned creature perceives the beings whose signal

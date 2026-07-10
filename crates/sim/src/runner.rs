@@ -1094,6 +1094,55 @@ fn creature_weight_deviation(seed: u64, id: StableId, tick: u64, k: usize, sprea
     (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
 }
 
+/// Breed the next creature generation from the eligible parents (creature-selection step 2, the PURE core of
+/// the reproduction beat, extracted so the mechanism is unit-testable without a full runner). The parents are
+/// grouped by cell (CO-LOCATION, the spatial proximity proxy) in canonical order, paired consecutively within
+/// each cell (an unpaired leftover does not breed), and one offspring is minted per pair whose controller is
+/// the parents' MIDPARENT blend plus a bounded seed-keyed perturbation, at the parents' cell with a fresh
+/// disjoint id (`CREATURE_ID_TAG | OFFSPRING_ID_BIT | count`). It reads no trait, kind, relatedness, or id tag.
+/// Pure and deterministic: for a fixed eligible list, seed, tick, and counter it returns the same offspring,
+/// advancing `offspring_count` by the number minted. The caller filters the eligible list (living creatures
+/// carrying heritable lineage, own reserve eligible), so the authored predator (no lineage) never appears here.
+fn breed_offspring(
+    eligible: &[(StableId, Coord3, Controller, BodyPlan, Physiology)],
+    params: &CreatureSelectionParams,
+    seed: u64,
+    clock: u64,
+    homeo: &HomeostaticRegistry,
+    organs: &BodyPlanRegistry,
+    offspring_count: &mut u64,
+) -> Vec<(StableId, Coord3, Walker)> {
+    let mut by_cell: BTreeMap<Coord3, Vec<usize>> = BTreeMap::new();
+    for (i, (_, coord, ..)) in eligible.iter().enumerate() {
+        by_cell.entry(*coord).or_default().push(i);
+    }
+    let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
+    for (coord, idxs) in &by_cell {
+        for pair in idxs.chunks_exact(2) {
+            let (_, _, ctrl_a, body_a, phys_a) = &eligible[pair[0]];
+            let (_, _, ctrl_b, _, _) = &eligible[pair[1]];
+            let count = *offspring_count;
+            *offspring_count += 1;
+            let child = StableId(CREATURE_ID_TAG | OFFSPRING_ID_BIT | count);
+            let child_ctrl = ctrl_a.midparent(ctrl_b, |k| {
+                creature_weight_deviation(seed, child, clock, k, params.offspring_mutation_spread)
+            });
+            let homeostasis = crate::homeostasis::Homeostasis::new(homeo, body_a, organs);
+            let walker = Walker::new(
+                child,
+                *coord,
+                body_a.clone(),
+                homeostasis,
+                phys_a.clone(),
+                child_ctrl.clone(),
+            )
+            .with_lineage(child_ctrl);
+            built.push((child, *coord, walker));
+        }
+    }
+    built
+}
+
 /// The reserved calibrations the in-run creature reproduction and behaviour-selection substrate reads
 /// (creature-selection step 2, fork 2a, gate-signed-off). `None` on an embodiment leaves creatures
 /// non-reproducing and byte-identical (the substrate is opt-in); `Some` arms the unified in-run selection.
@@ -6929,46 +6978,24 @@ impl Runner {
             })
             .collect();
         eligible.sort_by_key(|(id, ..)| *id);
-        // Group by cell (co-location, the spatial proximity proxy), in canonical Coord3 order.
-        let mut by_cell: BTreeMap<Coord3, Vec<usize>> = BTreeMap::new();
-        for (i, (_, coord, ..)) in eligible.iter().enumerate() {
-            by_cell.entry(*coord).or_default().push(i);
-        }
-        // For each cell with two or more eligible, pair consecutive (id-sorted) and mint one offspring per pair;
-        // an unpaired leftover does not reproduce this beat.
-        let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
-        for (coord, idxs) in &by_cell {
-            for pair in idxs.chunks_exact(2) {
-                let (_, _, ctrl_a, body_a, phys_a) = &eligible[pair[0]];
-                let (_, _, ctrl_b, _, _) = &eligible[pair[1]];
-                let count = {
-                    let e = self.embodiment.as_mut().unwrap();
-                    let c = e.creature_offspring_count;
-                    e.creature_offspring_count += 1;
-                    c
-                };
-                let child = StableId(CREATURE_ID_TAG | OFFSPRING_ID_BIT | count);
-                let child_ctrl = ctrl_a.midparent(ctrl_b, |k| {
-                    creature_weight_deviation(
-                        seed,
-                        child,
-                        clock,
-                        k,
-                        params.offspring_mutation_spread,
-                    )
-                });
-                let homeostasis = crate::homeostasis::Homeostasis::new(&homeo, body_a, &organs);
-                let walker = Walker::new(
-                    child,
-                    *coord,
-                    body_a.clone(),
-                    homeostasis,
-                    phys_a.clone(),
-                    child_ctrl.clone(),
-                )
-                .with_lineage(child_ctrl);
-                built.push((child, *coord, walker));
-            }
+        // Mint the offspring (the pure, deterministic core, extracted so it is unit-testable), advancing the
+        // embodiment's monotonic offspring counter.
+        let mut offspring_count = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.creature_offspring_count)
+            .unwrap_or(0);
+        let built = breed_offspring(
+            &eligible,
+            &params,
+            seed,
+            clock,
+            &homeo,
+            &organs,
+            &mut offspring_count,
+        );
+        if let Some(e) = self.embodiment.as_mut() {
+            e.creature_offspring_count = offspring_count;
         }
         // Install the offspring (thermal band, walker, located index) in canonical mint order.
         if let Some(emb) = self.embodiment.as_mut() {
@@ -12700,6 +12727,223 @@ values = [
             world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
             Some(HARMS),
             "the learned belief rode the shipped gossip to the co-located naive being by presence"
+        );
+    }
+
+    // The minimal creature fixtures for the reproduction-beat tests (creature-selection step 2).
+    fn repro_reg() -> crate::homeostasis::HomeostaticRegistry {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    fn repro_body() -> BodyPlan {
+        BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: crate::anatomy::Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        }
+    }
+
+    fn repro_params() -> CreatureSelectionParams {
+        CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(1, 2),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }
+    }
+
+    #[test]
+    fn carries_lineage_is_the_structural_pairing_predicate() {
+        let reg = repro_reg();
+        let layout = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let ctrl = Controller::zeros(&layout);
+        let mk = |id: u64, lineage: bool| {
+            let mut w = Walker::new(
+                StableId(id),
+                Coord3::ground(0, 0),
+                repro_body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                ctrl.clone(),
+            );
+            if lineage {
+                w = w.with_lineage(ctrl.clone());
+            }
+            w
+        };
+        // A modeled-lineage creature carrying a heritable controller can pair; a being with none (a founder
+        // body, the authored predator) cannot, and the predicate reads what the being CARRIES, never its id.
+        assert!(mk(CREATURE_ID_TAG | 1, true).carries_lineage());
+        assert!(!mk(CREATURE_ID_TAG | PREDATOR_ID_BIT, false).carries_lineage());
+        assert!(!mk(7, false).carries_lineage());
+    }
+
+    #[test]
+    fn breed_offspring_mints_a_midparent_blend_from_co_located_parents_and_replays() {
+        let reg = repro_reg();
+        let organs = BodyPlanRegistry::dev_default();
+        let layout = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let (n_in, n_out, hidden) = (layout.n_in(), layout.n_out(), layout.hidden());
+        // Parent A carries a full first weight, parent B a zero first weight; every other weight is zero for
+        // both, so the midparent of weight 0 is exactly one half (plus the bounded inheritance perturbation).
+        let mut wa = vec![Fixed::ZERO; layout.weight_count()];
+        wa[0] = Fixed::ONE;
+        let ctrl_a = Controller::from_weights(n_in, n_out, hidden, wa);
+        let ctrl_b = Controller::zeros(&layout);
+        let phys = Physiology::dev_for_registry(&reg);
+        let params = repro_params();
+        let (seed, clock) = (0x5EED, 6u64);
+
+        // Two eligible parents CO-LOCATED at one cell.
+        let here = Coord3::ground(3, 3);
+        let eligible = vec![
+            (
+                StableId(CREATURE_ID_TAG | 1),
+                here,
+                ctrl_a.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+            (
+                StableId(CREATURE_ID_TAG | 2),
+                here,
+                ctrl_b.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+        ];
+        let mut count = 0u64;
+        let built = breed_offspring(&eligible, &params, seed, clock, &reg, &organs, &mut count);
+        assert_eq!(
+            built.len(),
+            1,
+            "one co-located eligible pair mints one offspring"
+        );
+        assert_eq!(count, 1, "the offspring counter advanced by one");
+        let (cid, coord, walker) = &built[0];
+        assert_eq!(
+            cid.0,
+            CREATURE_ID_TAG | OFFSPRING_ID_BIT,
+            "offspring id in the disjoint sub-namespace"
+        );
+        assert!(
+            is_creature(*cid) && !is_predator(*cid),
+            "an offspring is a creature, not a predator"
+        );
+        assert_eq!(*coord, here, "the offspring is minted at the parents' cell");
+        assert!(
+            walker.carries_lineage(),
+            "an offspring carries its own heritable lineage"
+        );
+        // The midparent blend: weight 0 is one half of (ONE, ZERO) within the bounded inheritance perturbation;
+        // weight 1 (both parents zero) stays within that same bound of zero.
+        let half = Fixed::from_ratio(1, 2);
+        let bound = params.offspring_mutation_spread;
+        let w0 = walker.controller.weight(0);
+        assert!(
+            (w0 - half).abs() <= bound,
+            "offspring weight 0 is the midparent one-half within the perturbation bound"
+        );
+        assert!(
+            walker.controller.weight(1).abs() <= bound,
+            "offspring weight 1 (both parents zero) stays within the perturbation bound"
+        );
+        // Determinism: the same inputs and a fresh counter reproduce the identical offspring controller.
+        let mut count2 = 0u64;
+        let built2 = breed_offspring(&eligible, &params, seed, clock, &reg, &organs, &mut count2);
+        assert_eq!(
+            built2[0].2.controller, walker.controller,
+            "the beat replays bit for bit"
+        );
+
+        // A lone eligible creature (no co-located partner) does not reproduce.
+        let solo = vec![(
+            StableId(CREATURE_ID_TAG | 1),
+            here,
+            ctrl_a.clone(),
+            repro_body(),
+            phys.clone(),
+        )];
+        let mut c = 0u64;
+        assert!(
+            breed_offspring(&solo, &params, seed, clock, &reg, &organs, &mut c).is_empty(),
+            "an unpaired eligible creature does not breed"
+        );
+        // Two eligible creatures in DIFFERENT cells do not reproduce (co-location is required).
+        let apart = vec![
+            (
+                StableId(CREATURE_ID_TAG | 1),
+                here,
+                ctrl_a.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+            (
+                StableId(CREATURE_ID_TAG | 2),
+                Coord3::ground(5, 5),
+                ctrl_b.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+        ];
+        let mut c2 = 0u64;
+        assert!(
+            breed_offspring(&apart, &params, seed, clock, &reg, &organs, &mut c2).is_empty(),
+            "two eligible creatures in different cells do not pair"
         );
     }
 }
