@@ -23,7 +23,7 @@
 //! whose contact attack is electrical, chemical, thermal, or a non-Terran channel with no Earth analogue
 //! could not be expressed by plugging numbers into one mass-velocity function; it would need a new function,
 //! a rewrite rather than a data row. Here the delivered energy is resolved by dispatching on the NAMED kernel
-//! a channel's row carries, so a new delivery channel is a row (and, where a genuinely new law is needed, one
+//! a channel's row carries, so a new delivery channel is a row (and, where a new law is needed, one
 //! kernel on the floor), never by editing a `match channel { Kinetic => ..., Electrical => ... }`. Kinetic
 //! is the first (Terran, mass-bearing) instance; the law-set is small, fixed, and extensible.
 //!
@@ -270,8 +270,8 @@ pub struct ContactChannelId(pub u16);
 /// the kernel VARIANT (which physics). A source-independent actuator REUSES an existing mechanical variant (a
 /// turgor hydrostat IS a [`TransferKernel::Hydraulic`] `P dV`, a turgor spring an [`TransferKernel::ElasticRecoil`]),
 /// so it lands in the mechanical MAX arm and is SILENTLY MAX-folded; the exhaustive match below catches only a
-/// genuinely NEW variant (a new physics or channel, an electrical discharge), NOT a source-independent reuse of an
-/// existing one. So the real future fix is a SOURCE-INDEPENDENCE DATUM (a way for a world to declare that a driving
+/// NEW variant (a new physics or channel, an electrical discharge), NOT a source-independent reuse of an existing
+/// one. So the real future fix is a SOURCE-INDEPENDENCE DATUM (a way for a world to declare that a driving
 /// pressure or a stored strain energy is independently charged) plus its additive combine, not merely a new
 /// variant. Today the floor carries no such datum: `fluid.driving_pressure` and the elastic axes do not declare
 /// their charging source, so every modeled mechanical actuator is metabolic-sourced and MAX is correct; the
