@@ -5996,6 +5996,15 @@ impl Runner {
         // (1) Physics to physiology: the comfort-band map turns each being's core temperature into its
         // temperature reserve, per being from its own reserved band. No behaviour, no RNG.
         for w in emb.walkers.iter_mut() {
+            // An authored PREDATOR is a NON-METABOLIZING environmental given (a fixed hazard like a heat
+            // source): it maintains its own temperature and does not freeze, so its comfort reserve stays full
+            // and it is never thermally culled (the drain guard above zeros only its metabolic drain, not this
+            // thermal set; without this exemption a stationary predator's body temperature drifts to the cold
+            // field and its TEMPERATURE reserve floors within a few ticks, culling the "persistent hazard").
+            if is_predator(w.id) {
+                w.homeostasis.set_level(TEMPERATURE, Fixed::ONE);
+                continue;
+            }
             if let (Some(&bt), Some(band)) = (self.body_temp.get(&w.id), emb.thermal.get(&w.id)) {
                 w.homeostasis
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
@@ -6419,6 +6428,19 @@ impl Runner {
             .unwrap_or(0)
     }
 
+    /// The cell of the first living biosphere CREATURE (id order, excluding an authored predator), if any
+    /// (predation-integration slice). The world-build places the authored ambush predator HERE so it is a
+    /// hazard IN the inhabited region that strikes a co-located prey, rather than off in an empty cell
+    /// the prey never reach: an environmental-given placement, not authoring which prey adapts. A pure read.
+    pub fn first_creature_coord(&self) -> Option<Coord3> {
+        self.embodiment.as_ref().and_then(|e| {
+            e.walkers
+                .iter()
+                .find(|w| w.alive && is_creature(w.id) && !is_predator(w.id))
+                .map(|w| w.coord())
+        })
+    }
+
     /// The shared controller layout the embodiment's walkers express against (Arc 7), if an embodiment is
     /// installed. A creature's forage controller MUST be built against this exact layout (not a freshly
     /// derived one) or it would express at the wrong width, landing its forage weights on the wrong inputs.
@@ -6553,12 +6575,13 @@ impl Runner {
     /// [`Controller::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
     /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it DECIDES STRIKE and calls
     /// the existing [`Embodiment::strike_occupant`], which wounds a co-located being through the one INTEGRITY
-    /// cull; nothing reads a species, role, or relatedness (Principle 8). HONEST LIMIT (section-9 caught it):
-    /// `strike_occupant` delivers a wound only through grown-Structure Segments (both the striker's delivery mass
-    /// and the target's wound site are read off `structure.segments`), so against a CATALOG body (no run-path
-    /// Structure, as the biosphere creatures and this catalog predator currently are) it is a NO-OP; real
-    /// predation mortality awaits the `body::Body`-to-Structure bridge (a flagged preceding dependency, see
-    /// `strike_occupant`). It is registered in the `predators` set so its metabolism is
+    /// cull; nothing reads a species, role, or relatedness (Principle 8). The wound law reads the TARGET's body
+    /// granularity as DATA (the catalog-compatible wound, fork 2): a fine target (a grown Structure) is wounded
+    /// per-Segment, and a CATALOG target (`structure` is `None`, as the biosphere creatures currently are) is
+    /// wounded on its whole body against its outermost covering's `mat.fracture_energy`, accrued to
+    /// [`Walker::whole_body_damage`] and routed through the same unified INTEGRITY cull. The predator itself
+    /// carries a minimal FINE delivery Structure (below), so its own strike delivers a real mass and contact
+    /// area rather than a no-op. It is registered in the `predators` set so its metabolism is
     /// forced to zero (NON-METABOLIZING: it neither forages nor starves, the authored given). It EMITS a
     /// being-signal like any warm walker, which is REQUIRED for the prey's being-directed weight to select against
     /// it (a signalless hazard could not, since that weight keys on the emitted signal). Deterministic: an

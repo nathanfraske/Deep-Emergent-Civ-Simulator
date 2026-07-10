@@ -2307,14 +2307,18 @@ fn main() {
                             emb.set_strike(StrikeParams::dev_fixture());
                             emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
                         }
-                        // Spawn ONE authored ambush predator at the world centre, the environmental GIVEN a
-                        // prey's flee-sign adapts to (fork i, gate-ruled): a stationary always-STRIKE
-                        // non-metabolizing being with a minimal fine delivery body, which wounds any prey
-                        // co-located with it through the unified wound law's whole-body branch and the one
-                        // INTEGRITY cull, and emits a being-signal so the prey can perceive it. The prey's
-                        // founder-zero flee/hunt sign stays emergent; its flee-adaptation emerges once the
-                        // creature-selection substrate lands.
-                        let predator_at = Coord3::ground(WORLD_W / 2, WORLD_H / 2);
+                        // Spawn ONE authored ambush predator, the environmental GIVEN a prey's flee-sign adapts
+                        // to (fork i, gate-ruled): a stationary always-STRIKE non-metabolizing being with a
+                        // minimal fine delivery body, which wounds any prey co-located with it through the
+                        // unified wound law's whole-body branch and the one INTEGRITY cull, and emits a
+                        // being-signal so the prey can perceive it. Placed on an INHABITED cell (the first
+                        // living creature's) so it is a hazard the prey are exposed to in the region they
+                        // occupy, rather than off in an empty cell the prey never reach: an environmental-given
+                        // placement, never authoring which prey adapts. The prey's founder-zero flee/hunt sign
+                        // stays emergent.
+                        let predator_at = runner
+                            .first_creature_coord()
+                            .unwrap_or_else(|| Coord3::ground(WORLD_W / 2, WORLD_H / 2));
                         let predator = runner.spawn_predator(predator_at, predator_body());
                         println!(
                             "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
@@ -2326,10 +2330,14 @@ fn main() {
                         match predator {
                             Some(pid) => println!(
                                 "  PREDATION (fork i): 1 authored ambush predator {pid:?} at {predator_at:?} \
-                                 (fine delivery body, always-STRIKE, non-metabolizing, emits a being-signal); a \
-                                 prey co-located with it is wounded on the whole body and dies through the one \
-                                 INTEGRITY cull, so the prey's founder-zero flee-sign is now a SELECTABLE \
-                                 pressure (the flee-adaptation emerges once the creature-selection substrate lands)"
+                                 (fine delivery body, always-STRIKE, non-metabolizing, emits a being-signal), on \
+                                 an inhabited cell so it wounds the co-located prey on the whole body through the \
+                                 one INTEGRITY cull. The wound law is live and the mortality is real; the prey's \
+                                 founder-zero flee-sign is now a SELECTABLE pressure. HONEST LIMIT: sustained \
+                                 predation and the emergent flee-adaptation await BOTH the creature-selection \
+                                 substrate (next arc) AND the biosphere-balance calibration (creatures currently \
+                                 starve within a few ticks, the GATED metabolism balance), so in-run kills are \
+                                 few until creatures survive and reproduce"
                             ),
                             None => println!(
                                 "  PREDATION (fork i): predator NOT spawned (no embodiment or no STRIKE afforded)"
