@@ -2310,6 +2310,22 @@ value = ""
 unit = "ratio_per_tick"
 source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
 
+[[reserved]]
+id = "harm.eligibility_decay"
+basis = "the temporal-difference lambda the being-signal HARM eligibility trace decays by each tick (learn::EligibilityTrace::decay on the being-percept harm path), so a being-signal perceived some ticks before a harm still credits the signal that preceded it (the predator-approach-then-harm cue). Set at the interoceptive lag between perceiving a being-signal and the harm that follows, bounded by the retention window the belief substrate forgets on; the harm sibling of reward.eligibility_decay, set relative to it. In (0, 1): nearer one credits a longer-lagged cue, nearer zero only the immediately-preceding one. It enters through the existing observation weight, so it fabricates no new engine constant"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "being-percept keystone step 6; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "being_percept.emission_coefficient"
+basis = "the per-being emission coupling coefficient the emitter's thermal self-emission is scaled by (physiology::being_signal_emission = radiant_emission(body_temp) times this coefficient), the fraction of a being's blackbody radiant power that couples into the perceptible signal channel. Basis: the body's covering emissivity times its radiating area, folded into one lever until a per-body material-and-area vector exists on the run path to split it into emissivity (a chem/optics-floor material property) times area (from the BodyPlan). Dimensionless, at least zero (a body that couples nothing emits no perceptible signal); it enters as the emissivity-times-area term of radiant_emission, so the FLUX_MAX representability cap bounds the emission"
+status = "reserved"
+value = ""
+unit = "dimensionless"
+source = "being-percept keystone step 6; crates/sim/src/physiology.rs; crates/sim/src/learn.rs"
+
 # --- ideation / experiential-discovery arc, piece 2 (action-as-hypothesis): the affordance-percept
 # derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
 # when the affordance-percept block is wired onto the run path. Each is a physics reference scale, not a
@@ -2451,3 +2467,19 @@ set_date = "2026-07-09"
 value = "64"
 unit = "count"
 source = "base-level liveliness §4; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "body.tissue_turnover_rate"
+basis = "the per-tissue turnover rate the aging maintenance economy renews a segment's failure-energy reserve at each tick (R-AGING (c)), read as a new mat.turnover_rate floor material axis off a grown body's own tissue. Expressed per tick as biological_renewal_rate times tick_seconds so it couples to the tick length rather than being authored per-tick. From real measured per-tissue cell/tissue-renewal rates (bone remodeling about 10%/yr, Currey, Bones; epithelial and gut fast; per-organ otherwise), a per-material datum, never the lifespan it yields (the gating dependency, grounded in renewal data). Absent by default (the absence convention: a tissue that declares no turnover self-repairs none), so aging is opt-in. MODELING ASSUMPTION, flagged for owner review: a mass/cell-turnover fraction is read as a failure-ENERGY-reserve-renewal fraction, an implicit unit-one identification (insult.rs repair_energy)"
+status = "reserved"
+value = ""
+unit = "material_axes"
+source = "Part 35, Part 41; crates/sim/src/morphogen.rs accrue_aging; crates/sim/src/insult.rs repair_energy"
+
+[[reserved]]
+id = "aging.wear_energy_ceiling"
+basis = "the representability ceiling the per-tick aging wear energy saturates to (crates/sim/src/runner.rs, reusing STRESS_GUARD), a fixed-point overflow bound rather than a world quantity, the sibling of the wound damage_caps and the wear worn-volume ceiling. The aging wear insult otherwise reads the being's own tissue tribology (mat.wear_coefficient and its axis storage scale, mat.indentation_hardness, mat.specific_cut_energy) and its own locomotor load (whole-body muscle force, ground speed times tick), all existing floor data, so no new wear value is authored"
+status = "reserved"
+value = ""
+unit = "energy_ceiling"
+source = "Part 35, Part 41; crates/sim/src/runner.rs; crates/physics/src/laws.rs wear_energy"

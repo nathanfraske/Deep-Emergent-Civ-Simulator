@@ -198,6 +198,81 @@ for the gate's whole-arc gate. The being-percept keystone that wires the percept
 estimator, the per-axis noise floor, the eligibility trace, and the packing offset, sequenced with Agent B) is
 the payoff follow-on that unblocks predation on the run path.
 
+FRAMED being-percept keystone (the payoff arc: wire the percept live so predation and fleeing emerge),
+2026-07-10 (Agent A, PENDING gate ruling). Framed blind before any code. The section-11 input-bias smoke test
+(strongest model, fail-closed) BLOCKED my construction four times, each a real source-verified seam on a
+distinct axis (a whole-loop emergence claim scoped over receiver-only facts; the emitter curated alien-clean
+when a non-Terran channel is a missing-physics substrate; a symmetric receiver alien over-claim introduced
+while fixing the second; predation and fleeing framed as symmetric when only the harm pole had a substrate),
+and cleared the fifth. The section-10 blind panel (6 diverse panelists across 3 agent types and 3 models, 5
+returned, the 6th hit an infrastructure safeguard) came back 5/5 significant-flaw-fixable on two seams.
+SEAM 1 (unanimous strongest): the being-directed gradient's away-from-harm / toward-reward SIGN is an authored
+valence-to-direction coupling that forecloses approach-to-a-harm (a parasite, a scavenger, mobbing). REFUTED
+at source (Prime Directive 1: a unanimous panel is a lead generator, not a verdict): the controller weight is
+expressed from the genome UNCLAMPED (`GeneSet::express`, genome.rs:404-426, a sum of signed `genotypic.mul(weight)`
+terms with no clamp; contrast `express_unit`, genome.rs:435-437, which clamps to [0,1] and is used only for
+propensity channels, never for controller weights, which use `express` at controller.rs:942), and a working
+taxis test uses a -1 weight (controller.rs:1488). So the weight is FREELY SIGNED and founder-zero: selection
+lifts it positive (follow the percept) or negative (invert it), so a negative being-avoidance weight yields
+approach-to-a-harm-believed emitter and the full approach/avoid space is spanned, with harm and reward as
+separate percepts under independent weights. The panel reasoned correctly from my framing; my fact-3 phrasing
+("only a heritable weight lifted off founder-zero turns it into avoidance or approach", "the fixed sign is an
+open seam") MIS-STATED the mechanism, so the fix is a framing correction (state the weight is freely signed,
+the approach/avoid sign emerges, retract the open seam), never a mechanism change. The panel's proposed
+single-signed-percept would AUTHOR the reward-minus-harm combination, the less-emergent choice, so it is
+declined. SEAM 2 (valid, verified): the build list omitted the subject-namespace offset, a LIVE wiring
+requirement; `being_signal_observation` (learn.rs:583) keys `feature_subject(channel, bucket)` with no
+channel-base offset while the material `reward_observations` (learn.rs:610) takes a `channel_base`, so without
+the offset a being-signal aliases the environmental biology feature at the same index under HARM_ATTR (P11);
+the fix sequences the offset FIRST. Folded-in completeness: the named limits carry both alien gaps (receiver
+fail-loud on a non-optical channel, emitter alien emission a flagged floor extension) and the bootstrap
+precondition (an out-of-loop first contact and a survivable sublethal harm to have an outcome to learn from),
+and the being-directed gradient keys on perceived EMITTERS on a channel (any source, being or material),
+never on being-hood. THE RESOLVED FRAMING (survives my own check): a being passively emits on a channel from
+its own material (a Terran channel reads an existing floor source-power axis, a non-Terran channel's axis and
+law are a flagged missing-physics extension); the emission reaches another attenuated by geometry and the
+medium, and is threshold-gated into a percept (the receiver data-defined and fail-loud on a non-optical
+channel); the receiver-side learner correlates it (same-tick today, a keystone-built harm-path eligibility
+trace, its latency a reserved calibration, credits a lagged outcome) into a harm belief (the built core) or a
+reward belief (a keystone-built reward-frame counterpart) on a subject offset into its own namespace band; the
+evolved controller reads a being-directed geometric-direction gradient over those beliefs through a
+founder-zero FREELY-SIGNED weight, so approach (predation) and avoidance (fleeing) emerge from selection, with
+no mechanism reading a species, kingdom, trophic role, relatedness, named state, or being-hood. The keystone
+builds, in order: the subject-namespace offset (P11, first); the being-signal reward-frame counterpart core;
+the two being-directed gradients (consuming the reach and percept substrate); the harm-path eligibility trace;
+the per-being likelihood estimator (shared with Agent B's composer); the live wire (behaviour-changing, a
+stated hash change re-baselining the four pins). Flagged follow-ons: a discretionary emit affordance and
+referential meaning (an alarm call is both, so alarm is dropped from the keystone, narrowing the gate's
+predation/hunting/fleeing/alarm charge under Prime Directive 5); alien-channel emission and reception. THE
+SCOPE FORK for the gate: (A) build both poles now (reward core plus both being-directed gradients plus the
+eligibility trace), so predation and fleeing both emerge, my recommendation, since both poles need the
+being-directed gradient anyway and the reward core is a small mirror of the built material reward core; or
+(B) scope the keystone to fleeing (the built harm core plus a being-avoidance gradient plus the eligibility
+trace) and flag predation's reward core and attraction gradient as the next sub-slice. Reserved and
+owner-held, surfaced not fabricated: the belief-subject packing (the subject-namespace offset and whether a
+`SenseChannelId` fits the 16-bit channel field, the `SEQ_FIELD_BITS` / belief-subject-hash decision the gate
+surfaced to the owner); the per-being likelihood estimator (a build shared with Agent B, sequenced by the
+gate); the eligibility-trace latency and the per-axis noise floor (reserved calibrations with basis). Posted
+to the gate for its ruling before any keystone code.
+
+GATE RULED 2026-07-10 (on #116): the framing is signed off (the gate verified the Seam-1 refutation against
+source itself and confirmed it holds). The scope fork is ruled (A) BOTH POLES: build the six-step sequence,
+each step gated. The alarm DROP is accepted under Prime Directive 5, so the honest keystone charge is
+PREDATION, HUNTING, and FLEEING, with alarm (a discretionary emit plus referential meaning, both flagged
+follow-ons) named as the next substrate. The belief-subject packing is ruled to the HYBRID (an exact widened
+pack in-envelope plus a hash on overflow), which Agent B builds as the shared belief-subject key, so step 1's
+being-signal band is COORDINATED with Agent B as three disjoint top-level bands: environmental features at
+bit 62 (existing), sequences and conjunctions at bits 62 and 61 (Agent B's existing), being-signals proposed
+at `(1<<62) | (1<<60)` (a new `being_signal_subject`, disjoint from both, so the slice-3 aliasing seam is
+closed by construction), with the `SenseChannelId`-fits question falling out of Agent B's hybrid encoding
+within the being-signal band. Sequencing: build steps 1-4 now (independent of Agent B); sequence step 5 (the
+per-being likelihood estimator, shared with Agent B's composer) with the gate when Agent B frees; step 6 (the
+live wire) last. Route every re-pin (step 6, and step 4 if its eligibility trace touches the live
+environmental harm path rather than staying scoped to the dead being-signal path) through the gate; each
+re-pins once and the gate sequences them against Agent B's and Agent C's re-pins on the four tracked pins.
+The eligibility-trace latency and the per-axis noise floor stay reserved-with-basis (owner-set). Building on
+`claude/being-percept-keystone` (#116), each step pushed for the gate's per-step review.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
