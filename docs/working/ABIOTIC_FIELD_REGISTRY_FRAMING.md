@@ -542,3 +542,52 @@ energy-to-biomass bridge stays as a stoichiometric conversion; whether to derive
 the carrier charge rather than authoring R and F; whether to add a kinetic rate term; the coupling GRANULARITY of the
 clamp; the gamma registry and its non-Terran default; dE0/dT; and the determinism protocols. Surfaced, not decided;
 no code until the gate rules.
+
+## Arc 1 (uptake-flux law): blind framing result, and the corrections it made to the third-form spec
+
+The section-10 blind framing panel (five lenses, behind a section-11 smoke that cleared) was unanimous and decisive,
+and it corrected the owner-ruled third-form spec itself on several load-bearing points (Prime Directive 2, audit the
+input including the spec). The findings are verified against source or math.
+
+The conservation claim in the spec is mathematically false. The spec said conservation is STRUCTURAL, v <= S by
+construction, so the <= 1 cap is dropped. Verified: v = Vmax*S/(Km+S) < S holds only when Vmax < Km+S; at low supply
+v is about (Vmax/Km)*S with slope Vmax/Km, which exceeds one whenever Vmax > Km, and since Vmax = kcat*catalyst-tissue
+grows without bound as the producer's catalytic axis grows, a high-catalyst producer on a low-supply cell draws v > S
+and over-draws a depleting source. Monod bounds v <= Vmax (its saturation asymptote), NOT v <= S. So the deletion of the
+cap is unjustified as stated: conservation needs an EXPLICIT clamp v := min(v, S) (with pinned rounding direction and a
+post-divide clamp for fixed point), not a free consequence of the functional form.
+
+The bare Monod drops the second law. The irreversible Michaelis-Menten form has no driving-force term, so any positive
+substrate activity yields positive uptake regardless of whether the couple releases free energy, which lets a
+non-spontaneous redox couple power life (a Principle-9 / second-law violation). The old EMF-clamped-at-zero encoded the
+second law. The correct floor form is REVERSIBLE Michaelis-Menten / a flux-force relation whose net flux vanishes at
+delta-G = 0 and reverses past it, with delta-G = -nF*EMF keyed to the couple. So the couple's EMF (segment-3
+battery_emf) does NOT disappear under the third form: it becomes the intrinsic DRIVING FORCE of the reversible flux, and
+the spontaneity gate survives as the driving-force half of the same physical law rather than a bolt-on.
+
+The kinetics must be per-source-class registry DATA, not global constants or a closed enum. A single shared kcat and Km
+per source class, applied to every race drawing on that class, forces convergent uptake-affinity and turnover across
+independently-evolved lineages, an authored evolutionary outcome that fails the locked per-world-outcome rule and
+admit-the-alien; and a fixed table keyed on the built-in classes {light, water, nutrient, redox} gives a world-declared
+DataScalar source no kinetic path, breaking the alien-as-data-row property the whole registry exists for. The fix is the
+registry pattern this arc already uses: kcat, Km, and the response-SHAPE (a Hill coefficient, n=1 recovering plain
+Monod, so water's near-linear potential-gradient uptake and a cooperative sigmoidal uptake and an exotic declared curve
+are all data) are carried on each source-class registry entry, Mirror-calibrated to real measured kinetics, per-world
+and per-race differentiable. Km is a joint catalyst-substrate affinity, so it belongs per-producer (an evolvable
+selection axis) rather than shared per class.
+
+The flux is per-(producer, cell), not a per-cell scalar. catalyst-tissue is the producer's own composition magnitude, a
+property of the cell's producer that every observer computing "what flux does producer P draw from cell C" agrees on, so
+it is observer-independent and differs from the rejected per-lineage efficiency (which contaminated a shared cell yield a
+consumer read). Good, but v must be computed and consumed PER PRODUCER drawing from the cell, never cached as one shared
+cell yield, or the P10 break returns in disguise; and when several producers occupy one cell the drawdown order over the
+shared stock S must be deterministically resolved. The replacement is NOT byte-neutral (Monod diverges from the linear
+supply*conversion on every armed abiotic-source scenario), so the determinism pins re-baseline.
+
+Clean under the panel: reading catalyst-tissue as the producer's material catalytic-axis proxy (not a named
+photosynthesis skill or status) is the correct Principle-4 shape; the general saturating-flux-as-floor-physics notion is
+not itself Terran-biased. The corrected resolved form for the gate: v = min(S, reversible-MM-flux) with the flux
+carrying delta-G = -nF*EMF as its driving force (spontaneity intrinsic), the kinetics (kcat, Km, Hill shape) as
+per-source-class registry data Mirror-calibrated to real kinetics and per-race differentiable, Km per-producer evolvable,
+v computed per-(producer, cell) with a deterministic multi-producer drawdown, the pins re-baselined. Reserved with basis:
+kcat, Km, and the per-class Hill shape, basis real measured enzyme/transport kinetics. No code until the gate rules.
