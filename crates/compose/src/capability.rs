@@ -141,7 +141,16 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => &["opt.refractive_index"],
             CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
             CapabilityKernel::Crush => &["mat.compressive_strength"],
-            CapabilityKernel::Impact => &["mat.fracture_strength"],
+            // The rigid actuating strength (entry 0), then the elastic path's yield strength (1) and elastic
+            // modulus (2): the IMPACT grade reads the same run-all-gate-to-zero MAX the delivery path resolves,
+            // so the grade and the delivery stay in lockstep (the gate's slice-3 ruling). A part that grows no
+            // yield or modulus reads a zero elastic term and grades on the rigid `F d` alone (byte-neutral at the
+            // rigid limit).
+            CapabilityKernel::Impact => &[
+                "mat.fracture_strength",
+                "mat.yield_strength",
+                "mat.elastic_modulus",
+            ],
         }
     }
 
@@ -387,13 +396,19 @@ fn crush(
     )
 }
 
-/// The IMPACT read: is the part a percussion tool, and how good a one, from its ACTUATOR WORK (the made-world
-/// arc, Section G). The part's actuating force (its strength stress `mat.fracture_strength` over its
-/// cross-section `mech.cross_section_area`, an N) over its own grown stroke `mech.stroke_length` is the energy
-/// it delivers ([`laws::actuator_work`], `F d`, a J); if that clears the reserved reference strike energy (on
-/// the same joule scale) the part strikes, graded above the threshold. A STRONG, thick, long-stroked part reads
-/// a high impact where a weak or short-stroked one reads none, the distinction derived from the part's own body
-/// rather than a world-global swing speed. A part with no actuating strength or no stroke reads zero.
+/// The IMPACT read: is the part a percussion tool, and how good a one, from its delivered mechanical energy (the
+/// made-world arc, Section G; the stroke-rate step-2 substrate). The delivered energy is the run-all-gate-to-zero
+/// MAX over the shared-source mechanical family: the RIGID actuator work (its strength stress `mat.fracture_strength`
+/// over its cross-section `mech.cross_section_area`, an N, over its own grown stroke `mech.stroke_length`,
+/// [`laws::actuator_work`], `F d`) and the ELASTIC recoil (the modulus of resilience of its yield strength
+/// `mat.yield_strength` and elastic modulus `mat.elastic_modulus` over the swept volume `cross_section * stroke`,
+/// [`laws::elastic_recoil_energy`]). This is the SAME aggregate the delivery path resolves
+/// ([`civsim_sim::contact_transfer::resolve_delivered_energy`]), so the grade and the delivery stay in LOCKSTEP
+/// (the gate's slice-3 ruling): a springy actuator is graded on its recoil, not mis-graded as rigid-only. If the
+/// delivered energy clears the reserved reference strike energy the part strikes, graded above the threshold. A
+/// STRONG, thick, long-stroked part or a SPRINGY one reads a high impact where a weak, short-stroked, non-springy
+/// one reads none, derived from the part's own body rather than a world-global swing speed. A part with neither an
+/// actuating strength and stroke nor a springy tissue reads zero.
 fn impact(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
@@ -403,19 +418,31 @@ fn impact(
 ) -> Fixed {
     // The actuating-strength, cross-section, and stroke axes are read from the law's DATA-declared bindings (the
     // grade-path parallel of the delivery-path contact-transfer row), so an alien actuator names its own axes on
-    // both paths in lockstep: the strength is material-axis 0, the cross-section geometry-axis 0, the stroke
-    // geometry-axis 1 (the order the kernel's contract declares them). A binding that names no such axis reads
-    // zero through the accessor, so the part self-gates (the absence convention), never a hardcoded id and never
-    // a fabricated blow.
+    // both paths in lockstep: the rigid strength is material-axis 0, the cross-section geometry-axis 0, the stroke
+    // geometry-axis 1, and the elastic path's yield strength material-axis 1 and elastic modulus material-axis 2
+    // (the order the kernel's contract declares them). A binding that names no such axis reads zero through the
+    // accessor, so the part self-gates (the absence convention), never a hardcoded id and never a fabricated blow.
     let strength = material_axes.first().map(|a| mat(a)).unwrap_or(Fixed::ZERO);
     let cross_section = geometry_axes.first().map(|a| geo(a)).unwrap_or(Fixed::ZERO);
     let stroke = geometry_axes.get(1).map(|a| geo(a)).unwrap_or(Fixed::ZERO);
-    // The actuating force in newtons (strength stress over cross-section, promoted by the megapascal-to-newton
-    // bridge), then the actuator work over the grown stroke. Passing the force through `actuator_work` rather
-    // than short-circuiting on overflow keeps the stroke guard live: a part with no grown stroke reads zero even
-    // when its force would overflow (a representability corner, not a full-impact ceiling).
+    // The RIGID path: the actuating force in newtons (strength stress over cross-section, promoted by the
+    // megapascal-to-newton bridge), then the actuator work over the grown stroke. Passing the force through
+    // `actuator_work` rather than short-circuiting on overflow keeps the stroke guard live: a part with no grown
+    // stroke reads zero even when its force would overflow (a representability corner, not a full-impact ceiling).
     let force = laws::stress_force(strength, cross_section, ENERGY_GUARD);
-    let delivered = laws::actuator_work(force, stroke, ENERGY_GUARD);
+    let rigid = laws::actuator_work(force, stroke, ENERGY_GUARD);
+    // The ELASTIC path: the recoil energy of the springy tissue (yield strength, elastic modulus) over the swept
+    // volume (cross-section times stroke, the two geometry axes reused, no new axis). Self-gates to zero on a part
+    // with no yield or no modulus, so a rigid-limit part reads exactly the rigid `F d` (byte-neutral). The swept
+    // volume is a PROXY for the elastic element's own volume, the reserved-with-basis refinement noted on the row.
+    let yield_strength = material_axes.get(1).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let elastic_modulus = material_axes.get(2).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let volume = cross_section.checked_mul(stroke).unwrap_or(ENERGY_GUARD);
+    let elastic =
+        laws::elastic_recoil_energy(yield_strength, elastic_modulus, volume, ENERGY_GUARD);
+    // The MAX over the shared-source family (alternative paths for one metabolic source; SUM would double-count),
+    // the same aggregate the delivery path resolves.
+    let delivered = rigid.max(elastic);
     normalize(
         sat_sub(delivered, refs.reference_strike_energy),
         refs.reference_strike_energy,
@@ -1067,6 +1094,74 @@ mod tests {
             ),
             Fixed::ZERO,
             "a binding naming no stroke axis self-gates to zero (the absence convention)"
+        );
+    }
+
+    #[test]
+    fn a_springy_impact_binding_grades_on_its_recoil_and_the_grade_is_the_max_of_the_two_paths() {
+        // Slice-3b grade-delivery lockstep (the gate's slice-3 ruling iv): the IMPACT grade reads the same
+        // run-all-gate-to-zero MAX(rigid F d, elastic recoil) the delivery path resolves, so a springy actuator is
+        // graded on its recoil, not mis-graded as rigid-only. The ADVERSARIAL PROBE: a springy alien binding (no
+        // rigid strength) grades POSITIVE off its recoil, which a kinetic-only grade would read as zero (the
+        // mutation this catches), and it names its OWN axes as data (admit-the-alien).
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
+        let caps = test_caps();
+        // A springy body on its OWN axis ids: a yield/modulus tissue over a swept volume of 2e-5 m^3 (cross-section
+        // 2e-5 m^2 over a 1 m stroke) stores resilience 200^2/(2*2000)=10 (MPa) * C_PA * 2e-5 = 200 J of recoil,
+        // above the 100 J reference; it carries NO rigid actuating strength.
+        let springy_geo = geo_of(
+            [("alien.cross_section", "0.00002"), ("alien.stroke", "1")]
+                .into_iter()
+                .collect(),
+        );
+        let springy_mat = mat_of(
+            [("alien.yield", "200"), ("alien.modulus", "2000")]
+                .into_iter()
+                .collect(),
+        ); // no alien.strength: the rigid path self-gates
+        let springy = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec![
+                "alien.cross_section".to_string(),
+                "alien.stroke".to_string(),
+            ],
+            material_axes: vec![
+                "alien.strength".to_string(),
+                "alien.yield".to_string(),
+                "alien.modulus".to_string(),
+            ],
+        };
+        let grade = |g: &dyn Fn(&str) -> Fixed, m: &dyn Fn(&str) -> Fixed| {
+            springy.kernel.capability(
+                g,
+                m,
+                &refs,
+                &caps,
+                &springy.geometry_axes,
+                &springy.material_axes,
+            )
+        };
+        let springy_grade = grade(&springy_geo, &springy_mat);
+        assert!(
+            springy_grade > Fixed::ZERO,
+            "a springy actuator grades on its elastic recoil (a kinetic-only grade reads zero here): {springy_grade:?}"
+        );
+        // The SAME binding on a body with NO springy tissue and no rigid strength reads zero: both members
+        // self-gate, so no grade is fabricated.
+        let bare_mat = mat_of(BTreeMap::new());
+        assert_eq!(
+            grade(&springy_geo, &bare_mat),
+            Fixed::ZERO,
+            "no rigid strength and no springy tissue: no impact (the absence convention on both paths)"
+        );
+        // A RIGID body on the same binding (a rigid strength, no yield or modulus) still grades on its `F d`, the
+        // elastic term self-gating to zero (byte-neutral at the rigid limit).
+        let rigid_mat = mat_of([("alien.strength", "200")].into_iter().collect());
+        assert!(
+            grade(&springy_geo, &rigid_mat) > Fixed::ZERO,
+            "a rigid actuator still grades on its F d, the elastic member self-gating"
         );
     }
 
