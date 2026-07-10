@@ -1713,13 +1713,13 @@ category = "per_world"
 
 [[reserved]]
 id = "metabolism.stefan_boltzmann"
-basis = "the Stefan-Boltzmann constant sigma = 5.670374e-8 W/(m^2*K^4), the universal proportionality of the radiant heat-loss law (law.radiant_emission). A CODATA physical constant, not an owner taste value, surfaced fail-loud (an authored Principle-9 physics affordance) rather than hardcoded inline; the same value the other radiant-law callers pass"
-status = "set"
-value = "0.0000000567037441"
-set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
-set_date = "2026-07-09"
+basis = "DERIVE-TARGET (fundamentals-home): the Stefan-Boltzmann constant sigma is the CODATA COMPOSITE sigma = 2*pi^5*k_B^4/(15*h^3*c^2), COMPUTED from the fundamental constants (civsim_units::fundamentals::STEFAN_BOLTZMANN over BOLTZMANN, PLANCK, SPEED_OF_LIGHT), never authored as its own decimal. Retired from its former authored value to a fail-loud derive sentinel; the fixed-point COMPUTE is the split-out units/R-UNITS-PIN follow-on (the relation underflows Q32.32), until which a reader fails loud rather than reading a fabricated decimal"
+status = "reserved"
+value = ""
+set_by = ""
+set_date = ""
 unit = "watt_per_m2_kelvin4"
-source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
+source = "Part 41 optics floor; crates/units/src/fundamentals.rs STEFAN_BOLTZMANN; crates/sim/src/physiology.rs laws::radiant_emission"
 category = "derivable"
 
 [[reserved]]
