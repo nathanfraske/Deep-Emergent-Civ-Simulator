@@ -62,10 +62,14 @@ pub struct ContactTransfer {
     pub channel: ContactChannelId,
     /// The transfer law the channel delivers by (dispatched by this id, never by channel identity).
     pub kernel: TransferKernel,
-    /// The physics-floor material axis id the acting part's delivery mass derives from (for example a density
-    /// axis the caller multiplies by the part's geometry to get its mass). Named as data so the caller reads
-    /// the being's own body rather than a hardcoded field; the reserved density-to-mass geometry read is the
-    /// caller's, exactly as the emitter power assembly is the reach caller's.
+    /// The physics-floor axis id the acting part's delivery mass is read from. Named as DATA so the caller reads
+    /// the axis the row declares rather than a hardcoded field id (Principle 11): a world binds its channel's
+    /// mass source here, and the strike wire reads the acting part's mass off THIS axis
+    /// ([`crate::runner::Embodiment::strike_occupant`] reads `seg.geo(source_axis)`). The run-path Segment
+    /// carries the EXTENSIVE mass datum `mech.mass` (volume times density, integrated at growth), so a Terran
+    /// channel names `mech.mass` and the caller reads it directly; a world whose body carries an intensive
+    /// density axis instead names that and the caller integrates over geometry (the reserved density-to-mass
+    /// read), so the mass source stays the row's data, never a caller constant.
     pub source_axis: String,
 }
 
@@ -111,7 +115,7 @@ impl ContactTransferRegistry {
     }
 
     /// A labelled DEVELOPMENT FIXTURE: the one contact channel the physics floor already carries a law for, a
-    /// kinetic (mass-bearing) channel that reads the acting part's mass off a fracture-strength-scale material
+    /// kinetic (mass-bearing) channel that reads the acting part's delivery mass off the extensive `mech.mass`
     /// axis. Not owner data; the minimum a contact resolve needs to exercise the kinetic law. The real channel
     /// set is the world's data, and non-kinetic channels are the flagged floor extension.
     pub fn dev_terran() -> ContactTransferRegistry {
@@ -119,7 +123,9 @@ impl ContactTransferRegistry {
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
             kernel: TransferKernel::Kinetic,
-            source_axis: "mat.fracture_strength".to_string(),
+            // The extensive mass datum a grown part carries (volume times density), the axis the strike wire
+            // reads the delivery mass off. A Terran mass-bearing channel names it directly.
+            source_axis: "mech.mass".to_string(),
         });
         reg
     }
@@ -174,7 +180,8 @@ mod tests {
         // channel identity.
         let kinetic = reg.get(DEV_KINETIC).expect("kinetic row present");
         assert_eq!(kinetic.kernel, TransferKernel::Kinetic);
-        assert_eq!(kinetic.source_axis, "mat.fracture_strength");
+        // The Terran kinetic channel names the extensive mass axis the strike wire reads the delivery mass off.
+        assert_eq!(kinetic.source_axis, "mech.mass");
         assert!(reg.get(ContactChannelId(99)).is_none());
     }
 

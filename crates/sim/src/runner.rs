@@ -2349,23 +2349,35 @@ impl Embodiment {
     /// occupy the cell, the occupant-agnostic form.
     ///
     /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
-    /// `mech.mass` (the wielded tool's, or the largest-mass grown Segment's, the extensive datum) at the reserved
-    /// swing speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row.
-    /// The struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`): a blind blow
-    /// without aim most likely lands on the biggest target, a derive-first PROXY that reads only the target's own
-    /// geometry, never its `failure_tolerance`, so it is not weak-point targeting (a big tough part protects and
-    /// a big fragile one wounds deep, armor emerging). The wound is [`crate::contact_wound::wound_fraction`]
-    /// (piece 2) of the acting contact patch against that Segment's own `mat.fracture_energy`.
+    /// delivery mass (the wielded tool's, or the largest-mass grown Segment's, read off the axis the channel's
+    /// row DECLARES via `source_axis`, a Terran channel naming the extensive `mech.mass`) at the reserved swing
+    /// speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row. The
+    /// struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`), a derive-first
+    /// PROXY that reads only the target's own geometry, never its `failure_tolerance`, so it is not weak-point
+    /// targeting (a big tough part protects and a big fragile one wounds deep, armor emerging). The wound is
+    /// [`crate::contact_wound::wound_fraction`] (piece 2) of the acting contact patch against that Segment's own
+    /// `mat.fracture_energy`.
     ///
     /// HELD: the final `Segment.damage` write is the sequencing hold (piece 4, after the rebase onto Agent B's
     /// merged accumulator, where the exact accrual-convention scale is reconciled); this returns the computed
     /// wound FRACTION without applying it, so the run hash is unmoved. STRIKE is afforded only by a PIERCE-bearing
     /// body, decided by no run_world scenario, and the transfer registry is empty by default, so this is
-    /// byte-neutral. A part with no `mech.mass`, an empty registry, no co-located target, or a target with no
+    /// byte-neutral. A part with no declared mass, an empty registry, no co-located target, or a target with no
     /// Structure all deliver no wound (the absence conventions). Deterministic: the target is the first co-located
-    /// other being in id order, its struck Segment the first of the greatest contact area. The area-weighted
-    /// stochastic scatter over co-located targets and their Segments, and true aim geometry, are flagged
-    /// follow-ons coupled to the spatial-body-layout arc.
+    /// other being in id order (the walkers are id-sorted once per tick), and the struck Segment the FIRST of the
+    /// greatest contact area (a deterministic placeholder that ALWAYS strikes the single largest-presented part,
+    /// not yet the stochastic "most likely the biggest" scatter).
+    ///
+    /// FLAGGED FOLLOW-ONS (surfaced by the section-9 audit, none live while the write is held):
+    /// (1) the swing speed is the world-global reserved `StrikeParams::swing_velocity`, applied uniformly, while
+    /// mass and area emerge per-being; its own basis names per-being limb-length and stroke rate, so it should be
+    /// DERIVED from the acting part's own limb geometry times a stroke-rate substrate (a new floor axis), a
+    /// pre-existing seam shared with [`Embodiment::strike_underfoot`], not a per-strike fix;
+    /// (2) the caller assembles KINETIC inputs (mass, velocity) and gates on a positive mass, so adding a
+    /// non-kinetic floor kernel reworks this assembly, not just a data row (per-part channel SELECTION is the
+    /// same follow-on);
+    /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
+    /// coupled to the spatial-body-layout arc.
     pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {
         let Some(params) = self.strike else {
             return Fixed::ZERO; // strike unarmed: no swing kinematics
@@ -2398,7 +2410,10 @@ impl Embodiment {
             }
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
-                    let m = seg.geo("mech.mass");
+                    // The delivery mass is read off the axis the channel's row DECLARES (row.source_axis),
+                    // data-defined per Principle 11, never a hardcoded axis id: a Terran channel names the
+                    // extensive `mech.mass`, an alien body its own mass source.
+                    let m = seg.geo(&row.source_axis);
                     if m > acting_mass {
                         acting_mass = m;
                         acting_area = presented_contact_area(seg);

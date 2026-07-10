@@ -44,6 +44,16 @@
 //! kernel, a data row), so nothing here reads a kingdom, chemistry, or body plan. The severity is a scale-free
 //! FRACTION in `[0, ONE]`; converting it to the run-path damage accumulator's units (and writing it) is the
 //! held final step of the arc, sequenced with the merged accumulator, not this substrate.
+//!
+//! FLAGGED FOLLOW-ON (surfaced by the section-9 audit): the DEFENDER-resistance law is a single mechanical
+//! Griffith fracture (delivered energy against `mat.fracture_energy` times contact area), NOT yet kernel-
+//! dispatched the way piece 1's DELIVERY law is ([`crate::contact_transfer::TransferKernel`]). So a being whose
+//! integrity resists by a non-Griffith law (a field, plasma, or mana body, the same alien piece 1's channel set
+//! anticipates on the attack side) would today need a code change rather than a data row, and the
+//! absence convention defaults a body carrying no `mat.fracture_energy` to maximally fragile. The symmetric fix
+//! is a resistance-kernel registry, the sibling of the transfer-kernel registry, so a non-mechanical integrity
+//! law is a data row plus one floor kernel; it is a floor extension coupled to the non-kinetic delivery kernels,
+//! not this first cut (the floor carries only the Griffith law today, and the delivery set carries only kinetic).
 
 use civsim_core::Fixed;
 
