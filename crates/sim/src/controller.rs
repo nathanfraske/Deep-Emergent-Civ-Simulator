@@ -462,6 +462,20 @@ impl ControllerLayout {
             .map(|i| INPUTS_PER_AXIS * i)
     }
 
+    /// The OUTPUT-slot base index of an affordance: the offset in the output vector where the
+    /// affordance's slots begin (its activation, then, for a directional affordance, its two heading
+    /// components). `None` if the body/registry does not afford it. A caller reaching an affordance's
+    /// output weight (for a reaction norm, the weight feeding output `o` from input `i` is
+    /// [`ControllerParamId`] `o * n_in + i`) reads this so it never hardcodes the slot, which the
+    /// affordance registry's membership and canonical id order set (Principle 11): the base follows the
+    /// data, exactly as [`axis_input_base`] does for the input side.
+    pub fn output_base(&self, affordance: AffordanceId) -> Option<usize> {
+        self.outputs
+            .iter()
+            .find(|s| s.affordance == affordance)
+            .map(|s| s.base)
+    }
+
     /// The number of raw perceived-feature channels this layout feeds (zero when no percepts are
     /// declared; harm-learning arc slice a).
     pub fn n_features(&self) -> usize {

@@ -340,7 +340,17 @@ pub fn whole_body_composition_vector(
     let mut axes: BTreeSet<&str> = BTreeSet::new();
     for (_, map) in &contributors {
         for key in map.keys() {
-            if key.starts_with("opt.") {
+            // Exclude an optical SURFACE coefficient (`opt.*`, a covering's emissivity) as before, AND
+            // `mat.fracture_energy`: it is a material RESISTANCE PROPERTY (energy per crack area) the wound
+            // law reads off a body's OWN outermost material (the covering) for its Griffith tolerance
+            // (predation-integration slice), not a depositable bulk-matter quantity the world forages or
+            // decomposes, so it belongs to the wound read and not the corpse's matter vector, exactly as a
+            // surface coefficient does. No existing contributor carries it (weapons carry
+            // `mat.indentation_hardness`, organs carry `bio.*`), so this skip is byte-identical for every
+            // existing body; it keeps the covering's new fracture-energy out of the deposited matter. (Whether
+            // the other mechanical `mat.*` resistances, e.g. `mat.indentation_hardness`, should likewise be
+            // excluded is a pre-existing consistency question flagged, not changed here.)
+            if key.starts_with("opt.") || key.as_str() == "mat.fracture_energy" {
                 continue;
             }
             axes.insert(key.as_str());

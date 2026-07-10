@@ -1512,6 +1512,15 @@ source = "Part 35, Part 41; crates/sim/src/body.rs"
 category = "per_world"
 
 [[reserved]]
+id = "body.covering_fracture_energy"
+basis = "the outermost-covering Griffith fracture energy per covering kind (J/m^2), the whole-body-wound law's resistance term for a CATALOG body (the coarse branch of strike_occupant reads the target's outermost covering material here): the covering's fracture energy is grounded off its nearest tissue analogue, a soft or keratin covering (bare hide, fur, feathers, scales, mana-ward, phase-hide) taking the hide value 3 and a rigid or mineral covering (chitin carapace, bony plates, shell, stone-skin) the bone value 8, read off the tissue registry (crates/sim/src/body.rs TissueRegistry hide 3, bone 8; Currey, Bones). A per-substance datum (three-way-test category 2): each world's covering materials carry their own fracture energy as data, and what is reserved for owner calibration is the per-covering-to-tissue analogue mapping (which tissue's fracture energy each covering kind reads). A covering with NO fracture-bearing material (a fluid, plasma, or mana body) carries none and routes lethality through its reserves rather than a forced fracture death (admit-the-alien)"
+status = "reserved"
+value = ""
+unit = "fracture_energy_j_per_m2"
+source = "predation-integration #120; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
+category = "per_world"
+
+[[reserved]]
 id = "body.damage_caps"
 basis = "the contact-pressure, delivered-energy, and stress caps the wound laws saturate to (MPa, floor energy, MPa); from the floor's own axis maxima, a representability bound rather than a realism one"
 status = "reserved"
