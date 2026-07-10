@@ -165,6 +165,39 @@ affordance composer and the owner-held `SEQ_FIELD_BITS` packing; slice 3 consume
 without re-encoding, and whether a `SenseChannelId` fits the channel field is a packing question flagged, not
 decided. Posted to the gate for its ruling before any code.
 
+BUILT + AUDITED slice-3 (receiver-side valence learner core), 2026-07-10 (Agent A, gate ACCEPTED the framing
+and ruled the scope: build the byte-neutral valence CORE, reserve the four derive targets). Built as one
+byte-neutral off-path function, `learn::being_signal_observation(channel, bucket, harm, plasticity, calib)`:
+a being correlates a perceived being-signal (keyed by `feature_subject` on its sense channel and discriminated
+bucket) with its own interoceptive harm bit, minting one weight-of-evidence observation toward HARMS or BENIGN
+through the SHARED `observation_toward` minting the environmental-feature learner also uses, never branched on
+as "a being", so a signal's valence emerges receiver-side. All four run_world pins hold bit-exact (default
+2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The mandatory section-9 five-lens audit (6
+blind panelists) confirmed the core clean across all five lenses and returned 8 findings, all minor/nit, all
+verified against source and hardened: the subject-namespace collision (the core had no channel-base offset, so
+a being-signal would alias an environmental biology feature, flagged as a keystone-wiring seam the keystone
+resolves with the owner's packing ruling); the "identical learner" copy (extracted a shared `observation_toward`
+helper, byte-neutral, so identity is structural); the reserved likelihood basis mis-aim (corrected: a
+being-signal is a harm PREDICTOR not a CAUSE, so its likelihood is the receiver's own empirical co-occurrence
+reliability, not `harm_class` which is the basis for an environmental harm-cause); and the alien granularity
+limit (the reserved per-axis-outcome item).
+
+Reserved for calibration, surfaced with basis, deferred by the gate to their own builds (all four are keystone
+or shared builds, so this core moves no pin): the per-being LIKELIHOOD estimator (the empirical co-occurrence
+reliability for a being-signal, `harm_class` crossed with the reserve-noise for an environmental harm-cause; a
+build SHARED with Agent B's affordance composer, framed and sequenced separately); the per-axis NOISE FLOOR
+(from `DerivedDrain`) and the per-axis outcome (a live-learner behaviour change that moves the pins, reserved
+for the keystone); the harm-path ELIGIBILITY TRACE (the reward pole's `eligibility_decay`, which credits a
+lagged co-occurrence, load-bearing for the predation payoff, a live behaviour change reserved for the
+keystone); REFERENTIAL meaning (a flagged open limit); and the SUBJECT-NAMESPACE offset plus whether a
+`SenseChannelId` fits the 16-bit channel field (the owner-held `SEQ_FIELD_BITS`/belief-subject-hash packing
+decision, resolved for both Agent A and B together once the owner rules).
+
+With slice 3 built and audited, the perception-substrate arc (slices 1 through 3) is complete and presented
+for the gate's whole-arc gate. The being-percept keystone that wires the percept live (and does the reserved
+estimator, the per-axis noise floor, the eligibility trace, and the packing offset, sequenced with Agent B) is
+the payoff follow-on that unblocks predation on the run path.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate
