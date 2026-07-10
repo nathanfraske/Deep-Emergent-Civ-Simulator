@@ -42,19 +42,32 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 /// The transfer-law kernel a contact channel delivers energy by. The kernel SET is fixed Rust code (the
-/// mechanism); which kernel a channel uses is data (the registry row). Today only [`TransferKernel::Kinetic`]
-/// is built: the general mass-bearing contact law. A non-kinetic channel (an electrical discharge, a chemical
-/// or thermal touch, a mana coupling) is the flagged floor extension, so a new VARIANT here is a deliberate
-/// floor addition with its own law, never an authored per-channel branch.
+/// mechanism); which kernel a channel uses is data (the registry row). [`TransferKernel::Kinetic`] (the rigid
+/// `F d`) and [`TransferKernel::ElasticRecoil`] (the elastic strain-energy release) are the two members of the
+/// SHARED-METABOLIC-SOURCE mechanical family: a segment's delivered mechanical energy is the run-all-gate-to-zero
+/// MAX over them (both draw the one muscle-work source, so which contributes DERIVES from the segment's own
+/// continuous grown axes, never a selector; see [`resolve_delivered_energy`]). A non-mechanical channel (an
+/// electrical discharge, a chemical or thermal touch, a mana coupling) drawing a SEPARATE independent reserve is
+/// the flagged floor extension, so a new VARIANT here is a deliberate floor addition with its own law AND its own
+/// combine (additive across independent reserves, not folded into the mechanical MAX), never an authored
+/// per-channel branch.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TransferKernel {
-    /// Mass-bearing contact: the delivered energy is the ACTUATOR WORK that brought the acting part to speed
+    /// The RIGID mechanical path: the delivered energy is the ACTUATOR WORK that brought the acting part to speed
     /// ([`civsim_physics::laws::actuator_work`], force times stroke distance), the work-energy form of the
     /// kinetic energy. The swing-speed intermediate is retired because it only round-trips to this work
     /// (substituting `v = sqrt(2 F d / m)` into `1/2 m v^2` cancels the mass and returns `F d`), so the delivered
     /// energy is the actuating force over the stroke, read from the part's own strength, cross-section, and
-    /// grown stroke geometry, never a world-global swing speed.
+    /// grown stroke geometry, never a world-global swing speed. The rigid limit of the mechanical family.
     Kinetic,
+    /// The ELASTIC mechanical path: the delivered energy is the elastic STRAIN ENERGY a springy actuator stores
+    /// up to yield and releases in a recoil blow ([`civsim_physics::laws::elastic_recoil_energy`], the modulus of
+    /// resilience `yield^2 / (2 E)` over the strained volume), a whip tip or a trap-jaw latch. The elastic sibling
+    /// of the rigid `F d`, on the same joule currency, so the two combine on one scale. A rigid or fluid actuator
+    /// (no yield strength, no elastic modulus) stores none and this path self-gates to zero, so the mechanical MAX
+    /// falls back to the rigid limit. Shares the metabolic source with [`Self::Kinetic`] (a spring's stored energy
+    /// IS the muscle work that loaded it), so the two aggregate by MAX, never SUM.
+    ElasticRecoil,
 }
 
 /// One contact channel's transfer binding as data: the law its energy delivers by (dispatched by this kernel
@@ -82,8 +95,25 @@ pub struct ContactTransfer {
     /// actuating force acts over, the acting part's own grown `mech.stroke_length`). The delivered energy is the
     /// actuator work, force times this stroke ([`civsim_physics::laws::actuator_work`]). Grown independently of
     /// the segment length so the acting-distance-to-length ratio is per-body data, never a fixed one (the
-    /// value-authoring fix). Named as data so an alien actuator names its own stroke geometry.
+    /// value-authoring fix). Named as data so an alien actuator names its own stroke geometry. The elastic path
+    /// also reuses this axis (with `cross_section_axis`) as the swept strained VOLUME (see `yield_axis`).
     pub stroke_axis: String,
+    /// The physics-floor MATERIAL axis id the acting part's YIELD STRENGTH is read from, the elastic path's first
+    /// material input (the stress up to which the actuator stores elastic strain energy). Named as DATA, the
+    /// elastic sibling of `strength_axis`, so a springy alien binding names its own yield axis (Principle 11): a
+    /// Terran springy tissue names `mat.yield_strength`. A part with no yield strength stores no elastic energy and
+    /// the elastic path self-gates to zero (the absence convention), so a rigid actuator reads exactly the rigid
+    /// `F d`.
+    pub yield_axis: String,
+    /// The physics-floor MATERIAL axis id the acting part's ELASTIC MODULUS is read from, the elastic path's second
+    /// material input (the stiffness `E` in the modulus of resilience `yield^2 / (2 E)`). Named as data so an alien
+    /// names its own stiffness axis. The strained VOLUME the elastic energy density integrates over is the SWEPT
+    /// actuator volume `cross_section_axis * stroke_axis` (the two geometry axes the rigid path already reads,
+    /// reused with no new axis, the gate's slice-3 ruling). That swept volume is a PROXY for the elastic element's
+    /// own volume, exact only where they correlate; a dedicated `mech.elastic_element_volume` floor axis read
+    /// directly is the reserved-with-basis REFINEMENT for a world whose element volume diverges from its sweep,
+    /// surfaced not authored, not built now.
+    pub elastic_modulus_axis: String,
 }
 
 /// The set of contact-transfer bindings a world runs, keyed by [`ContactChannelId`] in canonical (ascending)
@@ -142,6 +172,11 @@ impl ContactTransferRegistry {
             strength_axis: "mat.fracture_strength".to_string(),
             cross_section_axis: "mech.cross_section_area".to_string(),
             stroke_axis: "mech.stroke_length".to_string(),
+            // The Terran springy tissue: the elastic path reads yield strength and elastic modulus off the floor's
+            // own material axes and the swept volume off the (shared) cross-section and stroke geometry. A rigid
+            // Terran actuator grows no yield or modulus, so the elastic path reads zero and the rigid `F d` stands.
+            yield_axis: "mat.yield_strength".to_string(),
+            elastic_modulus_axis: "mat.elastic_modulus".to_string(),
         });
         reg
     }
@@ -162,38 +197,52 @@ pub struct ContactChannelId(pub u16);
 /// pinned scenario arms it), so byte-neutral by construction.
 ///
 /// RUN-ALL-GATE-TO-ZERO (the stroke-rate step-2 substrate, gate-signed-off, owner-decisions R15): the delivered
-/// mechanical energy is resolved over the registered delivered-energy kernel set (exactly one today,
-/// [`TransferKernel::Kinetic`], dispatched below), each kernel contributing the energy its own grounded floor
-/// law delivers and reading ZERO where the part carries none of that law's axes (the absence convention). So
-/// which law contributes DERIVES from the part's continuous grown physics, never a grown categorical
-/// actuation-kind selector and never an authored threshold:
-/// a rigid lever, an elastic recoil, and a hydraulic jet differ only in which continuous axes are nonzero, an
-/// emergent DESCRIPTION of where a part lands in axis space, mirroring how the capability laws already emerge by
-/// physics not a tag. Today the kernel set is exactly [`TransferKernel::Kinetic`], the ACTUATOR WORK `F d`
-/// (strength stress over cross-section, the acting distance the grown stroke), the rigid limit; a new grounded
-/// delivered-energy law (an elastic-recoil `1/2 k x^2`, a hydraulic `integral P dV`) is a new kernel gated on
-/// its own axes. `energy_max` is the floor representability cap each law saturates at.
+/// mechanical energy is resolved over the SHARED-METABOLIC-SOURCE mechanical kernel family (the rigid `F d`
+/// [`TransferKernel::Kinetic`] and the elastic recoil [`TransferKernel::ElasticRecoil`]), each member contributing
+/// the energy its own grounded floor law delivers and reading ZERO where the part carries none of that law's axes
+/// (the absence convention). So which member contributes DERIVES from the part's continuous grown physics, never a
+/// grown categorical actuation-kind selector and never an authored threshold: a rigid lever and an elastic recoil
+/// differ only in which continuous axes are nonzero (strength and stroke, or yield and modulus), an emergent
+/// DESCRIPTION of where a part lands in axis space, mirroring how [`civsim_compose::derive_capabilities`] already
+/// runs every capability law blind to id and zeroes the inapplicable. `energy_max` is the floor representability
+/// cap each law saturates at.
 ///
-/// AGGREGATION across kernels is a single-kernel identity today and is DEFERRED to the slice that lands the
-/// second kernel: summing the per-kernel energies would double-count where they share an energy source (a
-/// spring's stored elastic energy IS the muscle work that loaded it), so the cross-kernel combine (a max over
-/// the dominant delivery mechanism, or a partition that avoids the shared-source double-count) is settled with
-/// the gate when kernel two lands, not pre-authored here. With one kernel the aggregate is that kernel's energy.
+/// AGGREGATION is the MAX over the family (the gate's slice-3 ruling, confirmed): the members are alternative
+/// delivery PATHS for ONE metabolically-sourced energy (a spring's stored recoil energy IS the muscle work that
+/// loaded it), so SUM would double-count that shared source and MAX selects the dominant path. Byte-neutral at
+/// the rigid limit: a part growing only the rigid axes (yield and modulus at floor-low) reads exactly the rigid
+/// `F d`, because the elastic member self-gates to zero and `MAX(F d, 0) = F d`.
+///
+/// FLAGGED FUTURE COUPLING (the gate's slice-3 ruling, ON RECORD, not folded in): a kernel drawing a SEPARATE,
+/// INDEPENDENT reserve (an electrical discharge fuelled apart from the stroke, a second metabolic store) is
+/// ADDITIVE with the mechanical family rather than a shared path, so the MAX here UNDER-counts it. It is NOT a
+/// mechanical-family member and is NOT MAX-folded; when a world grows one it joins as a new [`TransferKernel`]
+/// variant with an additive cross-family combine, a deliberate decision. The exhaustive match below makes that
+/// unmissable: a new variant outside the mechanical arm fails to compile until its family and combine are chosen.
 ///
 /// The DERIVED TOOL-GEOMETRY follow-on (the arc's flagged additive payoff (b), a longer wielded tool extends the
 /// effective stroke and a heavier one the sustainable force) drops in at the CALLER, which holds the wielded
 /// tool: the caller augments the `geo`/`mat` closure it passes (a wrapped accessor that adds the tool's stroke
-/// on the stroke axis), an additive read on the SAME `F d` law and the same axis, never a re-foundation here.
+/// on the stroke axis), an additive read on the SAME laws and the same axes, never a re-foundation here.
+///
+/// Off the run path (the strike wire is opt-in and no pinned scenario arms it), so byte-neutral by construction.
 pub fn resolve_delivered_energy(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
     row: &ContactTransfer,
     energy_max: Fixed,
 ) -> Fixed {
-    // Run-all-gate-to-zero over the registered delivered-energy kernels. One kernel today, so the aggregate is
-    // its energy; a new kernel adds a gated term here and the cross-kernel combine is settled with the gate then.
+    // The channel's kernel names its delivery FAMILY (its representative member); the resolve runs the whole
+    // family's run-all-gate-to-zero, not the one named member, so which law contributes derives from the grown
+    // axes, never this tag. Today the two members are the one shared-metabolic-source mechanical family, so the
+    // resolve is MAX over the rigid `F d` and the elastic recoil. A future independent-reserve variant would fall
+    // outside this arm and fail to compile until its additive cross-family combine is chosen (the flagged coupling).
     match row.kernel {
-        TransferKernel::Kinetic => kinetic_delivered_energy(geo, mat, row, energy_max),
+        TransferKernel::Kinetic | TransferKernel::ElasticRecoil => {
+            let rigid = kinetic_delivered_energy(geo, mat, row, energy_max);
+            let elastic = elastic_recoil_delivered_energy(geo, mat, row, energy_max);
+            rigid.max(elastic)
+        }
     }
 }
 
@@ -218,6 +267,40 @@ fn kinetic_delivered_energy(
     laws::actuator_work(force, geo(&row.stroke_axis), energy_max)
 }
 
+/// The ELASTIC-RECOIL delivered-energy law (the elastic member of the shared-source mechanical family): the
+/// elastic strain energy a springy actuator stores up to yield and releases in a recoil blow,
+/// [`laws::elastic_recoil_energy`] of the part's yield strength (`row.yield_axis`), elastic modulus
+/// (`row.elastic_modulus_axis`), and strained VOLUME. The volume is the SWEPT actuator volume
+/// `cross_section_axis * stroke_axis` (the two geometry axes the rigid path already reads, reused with no new
+/// axis, the gate's slice-3 ruling). A part with no yield strength or no elastic modulus (a rigid or fluid
+/// actuator) stores no elastic energy and reads zero (the absence convention, [`laws::elastic_recoil_energy`]
+/// gates), so the elastic member self-gates and the mechanical MAX falls back to the rigid `F d`. Reads only the
+/// part's own grown axes named as data on the row (admit-the-alien: a springy binding names its own axes).
+///
+/// The swept volume is a PROXY for the elastic element's own volume, exact only where they correlate (the gate's
+/// slice-3 limit ON RECORD); the dedicated `mech.elastic_element_volume` floor axis read directly is the
+/// reserved-with-basis REFINEMENT, surfaced not authored, not built now.
+fn elastic_recoil_delivered_energy(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    row: &ContactTransfer,
+    energy_max: Fixed,
+) -> Fixed {
+    // The swept strained volume, the two rigid-path geometry axes reused. A volume beyond the representable range
+    // saturates to `energy_max` as a numeric sentinel; the law gates on the material first (no yield or modulus
+    // reads zero however large the volume), and re-caps a present-material product at `energy_max`, so the sentinel
+    // never fabricates energy for a rigid actuator.
+    let volume = geo(&row.cross_section_axis)
+        .checked_mul(geo(&row.stroke_axis))
+        .unwrap_or(energy_max);
+    laws::elastic_recoil_energy(
+        mat(&row.yield_axis),
+        mat(&row.elastic_modulus_axis),
+        volume,
+        energy_max,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,10 +320,13 @@ mod tests {
         let kinetic = reg.get(DEV_KINETIC).expect("kinetic row present");
         assert_eq!(kinetic.kernel, TransferKernel::Kinetic);
         // The Terran kinetic channel names the strength, cross-section, and stroke axes the strike wire reads
-        // the actuating force and stroke off, all data (Principle 11).
+        // the actuating force and stroke off, and the yield and modulus axes the elastic path reads, all data
+        // (Principle 11).
         assert_eq!(kinetic.strength_axis, "mat.fracture_strength");
         assert_eq!(kinetic.cross_section_axis, "mech.cross_section_area");
         assert_eq!(kinetic.stroke_axis, "mech.stroke_length");
+        assert_eq!(kinetic.yield_axis, "mat.yield_strength");
+        assert_eq!(kinetic.elastic_modulus_axis, "mat.elastic_modulus");
         assert!(reg.get(ContactChannelId(99)).is_none());
     }
 
@@ -253,6 +339,8 @@ mod tests {
             strength_axis: "a".to_string(),
             cross_section_axis: "a".to_string(),
             stroke_axis: "a".to_string(),
+            yield_axis: "a".to_string(),
+            elastic_modulus_axis: "a".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: ContactChannelId(1),
@@ -260,6 +348,8 @@ mod tests {
             strength_axis: "b".to_string(),
             cross_section_axis: "b".to_string(),
             stroke_axis: "b".to_string(),
+            yield_axis: "b".to_string(),
+            elastic_modulus_axis: "b".to_string(),
         });
         let ids: Vec<u16> = reg.iter().map(|(c, _)| c.0).collect();
         assert_eq!(ids, vec![1, 2], "canonical ascending channel id order");
@@ -274,6 +364,8 @@ mod tests {
             strength_axis: "first".to_string(),
             cross_section_axis: "first".to_string(),
             stroke_axis: "first".to_string(),
+            yield_axis: "first".to_string(),
+            elastic_modulus_axis: "first".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
@@ -281,6 +373,8 @@ mod tests {
             strength_axis: "second".to_string(),
             cross_section_axis: "second".to_string(),
             stroke_axis: "second".to_string(),
+            yield_axis: "second".to_string(),
+            elastic_modulus_axis: "second".to_string(),
         });
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
         assert_eq!(reg.get(DEV_KINETIC).unwrap().stroke_axis, "second");
@@ -361,6 +455,115 @@ mod tests {
         assert_eq!(
             base,
             deliver(Fixed::from_int(200), m(1), Fixed::from_int(1))
+        );
+    }
+
+    /// A part's grown-axis accessors for the FULL mechanical family: the kinetic strength/cross-section/stroke plus
+    /// the elastic yield strength and elastic modulus; every other axis reads zero (the absence convention). Lets a
+    /// test grow a rigid part (strength, no yield/modulus), a springy part (yield/modulus, no strength), or both.
+    fn full_part_axes(
+        strength: Fixed,
+        cross_section: Fixed,
+        stroke: Fixed,
+        yield_s: Fixed,
+        modulus: Fixed,
+    ) -> (impl Fn(&str) -> Fixed, impl Fn(&str) -> Fixed) {
+        let geo = move |a: &str| match a {
+            "mech.cross_section_area" => cross_section,
+            "mech.stroke_length" => stroke,
+            _ => Fixed::ZERO,
+        };
+        let mat = move |a: &str| match a {
+            "mat.fracture_strength" => strength,
+            "mat.yield_strength" => yield_s,
+            "mat.elastic_modulus" => modulus,
+            _ => Fixed::ZERO,
+        };
+        (geo, mat)
+    }
+
+    #[test]
+    fn the_mechanical_resolve_is_the_max_of_the_rigid_and_elastic_paths_and_a_springy_part_reads_its_recoil(
+    ) {
+        // Slice-3b core (the gate's slice-3 ruling): the delivered mechanical energy is the run-all-gate-to-zero
+        // MAX over the rigid `F d` and the elastic recoil, each self-gating on the part's own grown axes. This is
+        // the ADVERSARIAL PROBE the byte-neutral kinetic tests cannot be: reverting the resolve to the rigid path
+        // alone reads ZERO for the springy-only part below (it grows no rigid strength), flipping the assertion.
+        let row = ContactTransferRegistry::dev_terran()
+            .get(DEV_KINETIC)
+            .expect("kinetic row")
+            .clone();
+        let cap = Fixed::from_int(1_000_000);
+        let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
+        let deliver = |strength: Fixed, yield_s: Fixed, modulus: Fixed| {
+            let (geo, mat) = full_part_axes(strength, m(1), Fixed::from_int(1), yield_s, modulus);
+            resolve_delivered_energy(&geo, &mat, &row, cap)
+        };
+        // A RIGID part (strength 200 MPa, no yield or modulus): the elastic path self-gates to zero, so the resolve
+        // is EXACTLY the rigid `F d` (byte-neutral at the rigid limit). Cross-checked against the kinetic-only
+        // accessors and the floor laws directly.
+        let rigid_only = deliver(Fixed::from_int(200), Fixed::ZERO, Fixed::ZERO);
+        let (kgeo, kmat) = part_axes(Fixed::from_int(200), m(1), Fixed::from_int(1));
+        assert_eq!(
+            rigid_only,
+            resolve_delivered_energy(&kgeo, &kmat, &row, cap),
+            "a part with no yield or modulus reads exactly the rigid F d (the elastic member self-gates)"
+        );
+        let expected_rigid = laws::actuator_work(
+            laws::stress_force(Fixed::from_int(200), m(1), cap),
+            Fixed::from_int(1),
+            cap,
+        );
+        assert_eq!(rigid_only, expected_rigid, "the rigid F d, 200 N over 1 m");
+        // A SPRINGY-ONLY part (no fracture strength, yield 200 / modulus 2000): the rigid path self-gates and the
+        // resolve is the elastic recoil, resilience 200^2/(2*2000)=10 (MPa) * C_PA * swept volume (1e-6 m^3). It is
+        // POSITIVE, so a kinetic-only revert would read zero here (the mutation the probe catches).
+        let springy_only = deliver(Fixed::ZERO, Fixed::from_int(200), Fixed::from_int(2000));
+        let vol = m(1).checked_mul(Fixed::from_int(1)).unwrap();
+        let expected_elastic =
+            laws::elastic_recoil_energy(Fixed::from_int(200), Fixed::from_int(2000), vol, cap);
+        assert_eq!(
+            springy_only, expected_elastic,
+            "a springy part with no rigid strength delivers its elastic recoil"
+        );
+        assert!(
+            springy_only > Fixed::ZERO,
+            "the elastic recoil is a positive blow (the kinetic-only revert reads zero here): {springy_only:?}"
+        );
+        // MAX selects the DOMINANT path: a weak rigid strength (1 MPa) under the same springy tissue reads the
+        // larger elastic energy; a strong rigid strength (200 MPa) reads the larger rigid energy.
+        let elastic_dominates = deliver(
+            Fixed::from_int(1),
+            Fixed::from_int(200),
+            Fixed::from_int(2000),
+        );
+        assert_eq!(
+            elastic_dominates, springy_only,
+            "MAX picks the elastic path when it exceeds the weak rigid path"
+        );
+        let rigid_dominates = deliver(
+            Fixed::from_int(200),
+            Fixed::from_int(200),
+            Fixed::from_int(2000),
+        );
+        assert_eq!(
+            rigid_dominates, rigid_only,
+            "MAX picks the rigid path when it exceeds the elastic path"
+        );
+        assert!(
+            rigid_dominates > elastic_dominates,
+            "the strong-rigid part outdelivers the springy-only one ({rigid_dominates:?} vs {elastic_dominates:?})"
+        );
+        // Both absent: no blow (run-all-gate-to-zero, the absence convention on both members).
+        assert_eq!(
+            deliver(Fixed::ZERO, Fixed::ZERO, Fixed::ZERO),
+            Fixed::ZERO,
+            "no rigid strength and no elastic tissue: no blow"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(
+            springy_only,
+            deliver(Fixed::ZERO, Fixed::from_int(200), Fixed::from_int(2000))
         );
     }
 }
