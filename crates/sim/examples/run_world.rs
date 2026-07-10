@@ -1615,6 +1615,19 @@ fn snapshot(
                 hi - lo
             );
         }
+        // Mirror's real tilt gives the world a latitude structure: the poles run colder than the equator, and
+        // as the orbital phase advances across the year the warmer pole reverses (the season). Read the mean
+        // surface temperature of each pole row against the equator so the tilt's effect is watchable.
+        if fh >= 3 {
+            let row_mean = |y: i32| -> f64 {
+                let s: f64 = (0..fw).map(|x| f.at(x, y).to_f64_lossy()).sum();
+                s / fw as f64
+            };
+            let (north, equator, south) = (row_mean(0), row_mean(mid), row_mean(fh - 1));
+            println!(
+                "  seasonal latitude (mean K): north-pole {north:.1}  equator {equator:.1}  south-pole {south:.1}"
+            );
+        }
     }
     if !death_cause.is_empty() {
         let parts: Vec<String> = death_cause
@@ -2215,10 +2228,12 @@ fn main() {
                 // Day-night arc (arc 2): arm the diurnal insolation cycle so the light and surface temperature
                 // sweep day to night, and any rhythm a being keeps emerges from selection over those cycling
                 // physical fields, never from an authored clock. A short 128-tick "day" makes the cycle visible
-                // over the run. The zero-obliquity single-star REFERENCE world (not Mirror: Mirror is Earth at
-                // its real 23.4-degree tilt, the flagged follow-on). Opt-in and byte-neutral off, so the four
-                // tracked determinism pins hold; only this armed scenario cycles.
-                env.arm_diurnal(civsim_sim::environ::DiurnalSky::reference(128, 128 * 365));
+                // over the run. This is the MIRROR sky: Earth's real single sun at its real 23.44-degree axial
+                // tilt, so REAL SEASONS ride on top of the day-night through the declination term (a year is
+                // 128*365 ticks; the sub-solar latitude, and with it the poles' warmth, swings across it). The
+                // tilt is Mirror's per-world datum, not a global author. Opt-in and byte-neutral off, so the
+                // four tracked determinism pins hold; only this armed scenario cycles.
+                env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(128, 128 * 365));
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());

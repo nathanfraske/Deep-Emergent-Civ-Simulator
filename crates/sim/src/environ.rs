@@ -1629,6 +1629,24 @@ impl DiurnalSky {
             t_max: Fixed::from_int(500),
         }
     }
+
+    /// The MIRROR world's sky: Earth's real single sun and, above all, Earth's real axial tilt, so REAL
+    /// SEASONS ride on top of the day-night cycle through the declination term already in the sun-angle law.
+    /// Identical to `reference` except the obliquity is set to Earth's measured 23.44 degrees (0.4091 rad):
+    /// the tilt that gives the sub-solar latitude its yearly swing, midnight sun and polar night at the poles,
+    /// and the summer/winter insolation contrast at mid-latitudes. This is per-world DATA (Principle 11,
+    /// the locked per-world-outcome rule): Mirror carries Earth's real value, an alien world sets its own,
+    /// and nothing is authored globally. The heat parameters remain the labelled Earth-like dev fixtures the
+    /// reference uses, reserved for the owner's calibration; the per-material emissivity/thermal-inertia read
+    /// is the sibling follow-on. `rotation_period_ticks` is Mirror's day, `orbital_period_ticks` its year.
+    pub fn mirror(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        DiurnalSky {
+            // Earth's real obliquity, 23.44 degrees = 0.4091 radians. Per-world data, not a global author:
+            // this is Mirror's measured tilt, surfaced for the owner as the reserved world datum.
+            obliquity: Fixed::from_ratio(4091, 10_000),
+            ..DiurnalSky::reference(rotation_period_ticks, orbital_period_ticks)
+        }
+    }
 }
 
 /// The instantaneous insolation at a cell (day-night sun-angle law): the sum over the world's data star-list of
@@ -1844,6 +1862,71 @@ mod tests {
                 "a zero-tilt pole is dark at phase {p}/4, got {pole:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_mirror_tilt_rides_real_seasons_on_the_day_night_cycle() {
+        // Mirror's sky carries Earth's real 23.44-degree tilt, so the declination term swings the sub-solar
+        // latitude across the year and REAL SEASONS emerge on top of the day-night cycle. Contrast it with the
+        // zero-tilt reference at the same orbital phase: the tilt is the only difference, so any pole effect is
+        // the season and not the day. North pole is y=0, south pole is y=h-1 (lat = (mid - y)/mid * pi/2).
+        let mirror = DiurnalSky::mirror(100, 36500);
+        let flat = DiurnalSky::reference(100, 36500);
+        let (w, h) = (10, 5); // equator row y=2 (mid); north pole y=0, south pole y=4.
+
+        // Northern summer solstice: orbital phase 1/4 puts sin(2*pi*phase)=1, declination = +obliquity, so the
+        // sub-solar point is at +23.44 latitude and the NORTH POLE sees MIDNIGHT SUN: lit at every hour of the
+        // rotation. The zero-tilt pole at the same phase stays dark (no season without tilt).
+        let summer = Fixed::from_ratio(1, 4);
+        for p in [0, 1, 2, 3] {
+            let phase = Fixed::from_ratio(p, 4);
+            let north_mirror = insolation_at(0, 0, w, h, phase, summer, &mirror);
+            let north_flat = insolation_at(0, 0, w, h, phase, summer, &flat);
+            assert!(
+                north_mirror > Fixed::from_ratio(3, 10),
+                "the tilted north pole has midnight sun at the summer solstice, phase {p}/4, got {north_mirror:?}"
+            );
+            let eps = Fixed::from_ratio(1, 1_000_000);
+            assert!(
+                north_flat < eps,
+                "the zero-tilt pole stays dark at the same phase {p}/4, got {north_flat:?}"
+            );
+        }
+
+        // Half a year on (orbital phase 3/4, sin = -1), the declination flips to -obliquity: the north pole is
+        // in POLAR NIGHT (dark at every hour) while the south pole now takes the midnight sun. Seasons reverse.
+        let winter = Fixed::from_ratio(3, 4);
+        for p in [0, 1, 2, 3] {
+            let phase = Fixed::from_ratio(p, 4);
+            let north = insolation_at(0, 0, w, h, phase, winter, &mirror);
+            assert_eq!(
+                north,
+                Fixed::ZERO,
+                "the tilted north pole is in polar night half a year later, phase {p}/4, got {north:?}"
+            );
+        }
+        let south_winter = insolation_at(0, 4, w, h, Fixed::ZERO, winter, &mirror);
+        assert!(
+            south_winter > Fixed::from_ratio(3, 10),
+            "the opposite pole takes the midnight sun when the seasons reverse, got {south_winter:?}"
+        );
+
+        // The season does not abolish the day: at the equator the diurnal swing still runs through the tilt.
+        // Local noon is the SYNODIC angle (diurnal phase = orbital phase, hour angle 0), midnight half a turn on.
+        let equator_noon = insolation_at(0, 2, w, h, summer, summer, &mirror);
+        let equator_midnight = insolation_at(
+            0,
+            2,
+            w,
+            h,
+            summer.saturating_add(Fixed::from_ratio(1, 2)),
+            summer,
+            &mirror,
+        );
+        assert!(
+            equator_noon > equator_midnight,
+            "the day-night swing survives the season at the equator ({equator_noon:?} vs {equator_midnight:?})"
+        );
     }
 
     #[test]

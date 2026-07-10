@@ -159,3 +159,17 @@ mandatory pre-cycle audit: every authored threshold in the pre-existing hydrolog
 to the STATIC field becomes a de-facto on/off time-gate once the field cycles (authoring a diurnal forcing rhythm one
 level down), so each must be found and shown to be a genuine physical phase boundary (freezing, evaporation onset) or
 replaced with a graded response, BEFORE the field is allowed to cycle.
+
+BUILT (day-night heating, then Mirror's real tilt). The day-night drive shipped as the opt-in third form (the closed-form
+`cos(zenith) = sin(lat)sin(decl) + cos(lat)cos(decl)cos(hour)` sum over the world's data star-list, the synodic hour
+angle, the declination `obliquity * sin(2*pi*orbital_phase)`, insolation setting the radiative-equilibrium solar
+baseline the temperature Field relaxes toward, byte-neutral off so the four pins hold). The immediate follow-on is now
+built too: `DiurnalSky::mirror` carries Earth's real 23.44-degree obliquity (0.4091 rad) as Mirror's per-world datum, so
+REAL SEASONS ride on the day-night through the declination term already in the law. The seasonal test proves the tilted
+north pole takes the midnight sun at the summer solstice (orbital phase 1/4, lit at every hour) where the zero-tilt
+reference pole stays dark, reverses to polar night half a year on while the south pole takes the sun, and the equator's
+diurnal swing survives the season. The living demo now arms `mirror` and reads out the pole-vs-equator latitude
+structure, where the warming pole reverses as the orbital phase advances. All four determinism pins hold bit-exact
+(default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The remaining sibling follow-on is per-material
+emissivity and thermal inertia (the (ii) completion), which reads the material floor's absorption/heat-capacity axes
+rather than the uniform dev-fixture emissivity, and after it the corrected Nernst uptake-flux.
