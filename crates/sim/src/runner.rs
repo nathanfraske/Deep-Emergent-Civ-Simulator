@@ -6595,7 +6595,21 @@ impl Runner {
                 let physiology = Physiology::dev_for_registry(&homeo);
                 let genome = ctrl_pool.promote(seed, cid.0, ploidy);
                 let controller = Controller::express(ctrl_genes, &genome, &layout);
-                let mut walker = Walker::new(cid, coord, body, homeostasis, physiology, controller);
+                // A creature is a MODELED-LINEAGE member: it carries its expressed controller as its heritable
+                // reproductive material (creature-selection step 2), so the reproduction beat can blend two
+                // parents' controllers into an offspring. Structurally distinct from the authored predator,
+                // which carries an authored controller but no `lineage` and so cannot reproduce. Byte-neutral:
+                // `lineage` is not folded into `state_hash` and nothing reads it until the reproduction beat is
+                // armed.
+                let mut walker = Walker::new(
+                    cid,
+                    coord,
+                    body,
+                    homeostasis,
+                    physiology,
+                    controller.clone(),
+                )
+                .with_lineage(controller);
                 if let Some(s) = structure {
                     walker = walker.with_structure(s);
                 }

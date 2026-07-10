@@ -564,6 +564,17 @@ pub struct Walker {
     /// it, no new death path. ZERO by default and only ever nonzero under an armed predator, so a being that is
     /// never struck folds nothing into `state_hash` (opt-in, hash-neutral by default), exactly like `structure`.
     pub whole_body_damage: Fixed,
+    /// The heritable reproductive controller of a MODELED-LINEAGE being (creature-selection step 2, the
+    /// in-run reproduction and behaviour-selection substrate): the controller weights this being contributes
+    /// to an offspring under the creature reproduction beat. `None` for a being that is NOT a reproducing
+    /// lineage member: a founder (whose reproduction runs through the `World` and its genome), and an authored
+    /// environmental GIVEN like the ambush predator, which carries an authored `controller` that drives its
+    /// behaviour but NO heritable material, so it structurally cannot contribute to an offspring and fails the
+    /// pairing predicate ([`Walker::carries_lineage`]) for the SAME reason it cannot adapt (it has no heritable
+    /// controller to pass on), never an authored id tag. `None` by default, so a being that carries no lineage
+    /// folds nothing into `state_hash` (opt-in, hash-neutral by default) and the reproduction beat never sees
+    /// it, exactly like `structure` and `whole_body_damage`.
+    pub lineage: Option<Controller>,
     /// The homeostatic reserves: the being's needs as physical states of its body.
     pub homeostasis: Homeostasis,
     /// The consumer physiology the ingest measure reads: its per-class requirement and assimilation
@@ -715,6 +726,7 @@ impl Walker {
             body,
             structure: None,
             whole_body_damage: Fixed::ZERO,
+            lineage: None,
             homeostasis,
             physiology,
             controller,
@@ -747,6 +759,24 @@ impl Walker {
     pub fn with_structure(mut self, structure: Structure) -> Walker {
         self.structure = Some(structure);
         self
+    }
+
+    /// Mark this being as a MODELED-LINEAGE member carrying the heritable reproductive controller `lineage`
+    /// (creature-selection step 2). A builder, so `spawn_creatures` can hand a creature its heritable
+    /// controller without changing [`Walker::new`]'s many callers; a being minted without it (a founder body,
+    /// the authored predator) carries no lineage and cannot enter the creature reproduction beat.
+    pub fn with_lineage(mut self, lineage: Controller) -> Walker {
+        self.lineage = Some(lineage);
+        self
+    }
+
+    /// The STRUCTURAL pairing predicate (creature-selection step 2, replacing the `PREDATOR_ID_BIT` id tag):
+    /// whether this being carries heritable reproductive material, so it can contribute to an offspring under
+    /// the creature reproduction beat. It reads what the being IS (does it carry a heritable controller),
+    /// never its id or a species tag, so the authored predator is excluded for the same structural reason it
+    /// cannot adapt: it carries no `lineage`. A pure read.
+    pub fn carries_lineage(&self) -> bool {
+        self.lineage.is_some()
     }
 
     /// The tile the being currently stands on.
