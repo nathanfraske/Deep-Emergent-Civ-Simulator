@@ -76,10 +76,19 @@ pub enum TransferKernel {
     /// piston cross-section exactly as it promotes a material strength, [`laws::stress_force`]) and `d` the stroke.
     /// So this member is [`laws::actuator_work`] of [`laws::stress_force`] read off the FLUID driving pressure
     /// rather than a solid strength, keyed on the part's own axes. A part with no driving pressure delivers zero and
-    /// this path self-gates. Shares the metabolic source with [`Self::Kinetic`] (the fluid charge IS the work that
-    /// pressurized it), so it aggregates by MAX, never SUM. The COMPRESSIBLE case (a gas expanding as it drives, so
-    /// `P` falls over the stroke, the true varying-`P` integral reading `fluid.bulk_modulus` and an equation of
-    /// state) does NOT reduce to `F d` and is the flagged FUTURE kernel, a genuine new floor law.
+    /// this path self-gates. For a METABOLICALLY-charged hydrostat it shares the source with [`Self::Kinetic`] (the
+    /// fluid charge IS the work that pressurized it), so it aggregates by MAX, never SUM; but a SOURCE-INDEPENDENT
+    /// hydrostat (an osmotic or turgor charge, not a muscle stroke) is under-counted by that MAX, the flagged
+    /// future coupling on [`resolve_delivered_energy`] (source-independence is orthogonal to this variant, so it is
+    /// not caught by adding a variant). TWO ASSUMPTIONS on record: `F = P A` is the NET piston force under the
+    /// DELTA-P reading of `fluid.driving_pressure` (the axis documents delta-P OR an absolute pressure; under the
+    /// absolute reading the net force subtracts the ambient back-pressure, not modelled here), and the piston area
+    /// is the reused structural `cross_section_axis`, a PROXY for the fluid chamber's own bore (a dedicated
+    /// piston-area / `fluid.channel_radius`-derived axis is the reserved refinement). The COMPRESSIBLE case (a gas
+    /// expanding as it drives, so `P` falls over the stroke, the true varying-`P` integral reading
+    /// `fluid.bulk_modulus` and an equation of state) does NOT reduce to `F d`: the kernel does not read
+    /// `fluid.bulk_modulus` to detect it, so a compressible fluid must NOT be bound to this member (no runtime
+    /// guard), it is the flagged FUTURE kernel, a genuine new floor law.
     Hydraulic,
 }
 
@@ -253,11 +262,20 @@ pub struct ContactChannelId(pub u16);
 /// section-9 alien-lens catch): a turgor- or photosynthesis-charged seed-pod spring (Impatiens, the squirting
 /// cucumber), a light- or mana-charged latch, stores elastic strain energy the being did not load with a muscle
 /// stroke, so for it the elastic recoil is a second joule, not the same one the rigid `F d` carries. Such a case
-/// is NOT a shared-source mechanical-family member and is NOT MAX-folded; when a world grows one it joins as a new
-/// [`TransferKernel`] variant with an additive cross-family combine, a deliberate decision. The exhaustive match
-/// below makes that unmissable: a new variant outside the mechanical arm fails to compile until its family and
-/// combine are chosen. (Today the floor models no independent elastic-charging pathway, so the Terran case where a
-/// spring's recoil IS the loading work holds and MAX is correct; the independent-source case is the flagged gap.)
+/// is NOT a shared-source mechanical-family member and is NOT MAX-folded. The same case exists for a HYDRAULIC
+/// actuator: an osmotically or turgor-charged hydrostat (the squirting cucumber's fluid pressure, a plant cell's
+/// turgor, a hydrostatic skeleton pressurized by an ion pump) drives a `P dV` blow whose driving pressure the being
+/// did not raise with a muscle stroke, so its hydraulic energy is a second joule too. HONEST LIMIT of the
+/// enforcement (a section-9 catch, correcting an earlier over-claim): energy-SOURCE independence is ORTHOGONAL to
+/// the kernel VARIANT (which physics). A source-independent actuator REUSES an existing mechanical variant (a
+/// turgor hydrostat IS a [`TransferKernel::Hydraulic`] `P dV`, a turgor spring an [`TransferKernel::ElasticRecoil`]),
+/// so it lands in the mechanical MAX arm and is SILENTLY MAX-folded; the exhaustive match below catches only a
+/// genuinely NEW variant (a new physics or channel, an electrical discharge), NOT a source-independent reuse of an
+/// existing one. So the real future fix is a SOURCE-INDEPENDENCE DATUM (a way for a world to declare that a driving
+/// pressure or a stored strain energy is independently charged) plus its additive combine, not merely a new
+/// variant. Today the floor carries no such datum: `fluid.driving_pressure` and the elastic axes do not declare
+/// their charging source, so every modeled mechanical actuator is metabolic-sourced and MAX is correct; the
+/// source-independent case is the flagged gap, needing the source datum before it can be routed additively.
 ///
 /// The DERIVED TOOL-GEOMETRY follow-on (the arc's flagged additive payoff (b), a longer wielded tool extends the
 /// effective stroke and a heavier one the sustainable force) drops in at the CALLER, which holds the wielded
@@ -669,13 +687,26 @@ mod tests {
             _ => Fixed::ZERO,
         };
         let fluid_mat = |a: &str| match a {
-            "fluid.driving_pressure" => Fixed::from_int(200), // MPa, an imposed hydraulic driving pressure
+            // 50 MPa, an imposed hydraulic driving pressure WITHIN the floor's declared 0.0001..100 MPa range
+            // (arterial is ~0.016 MPa; industrial heads reach ~100).
+            "fluid.driving_pressure" => Fixed::from_int(50),
             _ => Fixed::ZERO,
         };
         let delivered = resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, cap);
-        // The composition: the hydraulic blow EQUALS the actuator work of the pressure force (driving pressure over
-        // the piston cross-section), the same two laws the rigid path uses. This is the derive-first proof, as code.
-        let pressure_force = laws::stress_force(Fixed::from_int(200), m(1), cap);
+        // FIRST-PRINCIPLES physics check (non-tautological): the hydraulic blow equals the integral `P dV` computed
+        // DIRECTLY as pressure (in pascals) times the swept volume, with no reference to the stress_force/actuator_work
+        // composition. 50 MPa = 50e6 Pa over a swept volume 1e-6 m^2 * 1 m = 1e-6 m^3 is 50 J. This proves the
+        // PHYSICS reduction P dV = F d, not merely that the code matches its own composition.
+        let p_pascals = Fixed::from_int(50_000_000); // 50 MPa expressed in Pa
+        let swept_volume = m(1).checked_mul(Fixed::from_int(1)).unwrap(); // cross-section * stroke, m^3
+        let first_principles_pdv = p_pascals.checked_mul(swept_volume).unwrap(); // P dV, joules
+        assert_eq!(
+            delivered, first_principles_pdv,
+            "the hydraulic blow equals the first-principles integral P dV (50e6 Pa * 1e-6 m^3 = 50 J)"
+        );
+        // And it equals the actuator work of the pressure force, the derive-first composition (the same two laws the
+        // rigid path uses), corroborating that the composition reproduces the first-principles physics.
+        let pressure_force = laws::stress_force(Fixed::from_int(50), m(1), cap);
         let composed = laws::actuator_work(pressure_force, Fixed::from_int(1), cap);
         assert_eq!(
             delivered, composed,
@@ -685,9 +716,10 @@ mod tests {
             delivered > Fixed::ZERO,
             "a fluid part with no solid strength delivers a positive hydraulic blow (a rigid-only revert reads zero): {delivered:?}"
         );
-        // A stronger driving pressure delivers more (linear in pressure), keyed on the part's own fluid.
+        // A stronger driving pressure delivers more (linear in pressure), keyed on the part's own fluid. 100 MPa is
+        // the floor's declared upper end, still in range.
         let stronger_mat = |a: &str| match a {
-            "fluid.driving_pressure" => Fixed::from_int(400),
+            "fluid.driving_pressure" => Fixed::from_int(100),
             _ => Fixed::ZERO,
         };
         assert!(

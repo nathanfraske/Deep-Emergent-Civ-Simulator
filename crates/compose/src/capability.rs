@@ -1196,14 +1196,15 @@ mod tests {
         // which a rigid-only grade reads as zero, naming its OWN axes as data (admit-the-alien).
         let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
         let caps = test_caps();
-        // A hydraulic body on its OWN axis ids: a driving pressure 200 MPa over a 1e-6 m^2 piston cross-section is
-        // 200 N, over a 1 m stroke 200 J, above the 100 J reference; no rigid strength, no springy tissue.
+        // A hydraulic body on its OWN axis ids: a driving pressure 100 MPa (the floor's declared upper end, in
+        // range) over a 2e-6 m^2 piston cross-section is 200 N, over a 1 m stroke 200 J, above the 100 J reference;
+        // no rigid strength, no springy tissue.
         let hydraulic_geo = geo_of(
-            [("alien.piston", "0.000001"), ("alien.stroke", "1")]
+            [("alien.piston", "0.000002"), ("alien.stroke", "1")]
                 .into_iter()
                 .collect(),
         );
-        let hydraulic_mat = mat_of([("alien.pressure", "200")].into_iter().collect());
+        let hydraulic_mat = mat_of([("alien.pressure", "100")].into_iter().collect());
         let binding = FunctionLawDef {
             id: FunctionLawRegistry::ID_IMPACT,
             name: "impact".to_string(),
