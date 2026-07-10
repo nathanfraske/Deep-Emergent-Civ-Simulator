@@ -432,6 +432,31 @@ pub struct RedoxEmf {
     pub donor_potential: Fixed,
     /// The electron ACCEPTOR's (oxidant's) standard reduction potential (floor `chem.standard_potential`).
     pub acceptor_potential: Fixed,
+    /// The NERNST concentration term (the depth extension, now built): the couple's CARRIER CHARGE `q = n*e`
+    /// (Coulombs, on the `elec.charge` floor axis, a per-couple datum), the electrons the reaction transfers
+    /// times the elementary charge. ZERO is the OPT-OUT: at `q = 0` the Nernst reduces to the standard EMF
+    /// (`nernst_emf` returns `standard_emf`), so a couple that declares no carrier charge keeps the
+    /// concentration-INDEPENDENT standard behaviour and is byte-identical. A world arms the concentration
+    /// dependence by declaring `q > 0` (via [`AbioticSourceRegistry::set_source_nernst`]). RESERVED.
+    pub carrier_charge: Fixed,
+    /// The ACCEPTOR's concentration field (its located stock), read at the cell for the Nernst activity. `None`
+    /// reads unit acceptor activity (an abundant/buffered acceptor), reproducing the standard EMF's implicit
+    /// unit-activity acceptor. The DONOR activity is the source's own bound stock field (the fuel that
+    /// depletes). Data (Principle 11): a world names which field carries the acceptor.
+    pub acceptor_field: Option<AbioticField>,
+    /// The activity COEFFICIENTS (dimensionless) for the donor and acceptor, the gamma of the Nernst activity
+    /// `a = gamma * concentration` (a data-defined activity registry, non-Terran override). ONE is the ideal
+    /// reference (`a = concentration`), the byte-neutral default. RESERVED per couple.
+    pub gamma_donor: Fixed,
+    /// The acceptor's activity coefficient (see [`Self::gamma_donor`]).
+    pub gamma_acceptor: Fixed,
+    /// The temperature COEFFICIENT of the standard potential `dE0/dT` (V/K), the couple's reaction-entropy
+    /// term, and the reference temperature `t_ref` (K) it is measured at, so `E0(T)` shifts with the cell
+    /// temperature (`standard_potential_at_temperature`). ZERO `de0_dt` is the temperature-independent default.
+    /// RESERVED per couple.
+    pub de0_dt: Fixed,
+    /// The reference temperature the standard potential and `dE0/dT` are measured at (K). See [`Self::de0_dt`].
+    pub t_ref: Fixed,
 }
 
 /// One AVAILABILITY BAND on an abiotic source (chemistry arc, Arc 5 T1): the source is present in a region
@@ -542,6 +567,15 @@ pub struct AbioticSourceRegistry {
     /// the sentinel discipline `biomass_per_stock` follows. A world with no redox source never reads it, so it
     /// stays reserved and every Terran run is byte-identical.
     pub emf_to_biomass: Fixed,
+    /// RESERVED (the Nernst thermal factor, surfaced not fabricated): the BOLTZMANN constant `k_B` (J/K), read
+    /// as a calibration value rather than a floor-toml axis (option B, so this does not grow the floor or race
+    /// the concurrent floor-reconciliation sweep). It sets the per-particle thermal factor `k_B*T/q` of the
+    /// Nernst EMF. Basis: the CODATA value `1.380649e-23 J/K`, scaled to the engine units. Defaults to the
+    /// fail-loud sentinel (zero): while it is unset, an ARMED Nernst source (carrier charge above zero) refuses
+    /// to run rather than fabricating a thermal factor; an unarmed or non-redox source never reads it, so every
+    /// Terran run stays byte-identical. The graduation of `k_B` to a proper floor fundamental (with `R` and
+    /// sigma re-derived from it) is the flagged floor-reconciliation follow-on, not this arc.
+    pub boltzmann_k: Fixed,
 }
 
 impl AbioticSourceRegistry {
@@ -637,7 +671,46 @@ impl AbioticSourceRegistry {
             b.redox_emf = Some(RedoxEmf {
                 donor_potential,
                 acceptor_potential,
+                // The Nernst concentration term is OPT-OUT by default: q = 0 reduces to the standard EMF, so a
+                // source armed only via this setter keeps the concentration-independent standard behaviour and
+                // is byte-identical. Ideal activity coefficients, no temperature coefficient.
+                carrier_charge: Fixed::ZERO,
+                acceptor_field: None,
+                gamma_donor: Fixed::ONE,
+                gamma_acceptor: Fixed::ONE,
+                de0_dt: Fixed::ZERO,
+                t_ref: Fixed::ZERO,
             });
+        }
+    }
+
+    /// Arm the NERNST concentration dependence on an already-redox source (the depth extension): the couple's
+    /// carrier charge `q = n*e` (on `elec.charge`), the field carrying the ACCEPTOR concentration (`None` for a
+    /// unit-activity buffered acceptor), the donor/acceptor activity coefficients (gamma, `ONE` ideal), and the
+    /// standard-potential temperature coefficient `dE0/dT` with its reference temperature. With `q > 0` the
+    /// source's yield reads the couple's ACTUAL located concentrations, so its drive falls as the couple
+    /// depletes and crosses zero at its own equilibrium; `q = 0` (the default) is the standard EMF. A no-op if
+    /// the id is unbound or not a redox source (arm [`Self::set_source_redox`] first). All data (Principle 11).
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_source_nernst(
+        &mut self,
+        id: u16,
+        carrier_charge: Fixed,
+        acceptor_field: Option<AbioticField>,
+        gamma_donor: Fixed,
+        gamma_acceptor: Fixed,
+        de0_dt: Fixed,
+        t_ref: Fixed,
+    ) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            if let Some(rx) = b.redox_emf.as_mut() {
+                rx.carrier_charge = carrier_charge;
+                rx.acceptor_field = acceptor_field;
+                rx.gamma_donor = gamma_donor;
+                rx.gamma_acceptor = gamma_acceptor;
+                rx.de0_dt = de0_dt;
+                rx.t_ref = t_ref;
+            }
         }
     }
 
@@ -657,6 +730,64 @@ impl AbioticSourceRegistry {
             return emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX);
         }
         binding.biomass_per_stock.unwrap_or(self.biomass_per_stock)
+    }
+
+    /// Set the reserved Boltzmann constant `k_B` the Nernst thermal factor reads (option B: a calibration value,
+    /// not a floor axis). A world that arms a Nernst redox source sets it from CODATA; a Terran world leaves it
+    /// at the fail-loud sentinel and never reads it.
+    pub fn set_boltzmann_k(&mut self, k: Fixed) {
+        self.boltzmann_k = k;
+    }
+
+    /// The NERNST-adjusted redox stock-to-biomass conversion at a cell (the concentration-dependent depth
+    /// extension): for an ARMED redox source (carrier charge above zero) it returns `Some(bps)` computed from
+    /// the couple's ACTUAL activities through [`civsim_physics::laws::nernst_emf`], so the drive FALLS as the
+    /// couple depletes and crosses zero at its own equilibrium, clamped at zero and times `emf_to_biomass`. The
+    /// activities are the raw donor and acceptor concentrations at the cell each times its `gamma`; the standard
+    /// potential first shifts with the cell temperature (`dE0/dT`). Returns `None` for a non-redox source or an
+    /// UNARMED redox source (carrier charge zero), whose conversion stays the standard [`Self::effective_conversion`]
+    /// (byte-identical). Fails loud if `emf_to_biomass` or `k_B` is unset while armed (the sentinel discipline).
+    fn redox_conversion_at(
+        &self,
+        binding: &AbioticBinding,
+        donor_conc: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+    ) -> Option<Fixed> {
+        let rx = binding.redox_emf.as_ref()?;
+        if rx.carrier_charge <= Fixed::ZERO {
+            return None; // unarmed: the standard concentration-independent EMF via effective_conversion
+        }
+        assert!(
+            self.emf_to_biomass > Fixed::ZERO,
+            "redox source: emf_to_biomass coupling reserved value is unset (would starve every redox producer)"
+        );
+        assert!(
+            self.boltzmann_k > Fixed::ZERO,
+            "Nernst redox source: boltzmann_k reserved value is unset (would fabricate the thermal factor)"
+        );
+        let a_donor = rx.gamma_donor.checked_mul(donor_conc).unwrap_or(donor_conc);
+        let a_acceptor = rx
+            .gamma_acceptor
+            .checked_mul(acceptor_conc)
+            .unwrap_or(acceptor_conc);
+        // E0(T), then the Nernst concentration correction, clamped at zero (no life below equilibrium).
+        let e0_t = laws::standard_potential_at_temperature(
+            laws::battery_emf(rx.acceptor_potential, rx.donor_potential),
+            rx.de0_dt,
+            temperature,
+            rx.t_ref,
+        );
+        let emf = laws::nernst_emf(
+            e0_t,
+            a_donor,
+            a_acceptor,
+            self.boltzmann_k,
+            temperature,
+            rx.carrier_charge,
+        )
+        .max(Fixed::ZERO);
+        Some(emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX))
     }
 
     /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
@@ -1261,6 +1392,7 @@ impl EnvironFields {
         &mut self,
         soil: &mut SoilNutrientField,
         registry: &AbioticSourceRegistry,
+        temp: &Field,
     ) {
         // Fail loud on an unset reserved conversion rather than silently capping every producer to zero.
         assert!(
@@ -1319,11 +1451,32 @@ impl EnvironFields {
                                 .at(x, y),
                         },
                     };
-                    // The stock-to-biomass conversion resolves the Arc-5 precedence (segment 3 redox derivation
+                    // The stock-to-biomass conversion resolves the Arc-5 precedence (the Nernst redox derivation
                     // over the segment-2 per-source value over the registry-global; byte-neutral for Earth, which
-                    // declares none of the first two): a redox source DERIVES its yield from the couple's floor
-                    // EMF, a per-source override converts on its own terms, else the soil-derived global.
-                    let bps = registry.effective_conversion(binding);
+                    // declares none of the first two): an ARMED Nernst redox source reads its couple's ACTUAL
+                    // concentrations at the cell (donor = this source's own supply, acceptor = its named field or
+                    // unit activity, the cell temperature driving the k_B*T/q factor and the dE0/dT shift), so its
+                    // yield FALLS as the couple depletes and crosses zero at its own equilibrium; an unarmed redox
+                    // source uses the standard concentration-independent EMF, a per-source override its own rate,
+                    // else the soil-derived global (each byte-identical to before).
+                    let bps = {
+                        let temperature = temp.at(x, y);
+                        let acceptor_conc =
+                            match binding.redox_emf.as_ref().and_then(|rx| rx.acceptor_field) {
+                                Some(AbioticField::Light) => self.light[i],
+                                Some(AbioticField::Water) => self.water.at(x, y),
+                                Some(AbioticField::Soil) => soil.mass(coord, &binding.class),
+                                Some(AbioticField::DataScalar(fid)) => self
+                                    .data_fields
+                                    .get(&fid)
+                                    .map(|f| f.at(x, y))
+                                    .unwrap_or(Fixed::ONE),
+                                None => Fixed::ONE, // a buffered/abundant acceptor: unit activity (the standard case)
+                            };
+                        registry
+                            .redox_conversion_at(binding, supply, acceptor_conc, temperature)
+                            .unwrap_or_else(|| registry.effective_conversion(binding))
+                    };
                     let supported = supply.checked_mul(bps).unwrap_or(Fixed::MAX);
                     if supported < min_supported {
                         min_supported = supported;
@@ -2732,7 +2885,14 @@ mod tests {
             e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
             let mut soil = SoilNutrientField::new();
             soil.deposit(cell, "nutrient", scarce);
-            e.extract_producers(&mut soil, &reg);
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
             e.capacity_at(cell.x, cell.y)
         };
         let flux_only = run(vec![0]);
@@ -2791,7 +2951,14 @@ mod tests {
             e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
             e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
             let mut soil = SoilNutrientField::new();
-            e.extract_producers(&mut soil, &reg);
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
             (
                 e.capacity_at(cell.x, cell.y),
                 e.data_field_at(field_id, cell.x, cell.y).unwrap(),
@@ -2901,7 +3068,14 @@ mod tests {
         e.set_producer_source(&[(cell, vec![5])]);
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg); // panics: field 99 was never declared
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        }; // panics: field 99 was never declared
     }
 
     #[test]
@@ -2933,7 +3107,14 @@ mod tests {
             e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
             e.step(&temp, &calib);
             let mut soil = SoilNutrientField::new();
-            e.extract_producers(&mut soil, &reg);
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
             e.capacity_at(cell.x, cell.y)
         };
 
@@ -2989,7 +3170,14 @@ mod tests {
         e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg);
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
 
         let cap = e.capacity_at(cell.x, cell.y); // = field_level * per_source_bps
         let draw_biomass = cap.checked_mul(draw_fraction).unwrap();
@@ -3052,7 +3240,14 @@ mod tests {
         e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg);
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
 
         let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // = 0.6
         let derived_yield = emf.checked_mul(coupling).unwrap();
@@ -3066,6 +3261,79 @@ mod tests {
             cap,
             field_level.checked_mul(Fixed::from_int(4)).unwrap(),
             "the derivation OVERRIDES the registry-global conversion (the yield is read from the floor, not declared)"
+        );
+    }
+
+    #[test]
+    fn a_nernst_armed_redox_source_yield_falls_as_the_couple_depletes() {
+        // The concentration-dependent depth extension (the corrected Nernst): an ARMED redox source (carrier
+        // charge above zero) reads its couple's ACTUAL donor concentration, so BELOW the standard state
+        // (activity under one) its per-unit yield is LOWER than the concentration-independent standard EMF, and
+        // AT unit activity it reduces EXACTLY to the standard EMF. This is the fix for the standard-EMF defect:
+        // a depleting couple's drive falls rather than reading spontaneity forever.
+        let map = a_map(0x5EDD00);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 20;
+        let source_id: u16 = 200;
+        let donor = Fixed::from_ratio(2, 10);
+        let acceptor = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2);
+        let kb = Fixed::from_ratio(257, 10_000); // k_B*T/q ~ 0.0257 at unit T and unit carrier charge
+
+        let run = |stock: Fixed, armed: bool| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::ZERO;
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = coupling;
+            reg.set_source_redox(source_id, donor, acceptor);
+            if armed {
+                reg.set_boltzmann_k(kb);
+                // q = 1, ideal gamma, no temperature coefficient: the donor is the source's own stock, the
+                // acceptor buffered at unit activity, so only the donor concentration shifts the EMF here.
+                reg.set_source_nernst(
+                    source_id,
+                    Fixed::ONE,
+                    None,
+                    Fixed::ONE,
+                    Fixed::ONE,
+                    Fixed::ZERO,
+                    Fixed::ZERO,
+                );
+            }
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, stock));
+            let temp = Field::from_map(&map);
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            // A unit-temperature field so the thermal factor k_B*T/q equals kb exactly.
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::ONE; (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf);
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // At unit donor activity (stock = 1) the Nernst reduces exactly to the standard EMF: identical yield.
+        assert_eq!(
+            run(Fixed::ONE, true),
+            run(Fixed::ONE, false),
+            "at unit activity the armed Nernst yield equals the standard-EMF yield (reduces exactly)"
+        );
+        // Below the standard state (stock = 1/2, activity < 1) the armed drive FALLS below the standard EMF.
+        let low_armed = run(Fixed::from_ratio(1, 2), true);
+        let low_std = run(Fixed::from_ratio(1, 2), false);
+        assert!(
+            low_armed < low_std && low_armed > Fixed::ZERO,
+            "a depleting couple's Nernst yield falls below the standard EMF but still powers some life \
+             (armed {low_armed:?}, standard {low_std:?})"
         );
     }
 
@@ -3103,7 +3371,14 @@ mod tests {
         e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg);
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
 
         let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // 0.6
         let cap = e.capacity_at(cell.x, cell.y);
@@ -3151,7 +3426,14 @@ mod tests {
             e.set_data_field(field_id, ScalarField::uniform(w, h, Fixed::from_int(1)));
             e.step(&temp, &calib);
             let mut soil = SoilNutrientField::new();
-            e.extract_producers(&mut soil, &reg);
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
             e.capacity_at(cell.x, cell.y)
         };
 
@@ -3197,7 +3479,14 @@ mod tests {
         e.set_data_field(30, ScalarField::uniform(w, h, Fixed::from_int(1)));
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg); // panics: coupling unset
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        }; // panics: coupling unset
     }
 
     #[test]
@@ -3245,7 +3534,14 @@ mod tests {
         e.set_data_field(acceptor_field, ScalarField::uniform(w, h, acceptor_level));
         e.step(&temp, &calib);
         let mut soil = SoilNutrientField::new();
-        e.extract_producers(&mut soil, &reg);
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
 
         // (1) Co-limitation: the cap is the SCARCER (acceptor) supported biomass, not the donor's.
         let cap = e.capacity_at(cell.x, cell.y);

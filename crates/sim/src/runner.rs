@@ -3644,7 +3644,7 @@ impl Runner {
                 self.environ.as_mut(),
                 self.embodiment.as_mut(),
             ) {
-                env.extract_producers(emb.soil_mut(), reg);
+                env.extract_producers(emb.soil_mut(), reg, &self.field);
             }
         }
         {
