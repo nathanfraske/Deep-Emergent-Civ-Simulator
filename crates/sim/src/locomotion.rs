@@ -557,6 +557,14 @@ pub struct Walker {
     /// reward trace is opt-in, hash-neutral by default). Populated, decayed, and credited only where the
     /// runner arms the reward learner.
     pub eligibility_trace: EligibilityTrace,
+    /// The being's HARM eligibility trace (the being-percept keystone, step 6): the short, recency-decayed
+    /// memory of the being-signals it recently PERCEIVED, so a harm felt after perceiving another being can
+    /// credit the signals that preceded it (the lagged predator-approach cue, the distal association the
+    /// same-tick learner cannot form). Distinct from [`Self::eligibility_trace`], the reward/action trace:
+    /// this records being-signal subjects and decays by the reserved harm eligibility latency. EMPTY by
+    /// default, so a being in a world with the being-percept off folds nothing into `state_hash` (opt-in,
+    /// hash-neutral by default), exactly as the reward trace is.
+    pub harm_eligibility_trace: EligibilityTrace,
     /// The being's CONVICTION-EXPERIENCE record (Branch 1 of the learned experience-to-conviction coupling,
     /// `docs/working/OWNER_DECISIONS_LOG.md` R2/R4): the per-conviction leaky signed accumulator that learns,
     /// by correlation over the being's own life, which conviction its felt experience bears on
@@ -670,6 +678,7 @@ impl Walker {
             carried: SubstanceMix::new(),
             wielded: None,
             eligibility_trace: EligibilityTrace::new(),
+            harm_eligibility_trace: EligibilityTrace::new(),
             conviction_experience: ConvictionExperience::new(),
             decided_affordance: None,
             decided_step: None,

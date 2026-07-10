@@ -6038,6 +6038,13 @@ impl Runner {
                 if !w.eligibility_trace.is_empty() {
                     w.eligibility_trace.hash_into(&mut h);
                 }
+                // The HARM eligibility trace (the being-percept keystone, step 6): new per-being dynamic state,
+                // folded after the reward eligibility trace in the same canonical order. Empty for a being in a
+                // world with the being-percept off (never recorded), so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.harm_eligibility_trace.is_empty() {
+                    w.harm_eligibility_trace.hash_into(&mut h);
+                }
                 // The conviction-experience record (Branch 1 of the learned experience-to-conviction coupling,
                 // OWNER_DECISIONS_LOG R2/R4): new per-being dynamic state, folded after the eligibility trace in
                 // canonical (axis, association) order. Empty for a being with no felt-conviction learner armed
