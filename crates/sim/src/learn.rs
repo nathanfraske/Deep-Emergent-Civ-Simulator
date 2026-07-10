@@ -828,6 +828,81 @@ pub fn being_attraction_gradient(
     being_directed_gradient(mind, here, perceived, REWARD_ATTR, REWARDS, true, params)
 }
 
+/// The CREATURE-tier being-directed percept (creatures-react arc, mechanism B3, the magnitude-graded raw
+/// direction). A mind-less creature (an Arc-7 `Walker` absent from the mind registry) cannot run the
+/// belief-reading [`being_directed_gradient`] the founder tier uses; instead its toward/away disposition rides
+/// on the RAW perceived signal with NO belief and NO committed valence category. Over the beings it perceives
+/// (each an emitter position and the creature's OWN transduced magnitude for it, the perceiver-keyed sense the
+/// build constraint requires), this sums the UNIT toward-direction of each emitter SCALED by that magnitude.
+/// The magnitude is the SOLE distance factor: the reach already attenuated the signal with distance before it
+/// was transduced, so a nearer, bigger, or warmer emitter reads a larger magnitude and pulls harder, and no
+/// geometric `1/d` is applied on top (that would double-count distance). The summed vector's LENGTH is clamped
+/// to the unit disc (scaled down preserving its direction, never per-component, which would rotate it), so it
+/// lands in the same `[-1, 1]`-magnitude range the founder's unit percept does. Only the horizontal `(x, y)`
+/// heading is produced, matching the 2D heading the controller moves by; the vertical separation already
+/// entered the perceptibility through the reach that produced the magnitude, exactly as the founder gradient
+/// treats z. It is a PERCEPT, not a heading: only the creature's OWN heritable FREELY-SIGNED weight, set by
+/// selection off founder-zero, turns it into approach (a positive weight, hunting) or flight (a negative
+/// weight, fleeing), so the toward/away SIGN emerges rather than being authored (Principle 9), keyed only on
+/// the emitted signal and the creature's own sense, never on the emitter's species, kind, trophic role,
+/// relatedness, or being-hood. Its honest limit (mechanism B3): the discrimination runs along MAGNITUDE alone,
+/// so two same-magnitude emitters of different kind read alike; the per-bucket block (mechanism B2) is the
+/// fuller follow-on. Pure and RNG-free; no valence, no belief, no category.
+pub fn creature_being_direction(here: Coord3, perceived: &[(Coord3, Fixed)]) -> (Fixed, Fixed) {
+    let mut dx = Fixed::ZERO;
+    let mut dy = Fixed::ZERO;
+    for &(pos, magnitude) in perceived {
+        if magnitude <= Fixed::ZERO {
+            continue; // nothing perceived from this emitter (sub-threshold or absent), no pull
+        }
+        // The coordinate deltas in i64 so the subtraction cannot overflow i32 for far-apart raw coordinates;
+        // the sum-of-squares guard below bounds each delta to `sqrt(i32::MAX)` (< i32::MAX) before any cast.
+        let ex = pos.x as i64 - here.x as i64;
+        let ey = pos.y as i64 - here.y as i64;
+        // Skip a co-located emitter (no direction) and a separation whose square overflows i32, exactly as
+        // the founder gradient does; such an emitter is too far to clear the threshold and be perceived anyway.
+        let d2i = ex * ex + ey * ey;
+        if d2i == 0 || d2i > i32::MAX as i64 {
+            continue;
+        }
+        let dist = Fixed::from_int(d2i as i32).sqrt(); // |d| > 0 here, exact and deterministic
+                                                       // The UNIT toward-direction `(ex, ey) / |d|` scaled by the perceived magnitude (the sole distance
+                                                       // factor). An overflow in either step drops this emitter's contribution rather than fabricating one.
+        let contribute = |num: i64| -> Fixed {
+            Fixed::from_int(num as i32) // safe: |num| <= sqrt(i32::MAX) after the guard above
+                .checked_div(dist)
+                .and_then(|unit| unit.checked_mul(magnitude))
+                .unwrap_or(Fixed::ZERO)
+        };
+        dx = dx.saturating_add(contribute(ex));
+        dy = dy.saturating_add(contribute(ey));
+    }
+    // Clamp the vector LENGTH to the unit disc, preserving direction (a per-component clamp would rotate a
+    // diagonal pull toward an axis). A strong aggregate pull saturates at unit length, a weak one stays
+    // proportional, so the length carries the graded pull strength in the founder's `[-1, 1]` percept range.
+    match (dx.checked_mul(dx), dy.checked_mul(dy)) {
+        (Some(x2), Some(y2)) => {
+            let len2 = x2.saturating_add(y2);
+            if len2 > Fixed::ONE {
+                let len = len2.sqrt(); // > ONE here, so the divide scales the vector down to unit length
+                (
+                    dx.checked_div(len).unwrap_or(Fixed::ZERO),
+                    dy.checked_div(len).unwrap_or(Fixed::ZERO),
+                )
+            } else {
+                (dx, dy)
+            }
+        }
+        // Unreachable for any realistic perceived population (a component would need magnitude > ~46000, tens
+        // of thousands of emitters pulling one way); the safe bounded fallback caps each component to the unit
+        // box rather than panicking. The O(N^2) perceive scan is separately capped upstream.
+        _ => (
+            dx.clamp(-Fixed::ONE, Fixed::ONE),
+            dy.clamp(-Fixed::ONE, Fixed::ONE),
+        ),
+    }
+}
+
 /// The being-percept feature's run-path configuration (the being-percept keystone, step 6, the live wire):
 /// everything the perceive phase needs to run the being-directed perception and learning for one world. The
 /// SUBSTRATE bindings are labelled dev fixtures and floor data (the sense channel a being emits and is
@@ -1464,6 +1539,111 @@ mod tests {
             by,
             Fixed::ZERO,
             "no north-south component for a due-east emitter"
+        );
+    }
+
+    #[test]
+    fn the_creature_being_direction_is_belief_free_magnitude_graded_and_points_toward_the_emitter()
+    {
+        // Creatures-react arc, mechanism B3. The mind-less creature path takes only positions and the
+        // creature's own perceived magnitudes, no Mind, no belief, no valence.
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        // Empty perception (or an all-sub-threshold read) is a zero direction: a creature that perceives
+        // nothing has no pull, the true null before any weight acts.
+        assert_eq!(
+            creature_being_direction(here, &[]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no perception, no pull"
+        );
+        assert_eq!(
+            creature_being_direction(here, &[(east, Fixed::ZERO)]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a zero-magnitude (sub-threshold) emitter contributes nothing"
+        );
+        // The direction points TOWARD the due-east emitter (positive x, zero y). The sign the creature ACTS
+        // on (approach vs flee) is the controller weight's, not this percept's: this always points toward.
+        let (px, py) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 4))]);
+        assert!(
+            px > Fixed::ZERO,
+            "points toward the east emitter (positive x)"
+        );
+        assert_eq!(
+            py,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        // Magnitude grading: a stronger signal from the SAME position pulls harder (a larger x component),
+        // below the saturation bound.
+        let (weak_x, _) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 8))]);
+        let (strong_x, _) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 2))]);
+        assert!(
+            strong_x > weak_x,
+            "a stronger perceived magnitude pulls harder (B3 magnitude grading)"
+        );
+        // Distance is NOT double-counted: the perceived magnitude is the sole distance factor (the reach
+        // already attenuated it), so at EQUAL magnitude a near and a far due-east emitter pull IDENTICALLY.
+        // A closer emitter pulls harder only because its perceived magnitude is higher (attenuation, upstream).
+        let near = Coord3::ground(2, 0);
+        let far = Coord3::ground(8, 0);
+        assert_eq!(
+            creature_being_direction(here, &[(near, Fixed::from_ratio(1, 4))]),
+            creature_being_direction(here, &[(far, Fixed::from_ratio(1, 4))]),
+            "equal magnitude, different distance: identical pull (distance enters only through magnitude)"
+        );
+        // A DIAGONAL emitter yields a diagonal direction, both components toward it (positive), so the percept
+        // is not an x-axis artefact of the earlier cases.
+        let ne = Coord3::ground(3, 4);
+        let (nx, ny) = creature_being_direction(here, &[(ne, Fixed::from_ratio(1, 4))]);
+        assert!(
+            nx > Fixed::ZERO && ny > Fixed::ZERO,
+            "points toward a north-east emitter on both axes"
+        );
+        // Multi-emitter summation: an emitter due-east and one due-north of equal magnitude sum to a north-east
+        // pull (both components positive and, by symmetry, equal).
+        let north = Coord3::ground(4, 0); // reuse magnitude symmetry via mirrored positions
+        let east4 = Coord3::ground(0, 4);
+        let (mx, my) = creature_being_direction(
+            here,
+            &[
+                (north, Fixed::from_ratio(1, 4)),
+                (east4, Fixed::from_ratio(1, 4)),
+            ],
+        );
+        assert!(
+            mx > Fixed::ZERO && my > Fixed::ZERO,
+            "two orthogonal emitters sum to a diagonal pull"
+        );
+        assert_eq!(
+            mx, my,
+            "symmetric orthogonal emitters give an equal-component diagonal"
+        );
+        // A co-located emitter has no direction and is skipped (no divide, no pull).
+        assert_eq!(
+            creature_being_direction(here, &[(here, Fixed::ONE)]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a co-located emitter contributes no direction"
+        );
+        // Saturation preserves DIRECTION (length-clamp, not per-component): a very strong diagonal pull clamps
+        // to unit length while keeping its 45-degree heading (equal components), never rotated toward an axis.
+        let diag = Coord3::ground(1, 1);
+        let (sx, sy) = creature_being_direction(here, &[(diag, Fixed::from_int(100))]);
+        assert_eq!(
+            sx, sy,
+            "a saturated diagonal pull keeps equal components (direction preserved)"
+        );
+        assert!(
+            sx > Fixed::ZERO,
+            "the saturated diagonal still points toward the emitter"
+        );
+        // and its length is at the unit bound (within a fixed-point tie), never past it.
+        let len2 = sx
+            .checked_mul(sx)
+            .unwrap()
+            .saturating_add(sy.checked_mul(sy).unwrap());
+        assert!(
+            len2 <= Fixed::ONE,
+            "the clamped length never exceeds the unit disc"
         );
     }
 
