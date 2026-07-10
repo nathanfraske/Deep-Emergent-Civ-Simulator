@@ -1064,6 +1064,60 @@ impl Controller {
         &self.weights
     }
 
+    /// A copy of this controller with each weight `k` offset by `deviation(k)` (creature-selection step 2,
+    /// the mint-time and inheritance perturbation). The caller supplies a DETERMINISTIC per-weight deviation
+    /// (a seed-keyed bounded zero-mean draw), so the result is a pure function of the parent and the draw and
+    /// replays bit for bit; the offset is saturating so it can never overflow the weight.
+    pub fn perturbed(&self, mut deviation: impl FnMut(usize) -> Fixed) -> Controller {
+        let weights = self
+            .weights
+            .iter()
+            .enumerate()
+            .map(|(k, w)| Fixed::from_bits(w.to_bits().saturating_add(deviation(k).to_bits())))
+            .collect();
+        Controller {
+            n_in: self.n_in,
+            n_out: self.n_out,
+            hidden: self.hidden,
+            weights,
+        }
+    }
+
+    /// The MIDPARENT blend of two controllers of the same schema (creature-selection step 2, the offspring
+    /// controller under the reproduction beat): each weight is the average of the two parents' weights plus a
+    /// deterministic per-weight `deviation(k)`. The general inheritance primitive, no reading of a trait, kind,
+    /// or relatedness, so an offspring resembles both parents and drifts by the bounded perturbation, the sign
+    /// of any weight emerging from which lineages out-reproduce (Principle 8). Both controllers are minted
+    /// against the shared embodiment layout, so their schemas always match; a mismatch is a bug. Saturating;
+    /// a pure function of the parents and the draw.
+    pub fn midparent(
+        &self,
+        other: &Controller,
+        mut deviation: impl FnMut(usize) -> Fixed,
+    ) -> Controller {
+        assert_eq!(
+            (self.n_in, self.n_out, self.hidden),
+            (other.n_in, other.n_out, other.hidden),
+            "midparent controllers must share the schema"
+        );
+        let weights = self
+            .weights
+            .iter()
+            .zip(other.weights.iter())
+            .enumerate()
+            .map(|(k, (a, b))| {
+                let avg = a.to_bits().saturating_add(b.to_bits()) / 2;
+                Fixed::from_bits(avg.saturating_add(deviation(k).to_bits()))
+            })
+            .collect();
+        Controller {
+            n_in: self.n_in,
+            n_out: self.n_out,
+            hidden: self.hidden,
+            weights,
+        }
+    }
+
     /// A fresh zero hidden state of the right width (empty for a reaction norm), the state a being
     /// starts life with.
     pub fn fresh_hidden(&self) -> Vec<Fixed> {

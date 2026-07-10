@@ -1067,11 +1067,57 @@ pub fn is_creature(id: StableId) -> bool {
 pub const PREDATOR_ID_BIT: u64 = 1 << 61;
 
 /// Whether a walker id is an AUTHORED PREDATOR (the reserved predator sub-bit within the creature namespace).
-/// The creature reproduction/behaviour-selection arc (step 2) reads this to keep the authored predator OUT of
-/// the emergent breeding pool: the predator is an environmental GIVEN, not a modeled lineage that reproduces
-/// or is selected as prey, so its authored always-strike disposition must never enter the gene pool.
+/// The predator carries an authored controller but no heritable `lineage`, so the STRUCTURAL pairing predicate
+/// ([`Walker::carries_lineage`]) already excludes it from the creature breeding pool; this id bit remains the
+/// disjoint-namespace marker (so a spawned predator never collides with a biosphere creature or an offspring).
 pub fn is_predator(id: StableId) -> bool {
     id.0 & PREDATOR_ID_BIT != 0
+}
+
+/// The reserved sub-bit that marks a creature OFFSPRING bred in-run by the reproduction beat (creature-selection
+/// step 2), within the creature namespace. An offspring carries [`CREATURE_ID_TAG`] (so it is a mind-less
+/// creature, retired only on its own death) plus this bit and a monotonic per-run counter, so its id is
+/// provably disjoint from a founder's small sequential id, a spawned biosphere creature's `occ.id.0 | tag`
+/// (whose small `occ.id.0` never reaches bit 60), and the authored predator's `PREDATOR_ID_BIT` (bit 61).
+pub const OFFSPRING_ID_BIT: u64 = 1 << 60;
+
+/// A deterministic symmetric zero-mean deviation in `[-spread, +spread)` for a creature's controller weight
+/// `k`, keyed on the being id, the tick, and the weight index (creature-selection step 2, the mint-time and
+/// inheritance perturbation). Mirrors the founder developmental-offset draw: `unit_fixed` lies in `[0, ONE)`
+/// and the symmetric map is a pure function of the seed, the being, the tick, and the weight index, so it
+/// replays bit for bit. Keyed on `Phase::CREATURE_REPRO` and a creature id (disjoint from every founder id),
+/// so it never collides with a founder draw.
+fn creature_weight_deviation(seed: u64, id: StableId, tick: u64, k: usize, spread: Fixed) -> Fixed {
+    let unit = DrawKey::entity(id.0, tick, Phase::CREATURE_REPRO)
+        .rng(seed)
+        .unit_fixed(k as u64);
+    (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
+}
+
+/// The reserved calibrations the in-run creature reproduction and behaviour-selection substrate reads
+/// (creature-selection step 2, fork 2a, gate-signed-off). `None` on an embodiment leaves creatures
+/// non-reproducing and byte-identical (the substrate is opt-in); `Some` arms the unified in-run selection.
+/// The three spreads and the eligibility reserve are RESERVED values surfaced with their basis, never
+/// fabricated (the dev harness stands up labelled fixtures; the manifest carries the reserved entries).
+#[derive(Clone, Copy, Debug)]
+pub struct CreatureSelectionParams {
+    /// The bounded half-width of the zero-mean per-weight deviation applied to each MINTED creature's
+    /// controller, so the founding creature generation is not identical-founder-zero and can move and
+    /// co-locate (the bootstrap variance seed that breaks the zero-init deadlock, retiring the offline
+    /// empty-arena scorer's role). Basis: the deviation that lifts a founder-zero weight off zero enough to
+    /// drive movement without saturating the controller's activation clamp, sibling to
+    /// `reproduction.mutation_spread`.
+    pub mint_perturbation_spread: Fixed,
+    /// The own-reserve level above which a creature is eligible to reproduce in a cycle: a creature whose
+    /// energy reserve is at or above this can afford an offspring. Basis: the reserve fraction that marks a
+    /// well-fed being (an energy-cost proxy for reproductive fitness, the creature analogue of the founder
+    /// `reproductive_vigor` own-reserve gate), so a better forager out-reproduces, keyed on the being's OWN
+    /// reserve, never a trait or kind.
+    pub reproduction_eligibility_reserve: Fixed,
+    /// The bounded half-width of the zero-mean per-weight deviation added to an offspring's midparent
+    /// controller blend (the inheritance mutation). Basis: the drift the transmission subsystem already uses,
+    /// set equal to `reproduction.mutation_spread` for consistency.
+    pub offspring_mutation_spread: Fixed,
 }
 
 pub struct Embodiment {
@@ -1164,6 +1210,16 @@ pub struct Embodiment {
     /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
     /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
     creature_being_percept: bool,
+    /// The in-run creature reproduction and behaviour-selection substrate (creature-selection step 2, fork 2a):
+    /// `None` (the default) leaves creatures non-reproducing and byte-identical; `Some` arms the mint-time
+    /// perturbation and the reproduction beat, so a creature population turns over and its whole controller is
+    /// selected in the populated world (the correct single-loop architecture, replacing the offline empty-arena
+    /// scorer). Opt-in and hash-neutral by default.
+    creature_selection: Option<CreatureSelectionParams>,
+    /// The monotonic count of creature OFFSPRING bred in-run by the reproduction beat (creature-selection step
+    /// 2), the source of each offspring's disjoint id (`CREATURE_ID_TAG | OFFSPRING_ID_BIT | count`). Only ever
+    /// advanced when the substrate is armed, so an unarmed run keeps it zero and mints no offspring.
+    creature_offspring_count: u64,
     /// The ids of AUTHORED PREDATORS: stationary ambush hazards the predation-integration slice spawns as the
     /// environmental GIVEN a prey adapts to (fork i, gate-ruled). A predator is a mind-less `Walker` with a
     /// PIERCE body and an always-STRIKE controller, so it wounds any prey co-located with it through the
@@ -1394,6 +1450,8 @@ impl Embodiment {
             being_percept: false,
             being_field: None,
             creature_being_percept: false,
+            creature_selection: None,
+            creature_offspring_count: 0,
             predators: BTreeSet::new(),
             nutrition_learning: false,
             place_reward_learning: true,
@@ -1503,6 +1561,16 @@ impl Embodiment {
     /// reaction is pure selection on the raw percept.
     pub fn set_creature_being_percept(&mut self, enabled: bool) {
         self.creature_being_percept = enabled;
+    }
+
+    /// Arm (or disarm) the in-run creature reproduction and behaviour-selection substrate (creature-selection
+    /// step 2, fork 2a). `Some(params)` mints each creature with a bounded zero-mean controller perturbation
+    /// (the bootstrap variance seed) and runs the reproduction beat each life cadence, so co-located
+    /// reserve-eligible creatures that carry heritable lineage produce offspring whose controllers are the
+    /// parents' midparent blend plus a bounded perturbation, and the whole creature controller is selected in
+    /// the populated world. `None` (the default) leaves creatures non-reproducing and the run byte-identical.
+    pub fn set_creature_selection(&mut self, params: Option<CreatureSelectionParams>) {
+        self.creature_selection = params;
     }
 
     /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
@@ -4536,6 +4604,10 @@ impl Runner {
             }
         }
         self.reconcile_lifecycle();
+        // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
+        // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
+        // so they stay bit-identical (real-world unification).
+        self.reproduce_creatures();
         self.clock += 1;
     }
 
@@ -5399,6 +5471,10 @@ impl Runner {
         // state (worker-count independent), so both tick entry points reconcile identically and stay
         // bit-identical (real-world unification, step 3c).
         self.reconcile_lifecycle();
+        // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
+        // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
+        // so they stay bit-identical (real-world unification).
+        self.reproduce_creatures();
         self.clock += 1;
     }
 
@@ -6517,21 +6593,24 @@ impl Runner {
         ploidy: usize,
     ) -> usize {
         use crate::biosphere::SourceRef;
-        let Some((homeo, organs, layout, seed, thermal)) = self.embodiment.as_ref().map(|e| {
-            (
-                e.homeo.clone(),
-                e.organs.clone(),
-                e.layout.clone(),
-                e.seed,
-                // Creatures are born into the same comfort band the founders carry (a shared physical band in
-                // the dev world), read off a representative founder; a default centres it if none exist yet.
-                e.thermal.values().next().copied().unwrap_or(BeingThermal {
-                    setpoint: Fixed::ZERO,
-                    half_band: Fixed::ONE,
-                    initial_temp: Fixed::ZERO,
-                }),
-            )
-        }) else {
+        let Some((homeo, organs, layout, seed, creature_sel, thermal)) =
+            self.embodiment.as_ref().map(|e| {
+                (
+                    e.homeo.clone(),
+                    e.organs.clone(),
+                    e.layout.clone(),
+                    e.seed,
+                    e.creature_selection,
+                    // Creatures are born into the same comfort band the founders carry (a shared physical band in
+                    // the dev world), read off a representative founder; a default centres it if none exist yet.
+                    e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                        setpoint: Fixed::ZERO,
+                        half_band: Fixed::ONE,
+                        initial_temp: Fixed::ZERO,
+                    }),
+                )
+            })
+        else {
             return 0;
         };
         let founders: BTreeSet<StableId> = self
@@ -6594,13 +6673,23 @@ impl Runner {
                 );
                 let physiology = Physiology::dev_for_registry(&homeo);
                 let genome = ctrl_pool.promote(seed, cid.0, ploidy);
-                let controller = Controller::express(ctrl_genes, &genome, &layout);
-                // A creature is a MODELED-LINEAGE member: it carries its expressed controller as its heritable
-                // reproductive material (creature-selection step 2), so the reproduction beat can blend two
-                // parents' controllers into an offspring. Structurally distinct from the authored predator,
-                // which carries an authored controller but no `lineage` and so cannot reproduce. Byte-neutral:
-                // `lineage` is not folded into `state_hash` and nothing reads it until the reproduction beat is
-                // armed.
+                let expressed = Controller::express(ctrl_genes, &genome, &layout);
+                // Mint-time perturbation (creature-selection step 2, the bootstrap variance seed): when the
+                // substrate is armed, offset each controller weight by a bounded zero-mean seed-keyed draw so the
+                // founding creature generation is NOT identical-founder-zero and can move and co-locate (breaking
+                // the zero-init deadlock, taking over the offline scorer's role of supplying initial variance).
+                // Unarmed, the controller is the pure genome expression, so the run stays byte-identical.
+                let controller = match creature_sel {
+                    Some(p) => expressed.perturbed(|k| {
+                        creature_weight_deviation(seed, cid, 0, k, p.mint_perturbation_spread)
+                    }),
+                    None => expressed,
+                };
+                // A creature is a MODELED-LINEAGE member: it carries its controller as its heritable reproductive
+                // material (creature-selection step 2), so the reproduction beat can blend two parents' controllers
+                // into an offspring. Structurally distinct from the authored predator, which carries an authored
+                // controller but no `lineage` and so cannot reproduce. Byte-neutral when unarmed: `lineage` is not
+                // folded into `state_hash` and nothing reads it until the reproduction beat is armed.
                 let mut walker = Walker::new(
                     cid,
                     coord,
@@ -6762,6 +6851,135 @@ impl Runner {
         self.body_temp.insert(pid, thermal.initial_temp);
         self.index.place(OccupantId::being(pid), coord);
         Some(pid)
+    }
+
+    /// The in-run creature reproduction and behaviour-selection beat (creature-selection step 2, fork 2a,
+    /// gate-signed-off). On a life-cadence beat, when the substrate is armed, co-located reserve-eligible
+    /// creatures that carry heritable lineage pair and produce an offspring whose controller is the parents'
+    /// MIDPARENT blend plus a bounded zero-mean perturbation, so the WHOLE creature controller is selected in
+    /// the populated world: a well-fed forager (a high own energy reserve) out-reproduces, and a hazard-struck
+    /// creature dies (via the existing INTEGRITY cull in `reconcile_lifecycle`) and leaves no descendants, so
+    /// which weights spread falls out of which situations each creature meets, never an authored fitness term.
+    /// The pairing predicate is STRUCTURAL (`carries_lineage`, both carry a heritable controller) and keyed on
+    /// spatial CO-LOCATION (the same-cell proximity proxy), never a trait, kind, relatedness, or an id tag, so
+    /// the authored predator (which carries no lineage) is excluded for the same reason it cannot adapt.
+    /// Eligibility keys on the creature's OWN energy reserve found by its backing component (admit-the-alien),
+    /// never a hardcoded axis. Deterministic: the offspring id is a monotonic run counter in a disjoint
+    /// sub-namespace, the perturbation is seed-keyed, and the beat walks id-sorted parents and canonical cells,
+    /// so it replays bit for bit. A no-op unless armed AND on a cadence beat, so an unarmed or off-cadence run
+    /// is byte-identical.
+    fn reproduce_creatures(&mut self) {
+        let Some(params) = self.embodiment.as_ref().and_then(|e| e.creature_selection) else {
+            return;
+        };
+        let Some(world) = self.world.as_ref() else {
+            return;
+        };
+        let cadence = world.life_cadence_ticks();
+        let clock = world.clock();
+        if clock == 0 || cadence == 0 || !clock.is_multiple_of(cadence) {
+            return;
+        }
+        let emb = self.embodiment.as_ref().unwrap();
+        let seed = emb.seed;
+        let homeo = emb.homeo.clone();
+        let organs = emb.organs.clone();
+        let thermal = emb
+            .thermal
+            .values()
+            .next()
+            .copied()
+            .unwrap_or(BeingThermal {
+                setpoint: Fixed::ZERO,
+                half_band: Fixed::ONE,
+                initial_temp: Fixed::ZERO,
+            });
+        // The being's OWN energy-backing axis (admit-the-alien: found by its backing component, not a hardcoded
+        // id, the same read the metabolism uses). No energy-backed reserve means no eligibility read is possible.
+        let Some(energy_axis) = homeo
+            .axes
+            .iter()
+            .find(|a| a.backing_component.as_deref() == Some(crate::physiology::ENERGY_DENSITY))
+            .map(|a| a.id)
+        else {
+            return;
+        };
+        // Snapshot eligible parents (living creatures carrying heritable lineage whose OWN energy reserve is at
+        // or above the eligibility threshold), owning their body/physiology/controller so the mint borrows
+        // nothing from `self`. Sorted by id for a deterministic pairing order.
+        let mut eligible: Vec<(StableId, Coord3, Controller, BodyPlan, Physiology)> = emb
+            .walkers
+            .iter()
+            .filter(|w| {
+                w.alive
+                    && is_creature(w.id)
+                    && w.carries_lineage()
+                    && w.homeostasis.level(energy_axis) >= params.reproduction_eligibility_reserve
+            })
+            .filter_map(|w| {
+                w.lineage.as_ref().map(|l| {
+                    (
+                        w.id,
+                        w.coord(),
+                        l.clone(),
+                        w.body.clone(),
+                        w.physiology.clone(),
+                    )
+                })
+            })
+            .collect();
+        eligible.sort_by_key(|(id, ..)| *id);
+        // Group by cell (co-location, the spatial proximity proxy), in canonical Coord3 order.
+        let mut by_cell: BTreeMap<Coord3, Vec<usize>> = BTreeMap::new();
+        for (i, (_, coord, ..)) in eligible.iter().enumerate() {
+            by_cell.entry(*coord).or_default().push(i);
+        }
+        // For each cell with two or more eligible, pair consecutive (id-sorted) and mint one offspring per pair;
+        // an unpaired leftover does not reproduce this beat.
+        let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
+        for (coord, idxs) in &by_cell {
+            for pair in idxs.chunks_exact(2) {
+                let (_, _, ctrl_a, body_a, phys_a) = &eligible[pair[0]];
+                let (_, _, ctrl_b, _, _) = &eligible[pair[1]];
+                let count = {
+                    let e = self.embodiment.as_mut().unwrap();
+                    let c = e.creature_offspring_count;
+                    e.creature_offspring_count += 1;
+                    c
+                };
+                let child = StableId(CREATURE_ID_TAG | OFFSPRING_ID_BIT | count);
+                let child_ctrl = ctrl_a.midparent(ctrl_b, |k| {
+                    creature_weight_deviation(
+                        seed,
+                        child,
+                        clock,
+                        k,
+                        params.offspring_mutation_spread,
+                    )
+                });
+                let homeostasis = crate::homeostasis::Homeostasis::new(&homeo, body_a, &organs);
+                let walker = Walker::new(
+                    child,
+                    *coord,
+                    body_a.clone(),
+                    homeostasis,
+                    phys_a.clone(),
+                    child_ctrl.clone(),
+                )
+                .with_lineage(child_ctrl);
+                built.push((child, *coord, walker));
+            }
+        }
+        // Install the offspring (thermal band, walker, located index) in canonical mint order.
+        if let Some(emb) = self.embodiment.as_mut() {
+            for (cid, _, walker) in &built {
+                emb.thermal.insert(*cid, thermal);
+                emb.walkers.push(walker.clone());
+            }
+        }
+        for (cid, coord, _) in &built {
+            self.index.place(OccupantId::being(*cid), *coord);
+        }
     }
 
     fn reconcile_lifecycle(&mut self) {
