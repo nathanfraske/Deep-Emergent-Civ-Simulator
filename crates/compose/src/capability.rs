@@ -106,15 +106,15 @@ pub enum CapabilityKernel {
     /// but strong in compression is cut, not crushed, diverging on the target's own resistance axes by physics
     /// not a tag.
     Crush,
-    /// IMPACT, the percussion read (the made-world arc, tool-use, Section G, the mass payoff): a tool swung at
-    /// a reference speed delivers a KINETIC ENERGY ([`laws::kinetic_energy`], `1/2 m v^2`) over its own MASS,
-    /// the extensive datum only a carried object supplies (its retained volume times its density, exposed to
-    /// the kernel as `mech.mass`). If that delivered energy clears a reference strike energy the part is a
-    /// percussion tool, graded over the reference. So a HEAVY tool reads a high impact where a light one of the
-    /// same shape reads none, the payoff of carrying the tool's mass, the distinction the pierce/shear/crush
-    /// contact reads (which see only geometry and stress) cannot make. Reads `mech.mass`; the reference swing
-    /// speed and the reference strike energy are reserved. A massless part (no exposed mass) delivers no blow
-    /// and reads zero.
+    /// IMPACT, the percussion read (the made-world arc, tool-use, Section G): a part's ACTUATOR WORK delivers a
+    /// blow. Its actuating force (its strength stress `mat.fracture_strength` over its cross-section
+    /// `mech.cross_section_area`, promoted to newtons by [`laws::stress_force`]) over its own grown stroke
+    /// `mech.stroke_length` is the energy it delivers ([`laws::actuator_work`], `F d`, a joule). If that clears a
+    /// reference strike energy the part is a percussion tool, graded over the reference. So a STRONG, thick,
+    /// long-stroked part reads a high impact where a weak or short-stroked one reads none, the distinction
+    /// derived from the part's own body rather than a world-global swing speed (the stroke-rate substrate). Reads
+    /// `mat.fracture_strength`, `mech.cross_section_area`, `mech.stroke_length`; the reference strike energy is
+    /// reserved. A part with no actuating strength or no grown stroke delivers no blow and reads zero.
     Impact,
 }
 
@@ -129,7 +129,7 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => &[],
             CapabilityKernel::Shear => &["mech.contact_area"],
             CapabilityKernel::Crush => &["mech.contact_area"],
-            CapabilityKernel::Impact => &["mech.mass"],
+            CapabilityKernel::Impact => &["mech.cross_section_area", "mech.stroke_length"],
         }
     }
 
@@ -141,11 +141,7 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => &["opt.refractive_index"],
             CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
             CapabilityKernel::Crush => &["mat.compressive_strength"],
-            CapabilityKernel::Impact => &[
-                "mat.fracture_strength",
-                "mech.cross_section_area",
-                "mech.stroke_length",
-            ],
+            CapabilityKernel::Impact => &["mat.fracture_strength"],
         }
     }
 
@@ -397,10 +393,15 @@ fn impact(
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
 ) -> Fixed {
-    let force = match mat("mat.fracture_strength").checked_mul(geo("mech.cross_section_area")) {
-        Some(f) => f,
-        None => return Fixed::ONE, // an unrepresentably large force reads a full impact
-    };
+    // The actuating force in newtons (strength stress over cross-section, promoted by the megapascal-to-newton
+    // bridge), then the actuator work over the grown stroke. Passing the force through `actuator_work` rather
+    // than short-circuiting on overflow keeps the stroke guard live: a part with no grown stroke reads zero even
+    // when its force would overflow (a representability corner, not a full-impact ceiling).
+    let force = laws::stress_force(
+        mat("mat.fracture_strength"),
+        geo("mech.cross_section_area"),
+        ENERGY_GUARD,
+    );
     let delivered = laws::actuator_work(force, geo("mech.stroke_length"), ENERGY_GUARD);
     normalize(
         sat_sub(delivered, refs.reference_strike_energy),
@@ -884,17 +885,17 @@ mod tests {
         let fns = FunctionLawRegistry::dev_seed();
         let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
         let caps = test_caps();
-        // The actuating geometry: a cross-section the force acts over and a grown stroke it acts across.
+        // The actuating geometry: a 1e-6 m^2 cross-section the force acts over and a grown stroke it acts across.
         let geo = geo_of(
             [
-                ("mech.cross_section_area", "1"),
+                ("mech.cross_section_area", "0.000001"),
                 ("mech.stroke_length", "1"),
             ]
             .into_iter()
             .collect(),
         );
-        // A STRONG actuator (fracture_strength 200): force 200 N over a 1 m stroke delivers 200 J, above the
-        // 100 J reference. A WEAK one (0.1): 0.1 J, below it.
+        // A STRONG actuator (fracture_strength 200 MPa): force 200 N over a 1 m stroke (the stress_force
+        // megapascal-to-newton bridge) delivers 200 J, above the 100 J reference. A WEAK one (0.1): 0.1 J, below.
         let strong = mat_of([("mat.fracture_strength", "200")].into_iter().collect());
         let weak = mat_of([("mat.fracture_strength", "0.1")].into_iter().collect());
         let strengthless = mat_of(BTreeMap::new());

@@ -330,19 +330,38 @@ pub fn fracture_onset(
     (stress_margin, sat_sub(g_avail, delivered_energy))
 }
 
+/// The force a material STRESS raises over a bearing AREA, in newtons (the megapascal-to-newton bridge). A
+/// strength stress is stored on the MEGAPASCAL scale (`stored = Pa / 1e6`, the convention `mat.fracture_strength`
+/// and its siblings carry), so the force in newtons is the stress over the area promoted by the `C_PA` bridge,
+/// exactly as [`contact_pressure`] and [`axial_stress`] apply `C_PA` in the other direction. Without the bridge
+/// the force would be a factor of a million too small, and the actuator work below (compared against a
+/// joule-scale Griffith resistance) would read a million times too weak. `force_max` bounds the representable
+/// force. A zero stress or zero area raises no force.
+pub fn stress_force(stress: Fixed, area: Fixed, force_max: Fixed) -> Fixed {
+    if stress <= ZERO || area <= ZERO {
+        return ZERO;
+    }
+    match stress.checked_mul(area).and_then(|sa| sa.checked_mul(C_PA)) {
+        Some(f) => f.min(force_max),
+        None => force_max,
+    }
+}
+
 /// The actuator-work law (the stroke-rate / limb-biomechanics substrate). The kinetic energy a mass-bearing
 /// contact delivers equals the WORK the actuator does bringing the acting part to speed: force times the
 /// distance the force acts over (`W = F d`, the floor's work-energy relation), a Joule. This is the delivered
 /// energy DIRECTLY, retiring the swing-speed intermediate that only round-trips to it: substituting the swing
 /// speed `v = sqrt(2 F d / m)` into `1/2 m v^2` cancels the mass and returns `F d`, so the mass a body swings
 /// sets the tip speed but not the delivered energy (a heavier part swings slower for the same work). `force`
-/// is the actuating force (the acting material's strength over its cross-section, an N), `distance` is the
-/// stroke the force acts over (the acting part's own grown `mech.stroke_length`, an m), grown independently of
-/// the segment length so their ratio is per-body data, never a fixed one. The conversion efficiency is one, a
-/// lossless floor idealization (the energy-conservation ceiling, like a frictionless limit); a per-material
-/// toughness derating is the disclosed, physics-derivable refinement, not an authored world value. `energy_max`
-/// is the representability cap the product saturates at. A zero force (no actuating strength) or zero stroke
-/// yields zero energy (the absence convention: an actuator with no strength delivers no blow).
+/// is the actuating force in NEWTONS, formed from the acting material's strength over its cross-section by
+/// [`stress_force`] (which applies the megapascal-to-newton `C_PA` bridge, so the resulting energy is on the
+/// joule scale the Griffith resistance is on). `distance` is the stroke the force acts over (the acting part's
+/// own grown `mech.stroke_length`, an m), grown independently of the segment length so their ratio is per-body
+/// data, never a fixed one. The conversion efficiency is one, a lossless floor idealization (the
+/// energy-conservation ceiling, like a frictionless limit); a per-material toughness derating is the disclosed,
+/// physics-derivable refinement, not an authored world value. `energy_max` is the representability cap the
+/// product saturates at. A zero force (no actuating strength) or zero stroke yields zero energy (the absence
+/// convention: an actuator with no strength delivers no blow).
 pub fn actuator_work(force: Fixed, distance: Fixed, energy_max: Fixed) -> Fixed {
     if force <= ZERO || distance <= ZERO {
         return ZERO;

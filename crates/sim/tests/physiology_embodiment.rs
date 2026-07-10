@@ -1655,7 +1655,13 @@ values = [
     // does not. Grown per-body geometry, not a world-global swing speed.
     let actuator = |strength: Fixed| {
         let mut geometry = BTreeMap::new();
-        geometry.insert("mech.cross_section_area".to_string(), Fixed::ONE);
+        // A 1e-6 m^2 cross-section: a 200 MPa strong actuator is a 200 N force (the stress_force megapascal-to-
+        // newton bridge) over the 1 m stroke = 200 J, above the rock's 100 J resistance; a 50 MPa weak one is
+        // 50 J, below it.
+        geometry.insert(
+            "mech.cross_section_area".to_string(),
+            Fixed::from_ratio(1, 1_000_000),
+        );
         geometry.insert("mech.stroke_length".to_string(), Fixed::ONE);
         let mut material = BTreeMap::new();
         material.insert("mat.fracture_strength".to_string(), strength);

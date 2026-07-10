@@ -1258,12 +1258,12 @@ pub struct Embodiment {
     /// from the tool's and being's own physics, no reserved durability value (Principles 9, 11). Opt-in via
     /// [`Embodiment::set_breakage`].
     breakage: bool,
-    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass
-    /// payoff). `None` by default, so a being never strikes and every existing scenario is unchanged. When
-    /// armed, a being that decides STRIKE swings its WIELDED tool, delivering a kinetic energy (`1/2 m v^2`
-    /// over the tool's own MASS, the extensive datum the tool's retained volume and density supply) that
-    /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
-    /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
+    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G). `None` by
+    /// default, so a being never strikes and every existing scenario is unchanged. When armed, a being that
+    /// decides STRIKE delivers its own ACTUATOR WORK (its acting part's strength over cross-section, over its
+    /// grown stroke, `F d`, the stroke-rate substrate) into the matter or occupant it contacts, fracturing what
+    /// its Griffith energy the blow exceeds. So a STRONG or long-stroked being strikes harder than a weak one,
+    /// derived from its own body rather than a world-global swing speed. Opt-in via [`Embodiment::set_strike`].
     strike: Option<StrikeParams>,
     /// The contact-transfer registry the being-vs-being STRIKE delivers its energy through (hunt-kill strike
     /// arc): which contact channels exist and which physics-floor transfer kernel each delivers by
@@ -1842,10 +1842,12 @@ impl Embodiment {
         self.breakage = on;
     }
 
-    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the swing
-    /// speed and the energy ceiling ([`StrikeParams`]). Opt-in; without it a being never strikes and every
-    /// existing scenario is byte-identical. When armed, a being that decides STRIKE swings its wielded tool and
-    /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
+    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the energy
+    /// ceiling ([`StrikeParams`]; the per-being swing speed the delivered energy once rode on is retired, the
+    /// delivered energy now the acting part's own actuator work `F d`). Opt-in; without it a being never strikes
+    /// and every existing scenario is byte-identical. When armed, a being that decides STRIKE delivers its
+    /// actuator work into the matter underfoot (or the occupant it contacts), fracturing what its Griffith energy
+    /// the blow exceeds.
     pub fn set_strike(&mut self, params: StrikeParams) {
         self.strike = Some(params);
     }
@@ -2359,10 +2361,14 @@ impl Embodiment {
         row: &crate::contact_transfer::ContactTransfer,
         cap: Fixed,
     ) -> (Fixed, Fixed) {
-        let force = seg
-            .mat(&row.strength_axis)
-            .checked_mul(seg.geo(&row.cross_section_axis))
-            .unwrap_or(cap);
+        // The force in NEWTONS: the acting material's strength stress over its cross-section, promoted from the
+        // megapascal strength scale to newtons by the floor's `stress_force` (its C_PA bridge), so the actuator
+        // work below lands on the joule scale the Griffith resistance is on.
+        let force = laws::stress_force(
+            seg.mat(&row.strength_axis),
+            seg.geo(&row.cross_section_axis),
+            cap,
+        );
         let stroke = seg.geo(&row.stroke_axis);
         // Follow-on (b), the derived tool-geometry mass-payoff: when a tool is wielded, add its stroke extension
         // to `stroke` and its sustainable-force contribution to `force` HERE (an additive read on the same law),
@@ -2370,23 +2376,24 @@ impl Embodiment {
         (force, stroke)
     }
 
-    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff):
-    /// swing the WIELDED tool and fracture the matter underfoot with the blow's kinetic energy. The tool's own
-    /// MASS (its retained volume times its substance density, [`WieldedTool::mass`], the extensive datum only
-    /// the carried tool supplies) carried at the reserved swing speed is a kinetic energy
-    /// ([`laws::kinetic_energy`], `1/2 m v^2`), and every cell constituent whose GRIFFITH energy over the
-    /// struck face (its `mat.fracture_energy` times the tool's contact area) that delivered energy exceeds is
-    /// fractured loose and taken (the energy limb of [`laws::fracture_onset`]). So a HEAVY tool shatters rock a
-    /// LIGHT one cannot, the payoff of carrying the tool's mass, and a CONCENTRATED blow (a small struck face)
-    /// fractures where a spread one does not, by physics not a per-tool table. The delivered energy is scaled
-    /// from the law's kilojoule output to the joule scale the Griffith energy is on. WHICH constituents
-    /// fracture and HOW MUCH are both derived: the fractured set is the cell's own constituents the blow beats
-    /// (no openable list), and the volume is the strength-bounded carry the grasp uses (no transmutation). A
-    /// constituent with no declared fracture energy offers no Griffith resistance and is shattered by any blow
-    /// (the target-absence convention, matching the cut). Requires the strike params, a wielded tool, the
+    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G): swing at the matter
+    /// underfoot and fracture it with the blow's energy. The delivered energy is the WIELDER's own ACTUATOR WORK
+    /// (its greatest strength-over-cross-section force, promoted to newtons by [`laws::stress_force`], over its
+    /// own grown stroke, [`laws::actuator_work`], `F d`, on the joule scale the Griffith energy is on), and every
+    /// cell constituent whose GRIFFITH energy over the struck face (its `mat.fracture_energy` times the tool's
+    /// contact area) that delivered energy exceeds is fractured loose and taken (the energy limb of
+    /// [`laws::fracture_onset`]). So a STRONG or long-stroked MINER shatters rock a weak one cannot, and a
+    /// CONCENTRATED blow (a small struck face) fractures where a spread one does not, by physics not a per-tool
+    /// table. The tool concentrates the blow (its contact area) but no longer carries the energy: the free
+    /// tool-mass term is dropped (physically unfounded under fixed actuator work), the founded tool-geometry
+    /// coupling the flagged additive follow-on (b). WHICH constituents fracture and HOW MUCH are both derived:
+    /// the fractured set is the cell's own constituents the blow beats (no openable list), and the volume is the
+    /// strength-bounded carry the grasp uses (no transmutation). A constituent with no declared fracture energy
+    /// offers no Griffith resistance and is shattered by any blow (the target-absence convention, matching the
+    /// cut). Requires the strike params, a registered contact channel, a wielded tool (for the struck face), the
     /// material registry, and the physiology; a being with no tool never reaches here, so an opted-out world is
-    /// byte-identical. Reads only the tool's and matter's own physics, no race, kind, or role (Principles 8, 9,
-    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    /// byte-identical. Reads only the wielder's and matter's own physics, no race, kind, or role (Principles 8,
+    /// 9, 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
     pub fn strike_underfoot(&mut self, walker_id: StableId) -> Fixed {
         let Some(params) = self.strike else {
             return Fixed::ZERO;
@@ -2479,9 +2486,11 @@ impl Embodiment {
     /// occupy the cell, the occupant-agnostic form.
     ///
     /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
-    /// delivery mass (the wielded tool's, or the largest-mass grown Segment's, read off the axis the channel's
-    /// row DECLARES via `source_axis`, a Terran channel naming the extensive `mech.mass`) at the reserved swing
-    /// speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row. The
+    /// ACTUATOR WORK: the greatest, among the being's grown Segments, of its strength-over-cross-section force
+    /// (promoted to newtons by [`laws::stress_force`], read off the axes the channel's row DECLARES) times its
+    /// own grown `mech.stroke_length` (`F d`), dispatched by the registered channel's kernel, so the delivered
+    /// energy carries no world-global swing speed (the stroke-rate substrate) and a non-kinetic contact attack is
+    /// a data row. The
     /// struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`), a derive-first
     /// PROXY that reads only the target's own geometry to CHOOSE where a blind blow lands, never `failure_tolerance`,
     /// so it is not weak-point targeting. The wound is [`crate::contact_wound::wound_fraction`] (piece 2) of the
@@ -2496,21 +2505,22 @@ impl Embodiment {
     /// reflects it, and the ONE unified cull removes the being when any axis floors: one currency, one death path,
     /// no morphology predicate. STRIKE is afforded only by a PIERCE-bearing body, decided by no run_world scenario,
     /// and the transfer registry is empty by default, so the write is armed only for a striking predator body and
-    /// every run_world pin is unmoved (byte-neutral). A part with no declared mass, an empty registry, no
-    /// co-located target, or a target with no Structure all deliver no wound (the absence conventions). It returns
-    /// the wound fraction it applied. Deterministic: the target is the first co-located other being in id order (the
-    /// walkers are id-sorted once per tick), and the struck Segment the FIRST of the greatest contact area (a
-    /// deterministic placeholder that ALWAYS strikes the single largest-presented part, not yet the stochastic
-    /// "most likely the biggest" scatter).
+    /// every run_world pin is unmoved (byte-neutral). A part with no actuating strength or grown stroke, an empty
+    /// registry, no co-located target, or a target with no Structure all deliver no wound (the absence
+    /// conventions). It returns the wound fraction it applied. Deterministic: the target is the first co-located
+    /// other being in id order (the walkers are id-sorted once per tick), and the struck Segment the FIRST of the
+    /// greatest contact area (a deterministic placeholder that ALWAYS strikes the single largest-presented part,
+    /// not yet the stochastic "most likely the biggest" scatter).
     ///
-    /// FLAGGED FOLLOW-ONS (surfaced by the section-9 audit):
-    /// (1) the swing speed is the world-global reserved `StrikeParams::swing_velocity`, applied uniformly, while
-    /// mass and area emerge per-being; its own basis names per-being limb-length and stroke rate, so it should be
-    /// DERIVED from the acting part's own limb geometry times a stroke-rate substrate (a new floor axis), a
-    /// pre-existing seam shared with [`Embodiment::strike_underfoot`], not a per-strike fix;
-    /// (2) the caller assembles KINETIC inputs (mass, velocity) and gates on a positive mass, so adding a
-    /// non-kinetic floor kernel reworks this assembly, not just a data row (per-part channel SELECTION is the
-    /// same follow-on);
+    /// FLAGGED FOLLOW-ONS:
+    /// (1) the DELIVERED-ENERGY seam (the world-global `swing_velocity`) is RESOLVED by this stroke-rate substrate:
+    /// the delivered energy is now the acting part's own actuator work `F d`, force and stroke read per-body. Two
+    /// staged pieces remain of this arc: growing `mech.stroke_length` and `mech.cross_section_area` in the
+    /// body-development program so grown bodies deliver a non-zero blow, and the per-segment actuation-kind axis
+    /// plus kernel dispatch for a non-rigid (whip, jet, hydrostat) striker;
+    /// (2) the tool-geometry mass-payoff (a heavier or longer wielded tool affording a longer stroke or higher
+    /// sustainable force) is the owner-ruled additive follow-on (b), dropping into the `acting_force_and_stroke`
+    /// seam over the SAME `F d` law, coupled to the wielded-tool path;
     /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
     /// coupled to the spatial-body-layout arc.
     pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {
@@ -7463,9 +7473,11 @@ source = "test"
             let mut geometry = BTreeMap::new();
             geometry.insert("mech.mass".to_string(), mass);
             geometry.insert("mech.contact_area".to_string(), area);
+            // A 1e-6 m^2 cross-section of 200 MPa strength is a 200 N force (the stress_force megapascal-to-newton
+            // bridge), over a 1 m stroke a 200 J actuator-work blow, comfortably inside the 1e6 ceiling.
             geometry.insert(
                 "mech.cross_section_area".to_string(),
-                Fixed::from_ratio(1, 100),
+                Fixed::from_ratio(1, 1_000_000),
             );
             geometry.insert("mech.stroke_length".to_string(), Fixed::from_int(1));
             let mut material = BTreeMap::new();
@@ -7495,7 +7507,7 @@ source = "test"
         // the armor comparison below is a real inequality rather than two saturated full wounds.
         let big_area = Fixed::from_ratio(1, 2);
         let small_area = Fixed::from_ratio(1, 100);
-        let big_tough_fe = Fixed::from_int(100_000);
+        let big_tough_fe = Fixed::from_int(1000);
         let soft_fe = Fixed::from_int(1);
         let target = Structure {
             segments: vec![
@@ -7529,11 +7541,10 @@ source = "test"
             .get(DEV_KINETIC)
             .unwrap()
             .clone();
-        // The striker delivers its actuator work: force = strength (200) over cross-section (1/100) = 2 N, over
-        // its 1 m stroke, so 2 J (the mass a part carries no longer enters the delivered energy).
-        let force = Fixed::from_int(200)
-            .checked_mul(Fixed::from_ratio(1, 100))
-            .unwrap();
+        // The striker delivers its actuator work: force = 200 MPa strength over a 1e-6 m^2 cross-section, promoted
+        // by the stress_force megapascal-to-newton bridge, is 200 N; over its 1 m stroke, 200 J (the mass a part
+        // carries no longer enters the delivered energy).
+        let force = laws::stress_force(Fixed::from_int(200), Fixed::from_ratio(1, 1_000_000), cap);
         let energy = resolve_transfer(&row, force, Fixed::from_int(1), cap);
         let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
         assert_eq!(
