@@ -6602,12 +6602,49 @@ impl Runner {
         };
         let homeostasis = crate::homeostasis::Homeostasis::new(&homeo, &body, &organs);
         let physiology = Physiology::dev_for_registry(&homeo);
-        let walker = Walker::new(pid, coord, body, homeostasis, physiology, controller);
+        // The authored predator's minimal FINE body (fork i): ONE delivery Segment that (a) affords STRIKE by
+        // its OWN physics (a small, concentrated `mech.contact_area` and a hard `mat.indentation_hardness`
+        // read the PIERCE capability, the same small-area-hard-material physics a tooth reads, never a tag,
+        // Principle 8), and (b) delivers a REAL mass and contact area so the wound is not a no-op (dissolving
+        // the earlier strike-no-op barrier: the striker now carries a delivery part). Grown-body values
+        // grounded off the dev tooth/tissue floor (`anatomy.rs` teeth `mech.contact_area` 0.0000001 and
+        // `mat.indentation_hardness` 3000; `body.rs` bone `mat.fracture_energy` 8), the predator being the
+        // authored environmental given. The mass is read off the transfer channel's declared source axis
+        // (`mech.mass`), the same axis `strike_occupant` reads.
+        let delivery = {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), Fixed::ONE);
+            geometry.insert(
+                "mech.contact_area".to_string(),
+                Fixed::from_decimal_str("0.0000001").expect("tooth contact-area literal"),
+            );
+            let mut material = BTreeMap::new();
+            material.insert(
+                "mat.indentation_hardness".to_string(),
+                Fixed::from_int(3000),
+            );
+            material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            crate::morphogen::Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }
+        };
+        let walker = Walker::new(pid, coord, body, homeostasis, physiology, controller)
+            .with_structure(crate::morphogen::Structure {
+                segments: vec![delivery],
+            });
         if let Some(emb) = self.embodiment.as_mut() {
             emb.thermal.insert(pid, thermal);
             emb.walkers.push(walker);
             emb.predators.insert(pid);
         }
+        // Seed the predator's body temperature to its comfort set point so it EMITS a being-signal like any
+        // warm walker (the section-9 finding): the prey must PERCEIVE the predator's signal to evolve avoidance
+        // (step 2), and emission reads `body_temp`. Without this the predator is thermally invisible.
+        self.body_temp.insert(pid, thermal.initial_temp);
         self.index.place(OccupantId::being(pid), coord);
         Some(pid)
     }
@@ -7882,6 +7919,163 @@ source = "test"
             Fixed::ZERO,
             "no co-located being to strike delivers no wound"
         );
+    }
+
+    #[test]
+    fn an_authored_predator_wounds_a_co_located_catalog_prey_on_its_whole_body() {
+        // The COARSE (whole-body) branch of the unified wound law (predation-integration slice), driven with
+        // the REAL composition the earlier no-op barrier hid: a fine-bodied striker (a delivery Segment) against
+        // a CATALOG prey (no Structure). The wound reads the STRIKER's own delivery-part contact area and the
+        // prey's OUTERMOST covering fracture-energy, accruing to the prey's `whole_body_damage`. A covering with
+        // NO fracture-energy is not woundable (admit-the-alien: data-absent, no forced fracture death).
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::contact_transfer::ContactTransferRegistry;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::material::StrikeParams;
+        use crate::morphogen::{Segment, Structure};
+
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        // A catalog body; `covering.kind` selects the outermost material from `emb.organs` (dev_default, whose
+        // coverings carry `mat.fracture_energy`). kind 0 is bare hide (fracture-energy 3); an out-of-range kind
+        // carries none (the alien no-wound case).
+        let bp = |covering_kind: u16| BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: covering_kind,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The predator's fine delivery body: a small, hard, sharp Segment carrying a delivery mass.
+        let delivery = || {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), Fixed::ONE);
+            geometry.insert(
+                "mech.contact_area".to_string(),
+                Fixed::from_decimal_str("0.0000001").unwrap(),
+            );
+            let mut material = BTreeMap::new();
+            material.insert(
+                "mat.indentation_hardness".to_string(),
+                Fixed::from_int(3000),
+            );
+            material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            Structure {
+                segments: vec![Segment {
+                    parent: None,
+                    depth: 0,
+                    geometry,
+                    material,
+                    damage: Fixed::ZERO,
+                }],
+            }
+        };
+        let coord = Coord3::ground(2, 2);
+        let mk = |id: u64, covering_kind: u16, structure: Option<Structure>| {
+            let mut w = Walker::new(
+                StableId(id),
+                coord,
+                bp(covering_kind),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(
+                    &Embodiment::new(
+                        reg.clone(),
+                        AffordanceRegistry::dev_predator_geophage(),
+                        LocomotionParams::dev_default(),
+                        0,
+                        1,
+                    )
+                    .layout()
+                    .clone(),
+                ),
+            );
+            if let Some(s) = structure {
+                w = w.with_structure(s);
+            }
+            w
+        };
+
+        // Case 1: a fracture-covered catalog prey IS wounded on the whole body.
+        {
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_predator_geophage(),
+                LocomotionParams::dev_default(),
+                0,
+                0x9E,
+            );
+            emb.set_strike(StrikeParams::dev_fixture());
+            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+            emb.add(mk(1, 0, Some(delivery())), band());
+            emb.add(mk(2, 0, None), band());
+            let wound = emb.strike_occupant(StableId(1));
+            assert!(
+                wound > Fixed::ZERO,
+                "the predator delivered a whole-body wound to the catalog prey"
+            );
+            let prey = emb.walkers().iter().find(|w| w.id == StableId(2)).unwrap();
+            assert!(
+                prey.whole_body_damage > Fixed::ZERO,
+                "the catalog prey accrued whole-body damage"
+            );
+            let striker = emb.walkers().iter().find(|w| w.id == StableId(1)).unwrap();
+            assert_eq!(
+                striker.whole_body_damage,
+                Fixed::ZERO,
+                "the striker itself is unharmed"
+            );
+        }
+
+        // Case 2 (admit-the-alien): a catalog prey whose covering carries NO fracture-energy (an out-of-range
+        // covering kind) is not woundable by this law, so the strike returns zero and accrues no damage.
+        {
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_predator_geophage(),
+                LocomotionParams::dev_default(),
+                0,
+                0x9E,
+            );
+            emb.set_strike(StrikeParams::dev_fixture());
+            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+            emb.add(mk(1, 0, Some(delivery())), band());
+            emb.add(mk(2, 250, None), band()); // covering kind 250: out of range, no fracture-energy
+            let wound = emb.strike_occupant(StableId(1));
+            assert_eq!(
+                wound,
+                Fixed::ZERO,
+                "a fracture-less (alien) covering returns no wound; lethality routes through reserves"
+            );
+            let prey = emb.walkers().iter().find(|w| w.id == StableId(2)).unwrap();
+            assert_eq!(
+                prey.whole_body_damage,
+                Fixed::ZERO,
+                "and the alien prey accrues no whole-body damage from this law"
+            );
+        }
     }
 
     #[test]

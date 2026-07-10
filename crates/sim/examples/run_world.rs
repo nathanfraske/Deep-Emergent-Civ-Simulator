@@ -49,6 +49,7 @@ use civsim_sim::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
 use civsim_sim::calibration::{CalibrationManifest, Profile};
+use civsim_sim::contact_transfer::ContactTransferRegistry;
 use civsim_sim::conviction_experience::FeltConvictionCalib;
 use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
@@ -56,13 +57,13 @@ use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::genesis::{genesis, GenesisParams};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry, CRAFT, DIG,
-    ENERGY, EXTRACT, GEOPHAGE, GRASP, RELEASE, SHELTER, TEMPERATURE, WATER,
+    ENERGY, EXTRACT, GEOPHAGE, GRASP, INTEGRITY, RELEASE, SHELTER, TEMPERATURE, WATER,
 };
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::learn::{RewardLearningCalib, HARMS, HARM_ATTR, REWARDS, REWARD_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::material::{MaterialField, MatterCycleCalib};
+use civsim_sim::material::{MaterialField, MatterCycleCalib, StrikeParams};
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
@@ -260,8 +261,19 @@ fn dawn_layout(cfg: &Config) -> ControllerLayout {
     // land in the wrong slots and the founders never forage. The viability embodiment adds the seed-energy
     // axis and the geophage affordance, so its layout is wider; sizing the forage seed against the default
     // layout there misplaces every weight and starves the population by the second generation.
+    // The `--creatures` world adds an authored striking predator and the catalog-wound death path, so it
+    // carries the STRIKE affordance (the composed geophage+strike registry) and the INTEGRITY axis; both widen
+    // the layout, gated on `cfg.creatures` so only `full --creatures` re-pins. This MUST match
+    // `embodiment_genesis` below, or the founder seeds land in the wrong slots.
     let (homeostatic, affordances) = if cfg.viability {
-        (viability_homeostatic(), AffordanceRegistry::dev_geophage())
+        if cfg.creatures {
+            (
+                creature_homeostatic(),
+                AffordanceRegistry::dev_predator_geophage(),
+            )
+        } else {
+            (viability_homeostatic(), AffordanceRegistry::dev_geophage())
+        }
     } else {
         (
             HomeostaticRegistry::dev_grazer(),
@@ -920,6 +932,39 @@ fn viability_homeostatic() -> HomeostaticRegistry {
     reg
 }
 
+/// The `--creatures` world's homeostatic registry: the viability axes plus an INTEGRITY axis (predation-
+/// integration slice). INTEGRITY is non-draining (set each tick from the body: a grown body's aged viability,
+/// a catalog body's one-minus-whole-body-wound-damage) and lethal at its floor, so the catalog-wound coarse
+/// branch routes death through the SAME one unified INTEGRITY cull, no new death path. Added ONLY for
+/// `--creatures`, so it re-pins `full --creatures` alone (the four canonical pins carry no creatures and no
+/// INTEGRITY axis). The axis is pushed LAST so the existing axes' input bases (energy, water, temperature,
+/// seed) are unchanged and the founder forage seeds still land right; only the being-block base shifts, and
+/// every writer of it reads the layout, so the shift is consistent.
+fn creature_homeostatic() -> HomeostaticRegistry {
+    let mut reg = viability_homeostatic();
+    reg.axes.push(HomeostaticAxisDef {
+        id: INTEGRITY,
+        name: "integrity".to_string(),
+        backing_component: None,
+        capacity_per_mass: Fixed::ONE,
+        base_drain: Fixed::ZERO,
+        exertion_drain: Fixed::ZERO,
+        death_floor: Fixed::ZERO,
+    });
+    reg
+}
+
+/// The authored PREDATOR's body (predation-integration slice, fork i): the viability body (so it carries the
+/// reserve-backing organs and is a valid walker). It bears NO catalog weapon: `spawn_predator` gives the
+/// predator a minimal grown delivery Segment that affords STRIKE and delivers the wound by its own physics,
+/// so the catalog body needs no `weapons` entry (this also retires the earlier positional-literal weapon kind,
+/// the section-9 hardening). Labelled fixture; the predator is the authored environmental given a prey adapts
+/// to, non-metabolizing, and its disposition (always-strike) is authored while the PREY's response stays
+/// founder-zero and emergent.
+fn predator_body() -> BodyPlan {
+    viability_body()
+}
+
 /// A one-axis personality profile maturing toward a positive target, so the life-cadence personality
 /// beat has something to drift. Labelled fixture.
 fn a_personality() -> PersonalityProfile {
@@ -962,11 +1007,22 @@ fn language_genesis() -> LanguageGenesis {
 /// what it extracts; every other run keeps the dev-grazer genesis (byte-identical).
 fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
     let (homeostatic, affordances, organs) = if cfg.viability {
-        (
-            viability_homeostatic(),
-            AffordanceRegistry::dev_geophage(),
-            viability_organs(),
-        )
+        // The `--creatures` world adds the STRIKE affordance and the INTEGRITY axis (predation-integration
+        // slice); this MUST match the `dawn_layout` swap above so the founder seeds align with the widened
+        // layout. Gated on `cfg.creatures`, so only `full --creatures` re-pins.
+        if cfg.creatures {
+            (
+                creature_homeostatic(),
+                AffordanceRegistry::dev_predator_geophage(),
+                viability_organs(),
+            )
+        } else {
+            (
+                viability_homeostatic(),
+                AffordanceRegistry::dev_geophage(),
+                viability_organs(),
+            )
+        }
     } else {
         (
             HomeostaticRegistry::dev_grazer(),
@@ -2246,7 +2302,20 @@ fn main() {
                         // (a separate scenario, not one of the canonical four, which carry no creatures).
                         if let Some(emb) = runner.embodiment_mut() {
                             emb.set_creature_being_percept(true);
+                            // Predation-integration slice (fork i): arm the strike stack, the swing kinematics
+                            // and the contact-transfer channel `strike_occupant` delivers a wound through.
+                            emb.set_strike(StrikeParams::dev_fixture());
+                            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
                         }
+                        // Spawn ONE authored ambush predator at the world centre, the environmental GIVEN a
+                        // prey's flee-sign adapts to (fork i, gate-ruled): a stationary always-STRIKE
+                        // non-metabolizing being with a minimal fine delivery body, which wounds any prey
+                        // co-located with it through the unified wound law's whole-body branch and the one
+                        // INTEGRITY cull, and emits a being-signal so the prey can perceive it. The prey's
+                        // founder-zero flee/hunt sign stays emergent; its flee-adaptation emerges once the
+                        // creature-selection substrate lands.
+                        let predator_at = Coord3::ground(WORLD_W / 2, WORLD_H / 2);
+                        let predator = runner.spawn_predator(predator_at, predator_body());
                         println!(
                             "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
                              now: {}); they perceive, forage, metabolize, REACT to nearby beings (creatures- \
@@ -2254,6 +2323,18 @@ fn main() {
                              same loop as the founders; behaviour selection awaits the reproduction slice",
                             runner.creature_count()
                         );
+                        match predator {
+                            Some(pid) => println!(
+                                "  PREDATION (fork i): 1 authored ambush predator {pid:?} at {predator_at:?} \
+                                 (fine delivery body, always-STRIKE, non-metabolizing, emits a being-signal); a \
+                                 prey co-located with it is wounded on the whole body and dies through the one \
+                                 INTEGRITY cull, so the prey's founder-zero flee-sign is now a SELECTABLE \
+                                 pressure (the flee-adaptation emerges once the creature-selection substrate lands)"
+                            ),
+                            None => println!(
+                                "  PREDATION (fork i): predator NOT spawned (no embodiment or no STRIKE afforded)"
+                            ),
+                        }
                     }
                 } else {
                     let bodies = living.consumer_bodies(Fixed::ONE);
