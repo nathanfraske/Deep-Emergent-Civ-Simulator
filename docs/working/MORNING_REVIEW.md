@@ -7,6 +7,25 @@ to proceed, and log it here. Only a truly owner-only or hard-to-reverse decision
 place to review what happened overnight and what still needs your ruling. Newest entries at the top of each
 section.
 
+## 2026-07-10 (owner returned): the four held owner-calls RESOLVED, and two standing directives added
+
+The owner ran the four held owner-calls (the block below) through the de-biaser and then ruled. The headline the de-biaser returned: all three "cheap Terran interim vs full substrate" forks were artifacts of a mis-coded path, and each collapses to a THIRD FORM that dominates both poles by being the engine's own existing pattern applied to that path (a lumped insult, a raw multiply, a fixed sinusoid). My INTERIM lean was defeated in all three the same way: the interim relocates the authoring rather than removing it.
+
+**The owner's rulings:**
+- **Confirmed the third-form direction for all three, Terran-leaning for Mirror BY CALIBRATION (not by authoring).** Mirror is the build-around; everything is per-world overridable so an alien world is a data row. The standing shape now: default to Mirror by calibration to real data, admit the alien by data, author nothing globally.
+- **Fork 1 (oxidative insult): EXCLUDE now, third form is the follow-on.** Ship (c) on the throughput-independent insults it already carries (which Agent B is doing, so B's current form is correct); the target is the general metabolism-waste substrate (R-SOURCE-VECTOR): byproduct at throughput times a real per-pathway molar yield, damage routed through the existing corrosion/toxin laws net of repair, nothing reads size. My INCLUDE lean was sharpened: right impulse (metabolism damages its own tissue), wrong form (a named oxidative insult is the most Terran-specific and re-admits throughput, the exact coupling (c) severed).
+- **Fork 2 (Nernst): the uptake-flux third form.** Replace the raw multiply (`environ.rs:915-917`) with a saturating `v = Vmax*S/(Km+S)`, Vmax from the being's catalyst tissue via the existing composition-weighted-sum helper, Km a half-saturation datum on the source class, NO efficiency scalar (conservation becomes structural, `v <= S`). My A-with-guards lean was OVERTURNED: A's antagonistic cost cannot be modeled from any existing substrate, so it is authored, so A relocates authoring rather than removing it. The third form costs about A or less and is the engine's own flux-law pattern (Kleiber, Stefan-Boltzmann author a shape, the body derives the magnitude).
+- **Fork 3 (day-night): the general-form-minimal third form.** A diurnal phase from the existing rotation period, one sun-angle law `insolation = sum over the data star-list of L_s*max(0, cos theta_s(t))` defaulting to the Mirror reference row (tilt 0, one star), heat left to EMERGE on the existing diffusing Field. My full-substrate lean was right in direction but inflated the cost: four of five components already exist, so the general form lands nearly as fast as the interim and a tidally-locked or binary world is then a data row.
+- **Fork 4 (the aging size-longevity slope taste): DISSOLVED into a calibration datum.** The de-biaser called it the one genuine owner taste; the owner caught that LOCKING it would be Principle-9 steering, and it is a per-world calibrated scenario value instead (the default byproduct-yield and repair distribution), Mirror-set to Earth's real data so the Terran slope emerges from real inputs, alien-overridable. Rule LOCKED into AGENTIC_ADDENDUM section 9 (commit 81b541d, live on main) and memory. No held owner-taste survives.
+
+**Two standing MANAGER directives the owner added (both in memory):**
+- **Shared work becomes a walled agent's downtime arc.** R-SOURCE-VECTOR (the metabolism-waste plus per-source energy-draw substrate, shared between the aging and Nernst/AbioticField work) stays a flagged follow-on; when an agent hits a wall, direct it into the shared substrate arc as downtime work.
+- **A fully-owner-blocked agent gets useful downtime.** If an agent's arcs all block on the owner's basis while the owner is out, redirect it into the research backlog or housekeeping rather than let it idle. Keep the hard gates and blind-framing discipline on the redirected work.
+
+**Agent state after the rulings:** B is mid-build on the ruled exclude-now aging form (correct, no redirect; the R-SOURCE-VECTOR follow-on noted for when B hands me the test); C is on the calibration-layer reconciliation, with the Nernst and day-night third forms now RULED and queued as its next arcs; A is running its own frame-blind on the hunt-kill strike (I rule when it posts the resolved framing).
+
+---
+
 ## 2026-07-10 (owner away, "keep managing, tell me the results when I return"): the consolidated read
 
 **WHAT NEEDS YOUR RULING (the held owner-calls):**
