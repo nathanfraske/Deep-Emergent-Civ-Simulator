@@ -573,4 +573,53 @@ mod tests {
             deliver(Fixed::ZERO, Fixed::from_int(200), Fixed::from_int(2000))
         );
     }
+
+    #[test]
+    fn the_impact_grade_binding_and_the_delivery_row_name_the_same_axes_in_lockstep() {
+        // The grade/delivery LOCKSTEP the gate ruled (slice-3 ruling iv), PINNED by a test (a section-9
+        // correctness/steering-lens catch: the two paths coincide only BY CONSTRUCTION today, the grade path
+        // binding its axes POSITIONALLY (`FunctionLawDef` Vec order) and the delivery path by NAMED fields
+        // (`ContactTransfer`), with nothing in code linking them, so a reorder of either could silently desync the
+        // grade from the delivery with no compile error). This test fails if the IMPACT kernel's positional axis
+        // contract or the canonical delivery row's named axes drift apart, so the by-convention lockstep is no
+        // longer untested. The role map: grade `material_axes` [strength, yield, modulus] and `geometry_axes`
+        // [cross_section, stroke] must name the delivery row's `strength_axis` / `yield_axis` /
+        // `elastic_modulus_axis` / `cross_section_axis` / `stroke_axis`. The full named-vs-positional UNIFICATION
+        // (so the lockstep is mechanically enforced, not test-pinned) stays the gate-deferred follow-on.
+        use civsim_compose::{CapabilityKernel, FunctionLawDef, FunctionLawRegistry};
+        let grade = FunctionLawDef::new(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+        );
+        let row = ContactTransferRegistry::dev_terran()
+            .get(DEV_KINETIC)
+            .expect("kinetic row")
+            .clone();
+        assert_eq!(
+            grade.material_axes.first().map(String::as_str),
+            Some(row.strength_axis.as_str()),
+            "grade strength axis (material_axes[0]) matches the delivery row strength_axis"
+        );
+        assert_eq!(
+            grade.geometry_axes.first().map(String::as_str),
+            Some(row.cross_section_axis.as_str()),
+            "grade cross-section axis (geometry_axes[0]) matches the delivery row cross_section_axis"
+        );
+        assert_eq!(
+            grade.geometry_axes.get(1).map(String::as_str),
+            Some(row.stroke_axis.as_str()),
+            "grade stroke axis (geometry_axes[1]) matches the delivery row stroke_axis"
+        );
+        assert_eq!(
+            grade.material_axes.get(1).map(String::as_str),
+            Some(row.yield_axis.as_str()),
+            "grade yield axis (material_axes[1]) matches the delivery row yield_axis"
+        );
+        assert_eq!(
+            grade.material_axes.get(2).map(String::as_str),
+            Some(row.elastic_modulus_axis.as_str()),
+            "grade modulus axis (material_axes[2]) matches the delivery row elastic_modulus_axis"
+        );
+    }
 }

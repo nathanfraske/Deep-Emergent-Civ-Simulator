@@ -1003,13 +1003,23 @@ pub const CUT: AffordanceId = AffordanceId(10);
 /// physics not a tag. The id sits just past CUT, within the belief-subject packing bound.
 pub const CRUSH: AffordanceId = AffordanceId(11);
 
-/// The pound affordance (the made-world arc, tool-use, Section G, the mass payoff): a tool-CONTRIBUTED
-/// affordance granted by a WIELDED tool with enough MASS, capability-gated on IMPACT (a percussion blow's
-/// kinetic energy). Named POUND to avoid the body-weapon [`STRIKE`] (id 2); this is the TOOL percussion, a
-/// hammering blow. Distinct from the contact actions (cut/crush/pierce): those read only geometry and stress,
-/// so they cannot tell a heavy tool from a light one of the same shape; IMPACT reads the tool's mass, so a
-/// HEAVY tool affords a pound a light one does not, the payoff of carrying the tool's mass. The id sits just
-/// past CRUSH, within the belief-subject packing bound.
+/// The pound affordance (the made-world arc, tool-use, Section G): a tool-CONTRIBUTED affordance granted by a
+/// WIELDED tool, capability-gated on IMPACT (a percussion blow's delivered energy). Named POUND to avoid the
+/// body-weapon [`STRIKE`] (id 2); this is the TOOL percussion, a hammering blow. Distinct from the contact
+/// actions (cut/crush/pierce), which read only geometry and stress. The id sits just past CRUSH, within the
+/// belief-subject packing bound.
+///
+/// FLAGGED PRE-EXISTING SEAM (a section-9 catch, stroke-rate step 2): the stroke-rate STEP 1 retired the
+/// mass-based IMPACT (this doc formerly read "IMPACT reads the tool's mass, so a heavy tool affords a pound a
+/// light one does not") and made the IMPACT kernel read the ACTUATOR's `mech.cross_section_area` and
+/// `mech.stroke_length` (its `F d` work). But [`crate::affordance_percept::tool_capability`]'s accessor still
+/// exposes `mech.contact_area` and `mech.mass`, not those actuator axes, so a wielded tool's IMPACT grade now
+/// reads ZERO and POUND is unsatisfiable via a tool (the `mass` read is dead: no capability kernel reads
+/// `mech.mass`). This is off every pinned scenario (POUND lives only in the `dev_striker` test fixture, never
+/// installed by `run_world`), so it moves no pin, but it is a real broken affordance. The design question it
+/// raises (a tool has no actuator of its own, so a tool's percussion energy is the WIELDER's `F d` concentrated
+/// over the tool's contact area, not the tool's own actuator work) is flagged for the gate: POUND should gate on
+/// the wielder's delivered energy concentrated by the tool, not the tool's own (absent) actuator IMPACT.
 pub const POUND: AffordanceId = AffordanceId(12);
 
 /// The maximum capability the body's parts read on one function law, DERIVED from each part's geometry
