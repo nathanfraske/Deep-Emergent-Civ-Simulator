@@ -170,6 +170,20 @@ north pole takes the midnight sun at the summer solstice (orbital phase 1/4, lit
 reference pole stays dark, reverses to polar night half a year on while the south pole takes the sun, and the equator's
 diurnal swing survives the season. The living demo now arms `mirror` and reads out the pole-vs-equator latitude
 structure, where the warming pole reverses as the orbital phase advances. All four determinism pins hold bit-exact
-(default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The remaining sibling follow-on is per-material
-emissivity and thermal inertia (the (ii) completion), which reads the material floor's absorption/heat-capacity axes
-rather than the uniform dev-fixture emissivity, and after it the corrected Nernst uptake-flux.
+(default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82).
+
+BUILT (follow-on 2, per-material THERMAL INERTIA). The (ii) completion is built on the gate's ruling: a `SurfaceThermal`
+registry (fixed Rust reading the floor `mat.density * therm.specific_heat` per material, membership as data:
+substrate, water, ice, with the reserved dev-fixture Earth values surfaced) derives each armed cell's thermal-inertia
+factor from its OWN real state, the soil moisture plus the standing-water saturation plus the freeze read (water below
+its melting temperature reads ice), blended with no lookup. The factor (one for bone-dry land, below one for damp or
+water-laden cells) scales A's `Field::step` relaxation-plus-diffusion through an additive optional per-cell inertia
+field (`Field::set_inertia_from`, `None` by default so the step is byte-identical unarmed), so a wetter cell lags and
+swings less than drier land, the ocean and damp-soil effect, emergent from the cell's water content. The `living`
+equatorial-band readout shows it (drier land ~13-16 K day-night swing versus wetter ~7-9 K). Byte-neutral: armed only in
+`living`, all four pins hold bit-exact. The EMISSIVITY stays uniform on the gate's ruling: the real radiative
+differentiator is per-cell ALBEDO (shortwave solar absorptivity, a different axis from the longwave thermal
+emissivity, so a single grey-body per-cell emissivity partly cancels), which lands with A's `radiative_equilibrium`
+floor law and the two-sided-Kirchhoff correctness question as a separate follow-on. The remaining siblings: per-cell
+albedo on A's radiative law; the full per-column LITHOLOGY substrate (varying the dry substrate, the geodynamics arc);
+back_radiation from atmospheric greenhouse optical depth; and then the corrected Nernst uptake-flux.

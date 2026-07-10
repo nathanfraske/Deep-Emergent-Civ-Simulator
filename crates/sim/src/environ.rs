@@ -348,6 +348,14 @@ pub struct EnvironFields {
     /// baseline, and the field's existing relaxation-plus-diffusion produces the emergent surface swing and
     /// thermal lag. EMPTY when the cycle is unarmed (no copy happens, the field baseline stands, byte-identical).
     solar_baseline: Vec<Fixed>,
+    /// The per-cell THERMAL-INERTIA FACTOR the diurnal drive computes each armed tick (follow-on 2): the ratio
+    /// of the dry substrate's volumetric heat capacity to the cell's own, blended from the cell's real water
+    /// fraction and freeze state ([`SurfaceThermal::inertia_factor`]). The runner copies it into the temperature
+    /// `Field`, whose relaxation-plus-diffusion step scales by it, so a water-laden cell lags and swings less
+    /// than dry land (the ocean effect), emergent from the cell's own water content. A dry cell reads one, so
+    /// its dynamics are unchanged. EMPTY when the cycle is unarmed (the field's inertia stays absent, and its
+    /// step is byte-identical to the uniform pre-follow-on kernel).
+    solar_inertia: Vec<Fixed>,
 }
 
 /// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
@@ -767,6 +775,7 @@ impl EnvironFields {
             sky: None,
             diurnal_tick: 0,
             solar_baseline: Vec::new(),
+            solar_inertia: Vec::new(),
         }
     }
 
@@ -785,7 +794,7 @@ impl EnvironFields {
     /// light and is byte-identical. The phase is the counter modulo the sidereal rotation period, the orbital
     /// phase the counter modulo the orbital period, and each cell's light is [`insolation_at`] over the world's
     /// star-list. Deterministic (a pure fold over the counter and the cell coordinate), so it replays.
-    fn step_insolation(&mut self) {
+    fn step_insolation(&mut self, temp: &Field) {
         let Some(sky) = self.sky.clone() else {
             return; // the cycle is unarmed: the static latitude light stands, byte-identical.
         };
@@ -798,8 +807,12 @@ impl EnvironFields {
             (self.diurnal_tick % sky.orbital_period_ticks) as i64,
             sky.orbital_period_ticks as i64,
         );
-        if self.solar_baseline.len() != (w.max(0) as usize) * (h.max(0) as usize) {
-            self.solar_baseline = vec![Fixed::ZERO; (w.max(0) as usize) * (h.max(0) as usize)];
+        let n = (w.max(0) as usize) * (h.max(0) as usize);
+        if self.solar_baseline.len() != n {
+            self.solar_baseline = vec![Fixed::ZERO; n];
+        }
+        if self.solar_inertia.len() != n {
+            self.solar_inertia = vec![Fixed::ONE; n];
         }
         for y in 0..h {
             for x in 0..w {
@@ -811,7 +824,8 @@ impl EnvironFields {
                 // floor so the night side relaxes toward a retained temperature (airless zero, Earth mild,
                 // Venus high) rather than absolute zero. The radiative-equilibrium law returns the surface
                 // temperature of that absorbed flux; the field's relaxation-plus-diffusion then produces the
-                // emergent swing and lag. The per-material emissivity read is the flagged follow-on.
+                // emergent swing and lag. The emissivity stays uniform (the per-material radiative
+                // differentiation is per-cell ALBEDO, a separate flagged follow-on on the floor law).
                 let absorbed = insol
                     .checked_mul(sky.solar_constant)
                     .unwrap_or(Fixed::MAX)
@@ -821,6 +835,17 @@ impl EnvironFields {
                     sky.emissivity,
                     sky.sigma,
                     sky.t_max,
+                );
+                // The per-material THERMAL INERTIA (follow-on 2): the cell's own soil moisture and standing-water
+                // depth, with its current temperature (the freeze read), blend the substrate with water or ice,
+                // and the factor (one for bone-dry land, below one for damp or water-laden cells) scales how fast
+                // the field relaxes and diffuses, so a water-laden cell lags and swings less than dry land. A dry
+                // cell reads one, so its dynamics are unchanged. The frozen state reads the field's current
+                // temperature, a one-tick lag the deterministic replay preserves.
+                self.solar_inertia[i] = sky.surface.inertia_factor(
+                    self.water.at(x, y),
+                    self.moisture[i],
+                    temp.at(x, y),
                 );
             }
         }
@@ -861,6 +886,31 @@ impl EnvironFields {
             .get(self.idx(x, y))
             .copied()
             .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Copy the armed diurnal per-cell THERMAL-INERTIA factor into the temperature field (follow-on 2), so the
+    /// field's relaxation-plus-diffusion step scales by it and a water-laden cell lags and swings less than dry
+    /// land. A no-op when the cycle is unarmed (the field's inertia stays absent and its step is byte-identical
+    /// to the uniform pre-follow-on kernel). Called by the runner each tick after [`Self::step`], the sibling of
+    /// [`Self::apply_diurnal_baseline`]; a dry cell's factor is one, so only water-laden cells change.
+    pub fn apply_diurnal_inertia(&self, field: &mut Field) {
+        if !self.is_diurnal_armed() {
+            return;
+        }
+        field.set_inertia_from(&self.solar_inertia);
+    }
+
+    /// The per-cell thermal-inertia factor the armed diurnal drive computed this tick (follow-on 2): one for
+    /// dry land, below one for a water-laden cell (slower, lagging). Reads one for an off-grid cell or an
+    /// unarmed run (no slowing, the byte-neutral baseline).
+    pub fn solar_inertia_at(&self, x: i32, y: i32) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return Fixed::ONE;
+        }
+        self.solar_inertia
+            .get(self.idx(x, y))
+            .copied()
+            .unwrap_or(Fixed::ONE)
     }
 
     #[inline]
@@ -938,7 +988,7 @@ impl EnvironFields {
     /// is the runner's diffused [`Field`], sized to the same grid. The standing stock itself is regrown
     /// and grazed through [`Self::regrow_supply`] against this capacity, not here.
     pub fn step(&mut self, temp: &Field, calib: &EnvironCalib) {
-        self.step_insolation();
+        self.step_insolation(temp);
         self.step_hydrology(temp, calib);
         self.step_salinity(calib);
         self.step_productivity(temp, calib);
@@ -1567,6 +1617,112 @@ pub struct Star {
     pub phase_offset: Fixed,
 }
 
+/// The world's SURFACE-MATERIAL thermal data for the per-material heat effect (day-night arc, follow-on 2):
+/// the volumetric heat capacities (`rho * c_p`, the `mat.density * therm.specific_heat` floor product) of the
+/// three surface thermal materials a cell blends by its REAL state, and the water freezing temperature. Fixed
+/// Rust mechanism, data membership (Principle 11): the mechanism blends and derives the per-cell thermal
+/// inertia, these values are per-world data. The membership is deliberately the three the cell's own state can
+/// distinguish without a lookup: the dry SUBSTRATE, standing WATER, and its frozen form ICE, blended by the
+/// cell's water fraction and freeze state (the derive-from-real-state form the gate ruled). The full per-cell
+/// lithology (rock versus sand versus clay varying the dry substrate) is a separate flagged substrate arc
+/// (the geodynamics per-column lithology field), not faked here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceThermal {
+    /// The dry substrate's volumetric heat capacity `rho * c_p` (J/(m^3*K)). The REFERENCE material: a
+    /// bone-dry cell reads exactly this, so its inertia factor is one and its heat dynamics are unchanged.
+    /// RESERVED, owner-set from the floor `mat.density * therm.specific_heat` of the world's default dry
+    /// surface material (dev fixture: dry mineral soil, ~1.2e6, CRC soil-property tables).
+    pub substrate: Fixed,
+    /// Standing WATER's volumetric heat capacity `rho * c_p` (J/(m^3*K)). Larger than the substrate, so a
+    /// water-laden cell (an ocean or a filled basin) has a higher thermal inertia and lags: the ocean's small
+    /// diurnal swing versus dry land's large one, emergent from the cell's own water content. RESERVED, from
+    /// the floor water profile (dev fixture: ~4.182e6, water rho 1000 * c_p 4182, CRC).
+    pub water: Fixed,
+    /// ICE's volumetric heat capacity `rho * c_p` (J/(m^3*K)), read for a cell whose water has frozen (its
+    /// temperature is below `freeze_temp`), so a frozen surface lags by ice's inertia rather than water's.
+    /// RESERVED, from the floor ice profile (dev fixture: ~1.919e6, ice rho 917 * c_p 2093, CRC).
+    pub ice: Fixed,
+    /// The water FREEZING temperature (K): below it a cell's standing water is ice (the [`therm.melting_temperature`]
+    /// floor phase boundary, read as data, not an authored branch). RESERVED, from the floor water melting point
+    /// (dev fixture: 273.15 K, Mirror's real value).
+    pub freeze_temp: Fixed,
+    /// The standing-water depth at which a cell reads HALF water inertia, the half-saturation of the water
+    /// fraction `w = depth / (depth + water_reference)` (a Michaelis saturation, the same shape the salinity
+    /// dilution uses): a dry cell (no standing water) is all substrate, a deep basin or ocean saturates toward
+    /// all water. RESERVED, owner-set against the hydrology's standing-water depth scale (the depth marking a
+    /// water-dominated cell); dev fixture at unit depth. Its own value, not the salinity dilution reference (a
+    /// different quantity), so the thermal fraction keys off its own basis.
+    pub water_reference: Fixed,
+}
+
+impl SurfaceThermal {
+    /// The LABELLED dev-fixture surface thermal materials (Earth-like), the reserved values surfaced for the
+    /// owner, not decided here: the dry-soil, water, and ice volumetric heat capacities, the water freezing
+    /// point, and the standing-water half-saturation depth. A calibrated world reads the heat capacities from
+    /// the floor `mat.density * therm.specific_heat` per material; an alien world (a methane ocean, an ammonia
+    /// crust) is a data row.
+    pub fn dev_fixture() -> SurfaceThermal {
+        SurfaceThermal {
+            substrate: Fixed::from_int(1_200_000),
+            water: Fixed::from_int(4_182_000),
+            ice: Fixed::from_int(1_919_000),
+            freeze_temp: Fixed::from_ratio(27315, 100),
+            water_reference: Fixed::ONE,
+        }
+    }
+
+    /// The per-cell THERMAL INERTIA FACTOR (day-night arc, follow-on 2): the ratio of the dry substrate's
+    /// volumetric heat capacity to the cell's own, `substrate / c_cell`, where the cell's heat capacity blends
+    /// the substrate with its water (or ice, when frozen) by the cell's water FRACTION,
+    /// `c_cell = (1 - w) * substrate + w * c_liquid`. The fraction combines the cell's TWO real water signals:
+    /// its worldgen soil MOISTURE (`[0, 1]`, damp soil already holds thermal mass) and the Michaelis saturation
+    /// of its standing-water DEPTH (`depth / (depth + water_reference)`, a lake or ocean over the top),
+    /// `w = moisture + (1 - moisture) * standing`, so standing water saturates the remaining dry fraction: dry
+    /// desert reads near zero (all substrate), damp soil lags, and a filled basin saturates toward all water. A
+    /// bone-dry cell (`moisture = 0`, no standing water) reads exactly one, so scaling its heat dynamics by this
+    /// factor leaves them unchanged; a water-laden cell reads below one, so its relaxation and diffusion slow
+    /// and it lags and swings less (the ocean and damp-soil effect), emergent from the cell's real water content
+    /// and temperature and the floor material data, no authored lookup. The factor is clamped at one (a dry cell
+    /// is the fastest, the lowest heat capacity, which the material ordering guarantees and which also holds the
+    /// diffusion stencil inside its stability bound). A pure fixed-point function of the cell's own state; the
+    /// freeze read keys off the material's floor melting temperature, so a frozen surface lags by ice, never by
+    /// a label (Principles 3, 8, 9).
+    pub fn inertia_factor(&self, water_depth: Fixed, moisture: Fixed, cell_temp: Fixed) -> Fixed {
+        // The standing-water saturation, the Michaelis fraction of the depth, in `[0, 1)`.
+        let depth = water_depth.max(Fixed::ZERO);
+        let denom = depth.saturating_add(self.water_reference);
+        let standing = if denom > Fixed::ZERO {
+            depth.div(denom).clamp(Fixed::ZERO, Fixed::ONE)
+        } else {
+            Fixed::ZERO
+        };
+        // The combined water fraction: soil moisture, with standing water saturating the remaining dry
+        // fraction. A bone-dry cell (no moisture, no standing water) is zero, so its factor is exactly one.
+        let moist = moisture.clamp(Fixed::ZERO, Fixed::ONE);
+        let w = moist
+            .saturating_add(
+                (Fixed::ONE - moist)
+                    .checked_mul(standing)
+                    .unwrap_or(standing),
+            )
+            .clamp(Fixed::ZERO, Fixed::ONE);
+        let c_liquid = if cell_temp < self.freeze_temp {
+            self.ice
+        } else {
+            self.water
+        };
+        let dry = Fixed::ONE - w;
+        let c_cell = dry
+            .checked_mul(self.substrate)
+            .unwrap_or(self.substrate)
+            .saturating_add(w.checked_mul(c_liquid).unwrap_or(c_liquid));
+        if c_cell <= Fixed::ZERO {
+            return Fixed::ONE; // a degenerate zero heat capacity: no slowing (the substrate-absence convention).
+        }
+        self.substrate.div(c_cell).min(Fixed::ONE)
+    }
+}
+
 /// The world's DATA sky: the star-list and the orbital geometry the diurnal insolation reads. Fixed Rust law,
 /// data membership; the default is the zero-obliquity single-star reference world.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1602,6 +1758,10 @@ pub struct DiurnalSky {
     pub sigma: Fixed,
     /// The representability cap the radiative-equilibrium kernel clamps its output temperature to.
     pub t_max: Fixed,
+    /// The world's SURFACE-MATERIAL thermal data (follow-on 2): the volumetric heat capacities the per-cell
+    /// thermal-inertia factor blends by a cell's real water fraction and freeze state, so ice, water, and dry
+    /// substrate lag and swing differently. Per-world data; the reference uses the dev fixture.
+    pub surface: SurfaceThermal,
 }
 
 impl DiurnalSky {
@@ -1627,6 +1787,7 @@ impl DiurnalSky {
             emissivity: Fixed::from_ratio(95, 100),
             sigma: Fixed::from_ratio(567, 10_000_000_000),
             t_max: Fixed::from_int(500),
+            surface: SurfaceThermal::dev_fixture(),
         }
     }
 
@@ -1785,6 +1946,7 @@ mod tests {
             sky: None,
             diurnal_tick: 0,
             solar_baseline: Vec::new(),
+            solar_inertia: Vec::new(),
         }
     }
 
@@ -1958,6 +2120,49 @@ mod tests {
         assert!(
             day > night,
             "the daylit side is warmer than the dark side ({day:?} vs {night:?})"
+        );
+    }
+
+    #[test]
+    fn surface_thermal_inertia_makes_water_lag_and_freezing_shifts_to_ice() {
+        // The per-material thermal inertia (follow-on 2): a DRY cell reads exactly one, so its heat dynamics
+        // are unchanged (the byte-neutral baseline); a WATER-laden cell reads below one, so it lags; and a
+        // frozen cell reads ice's inertia (a smaller heat capacity than liquid water), so it lags LESS than the
+        // same cell unfrozen. All emergent from the cell's own water depth and temperature, no label.
+        let s = SurfaceThermal::dev_fixture();
+        let warm = Fixed::from_int(300); // above freezing: standing water is liquid
+        let cold = Fixed::from_int(260); // below 273.15 K: the water is ice
+        let deep = Fixed::from_int(50); // a deep basin or ocean, far past the half-saturation depth
+        let dry_soil = Fixed::ZERO; // no soil moisture
+        let full_soil = Fixed::ONE; // saturated soil
+
+        let dry = s.inertia_factor(Fixed::ZERO, dry_soil, warm);
+        assert_eq!(
+            dry,
+            Fixed::ONE,
+            "a bone-dry cell reads exactly one (its dynamics are unchanged), got {dry:?}"
+        );
+        // Soil moisture alone (no standing water) already lags: damp soil holds thermal mass.
+        let damp = s.inertia_factor(Fixed::ZERO, Fixed::from_ratio(1, 2), warm);
+        assert!(
+            damp < dry,
+            "damp soil lags below dry land even with no standing water (damp {damp:?}, dry {dry:?})"
+        );
+        let wet = s.inertia_factor(deep, full_soil, warm);
+        assert!(
+            wet < damp,
+            "a water-laden cell lags more than merely damp soil (water {wet:?}, damp {damp:?})"
+        );
+        let frozen = s.inertia_factor(deep, full_soil, cold);
+        assert!(
+            wet < frozen && frozen < Fixed::ONE,
+            "ice's smaller heat capacity lags less than liquid water but still more than dry land (liquid {wet:?}, ice {frozen:?})"
+        );
+        // Monotone in soil moisture: more moisture, more inertia, more lag.
+        let a_little = s.inertia_factor(Fixed::ZERO, Fixed::from_ratio(1, 4), warm);
+        assert!(
+            damp < a_little && a_little < Fixed::ONE,
+            "more soil moisture lags more (quarter-moist {a_little:?}, half-moist {damp:?})"
         );
     }
 

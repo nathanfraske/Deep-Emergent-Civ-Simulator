@@ -403,6 +403,13 @@ pub struct Field {
     height: i32,
     temp: Vec<Fixed>,
     baseline: Vec<Fixed>,
+    /// The optional per-cell THERMAL-INERTIA factor (day-night arc, follow-on 2), in `(0, 1]`: a scale on the
+    /// per-tick relaxation-plus-diffusion change, so a high-inertia (water-laden) cell moves toward its
+    /// baseline more slowly and lags. `None` by default, in which case [`Field::step`] runs the uniform
+    /// pre-follow-on kernel unchanged (byte-identical); the diurnal drive sets it ([`Field::set_inertia_from`])
+    /// only when a run arms the cycle, so the field is bit-identical when the cycle is unarmed. A dry cell's
+    /// factor is one, so even when armed only water-laden cells change.
+    inertia: Option<Vec<Fixed>>,
 }
 
 impl Field {
@@ -421,6 +428,7 @@ impl Field {
             height,
             temp: baseline.clone(),
             baseline,
+            inertia: None,
         }
     }
 
@@ -446,6 +454,19 @@ impl Field {
         }
         let i = (y * self.width + x) as usize;
         self.baseline[i] = baseline;
+    }
+
+    /// Set the per-cell THERMAL-INERTIA factor field (day-night arc, follow-on 2), the additive coupling the
+    /// diurnal drive uses to make water lag rock. Each factor in `(0, 1]` scales that cell's per-tick
+    /// relaxation-plus-diffusion change in [`Field::step`], so a water-laden cell (factor below one) moves
+    /// toward its baseline more slowly. A slice of the wrong length is ignored (defensive), leaving the field
+    /// on its uniform kernel. Unused unless a run arms the diurnal cycle, so the field is byte-identical when
+    /// the cycle is unarmed (the inertia stays `None` and the step runs the pre-follow-on expression).
+    pub fn set_inertia_from(&mut self, inertia: &[Fixed]) {
+        if inertia.len() != self.temp.len() {
+            return;
+        }
+        self.inertia = Some(inertia.to_vec());
     }
 
     /// The field seeded from a generated map's per-tile temperatures, mapping the worldgen's NORMALISED
@@ -568,6 +589,11 @@ impl Field {
         // read of the immutable snapshot.
         let temp = &self.temp;
         let baseline = &self.baseline;
+        // The optional per-cell thermal-inertia factor (day-night arc, follow-on 2). `None` runs the uniform
+        // pre-follow-on kernel unchanged (the `None` arm below is textually the original expression, so it is
+        // byte-identical); `Some` scales each cell's relaxation-plus-diffusion change by its factor, so a
+        // water-laden cell (factor below one) lags. A dry cell's factor is one, which leaves its change exact.
+        let inertia = self.inertia.as_deref();
         next.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             for x in 0..w {
                 let i = y * w + x;
@@ -578,7 +604,10 @@ impl Field {
                 let rt = temp[if x < w - 1 { i + 1 } else { i }];
                 let lap = up + dn + lf + rt - Fixed::from_int(4).mul(cur);
                 let relax = baseline[i] - cur;
-                row[x] = cur + c.diffusion.mul(lap) + c.relaxation.mul(relax);
+                row[x] = match inertia {
+                    Some(v) => cur + v[i].mul(c.diffusion.mul(lap) + c.relaxation.mul(relax)),
+                    None => cur + c.diffusion.mul(lap) + c.relaxation.mul(relax),
+                };
             }
         });
         self.temp = next;
@@ -3599,6 +3628,10 @@ impl Runner {
             // fields (environ read, field write), after the environ step that produced the baseline.
             if let Some((env, _)) = self.environ.as_ref() {
                 env.apply_diurnal_baseline(&mut self.field);
+                // The per-material THERMAL INERTIA (follow-on 2): copy the environ's per-cell inertia factor
+                // into the field so its relaxation-plus-diffusion slows on water-laden cells and water lags
+                // rock. A no-op (byte-identical) when the cycle is unarmed; a dry cell's factor is one.
+                env.apply_diurnal_inertia(&mut self.field);
             }
         }
         {
@@ -6289,6 +6322,42 @@ source = "test"
         assert!(
             air_edge > water_edge,
             "air's faster medium diffusion spreads more heat in one step than water's ({air_edge:?} > {water_edge:?})"
+        );
+    }
+
+    #[test]
+    fn the_per_cell_thermal_inertia_slows_the_field_and_a_unit_factor_is_byte_identical() {
+        // The per-material thermal inertia (day-night arc, follow-on 2): a cell relaxes toward its baseline,
+        // and scaling by an inertia factor below one slows that approach (the cell lags), while a factor of
+        // exactly one (a dry cell) leaves the step BIT-IDENTICAL to the uniform pre-follow-on kernel. A single
+        // cell at 300 K with a 400 K baseline, relaxing, no diffusion.
+        let calib = FieldCalib {
+            diffusion: Fixed::ZERO,
+            relaxation: Fixed::from_ratio(1, 4),
+            exchange: Fixed::ZERO,
+        };
+        let start = Fixed::from_int(300);
+        let base = Fixed::from_int(400);
+        let step_with = |inertia: Option<Vec<Fixed>>| -> Fixed {
+            let mut f = Field::new(1, 1, vec![base]);
+            f.temp[0] = start;
+            if let Some(v) = inertia {
+                f.set_inertia_from(&v);
+            }
+            f.step(&calib);
+            f.at(0, 0)
+        };
+        let uniform = step_with(None);
+        let unit = step_with(Some(vec![Fixed::ONE]));
+        assert_eq!(
+            uniform, unit,
+            "a unit inertia factor is byte-identical to the uniform kernel ({uniform:?} vs {unit:?})"
+        );
+        // A high-inertia (water-laden) cell moves LESS toward the baseline in one step: it lags.
+        let lagged = step_with(Some(vec![Fixed::from_ratio(1, 4)]));
+        assert!(
+            lagged < uniform && lagged > start,
+            "a below-one inertia factor slows the approach so the cell lags (lagged {lagged:?}, full {uniform:?}, start {start:?})"
         );
     }
 
