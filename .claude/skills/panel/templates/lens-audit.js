@@ -12,13 +12,20 @@ export const meta = {
   phases: [{ title: 'Review', detail: 'six independent lens panelists' }, { title: 'Verify', detail: 'adversarial per-finding verification against source' }],
 }
 
+// The harness may deliver `args` as a JSON STRING rather than a parsed object; normalize either way so the
+// audit context actually reaches the panelists (a silent empty context makes them audit nothing).
+let A = args
+if (typeof A === 'string') {
+  try { A = JSON.parse(A) } catch (e) { A = {} }
+}
+
 const CONTEXT = `
 You are auditing a change to a deterministic emergent-world simulator (Rust). Read the ACTUAL source; do not
 trust any summary. Report only findings you can tie to a specific file:line in the current source; if you
 cannot substantiate a finding against source, do not report it.
 
 CHANGE UNDER AUDIT:
-${(args && args.context) || '(no context provided in args.context; run `git diff` and read the changed files)'}
+${(A && A.context) || '(no context provided in args.context; run `git diff` and read the changed files)'}
 `
 
 const FINDING_SCHEMA = {

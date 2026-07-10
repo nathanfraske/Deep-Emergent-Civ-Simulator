@@ -1679,6 +1679,7 @@ fn integrity_thermal_registry() -> HomeostaticRegistry {
         base_drain: Fixed::ZERO,
         exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_ratio(1, 32),
+        draw_set: Vec::new(),
     });
     reg
 }
@@ -1829,6 +1830,7 @@ fn aging_homeo() -> HomeostaticRegistry {
         base_drain: Fixed::ZERO,
         exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_ratio(1, 8),
+        draw_set: Vec::new(),
     });
     reg
 }
@@ -1876,18 +1878,19 @@ fn aging_race(fracture_energy: Fixed) -> Race {
     let mut effects = vec![Fixed::ZERO; 3];
     // The same limb seed the viability race grows (a section modulus, arm length, and bony yield with a
     // blunt tip), so the founder reads LOCOMOTE and its wear drive (force and slide distance) is positive;
-    // PLUS a full metabolic tissue (energy density and water fraction, the last two composition params by
-    // the `param_count() - 2` / `- 1` convention) so the founders carry ample energy and water reserves and
-    // do not starve or dehydrate before aging kills them (isolating the first-passage cause).
-    // The composition params (convective_surface, fracture_strength, specific_heat, energy_density,
-    // water_fraction) follow the geometry (2 params each) and material params, then the 2 spawn/branch
-    // params. fracture_strength IS physiology::MUSCLE_STRENGTH, so seeding it gives the being a positive
-    // muscle force (the Archard wear drive; a zero-muscle body exerts no load and never wears). Energy and
-    // water are the last two (the `param_count() - 2` / `- 1` convention), so a full metabolic tissue.
-    let comp_base = program.geometry_axes.len() * 2 + program.material_axes.len() + 2;
-    let muscle = MorphogenParamId((comp_base + 1) as u32); // composition index 1 = fracture_strength
-    let energy_density = MorphogenParamId(program.param_count() as u32 - 2);
-    let water_fraction = MorphogenParamId(program.param_count() as u32 - 1);
+    // PLUS a full metabolic tissue (energy density and water fraction) so the founders carry ample energy and
+    // water reserves and do not starve or dehydrate before aging kills them (isolating the first-passage
+    // cause). The composition axes (convective_surface, fracture_strength, specific_heat, energy_density,
+    // water_fraction) are addressed through the program's own `composition_param` accessor, so this fixture
+    // stays correct as more param categories are appended (the stroke-rate actuator block now follows
+    // composition; a `param_count() - 2` / `- 1` address would point at it, not at energy/water). Composition
+    // index 1 IS physiology::MUSCLE_STRENGTH (fracture_strength), so seeding it gives the being a positive
+    // muscle force (the Archard wear drive; a zero-muscle body exerts no load and never wears); the last two
+    // composition axes are energy density and water fraction.
+    let comp = program.composition_axes.len();
+    let muscle = MorphogenParamId(program.composition_param(1) as u32); // fracture_strength
+    let energy_density = MorphogenParamId(program.composition_param(comp - 2) as u32);
+    let water_fraction = MorphogenParamId(program.composition_param(comp - 1) as u32);
     let morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
         (MorphogenParamId(0), Fixed::ONE),
         (MorphogenParamId(1), Fixed::from_ratio(1, 2)),
@@ -2036,12 +2039,15 @@ fn fully_grown_race(nourished: bool, physiological: bool) -> Race {
     // A limb (a coherent body); the composition params sit after spawn, the physiology axes (convective
     // surface, muscle strength, specific heat) leading the energy density and water fraction the reserves
     // back. `nourished` seeds the reserves; `physiological` additionally seeds the derived-physiology tissue,
-    // so a body grows an exchange surface, muscle, and thermal mass the run reads.
-    let surface = program.param_count() - 5;
-    let muscle = program.param_count() - 4;
-    let specific_heat = program.param_count() - 3;
-    let energy = program.param_count() - 2;
-    let water = program.param_count() - 1;
+    // so a body grows an exchange surface, muscle, and thermal mass the run reads. Addressed through the
+    // program's own `composition_param` accessor (not `param_count()`-relative, which the appended actuator
+    // block would shift), so the fixture stays correct as more param categories are added.
+    let comp = program.composition_axes.len();
+    let surface = program.composition_param(comp - 5);
+    let muscle = program.composition_param(comp - 4);
+    let specific_heat = program.composition_param(comp - 3);
+    let energy = program.composition_param(comp - 2);
+    let water = program.composition_param(comp - 1);
     let mut morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
         (MorphogenParamId(0), Fixed::ONE),
         (MorphogenParamId(1), Fixed::from_ratio(1, 2)),

@@ -45,6 +45,7 @@
 use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
+use civsim_physics::DepletionCharacter;
 
 use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawId, FunctionLawRegistry,
@@ -59,6 +60,61 @@ use crate::stocks::Stock;
 /// per-being reserves.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct HomeostaticAxisId(pub u16);
+
+/// How a draw term bridges its source axis's supply to reserve-fillable content (R-SOURCE-VECTOR). A
+/// matter term keeps the per-being `food_energy_density` bridge unchanged (gate rule (i): the matter
+/// unit is R-UNITS-PIN's territory, unmoved this arc); a field-and-gradient feeder term carries its own
+/// per-axis unit, so a photovore's flux and a grazer's tissue bridge to reserve content through the same
+/// fold with no branch on any source kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnitBridge {
+    /// The matter path's per-being content bridge (`supply * food_energy_density`), unchanged this arc.
+    MatterPerBeing,
+    /// A feeder axis's own unit: supply bridges to content by this per-axis factor.
+    Feeder(Fixed),
+}
+
+impl UnitBridge {
+    /// The reserve-fillable content a `supply` of the source implies, bridged by this term's unit. The
+    /// matter bridge reads the per-being `food_energy_density`; a feeder its own per-axis unit. An
+    /// overflow reads `MAX` (an effectively unbounded content), mirroring the matter path's convention.
+    pub fn content(&self, supply: Fixed, food_energy_density: Fixed) -> Fixed {
+        let unit = match self {
+            UnitBridge::MatterPerBeing => food_energy_density,
+            UnitBridge::Feeder(u) => *u,
+        };
+        supply.checked_mul(unit).unwrap_or(Fixed::MAX)
+    }
+
+    /// The source supply a `content` came from, the inverse of [`UnitBridge::content`], used to deplete a
+    /// depletable stock by exactly what was drawn. A zero unit (a degenerate bridge) reads the content
+    /// through, mirroring the matter path's `unwrap_or`.
+    pub fn supply(&self, content: Fixed, food_energy_density: Fixed) -> Fixed {
+        let unit = match self {
+            UnitBridge::MatterPerBeing => food_energy_density,
+            UnitBridge::Feeder(u) => *u,
+        };
+        content.checked_div(unit).unwrap_or(content)
+    }
+}
+
+/// One term of a reserve's draw over the floor's source axes (R-SOURCE-VECTOR): the source-axis class it
+/// reads, how its supply bridges to reserve content, and whether drawing DEPLETES the source (cached from
+/// the axis's floor depletion-character at build, so the deplete step reads no threaded registry on the
+/// hot path). A matter reserve's draw is the SINGLETON derived from its `backing_component`; a mixotroph's
+/// is a multi-term set (light plus tissue); a photovore's a singleton flux axis. The fold over the set is
+/// the fixed mechanism; the membership is data and grows with the world.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DrawTerm {
+    /// The floor source-axis class this term reads (`bio.energy_density`, a light-flux axis, and the rest
+    /// a world declares), the `resources.supply` / `Substance::vector` key.
+    pub class: String,
+    /// How this term's supply bridges to reserve-fillable content.
+    pub unit_bridge: UnitBridge,
+    /// Whether drawing this term depletes the source, cached from the source axis's floor character so the
+    /// deplete step keys on the conservation law of the quantity, never on a source kind.
+    pub depletion: DepletionCharacter,
+}
 
 /// One homeostatic axis as data: how a body's reserve of this quantity drains and what keeps it
 /// viable. Membership grows with the world (Principle 11): a world adds an axis without touching the
@@ -96,6 +152,13 @@ pub struct HomeostaticAxisDef {
     /// dies. RESERVED. Basis: the physiological reserve at which the body can no longer function,
     /// per axis (Part 20 death conditions).
     pub death_floor: Fixed,
+    /// The reserve's explicit draw over the floor's source axes (R-SOURCE-VECTOR). EMPTY for every
+    /// current reserve: an empty set means the reserve draws the SINGLETON derived from
+    /// `backing_component` (the matter default, a depletable stock on the per-being bridge), so an
+    /// existing reserve draws exactly as before and the four determinism pins hold. A non-empty set is a
+    /// feeder's own draw (a mixotroph's light-plus-tissue, a photovore's flux), each term a data row over
+    /// the floor axes; the per-reserve fold over the set is the mechanism.
+    pub draw_set: Vec<DrawTerm>,
 }
 
 /// The set of homeostatic axes a world runs, data-defined and extensible.
@@ -119,6 +182,7 @@ impl HomeostaticRegistry {
                     base_drain: Fixed::from_ratio(1, 400),
                     exertion_drain: Fixed::from_ratio(1, 100),
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: WATER,
@@ -128,6 +192,7 @@ impl HomeostaticRegistry {
                     base_drain: Fixed::from_ratio(1, 300),
                     exertion_drain: Fixed::from_ratio(1, 400),
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         }
@@ -147,6 +212,7 @@ impl HomeostaticRegistry {
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         });
         reg
     }
@@ -169,6 +235,7 @@ impl HomeostaticRegistry {
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         });
         // The condition reserve the environmental-harm sink drains (base-level liveliness step 4): a
         // non-draining, unit-capacity axis degraded only by the measured net_harm of the cell's toxin
@@ -181,6 +248,7 @@ impl HomeostaticRegistry {
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         });
         reg
     }
@@ -203,6 +271,7 @@ impl HomeostaticRegistry {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         }
     }
@@ -1673,6 +1742,7 @@ mod tests {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let plan = organ_body((1, 2), vec![organ(0, (1, 1))]);

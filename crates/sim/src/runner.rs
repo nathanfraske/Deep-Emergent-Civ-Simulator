@@ -1285,12 +1285,12 @@ pub struct Embodiment {
     /// from the tool's and being's own physics, no reserved durability value (Principles 9, 11). Opt-in via
     /// [`Embodiment::set_breakage`].
     breakage: bool,
-    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass
-    /// payoff). `None` by default, so a being never strikes and every existing scenario is unchanged. When
-    /// armed, a being that decides STRIKE swings its WIELDED tool, delivering a kinetic energy (`1/2 m v^2`
-    /// over the tool's own MASS, the extensive datum the tool's retained volume and density supply) that
-    /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
-    /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
+    /// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G). `None` by
+    /// default, so a being never strikes and every existing scenario is unchanged. When armed, a being that
+    /// decides STRIKE delivers its own ACTUATOR WORK (its acting part's strength over cross-section, over its
+    /// grown stroke, `F d`, the stroke-rate substrate) into the matter or occupant it contacts, fracturing what
+    /// its Griffith energy the blow exceeds. So a STRONG or long-stroked being strikes harder than a weak one,
+    /// derived from its own body rather than a world-global swing speed. Opt-in via [`Embodiment::set_strike`].
     strike: Option<StrikeParams>,
     /// The contact-transfer registry the being-vs-being STRIKE delivers its energy through (hunt-kill strike
     /// arc): which contact channels exist and which physics-floor transfer kernel each delivers by
@@ -1870,10 +1870,12 @@ impl Embodiment {
         self.breakage = on;
     }
 
-    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the swing
-    /// speed and the energy ceiling ([`StrikeParams`]). Opt-in; without it a being never strikes and every
-    /// existing scenario is byte-identical. When armed, a being that decides STRIKE swings its wielded tool and
-    /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
+    /// Install the reserved percussion-STRIKE parameters (the made-world arc, tool-use, Section G): the energy
+    /// ceiling ([`StrikeParams`]; the per-being swing speed the delivered energy once rode on is retired, the
+    /// delivered energy now the acting part's own actuator work `F d`). Opt-in; without it a being never strikes
+    /// and every existing scenario is byte-identical. When armed, a being that decides STRIKE delivers its
+    /// actuator work into the matter underfoot (or the occupant it contacts), fracturing what its Griffith energy
+    /// the blow exceeds.
     pub fn set_strike(&mut self, params: StrikeParams) {
         self.strike = Some(params);
     }
@@ -2368,23 +2370,58 @@ impl Embodiment {
         freed
     }
 
-    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff):
-    /// swing the WIELDED tool and fracture the matter underfoot with the blow's kinetic energy. The tool's own
-    /// MASS (its retained volume times its substance density, [`WieldedTool::mass`], the extensive datum only
-    /// the carried tool supplies) carried at the reserved swing speed is a kinetic energy
-    /// ([`laws::kinetic_energy`], `1/2 m v^2`), and every cell constituent whose GRIFFITH energy over the
-    /// struck face (its `mat.fracture_energy` times the tool's contact area) that delivered energy exceeds is
-    /// fractured loose and taken (the energy limb of [`laws::fracture_onset`]). So a HEAVY tool shatters rock a
-    /// LIGHT one cannot, the payoff of carrying the tool's mass, and a CONCENTRATED blow (a small struck face)
-    /// fractures where a spread one does not, by physics not a per-tool table. The delivered energy is scaled
-    /// from the law's kilojoule output to the joule scale the Griffith energy is on. WHICH constituents
-    /// fracture and HOW MUCH are both derived: the fractured set is the cell's own constituents the blow beats
-    /// (no openable list), and the volume is the strength-bounded carry the grasp uses (no transmutation). A
-    /// constituent with no declared fracture energy offers no Griffith resistance and is shattered by any blow
-    /// (the target-absence convention, matching the cut). Requires the strike params, a wielded tool, the
+    /// The actuating FORCE and STROKE the ACTING SYSTEM brings to a strike on `row`'s channel. For a BARE
+    /// strike (step 1, byte-neutral) this reads the acting Segment's OWN grown body: the force is its strength
+    /// stress (`row.strength_axis`) over its cross-section (`row.cross_section_axis`), an N, and the stroke is its
+    /// own grown `mech.stroke_length` (`row.stroke_axis`), the distance the force acts over. Both are per-body
+    /// grown data, so the delivered actuator work (`F d`) carries no world-global swing speed and no free mass
+    /// term (the stroke-rate substrate).
+    ///
+    /// Factored as ONE read over the acting SYSTEM so the DERIVED TOOL-GEOMETRY mass-payoff (the arc's follow-on
+    /// (b), the honest "heavier or longer tool hits harder") drops in ADDITIVELY here, coupled to the
+    /// wielded-tool / made-world path: a longer wielded tool extends the effective `stroke` and a heavier one the
+    /// sustainable `force`, an additive read on the SAME `F d` law and the same stroke-distance axis, never a
+    /// re-foundation. The substrate is shaped to admit it (the do-not-forbid-the-follow-on discipline); the free
+    /// tool-mass term the old form carried is not restored, the founded coupling is. `cap` is the representability
+    /// ceiling an unrepresentable force saturates to.
+    fn acting_force_and_stroke(
+        seg: &crate::morphogen::Segment,
+        row: &crate::contact_transfer::ContactTransfer,
+        cap: Fixed,
+    ) -> (Fixed, Fixed) {
+        // The force in NEWTONS: the acting material's strength stress over its cross-section, promoted from the
+        // megapascal strength scale to newtons by the floor's `stress_force` (its C_PA bridge), so the actuator
+        // work below lands on the joule scale the Griffith resistance is on.
+        let force = laws::stress_force(
+            seg.mat(&row.strength_axis),
+            seg.geo(&row.cross_section_axis),
+            cap,
+        );
+        let stroke = seg.geo(&row.stroke_axis);
+        // Follow-on (b), the derived tool-geometry mass-payoff: when a tool is wielded, add its stroke extension
+        // to `stroke` and its sustainable-force contribution to `force` HERE (an additive read on the same law),
+        // coupled to the wielded-tool path. Bare-limb reads only for step 1 (byte-neutral).
+        (force, stroke)
+    }
+
+    /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G): swing at the matter
+    /// underfoot and fracture it with the blow's energy. The delivered energy is the WIELDER's own ACTUATOR WORK
+    /// (its greatest strength-over-cross-section force, promoted to newtons by [`laws::stress_force`], over its
+    /// own grown stroke, [`laws::actuator_work`], `F d`, on the joule scale the Griffith energy is on), and every
+    /// cell constituent whose GRIFFITH energy over the struck face (its `mat.fracture_energy` times the tool's
+    /// contact area) that delivered energy exceeds is fractured loose and taken (the energy limb of
+    /// [`laws::fracture_onset`]). So a STRONG or long-stroked MINER shatters rock a weak one cannot, and a
+    /// CONCENTRATED blow (a small struck face) fractures where a spread one does not, by physics not a per-tool
+    /// table. The tool concentrates the blow (its contact area) but no longer carries the energy: the free
+    /// tool-mass term is dropped (physically unfounded under fixed actuator work), the founded tool-geometry
+    /// coupling the flagged additive follow-on (b). WHICH constituents fracture and HOW MUCH are both derived:
+    /// the fractured set is the cell's own constituents the blow beats (no openable list), and the volume is the
+    /// strength-bounded carry the grasp uses (no transmutation). A constituent with no declared fracture energy
+    /// offers no Griffith resistance and is shattered by any blow (the target-absence convention, matching the
+    /// cut). Requires the strike params, a registered contact channel, a wielded tool (for the struck face), the
     /// material registry, and the physiology; a being with no tool never reaches here, so an opted-out world is
-    /// byte-identical. Reads only the tool's and matter's own physics, no race, kind, or role (Principles 8, 9,
-    /// 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
+    /// byte-identical. Reads only the wielder's and matter's own physics, no race, kind, or role (Principles 8,
+    /// 9, 11). Returns the total volume freed. The id-ordered walk is a deterministic tie-break.
     pub fn strike_underfoot(&mut self, walker_id: StableId) -> Fixed {
         let Some(params) = self.strike else {
             return Fixed::ZERO;
@@ -2393,25 +2430,44 @@ impl Embodiment {
         else {
             return Fixed::ZERO;
         };
+        // The channel the strike delivers through: the first registered contact-transfer row, whose kernel drives
+        // the actuator-work resolve. An empty registry declares no channel, so no strike fires (the opt-in absence).
+        let Some((_, row)) = self.contact_transfer.iter().next() else {
+            return Fixed::ZERO;
+        };
+        let row = row.clone();
         let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
             return Fixed::ZERO;
         };
         let coord = w.coord();
         let Some(tool) = w.wielded.as_ref() else {
-            return Fixed::ZERO; // a strike needs a tool to swing (a bare being does not afford it)
+            return Fixed::ZERO; // a strike needs a tool to make contact with the matter underfoot
         };
-        let mass = tool.mass(reg);
-        if mass <= Fixed::ZERO {
-            return Fixed::ZERO; // a massless tool (no density or no volume) delivers no blow
+        let crack_area = tool.contact_area; // the struck face the tool concentrates the blow over
+                                            // The delivered energy is the WIELDER's greatest ACTUATOR WORK among its grown Structure Segments (its
+                                            // strength stress over its cross-section, over its own grown stroke), dispatched by the channel's kernel to
+                                            // the actuator-work law, on the JOULE scale the Griffith fracture energy (`mat.fracture_energy`, J/m^2, over
+                                            // the struck area) is on, so the comparison is on one scale with no kilojoule bridge. The tool concentrates
+                                            // the blow but delivers no work of its own (an inert tool carries no actuator): the mass a tool carries sets
+                                            // its tip speed, not the delivered energy (the gate-ruled drop of the free mass term; the tool-reach-to-stroke
+                                            // coupling is the flagged future). A blow beyond the representable range saturates to the ceiling.
+        let delivered_energy = {
+            let mut delivered = Fixed::ZERO;
+            if let Some(structure) = w.structure.as_ref() {
+                for seg in &structure.segments {
+                    let (force, stroke) =
+                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
+                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    if work > delivered {
+                        delivered = work;
+                    }
+                }
+            }
+            delivered
+        };
+        if delivered_energy <= Fixed::ZERO {
+            return Fixed::ZERO; // no actuating part with strength and stroke: no blow (the absence convention)
         }
-        let crack_area = tool.contact_area; // the struck face, the area the blow lands over
-                                            // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
-                                            // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
-                                            // one scale. A swing beyond the representable range saturates to the ceiling.
-        let ke_kj = laws::kinetic_energy(mass, params.swing_velocity, params.energy_max);
-        let delivered_energy = ke_kj
-            .checked_mul(Fixed::from_int(1000))
-            .unwrap_or(params.energy_max);
         // The cell's constituents the blow FRACTURES: each whose Griffith energy over the struck face the
         // delivered energy exceeds, in canonical id order (snapshot before the mutable take). Uses the energy
         // limb of `fracture_onset` (a zero applied stress, so only the Griffith energy criterion fires): a
@@ -2458,9 +2514,11 @@ impl Embodiment {
     /// occupy the cell, the occupant-agnostic form.
     ///
     /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
-    /// delivery mass (the wielded tool's, or the largest-mass grown Segment's, read off the axis the channel's
-    /// row DECLARES via `source_axis`, a Terran channel naming the extensive `mech.mass`) at the reserved swing
-    /// speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row. The
+    /// ACTUATOR WORK: the greatest, among the being's grown Segments, of its strength-over-cross-section force
+    /// (promoted to newtons by [`laws::stress_force`], read off the axes the channel's row DECLARES) times its
+    /// own grown `mech.stroke_length` (`F d`), dispatched by the registered channel's kernel, so the delivered
+    /// energy carries no world-global swing speed (the stroke-rate substrate) and a non-kinetic contact attack is
+    /// a data row. The
     /// struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`), a derive-first
     /// PROXY that reads only the target's own geometry to CHOOSE where a blind blow lands, never `failure_tolerance`,
     /// so it is not weak-point targeting. The wound is [`crate::contact_wound::wound_fraction`] (piece 2) of the
@@ -2475,21 +2533,22 @@ impl Embodiment {
     /// reflects it, and the ONE unified cull removes the being when any axis floors: one currency, one death path,
     /// no morphology predicate. STRIKE is afforded only by a PIERCE-bearing body, decided by no run_world scenario,
     /// and the transfer registry is empty by default, so the write is armed only for a striking predator body and
-    /// every run_world pin is unmoved (byte-neutral). A part with no declared mass, an empty registry, no
-    /// co-located target, or a target with no Structure all deliver no wound (the absence conventions). It returns
-    /// the wound fraction it applied. Deterministic: the target is the first co-located other being in id order (the
-    /// walkers are id-sorted once per tick), and the struck Segment the FIRST of the greatest contact area (a
-    /// deterministic placeholder that ALWAYS strikes the single largest-presented part, not yet the stochastic
-    /// "most likely the biggest" scatter).
+    /// every run_world pin is unmoved (byte-neutral). A part with no actuating strength or grown stroke, an empty
+    /// registry, no co-located target, or a target with no Structure all deliver no wound (the absence
+    /// conventions). It returns the wound fraction it applied. Deterministic: the target is the first co-located
+    /// other being in id order (the walkers are id-sorted once per tick), and the struck Segment the FIRST of the
+    /// greatest contact area (a deterministic placeholder that ALWAYS strikes the single largest-presented part,
+    /// not yet the stochastic "most likely the biggest" scatter).
     ///
-    /// FLAGGED FOLLOW-ONS (surfaced by the section-9 audit):
-    /// (1) the swing speed is the world-global reserved `StrikeParams::swing_velocity`, applied uniformly, while
-    /// mass and area emerge per-being; its own basis names per-being limb-length and stroke rate, so it should be
-    /// DERIVED from the acting part's own limb geometry times a stroke-rate substrate (a new floor axis), a
-    /// pre-existing seam shared with [`Embodiment::strike_underfoot`], not a per-strike fix;
-    /// (2) the caller assembles KINETIC inputs (mass, velocity) and gates on a positive mass, so adding a
-    /// non-kinetic floor kernel reworks this assembly, not just a data row (per-part channel SELECTION is the
-    /// same follow-on);
+    /// FLAGGED FOLLOW-ONS:
+    /// (1) the DELIVERED-ENERGY seam (the world-global `swing_velocity`) is RESOLVED by this stroke-rate substrate:
+    /// the delivered energy is now the acting part's own actuator work `F d`, force and stroke read per-body. Two
+    /// staged pieces remain of this arc: growing `mech.stroke_length` and `mech.cross_section_area` in the
+    /// body-development program so grown bodies deliver a non-zero blow, and the per-segment actuation-kind axis
+    /// plus kernel dispatch for a non-rigid (whip, jet, hydrostat) striker;
+    /// (2) the tool-geometry mass-payoff (a heavier or longer wielded tool affording a longer stroke or higher
+    /// sustainable force) is the owner-ruled additive follow-on (b), dropping into the `acting_force_and_stroke`
+    /// seam over the SAME `F d` law, coupled to the wielded-tool path;
     /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
     /// coupled to the spatial-body-layout arc.
     pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {
@@ -2504,51 +2563,42 @@ impl Embodiment {
             return Fixed::ZERO;
         };
         let row = row.clone();
-        // The acting part's delivery MASS, off the being's OWN apparatus: the part with the greatest `mech.mass`
-        // among its wielded tool and its grown Structure Segments (the one delivering the most kinetic energy).
-        // Reads only the part's own physics, never a race or role. Scoped so the acting walker's borrow ends
-        // before the target search.
-        let (coord, acting_mass, acting_contact_area) = {
+        // The energy the blow delivers, off the being's OWN apparatus: the greatest ACTUATOR WORK among its
+        // grown Structure Segments (main's stroke-rate substrate, retiring the world-global swing speed). For
+        // each, the actuating force (its strength stress over its cross-section, read off the axes the channel's
+        // row DECLARES, data-defined per Principle 11) over its own grown stroke distance, dispatched by the
+        // row's kernel to the actuator-work law (force times stroke, the delivered energy directly). A wielded
+        // inert tool carries no actuator of its own (its strength is not a muscle), so it delivers no work here;
+        // its reach-extending contribution to the stroke is the flagged future derived coupling. The delivering
+        // part's own CONTACT AREA travels with it: the striker-side contact patch the blow lands over (its grown
+        // delivery segment's presented area). It is the coarse wound branch's contact area (a striker-target
+        // contact property, keyed on the striker's own geometry, never the target's whole-body surface, so a
+        // high-surface low-cross-section target is not spuriously unwoundable); the fine per-segment path keeps
+        // reading the struck segment's own area. Reads only the part's own physics, never a race or role. Scoped
+        // so the acting walker's borrow ends before the target search.
+        let (coord, delivered_energy, acting_contact_area) = {
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return Fixed::ZERO;
             };
             let coord = w.coord();
-            let mut acting_mass = Fixed::ZERO;
-            // The delivery part's own CONTACT AREA travels with its mass: the striker-side contact patch the
-            // blow lands over (its tool tip or its grown delivery segment's presented area). It is the coarse
-            // wound branch's contact area (a striker-target contact property, keyed on the striker's own
-            // geometry, never the target's whole-body surface, so a high-surface low-cross-section target is not
-            // spuriously unwoundable). The fine per-segment path keeps reading the struck segment's own area.
+            let mut delivered = Fixed::ZERO;
             let mut acting_contact_area = Fixed::ZERO;
-            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
-                let m = tool.mass(reg);
-                if m > acting_mass {
-                    acting_mass = m;
-                    acting_contact_area = tool.contact_area;
-                }
-            }
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
-                    // The delivery mass is read off the axis the channel's row DECLARES (row.source_axis),
-                    // data-defined per Principle 11, never a hardcoded axis id: a Terran channel names the
-                    // extensive `mech.mass`, an alien body its own mass source.
-                    let m = seg.geo(&row.source_axis);
-                    if m > acting_mass {
-                        acting_mass = m;
+                    let (force, stroke) =
+                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
+                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    if work > delivered {
+                        delivered = work;
                         acting_contact_area = presented_contact_area(seg);
                     }
                 }
             }
-            (coord, acting_mass, acting_contact_area)
+            (coord, delivered, acting_contact_area)
         };
-        if acting_mass <= Fixed::ZERO {
-            return Fixed::ZERO; // a part with no mass delivers no blow (the absence convention)
+        if delivered_energy <= Fixed::ZERO {
+            return Fixed::ZERO; // no actuating part with strength and stroke: no blow (the absence convention)
         }
-        // The energy the blow delivers, dispatched by the channel's kernel over the acting part's own mass and
-        // the reserved swing speed (piece 1). The scale bridge to Agent B's `Segment.damage` accumulator
-        // convention is reconciled at the held write (piece 4), not baked here.
-        let delivered_energy =
-            resolve_transfer(&row, acting_mass, params.swing_velocity, params.energy_max);
         // The TARGET: another being CO-LOCATED in the same cell, found by iterating the beings (this method
         // cannot reach the runner's located index). The first in id order is the deterministic pick; an
         // area-weighted stochastic scatter over co-located targets is the flagged follow-on.
@@ -6636,12 +6686,23 @@ impl Runner {
         // The authored predator's minimal FINE body (fork i): ONE delivery Segment that (a) affords STRIKE by
         // its OWN physics (a small, concentrated `mech.contact_area` and a hard `mat.indentation_hardness`
         // read the PIERCE capability, the same small-area-hard-material physics a tooth reads, never a tag,
-        // Principle 8), and (b) delivers a REAL mass and contact area so the wound is not a no-op (dissolving
-        // the earlier strike-no-op barrier: the striker now carries a delivery part). Grown-body values
-        // grounded off the dev tooth/tissue floor (`anatomy.rs` teeth `mech.contact_area` 0.0000001 and
-        // `mat.indentation_hardness` 3000; `body.rs` bone `mat.fracture_energy` 8), the predator being the
-        // authored environmental given. The mass is read off the transfer channel's declared source axis
-        // (`mech.mass`), the same axis `strike_occupant` reads.
+        // Principle 8), and (b) carries the ACTUATOR axes the stroke-rate substrate reads so it delivers a REAL
+        // blow (a non-zero actuator work `F d`) rather than a no-op. Under the stroke-rate model the delivered
+        // energy is the segment's own strength stress over its cross-section (force), promoted to newtons, times
+        // its grown stroke: the delivery segment carries `mat.fracture_strength` (the actuating strength), and
+        // `mech.cross_section_area` and `mech.stroke_length` (the actuator geometry), read by
+        // [`Self::acting_force_and_stroke`] via the channel row's declared axes. Values grounded off the floor's
+        // own dev fixtures, the predator being the authored environmental given: `mech.contact_area` 0.0000001
+        // and `mat.indentation_hardness` 3000 off the `anatomy.rs` teeth, `mat.fracture_energy` 8 off `body.rs`
+        // bone, and the actuator axes within the `morphogen.rs` dev-fixture ranges (`mat.fracture_strength` in
+        // [0,200] MPa, `mech.cross_section_area` in [5e-8, 1e-2], `mech.stroke_length` in [1e-2, 1]) at
+        // strong-predator representative values. The blow MAGNITUDE is a reserved calibration lever (the same
+        // "how hard does a strike land" tuning the stroke-rate substrate reserves, gate-set interim); its
+        // one-shot lethality against an unarmored catalog prey follows from the sharp-tooth CONTACT GEOMETRY (a
+        // tiny contact area concentrates even a modest blow past the covering's Griffith tolerance), tunable via
+        // the covering fracture-energy (tougher armor), the contact area (a blunter strike), or the actuator
+        // work, all data. `mech.mass` is kept as a real physical property (exertion, locomotion) though the
+        // strike no longer reads it.
         let delivery = {
             let mut geometry = BTreeMap::new();
             geometry.insert("mech.mass".to_string(), Fixed::ONE);
@@ -6649,12 +6710,21 @@ impl Runner {
                 "mech.contact_area".to_string(),
                 Fixed::from_decimal_str("0.0000001").expect("tooth contact-area literal"),
             );
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_decimal_str("0.001").expect("actuator cross-section literal"),
+            );
+            geometry.insert(
+                "mech.stroke_length".to_string(),
+                Fixed::from_decimal_str("0.3").expect("actuator stroke literal"),
+            );
             let mut material = BTreeMap::new();
             material.insert(
                 "mat.indentation_hardness".to_string(),
                 Fixed::from_int(3000),
             );
             material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(150));
             crate::morphogen::Segment {
                 parent: None,
                 depth: 0,
@@ -7613,6 +7683,7 @@ source = "test"
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let geo = Embodiment::new(
@@ -7677,6 +7748,7 @@ source = "test"
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let layout = Embodiment::new(
@@ -7735,6 +7807,7 @@ source = "test"
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let bp = || BodyPlan {
@@ -7768,13 +7841,25 @@ source = "test"
         emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
         let layout = emb.layout().clone();
 
-        // A segment carrying a delivery mass, a presented contact area, and a fracture resistance.
+        // A segment carrying a presented contact area, a fracture resistance, and a fixed ACTUATOR (a strength
+        // stress over a cross-section, over a stroke) so it can deliver a strike's energy under the stroke-rate
+        // substrate: force = 200 * (1/100) = 2 N over a 1 m stroke delivers 2 J of actuator work, the mass a
+        // part carries no longer entering the delivered energy. The `mass` arg is retained for the target's
+        // presented mass but is not read for the delivered energy.
         let seg = |mass: Fixed, area: Fixed, fe: Fixed| {
             let mut geometry = BTreeMap::new();
             geometry.insert("mech.mass".to_string(), mass);
             geometry.insert("mech.contact_area".to_string(), area);
+            // A 1e-6 m^2 cross-section of 200 MPa strength is a 200 N force (the stress_force megapascal-to-newton
+            // bridge), over a 1 m stroke a 200 J actuator-work blow, comfortably inside the 1e6 ceiling.
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_ratio(1, 1_000_000),
+            );
+            geometry.insert("mech.stroke_length".to_string(), Fixed::from_int(1));
             let mut material = BTreeMap::new();
             material.insert("mat.fracture_energy".to_string(), fe);
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(200));
             Segment {
                 parent: None,
                 depth: 0,
@@ -7799,7 +7884,7 @@ source = "test"
         // the armor comparison below is a real inequality rather than two saturated full wounds.
         let big_area = Fixed::from_ratio(1, 2);
         let small_area = Fixed::from_ratio(1, 100);
-        let big_tough_fe = Fixed::from_int(100_000);
+        let big_tough_fe = Fixed::from_int(1000);
         let soft_fe = Fixed::from_int(1);
         let target = Structure {
             segments: vec![
@@ -7833,7 +7918,11 @@ source = "test"
             .get(DEV_KINETIC)
             .unwrap()
             .clone();
-        let energy = resolve_transfer(&row, Fixed::from_int(5), Fixed::from_int(10), cap);
+        // The striker delivers its actuator work: force = 200 MPa strength over a 1e-6 m^2 cross-section, promoted
+        // by the stress_force megapascal-to-newton bridge, is 200 N; over its 1 m stroke, 200 J (the mass a part
+        // carries no longer enters the delivered energy).
+        let force = laws::stress_force(Fixed::from_int(200), Fixed::from_ratio(1, 1_000_000), cap);
+        let energy = resolve_transfer(&row, force, Fixed::from_int(1), cap);
         let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
         assert_eq!(
             wound, expected,
@@ -7974,6 +8063,7 @@ source = "test"
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         // A catalog body; `covering.kind` selects the outermost material from `emb.organs` (dev_default, whose
@@ -7999,7 +8089,11 @@ source = "test"
                 aggression: Fixed::from_ratio(1, 4),
             },
         };
-        // The predator's fine delivery body: a small, hard, sharp Segment carrying a delivery mass.
+        // The predator's fine delivery body: a small, hard, sharp Segment carrying the actuator axes the
+        // stroke-rate substrate reads (`mat.fracture_strength`, `mech.cross_section_area`, `mech.stroke_length`)
+        // so `acting_force_and_stroke` yields a non-zero `F d` blow, plus the sharp contact geometry
+        // (`mech.contact_area`, `mat.indentation_hardness`) and its own fracture-energy. Mirrors
+        // `spawn_predator`'s delivery segment.
         let delivery = || {
             let mut geometry = BTreeMap::new();
             geometry.insert("mech.mass".to_string(), Fixed::ONE);
@@ -8007,12 +8101,21 @@ source = "test"
                 "mech.contact_area".to_string(),
                 Fixed::from_decimal_str("0.0000001").unwrap(),
             );
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_decimal_str("0.001").unwrap(),
+            );
+            geometry.insert(
+                "mech.stroke_length".to_string(),
+                Fixed::from_decimal_str("0.3").unwrap(),
+            );
             let mut material = BTreeMap::new();
             material.insert(
                 "mat.indentation_hardness".to_string(),
                 Fixed::from_int(3000),
             );
             material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(150));
             Structure {
                 segments: vec![Segment {
                     parent: None,
@@ -8216,6 +8319,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -8229,6 +8333,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -8390,6 +8495,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -8399,6 +8505,7 @@ source = "test"
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -8575,6 +8682,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -8584,6 +8692,7 @@ source = "test"
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -8830,6 +8939,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let body = BodyPlan {
@@ -9017,6 +9127,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         // A GRASP-only affordance registry, so the sampled proposal is always the grasp matter primitive
@@ -9205,6 +9316,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9214,6 +9326,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9409,6 +9522,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9418,6 +9532,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9620,6 +9735,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9629,6 +9745,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9815,6 +9932,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9824,6 +9942,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10023,6 +10142,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -10032,6 +10152,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: STARCH,
@@ -10041,6 +10162,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10239,6 +10361,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -10248,6 +10371,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10490,6 +10614,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let grasp_only = || AffordanceRegistry {
@@ -10700,6 +10825,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let grasp_only = || AffordanceRegistry {
@@ -10885,6 +11011,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -10894,6 +11021,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11114,6 +11242,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -11123,6 +11252,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11325,6 +11455,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -11334,6 +11465,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11546,6 +11678,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 50),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: TEMPERATURE,
@@ -11555,6 +11688,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11717,6 +11851,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 50),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: TEMPERATURE,
@@ -11726,6 +11861,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11903,6 +12039,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -11912,6 +12049,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };

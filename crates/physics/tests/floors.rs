@@ -42,7 +42,7 @@ fn the_mechanical_floor_loads_with_its_axes_laws_and_substances() {
     let reg = mechanical();
     // The unified registry: the shared mechanical, bulk-material, and energy-thermal
     // axes plus the shared gravitational axis, and the wave-1 law set.
-    assert_eq!(reg.axis_count(), 38, "the mechanical-and-materials axes");
+    assert_eq!(reg.axis_count(), 39, "the mechanical-and-materials axes");
     assert_eq!(
         reg.law_count(),
         21,

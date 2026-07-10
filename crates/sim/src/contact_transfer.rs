@@ -27,11 +27,12 @@
 //! kernel on the floor), never by editing a `match channel { Kinetic => ..., Electrical => ... }`. Kinetic
 //! is the first (Terran, mass-bearing) instance; the law-set is small, fixed, and extensible.
 //!
-//! What a kernel READS is the acting part's own data. The kinetic kernel reads the part's mass (the caller
-//! derives it from the part's own density and geometry) and the contact velocity, so a denser or faster
-//! contacting part delivers more energy, keyed on the being's own body, never a per-species number. The caller
-//! passes the derived inputs (as [`crate::perception_reach::resolve_reach`] takes the emitted power as a
-//! parameter), so this substrate stays a pure law dispatch with no body-representation dependency.
+//! What a kernel READS is the acting part's own data. The kinetic kernel reads the part's actuating force (its
+//! strength stress over its cross-section) and its stroke distance (its own grown `mech.stroke_length`), so a
+//! stronger, thicker, or longer-stroked part delivers more energy, keyed on the being's own body, never a
+//! per-species number and never a world-global swing speed. The caller derives the force and stroke from the
+//! axes the row declares and passes them (as [`crate::perception_reach::resolve_reach`] takes the emitted power
+//! as a parameter), so this substrate stays a pure law dispatch with no body-representation dependency.
 
 use std::collections::BTreeMap;
 
@@ -45,32 +46,42 @@ use civsim_physics::laws;
 /// floor addition with its own law, never an authored per-channel branch.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TransferKernel {
-    /// Mass-bearing contact: the delivered energy is the kinetic energy of the acting part
-    /// ([`civsim_physics::laws::kinetic_energy`], one-half m v-squared), from the part's own mass and the
-    /// contact velocity.
+    /// Mass-bearing contact: the delivered energy is the ACTUATOR WORK that brought the acting part to speed
+    /// ([`civsim_physics::laws::actuator_work`], force times stroke distance), the work-energy form of the
+    /// kinetic energy. The swing-speed intermediate is retired because it only round-trips to this work
+    /// (substituting `v = sqrt(2 F d / m)` into `1/2 m v^2` cancels the mass and returns `F d`), so the delivered
+    /// energy is the actuating force over the stroke, read from the part's own strength, cross-section, and
+    /// grown stroke geometry, never a world-global swing speed.
     Kinetic,
 }
 
 /// One contact channel's transfer binding as data: the law its energy delivers by (dispatched by this kernel
-/// id, never by channel identity) and the physics-floor material axis the kinetic kernel reads the acting
-/// part's delivery mass from. Every field is data (Principle 11); the resolve is fixed Rust that consumes this
-/// row. The axis is a floor axis id string, the same string-keyed floor reference the reach and percept
-/// substrates use, so the floor stays the one authored place.
+/// id, never by channel identity) and the physics-floor axes the kinetic (actuator-work) kernel reads the
+/// acting part's actuating force and stroke from. Every field is data (Principle 11); the resolve is fixed Rust
+/// that consumes derived inputs. The axes are floor axis id strings, the same string-keyed floor reference the
+/// reach and percept substrates use, so the floor stays the one authored place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContactTransfer {
     /// The contact channel this row binds.
     pub channel: ContactChannelId,
     /// The transfer law the channel delivers by (dispatched by this id, never by channel identity).
     pub kernel: TransferKernel,
-    /// The physics-floor axis id the acting part's delivery mass is read from. Named as DATA so the caller reads
-    /// the axis the row declares rather than a hardcoded field id (Principle 11): a world binds its channel's
-    /// mass source here, and the strike wire reads the acting part's mass off THIS axis
-    /// ([`crate::runner::Embodiment::strike_occupant`] reads `seg.geo(source_axis)`). The run-path Segment
-    /// carries the EXTENSIVE mass datum `mech.mass` (volume times density, integrated at growth), so a Terran
-    /// channel names `mech.mass` and the caller reads it directly; a world whose body carries an intensive
-    /// density axis instead names that and the caller integrates over geometry (the reserved density-to-mass
-    /// read), so the mass source stays the row's data, never a caller constant.
-    pub source_axis: String,
+    /// The physics-floor MATERIAL axis id the acting part's actuating STRESS is read from (its strength per unit
+    /// cross-section). Named as DATA so the caller reads the axis the row declares rather than a hardcoded field
+    /// id (Principle 11): a Terran actuator names `mat.fracture_strength` (the axis the physiology already reads
+    /// as muscle strength), an alien actuator its own strength axis. The caller multiplies this stress by the
+    /// cross-section axis below to form the actuating force.
+    pub strength_axis: String,
+    /// The physics-floor GEOMETRY axis id the acting part's load-bearing CROSS-SECTION is read from. The
+    /// actuating force is the strength (above) over this area (`mat.fracture_strength * mech.cross_section_area`,
+    /// an N). Named as data so an alien body names its own force geometry.
+    pub cross_section_axis: String,
+    /// The physics-floor GEOMETRY axis id the acting part's STROKE distance is read from (the distance the
+    /// actuating force acts over, the acting part's own grown `mech.stroke_length`). The delivered energy is the
+    /// actuator work, force times this stroke ([`civsim_physics::laws::actuator_work`]). Grown independently of
+    /// the segment length so the acting-distance-to-length ratio is per-body data, never a fixed one (the
+    /// value-authoring fix). Named as data so an alien actuator names its own stroke geometry.
+    pub stroke_axis: String,
 }
 
 /// The set of contact-transfer bindings a world runs, keyed by [`ContactChannelId`] in canonical (ascending)
@@ -115,17 +126,20 @@ impl ContactTransferRegistry {
     }
 
     /// A labelled DEVELOPMENT FIXTURE: the one contact channel the physics floor already carries a law for, a
-    /// kinetic (mass-bearing) channel that reads the acting part's delivery mass off the extensive `mech.mass`
-    /// axis. Not owner data; the minimum a contact resolve needs to exercise the kinetic law. The real channel
-    /// set is the world's data, and non-kinetic channels are the flagged floor extension.
+    /// kinetic (actuator-work) channel that reads the acting part's actuating force off `mat.fracture_strength`
+    /// over `mech.cross_section_area` and its stroke off the grown `mech.stroke_length`. Not owner data; the
+    /// minimum a contact resolve needs to exercise the actuator-work law. The real channel set is the world's
+    /// data, and non-kinetic channels are the flagged floor extension.
     pub fn dev_terran() -> ContactTransferRegistry {
         let mut reg = ContactTransferRegistry::empty();
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
             kernel: TransferKernel::Kinetic,
-            // The extensive mass datum a grown part carries (volume times density), the axis the strike wire
-            // reads the delivery mass off. A Terran mass-bearing channel names it directly.
-            source_axis: "mech.mass".to_string(),
+            // The Terran actuator: strength stress over cross-section is the force, the grown stroke length the
+            // distance it acts over. A body names its own strength, cross-section, and stroke axes.
+            strength_axis: "mat.fracture_strength".to_string(),
+            cross_section_axis: "mech.cross_section_area".to_string(),
+            stroke_axis: "mech.stroke_length".to_string(),
         });
         reg
     }
@@ -144,21 +158,24 @@ pub struct ContactChannelId(pub u16);
 /// or a channel is a match-arm or data change, never a channel-identity branch). Pure and off the run path (no
 /// live caller): the hunt-kill strike wire consumes it, so this is byte-neutral by construction.
 ///
-/// The delivery inputs are PARAMETERS the caller derives from the acting part's OWN body: `part_mass` is the
-/// part's mass (its material density integrated over its geometry) and `contact_velocity` is the approach
-/// speed of the contact. The kinetic kernel is [`civsim_physics::laws::kinetic_energy`] of those; a future
-/// non-kinetic kernel reads its own channel-appropriate inputs. `energy_max` is the physics-floor
-/// representability cap the law saturates at. Keying on the part's own mass and velocity, a denser or faster
-/// part delivers more energy, never a per-species constant (admit-the-alien: a massless energy-being would
-/// carry a different channel and kernel, a data row).
+/// The delivery inputs are PARAMETERS the caller derives from the acting part's OWN body: `actuator_force` is
+/// the actuating force (the part's strength stress over its cross-section, read off the row's `strength_axis`
+/// and `cross_section_axis`) and `stroke_distance` is the distance the force acts over (the part's own grown
+/// `mech.stroke_length`, read off the row's `stroke_axis`). The kinetic kernel is
+/// [`civsim_physics::laws::actuator_work`] of those (force times distance, the delivered energy directly); a
+/// future non-kinetic kernel reads its own channel-appropriate inputs. `energy_max` is the physics-floor
+/// representability cap the law saturates at. Keying on the part's own strength, cross-section, and stroke, a
+/// stronger, thicker, or longer-stroked part delivers more energy, never a per-species constant and never a
+/// world-global swing speed (admit-the-alien: a massless energy-being would carry a different channel and
+/// kernel, a data row).
 pub fn resolve_transfer(
     row: &ContactTransfer,
-    part_mass: Fixed,
-    contact_velocity: Fixed,
+    actuator_force: Fixed,
+    stroke_distance: Fixed,
     energy_max: Fixed,
 ) -> Fixed {
     match row.kernel {
-        TransferKernel::Kinetic => laws::kinetic_energy(part_mass, contact_velocity, energy_max),
+        TransferKernel::Kinetic => laws::actuator_work(actuator_force, stroke_distance, energy_max),
     }
 }
 
@@ -174,14 +191,17 @@ mod tests {
     }
 
     #[test]
-    fn a_transfer_is_looked_up_by_id_and_carries_its_law_and_axis_as_data() {
+    fn a_transfer_is_looked_up_by_id_and_carries_its_law_and_axes_as_data() {
         let reg = ContactTransferRegistry::dev_terran();
         // Dispatch is by channel id into the registry, then by the row's kernel id: never a code branch on
         // channel identity.
         let kinetic = reg.get(DEV_KINETIC).expect("kinetic row present");
         assert_eq!(kinetic.kernel, TransferKernel::Kinetic);
-        // The Terran kinetic channel names the extensive mass axis the strike wire reads the delivery mass off.
-        assert_eq!(kinetic.source_axis, "mech.mass");
+        // The Terran kinetic channel names the strength, cross-section, and stroke axes the strike wire reads
+        // the actuating force and stroke off, all data (Principle 11).
+        assert_eq!(kinetic.strength_axis, "mat.fracture_strength");
+        assert_eq!(kinetic.cross_section_axis, "mech.cross_section_area");
+        assert_eq!(kinetic.stroke_axis, "mech.stroke_length");
         assert!(reg.get(ContactChannelId(99)).is_none());
     }
 
@@ -191,12 +211,16 @@ mod tests {
         reg.insert(ContactTransfer {
             channel: ContactChannelId(2),
             kernel: TransferKernel::Kinetic,
-            source_axis: "a".to_string(),
+            strength_axis: "a".to_string(),
+            cross_section_axis: "a".to_string(),
+            stroke_axis: "a".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: ContactChannelId(1),
             kernel: TransferKernel::Kinetic,
-            source_axis: "b".to_string(),
+            strength_axis: "b".to_string(),
+            cross_section_axis: "b".to_string(),
+            stroke_axis: "b".to_string(),
         });
         let ids: Vec<u16> = reg.iter().map(|(c, _)| c.0).collect();
         assert_eq!(ids, vec![1, 2], "canonical ascending channel id order");
@@ -208,47 +232,57 @@ mod tests {
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
             kernel: TransferKernel::Kinetic,
-            source_axis: "first".to_string(),
+            strength_axis: "first".to_string(),
+            cross_section_axis: "first".to_string(),
+            stroke_axis: "first".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
             kernel: TransferKernel::Kinetic,
-            source_axis: "second".to_string(),
+            strength_axis: "second".to_string(),
+            cross_section_axis: "second".to_string(),
+            stroke_axis: "second".to_string(),
         });
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
-        assert_eq!(reg.get(DEV_KINETIC).unwrap().source_axis, "second");
+        assert_eq!(reg.get(DEV_KINETIC).unwrap().stroke_axis, "second");
     }
 
     #[test]
-    fn kinetic_resolve_is_the_kinetic_energy_of_the_parts_mass_and_velocity() {
+    fn kinetic_resolve_is_the_actuator_work_of_the_parts_force_and_stroke() {
         let row = ContactTransferRegistry::dev_terran()
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
         let cap = Fixed::from_int(1_000_000);
-        let mass = Fixed::from_int(2);
-        let velocity = Fixed::from_int(3);
-        // The resolve dispatches the Kinetic kernel to the floor kinetic-energy law over the given mass and
-        // velocity: the substrate adds no arithmetic of its own, it selects the law.
+        let force = Fixed::from_int(2);
+        let stroke = Fixed::from_int(3);
+        // The resolve dispatches the Kinetic kernel to the floor actuator-work law over the given force and
+        // stroke: the substrate adds no arithmetic of its own, it selects the law.
         assert_eq!(
-            resolve_transfer(&row, mass, velocity, cap),
-            laws::kinetic_energy(mass, velocity, cap),
+            resolve_transfer(&row, force, stroke, cap),
+            laws::actuator_work(force, stroke, cap),
         );
     }
 
     #[test]
-    fn a_denser_or_faster_part_delivers_more_energy() {
+    fn a_stronger_or_longer_stroked_part_delivers_more_energy() {
         let row = ContactTransferRegistry::dev_terran()
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
         let cap = Fixed::from_int(1_000_000);
         let base = resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(3), cap);
-        // A more massive contacting part delivers more energy (linear in mass), keyed on the part's own body.
-        let heavier = resolve_transfer(&row, Fixed::from_int(4), Fixed::from_int(3), cap);
-        // A faster contact delivers more energy (quadratic in velocity), keyed on the contact kinematics.
-        let faster = resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(6), cap);
-        assert!(heavier > base && faster > base && base > Fixed::ZERO);
+        // A greater actuating force delivers more energy (linear in force), keyed on the part's own strength and
+        // cross-section.
+        let stronger = resolve_transfer(&row, Fixed::from_int(4), Fixed::from_int(3), cap);
+        // A longer stroke delivers more energy (linear in distance), keyed on the part's own grown geometry.
+        let longer = resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(6), cap);
+        assert!(stronger > base && longer > base && base > Fixed::ZERO);
+        // A zero-strength actuator delivers no blow (the absence convention).
+        assert_eq!(
+            resolve_transfer(&row, Fixed::ZERO, Fixed::from_int(3), cap),
+            Fixed::ZERO
+        );
         // Deterministic: identical inputs give the identical bit-exact energy (Principle 3).
         assert_eq!(
             base,
