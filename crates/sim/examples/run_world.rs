@@ -2154,10 +2154,21 @@ fn main() {
                         let ctrl_pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
                             .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
                         let n = runner.spawn_creatures(living, &ctrl_genes, &ctrl_pool, 2);
+                        // Creatures-react arc (mechanism B3, the LIVE WIRE): arm the mind-less creature
+                        // being-directed percept, so each spawned creature perceives the beings whose signal
+                        // reaches it and moves TOWARD or AWAY by its own heritable freely-signed weight (the
+                        // reaction emerges under selection, no belief, no category). `full` is non-living, so
+                        // being-percept and its declared field are already armed above; this completes the
+                        // creature's arming. Behaviour-changing: it re-pins the `full --creatures` baseline
+                        // (a separate scenario, not one of the canonical four, which carry no creatures).
+                        if let Some(emb) = runner.embodiment_mut() {
+                            emb.set_creature_being_percept(true);
+                        }
                         println!(
                             "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
-                             now: {}); they perceive, forage, metabolize, and die on the same loop as the \
-                             founders; behaviour selection awaits the reproduction slice",
+                             now: {}); they perceive, forage, metabolize, REACT to nearby beings (creatures- \
+                             react B3: a magnitude-graded toward/away pull, the sign selected), and die on the \
+                             same loop as the founders; behaviour selection awaits the reproduction slice",
                             runner.creature_count()
                         );
                     }
