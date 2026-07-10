@@ -1625,10 +1625,12 @@ depletion_character = "non_rivalrous_flux"
     }
 
     #[test]
-    fn an_undeclared_depletion_character_is_the_fail_loud_reserved_sentinel() {
+    fn an_undeclared_depletion_character_stores_the_reserved_sentinel() {
         // An axis that declares no depletion character (every pre-R-SOURCE-VECTOR axis) carries the
-        // fail-loud Reserved sentinel, never a fabricated "stock" default: a feeder must declare its
-        // character before a draw reads it (the reserved-value discipline, Principle 11).
+        // Reserved sentinel, never a fabricated "stock" default: a feeder must declare its character
+        // before a draw reads it (the reserved-value discipline, Principle 11). This test covers the
+        // STORAGE of the sentinel; the behavioral fail-loud (a Reserved-character draw panics) is proven
+        // in the sim fold test `a_draw_on_an_undeclared_reserved_character_fails_loud`.
         let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
         assert!(matches!(
             reg.axis("mech.density").unwrap().depletion_character,

@@ -1031,6 +1031,9 @@ pub fn draw_feeder_set(
         if eaten_content <= Fixed::ZERO {
             continue;
         }
+        // The deplete step keys on the source axis's floor conservation character, then the reserve gains.
+        // A character the fold cannot yet honour FAILS LOUD before the gain: a draw must never silently
+        // ingest against an undeclared or unwired character (the reserved-value discipline, Principle 11).
         match &term.depletion {
             DepletionCharacter::DepletableStock => {
                 // A located stock: remove the supply the eaten content came from, so the cell depletes by
@@ -1042,9 +1045,25 @@ pub fn draw_feeder_set(
                 // A renewable flux (a photon or gravity-gradient source): the draw gains but never depletes
                 // it, so no `take`. This is the whole feeder generalization, a data row not a code branch.
             }
-            DepletionCharacter::Reservoir | DepletionCharacter::Reserved { .. } => {
-                // A reservoir pool draw is not yet wired, and an undeclared (reserved) character is rejected
-                // when a feeder's draw term is built, so neither reaches this fold with a silent take.
+            DepletionCharacter::Reservoir => {
+                // A reservoir's pool draw (a source-and-sink pool) is not yet wired; fail loud rather than
+                // gain against a character the fold does not model, so it cannot silently grant a reserve.
+                panic!(
+                    "R-SOURCE-VECTOR: a reservoir draw is not yet wired (axis '{}'); a feeder must declare a \
+                     depletable_stock or non_rivalrous_flux character until the reservoir path is built",
+                    term.class
+                );
+            }
+            DepletionCharacter::Reserved { .. } => {
+                // An undeclared (reserved) character reaching a draw is a config error: the axis's floor
+                // conservation character was never declared. Fail loud (the reserved-value discipline: never
+                // a silent use of an unset value). The feeder-arming follow-on adds a validated DrawTerm
+                // builder that rejects this at construction; this fold is the backstop.
+                panic!(
+                    "R-SOURCE-VECTOR: a draw on axis '{}' whose depletion character is undeclared (Reserved) \
+                     is a config error; declare the axis's floor conservation character before a feeder draws it",
+                    term.class
+                );
             }
         }
         homeostasis.ingest(axis_id, gain);
@@ -2645,6 +2664,89 @@ mod tests {
             field.supply(tile, flux),
             supply0,
             "a non-rivalrous flux is NOT depleted by the draw (the character read, not a source kind)"
+        );
+    }
+
+    /// A draw term reading a source axis of the given depletion character, for the fail-loud fold tests.
+    fn feeder_field_for(class: &str) -> (ResourceField, Physiology, BTreeMap<String, Fixed>) {
+        let tile = Coord3::ground(0, 0);
+        let mut field = ResourceField::new();
+        field.set(
+            tile,
+            Composition {
+                nutrients: [(class.to_string(), Fixed::from_ratio(1, 4))]
+                    .into_iter()
+                    .collect(),
+                toxins: BTreeMap::new(),
+            },
+        );
+        let phys = Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: [(class.to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let storage: BTreeMap<String, Fixed> = [(class.to_string(), Fixed::from_int(10))]
+            .into_iter()
+            .collect();
+        (field, phys, storage)
+    }
+
+    #[test]
+    #[should_panic(expected = "undeclared")]
+    fn a_draw_on_an_undeclared_reserved_character_fails_loud() {
+        // R-SOURCE-VECTOR reserved-value discipline (the section-9 audit's catch): a draw term whose source
+        // axis carries an UNDECLARED (Reserved) conservation character must FAIL LOUD in the fold, never
+        // silently ingest a reserve against an unset value. The behavioral counterpart to the physics
+        // storage test that the sentinel is carried.
+        let (_reg, mut homeo) = drained_energy_reserve();
+        let class = "field.undeclared";
+        let (mut field, phys, storage) = feeder_field_for(class);
+        let draw_set = vec![DrawTerm {
+            class: class.to_string(),
+            unit_bridge: UnitBridge::MatterPerBeing,
+            depletion: DepletionCharacter::Reserved {
+                basis: "test: never declared".to_string(),
+            },
+        }];
+        draw_feeder_set(
+            &draw_set,
+            ENERGY,
+            Coord3::ground(0, 0),
+            &mut field,
+            &mut homeo,
+            &phys,
+            &storage,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "reservoir")]
+    fn a_reservoir_draw_fails_loud_until_wired() {
+        // A reservoir character is declared but the reservoir pool draw is not yet wired: the fold fails
+        // loud rather than silently gaining against a character it does not model (the same discipline).
+        let (_reg, mut homeo) = drained_energy_reserve();
+        let class = "field.reservoir";
+        let (mut field, phys, storage) = feeder_field_for(class);
+        let draw_set = vec![DrawTerm {
+            class: class.to_string(),
+            unit_bridge: UnitBridge::MatterPerBeing,
+            depletion: DepletionCharacter::Reservoir,
+        }];
+        draw_feeder_set(
+            &draw_set,
+            ENERGY,
+            Coord3::ground(0, 0),
+            &mut field,
+            &mut homeo,
+            &phys,
+            &storage,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
         );
     }
 
