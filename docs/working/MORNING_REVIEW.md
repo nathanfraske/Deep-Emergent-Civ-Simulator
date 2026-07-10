@@ -9,6 +9,33 @@ section.
 
 ## 2026-07-09 (standing mediator/manager directive): current effort held items and awareness
 
+**DE-BIASED DECISION BRIEF (the three held forks, presented to the owner).** A section-11-de-biased,
+adversarially-judged workflow (each verdict source-verified) resolved the three held decisions; it overturned
+one of my leans, filled an option I had omitted, and sharpened the third:
+- **Affordance-composer morphospace: UNIFY, the LIGHT form (cheap win that is also the true-complete).** One
+  library for designed objects and sensed affordances; the light form adds one arm to the existing composition
+  node, reuses promote/fold verbatim, leaves every existing object id bit-identical, sacrifices no completeness.
+  (This OVERTURNS my earlier distinct-sibling lean.)
+- **SEQ_FIELD_BITS: the HASH (true-complete, do now).** Mint the belief subject by a canonical hash of the full
+  step, dissolving the 16-value and step caps. Widening cannot fit the open alphabet in the 61-bit budget (a
+  false economy); deferring leaves a latent P8 ceiling. A one-time not-byte-neutral re-pin; owner sets the
+  collision-probability / hash-width reserved value and the timing. (This was the option I had OMITTED.)
+- **R-AGING: (B) emergent senescence (true-complete, do now).** No cheap win is just as good. Kleiber's exponent
+  is legitimate floor physics because it has a MECHANISTIC derivation (fractal transport geometry) the
+  rate-of-living longevity relation lacks and which is empirically falsified, so authoring a longevity exponent
+  authors a contested outcome; (B) authors wear/repair RATES and lets lifespan emerge, reusing the existing
+  death floor. (My original lean, now on honest grounds.)
+
+**Biosphere-balance (Agent B computed study, verified): PURE CALIBRATION, no build.** The flow-viability ratio
+is mass-INDEPENDENT (mass cancels in both denominators, `physiology.rs:471`/`503-505`), so small bodies are not
+harder (the small-body effect is buffer/time-to-death, not viability). Owner items: promote and set the two
+dev-fixture reserved values (`food_energy_density`, basis intake-offsets-Kleiber-drain; `ingest_efficiency`,
+basis Lindeman transfer); the T3-arming design-intent decision (owner-gated, needs two NEW reserved values, and
+worsens grazer survival as-is, NOT a starvation fix); and reconcile a doc-vs-code seam (`locomotion.rs:1224`
+claims a per-plant value supersedes the scalar once T3 wires, but `:1225` multiplies unconditionally, the
+supersede claim is aspirational).
+
+
 The owner designated me mediator/manager for their absence (loop every piece to bedrock, HOLD genuine
 owner-blockers with basis, keep building the unblocked substrate, sequence the agents). The Mirror sign-off
 below is RESOLVED (owner signed off batches 1-3, applied, Arc 2 merged as #108). Current effort: the
