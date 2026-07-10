@@ -191,10 +191,13 @@ fn aging_race(fracture_energy: Fixed) -> Race {
     let mut genes = race.genes.genes.clone();
     let mut freqs = vec![Fixed::from_ratio(1, 2); 3];
     let mut effects = vec![Fixed::ZERO; 3];
-    let comp_base = program.geometry_axes.len() * 2 + program.material_axes.len() + 2;
-    let muscle = MorphogenParamId((comp_base + 1) as u32); // composition index 1 = fracture_strength = MUSCLE_STRENGTH
-    let energy_density = MorphogenParamId(program.param_count() as u32 - 2);
-    let water_fraction = MorphogenParamId(program.param_count() as u32 - 1);
+    // Address composition axes through the program's own accessor, so this stays correct as more param
+    // categories are appended (the stroke-rate actuator block follows composition; `param_count() - 2` / `- 1`
+    // would point at it, not at energy/water).
+    let comp = program.composition_axes.len();
+    let muscle = MorphogenParamId(program.composition_param(1) as u32); // fracture_strength = MUSCLE_STRENGTH
+    let energy_density = MorphogenParamId(program.composition_param(comp - 2) as u32);
+    let water_fraction = MorphogenParamId(program.composition_param(comp - 1) as u32);
     let morph_seeds: Vec<(MorphogenParamId, Fixed)> = vec![
         (MorphogenParamId(0), Fixed::ONE),
         (MorphogenParamId(1), Fixed::from_ratio(1, 2)),

@@ -98,10 +98,12 @@ pub struct MorphogenProgram {
     /// `mech.stroke_length`), each with its floor range. They are GEOMETRY axes (grown into the per-segment
     /// geometry map like [`Self::geometry_axes`], with a root and a per-generation growth fraction), so a grown
     /// body's actuator has a real cross-section and stroke and its `F d` blow is non-zero. They are held in a
-    /// SEPARATE list, and their parameters sit AFTER the branch and spawn parameters but BEFORE the composition
-    /// parameters, so adding an actuator axis does not shift the geometry, material, branch, or spawn indices,
-    /// and the composition axes (whose energy-density and water-fraction stay LAST, addressed by
-    /// `param_count() - 2` and `- 1`) stay last. Empty leaves growth unchanged (a body without an actuator).
+    /// SEPARATE list, and their parameters sit at the END, AFTER the composition parameters, so adding an
+    /// actuator axis shifts NONE of the existing indices (geometry, material, branch, spawn, composition): the
+    /// growth is strictly additive, so every existing grown value is byte-identical and only the new
+    /// cross-section and stroke are added. Because the actuator params are now last, the composition energy-
+    /// density and water-fraction axes are addressed by `composition_param(composition_axes.len() - 2)` and
+    /// `- 1`, not by `param_count()`. Empty leaves growth unchanged (a body without an actuator).
     pub actuator_axes: Vec<AxisSpec>,
     /// RESERVED. The hard cap on growth generations (recursion depth), a termination guarantee. Basis: the
     /// number of developmental tiers a body plan represents (a handful), a performance-and-termination
@@ -152,23 +154,30 @@ impl MorphogenProgram {
         self.branch_param() + 1
     }
 
-    /// The parameter index of actuator axis `i`'s root fraction (the stroke-rate substrate), placed AFTER the
-    /// spawn parameter and BEFORE the composition parameters so it shifts none of the geometry, material,
-    /// branch, or spawn indices and leaves the composition axes last.
-    fn actuator_root_param(&self, i: usize) -> usize {
+    /// The parameter index of composition axis `i`'s tissue-composition fraction, placed AFTER the spawn
+    /// parameter so adding a bio axis does not shift the geometry, material, branch, or spawn indices. The
+    /// actuator parameters follow the composition block (see below), so the composition indices are UNCHANGED
+    /// by the stroke-rate substrate: a grown body's tissue composition is byte-identical to before. Public so a
+    /// founder-seeding fixture addresses a composition axis by asking the program (`composition_param(i)`)
+    /// rather than recomputing the offset off `param_count()`, which drifts the moment a param category is
+    /// appended (the stroke-rate actuator block did exactly that): the accessor is the one source of the layout.
+    pub fn composition_param(&self, i: usize) -> usize {
         self.spawn_param() + 1 + i
     }
 
-    /// The parameter index of actuator axis `i`'s per-generation growth fraction.
-    fn actuator_growth_param(&self, i: usize) -> usize {
-        self.spawn_param() + 1 + self.actuator_axes.len() + i
+    /// The parameter index of actuator axis `i`'s root fraction (the stroke-rate substrate), placed at the END,
+    /// AFTER the composition parameters, so it shifts NONE of the existing indices (geometry, material, branch,
+    /// spawn, composition all unchanged): the two actuator axes are a strictly-additive growth, so every existing
+    /// grown value is byte-identical and only the new cross-section and stroke are added. Because the actuator
+    /// params are now last, the energy-density and water-fraction composition axes are addressed by
+    /// `composition_param(composition_axes.len() - 2)` and `- 1`, not by `param_count() - 2` / `- 1`.
+    fn actuator_root_param(&self, i: usize) -> usize {
+        self.spawn_param() + 1 + self.composition_axes.len() + i
     }
 
-    /// The parameter index of bio axis `i`'s tissue-composition fraction, placed AFTER the spawn and actuator
-    /// parameters so adding a bio or an actuator axis does not shift the geometry, material, branch, or spawn
-    /// indices, and the energy-density and water-fraction axes stay LAST (`param_count() - 2` and `- 1`).
-    fn composition_param(&self, i: usize) -> usize {
-        self.spawn_param() + 1 + self.actuator_axes.len() * 2 + i
+    /// The parameter index of actuator axis `i`'s per-generation growth fraction (after the actuator roots).
+    fn actuator_growth_param(&self, i: usize) -> usize {
+        self.spawn_param() + 1 + self.composition_axes.len() + self.actuator_axes.len() + i
     }
 
     /// A labelled DEVELOPMENT FIXTURE program over the mechanical and optical floor axes a body part's
@@ -198,8 +207,9 @@ impl MorphogenProgram {
             // The tissue-composition axes the metabolism and physiology read. RESERVED (the floor's own axis
             // ranges, biology_floor.toml and the mechanical/thermal floors); labelled dev fixtures until a
             // floor registry supplies them. The convective surface, muscle strength, and specific heat lead;
-            // energy density and water fraction stay LAST so a caller addressing them by `param_count() - 2`
-            // and `- 1` (the two the reserves back) is stable as more physiology axes are added.
+            // energy density and water fraction stay LAST in the composition block (the two the reserves back),
+            // addressed by `composition_param(composition_axes.len() - 2)` and `- 1` so a caller stays stable as
+            // more physiology axes are added; the actuator params follow the composition block.
             composition_axes: vec![
                 geo("bio.convective_surface", dec("0"), dec("500")),
                 geo("mat.fracture_strength", dec("0"), dec("200")),
@@ -209,8 +219,9 @@ impl MorphogenProgram {
             ],
             // The actuator axes (the stroke-rate substrate): a load-bearing cross-section and a stroke length the
             // `F d` blow reads, grown per-segment so a grown body strikes with its own force and reach. RESERVED
-            // ranges (the floor's own `mech.cross_section_area` and `mech.stroke_length` bounds); labelled dev
-            // fixtures until a floor registry supplies them.
+            // ranges: plausible per-segment SUB-ranges WITHIN the floor's declared `mech.cross_section_area` and
+            // `mech.stroke_length` bounds (not the full floor bounds), labelled dev fixtures on the same footing
+            // as the geometry and composition axes above until a floor registry supplies them.
             actuator_axes: vec![
                 geo("mech.cross_section_area", dec("0.00000005"), dec("0.01")),
                 geo("mech.stroke_length", dec("0.01"), dec("1")),
@@ -1108,6 +1119,153 @@ mod tests {
     }
 
     #[test]
+    fn the_param_layout_is_a_nonoverlapping_partition_of_param_count() {
+        // The determinism guard for the whole positional param layout (root/growth geometry, material, branch,
+        // spawn, composition, and the stroke-rate actuator roots and growths): every accessor must map to a
+        // DISTINCT index, and together they must cover exactly `[0, param_count())` with no gap and no overlap.
+        // This breaks immediately on the exact index regressions the append risks: a dropped offset (two
+        // categories collide), an off-by-one (a gap or an overlap), or `actuator_growth_param` losing its
+        // `+ actuator_axes.len()` term so a root and its growth share an index. A functional grow test can be
+        // blind to these when the colliding loci happen to carry the same seed, so this asserts the arithmetic
+        // itself, not an outcome. It runs over a program with a DIFFERENT axis count per category so no
+        // coincidental equality hides a swapped `.len()`.
+        let mut program = MorphogenProgram::dev_default();
+        // Perturb the per-category counts so they are pairwise distinct (2 geometry, 3 material, 4 composition,
+        // 1 actuator): a formula that read the wrong category's length would then land on a wrong index.
+        program.geometry_axes.truncate(2);
+        program.material_axes.truncate(3);
+        program.composition_axes.truncate(4);
+        program.actuator_axes.truncate(1);
+
+        let mut indices = Vec::new();
+        for i in 0..program.geometry_axes.len() {
+            indices.push(program.root_geo_param(i));
+            indices.push(program.growth_param(i));
+        }
+        for i in 0..program.material_axes.len() {
+            indices.push(program.material_param(i));
+        }
+        indices.push(program.branch_param());
+        indices.push(program.spawn_param());
+        for i in 0..program.composition_axes.len() {
+            indices.push(program.composition_param(i));
+        }
+        for i in 0..program.actuator_axes.len() {
+            indices.push(program.actuator_root_param(i));
+            indices.push(program.actuator_growth_param(i));
+        }
+
+        assert_eq!(
+            indices.len(),
+            program.param_count(),
+            "every parameter is addressed exactly once, so the accessors account for the whole count"
+        );
+        indices.sort_unstable();
+        let expected: Vec<usize> = (0..program.param_count()).collect();
+        assert_eq!(
+            indices, expected,
+            "the accessors are a bijection onto [0, param_count()): no collision (a dropped offset), no gap or \
+             overlap (an off-by-one), and no root/growth aliasing"
+        );
+    }
+
+    #[test]
+    fn a_grown_body_grows_its_actuator_axes_and_reads_a_positive_impact_blow() {
+        // Stroke-rate step-1b, the payoff and its coverage: a grown body carries its own
+        // `mech.cross_section_area` and `mech.stroke_length` on every segment (root AND children, so the
+        // grow_child actuator branch and its distinct jitter stream are exercised), and reads a POSITIVE
+        // IMPACT capability, the `F d` actuator-work blow the strike delivers, derived from its own grown
+        // actuator geometry. Before step-1b a grown body carried no such geometry and delivered `F d = 0`.
+        // A body whose program declares NO actuator axes (an empty data list, the alien with no actuator)
+        // grows no cross-section or stroke and reads a zero blow: the actuator is a data row and the blow
+        // emerges from it, never authored. This test breaks on an actuator-index regression (a wrong
+        // `actuator_root_param`/`actuator_growth_param` grows the wrong axis, so IMPACT reads zero) that the
+        // determinism and composition tests, which only check run-to-run equality and the composition block,
+        // would pass blind.
+        let program = MorphogenProgram::dev_default();
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = caps();
+
+        // Seed the actuating strength (the muscle tissue, composition index 1), both actuator roots high, a
+        // per-generation actuator growth, and a branch plus spawn so a child grows. Address every locus through
+        // the program's own accessors so the seed cannot drift if the layout grows again.
+        let seeded = grow(
+            &program,
+            &params(
+                &program,
+                &[
+                    (program.composition_param(1), "1"), // mat.fracture_strength (MUSCLE_STRENGTH)
+                    (program.actuator_root_param(0), "1"), // mech.cross_section_area root
+                    (program.actuator_root_param(1), "1"), // mech.stroke_length root
+                    (program.actuator_growth_param(0), "0.8"),
+                    (program.actuator_growth_param(1), "0.8"),
+                    (program.branch_param(), "1"),
+                    (program.spawn_param(), "1"),
+                ],
+            ),
+            0x1,
+            StableId(1),
+        );
+        // The root grows both actuator axes positive from its own genome.
+        let root = &seeded.segments[0];
+        assert!(
+            root.geo("mech.cross_section_area") > Fixed::ZERO,
+            "the root grows a load-bearing cross-section"
+        );
+        assert!(
+            root.geo("mech.stroke_length") > Fixed::ZERO,
+            "and a stroke length"
+        );
+        // A child grows them too (the grow_child actuator branch, scaled from the parent).
+        let child = seeded
+            .segments
+            .iter()
+            .find(|s| s.parent.is_some())
+            .expect("a child grew so the grow_child actuator path is exercised");
+        assert!(
+            child.geo("mech.cross_section_area") > Fixed::ZERO,
+            "a child inherits and scales its cross-section"
+        );
+        assert!(
+            child.geo("mech.stroke_length") > Fixed::ZERO,
+            "and its stroke length"
+        );
+        // The payoff: a grown body reads a POSITIVE IMPACT (the `F d` blow), the whole point of step-1b.
+        assert!(
+            seeded.max_capability(FunctionLawRegistry::ID_IMPACT, &fns, &refs, &caps) > Fixed::ZERO,
+            "a grown body delivers a non-zero actuator-work blow from its own grown cross-section and stroke"
+        );
+
+        // The alien with no actuator: the same strength tissue but an EMPTY actuator-axis list, so no
+        // cross-section or stroke is grown and the blow is zero. The actuator is a data row.
+        let mut no_actuator = MorphogenProgram::dev_default();
+        no_actuator.actuator_axes = Vec::new();
+        let unarmed = grow(
+            &no_actuator,
+            &params(&no_actuator, &[(no_actuator.composition_param(1), "1")]),
+            0x1,
+            StableId(1),
+        );
+        let unarmed_root = &unarmed.segments[0];
+        assert_eq!(
+            unarmed_root.geo("mech.cross_section_area"),
+            Fixed::ZERO,
+            "a body whose program declares no actuator grows no cross-section"
+        );
+        assert_eq!(
+            unarmed_root.geo("mech.stroke_length"),
+            Fixed::ZERO,
+            "and no stroke length"
+        );
+        assert_eq!(
+            unarmed.max_capability(FunctionLawRegistry::ID_IMPACT, &fns, &refs, &caps),
+            Fixed::ZERO,
+            "and so it delivers no blow: the actuator is a data row the blow emerges from"
+        );
+    }
+
+    #[test]
     fn whole_body_viability_is_positive_for_a_functional_body_and_zero_for_inert_matter() {
         // Emergent-anatomy Step 3, the viability read the run-tier cull sets a grown being's integrity from:
         // a body that reads a positive capability on SOME function (a limb, a weapon, or an eye) is
@@ -1439,9 +1597,10 @@ mod tests {
         // density backs a positive energy reserve; one whose tissue carries none backs zero and starves at
         // birth through the ordinary reserve-floor cull, never a morphology gate.
         let program = MorphogenProgram::dev_default();
-        // The bio parameters sit after spawn: energy_density then water_fraction (see `composition_param`).
-        let energy = program.param_count() - 2;
-        let water = program.param_count() - 1;
+        // The bio parameters sit after spawn: energy_density then water_fraction are the last two composition
+        // axes (addressed via `composition_param`, since the actuator params now follow composition).
+        let energy = program.composition_param(program.composition_axes.len() - 2);
+        let water = program.composition_param(program.composition_axes.len() - 1);
 
         let nourished = grow(
             &program,
@@ -1491,12 +1650,13 @@ mod tests {
         // intensive MEAN (`composition_mean`), directly off the grown segments with no organ kind id, exactly
         // as the reserve capacity and energy density do. A body whose tissue carries none reads zero.
         let program = MorphogenProgram::dev_default();
-        let n = program.param_count();
         // The physiology composition params lead the composition block (convective surface, fracture
         // strength, specific heat), before the energy density and water fraction the reserves back.
-        let surface = n - 5;
-        let fracture = n - 4;
-        let specific_heat = n - 3;
+        // Addressed via `composition_param` (not `param_count()`-relative), since the actuator params now
+        // follow the composition block and the physiology axes lead it.
+        let surface = program.composition_param(0);
+        let fracture = program.composition_param(1);
+        let specific_heat = program.composition_param(2);
         let grown = grow(
             &program,
             &params(
