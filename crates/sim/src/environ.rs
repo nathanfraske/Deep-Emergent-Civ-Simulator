@@ -483,6 +483,31 @@ pub struct AbioticAvailability {
     pub bands: Vec<AxisBand>,
 }
 
+/// The per-source-class KINETICS of a redox uptake (the reversible-Michaelis-Menten draw, phase-2 increment 2):
+/// the catalytic turnover `kcat`, the half-saturation stock `Km`, the Hill cooperativity `h`, and the composition
+/// CLASS whose amount is the being's catalyst tissue (so `Vmax = kcat * catalyst`). A high-affinity oligotroph and
+/// a low-affinity copiotroph are data rows, not one authored kinetics. The catalyst class is DATA (Principle 11):
+/// it defaults to `bio.protein` (enzymes are proteins, Principle 4's causal-primitive-plus-correlating-proxy), but
+/// a world names its own, so a silicon or mineral-catalyst alien whose catalyst is NOT protein is a data row. The
+/// admit-alien catalyst AXIS (a first-class catalyst datum rather than a borrowed composition class) is coupled to
+/// R-SOURCE-VECTOR (the shared source-vector substrate), flagged there, not baked here.
+#[derive(Clone, Debug)]
+pub struct RedoxKinetics {
+    /// The catalytic turnover `kcat` (per tick), the maximum specific uptake per unit catalyst tissue. RESERVED,
+    /// basis the enzyme's turnover number. `Vmax = kcat * catalyst_tissue`, the emergent-throughput architecture
+    /// (no authored efficiency scalar; the throughput derives from the being's own catalyst amount).
+    pub kcat: Fixed,
+    /// The half-saturation stock `Km` (in the source's stock units): the substrate at which the uptake is half of
+    /// `Vmax`. RESERVED, basis the transporter's affinity for the source class it draws.
+    pub km: Fixed,
+    /// The Hill cooperativity exponent `h` (dimensionless): 1 the plain Monod, above 1 cooperative uptake.
+    /// RESERVED, basis the couple's cooperativity (1 unless the uptake is known cooperative).
+    pub hill: Fixed,
+    /// The producer-composition CLASS whose amount is the catalyst tissue (`Vmax = kcat * producer_food[class]`).
+    /// DATA: `bio.protein` by default (the protein-fraction proxy), a world names its own for an alien catalyst.
+    pub catalyst_class: String,
+}
+
 /// The data-defined binding of one abiotic source id to the run field it reads, whether it depletes that
 /// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
 #[derive(Clone, Debug)]
@@ -535,6 +560,12 @@ pub struct AbioticBinding {
     /// source's power is neither soil-borrowed nor fabricated but read from the floor. `None` (every Terran source)
     /// keeps the segment-2 behaviour, so the run is byte-identical.
     pub redox_emf: Option<RedoxEmf>,
+    /// The reversible-Michaelis-Menten uptake KINETICS (phase-2 increment 2): when `Some` on an armed redox
+    /// source, the pass-2 draw is the [`civsim_physics::laws::reversible_uptake_flux`] (Hill-saturating, driven by
+    /// the Nernst EMF, `min(v, S)` conserved, `Vmax = kcat * catalyst tissue`) rather than the capacity-
+    /// proportional draw. `None` (every Terran source and every unarmed redox source) keeps the segment-2 draw,
+    /// so the run is byte-identical. See [`RedoxKinetics`].
+    pub kinetics: Option<RedoxKinetics>,
 }
 
 /// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
@@ -630,6 +661,7 @@ impl AbioticSourceRegistry {
                 biomass_per_stock: None,
                 stock_per_biomass: None,
                 redox_emf: None,
+                kinetics: None,
             },
         );
     }
@@ -714,6 +746,29 @@ impl AbioticSourceRegistry {
         }
     }
 
+    /// Arm the reversible-Michaelis-Menten uptake KINETICS on a source (phase-2 increment 2): the catalytic
+    /// turnover `kcat`, the half-saturation `km`, the Hill exponent `hill`, and the producer-composition class
+    /// whose amount is the catalyst tissue (`Vmax = kcat * producer_food[catalyst_class]`, default `bio.protein`).
+    /// With this set on an armed redox source, its pass-2 draw is the reversible flux; unset, the draw is the
+    /// segment-2 capacity-proportional draw (byte-identical). A no-op if the id is unbound. All data (Principle 11).
+    pub fn set_source_kinetics(
+        &mut self,
+        id: u16,
+        kcat: Fixed,
+        km: Fixed,
+        hill: Fixed,
+        catalyst_class: &str,
+    ) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.kinetics = Some(RedoxKinetics {
+                kcat,
+                km,
+                hill,
+                catalyst_class: catalyst_class.to_string(),
+            });
+        }
+    }
+
     /// The stock-to-biomass conversion a binding uses, resolving the Arc-5 precedence (segment 3 over 2 over the
     /// global): a REDOX source DERIVES it from the couple's galvanic EMF ([`civsim_physics::laws::battery_emf`],
     /// `E_acceptor - E_donor`, clamped at zero so a non-spontaneous couple powers no life) times the RESERVED
@@ -754,6 +809,23 @@ impl AbioticSourceRegistry {
         acceptor_conc: Fixed,
         temperature: Fixed,
     ) -> Option<Fixed> {
+        let emf = self.redox_nernst_emf(binding, donor_conc, acceptor_conc, temperature)?;
+        Some(emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX))
+    }
+
+    /// The clamped NERNST EMF (volts) of an ARMED redox source at a cell, the shared drive both the pass-1 yield
+    /// ([`Self::redox_conversion_at`]) and the pass-2 reversible-flux draw ([`Self::redox_draw_flux`]) read: the
+    /// standard potential shifted for temperature (`dE0/dT`), corrected for the couple's ACTUAL activities (raw
+    /// concentrations times `gamma`), clamped at zero (no life below its own equilibrium). Returns `None` for a
+    /// non-redox or UNARMED redox source (carrier charge zero). Fails loud if `emf_to_biomass` or `k_B` is unset
+    /// while armed (the sentinel discipline).
+    fn redox_nernst_emf(
+        &self,
+        binding: &AbioticBinding,
+        donor_conc: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+    ) -> Option<Fixed> {
         let rx = binding.redox_emf.as_ref()?;
         if rx.carrier_charge <= Fixed::ZERO {
             return None; // unarmed: the standard concentration-independent EMF via effective_conversion
@@ -778,16 +850,48 @@ impl AbioticSourceRegistry {
             temperature,
             rx.t_ref,
         );
-        let emf = laws::nernst_emf(
-            e0_t,
-            a_donor,
-            a_acceptor,
+        Some(
+            laws::nernst_emf(
+                e0_t,
+                a_donor,
+                a_acceptor,
+                self.boltzmann_k,
+                temperature,
+                rx.carrier_charge,
+            )
+            .max(Fixed::ZERO),
+        )
+    }
+
+    /// The pass-2 reversible-Michaelis-Menten uptake DRAW of an armed redox source WITH kinetics (phase-2
+    /// increment 2): the [`civsim_physics::laws::reversible_uptake_flux`] over the source's own stock, driven by
+    /// the couple's Nernst EMF, with `Vmax = kcat * catalyst_tissue` (the emergent throughput, no authored
+    /// efficiency scalar), the Hill saturation, and the structural `min(v, S)` conservation clamp. Returns `None`
+    /// for a source that is non-redox, unarmed, or carries no kinetics, whose draw stays the segment-2
+    /// capacity-proportional draw (byte-identical). `catalyst_tissue` is the being's catalyst amount (its
+    /// `catalyst_class` composition), read by the caller from the producer at the cell.
+    fn redox_draw_flux(
+        &self,
+        binding: &AbioticBinding,
+        stock: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+        catalyst_tissue: Fixed,
+    ) -> Option<Fixed> {
+        let kin = binding.kinetics.as_ref()?;
+        let rx = binding.redox_emf.as_ref()?;
+        let emf = self.redox_nernst_emf(binding, stock, acceptor_conc, temperature)?;
+        let vmax = kin.kcat.checked_mul(catalyst_tissue).unwrap_or(Fixed::ZERO);
+        Some(laws::reversible_uptake_flux(
+            stock,
+            vmax,
+            kin.km,
+            kin.hill,
+            emf,
             self.boltzmann_k,
             temperature,
             rx.carrier_charge,
-        )
-        .max(Fixed::ZERO);
-        Some(emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX))
+        ))
     }
 
     /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
@@ -1508,10 +1612,69 @@ impl EnvironFields {
                     // each by its OWN coefficient. `None` falls back to the reciprocal of this source's effective
                     // conversion (draw_biomass / bps, the same segment-3-or-2-or-global conversion Pass 1 capped
                     // by), today's implicit 1:1 draw (byte-identical for Earth).
-                    let bps = registry.effective_conversion(binding);
-                    let draw_amt = match binding.stock_per_biomass {
-                        Some(spb) => draw_biomass.checked_mul(spb).unwrap_or(Fixed::ZERO),
-                        None => draw_biomass.checked_div(bps).unwrap_or(Fixed::ZERO),
+                    // The reversible-flux DRAW (increment 2): an armed redox source WITH kinetics draws its own
+                    // uptake flux (Hill-saturating, driven by the couple's Nernst EMF, Vmax = kcat * the being's
+                    // catalyst tissue, min(v, S) conserved) over its own stock, so a depleting couple's draw
+                    // saturates and falls with the drive. Any other source (non-redox, unarmed, or no kinetics)
+                    // keeps the segment-2 capacity-proportional draw exactly (byte-identical). The catalyst tissue
+                    // is the producer's own composition amount for the kinetics' named class (default bio.protein,
+                    // a per-source datum so an alien names its own catalyst class; the fuller catalyst axis is the
+                    // flagged R-SOURCE-VECTOR follow-on). The per-couple clamp (the Nernst EMF zeroed below the
+                    // couple's own equilibrium) is the correct form for these INDEPENDENT couples; the net-across-a-
+                    // thermodynamically-coupled-set clamp is a follow-on for when shared-intermediate coupling is
+                    // modelled (there is no coupling substrate yet).
+                    let draw_amt = {
+                        let temperature = temp.at(x, y);
+                        let acceptor_conc =
+                            match binding.redox_emf.as_ref().and_then(|rx| rx.acceptor_field) {
+                                Some(AbioticField::Light) => self.light[i],
+                                Some(AbioticField::Water) => self.water.at(x, y),
+                                Some(AbioticField::Soil) => soil.mass(coord, &binding.class),
+                                Some(AbioticField::DataScalar(fid)) => self
+                                    .data_fields
+                                    .get(&fid)
+                                    .map(|f| f.at(x, y))
+                                    .unwrap_or(Fixed::ONE),
+                                None => Fixed::ONE,
+                            };
+                        let stock = match binding.field {
+                            AbioticField::Light => Fixed::ZERO,
+                            AbioticField::Soil => soil.mass(coord, &binding.class),
+                            AbioticField::Water => self.water.at(x, y),
+                            AbioticField::DataScalar(fid) => self
+                                .data_fields
+                                .get(&fid)
+                                .map(|f| f.at(x, y))
+                                .unwrap_or(Fixed::ZERO),
+                        };
+                        let catalyst_tissue = binding
+                            .kinetics
+                            .as_ref()
+                            .map(|kin| {
+                                self.producer_food[i]
+                                    .as_ref()
+                                    .and_then(|f| f.get(&kin.catalyst_class).copied())
+                                    .unwrap_or(Fixed::ZERO)
+                            })
+                            .unwrap_or(Fixed::ZERO);
+                        match registry.redox_draw_flux(
+                            binding,
+                            stock,
+                            acceptor_conc,
+                            temperature,
+                            catalyst_tissue,
+                        ) {
+                            Some(flux) => flux,
+                            None => {
+                                let bps = registry.effective_conversion(binding);
+                                match binding.stock_per_biomass {
+                                    Some(spb) => {
+                                        draw_biomass.checked_mul(spb).unwrap_or(Fixed::ZERO)
+                                    }
+                                    None => draw_biomass.checked_div(bps).unwrap_or(Fixed::ZERO),
+                                }
+                            }
+                        }
                     };
                     match binding.field {
                         AbioticField::Light => {} // light has no located stock to deplete
@@ -3334,6 +3497,89 @@ mod tests {
             low_armed < low_std && low_armed > Fixed::ZERO,
             "a depleting couple's Nernst yield falls below the standard EMF but still powers some life \
              (armed {low_armed:?}, standard {low_std:?})"
+        );
+    }
+
+    #[test]
+    fn a_nernst_redox_source_with_kinetics_draws_the_reversible_flux_from_its_catalyst_tissue() {
+        // Phase-2 increment 2: an armed redox source WITH kinetics draws the reversible-Michaelis-Menten uptake
+        // flux, Vmax = kcat * the being's OWN catalyst tissue (its named composition class), min(v, S) conserved.
+        // A producer WITH catalyst tissue draws its stock down; one WITHOUT (no catalyst, Vmax = 0) draws nothing;
+        // the draw never exceeds the present stock (the conservation clamp).
+        let map = a_map(0x5EDD02);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 21;
+        let source_id: u16 = 201;
+        let donor = Fixed::from_ratio(2, 10);
+        let acceptor = Fixed::from_ratio(8, 10);
+
+        let run = |stock: Fixed, protein: Option<Fixed>| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), true, ""); // depletes: pass 2 draws it
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::from_ratio(1, 2);
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = Fixed::from_int(2);
+            reg.set_boltzmann_k(Fixed::from_ratio(257, 10_000));
+            reg.set_source_redox(source_id, donor, acceptor);
+            reg.set_source_nernst(
+                source_id,
+                Fixed::ONE,
+                None,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            );
+            reg.set_source_kinetics(
+                source_id,
+                Fixed::from_int(4),
+                Fixed::ONE,
+                Fixed::ONE,
+                "bio.protein",
+            );
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            if let Some(p) = protein {
+                let mut comp = BTreeMap::new();
+                comp.insert("bio.protein".to_string(), p);
+                e.set_producer_food(&[(cell, comp)]);
+            }
+            e.set_data_field(field_id, ScalarField::uniform(w, h, stock));
+            let temp = Field::from_map(&map);
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::ONE; (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf);
+            stock - e.data_field_at(field_id, cell.x, cell.y).unwrap() // the amount drawn
+        };
+
+        // A producer WITH catalyst tissue draws the flux; one WITHOUT draws nothing (Vmax = kcat * 0 = 0).
+        let drawn_with = run(Fixed::from_int(10), Some(Fixed::from_ratio(1, 2)));
+        let drawn_without = run(Fixed::from_int(10), None);
+        assert!(
+            drawn_with > Fixed::ZERO,
+            "a producer with catalyst tissue draws the reversible flux, got {drawn_with:?}"
+        );
+        assert_eq!(
+            drawn_without,
+            Fixed::ZERO,
+            "a producer with no catalyst tissue draws nothing (its Vmax is zero), got {drawn_without:?}"
+        );
+
+        // Conservation: with a tiny stock the draw never exceeds it (the structural min(v, S) clamp).
+        let tiny = Fixed::from_ratio(1, 1000);
+        let drawn_tiny = run(tiny, Some(Fixed::from_ratio(1, 2)));
+        assert!(
+            drawn_tiny <= tiny && drawn_tiny > Fixed::ZERO,
+            "the flux draws some but never more than the present stock (drawn {drawn_tiny:?}, stock {tiny:?})"
         );
     }
 
