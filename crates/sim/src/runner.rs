@@ -88,6 +88,8 @@ use crate::affordance_percept::{
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::axiom::AxiomAxisId;
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry};
+use crate::contact_wound::{presented_contact_area, wound_fraction, FRACTURE_ENERGY_AXIS};
 use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::FeltConvictionCalib;
 use crate::conviction_percept::ConvictionPerceptRegistry;
@@ -99,7 +101,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
     HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
-    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, STRIKE, TEMPERATURE,
 };
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
@@ -1196,6 +1198,13 @@ pub struct Embodiment {
     /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
     /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
     strike: Option<StrikeParams>,
+    /// The contact-transfer registry the being-vs-being STRIKE delivers its energy through (hunt-kill strike
+    /// arc): which contact channels exist and which physics-floor transfer kernel each delivers by
+    /// ([`crate::contact_transfer`]). EMPTY by default, so a world that declares no channel delivers no strike
+    /// energy and every existing scenario is byte-identical (the opt-in empty-default); the STRIKE affordance is
+    /// itself afforded only by a PIERCE-bearing body, so no run_world scenario reaches the strike at all.
+    /// Populated by the world-build ([`Embodiment::set_contact_transfer`]).
+    contact_transfer: ContactTransferRegistry,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1305,6 +1314,7 @@ impl Embodiment {
             wear: None,
             breakage: false,
             strike: None,
+            contact_transfer: ContactTransferRegistry::empty(),
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -1757,6 +1767,14 @@ impl Embodiment {
     /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
     pub fn set_strike(&mut self, params: StrikeParams) {
         self.strike = Some(params);
+    }
+
+    /// Install the contact-transfer registry the being-vs-being STRIKE delivers energy through (hunt-kill strike
+    /// arc): the channels a world runs and the physics-floor transfer kernel each delivers by. Opt-in; without it
+    /// (the empty default) a strike finds no channel and delivers no wound, so every existing scenario is
+    /// byte-identical. Kinetic is the first (Terran) channel; a non-kinetic contact attack is a data row.
+    pub fn set_contact_transfer(&mut self, registry: ContactTransferRegistry) {
+        self.contact_transfer = registry;
     }
 
     /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
@@ -2320,6 +2338,168 @@ impl Embodiment {
             freed += self.pick_up(walker_id, coord, s, want);
         }
         freed
+    }
+
+    /// Enact a being's decided STRIKE (hunt-kill strike arc, the emergent predation payoff): the acting being
+    /// wounds the Segments of another being CO-LOCATED in its cell, delivering its striking part's energy against
+    /// the struck part's own material, computed from the physics floor. This is the being-vs-being sibling of
+    /// [`Embodiment::strike_underfoot`] (which fractures the MATTER underfoot): WHO strikes is the emergent
+    /// controller decision (the keystone being-percept gradient plus a founder-zero freely-signed STRIKE weight),
+    /// so nothing reads a species, role, or relatedness (Principle 8), and the primitive reads whatever Segments
+    /// occupy the cell, the occupant-agnostic form.
+    ///
+    /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
+    /// delivery mass (the wielded tool's, or the largest-mass grown Segment's, read off the axis the channel's
+    /// row DECLARES via `source_axis`, a Terran channel naming the extensive `mech.mass`) at the reserved swing
+    /// speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row. The
+    /// struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`), a derive-first
+    /// PROXY that reads only the target's own geometry to CHOOSE where a blind blow lands, never `failure_tolerance`,
+    /// so it is not weak-point targeting. The wound is [`crate::contact_wound::wound_fraction`] (piece 2) of the
+    /// delivered energy against that struck Segment's OWN `failure_tolerance = mat.fracture_energy * mech.contact_area`
+    /// (its Griffith reserve), so a big tough Segment (a large reserve) takes a small wound and armor emerges.
+    ///
+    /// The wound is WRITTEN to Agent B's `Segment.damage` accumulator in B's exact convention (piece 4, the
+    /// sequencing hold cleared): the wound fraction is added to the struck Segment's normalized damage, saturating
+    /// then clamping to `[0, ONE]` exactly as [`crate::morphogen::Structure::accrue_aging`], so a strike is a large
+    /// one-tick increment on the SAME currency aging accrues by, NO `* 1000`, no double-count.
+    /// `whole_body_viability_aged` reads the Segment's `integrity()` (one minus this damage), the INTEGRITY axis
+    /// reflects it, and the ONE unified cull removes the being when any axis floors: one currency, one death path,
+    /// no morphology predicate. STRIKE is afforded only by a PIERCE-bearing body, decided by no run_world scenario,
+    /// and the transfer registry is empty by default, so the write is armed only for a striking predator body and
+    /// every run_world pin is unmoved (byte-neutral). A part with no declared mass, an empty registry, no
+    /// co-located target, or a target with no Structure all deliver no wound (the absence conventions). It returns
+    /// the wound fraction it applied. Deterministic: the target is the first co-located other being in id order (the
+    /// walkers are id-sorted once per tick), and the struck Segment the FIRST of the greatest contact area (a
+    /// deterministic placeholder that ALWAYS strikes the single largest-presented part, not yet the stochastic
+    /// "most likely the biggest" scatter).
+    ///
+    /// FLAGGED FOLLOW-ONS (surfaced by the section-9 audit):
+    /// (1) the swing speed is the world-global reserved `StrikeParams::swing_velocity`, applied uniformly, while
+    /// mass and area emerge per-being; its own basis names per-being limb-length and stroke rate, so it should be
+    /// DERIVED from the acting part's own limb geometry times a stroke-rate substrate (a new floor axis), a
+    /// pre-existing seam shared with [`Embodiment::strike_underfoot`], not a per-strike fix;
+    /// (2) the caller assembles KINETIC inputs (mass, velocity) and gates on a positive mass, so adding a
+    /// non-kinetic floor kernel reworks this assembly, not just a data row (per-part channel SELECTION is the
+    /// same follow-on);
+    /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
+    /// coupled to the spatial-body-layout arc.
+    pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {
+        let Some(params) = self.strike else {
+            return Fixed::ZERO; // strike unarmed: no swing kinematics
+        };
+        // The channel the strike delivers through: the first registered contact-transfer row, whose kernel
+        // drives resolve_transfer. An empty registry declares no channel, so no strike fires (the opt-in
+        // absence). The per-part channel SELECTION (an acting part choosing among several channels by its own
+        // data) is the flagged follow-on; the first cut delivers through the world's registered channel.
+        let Some((_, row)) = self.contact_transfer.iter().next() else {
+            return Fixed::ZERO;
+        };
+        let row = row.clone();
+        // The acting part's delivery MASS, off the being's OWN apparatus: the part with the greatest `mech.mass`
+        // among its wielded tool and its grown Structure Segments (the one delivering the most kinetic energy).
+        // Reads only the part's own physics, never a race or role. Scoped so the acting walker's borrow ends
+        // before the target search.
+        let (coord, acting_mass) = {
+            let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+                return Fixed::ZERO;
+            };
+            let coord = w.coord();
+            let mut acting_mass = Fixed::ZERO;
+            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
+                let m = tool.mass(reg);
+                if m > acting_mass {
+                    acting_mass = m;
+                }
+            }
+            if let Some(structure) = w.structure.as_ref() {
+                for seg in &structure.segments {
+                    // The delivery mass is read off the axis the channel's row DECLARES (row.source_axis),
+                    // data-defined per Principle 11, never a hardcoded axis id: a Terran channel names the
+                    // extensive `mech.mass`, an alien body its own mass source.
+                    let m = seg.geo(&row.source_axis);
+                    if m > acting_mass {
+                        acting_mass = m;
+                    }
+                }
+            }
+            (coord, acting_mass)
+        };
+        if acting_mass <= Fixed::ZERO {
+            return Fixed::ZERO; // a part with no mass delivers no blow (the absence convention)
+        }
+        // The energy the blow delivers, dispatched by the channel's kernel over the acting part's own mass and
+        // the reserved swing speed (piece 1). The scale bridge to Agent B's `Segment.damage` accumulator
+        // convention is reconciled at the held write (piece 4), not baked here.
+        let delivered_energy =
+            resolve_transfer(&row, acting_mass, params.swing_velocity, params.energy_max);
+        // The TARGET: another being CO-LOCATED in the same cell, found by iterating the beings (this method
+        // cannot reach the runner's located index). The first in id order is the deterministic pick; an
+        // area-weighted stochastic scatter over co-located targets is the flagged follow-on.
+        let Some(target_idx) = self
+            .walkers
+            .iter()
+            .position(|other| other.id != walker_id && other.coord() == coord)
+        else {
+            return Fixed::ZERO; // nothing co-located to strike
+        };
+        // The struck Segment INDEX: the target's LARGEST-PRESENTED (greatest `mech.contact_area`), the
+        // derive-first proxy for where a blind blow lands. Reads geometry, never `failure_tolerance`. The first
+        // segment of the greatest area wins (strictly-greater updates keep the earlier on a tie), deterministic.
+        let struck_idx = {
+            let Some(structure) = self.walkers[target_idx].structure.as_ref() else {
+                // The target presents no run-path Segments (the deep `body::Body`-to-Structure bridge is the
+                // flagged separate arc): nothing to wound here.
+                return Fixed::ZERO;
+            };
+            let mut best: Option<usize> = None;
+            let mut best_area = Fixed::ZERO;
+            for (i, seg) in structure.segments.iter().enumerate() {
+                let area = presented_contact_area(seg);
+                if best.is_none() || area > best_area {
+                    best_area = area;
+                    best = Some(i);
+                }
+            }
+            match best {
+                Some(i) => i,
+                None => return Fixed::ZERO, // a Structure with no Segments
+            }
+        };
+        // The wound in Agent B's EXACT accrual convention: the fraction of the struck segment's OWN
+        // `failure_tolerance = fracture_energy * mech.contact_area` (its Griffith reserve, the same product
+        // `Segment::failure_tolerance` and `accrue_aging` use) the delivered energy reaches, NO `* 1000`, so a
+        // strike is a large one-tick increment on the SAME currency aging accrues by. A big tough segment (a
+        // large tolerance) takes a small wound, armor emerging; the acting part's concentration (the
+        // pierce-versus-blunt sub-cell wound shape) is the flagged follow-on coupled to the spatial-body-layout
+        // arc. Computed under an immutable borrow that ends before the write.
+        let wound = {
+            let struck = &self.walkers[target_idx]
+                .structure
+                .as_ref()
+                .expect("structure present (checked above)")
+                .segments[struck_idx];
+            wound_fraction(
+                delivered_energy,
+                presented_contact_area(struck),
+                struck.mat(FRACTURE_ENERGY_AXIS),
+                params.energy_max,
+            )
+        };
+        // WRITE Agent B's `Segment.damage` accumulator (piece 4, the sequencing hold now cleared): add the wound
+        // fraction to the struck segment's normalized damage, saturating on the bits then clamping to `[0, ONE]`,
+        // exactly as `Structure::accrue_aging` advances aging damage, so wounds and aging compose on ONE
+        // accumulator with no double-count. `whole_body_viability_aged` reads the segment's `integrity()` (one
+        // minus this damage), the INTEGRITY axis reflects it, and the ONE unified cull removes the being when any
+        // axis floors: one currency, one death path, no morphology predicate (Principle 8). Armed only for a
+        // STRIKE-deciding body, so no run_world scenario reaches it (byte-neutral).
+        let struck = &mut self.walkers[target_idx]
+            .structure
+            .as_mut()
+            .expect("structure present (checked above)")
+            .segments[struck_idx];
+        struck.damage = Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
+            .clamp(Fixed::ZERO, Fixed::ONE);
+        wound
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -5757,6 +5937,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -5818,6 +5999,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -5889,6 +6071,15 @@ impl Runner {
                     }
                     SHELTER => {
                         emb.deposit_overhead(id);
+                    }
+                    STRIKE => {
+                        // The hunt-kill strike (the emergent-predation payoff): wound a co-located being's
+                        // largest-presented Segment with the acting part's delivered energy (the piece-1 transfer
+                        // and piece-2 wound), writing Agent B's `Segment.damage` in B's accrual convention so the
+                        // wound degrades that region's integrity and the ONE unified INTEGRITY cull removes the
+                        // being when it floors. Armed only for a STRIKE-deciding PIERCE-bearing body, so no
+                        // run_world scenario reaches it (byte-neutral). The returned wound fraction is unused here.
+                        emb.strike_occupant(id);
                     }
                     _ => {}
                 }
@@ -6947,6 +7138,241 @@ source = "test"
             half_band: Fixed::from_int(8),
             initial_temp: Fixed::from_int(37),
         }
+    }
+
+    #[test]
+    fn a_strike_wounds_the_targets_largest_presented_segment_by_geometry_not_weak_point() {
+        use crate::anatomy::{Part, Temperament};
+        use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry, DEV_KINETIC};
+        use crate::contact_wound::wound_fraction;
+        use crate::homeostasis::HomeostaticAxisDef;
+        use crate::material::StrikeParams;
+        use crate::morphogen::{Segment, Structure};
+
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let bp = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        emb.set_strike(StrikeParams::dev_fixture());
+        emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        let layout = emb.layout().clone();
+
+        // A segment carrying a delivery mass, a presented contact area, and a fracture resistance.
+        let seg = |mass: Fixed, area: Fixed, fe: Fixed| {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), mass);
+            geometry.insert("mech.contact_area".to_string(), area);
+            let mut material = BTreeMap::new();
+            material.insert("mat.fracture_energy".to_string(), fe);
+            Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }
+        };
+
+        // The striker: one mass-bearing part at a small (concentrated) contact patch.
+        let striker = Structure {
+            segments: vec![seg(
+                Fixed::from_int(5),
+                Fixed::from_ratio(1, 100),
+                Fixed::ZERO,
+            )],
+        };
+        // The target: a BIG-area TOUGH Segment (index 0) and a SMALL-area SOFT one. The largest-presented is
+        // the big tough Segment, so a blind blow lands there (geometry), and the wound reads the TOUGH material,
+        // never the weak point: armor emerges.
+        // The big segment is tough enough (a large fracture energy) that the blow only PARTIALLY wounds it, so
+        // the armor comparison below is a real inequality rather than two saturated full wounds.
+        let big_area = Fixed::from_ratio(1, 2);
+        let small_area = Fixed::from_ratio(1, 100);
+        let big_tough_fe = Fixed::from_int(100_000);
+        let soft_fe = Fixed::from_int(1);
+        let target = Structure {
+            segments: vec![
+                seg(Fixed::ZERO, big_area, big_tough_fe),
+                seg(Fixed::ZERO, small_area, soft_fe),
+            ],
+        };
+
+        let coord = Coord3::ground(3, 3);
+        let mk = |id: u64, structure: Structure| {
+            Walker::new(
+                StableId(id),
+                coord,
+                bp(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(&layout),
+            )
+            .with_structure(structure)
+        };
+        emb.add(mk(1, striker), band());
+        emb.add(mk(2, target), band());
+
+        let wound = emb.strike_occupant(StableId(1));
+
+        // The wound is exactly the piece-1 delivered energy over the LARGEST-PRESENTED (big tough) Segment's OWN
+        // failure tolerance (its own `mat.fracture_energy * mech.contact_area`, Agent B's convention): the
+        // largest-presented was struck, and the wound reads that struck Segment's own geometry and material.
+        let cap = Fixed::from_int(1_000_000);
+        let row = ContactTransferRegistry::dev_terran()
+            .get(DEV_KINETIC)
+            .unwrap()
+            .clone();
+        let energy = resolve_transfer(&row, Fixed::from_int(5), Fixed::from_int(10), cap);
+        let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
+        assert_eq!(
+            wound, expected,
+            "the wound reads the largest-presented (big tough) Segment's OWN tolerance"
+        );
+        assert!(
+            wound > Fixed::ZERO && wound < Fixed::ONE,
+            "a real, partial wound"
+        );
+
+        // The write LANDED on the struck (largest-presented, index 0) Segment in Agent B's damage accumulator,
+        // and the un-struck Segment stays whole: the wound degraded the struck region's integrity.
+        let target = emb.walkers()[1].structure.as_ref().unwrap();
+        assert_eq!(
+            target.segments[0].damage, wound,
+            "the struck Segment's damage rose by the wound (B's accumulator)"
+        );
+        assert_eq!(
+            target.segments[1].damage,
+            Fixed::ZERO,
+            "the un-struck Segment is unwounded"
+        );
+
+        // The tough largest-presented Segment PROTECTS: its own large tolerance takes a lesser wound than the
+        // soft small Segment's tiny tolerance would, so armor emerges from geometry plus material.
+        let soft = wound_fraction(energy, small_area, soft_fe, cap);
+        assert!(
+            wound < soft,
+            "a big tough surface takes a lesser wound than the soft part (armor emerges, not weak-point targeting)"
+        );
+
+        // The DEATH LINKAGE: a blow past the struck Segment's own tolerance fully wounds it, so its damage
+        // saturates to ONE and its integrity() FLOORS to ZERO, the input `whole_body_viability_aged` (and thus
+        // the INTEGRITY axis and the one unified cull) reads: a vital wound kills through the SAME reserve cull
+        // aging kills through, one death path. A being whose only Segment is fragile (a tiny failure tolerance)
+        // is struck dead in one blow.
+        let mut lethal = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        lethal.set_strike(StrikeParams::dev_fixture());
+        lethal.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        lethal.add(
+            mk(
+                1,
+                Structure {
+                    segments: vec![seg(Fixed::from_int(5), small_area, Fixed::ONE)],
+                },
+            ),
+            band(),
+        );
+        // The prey: one fragile Segment (a tiny fracture energy over a tiny area, so its failure tolerance is
+        // far below the delivered energy).
+        lethal.add(
+            mk(
+                2,
+                Structure {
+                    segments: vec![seg(Fixed::ZERO, small_area, Fixed::from_ratio(1, 1000))],
+                },
+            ),
+            band(),
+        );
+        let lethal_wound = lethal.strike_occupant(StableId(1));
+        assert_eq!(
+            lethal_wound,
+            Fixed::ONE,
+            "a blow past the Segment's tolerance is a full wound"
+        );
+        let prey = lethal.walkers()[1].structure.as_ref().unwrap();
+        assert_eq!(
+            prey.segments[0].damage,
+            Fixed::ONE,
+            "the wound saturates the damage accumulator"
+        );
+        assert_eq!(
+            prey.segments[0].integrity(),
+            Fixed::ZERO,
+            "a fully-wounded Segment has zero integrity, flooring whole_body_viability and the unified INTEGRITY cull"
+        );
+
+        // No co-located other being: no target, no wound (the absence convention). Move the target away.
+        let mut lone = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        lone.set_strike(StrikeParams::dev_fixture());
+        lone.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        lone.add(
+            Walker::new(
+                StableId(1),
+                coord,
+                bp(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(&layout),
+            )
+            .with_structure(Structure {
+                segments: vec![seg(
+                    Fixed::from_int(5),
+                    Fixed::from_ratio(1, 100),
+                    Fixed::ZERO,
+                )],
+            }),
+            band(),
+        );
+        assert_eq!(
+            lone.strike_occupant(StableId(1)),
+            Fixed::ZERO,
+            "no co-located being to strike delivers no wound"
+        );
     }
 
     #[test]
