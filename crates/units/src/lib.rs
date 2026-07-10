@@ -43,6 +43,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod bignum;
+pub mod compute;
 pub mod fundamentals;
 
 /// An exponent on a base dimension. Small signed integer; real physical dimensions
