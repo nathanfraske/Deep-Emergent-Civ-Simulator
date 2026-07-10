@@ -988,6 +988,89 @@ mod tests {
     }
 
     #[test]
+    fn impact_reads_its_axis_ids_from_the_data_binding_so_an_alien_actuator_names_its_own_axes() {
+        // Slice 2's core value (Principle 11, admit-the-alien): the IMPACT grade reads its strength, cross-section,
+        // and stroke off the law's DATA-declared bindings, not hardcoded ids, so an alien actuator that names its
+        // own axes is honored on the grade path exactly as on the delivery-path row. This is the adversarial probe
+        // the byte-neutral tests cannot be: reverting impact() to the old hardcoded ids would flip both the
+        // canonical-reads-zero and the alien-reads-positive assertions below.
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
+        let caps = test_caps();
+        // A being that carries its actuating physics on ALIEN axis ids, not the Terran mech.*/mat.* the kernel
+        // used to hardcode; the canonical Terran axes carry nothing.
+        let geo = geo_of(
+            [("alien.cross_section", "0.000001"), ("alien.reach", "1")]
+                .into_iter()
+                .collect(),
+        );
+        let mat = mat_of([("alien.strength", "200")].into_iter().collect());
+
+        // The canonical Terran binding (`FunctionLawDef::new`, the byte-neutral default) reads ZERO off this alien
+        // body: its values are not on `mech.cross_section_area` / `mech.stroke_length` / `mat.fracture_strength`.
+        let canonical = FunctionLawDef::new(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+        );
+        assert_eq!(
+            canonical.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &canonical.geometry_axes,
+                &canonical.material_axes,
+            ),
+            Fixed::ZERO,
+            "the canonical Terran binding reads nothing off an alien body's own axes (the grade is not hardcoded)"
+        );
+
+        // The SAME kernel with an ALIEN binding (the law's row naming the being's own axes as data) reads a
+        // positive impact from them: strength 200 MPa over a 1e-6 m^2 cross-section is 200 N, over a 1 m reach
+        // 200 J, above the 100 J reference. The grade follows the DATA, not a hardcoded id.
+        let alien = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec!["alien.cross_section".to_string(), "alien.reach".to_string()],
+            material_axes: vec!["alien.strength".to_string()],
+        };
+        assert!(
+            alien.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &alien.geometry_axes,
+                &alien.material_axes,
+            ) > Fixed::ZERO,
+            "an alien actuator that names its own axes is honored on the grade path (the data binding is read)"
+        );
+
+        // A binding that names no stroke axis (only a cross-section entry) self-gates to zero, even with the
+        // strength and cross-section present: the absence convention, no fabricated blow, no index panic.
+        let no_stroke = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec!["alien.cross_section".to_string()],
+            material_axes: vec!["alien.strength".to_string()],
+        };
+        assert_eq!(
+            no_stroke.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &no_stroke.geometry_axes,
+                &no_stroke.material_axes,
+            ),
+            Fixed::ZERO,
+            "a binding naming no stroke axis self-gates to zero (the absence convention)"
+        );
+    }
+
+    #[test]
     fn a_cut_reads_the_targets_own_material_so_the_same_edge_diverges_by_target() {
         // The crafting seam (material-substrate item 4): a cut contest reads the TARGET's material, so the
         // same edge parts a soft target and stalls on a hard one, and a harder sharper edge parts stone a
