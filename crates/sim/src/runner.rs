@@ -424,6 +424,16 @@ impl Field {
         }
     }
 
+    /// The field's grid width (additive accessor, for a reader that samples the surface temperature).
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    /// The field's grid height (additive accessor, for a reader that samples the surface temperature).
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
     /// Set one cell's relaxation BASELINE (the solar-and-biome forcing target the field relaxes toward),
     /// additive API for the day-night arc: the diurnal insolation writes each cell's baseline per tick, and the
     /// existing relaxation-plus-diffusion produces the emergent surface-temperature swing and its thermal lag
@@ -3579,6 +3589,16 @@ impl Runner {
                     env.set_fertility_from(emb.soil(), mc.fertility_scale);
                 }
                 env.step(&self.field, &calib);
+            }
+        }
+        {
+            // Day-night HEAT coupling (arc 2): when the diurnal cycle is armed, copy the environ's freshly
+            // computed solar-forcing baseline into the temperature field's relaxation baseline, so the field
+            // relaxes toward the cycling insolation and the diurnal surface swing and thermal lag EMERGE from
+            // its own relaxation-plus-diffusion. A no-op (byte-identical) when the cycle is unarmed. Disjoint
+            // fields (environ read, field write), after the environ step that produced the baseline.
+            if let Some((env, _)) = self.environ.as_ref() {
+                env.apply_diurnal_baseline(&mut self.field);
             }
         }
         {

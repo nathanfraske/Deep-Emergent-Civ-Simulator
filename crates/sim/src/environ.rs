@@ -342,6 +342,12 @@ pub struct EnvironFields {
     /// into the state hash: its effect enters through the light field, which drives the hashed productivity
     /// capacity; on an unarmed run it never advances, so the pins hold.
     diurnal_tick: u64,
+    /// The per-cell SOLAR-FORCING BASELINE temperature the diurnal drive computes each armed tick (the
+    /// radiative-equilibrium temperature of the absorbed insolation plus the world's back-radiation floor,
+    /// day-night arc, night-floor form (2)). The runner copies it into the temperature `Field`'s relaxation
+    /// baseline, and the field's existing relaxation-plus-diffusion produces the emergent surface swing and
+    /// thermal lag. EMPTY when the cycle is unarmed (no copy happens, the field baseline stands, byte-identical).
+    solar_baseline: Vec<Fixed>,
 }
 
 /// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
@@ -760,6 +766,7 @@ impl EnvironFields {
             data_fields: BTreeMap::new(),
             sky: None,
             diurnal_tick: 0,
+            solar_baseline: Vec::new(),
         }
     }
 
@@ -791,13 +798,69 @@ impl EnvironFields {
             (self.diurnal_tick % sky.orbital_period_ticks) as i64,
             sky.orbital_period_ticks as i64,
         );
+        if self.solar_baseline.len() != (w.max(0) as usize) * (h.max(0) as usize) {
+            self.solar_baseline = vec![Fixed::ZERO; (w.max(0) as usize) * (h.max(0) as usize)];
+        }
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
-                self.light[i] = insolation_at(x, y, w, h, diurnal_phase, orbital_phase, &sky);
+                let insol = insolation_at(x, y, w, h, diurnal_phase, orbital_phase, &sky);
+                self.light[i] = insol;
+                // The heat baseline (night-floor form (2)): the absorbed irradiance is the normalised daylit
+                // insolation scaled to physical watts by the stellar constant, plus the world's back-radiation
+                // floor so the night side relaxes toward a retained temperature (airless zero, Earth mild,
+                // Venus high) rather than absolute zero. The radiative-equilibrium law returns the surface
+                // temperature of that absorbed flux; the field's relaxation-plus-diffusion then produces the
+                // emergent swing and lag. The per-material emissivity read is the flagged follow-on.
+                let absorbed = insol
+                    .checked_mul(sky.solar_constant)
+                    .unwrap_or(Fixed::MAX)
+                    .saturating_add(sky.back_radiation);
+                self.solar_baseline[i] = civsim_physics::laws::radiative_equilibrium(
+                    absorbed,
+                    sky.emissivity,
+                    sky.sigma,
+                    sky.t_max,
+                );
             }
         }
         self.diurnal_tick = self.diurnal_tick.saturating_add(1);
+    }
+
+    /// Whether the diurnal insolation cycle is armed (day-night arc), so the runner knows to copy
+    /// [`Self::solar_baseline_at`] into the temperature field's relaxation baseline each tick.
+    pub fn is_diurnal_armed(&self) -> bool {
+        self.sky.is_some()
+    }
+
+    /// Copy the armed diurnal SOLAR BASELINE into the temperature field's relaxation baseline (day-night arc,
+    /// the heat coupling). A no-op when the cycle is unarmed, so an unarmed run leaves the field's baseline
+    /// untouched and is byte-identical. Called by the runner each tick after [`Self::step`] has computed the
+    /// baseline, keeping the runner edit to one line; the field then relaxes toward the cycling baseline and the
+    /// diurnal swing and thermal lag emerge from its own relaxation-plus-diffusion (bounded by the maximum
+    /// principle), never authored here.
+    pub fn apply_diurnal_baseline(&self, field: &mut Field) {
+        if !self.is_diurnal_armed() {
+            return;
+        }
+        for y in 0..self.height {
+            for x in 0..self.width {
+                field.set_baseline_at(x, y, self.solar_baseline_at(x, y));
+            }
+        }
+    }
+
+    /// The per-cell solar-forcing baseline TEMPERATURE the armed diurnal drive computed this tick (day-night
+    /// arc), for the runner to copy into the temperature field's relaxation baseline. Reads zero for an
+    /// off-grid cell or an unarmed run (the field baseline then stands unchanged).
+    pub fn solar_baseline_at(&self, x: i32, y: i32) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return Fixed::ZERO;
+        }
+        self.solar_baseline
+            .get(self.idx(x, y))
+            .copied()
+            .unwrap_or(Fixed::ZERO)
     }
 
     #[inline]
@@ -1518,6 +1581,27 @@ pub struct DiurnalSky {
     pub obliquity: Fixed,
     /// The data star-list. One unit-luminosity star at zero phase offset is the single-star reference.
     pub stars: Vec<Star>,
+    /// The physical stellar flux scale (W/m^2) that turns the normalised daylit insolation into an absorbed
+    /// irradiance for the radiative surface-temperature baseline, so the heat path reads physical watts while
+    /// the light path stays the normalised `[0, 1]` productivity signal. RESERVED, owner-set from the real
+    /// stellar constant (Mirror = Earth's ~1361 W/m^2 solar constant).
+    pub solar_constant: Fixed,
+    /// The per-world atmospheric BACK-RADIATION (downwelling longwave) floor (W/m^2), the night-side irradiance
+    /// a surface still absorbs when the star is down, so the night baseline is `radiative_eq(back_radiation)`
+    /// rather than absolute zero and the Moon-Earth-Venus diurnal-swing spectrum EMERGES from this one datum
+    /// (airless 0, Earth mild, thick-atmosphere high). RESERVED, owner-set (Mirror = Earth's real downwelling
+    /// longwave). The full derivation from the atmosphere's greenhouse optical depth is the flagged follow-on.
+    pub back_radiation: Fixed,
+    /// The surface EMISSIVITY the radiative-equilibrium baseline reads. INTERIM uniform (a flagged
+    /// uniform-absorption limit): the per-material emissivity from the floor `opt.emissivity` (so ice, rock,
+    /// water, and an alien crust equilibrate and lag differently) is the named immediate follow-on.
+    pub emissivity: Fixed,
+    /// The Stefan-Boltzmann constant sigma the radiative-equilibrium law reads (a physics-floor universal
+    /// constant, `metabolism.stefan_boltzmann`), and the temperature representability cap `t_max` the kernel
+    /// clamps to.
+    pub sigma: Fixed,
+    /// The representability cap the radiative-equilibrium kernel clamps its output temperature to.
+    pub t_max: Fixed,
 }
 
 impl DiurnalSky {
@@ -1533,6 +1617,16 @@ impl DiurnalSky {
                 luminosity: Fixed::ONE,
                 phase_offset: Fixed::ZERO,
             }],
+            // LABELLED DEV FIXTURES (Earth-like), the reserved heat values surfaced for the owner, not decided
+            // here: the solar constant (W/m^2), a mild atmospheric back-radiation floor, a uniform surface
+            // emissivity (the per-material floor read is the follow-on), the Stefan-Boltzmann sigma, and a
+            // representability cap. Mirror sets these to Earth's real values; an airless world sets
+            // back_radiation to zero for a Moon-like plunge.
+            solar_constant: Fixed::from_int(1361),
+            back_radiation: Fixed::from_int(300),
+            emissivity: Fixed::from_ratio(95, 100),
+            sigma: Fixed::from_ratio(567, 10_000_000_000),
+            t_max: Fixed::from_int(500),
         }
     }
 }
@@ -1672,6 +1766,7 @@ mod tests {
             data_fields: BTreeMap::new(),
             sky: None,
             diurnal_tick: 0,
+            solar_baseline: Vec::new(),
         }
     }
 
@@ -1749,6 +1844,38 @@ mod tests {
                 "a zero-tilt pole is dark at phase {p}/4, got {pole:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_armed_diurnal_cycle_warms_the_day_baseline_and_holds_a_night_floor_above_absolute_zero()
+    {
+        // Arm the reference sky and step one tick, then read the solar-forcing baseline the runner would copy
+        // into the temperature field. The equator at dawn (tick 0, hour angle 0) is fully daylit, so its
+        // baseline is the radiative-equilibrium temperature of the full stellar flux plus back-radiation; a
+        // dark cell (a zero-tilt pole) reads the radiative-equilibrium of the back-radiation floor alone, which
+        // is well above absolute zero (the night-floor form (2), never 0 K).
+        let map = a_map(0x5A1A17);
+        let mut e = EnvironFields::from_map(&map);
+        let h = e.height;
+        e.arm_diurnal(DiurnalSky::reference(100, 36500));
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        e.step(&temp, &calib);
+        let mid = h / 2;
+        let day = e.solar_baseline_at(0, mid); // equator, local noon at tick 0
+        let night = e.solar_baseline_at(0, 0); // a zero-tilt pole: no direct sun, back-radiation only
+        assert!(
+            day > Fixed::from_int(250),
+            "the daylit baseline is a warm surface temperature (K), got {day:?}"
+        );
+        assert!(
+            night > Fixed::from_int(50),
+            "the dark-side baseline holds a back-radiation floor well above absolute zero, got {night:?}"
+        );
+        assert!(
+            day > night,
+            "the daylit side is warmer than the dark side ({day:?} vs {night:?})"
+        );
     }
 
     #[test]

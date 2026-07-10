@@ -1591,6 +1591,31 @@ fn snapshot(
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
     }
+    // Day-night arc: when the diurnal cycle is armed, show the surface temperature swing across the equator
+    // (the coolest night-side cell versus the warmest day-side cell in the middle row) so the day-night heating
+    // is watchable in the readout. Silent when the cycle is unarmed.
+    if runner
+        .environ()
+        .map(|e| e.is_diurnal_armed())
+        .unwrap_or(false)
+    {
+        let f = runner.field();
+        let (fw, fh) = (f.width(), f.height());
+        let mid = fh / 2;
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for x in 0..fw {
+            let t = f.at(x, mid).to_f64_lossy();
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        if lo.is_finite() && hi.is_finite() {
+            println!(
+                "  day-night surface (equator, K): night-side {lo:.1}  day-side {hi:.1}  swing {:.1}",
+                hi - lo
+            );
+        }
+    }
     if !death_cause.is_empty() {
         let parts: Vec<String> = death_cause
             .iter()
@@ -2187,6 +2212,13 @@ fn main() {
             let comps = living.producer_compositions();
             if let Some(env) = runner.environ_mut() {
                 env.set_producer_food(&comps);
+                // Day-night arc (arc 2): arm the diurnal insolation cycle so the light and surface temperature
+                // sweep day to night, and any rhythm a being keeps emerges from selection over those cycling
+                // physical fields, never from an authored clock. A short 128-tick "day" makes the cycle visible
+                // over the run. The zero-obliquity single-star REFERENCE world (not Mirror: Mirror is Earth at
+                // its real 23.4-degree tilt, the flagged follow-on). Opt-in and byte-neutral off, so the four
+                // tracked determinism pins hold; only this armed scenario cycles.
+                env.arm_diurnal(civsim_sim::environ::DiurnalSky::reference(128, 128 * 365));
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
