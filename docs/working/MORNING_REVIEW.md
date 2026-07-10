@@ -271,6 +271,7 @@ AbioticField field-kind registry (Agent C, my recommendation, owner-approved). H
   tissue-tolerance / denaturation substrate that is truly Arc 4 (that is `burn_scale`'s home). You may have
   grouped it by name; set it now on reconsideration, or keep the Arc-4 deferral. `burn_scale` stays Arc-4
   either way.
+- **Strike mass-payoff: I ruled the honest physics interim (a), your feel call to confirm or override (Agent A, #119).** The stroke-rate substrate's corrected law makes delivered strike energy = actuator work `F*d`, which is INDEPENDENT of the swung mass (Agent A's §10 panel showed the old `swing_velocity` form hid an authored per-body stroke-fraction, and the honest `F*d` form cancels mass under fixed actuator work, verified). That removes the deliberate "carrying the tool's mass pays off" the current strike design encodes (`runner.rs:1197`). I ruled the physics-honest form (a): drop the free mass term now, since keeping it authors an unfounded physics for feel; mass still pays off through the real channels (contact area, not-shattering) and through a FOUNDED future coupling (a heavier or longer tool affording a longer power stroke `d` or higher sustainable `F`), which I flagged as a derived refinement (b), not authored. This changes strike FEEL, so it is your call: confirm (a) as the honest default, or override to keep the free mass term for gameplay, or ask for (b) the derived tool-geometry payoff sooner. Reversible either way (b is an additive future coupling).
 
 ## Notes and observations from the night
 
