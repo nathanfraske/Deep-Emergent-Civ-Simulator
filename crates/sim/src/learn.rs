@@ -619,6 +619,40 @@ pub fn being_signal_observation(
     observation_toward(being_signal_subject(channel, bucket), harm, weight)
 }
 
+/// The REWARD-frame counterpart of [`being_signal_observation`] (the being-percept keystone, step 2, the
+/// PREDATION pole's learner): a being correlates a perceived being-signal, keyed by its sense `channel` and
+/// discriminated `bucket`, with its OWN reward bit that tick ([`crate::homeostasis::is_reward_tick`], whether
+/// any reserve ROSE beyond the noise floor), minting one observation toward `REWARDS` on a reward tick and
+/// `NEUTRAL` otherwise, on the SAME [`being_signal_subject`] the harm core uses but fed into the disjoint
+/// `(subject, REWARD_ATTR)` frame. So perceiving a being that correlates with the perceiver's own reserves
+/// RISING (it ate) mints a reward belief on that being-signal, the substrate the predation pole rests on;
+/// perceiving a being that correlates with reserves FALLING mints the harm belief through
+/// [`being_signal_observation`]. Which belief forms, and so which pole a being later acts on, emerges from
+/// the being's own outcomes, never from a species, trophic role, or being-hood read.
+///
+/// Minted INLINE toward `REWARDS`/`NEUTRAL`, exactly as [`reward_observations`] does for a material feature,
+/// because the shared [`observation_toward`] helper is hardwired to the harm frame (`HARMS`/`BENIGN`) and a
+/// reward observation points the other way. The weight is the reserved reward observation weight scaled by
+/// the being's plasticity, reusing the existing reward likelihoods, never a new fabricated weight. Pure and
+/// OFF the run path (no live caller): the keystone's live wire consumes it, so this is byte-neutral by
+/// construction. The reserved derive targets and the eligibility-trace latency are the same ones
+/// [`being_signal_observation`] documents; they are shared, not re-listed here.
+pub fn being_signal_reward_observation(
+    channel: u16,
+    bucket: i64,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    FeatureObservation {
+        subject: being_signal_subject(channel, bucket),
+        toward: if reward { REWARDS } else { NEUTRAL },
+        weight,
+    }
+}
+
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
 /// in its degenerate single-tick form): one per PRESENT feature of the cell it stands on (a channel whose
 /// amount is positive), toward `REWARDS` if it felt a supra-recovery reserve RISE this tick and `NEUTRAL`
@@ -1019,6 +1053,69 @@ mod tests {
         assert!(
             being_signal_subject(u16::MAX, i64::MAX).0 < (1 << 63),
             "stays below the reserved-high landmark ids, exactly as the feature and sequence bands do"
+        );
+    }
+
+    #[test]
+    fn a_being_signal_earns_a_reward_observation_pointed_by_the_reward_bit() {
+        // Keystone step 2 (the predation pole): a perceived being-signal correlated with the being's own
+        // reward bit mints one observation toward REWARDS on a reward tick, NEUTRAL otherwise, on the SAME
+        // being-signal subject the harm core uses (disjoint frames by attribute), so a perceived being carries
+        // both a harm belief and a reward belief that emerge from the perceiver's own outcomes.
+        let calib = RewardLearningCalib::dev_default();
+        let rewarded = being_signal_reward_observation(2, 7, true, Fixed::ONE, &calib);
+        assert_eq!(
+            rewarded.toward, REWARDS,
+            "a reward tick points toward REWARDS"
+        );
+        assert_eq!(
+            rewarded.subject,
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal band"
+        );
+        assert!(rewarded.weight > Fixed::ZERO, "positive evidence weight");
+        let neutral = being_signal_reward_observation(2, 7, false, Fixed::ONE, &calib);
+        assert_eq!(
+            neutral.toward, NEUTRAL,
+            "a reward-free tick points toward NEUTRAL"
+        );
+        // The reward core and the harm core share the SAME subject (one perceived signal, two disjoint belief
+        // frames), so a being's harm and reward beliefs about a signal never split across subjects.
+        let hcalib = HarmLearningCalib::dev_default();
+        let harm = being_signal_observation(2, 7, true, Fixed::ONE, &hcalib);
+        assert_eq!(
+            rewarded.subject, harm.subject,
+            "harm and reward beliefs share the being-signal subject"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_reward_core_mints_inline_like_the_material_reward_core() {
+        // The being-signal reward core is fed through the same INLINE reward mint the material reward learner
+        // uses: for the same channel, bucket, reward bit, and plasticity, the valence direction and evidence
+        // weight match reward_observations, so no being path is special-cased; only the SUBJECT differs (the
+        // disjoint being-signal band), so a being-signal reward belief never aliases a material one.
+        let calib = RewardLearningCalib::dev_default();
+        let amount = Fixed::from_int(2);
+        let bucket = feature_bucket(amount, calib.feature_granularity);
+        let mat = reward_observations(true, &[amount], Fixed::ONE, &calib, 0);
+        let sig = being_signal_reward_observation(0, bucket, true, Fixed::ONE, &calib);
+        assert_eq!(
+            sig.toward, mat[0].toward,
+            "same valence direction (REWARDS)"
+        );
+        assert_eq!(
+            sig.weight, mat[0].weight,
+            "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, mat[0].subject,
+            "disjoint from the material-feature reward subject"
         );
     }
 
