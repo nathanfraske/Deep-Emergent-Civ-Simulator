@@ -20,27 +20,27 @@ The lists below are GENERATED from `crates/physics/data/*.toml` and `crates/phys
 ### `crates/physics/data/biology_floor.toml` (22 axes)
 
 - `bio.water_fraction` [fraction] (crates/physics/data/biology_floor.toml:16): the water mass fraction of fresh tissue (perishability and energy dilution)
-- `bio.energy_density` [kJ/g] (crates/physics/data/biology_floor.toml:27): gross energy per gram fresh (stored gross, bomb-calorimetry)
-- `bio.protein_fraction` [fraction] (crates/physics/data/biology_floor.toml:38): the protein mass fraction (a partial lump with a residual child for exact additivity)
-- `bio.lipid_fraction` [fraction] (crates/physics/data/biology_floor.toml:49): the lipid mass fraction
-- `bio.nonstructural_carbohydrate_fraction` [fraction] (crates/physics/data/biology_floor.toml:60): the storage and soluble carbohydrate mass fraction (chemistry-keyed, not eater-keyed)
-- `bio.structural_carbohydrate_fraction` [fraction] (crates/physics/data/biology_floor.toml:71): the fiber, cellulose, and lignin fraction (energy to a fermenter, ballast otherwise)
-- `bio.mineral_ash_fraction` [fraction] (crates/physics/data/biology_floor.toml:82): the mineral ash mass fraction
-- `bio.decomposition_barrier` [K] (crates/physics/data/biology_floor.toml:98): the temperature at or above which the organic matter decomposes; at or below it a frozen remains is preserved
-- `bio.decomposition_rate` [fraction] (crates/physics/data/biology_floor.toml:109): the fraction of the organic matter's volume that breaks down per tick once at or above its decomposition barrier
-- `bio.toxin_load_coarse` [mg/kg] (crates/physics/data/biology_floor.toml:120): the Tier-0 total toxin mass, the saturating sum of the Tier-1 toxin-class concentrations
-- `bio.toxin.alkaloid` [mg/kg] (crates/physics/data/biology_floor.toml:134): alkaloid concentration in the shared mg/kg scale
-- `bio.toxin.cyanogenic` [mg/kg] (crates/physics/data/biology_floor.toml:145): cyanogenic and hydrolytic-release HCN-releasable concentration (preparation detoxifies)
-- `bio.toxin.cardiac_glycoside` [mg/kg] (crates/physics/data/biology_floor.toml:156): cardiac and steroidal glycoside concentration (Na/K-ATPase, the narrow-window exemplar)
-- `bio.consumer.requirement` [fraction] (crates/physics/data/biology_floor.toml:170): the per-nutrient-class deficiency floor (a not-required sentinel distinct from zero; trace classes warrant a finer per-quantity scale)
-- `bio.consumer.assimilation` [fraction] (crates/physics/data/biology_floor.toml:181): the absorbed fraction of a class present (carries digestibility consumer-side, zero where no pathway)
-- `bio.consumer.fermentation` [fraction] (crates/physics/data/biology_floor.toml:192): the fermentation capacity converting structural carbohydrate to available energy
-- `bio.consumer.reference_tolerance` [mg/kg-body] (crates/physics/data/biology_floor.toml:203): the per-toxin-class reference dose harm is measured against (a not-applicable sentinel distinct from zero)
-- `bio.consumer.hill_exponent` [integer] (crates/physics/data/biology_floor.toml:213): the per-(toxin-class, consumer) integer dose-response steepness (1 hyperbolic, 2 or 3 sigmoid)
-- `bio.respiratory_surface` [m^2] (crates/physics/data/biology_floor.toml:226): gas-exchange surface area a respiratory tissue presents per unit organ development (the area the Fick membrane law exchanges over)
-- `bio.convective_surface` [m^2] (crates/physics/data/biology_floor.toml:241): the body-to-medium exchange surface area a covering or exposed tissue presents per unit organ development (the area the Newton convective and Stefan-B...
-- `bio.net_nutrition` [fraction] (crates/physics/data/biology_floor.toml:254): the net-nutrition adequacy score, the Liebig minimum over per-class satisfaction
-- `bio.net_harm` [fraction] (crates/physics/data/biology_floor.toml:265): the net-harm score, the saturating sum over per-class integer-Hill dose response
+- `bio.energy_density` [kJ/g] (crates/physics/data/biology_floor.toml:28): gross energy per gram fresh (stored gross, bomb-calorimetry)
+- `bio.protein_fraction` [fraction] (crates/physics/data/biology_floor.toml:40): the protein mass fraction (a partial lump with a residual child for exact additivity)
+- `bio.lipid_fraction` [fraction] (crates/physics/data/biology_floor.toml:52): the lipid mass fraction
+- `bio.nonstructural_carbohydrate_fraction` [fraction] (crates/physics/data/biology_floor.toml:63): the storage and soluble carbohydrate mass fraction (chemistry-keyed, not eater-keyed)
+- `bio.structural_carbohydrate_fraction` [fraction] (crates/physics/data/biology_floor.toml:74): the fiber, cellulose, and lignin fraction (energy to a fermenter, ballast otherwise)
+- `bio.mineral_ash_fraction` [fraction] (crates/physics/data/biology_floor.toml:85): the mineral ash mass fraction
+- `bio.decomposition_barrier` [K] (crates/physics/data/biology_floor.toml:101): the temperature at or above which the organic matter decomposes; at or below it a frozen remains is preserved
+- `bio.decomposition_rate` [fraction] (crates/physics/data/biology_floor.toml:112): the fraction of the organic matter's volume that breaks down per tick once at or above its decomposition barrier
+- `bio.toxin_load_coarse` [mg/kg] (crates/physics/data/biology_floor.toml:123): the Tier-0 total toxin mass, the saturating sum of the Tier-1 toxin-class concentrations
+- `bio.toxin.alkaloid` [mg/kg] (crates/physics/data/biology_floor.toml:137): alkaloid concentration in the shared mg/kg scale
+- `bio.toxin.cyanogenic` [mg/kg] (crates/physics/data/biology_floor.toml:148): cyanogenic and hydrolytic-release HCN-releasable concentration (preparation detoxifies)
+- `bio.toxin.cardiac_glycoside` [mg/kg] (crates/physics/data/biology_floor.toml:159): cardiac and steroidal glycoside concentration (Na/K-ATPase, the narrow-window exemplar)
+- `bio.consumer.requirement` [fraction] (crates/physics/data/biology_floor.toml:173): the per-nutrient-class deficiency floor (a not-required sentinel distinct from zero; trace classes warrant a finer per-quantity scale)
+- `bio.consumer.assimilation` [fraction] (crates/physics/data/biology_floor.toml:184): the absorbed fraction of a class present (carries digestibility consumer-side, zero where no pathway)
+- `bio.consumer.fermentation` [fraction] (crates/physics/data/biology_floor.toml:195): the fermentation capacity converting structural carbohydrate to available energy
+- `bio.consumer.reference_tolerance` [mg/kg-body] (crates/physics/data/biology_floor.toml:206): the per-toxin-class reference dose harm is measured against (a not-applicable sentinel distinct from zero)
+- `bio.consumer.hill_exponent` [integer] (crates/physics/data/biology_floor.toml:216): the per-(toxin-class, consumer) integer dose-response steepness (1 hyperbolic, 2 or 3 sigmoid)
+- `bio.respiratory_surface` [m^2] (crates/physics/data/biology_floor.toml:229): gas-exchange surface area a respiratory tissue presents per unit organ development (the area the Fick membrane law exchanges over)
+- `bio.convective_surface` [m^2] (crates/physics/data/biology_floor.toml:244): the body-to-medium exchange surface area a covering or exposed tissue presents per unit organ development (the area the Newton convective and Stefan-B...
+- `bio.net_nutrition` [fraction] (crates/physics/data/biology_floor.toml:257): the net-nutrition adequacy score, the Liebig minimum over per-class satisfaction
+- `bio.net_harm` [fraction] (crates/physics/data/biology_floor.toml:268): the net-harm score, the saturating sum over per-class integer-Hill dose response
 
 ### `crates/physics/data/chem_optics_floor.toml` (14 axes)
 
@@ -179,9 +179,9 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 
 #### `crates/physics/data/biology_floor.toml` (3 laws)
 
-- `law.net_nutrition` -> `net_nutrition` (crates/physics/data/biology_floor.toml:278)
-- `law.harm` -> `net_harm` (crates/physics/data/biology_floor.toml:293)
-- `law.edibility` -> `edibility` (crates/physics/data/biology_floor.toml:307)
+- `law.net_nutrition` -> `net_nutrition` (crates/physics/data/biology_floor.toml:281)
+- `law.harm` -> `net_harm` (crates/physics/data/biology_floor.toml:296)
+- `law.edibility` -> `edibility` (crates/physics/data/biology_floor.toml:310)
 
 #### `crates/physics/data/chem_optics_floor.toml` (11 laws)
 
