@@ -900,6 +900,7 @@ fn viability_homeostatic() -> HomeostaticRegistry {
         // exploration propensity that leads to eating (the run path has no fitness scorer). The reproductive
         // cost is graded, so the eating lineage spreads without the mass starvation a lethal hunger caused.
         death_floor: Fixed::from_int(-1000),
+        draw_set: Vec::new(),
     });
     // The seed-CRAVING reserve: also oilseed-backed, so the SAME geophage bite that feeds the survival hunger
     // feeds it, but it drains FAST and never kills. Because it drains fast it always carries room, so each
@@ -916,6 +917,7 @@ fn viability_homeostatic() -> HomeostaticRegistry {
         base_drain: seed_craving_drain(),
         exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_int(-1000),
+        draw_set: Vec::new(),
     });
     reg
 }

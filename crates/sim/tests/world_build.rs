@@ -1679,6 +1679,7 @@ fn integrity_thermal_registry() -> HomeostaticRegistry {
         base_drain: Fixed::ZERO,
         exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_ratio(1, 32),
+        draw_set: Vec::new(),
     });
     reg
 }
@@ -1829,6 +1830,7 @@ fn aging_homeo() -> HomeostaticRegistry {
         base_drain: Fixed::ZERO,
         exertion_drain: Fixed::ZERO,
         death_floor: Fixed::from_ratio(1, 8),
+        draw_set: Vec::new(),
     });
     reg
 }
