@@ -94,6 +94,15 @@ pub struct MorphogenProgram {
     /// tissue with no organ kind id. Their parameters sit AFTER the branch and spawn parameters, so adding a
     /// composition axis does not shift the geometry, material, branch, or spawn parameter indices.
     pub composition_axes: Vec<AxisSpec>,
+    /// The ACTUATOR geometry axes a segment carries for the stroke-rate substrate (`mech.cross_section_area`,
+    /// `mech.stroke_length`), each with its floor range. They are GEOMETRY axes (grown into the per-segment
+    /// geometry map like [`Self::geometry_axes`], with a root and a per-generation growth fraction), so a grown
+    /// body's actuator has a real cross-section and stroke and its `F d` blow is non-zero. They are held in a
+    /// SEPARATE list, and their parameters sit AFTER the branch and spawn parameters but BEFORE the composition
+    /// parameters, so adding an actuator axis does not shift the geometry, material, branch, or spawn indices,
+    /// and the composition axes (whose energy-density and water-fraction stay LAST, addressed by
+    /// `param_count() - 2` and `- 1`) stay last. Empty leaves growth unchanged (a body without an actuator).
+    pub actuator_axes: Vec<AxisSpec>,
     /// RESERVED. The hard cap on growth generations (recursion depth), a termination guarantee. Basis: the
     /// number of developmental tiers a body plan represents (a handful), a performance-and-termination
     /// bound rather than a realism one.
@@ -111,7 +120,11 @@ impl MorphogenProgram {
     /// per-generation growth fraction, per material axis a fraction, plus a branch fraction and a spawn
     /// fraction. The morphogen block appended to a founder gene set is this many loci.
     pub fn param_count(&self) -> usize {
-        self.geometry_axes.len() * 2 + self.material_axes.len() + 2 + self.composition_axes.len()
+        self.geometry_axes.len() * 2
+            + self.material_axes.len()
+            + 2
+            + self.actuator_axes.len() * 2
+            + self.composition_axes.len()
     }
 
     /// The parameter index of geometry axis `i`'s root fraction.
@@ -139,10 +152,23 @@ impl MorphogenProgram {
         self.branch_param() + 1
     }
 
-    /// The parameter index of bio axis `i`'s tissue-composition fraction, placed AFTER the spawn parameter so
-    /// adding a bio axis does not shift the geometry, material, branch, or spawn indices.
-    fn composition_param(&self, i: usize) -> usize {
+    /// The parameter index of actuator axis `i`'s root fraction (the stroke-rate substrate), placed AFTER the
+    /// spawn parameter and BEFORE the composition parameters so it shifts none of the geometry, material,
+    /// branch, or spawn indices and leaves the composition axes last.
+    fn actuator_root_param(&self, i: usize) -> usize {
         self.spawn_param() + 1 + i
+    }
+
+    /// The parameter index of actuator axis `i`'s per-generation growth fraction.
+    fn actuator_growth_param(&self, i: usize) -> usize {
+        self.spawn_param() + 1 + self.actuator_axes.len() + i
+    }
+
+    /// The parameter index of bio axis `i`'s tissue-composition fraction, placed AFTER the spawn and actuator
+    /// parameters so adding a bio or an actuator axis does not shift the geometry, material, branch, or spawn
+    /// indices, and the energy-density and water-fraction axes stay LAST (`param_count() - 2` and `- 1`).
+    fn composition_param(&self, i: usize) -> usize {
+        self.spawn_param() + 1 + self.actuator_axes.len() * 2 + i
     }
 
     /// A labelled DEVELOPMENT FIXTURE program over the mechanical and optical floor axes a body part's
@@ -180,6 +206,14 @@ impl MorphogenProgram {
                 geo("therm.specific_heat", dec("0"), dec("5000")),
                 geo("bio.energy_density", dec("0"), dec("38")),
                 geo("bio.water_fraction", dec("0"), dec("1")),
+            ],
+            // The actuator axes (the stroke-rate substrate): a load-bearing cross-section and a stroke length the
+            // `F d` blow reads, grown per-segment so a grown body strikes with its own force and reach. RESERVED
+            // ranges (the floor's own `mech.cross_section_area` and `mech.stroke_length` bounds); labelled dev
+            // fixtures until a floor registry supplies them.
+            actuator_axes: vec![
+                geo("mech.cross_section_area", dec("0.00000005"), dec("0.01")),
+                geo("mech.stroke_length", dec("0.01"), dec("1")),
             ],
             // Labelled dev caps: a shallow developmental tree, wide enough to grow a limbed, multi-part
             // body but hard-bounded so the recursion always halts.
@@ -730,6 +764,12 @@ pub fn grow(program: &MorphogenProgram, params: &[Fixed], seed: u64, id: StableI
         let f = frac(params, program.root_geo_param(i));
         geometry.insert(spec.axis.clone(), map_range(f, spec.lo, spec.hi));
     }
+    // The actuator axes (the stroke-rate substrate): grown into the same geometry map, so a grown body's
+    // cross-section and stroke are its own per-segment data and its `F d` blow is non-zero.
+    for (i, spec) in program.actuator_axes.iter().enumerate() {
+        let f = frac(params, program.actuator_root_param(i));
+        geometry.insert(spec.axis.clone(), map_range(f, spec.lo, spec.hi));
+    }
     let mut material = BTreeMap::new();
     for (i, spec) in program.material_axes.iter().enumerate() {
         let f = frac(params, program.material_param(i));
@@ -810,6 +850,21 @@ fn grow_child(
             .slot(SLOT_JITTER)
             .rng(seed)
             .unit_fixed(i as u64);
+        let jitter = Fixed::ONE + (roll - HALF).mul(Fixed::from_int(2)).mul(JITTER_MAG);
+        let raw = parent.geo(&spec.axis).mul(growth).mul(jitter);
+        geometry.insert(spec.axis.clone(), raw.clamp(spec.lo, spec.hi));
+    }
+    // The actuator axes scale from the parent exactly as the geometry axes, by their own growth fraction and a
+    // distinct jitter stream (offset past the geometry axes so the draws never collide), so a child's stroke and
+    // cross-section stay heritable-plus-individual and deterministic.
+    for (i, spec) in program.actuator_axes.iter().enumerate() {
+        let f = frac(params, program.actuator_growth_param(i));
+        let growth = GROWTH_LO + f.mul(GROWTH_HI - GROWTH_LO);
+        let locus = ((parent_idx as u64) << 8) | child as u64;
+        let roll = DrawKey::pair(id.0, locus, gen as u64, Phase::MORPHOGEN)
+            .slot(SLOT_JITTER)
+            .rng(seed)
+            .unit_fixed((program.geometry_axes.len() + i) as u64);
         let jitter = Fixed::ONE + (roll - HALF).mul(Fixed::from_int(2)).mul(JITTER_MAG);
         let raw = parent.geo(&spec.axis).mul(growth).mul(jitter);
         geometry.insert(spec.axis.clone(), raw.clamp(spec.lo, spec.hi));
