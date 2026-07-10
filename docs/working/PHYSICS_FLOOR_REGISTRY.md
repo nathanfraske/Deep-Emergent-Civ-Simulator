@@ -332,15 +332,15 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 - `battery_emf` (crates/physics/src/laws.rs:1988): Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
 - `standard_potential_at_temperature` [direct] (crates/physics/src/laws.rs:1997): The standard cell potential at the cell TEMPERATURE (V): `E0(T) = E0_ref + (dE0/dT) * (T - T_ref)`, the
 - `nernst_emf` [direct] (crates/physics/src/laws.rs:2022): The NERNST-adjusted galvanic EMF (V): the (temperature-adjusted) standard cell EMF corrected for the
-- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2073): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
-- `resistance` (crates/physics/src/laws.rs:2129): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
-- `solenoid_field` (crates/physics/src/laws.rs:2147): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
-- `flux_linkage` (crates/physics/src/laws.rs:2176): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
-- `motor_force` (crates/physics/src/laws.rs:2184): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
-- `lorentz_force` (crates/physics/src/laws.rs:2196): Lorentz force on a moving charge F = |q|*v*B (N).
-- `dipole_torque` (crates/physics/src/laws.rs:2209): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
-- `faraday_emf` (crates/physics/src/laws.rs:2218): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
-- `inductive_emf` (crates/physics/src/laws.rs:2242): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
-- `inductor_energy` (crates/physics/src/laws.rs:2266): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
-- `parse_cost` [direct] (crates/physics/src/laws.rs:2301): The dependency-integration parse cost of holding a linearization domain in working memory
-- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2335): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
+- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2074): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
+- `resistance` (crates/physics/src/laws.rs:2130): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
+- `solenoid_field` (crates/physics/src/laws.rs:2148): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
+- `flux_linkage` (crates/physics/src/laws.rs:2177): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+- `motor_force` (crates/physics/src/laws.rs:2185): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
+- `lorentz_force` (crates/physics/src/laws.rs:2197): Lorentz force on a moving charge F = |q|*v*B (N).
+- `dipole_torque` (crates/physics/src/laws.rs:2210): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
+- `faraday_emf` (crates/physics/src/laws.rs:2219): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
+- `inductive_emf` (crates/physics/src/laws.rs:2243): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
+- `inductor_energy` (crates/physics/src/laws.rs:2267): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
+- `parse_cost` [direct] (crates/physics/src/laws.rs:2302): The dependency-integration parse cost of holding a linearization domain in working memory
+- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2336): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
