@@ -153,6 +153,7 @@ mod tests {
             depth: 0,
             geometry,
             material: BTreeMap::new(),
+            damage: Fixed::ZERO,
         }
     }
 
@@ -165,6 +166,7 @@ mod tests {
             depth: 0,
             geometry: BTreeMap::new(),
             material,
+            damage: Fixed::ZERO,
         }
     }
 
