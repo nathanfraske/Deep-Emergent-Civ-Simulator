@@ -134,23 +134,64 @@ pub struct MetabolicAnchors {
     /// The kilograms a body carries at `body_mass = 1` (the normalized-trait-to-kilograms bridge). An
     /// R-UNITS-PIN bridge, NOT derivable. RESERVED owner anchor.
     pub body_mass_kg_scale: Fixed,
-    /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant passed like the
-    /// other physics constants the radiant law reads. RESERVED (a CODATA constant, an authored
-    /// Principle-9 physics affordance).
+    /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant. DERIVED from the
+    /// CODATA fundamentals ([`derived_stefan_boltzmann`]), not an authored decimal and not a reserved
+    /// manifest value: the same in every profile, computed once at load.
     pub sigma: Fixed,
+}
+
+/// The global significance target and guard for the composite-constant fixed-point scale derivation
+/// (R-UNITS-PIN). They set the INTERMEDIATE per-quantity scale a composite is derived at. At the shipped
+/// values (30, 1) the value the sim consumes (sigma at Q32.32) is invariant to them, locked by the test
+/// `derived_stefan_boltzmann_is_the_expected_q32_bits`; they are fixed-point REPRESENTATION knobs (the family
+/// of the canonical `FRAC_BITS`), not world values. The invariance is NOT universal, though: an extreme
+/// retune (a large guard, or a significance target that drives the intermediate scale below the canonical
+/// bits) can perturb the consumed value, so a retune MUST re-verify the four run_world pins rather than
+/// treat these as inconsequential. Surfaced for the owner (reserved-with-basis in the decisions log). Basis:
+/// resolve a CODATA composite's ~10 significant figures. Both become fully live only when a composite is
+/// consumed at its fine scale (the flagged follow-on).
+const COMPOSITE_SIG_TARGET: u32 = 30;
+const COMPOSITE_GUARD_BITS: u32 = 1;
+
+/// The Stefan-Boltzmann constant sigma DERIVED from the fundamentals, never an authored decimal: the
+/// units-crate composite compute evaluates `2*pi^5*k_B^4/(15*h^3*c^2)` EXACTLY as a rational (pi by a
+/// deterministic series, no float) and rounds ONCE to sigma's derived scale, and this projects it to the
+/// sim's Q32.32 `Fixed`. A one-time, float-free, deterministic load computation, so it perturbs no canonical
+/// result; every sigma anchor reads this one derivation. Memoized because the value is a pure constant.
+pub fn derived_stefan_boltzmann() -> Fixed {
+    use std::sync::OnceLock;
+    static SIGMA: OnceLock<Fixed> = OnceLock::new();
+    *SIGMA.get_or_init(|| {
+        let (bits, scale) = civsim_units::compute::derived_composite_bits(
+            &civsim_units::fundamentals::STEFAN_BOLTZMANN,
+            COMPOSITE_SIG_TARGET,
+            COMPOSITE_GUARD_BITS,
+            Fixed::FRAC_BITS,
+        )
+        .expect("the Stefan-Boltzmann sigma must derive from the fundamentals");
+        let q32 = civsim_units::rescale_bits(
+            i64::try_from(bits).expect("sigma at its derived scale fits i64"),
+            scale,
+            Fixed::FRAC_BITS,
+        )
+        .expect("sigma rescale to Q32.32 must not overflow");
+        Fixed::from_bits(q32)
+    })
 }
 
 impl MetabolicAnchors {
     /// The anchors read from the calibration manifest, fail-loud if any is still reserved (Principle 11,
     /// the reserved-value discipline). This is the sanctioned way to obtain the anchors on a canonical
-    /// run; there is no default, so an unset value refuses to run rather than fabricating a number.
+    /// run; there is no default, so an unset value refuses to run rather than fabricating a number. Sigma is
+    /// no longer read here: it DERIVES from the fundamentals ([`derived_stefan_boltzmann`]), the same in
+    /// every profile, so it is never a reserved manifest value.
     pub fn from_manifest(
         manifest: &CalibrationManifest,
     ) -> Result<MetabolicAnchors, CalibrationError> {
         Ok(MetabolicAnchors {
             kleiber_a: manifest.require_fixed("metabolism.kleiber_coefficient")?,
             body_mass_kg_scale: manifest.require_fixed("metabolism.body_mass_kg_scale")?,
-            sigma: manifest.require_fixed("metabolism.stefan_boltzmann")?,
+            sigma: derived_stefan_boltzmann(),
         })
     }
 
@@ -164,7 +205,7 @@ impl MetabolicAnchors {
         MetabolicAnchors {
             kleiber_a: Fixed::from_ratio(1, 100),
             body_mass_kg_scale: Fixed::from_int(100),
-            sigma: Fixed::from_ratio(567, 10_000_000_000),
+            sigma: derived_stefan_boltzmann(),
         }
     }
 }
@@ -1367,17 +1408,13 @@ status = "set"
 value = "100"
 unit = "kg"
 source = "test"
-[[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "fixture"
-status = "set"
-value = "0.0000000567"
-unit = "sigma"
-source = "test"
 "#;
         let m = CalibrationManifest::from_toml_str(set).unwrap();
         let a = MetabolicAnchors::from_manifest(&m).unwrap();
         assert_eq!(a.body_mass_kg_scale, Fixed::from_int(100));
+        // Sigma is no longer a manifest key: it DERIVES from the fundamentals regardless of the
+        // profile, so from_manifest reads no stefan_boltzmann key and returns the derived value.
+        assert_eq!(a.sigma, derived_stefan_boltzmann());
         // The shipped anchors are reserved (empty), so a from_manifest read fails loud rather than
         // fabricating a number.
         let reserved = set.replace(
@@ -1389,6 +1426,15 @@ source = "test"
             MetabolicAnchors::from_manifest(&mr).unwrap_err(),
             CalibrationError::Reserved("metabolism.kleiber_coefficient".to_string()),
         );
+    }
+
+    #[test]
+    fn derived_stefan_boltzmann_is_the_expected_q32_bits() {
+        // Lock the CONSUMED sigma to its Q32.32 bits (244 x 2^-32), the round-half-even nearest of the true
+        // CODATA sigma. Sigma folds into the metabolic drain (base_drain_from's radiant term) and thus into
+        // the four run_world pins, so any change here (a compute change, or a retune of the representation
+        // knobs that perturbs the consumed value) FAILS this test loudly rather than silently moving a pin.
+        assert_eq!(derived_stefan_boltzmann(), Fixed::from_bits(244));
     }
 
     #[test]

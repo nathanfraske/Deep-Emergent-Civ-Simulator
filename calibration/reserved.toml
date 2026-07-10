@@ -1335,7 +1335,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.base_metabolic_drain"
-basis = "DERIVE (R-METABOLIZE, derive audit): the resting per-tick energy drain is no longer an authored per-axis fraction. It DERIVES through physiology::derive_base_drain (crates/sim/src/physiology.rs) as the Kleiber basal rate laws::basal_metabolic_rate(a*mass^0.75, the exact two-sqrt fixed-point identity) plus the thermoregulatory heat loss laws::resting_heat_loss (convective_flux + radiant_emission over the whole-body convective surface), bridged to a fraction of the reserve's stored energy by laws::metabolic_drain_fraction. So two bodies diverge in resting drain from their mass, tissue, medium, and temperature alone, not a hardcoded number. The reserved inputs are the metabolism.* owner anchors below (the Kleiber coefficient, the kilogram bridge, the medium coefficient, the emissivity, and sigma); the drain fraction itself is a derived read, kept a fail-loud DERIVE sentinel rather than an authored value."
+basis = "DERIVE (R-METABOLIZE, derive audit): the resting per-tick energy drain is no longer an authored per-axis fraction. It DERIVES through physiology::derive_base_drain (crates/sim/src/physiology.rs) as the Kleiber basal rate laws::basal_metabolic_rate(a*mass^0.75, the exact two-sqrt fixed-point identity) plus the thermoregulatory heat loss laws::resting_heat_loss (convective_flux + radiant_emission over the whole-body convective surface), bridged to a fraction of the reserve's stored energy by laws::metabolic_drain_fraction. So two bodies diverge in resting drain from their mass, tissue, medium, and temperature alone, not a hardcoded number. The reserved inputs are the metabolism.* owner anchors below (the Kleiber coefficient and the kilogram bridge); the medium coefficient, the emissivity, and sigma each DERIVE (sigma from the CODATA fundamentals, units / R-UNITS-PIN), not reserved. The drain fraction itself is a derived read, kept a fail-loud DERIVE sentinel rather than an authored value."
 status = "reserved"
 value = ""
 unit = "fraction_of_capacity_per_tick"
@@ -1677,12 +1677,12 @@ source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/sr
 category = "derivable"
 
 # --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
-# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a, the normalized
-# body-mass-to-kilograms bridge, and the Stefan-Boltzmann constant. Two surface properties the radiant
-# and convective terms once carried as anchors now DERIVE from the being's own data (derive-vs-author,
-# Principle 6): the radiant-surface emissivity from its covering (opt.emissivity) and the medium
-# convective coefficient h from its medium (medium.{air,water} convective_coefficient), both retired here
-# (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
+# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a and the normalized
+# body-mass-to-kilograms bridge. Three properties the radiant and convective terms once carried as anchors
+# now DERIVE rather than being reserved (derive-vs-author, Principle 6): the radiant-surface emissivity from
+# its covering (opt.emissivity), the medium convective coefficient h from its medium (medium.{air,water}
+# convective_coefficient), and the Stefan-Boltzmann sigma from the CODATA fundamentals (units / R-UNITS-PIN,
+# crates/units/src/compute.rs; sigma is no longer a manifest key), all retired here (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
 # kernels are fixed Rust (crates/physics/src/laws.rs basal_metabolic_rate, resting_heat_loss,
 # metabolic_drain_fraction), these are the owner's to set. Read together by
 # MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
@@ -1719,17 +1719,6 @@ category = "per_world"
 # (physiology::covering_emissivity, per-race / per-covering differentiable) rather than a global manifest
 # scalar, so there is no reserved value here to set: it derives. The real per-covering emissivities
 # (bare skin ~0.98, fur or scales lower) are covering-material world/race DATA, not a calibration constant.
-
-[[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "DERIVE-TARGET (fundamentals-home): the Stefan-Boltzmann constant sigma is the CODATA COMPOSITE sigma = 2*pi^5*k_B^4/(15*h^3*c^2), COMPUTED from the fundamental constants (civsim_units::fundamentals::STEFAN_BOLTZMANN over BOLTZMANN, PLANCK, SPEED_OF_LIGHT), never authored as its own decimal. Retired from its former authored value to a fail-loud derive sentinel; the fixed-point COMPUTE is the split-out units/R-UNITS-PIN follow-on (the relation underflows Q32.32), until which a reader fails loud rather than reading a fabricated decimal"
-status = "reserved"
-value = ""
-set_by = ""
-set_date = ""
-unit = "watt_per_m2_kelvin4"
-source = "Part 41 optics floor; crates/units/src/fundamentals.rs STEFAN_BOLTZMANN; crates/sim/src/physiology.rs laws::radiant_emission"
-category = "derivable"
 
 [[reserved]]
 id = "metabolism.respiration_transfer_coefficient"

@@ -345,14 +345,13 @@ fn mirror_boots_under_calibrated_or_names_the_next_reserved_key() {
             assert_eq!(runner.clock(), TICKS as u64, "the booted runner advanced");
         }
         Err(e) => {
-            // A reserved value blocks the boot. Distinguish a DERIVE-TARGET (category=derivable), which is
-            // COMPUTED at a follow-on arc and will never be owner-set, from an owner-settable reserved value.
-            // A derive-target block is the EXPECTED state until its arc lands: metabolism.stefan_boltzmann is
-            // the Stefan-Boltzmann composite, retired to a derive sentinel by the fundamentals-home, and its
-            // fixed-point compute is the split-out units / R-UNITS-PIN follow-on, so it correctly blocks the
-            // calibrated boot until then and does not fail this test (the determinism checks above re-arm once
-            // that arc computes sigma). An owner-settable reserved value still FAILS LOUD, naming the next
-            // calibration the owner must set.
+            // A reserved value blocks the boot. The Stefan-Boltzmann sigma that formerly blocked here (its
+            // fundamentals-home derive sentinel) now COMPUTES from the fundamentals (units / R-UNITS-PIN
+            // landed: MetabolicAnchors derives sigma, it is no longer a manifest key), so the boot reaches the
+            // Ok branch above and its determinism and worker-invariance checks are RE-ARMED. This branch stays
+            // for two cases: a FUTURE derive-target (category=derivable), computed at its own follow-on arc and
+            // never owner-set, is the EXPECTED blocked state and does not fail this test; an owner-settable
+            // reserved value still FAILS LOUD, naming the next calibration the owner must set.
             if let CalibrationError::Reserved(id) = &e {
                 let manifest = reserved_manifest();
                 let is_derive_target = manifest
