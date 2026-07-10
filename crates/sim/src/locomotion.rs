@@ -62,7 +62,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
-use civsim_physics::laws;
+use civsim_physics::{laws, DepletionCharacter};
 use civsim_world::Coord3;
 
 use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawRegistry};
@@ -72,7 +72,7 @@ use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::ConvictionExperience;
 use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
-    AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
+    AffordanceId, AffordanceRegistry, DerivedDrain, DrawTerm, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
     MOVE, RELEASE, SHELTER, STRIKE,
 };
@@ -989,6 +989,68 @@ pub fn step<T: Terrain>(
 /// [`Homeostasis::metabolize`] over the axis defs' authored drains, so the derived path is retired only
 /// where a caller supplies a derived drain. The exertion signal each being computes this tick scales
 /// its exertion coupling in both paths, so the reconciliation with locomotion is exact.
+/// The R-SOURCE-VECTOR per-reserve DRAW FOLD: fold a feeder reserve's declared draw over its axis SET into
+/// that one reserve. Each term reads its source axis's standing supply, bridges it to reserve-fillable
+/// content by the term's own unit (a matter term keeps the per-being `food_energy_density` bridge, a feeder
+/// its own), fills the reserve bounded by the REMAINING room (each `ingest` raises `amount()`, so a later
+/// term in the set sees the reduced room), and depletes the source only where the term's cached floor
+/// character is a depletable stock. The deplete step keys on the CONSERVATION LAW of the quantity, never on
+/// a source kind: a matter axis and a mixotroph's second axis both deplete, a photon or gravity-gradient
+/// flux does not, and each is a data row over the axis registry with no branch added. A matter reserve's
+/// singleton draw is NOT routed here (it stays the byte-identical fast path in the INGEST arm); this fold
+/// runs only for a reserve that declares an explicit multi-term or feeder draw set.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_feeder_set(
+    draw_set: &[DrawTerm],
+    axis_id: HomeostaticAxisId,
+    here: Coord3,
+    resources: &mut ResourceField,
+    homeostasis: &mut Homeostasis,
+    physiology: &Physiology,
+    storage: &BTreeMap<String, Fixed>,
+    body_mass: Fixed,
+    eta: Fixed,
+    food_energy_density: Fixed,
+) {
+    for term in draw_set {
+        let supply = resources.supply(here, &term.class);
+        if supply <= Fixed::ZERO {
+            continue; // the cell is no source of this term's axis
+        }
+        let content = term.unit_bridge.content(supply, food_energy_density);
+        let body_c = storage.get(&term.class).copied().unwrap_or(Fixed::ZERO);
+        let room = homeostasis.capacity(axis_id) - homeostasis.amount(axis_id);
+        let (eaten_content, gain) = crate::physiology::physical_intake(
+            content,
+            physiology.assimilation(&term.class),
+            eta,
+            body_mass,
+            body_c,
+            room,
+        );
+        if eaten_content <= Fixed::ZERO {
+            continue;
+        }
+        match &term.depletion {
+            DepletionCharacter::DepletableStock => {
+                // A located stock: remove the supply the eaten content came from, so the cell depletes by
+                // exactly what the reserve drew (mass conserved, the matter case and a mixotroph's tissue).
+                let eaten_supply = term.unit_bridge.supply(eaten_content, food_energy_density);
+                resources.take(here, &term.class, eaten_supply);
+            }
+            DepletionCharacter::NonRivalrousFlux => {
+                // A renewable flux (a photon or gravity-gradient source): the draw gains but never depletes
+                // it, so no `take`. This is the whole feeder generalization, a data row not a code branch.
+            }
+            DepletionCharacter::Reservoir | DepletionCharacter::Reserved { .. } => {
+                // A reservoir pool draw is not yet wired, and an undeclared (reserved) character is rejected
+                // when a feeder's draw term is built, so neither reaches this fold with a silent take.
+            }
+        }
+        homeostasis.ingest(axis_id, gain);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn step_with_field_dirs<T: Terrain>(
     walkers: &mut [Walker],
@@ -1251,55 +1313,18 @@ pub fn step_with_field_dirs<T: Terrain>(
                                         // depletable stock, so the deplete step keys on the conservation
                                         // law of the quantity, never on a source kind. The matter singleton
                                         // is the empty-set special case below, kept as today's fast path.
-                                        for term in &axis.draw_set {
-                                            let supply = resources.supply(here, &term.class);
-                                            if supply <= Fixed::ZERO {
-                                                continue;
-                                            }
-                                            let content = term
-                                                .unit_bridge
-                                                .content(supply, p.food_energy_density);
-                                            let body_c = storage
-                                                .get(&term.class)
-                                                .copied()
-                                                .unwrap_or(Fixed::ZERO);
-                                            let room = w.homeostasis.capacity(axis.id)
-                                                - w.homeostasis.amount(axis.id);
-                                            let (eaten_content, gain) =
-                                                crate::physiology::physical_intake(
-                                                    content,
-                                                    w.physiology.assimilation(&term.class),
-                                                    eta,
-                                                    body_mass,
-                                                    body_c,
-                                                    room,
-                                                );
-                                            if eaten_content <= Fixed::ZERO {
-                                                continue;
-                                            }
-                                            match &term.depletion {
-                                                civsim_physics::DepletionCharacter::DepletableStock => {
-                                                    let eaten_supply = term
-                                                        .unit_bridge
-                                                        .supply(eaten_content, p.food_energy_density);
-                                                    resources.take(here, &term.class, eaten_supply);
-                                                }
-                                                civsim_physics::DepletionCharacter::NonRivalrousFlux => {
-                                                    // A renewable flux (a photon or gravity-gradient
-                                                    // source): the draw gains but never depletes it.
-                                                }
-                                                civsim_physics::DepletionCharacter::Reservoir
-                                                | civsim_physics::DepletionCharacter::Reserved {
-                                                    ..
-                                                } => {
-                                                    // A reservoir pool draw is not yet wired, and an
-                                                    // undeclared (reserved) character is rejected when a
-                                                    // feeder's draw term is built, so neither reaches the
-                                                    // hot path with a silent take.
-                                                }
-                                            }
-                                            w.homeostasis.ingest(axis.id, gain);
-                                        }
+                                        draw_feeder_set(
+                                            &axis.draw_set,
+                                            axis.id,
+                                            here,
+                                            resources,
+                                            &mut w.homeostasis,
+                                            &w.physiology,
+                                            &storage,
+                                            body_mass,
+                                            eta,
+                                            p.food_energy_density,
+                                        );
                                         continue;
                                     }
                                     let Some(class) = axis.backing_component.as_deref() else {
@@ -1505,7 +1530,7 @@ mod tests {
     use crate::anatomy::{BodyPlan, Part, Temperament};
     use crate::controller::ControllerLayout;
     use crate::homeostasis::{
-        AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
+        AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, UnitBridge, ENERGY, WATER,
     };
 
     const SEED: u64 = 0x10C0;
@@ -2443,6 +2468,183 @@ mod tests {
         assert!(
             e > d,
             "the efficient consumer (lower requirement) restores more from the identical tile than the demanding one, purely from its own physiology: {e:?} vs {d:?}"
+        );
+    }
+
+    /// A one-reserve homeostasis drained to leave ample room, for the R-SOURCE-VECTOR fold fixtures.
+    fn drained_energy_reserve() -> (HomeostaticRegistry, Homeostasis) {
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: ENERGY,
+                name: "energy".to_string(),
+                backing_component: Some("bio.energy_density".to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::from_ratio(1, 400),
+                exertion_drain: Fixed::from_ratio(1, 100),
+                death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
+            }],
+        };
+        let mut homeo = Homeostasis::from_mass(&reg, Fixed::ONE);
+        for _ in 0..200 {
+            homeo.metabolize(&reg, Fixed::ZERO); // open ample room without dying
+        }
+        (reg, homeo)
+    }
+
+    #[test]
+    fn mixotrophy_folds_two_source_axes_into_one_reserve_with_zero_mechanism_code() {
+        // R-SOURCE-VECTOR HARD-GATE ACCEPTANCE (a): a mixotroph draws ONE reserve from TWO source axes
+        // (a photo-and-chemo feeder, here two composition classes). The per-reserve fold sums both bites
+        // into the reserve and depletes both, through `draw_feeder_set` exactly as a matter singleton
+        // would, differing ONLY in that the draw set has two entries. No branch on any source kind: a
+        // mixotroph costs zero mechanism code, a data row of two terms.
+        let (_reg, mut homeo) = drained_energy_reserve();
+        let class_a = "bio.energy_density";
+        let class_b = "bio.protein_fraction";
+        let tile = Coord3::ground(0, 0);
+        let mut field = ResourceField::new();
+        field.set(
+            tile,
+            Composition {
+                nutrients: [
+                    (class_a.to_string(), Fixed::from_ratio(1, 4)),
+                    (class_b.to_string(), Fixed::from_ratio(1, 4)),
+                ]
+                .into_iter()
+                .collect(),
+                toxins: BTreeMap::new(),
+            },
+        );
+        let phys = Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: [
+                (class_a.to_string(), Fixed::ONE),
+                (class_b.to_string(), Fixed::ONE),
+            ]
+            .into_iter()
+            .collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        // A large storage density on each class makes each bite small relative to the room, so neither
+        // term saturates the reserve and both contribute (the fold's sum is visible, not a single bite).
+        let storage: BTreeMap<String, Fixed> = [
+            (class_a.to_string(), Fixed::from_int(10)),
+            (class_b.to_string(), Fixed::from_int(10)),
+        ]
+        .into_iter()
+        .collect();
+        let body_mass = Fixed::ONE;
+        let eta = Fixed::ONE;
+        let fed = Fixed::ONE; // a unit bridge, so content == supply and the bite arithmetic is legible
+        let draw_set = vec![
+            DrawTerm {
+                class: class_a.to_string(),
+                unit_bridge: UnitBridge::MatterPerBeing,
+                depletion: DepletionCharacter::DepletableStock,
+            },
+            DrawTerm {
+                class: class_b.to_string(),
+                unit_bridge: UnitBridge::MatterPerBeing,
+                depletion: DepletionCharacter::DepletableStock,
+            },
+        ];
+        // The expected total is the two terms' independent bites with the fold's room threading (the
+        // second term sees the room the first left).
+        let room0 = homeo.capacity(ENERGY) - homeo.amount(ENERGY);
+        let (_, gain_a) = crate::physiology::physical_intake(
+            field.supply(tile, class_a),
+            phys.assimilation(class_a),
+            eta,
+            body_mass,
+            storage[class_a],
+            room0,
+        );
+        let (_, gain_b) = crate::physiology::physical_intake(
+            field.supply(tile, class_b),
+            phys.assimilation(class_b),
+            eta,
+            body_mass,
+            storage[class_b],
+            room0 - gain_a,
+        );
+        assert!(
+            room0 > gain_a + gain_b,
+            "the fixture must leave room for both terms, else the sum is not observable"
+        );
+        let before = homeo.amount(ENERGY);
+        let supply_a0 = field.supply(tile, class_a);
+        let supply_b0 = field.supply(tile, class_b);
+        draw_feeder_set(
+            &draw_set, ENERGY, tile, &mut field, &mut homeo, &phys, &storage, body_mass, eta, fed,
+        );
+        // The one reserve rose by the SUM of the two terms' bites: mixotrophy IS the fold, no new branch.
+        assert_eq!(homeo.amount(ENERGY) - before, gain_a + gain_b);
+        assert!(
+            gain_a > Fixed::ZERO && gain_b > Fixed::ZERO,
+            "both terms contributed"
+        );
+        // Both source axes depleted (each a depletable stock, the conservation law read off the axis).
+        assert!(field.supply(tile, class_a) < supply_a0, "class A depleted");
+        assert!(field.supply(tile, class_b) < supply_b0, "class B depleted");
+    }
+
+    #[test]
+    fn a_flux_feeder_draws_without_depleting_its_source() {
+        // R-SOURCE-VECTOR HARD-GATE ACCEPTANCE (b), the draw side: a photovore or gravity-gradient feeder
+        // draws a NON-RIVALROUS FLUX. The reserve gains but the source is NOT depleted, because the fold's
+        // deplete step keys on the axis's floor character (a flux), never on a source kind. The flux is a
+        // data row; adding it edits no code in the fold.
+        let (_reg, mut homeo) = drained_energy_reserve();
+        let flux = "field.gravity_gradient";
+        let tile = Coord3::ground(0, 0);
+        let mut field = ResourceField::new();
+        field.set(
+            tile,
+            Composition {
+                nutrients: [(flux.to_string(), Fixed::from_ratio(1, 4))]
+                    .into_iter()
+                    .collect(),
+                toxins: BTreeMap::new(),
+            },
+        );
+        let phys = Physiology {
+            requirements: BTreeMap::new(),
+            assimilation: [(flux.to_string(), Fixed::ONE)].into_iter().collect(),
+            tolerances: BTreeMap::new(),
+            hill: BTreeMap::new(),
+        };
+        let storage: BTreeMap<String, Fixed> = [(flux.to_string(), Fixed::from_int(10))]
+            .into_iter()
+            .collect();
+        let draw_set = vec![DrawTerm {
+            class: flux.to_string(),
+            unit_bridge: UnitBridge::MatterPerBeing,
+            depletion: DepletionCharacter::NonRivalrousFlux,
+        }];
+        let before = homeo.amount(ENERGY);
+        let supply0 = field.supply(tile, flux);
+        draw_feeder_set(
+            &draw_set,
+            ENERGY,
+            tile,
+            &mut field,
+            &mut homeo,
+            &phys,
+            &storage,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE,
+        );
+        assert!(
+            homeo.amount(ENERGY) > before,
+            "the flux feeder gained from its source"
+        );
+        assert_eq!(
+            field.supply(tile, flux),
+            supply0,
+            "a non-rivalrous flux is NOT depleted by the draw (the character read, not a source kind)"
         );
     }
 

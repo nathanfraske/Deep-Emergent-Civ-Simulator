@@ -1589,6 +1589,96 @@ values = [
     }
 
     #[test]
+    fn an_unlisted_feeder_modality_is_a_pure_registry_row_that_carries_its_own_character() {
+        // R-SOURCE-VECTOR HARD-GATE ACCEPTANCE (b): an unlisted feeder modality (a gravity-gradient
+        // feeder) is addable as PURE NEW REGISTRY ROWS with zero code edits: a new axis declaring its
+        // own depletion character loads and carries it, so a photovore's flux, a thermovore's gradient,
+        // and this gravity-gradient feeder each name nothing in code. A build that needed a new source-kind
+        // branch to add one would fail this; adding it here is a data edit alone.
+        let feeder = r#"
+[[axis]]
+id = "field.gravity_gradient"
+measures = "the local gravity-potential gradient a gravitropic feeder draws on"
+unit = "m/s^2"
+dimension = "1,0,-2,0"
+scale = "m/s^2"
+tier = 0
+range_lo = "0"
+range_hi = "100"
+fantasy = "a gravity-gradient feeder's source, a reserved fantasy modality"
+depletion_character = "non_rivalrous_flux"
+"#;
+        let reg = PhysicsRegistry::from_toml_str(feeder).unwrap();
+        let axis = reg.axis("field.gravity_gradient").unwrap();
+        // The feeder's flux character is carried off its own row (a renewable flux, drawn but not depleted).
+        assert_eq!(
+            axis.depletion_character,
+            DepletionCharacter::NonRivalrousFlux
+        );
+        // Its reduction to the conserved currency is a DERIVE target (the fundamentals times the substance's
+        // floor physics), never an authored number, so it reads as the fail-loud Derive sentinel until a
+        // feeder-arming derive computes it.
+        assert!(matches!(
+            axis.reduction_coefficient,
+            ReductionCoefficient::Derive { .. }
+        ));
+    }
+
+    #[test]
+    fn an_undeclared_depletion_character_is_the_fail_loud_reserved_sentinel() {
+        // An axis that declares no depletion character (every pre-R-SOURCE-VECTOR axis) carries the
+        // fail-loud Reserved sentinel, never a fabricated "stock" default: a feeder must declare its
+        // character before a draw reads it (the reserved-value discipline, Principle 11).
+        let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
+        assert!(matches!(
+            reg.axis("mech.density").unwrap().depletion_character,
+            DepletionCharacter::Reserved { .. }
+        ));
+    }
+
+    #[test]
+    fn a_declared_depletable_stock_axis_carries_its_character() {
+        // A matter axis declaring depletable_stock carries it, so the matter draw depletes as today.
+        let matter = r#"
+[[axis]]
+id = "bio.test_energy"
+measures = "a test matter composition axis"
+unit = "kJ/g"
+dimension = "2,0,-2,0"
+scale = "kJ/g"
+tier = 0
+range_lo = "0"
+range_hi = "38"
+real = "test fixture"
+depletion_character = "depletable_stock"
+"#;
+        let reg = PhysicsRegistry::from_toml_str(matter).unwrap();
+        assert_eq!(
+            reg.axis("bio.test_energy").unwrap().depletion_character,
+            DepletionCharacter::DepletableStock
+        );
+    }
+
+    #[test]
+    fn an_unknown_depletion_character_fails_loud_at_load() {
+        // A malformed character is a config error rejected at load, not a silent fallback.
+        let bad = r#"
+[[axis]]
+id = "bio.test_bad"
+measures = "a test axis with a bad character"
+unit = "fraction"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "0"
+range_hi = "1.0"
+real = "test fixture"
+depletion_character = "sometimes"
+"#;
+        assert!(PhysicsRegistry::from_toml_str(bad).is_err());
+    }
+
+    #[test]
     fn substance_values_parse_exactly_and_have_a_content_id() {
         let reg = PhysicsRegistry::from_toml_str(SAMPLE).unwrap();
         let iron = reg.substance("iron").unwrap();
