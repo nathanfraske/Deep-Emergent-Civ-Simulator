@@ -6417,9 +6417,14 @@ impl Runner {
     /// afforded and there is no hazard to spawn) and an always-STRIKE controller expressed against the
     /// embodiment's OWN widened layout: every weight is zero except a positive bias on the STRIKE activation, so
     /// [`Controller::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
-    /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it wounds whatever prey is
-    /// co-located through the existing [`Embodiment::strike_occupant`] and the one INTEGRITY cull; nothing reads a
-    /// species, role, or relatedness (Principle 8). It is registered in the `predators` set so its metabolism is
+    /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it DECIDES STRIKE and calls
+    /// the existing [`Embodiment::strike_occupant`], which wounds a co-located being through the one INTEGRITY
+    /// cull; nothing reads a species, role, or relatedness (Principle 8). HONEST LIMIT (section-9 caught it):
+    /// `strike_occupant` delivers a wound only through grown-Structure Segments (both the striker's delivery mass
+    /// and the target's wound site are read off `structure.segments`), so against a CATALOG body (no run-path
+    /// Structure, as the biosphere creatures and this catalog predator currently are) it is a NO-OP; real
+    /// predation mortality awaits the `body::Body`-to-Structure bridge (a flagged preceding dependency, see
+    /// `strike_occupant`). It is registered in the `predators` set so its metabolism is
     /// forced to zero (NON-METABOLIZING: it neither forages nor starves, the authored given). It EMITS a
     /// being-signal like any warm walker, which is REQUIRED for the prey's being-directed weight to select against
     /// it (a signalless hazard could not, since that weight keys on the emitted signal). Deterministic: an
