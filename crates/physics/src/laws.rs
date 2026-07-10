@@ -671,6 +671,50 @@ pub fn wear(
     }
 }
 
+/// Energy (kilojoule scale) to abrade the Archard worn volume away, so a wear insult accrues in the
+/// same currency as a fracture tolerance. From the cut model's own identity, inverting
+/// [`cut_penetrate`] (`depth = delivered_energy / (specific_cut_energy * contact_area) / C_VOL`, and
+/// `depth * contact_area` is the swept volume `V`): the delivered work to remove a swept volume `V`
+/// is `V * specific_cut_energy * C_VOL`. That is the SAME kilojoule scale as `fracture_energy *
+/// crack_area` in [`fracture_onset`], so a wear increment and a fracture tolerance are directly
+/// commensurate with NO free per-insult weight: the commensuration is the floor's own cut work,
+/// keyed on the being's own `specific_cut_energy`. `energy_max` caps the result; `C_VOL` exceeds one,
+/// so an intermediate that overflows the representable range means the true energy already exceeds
+/// any sane `energy_max` and routes to the cap.
+#[allow(clippy::too_many_arguments)]
+pub fn wear_energy(
+    wear_coefficient_scaled: Fixed,
+    coefficient_scale: Fixed,
+    force: Fixed,
+    distance: Fixed,
+    hardness: Fixed,
+    specific_cut_energy: Fixed,
+    wear_max: Fixed,
+    energy_max: Fixed,
+) -> Fixed {
+    // No load or no slide, no abrasive wear energy (Archard wear is proportional to force times
+    // distance). This guard also means a body at REST wears nothing regardless of its hardness,
+    // rather than inheriting `wear`'s zero-hardness "abrades without bound" volume convention when
+    // there is no drive to abrade it (an unset zero-hardness material is a fail-loud manifest concern,
+    // not a per-tick maximum).
+    if force <= ZERO || distance <= ZERO {
+        return ZERO;
+    }
+    let v = wear(
+        wear_coefficient_scaled,
+        coefficient_scale,
+        force,
+        distance,
+        hardness,
+        wear_max,
+    );
+    let e = v
+        .checked_mul(specific_cut_energy)
+        .and_then(|x| x.checked_mul(C_VOL))
+        .unwrap_or(energy_max);
+    e.min(energy_max)
+}
+
 // === Energy and thermal (R-PHYS-MECH, the energy sub-domain) ===
 
 /// Steady conductive heat flux by Fourier's law, reassociated so the only multiply that
