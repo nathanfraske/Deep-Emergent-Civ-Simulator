@@ -1,6 +1,7 @@
-//! The damage-insult substrate (R-AGING (c), slice 1): the data-defined set of ways a body part's
-//! own material accrues cumulative DAMAGE ENERGY, and the pure math that turns accumulated damage
-//! into the part's integrity.
+//! The damage-insult substrate (R-AGING (c), slices 1 and 2): the data-defined set of ways a body
+//! part's own material accrues cumulative DAMAGE ENERGY, its restoring counter (a tissue-turnover
+//! REPAIR flux funded by a maintenance-energy draw), and the pure math that turns net accumulated
+//! damage into the part's integrity.
 //!
 //! Operational lifespan is the first-passage time of a per-part damage accumulator against each
 //! part's own material tolerance (a body dies when a vital part's accumulated damage reaches its
@@ -246,6 +247,84 @@ pub fn derive_integrity(
 /// grouped. The value the later slice will store on the part's condition.
 pub fn accumulate_damage(increments: impl IntoIterator<Item = Fixed>) -> Fixed {
     Fixed::saturating_sum(increments)
+}
+
+// --- Repair and the maintenance economy (slice 2, still inert) ---
+//
+// The restoring side of the same accumulator: a tissue renews itself at its own turnover rate, funded
+// by a maintenance-energy draw on the being's budget. These are pure functions taking reserved
+// parameters. Whether the emergent size-longevity relation is clean is NOT a property this slice can
+// exhibit or test: none of these functions takes a mass or size input, so the reframed (c) discipline
+// (no engineered mass-neutrality; the demand extensive; the slope an emergent output) is a constraint
+// on the RE-PIN SLICE's wiring of `energy_available` and `maintenance_demand` from the physiology, not
+// something verified here. Slice 2 only supplies the inert math.
+
+/// The energy a part's own tissue restores this tick, in the common kilojoule currency: its turnover
+/// rate times its failure-energy tolerance, scaled by how much of the maintenance cost the being can
+/// fund. The conversion from a turnover RATE to a repaired ENERGY is through the part's own
+/// failure-energy scale so no numeric constant is injected: multiplying `turnover_rate` by
+/// `failure_energy_tolerance` (the same kilojoule tolerance [`derive_integrity`] measures damage
+/// against) gives the restored energy. Capped at the full tolerance (a tick cannot restore more than
+/// the whole failure reserve), and a zero-or-negative tolerance is a part with no failure reserve, so
+/// nothing to restore (returns zero), matching [`derive_integrity`]'s guard on the shared tolerance.
+///
+/// RESERVED: `turnover_rate` is a per-tissue-material value, basis the real measured cell/tissue-renewal
+/// rates per tissue (the gating dependency, grounded in tissue-turnover data, never the lifespan it
+/// yields). MODELING ASSUMPTION, flagged for the owner review when the reserved value is set: real
+/// tissue-turnover data measures a fraction of MASS or CELL COUNT renewed per tick, and this treats that
+/// same fraction as the fraction of the failure-ENERGY reserve renewed. Equating a mass/cell-turnover
+/// fraction with an energy-reserve-renewal fraction is a modeling choice (an implicit unit-one
+/// identification), not a floor law; it avoids inventing a free coefficient (the least-authoring choice)
+/// but is not independently grounded, so it is surfaced as its own reserved-with-basis question.
+pub fn repair_energy(
+    turnover_rate: Fixed,
+    failure_energy_tolerance: Fixed,
+    funded_fraction: Fixed,
+) -> Fixed {
+    if failure_energy_tolerance.to_bits() <= 0 {
+        return Fixed::ZERO;
+    }
+    turnover_rate
+        .checked_mul(failure_energy_tolerance)
+        .and_then(|x| x.checked_mul(funded_fraction))
+        .unwrap_or(failure_energy_tolerance)
+        .clamp(Fixed::ZERO, failure_energy_tolerance)
+}
+
+/// The fraction of full repair the being can fund this tick: `clamp(energy_available / demand, 0, 1)`.
+/// The maintenance GATE: when the being cannot pay the full maintenance demand (starving, or a large
+/// extensive demand against a smaller budget) repair is throttled proportionally; when it can, repair
+/// runs at the full turnover rate. Nothing is engineered mass-neutral: `energy_available` is a fraction
+/// of the being's own energy budget and `maintenance_demand` is the extensive cost of the repair, both
+/// reserved parameters the re-pin slice derives from the real physiology, so the mass dependence of the
+/// duty cycle is whatever those produce. A zero demand is unthrottled (nothing to fund); a zero budget
+/// funds nothing. An unrepresentably large ratio saturates in the DIRECTION its sign implies: a large
+/// positive surplus is fully funded, a deep negative deficit funds nothing, rather than wrapping or
+/// blindly reading a deficit as fully funded.
+pub fn maintenance_funded_fraction(energy_available: Fixed, maintenance_demand: Fixed) -> Fixed {
+    if maintenance_demand.to_bits() <= 0 {
+        return Fixed::ONE;
+    }
+    // `maintenance_demand` is positive here, so the quotient's sign is `energy_available`'s sign; an
+    // overflow (unrepresentable ratio) saturates toward the answer that sign implies.
+    let saturated = if energy_available.to_bits() >= 0 {
+        Fixed::ONE
+    } else {
+        Fixed::ZERO
+    };
+    energy_available
+        .checked_div(maintenance_demand)
+        .unwrap_or(saturated)
+        .clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The signed change in a part's accumulated damage energy this tick: the insult energy accrued minus
+/// the funded repair energy restored. Positive is net damage, negative is net healing. The later slice
+/// applies this to the stored accumulator with a floor at zero (a part cannot heal below intact), so a
+/// being whose funded repair exceeds its insults holds its integrity, and one whose insults outrun its
+/// repair accumulates toward the first-passage failure. Saturating in raw bits, so it never wraps.
+pub fn net_damage_delta(insult_energy: Fixed, repair: Fixed) -> Fixed {
+    Fixed::from_bits(insult_energy.to_bits().saturating_sub(repair.to_bits()))
 }
 
 #[cfg(test)]
@@ -525,6 +604,121 @@ mod tests {
         assert_eq!(
             derive_integrity(Fixed::from_int(10), Fixed::from_int(50)),
             derive_integrity(Fixed::from_int(10), Fixed::from_int(50))
+        );
+    }
+
+    // --- repair and the maintenance economy (slice 2) ---
+
+    #[test]
+    fn repair_energy_is_the_turnover_fraction_of_the_tolerance_when_fully_funded() {
+        // r = 0.5 per tick (exact in Q32.32), tolerance 50 kJ, fully funded -> 25 kJ restored (through
+        // the fracture scale). An exactly-representable rate so the assertion is on the math, not on
+        // fixed-point rounding of an inexact fraction like 0.1.
+        let tol = Fixed::from_int(50);
+        let r = Fixed::from_ratio(1, 2);
+        assert_eq!(repair_energy(r, tol, Fixed::ONE), Fixed::from_int(25));
+    }
+
+    #[test]
+    fn repair_energy_scales_with_the_funded_fraction() {
+        let tol = Fixed::from_int(50);
+        let r = Fixed::from_ratio(1, 2);
+        let half = Fixed::from_ratio(1, 2);
+        // 0.5 * 50 * 0.5 = 12.5
+        assert_eq!(repair_energy(r, tol, half), Fixed::from_ratio(25, 2));
+        assert_eq!(repair_energy(r, tol, Fixed::ZERO), Fixed::ZERO);
+    }
+
+    #[test]
+    fn repair_energy_caps_at_the_full_tolerance() {
+        // A turnover rate above one would restore more than the whole reserve; it caps at the tolerance.
+        let tol = Fixed::from_int(50);
+        assert_eq!(repair_energy(Fixed::from_int(2), tol, Fixed::ONE), tol);
+    }
+
+    #[test]
+    fn maintenance_gate_throttles_proportionally_when_the_budget_falls_short() {
+        // Half the demand affordable -> half funded; surplus -> fully funded; no demand -> unthrottled;
+        // no budget -> nothing funded.
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::from_int(5), Fixed::from_int(10)),
+            Fixed::from_ratio(1, 2)
+        );
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::from_int(20), Fixed::from_int(10)),
+            Fixed::ONE
+        );
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::from_int(5), Fixed::ZERO),
+            Fixed::ONE
+        );
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::ZERO, Fixed::from_int(10)),
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn net_damage_delta_is_signed_insult_minus_repair() {
+        assert_eq!(
+            net_damage_delta(Fixed::from_int(10), Fixed::from_int(3)),
+            Fixed::from_int(7)
+        );
+        assert_eq!(
+            net_damage_delta(Fixed::from_int(3), Fixed::from_int(10)),
+            Fixed::from_int(-7),
+            "repair beyond the insult is net healing (the accumulator floors at zero in a later slice)"
+        );
+        assert_eq!(
+            net_damage_delta(Fixed::from_int(5), Fixed::from_int(5)),
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn net_damage_delta_is_zero_when_repair_exactly_matches_insult() {
+        // When the funded repair equals the insult, the net delta is zero, so nothing accumulates this
+        // tick. This checks the arithmetic identity only; a genuine multi-tick integrity-holding
+        // composition is deferred to the slice that wires the accumulator and derive_integrity in sequence.
+        let tol = Fixed::from_int(50);
+        let insult = Fixed::from_int(25);
+        let r = Fixed::from_ratio(1, 2); // 0.5 * 50 = 25 kJ repaired when fully funded (exact)
+        let repair = repair_energy(r, tol, Fixed::ONE);
+        assert_eq!(repair, insult, "repair matches the insult");
+        assert_eq!(
+            net_damage_delta(insult, repair),
+            Fixed::ZERO,
+            "no net delta"
+        );
+    }
+
+    #[test]
+    fn repair_energy_of_a_zero_or_negative_tolerance_is_zero() {
+        // A part with no failure reserve has nothing to restore; the guard matches derive_integrity, and
+        // it also removes the degenerate clamp(ZERO, negative) case (lo > hi) that would otherwise let a
+        // negative "repair" leak into net_damage_delta and INCREASE damage.
+        let r = Fixed::from_ratio(1, 2);
+        assert_eq!(repair_energy(r, Fixed::ZERO, Fixed::ONE), Fixed::ZERO);
+        assert_eq!(
+            repair_energy(r, Fixed::from_int(-5), Fixed::ONE),
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn maintenance_gate_funds_nothing_on_a_deep_deficit_that_overflows() {
+        // A deep negative energy deficit against a small positive demand overflows checked_div; the
+        // sign-aware fallback must fund NOTHING (a starving being does not repair), never blindly read a
+        // deficit as fully funded.
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::MIN, Fixed::from_bits(1)),
+            Fixed::ZERO,
+            "a deficit that overflows funds nothing, not everything"
+        );
+        // And a large positive surplus that overflows is fully funded.
+        assert_eq!(
+            maintenance_funded_fraction(Fixed::MAX, Fixed::from_bits(1)),
+            Fixed::ONE
         );
     }
 }
