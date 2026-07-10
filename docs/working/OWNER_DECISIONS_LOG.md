@@ -255,6 +255,24 @@ surfaced to the owner); the per-being likelihood estimator (a build shared with 
 gate); the eligibility-trace latency and the per-axis noise floor (reserved calibrations with basis). Posted
 to the gate for its ruling before any keystone code.
 
+GATE RULED 2026-07-10 (on #116): the framing is signed off (the gate verified the Seam-1 refutation against
+source itself and confirmed it holds). The scope fork is ruled (A) BOTH POLES: build the six-step sequence,
+each step gated. The alarm DROP is accepted under Prime Directive 5, so the honest keystone charge is
+PREDATION, HUNTING, and FLEEING, with alarm (a discretionary emit plus referential meaning, both flagged
+follow-ons) named as the next substrate. The belief-subject packing is ruled to the HYBRID (an exact widened
+pack in-envelope plus a hash on overflow), which Agent B builds as the shared belief-subject key, so step 1's
+being-signal band is COORDINATED with Agent B as three disjoint top-level bands: environmental features at
+bit 62 (existing), sequences and conjunctions at bits 62 and 61 (Agent B's existing), being-signals proposed
+at `(1<<62) | (1<<60)` (a new `being_signal_subject`, disjoint from both, so the slice-3 aliasing seam is
+closed by construction), with the `SenseChannelId`-fits question falling out of Agent B's hybrid encoding
+within the being-signal band. Sequencing: build steps 1-4 now (independent of Agent B); sequence step 5 (the
+per-being likelihood estimator, shared with Agent B's composer) with the gate when Agent B frees; step 6 (the
+live wire) last. Route every re-pin (step 6, and step 4 if its eligibility trace touches the live
+environmental harm path rather than staying scoped to the dead being-signal path) through the gate; each
+re-pins once and the gate sequences them against Agent B's and Agent C's re-pins on the four tracked pins.
+The eligibility-trace latency and the per-axis noise floor stay reserved-with-basis (owner-set). Building on
+`claude/being-percept-keystone` (#116), each step pushed for the gate's per-step review.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate

@@ -144,6 +144,33 @@ pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
     StableId(FEATURE_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
 }
 
+/// The reserved base of the per-BEING-SIGNAL belief-subject band (the being-percept keystone, step 1): a
+/// perceived being-signal, keyed by its sense channel and discriminated bucket, mints its harm or reward
+/// belief subject HERE, in its OWN top-level band, disjoint from every environmental-feature subject and
+/// every sequence subject. It sets bit 60 as well as bit 62, so a being-signal subject is DISJOINT from a
+/// feature subject (whose payload stays in the low 48 bits, leaving bit 60 clear) and from a sequence subject
+/// (which sets bit 61, clear here), and stays below `1 << 63` (below the reserved-high landmark ids). So a
+/// being-signal on sense channel c never aliases the environmental biology feature at index c under the same
+/// attribute (the slice-3 subject-namespace seam), closed by construction rather than by a
+/// [`MATERIAL_FEATURE_CHANNEL_BASE`]-style channel offset (which would not fit the `u16` channel field, since
+/// biology and material features already split it at `1 << 15`). The bit-60 placement is coordinated with the
+/// affordance composer's hybrid belief-subject key as one of three disjoint top-level bands (features,
+/// sequences and conjunctions, being-signals); if the hybrid claims bit 60 the base retargets to another free
+/// bit, a one-line change, and this band is byte-neutral until the keystone's live wire consumes it.
+const BEING_SIGNAL_SUBJECT_BASE: u64 = (1 << 62) | (1 << 60);
+
+/// Mint the belief subject for a perceived being-signal: the `(channel, bucket)` pair packed into the
+/// reserved being-signal band ([`BEING_SIGNAL_SUBJECT_BASE`]), the sibling of [`feature_subject`]'s
+/// per-feature band. Two perceived beings whose signal on the same sense channel lands in the same bucket
+/// mint the SAME subject (the generalisation the quantization buys), so a valence learned about one applies
+/// to another emitting the same signal; a different channel or a different bucket is a different subject. The
+/// bucket is clamped non-negative and into the 32-bit field, so the packing never overflows the band, exactly
+/// as [`feature_subject`] does.
+pub fn being_signal_subject(channel: u16, bucket: i64) -> StableId {
+    let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
+    StableId(BEING_SIGNAL_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
+}
+
 /// The reserved base of the per-SEQUENCE belief-subject band (ideation / experiential-discovery arc, piece
 /// 1, slice 1b): a discovered ACTION is a wildcard template over a primitive sequence, and this band mints
 /// the belief subject it is keyed on, the sibling of [`feature_subject`]'s per-feature band. It sets bit 61
@@ -556,13 +583,13 @@ pub fn feature_observations(
 ///
 /// RESERVED derive targets and keystone-wiring seams, surfaced with basis, deferred by the gate to their own
 /// builds (this core reuses the existing learner and reserves them, so it moves no pin):
-/// - SUBJECT NAMESPACE (a keystone-wiring seam, section-9 catch): this mints into the SAME `feature_subject`
-///   band with NO channel-base offset, so a being-signal on sense channel c aliases the environmental biology
-///   feature at index c under the same `HARM_ATTR`, silently merging two distinct HARM beliefs. Environmental
-///   material features already avoid this by offsetting through [`MATERIAL_FEATURE_CHANNEL_BASE`]; the keystone
-///   must offset the being-signal into its OWN disjoint band the same way. Whether a `SenseChannelId` fits the
-///   16-bit channel field, and the offset itself, is the owner-held belief-subject packing decision
-///   (`SEQ_FIELD_BITS` / the belief-subject hash the gate surfaced), so it is flagged here, not decided.
+/// - SUBJECT NAMESPACE (RESOLVED by the keystone, step 1; was a section-9-caught seam): this mints into the
+///   being-signal's OWN band through [`being_signal_subject`] ([`BEING_SIGNAL_SUBJECT_BASE`]), disjoint from
+///   every environmental-feature subject and every sequence subject, so a being-signal on sense channel c no
+///   longer aliases the environmental biology feature at index c under the same `HARM_ATTR`. The band bit is
+///   coordinated with the affordance composer's hybrid belief-subject key as one of three disjoint top-level
+///   bands, and the `SenseChannelId`-fits-the-channel-field question falls out of that hybrid encoding within
+///   the being-signal band (the gate's packing ruling).
 /// - The evidence WEIGHT's two likelihoods are the existing reserved `p_harm_given_harms`/`p_harm_given_benign`
 ///   (never the fixed dev 0.9/0.1). Their per-being derived form is the deepest derive target, a build shared
 ///   with the affordance composer, framed and sequenced separately. Basis, corrected by the section-9 catch:
@@ -589,7 +616,7 @@ pub fn being_signal_observation(
 ) -> FeatureObservation {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
-    observation_toward(feature_subject(channel, bucket), harm, weight)
+    observation_toward(being_signal_subject(channel, bucket), harm, weight)
 }
 
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
@@ -892,8 +919,8 @@ mod tests {
         assert_eq!(harm.toward, HARMS, "a harm tick points toward HARMS");
         assert_eq!(
             harm.subject,
-            feature_subject(2, 7),
-            "keyed on channel and bucket"
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal's own band"
         );
         assert!(harm.weight > Fixed::ZERO, "positive evidence weight");
         let benign = being_signal_observation(2, 7, false, Fixed::ONE, &calib);
@@ -908,21 +935,32 @@ mod tests {
     }
 
     #[test]
-    fn a_being_signal_is_learned_identically_to_an_environmental_feature() {
-        // The being-signal is fed through the exact same learner: for the same channel, bucket, harm bit,
-        // and plasticity, the observation matches what the environmental learner mints, so no "communication"
-        // path is special-cased and the valence emerges receiver-side from correlation alone.
+    fn a_being_signal_is_learned_through_the_same_learner_on_its_own_disjoint_subject() {
+        // The being-signal is fed through the exact same LEARNER: for the same channel, bucket, harm bit, and
+        // plasticity, the valence direction and evidence weight match what the environmental learner mints, so
+        // no "communication" path is special-cased and the valence emerges receiver-side from correlation
+        // alone. But the SUBJECT is disjoint (the keystone step-1 namespace fix): a being-signal on channel c
+        // mints in the being-signal band, never the environmental-feature band, so the two beliefs never
+        // alias even at the same channel and bucket.
         let calib = HarmLearningCalib::dev_default();
         // An environmental feature whose amount buckets to a known bucket on channel 0.
         let amount = Fixed::from_int(2);
         let bucket = feature_bucket(amount, calib.feature_granularity);
         let env = feature_observations(true, &[amount], Fixed::ONE, &calib);
         let sig = being_signal_observation(0, bucket, true, Fixed::ONE, &calib);
-        assert_eq!(sig.subject, env[0].subject, "same subject minting");
         assert_eq!(sig.toward, env[0].toward, "same valence direction");
         assert_eq!(
             sig.weight, env[0].weight,
             "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, env[0].subject,
+            "disjoint from the environmental-feature subject at the same channel and bucket"
         );
     }
 
@@ -937,6 +975,50 @@ mod tests {
         assert!(
             keen.weight > base.weight,
             "a higher plasticity extracts more evidence"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_band_is_disjoint_from_the_feature_and_sequence_bands() {
+        // Keystone step 1: a being-signal subject sets bit 60 (with bit 62), so it never equals a feature
+        // subject (bit 60 clear, its payload in the low 48 bits) nor a sequence subject (bit 61 set, clear
+        // here), whatever the channel and bucket, so a being's learned valence about a perceived signal never
+        // aliases a belief about a standing-on feature or a discovered action, even at the same channel and
+        // bucket (the section-9 slice-3 aliasing seam, closed by construction).
+        for ch in 0..8u16 {
+            for bk in 0..8i64 {
+                assert_ne!(
+                    being_signal_subject(ch, bk).0,
+                    feature_subject(ch, bk).0,
+                    "disjoint from the feature band at the same channel and bucket"
+                );
+            }
+        }
+        // The band markers: the being-signal band sets bit 60 and clears bit 61; the feature band clears bit
+        // 60; the sequence band sets bit 61. So the three bands are pairwise disjoint by their marker bits.
+        assert_eq!(
+            being_signal_subject(0, 0).0 & (1 << 60),
+            1 << 60,
+            "being-signal band marker (bit 60) set"
+        );
+        assert_eq!(
+            being_signal_subject(u16::MAX, i64::MAX).0 & (1 << 61),
+            0,
+            "being-signal band leaves bit 61 clear, disjoint from the sequence band"
+        );
+        assert_eq!(
+            feature_subject(0, 0).0 & (1 << 60),
+            0,
+            "feature band leaves bit 60 clear"
+        );
+        assert_eq!(
+            SEQUENCE_SUBJECT_BASE & (1 << 61),
+            1 << 61,
+            "sequence band sets bit 61"
+        );
+        assert!(
+            being_signal_subject(u16::MAX, i64::MAX).0 < (1 << 63),
+            "stays below the reserved-high landmark ids, exactly as the feature and sequence bands do"
         );
     }
 
