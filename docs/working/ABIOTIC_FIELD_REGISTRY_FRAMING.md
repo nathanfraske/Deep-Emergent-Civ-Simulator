@@ -474,3 +474,19 @@ draws on the source; versus a per-lineage term folded into the cell yield). This
 substrate, so it MUST be framed blind (section-11 then section-10) and its surface-disjointness from Agent A
 (learn/runner/evolve) and Agent B (affordance/composition) confirmed BEFORE any code. That framing is the next step;
 no code until the gate rules on it.
+
+### Nernst surface-disjointness (grounded against git history)
+
+Two cross-surface touchpoints with Agent A, so the Nernst is NOT a solo build and needs the gate to sequence:
+- `crates/physics/src/laws.rs`: the Nernst kernel and the activity law belong here beside `battery_emf` (the floor's
+  law-kernel home, which `PHYSICS_FLOOR_REGISTRY.md` indexes). But this file was last touched by Agent A's #109
+  perception arc (the `geometric_spread` kernel and the transduction family), so A actively adds kernels here. The
+  additions are additive `pub fn`s (low textual-conflict risk if placed apart), but the file is contended and the edit
+  must be declared and sequenced, not made unilaterally.
+- The per-lineage EFFICIENCY trait wires through the genome/selection substrate (`evolve.rs`/`controller.rs`, the
+  living recurrent-controller foundation), which is A's ground. Whether efficiency is a new genome channel, a reused
+  trait, or a downstream consumer multiplier is the framing's to settle; either way the wiring touches A's substrate
+  and must be coordinated.
+The environ side (`effective_conversion`, the redox binding, temperature access) is mine. The floor DATA growth (the
+`chem.electron_count` axis in the chem floor toml, the universal R and F constants) is floor data, to place where the
+existing constants live. Surfacing this to the gate with the framing result; no edit to A's files until it sequences.
