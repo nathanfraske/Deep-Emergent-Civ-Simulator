@@ -334,6 +334,44 @@ gate with the recommendation; holding at doc-only for Nernst until the gate/owne
 detail (store the stepped temperature in `EnvironFields` so the frozen-signature `extract_producers` can read it,
 byte-neutral) stands ready regardless of the ruling.
 
+## CORRECTED-T3: blind framing sharpened the fix (verified), for the gate
+
+The gate sequenced CORRECTED-T3 first and specified carrying the plant's "composition-weighted energy density".
+I framed it blind. All six panelists returned significant-flaw-fixable (one minor), convergent on two points,
+both verified against source:
+
+1. Do NOT collapse to a plant-side scalar. Killing the simplex normalization is correct (it authors a flat
+   "every plant equally nutritious" coupling). But reducing the plant to a single composition-weighted GROSS
+   energy density authors digestibility = 1 for every consumer: gross kJ/g is a substance property; the energy a
+   grazer BANKS is what ITS metabolism assimilates (cellulose is high-energy yet worthless to a gut without the
+   pathway). A plant-side scalar relocates the flatness from the plant to the consumer, a template-case and
+   admit-the-alien violation (a redox/mana/silicon feeder banks no kJ/g of biomass). Fix: carry the FULL
+   de-normalized composition VECTOR (real per-axis magnitudes) into the standing food, and let usable food value
+   emerge at consumption as the plant's composition folded against the CONSUMER's own metabolic data.
+2. Reuse the existing energy bridge, do not mint a fresh anchor. A new kJ-to-intake anchor independent of the
+   one that derives a body's reserve capacity from the same `bio.energy_density` axis would give two unreconciled
+   scales for one quantity and break energy conservation across the eat step. Fix: reuse the existing bridge; add
+   a pin only if a unit mismatch requires it, with basis EQUALITY to that bridge, never a free parameter.
+
+Both are confirmed against source, and they make the fix SIMPLER than the spec: `physiology::physical_intake`
+(physiology.rs:495) ALREADY folds the food's physical `content` against the CONSUMER's own `assim` (assimilation)
+and `eta` (trophic efficiency) through the SAME size-scaled `bio.energy_density` reserve bridge the drain uses
+(`content * assim * eta / (body_mass * body_storage_density)`), keyed on NO axis identity (a non-digester with
+`assim <= 0` eats nothing; a thaumic reserve fills from a mana plant the same way). So the consumer-side
+per-consumer emergence is already built and alien-clean. The ONLY defect is that `set_producer_food`
+(environ.rs) divides the composition by its total (the simplex), discarding the magnitude so every plant presents
+the same `content` per biomass volume.
+
+The corrected fix: `set_producer_food` stops normalizing and carries the real per-axis composition magnitudes;
+the existing `physical_intake` then folds the real content against each consumer's metabolism, so which plants
+are worth eating (and which thrive under grazing) emerges from the plant-consumer material interaction, not a
+shared nutrition number. No fresh reserved anchor (the existing reserve bridge already converts the magnitude);
+a units pin is added only if a scale mismatch is found, its basis equality with that bridge. Confined to
+`set_producer_food` (my surface); `physical_intake` is READ to confirm the consumer fold exists, not edited (it
+is already correct and alien-clean). The four tracked pins hold byte-identical (only `--scenario living` and the
+composition tests arm producer food); the stated behaviour change is that plants stop being uniformly nutritious.
+Surfaced to the gate (it revises the spec toward more principled, and simpler); holding at doc-only until it rules.
+
 ## Files
 
 - Edit surface: `crates/sim/src/environ.rs` (the enum, the two matches, the `EnvironFields` struct, tests).
