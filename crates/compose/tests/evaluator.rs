@@ -769,3 +769,74 @@ fn additive_mass_is_conserved_exactly_but_a_nonlinear_proxy_is_tier_dependent() 
         "a nonlinear proxy over the additive quantity is tier-dependent"
     );
 }
+
+// === The transduction leaf: an opaque domain sensor, not structurally gated ===
+
+#[test]
+fn a_transduction_leaf_evaluates_to_the_zero_load_max_safety_not_the_collapse_boundary() {
+    // The audit regression (derive-vs-author): a sensor bears no structural load, so its derived
+    // structural safety is the unconstrained maximum (a utilization of zero gives safety one), NOT the
+    // zero that marks a fully-utilized artifact at the collapse boundary and NOT the -1 a degenerate
+    // zero-capacity structure yields. compose does not physics-evaluate the opaque bytes.
+    let reg = physics();
+    let mut m = memo(InterfaceRegistry::dev_seed_base());
+    let sensor = CompositionNode::new(
+        IntentRef(0),
+        NodeBody::Transduction {
+            canonical: vec![1, 2, 3, 4],
+        },
+        InterfaceRegistry::dev_seed_base().empty_vector(),
+        vec![],
+    );
+    let ev = evaluate_node(&reg, &mut m, &sensor);
+    assert_eq!(
+        ev.viability,
+        Interval::point(Fixed::ONE),
+        "a sensor's zero-load structural safety is the unconstrained maximum, one"
+    );
+}
+
+#[test]
+fn a_transduction_leaf_survives_the_structural_promotion_gate_under_a_positive_owner_margin() {
+    // The load-bearing half of the same regression: the earlier zero viability sat exactly on the
+    // promotion gate, so ANY positive owner safety margin above the physics collapse boundary would have
+    // rejected every discovered sensor (`0 < margin` is true) and defeated the stated goal that a sensor
+    // is promoted, folded, and selected through discovery. With the derived max-safety viability, the
+    // structural gate does not filter it: `1 < margin` is false for any margin at or below full safety.
+    let reg = physics();
+    let mut m = memo(InterfaceRegistry::dev_seed_base());
+    let sensor = CompositionNode::new(
+        IntentRef(0),
+        NodeBody::Transduction {
+            canonical: vec![9, 9, 9],
+        },
+        InterfaceRegistry::dev_seed_base().empty_vector(),
+        vec![],
+    );
+    let ev = evaluate_node(&reg, &mut m, &sensor);
+    // A positive owner safety factor above the derived (zero) collapse boundary, the reserved use of
+    // `compose.viability_threshold` (the research worksheet proposes about a third).
+    let params = PromotionParams {
+        viability_floor: fx("0.33"),
+        loss_rate: fx("0.25"),
+        drift_rate: fx("0.01"),
+        reuse_threshold: 1,
+    };
+    let evidence = DesignEvidence {
+        id: sensor.content_id(),
+        viability: ev.viability,
+        persisted_ticks: 1000,
+        copies: vec![fx("0.5"), fx("0.5")],
+        reuse_count: 5,
+    };
+    assert_ne!(
+        promote(&evidence, &params),
+        Promotion::RejectedViability,
+        "a sensor must not be rejected AS a structure under a positive owner safety margin"
+    );
+    assert_eq!(
+        promote(&evidence, &params),
+        Promotion::Promoted,
+        "with its stability and reuse met, the sensor promotes through discovery"
+    );
+}

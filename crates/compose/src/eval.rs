@@ -292,6 +292,19 @@ fn compute(
             }
             eval_composite(memo, node, &child_evals)
         }
+        // A transduction leaf is an OPAQUE domain sensor. compose is domain-agnostic and does not
+        // physics-evaluate it: it offers an empty interface vector (no structural role filled). Its
+        // STRUCTURAL viability is the derived zero-load case: a sensor bears no structural load, so its
+        // utilization is zero and its safety fraction is `safety(0, .) = 1 - 0 = ONE`, the unconstrained
+        // maximum (never the `-1` a degenerate zero-CAPACITY structure yields, and never the `0` that
+        // marks a fully-utilized artifact at the collapse boundary). One means the structural promotion
+        // gate does not filter it: `viability.lo < viability_floor` stays false for any owner safety
+        // margin at or below full safety (promote.rs), so a sensor is never rejected AS a structure. Its
+        // sensory fitness is the domain's to select through discovery; compose only content-addresses it.
+        NodeBody::Transduction { .. } => NodeEval {
+            vector: memo.interface.empty_vector(),
+            viability: Interval::point(Fixed::ONE),
+        },
     };
     if use_cache {
         memo.evals.insert(node.id, ev.clone());
@@ -309,6 +322,7 @@ fn eval_leaf(reg: &PhysicsRegistry, memo: &Memo, node: &CompositionNode) -> Node
             joining,
         } => (primitives, *material, *joining),
         NodeBody::Composite { .. } => unreachable!("eval_leaf on a composite"),
+        NodeBody::Transduction { .. } => unreachable!("eval_leaf on a transduction"),
     };
 
     let caps = Caps::derive(reg);
@@ -435,6 +449,7 @@ fn eval_composite(
     let assembly_join = match &node.body {
         NodeBody::Composite { assembly_join, .. } => *assembly_join,
         NodeBody::Leaf { .. } => unreachable!("eval_composite on a leaf"),
+        NodeBody::Transduction { .. } => unreachable!("eval_composite on a transduction"),
     };
     let child_vectors: Vec<(u128, PortVector)> = child_evals
         .iter()
