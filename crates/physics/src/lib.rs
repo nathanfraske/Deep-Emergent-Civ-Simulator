@@ -268,6 +268,53 @@ impl AxisRange {
     }
 }
 
+/// How drawing on a source axis behaves under conservation (R-SOURCE-VECTOR floor metadata): whether a
+/// draw DRAWS DOWN a located stock, reads a renewable flux no draw exhausts, or drains a reservoir. This
+/// is floor physics on the AXIS (the conservation law of the axis's quantity), read as data so a feeder's
+/// supply behaviour is a data row rather than a branch on any source kind (Principle 11): a matter
+/// composition axis is a depletable stock, a photon or gravity-gradient feeder's source a non-rivalrous
+/// flux. An axis whose character the owner has not declared is [`DepletionCharacter::Reserved`] and
+/// reading it in a draw fails loud, never a silent "stock" default (the reserved-value discipline).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DepletionCharacter {
+    /// The owner has not declared the character; the basis on which it is decided (the conservation law
+    /// of the axis's quantity).
+    Reserved {
+        /// The ground for the eventual character.
+        basis: String,
+    },
+    /// A located stock a draw draws DOWN (matter composition: mass is conserved, so eating removes it).
+    DepletableStock,
+    /// A renewable flux no draw exhausts (a light, thermal-gradient, or gravity-gradient feeder's source).
+    NonRivalrousFlux,
+    /// A reservoir replenished from a source and drained to a sink (a hydrology pool).
+    Reservoir,
+}
+
+/// The reduction of one unit on this axis to the floor's common conserved energy/matter currency
+/// (R-SOURCE-VECTOR floor metadata). Used for CROSS-AXIS comparison (the R-TIER-CONSIST pool projection),
+/// never the intake arithmetic of a draw. This is NOT an authored value: under the fundamental-constants
+/// floor (AGENTIC_ADDENDUM section 9, the three-way test), an axis's reduction IS the energy-equivalence
+/// of its physical quantity, so it is DERIVED (the fundamental constants times the substance's own floor
+/// physics: a redox axis through its couple's EMF times carrier charge, the `nFE` bridge; a thermal-
+/// gradient axis through the heat capacity and the temperature difference; a mass-flux axis through
+/// `bio.energy_density`), never declared. Until a feeder is armed and its reduction is derived, the axis
+/// carries the [`ReductionCoefficient::Derive`] sentinel and reading it fails loud, never a fabricated
+/// number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReductionCoefficient {
+    /// No feeder draws on this axis yet, so its reduction has not been derived; the ground from which it
+    /// will be derived (the axis's energy-equivalence: the fundamentals times the substance's floor
+    /// physics). Reading it fails loud, never a silent default (the derive target, not an owner value).
+    Derive {
+        /// The ground from which the reduction is derived when a feeder is armed.
+        basis: String,
+    },
+    /// The derived reduction: one axis-unit in the conserved energy/matter currency, computed from the
+    /// axis's energy-equivalence at feeder-arming, never authored.
+    Derived(Fixed),
+}
+
 /// A quantity axis: a named, unit-bearing, range-bounded, fixed-point scalar dimension
 /// at a tier (substrate guide Section 4). The `scale_unit` is the one canonical
 /// per-quantity scale the value is stored in (for example the megapascal for every
@@ -303,6 +350,14 @@ pub struct QuantityAxis {
     pub tier: u8,
     /// Whether the axis is real-with-source or fantasy-reserved.
     pub provenance: Provenance,
+    /// How drawing on this axis behaves under conservation (R-SOURCE-VECTOR): a depletable stock, a
+    /// non-rivalrous flux, or a reservoir. Reserved (fail-loud) until the world declares it. A matter
+    /// composition axis declares `depletable_stock`; a field-and-gradient feeder's axis its own character.
+    pub depletion_character: DepletionCharacter,
+    /// The reduction of one axis-unit to the floor's common conserved energy/matter currency
+    /// (R-SOURCE-VECTOR), for cross-axis comparison (R-TIER-CONSIST), never a draw's intake arithmetic.
+    /// Reserved until the owner sets it from the floor's energy/matter equivalence for the quantity.
+    pub reduction_coefficient: ReductionCoefficient,
 }
 
 impl QuantityAxis {
@@ -1099,6 +1154,10 @@ struct AxisDef {
     /// so the catalogue registers one quantity per class. Empty for a single-scale axis.
     #[serde(default)]
     per_class: Vec<PerClassDef>,
+    /// The R-SOURCE-VECTOR depletion character: `depletable_stock`, `non_rivalrous_flux`, or `reservoir`.
+    /// Empty declares it reserved (fail-loud on a draw), the default for an axis no feeder draws on yet.
+    #[serde(default)]
+    depletion_character: String,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1157,6 +1216,31 @@ impl AxisDef {
             return Err(PhysicsError::BadRange(self.id.clone()));
         };
         let provenance = provenance_from(&self.real, &self.fantasy, &self.id)?;
+        let depletion_character = match self.depletion_character.trim() {
+            "" => DepletionCharacter::Reserved {
+                basis: "the conservation law of the axis's quantity, declared when a feeder draws on it"
+                    .to_string(),
+            },
+            "depletable_stock" => DepletionCharacter::DepletableStock,
+            "non_rivalrous_flux" => DepletionCharacter::NonRivalrousFlux,
+            "reservoir" => DepletionCharacter::Reservoir,
+            other => {
+                return Err(PhysicsError::BadValue {
+                    id: self.id.clone(),
+                    detail: format!(
+                        "unknown depletion_character '{other}', expected depletable_stock, non_rivalrous_flux, or reservoir"
+                    ),
+                });
+            }
+        };
+        // The reduction to the conserved currency is a DERIVE target on every axis (R-SOURCE-VECTOR under
+        // the fundamental-constants floor): an axis's reduction IS its quantity's energy-equivalence, so it
+        // is derived from the fundamentals times the substance's floor physics at feeder-arming, never
+        // authored. Until then every axis carries the fail-loud Derive sentinel, no fabricated coefficient.
+        let reduction_coefficient = ReductionCoefficient::Derive {
+            basis: "the axis's energy-equivalence: the fundamentals times the substance's floor physics"
+                .to_string(),
+        };
         let mut per_class: Vec<PerClassRange> = Vec::with_capacity(self.per_class.len());
         for p in self.per_class {
             // A class id must be non-empty and free of the `@` separator, else its
@@ -1194,6 +1278,8 @@ impl AxisDef {
             per_class,
             tier: self.tier,
             provenance,
+            depletion_character,
+            reduction_coefficient,
         })
     }
 }

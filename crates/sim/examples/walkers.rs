@@ -89,6 +89,7 @@ fn water_reg() -> HomeostaticRegistry {
             base_drain: Fixed::from_ratio(1, 120),
             exertion_drain: Fixed::from_ratio(1, 300),
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         }],
     }
 }

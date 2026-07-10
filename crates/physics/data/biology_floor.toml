@@ -22,6 +22,7 @@ tier = 0
 range_lo = "0"
 range_hi = "1.0"
 real = "USDA FoodData Central; FAO/INFOODS (water-rich tissues to ~0.96, definitional ceiling 1.0)"
+depletion_character = "depletable_stock"
 
 [[axis]]
 id = "bio.energy_density"
@@ -33,6 +34,7 @@ tier = 0
 range_lo = "0"
 range_hi = "38"
 real = "Atwater, Merrill and Watt, USDA Agriculture Handbook 74 (pure-lipid gross ~38.9 kJ/g)"
+depletion_character = "depletable_stock"
 
 [[axis]]
 id = "bio.protein_fraction"
@@ -44,6 +46,7 @@ tier = 0
 range_lo = "0"
 range_hi = "0.9"
 real = "USDA FoodData Central; WHO/FAO TRS 935 (lean-dried isolates ~0.9)"
+depletion_character = "depletable_stock"
 
 [[axis]]
 id = "bio.lipid_fraction"

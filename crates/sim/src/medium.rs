@@ -110,6 +110,7 @@ pub fn dev_respiration() -> HomeostaticRegistry {
             base_drain: Fixed::from_ratio(1, 50),
             exertion_drain: Fixed::from_ratio(1, 50),
             death_floor: Fixed::from_ratio(1, 2),
+            draw_set: Vec::new(),
         }],
     }
 }

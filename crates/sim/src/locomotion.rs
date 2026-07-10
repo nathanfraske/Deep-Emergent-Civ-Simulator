@@ -1239,6 +1239,69 @@ pub fn step_with_field_dirs<T: Terrain>(
                                     &w.body, organs,
                                 );
                                 for axis in &homeo.axes {
+                                    if !axis.draw_set.is_empty() {
+                                        // A FEEDER RESERVE'S DRAW (R-SOURCE-VECTOR): the per-reserve FOLD
+                                        // over its declared draw-axis set (a mixotroph's light-plus-tissue,
+                                        // a photovore's flux). No current reserve declares a set, so this
+                                        // branch never runs on the pinned scenarios and the four pins hold
+                                        // by non-modification of the matter path below. Each term reads its
+                                        // source, bridges to content by its own unit, fills bounded by the
+                                        // REMAINING room (the live amount() reflects prior terms' ingests),
+                                        // and depletes the source only where its floor character is a
+                                        // depletable stock, so the deplete step keys on the conservation
+                                        // law of the quantity, never on a source kind. The matter singleton
+                                        // is the empty-set special case below, kept as today's fast path.
+                                        for term in &axis.draw_set {
+                                            let supply = resources.supply(here, &term.class);
+                                            if supply <= Fixed::ZERO {
+                                                continue;
+                                            }
+                                            let content = term
+                                                .unit_bridge
+                                                .content(supply, p.food_energy_density);
+                                            let body_c = storage
+                                                .get(&term.class)
+                                                .copied()
+                                                .unwrap_or(Fixed::ZERO);
+                                            let room = w.homeostasis.capacity(axis.id)
+                                                - w.homeostasis.amount(axis.id);
+                                            let (eaten_content, gain) =
+                                                crate::physiology::physical_intake(
+                                                    content,
+                                                    w.physiology.assimilation(&term.class),
+                                                    eta,
+                                                    body_mass,
+                                                    body_c,
+                                                    room,
+                                                );
+                                            if eaten_content <= Fixed::ZERO {
+                                                continue;
+                                            }
+                                            match &term.depletion {
+                                                civsim_physics::DepletionCharacter::DepletableStock => {
+                                                    let eaten_supply = term
+                                                        .unit_bridge
+                                                        .supply(eaten_content, p.food_energy_density);
+                                                    resources.take(here, &term.class, eaten_supply);
+                                                }
+                                                civsim_physics::DepletionCharacter::NonRivalrousFlux => {
+                                                    // A renewable flux (a photon or gravity-gradient
+                                                    // source): the draw gains but never depletes it.
+                                                }
+                                                civsim_physics::DepletionCharacter::Reservoir
+                                                | civsim_physics::DepletionCharacter::Reserved {
+                                                    ..
+                                                } => {
+                                                    // A reservoir pool draw is not yet wired, and an
+                                                    // undeclared (reserved) character is rejected when a
+                                                    // feeder's draw term is built, so neither reaches the
+                                                    // hot path with a silent take.
+                                                }
+                                            }
+                                            w.homeostasis.ingest(axis.id, gain);
+                                        }
+                                        continue;
+                                    }
                                     let Some(class) = axis.backing_component.as_deref() else {
                                         continue;
                                     };
@@ -1479,6 +1542,7 @@ mod tests {
                 base_drain: Fixed::from_ratio(1, 300),
                 exertion_drain: Fixed::from_ratio(1, 400),
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         }
     }
@@ -2472,6 +2536,7 @@ mod tests {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         }
     }

@@ -335,6 +335,7 @@ fn scoring_reg() -> HomeostaticRegistry {
             base_drain: Fixed::from_ratio(1, 60),
             exertion_drain: Fixed::from_ratio(1, 200),
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         }],
     }
 }
@@ -509,6 +510,7 @@ fn dawn_reg() -> HomeostaticRegistry {
             base_drain: Fixed::from_ratio(1, 150),
             exertion_drain: Fixed::from_ratio(1, 300),
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         }],
     }
 }
@@ -595,6 +597,7 @@ fn two_reserve_reg() -> HomeostaticRegistry {
         base_drain: Fixed::from_ratio(1, 200),
         exertion_drain: Fixed::from_ratio(1, 600),
         death_floor: Fixed::ZERO,
+        draw_set: Vec::new(),
     };
     HomeostaticRegistry {
         axes: vec![axis(ENERGY), axis(WATER)],

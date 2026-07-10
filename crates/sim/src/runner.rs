@@ -7277,6 +7277,7 @@ source = "test"
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let bp = || BodyPlan {
@@ -7601,6 +7602,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -7614,6 +7616,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -7775,6 +7778,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -7784,6 +7788,7 @@ source = "test"
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -7960,6 +7965,7 @@ source = "test"
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -7969,6 +7975,7 @@ source = "test"
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -8215,6 +8222,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let body = BodyPlan {
@@ -8402,6 +8410,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         // A GRASP-only affordance registry, so the sampled proposal is always the grasp matter primitive
@@ -8590,6 +8599,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -8599,6 +8609,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -8794,6 +8805,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -8803,6 +8815,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9005,6 +9018,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9014,6 +9028,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9200,6 +9215,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9209,6 +9225,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9408,6 +9425,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9417,6 +9435,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: STARCH,
@@ -9426,6 +9445,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9624,6 +9644,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -9633,6 +9654,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -9875,6 +9897,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let grasp_only = || AffordanceRegistry {
@@ -10085,6 +10108,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             }],
         };
         let grasp_only = || AffordanceRegistry {
@@ -10270,6 +10294,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -10279,6 +10304,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10499,6 +10525,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -10508,6 +10535,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10710,6 +10738,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: CONDITION,
@@ -10719,6 +10748,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -10931,6 +10961,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 50),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: TEMPERATURE,
@@ -10940,6 +10971,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11102,6 +11134,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 50),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: TEMPERATURE,
@@ -11111,6 +11144,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };
@@ -11288,6 +11322,7 @@ values = [
                     base_drain: Fixed::ZERO,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
                 HomeostaticAxisDef {
                     id: ENERGY,
@@ -11297,6 +11332,7 @@ values = [
                     base_drain: Fixed::from_ratio(1, 100),
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
                 },
             ],
         };

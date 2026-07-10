@@ -129,6 +129,7 @@ fn energy_thermal_registry() -> HomeostaticRegistry {
                 base_drain: Fixed::from_ratio(1, 400),
                 exertion_drain: Fixed::from_ratio(1, 100),
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -138,6 +139,7 @@ fn energy_thermal_registry() -> HomeostaticRegistry {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     }
@@ -2353,6 +2355,7 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
                 base_drain: Fixed::from_ratio(1, 50),
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -2362,6 +2365,7 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     };
@@ -2476,6 +2480,7 @@ fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_subs
                 base_drain: Fixed::from_ratio(1, 20),
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: WATER,
@@ -2485,6 +2490,7 @@ fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_subs
                 base_drain: Fixed::from_ratio(1, 20),
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -2494,6 +2500,7 @@ fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_subs
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     };
@@ -2649,6 +2656,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: CONDITION,
@@ -2658,6 +2666,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -2667,6 +2676,7 @@ values = [
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     };
@@ -2778,6 +2788,7 @@ fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -2787,6 +2798,7 @@ fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     };
@@ -2879,6 +2891,7 @@ fn the_geophage_enact_deposits_a_spent_hull_trace_and_is_inert_unarmed() {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
             HomeostaticAxisDef {
                 id: TEMPERATURE,
@@ -2888,6 +2901,7 @@ fn the_geophage_enact_deposits_a_spent_hull_trace_and_is_inert_unarmed() {
                 base_drain: Fixed::ZERO,
                 exertion_drain: Fixed::ZERO,
                 death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
             },
         ],
     };
@@ -4804,6 +4818,7 @@ fn medium_respiration_lives_in_a_rich_medium_and_suffocates_in_a_poor_one() {
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         });
         r
     };
@@ -4884,6 +4899,7 @@ fn beings_respire_the_medium_of_their_own_cell_through_the_runner() {
             base_drain: Fixed::ZERO,
             exertion_drain: Fixed::ZERO,
             death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
         });
         r
     };
