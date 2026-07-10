@@ -103,3 +103,59 @@ and the tidal-lock/poles/luminosity cases are handled or flagged, not silently b
 period, cos(zenith) with declination from per-world obliquity and orbital phase, per-material emissivity, stellar
 luminosity and orbital distance, a data-defined light-source set) is the true substrate, a larger build. This is the
 gate and owner's scope call. Surfaced, not decided; no code until the gate rules the scope.
+
+## Third-form blind framing result (arc 2, the overnight priority): corrections to the sun-angle spec
+
+The section-10 panel (five lenses, section-11 cleared) confirmed the third form fixes the earlier interim-vs-substrate
+seams in principle (a closed-form cos-zenith sum-over-stars with data obliquity/eccentricity/luminosity, the old poles=0
+latitude tent gone, the phase firewalled) but corrected the spec on several load-bearing points, verified against
+geometry and source.
+
+Missing the per-cell LONGITUDE term (a correctness bug). The proposed theta_s(t) took latitude, a single GLOBAL diurnal
+phase, obliquity, and orbital phase, with no per-cell longitude, so every cell at one latitude would be at the same sun
+angle simultaneously (the whole planet noon at once). The hour angle must carry the cell's longitude (its x-column
+mapped to a longitude offset), so the sun sweeps across columns: hour_angle = 2*pi*(phase + longitude_fraction). The
+full geometry is cos(zenith) = sin(lat)sin(decl) + cos(lat)cos(decl)cos(hour_angle), with declination from obliquity and
+orbital phase.
+
+Synodic, not bare sidereal. The phase = tick modulo the rotation period is the SIDEREAL day; the solar day (successive
+noons) combines rotation and orbit, so the hour angle must subtract the orbital phase (hour = sidereal_phase +
+longitude - orbital_phase) for the tidally-locked case (rotation = orbit, a permanent day face) to come out right. The
+spec left this open; it must be specified.
+
+Each star its own orbital geometry. The star-list is open (admits a binary or trinary system as data), but a single
+shared "world orbital phase" applied to every star is wrong: each star carries its own orbital position, so a binary
+system's two suns rise and set independently. L_s is attenuated by the inverse-square distance, and under eccentricity
+the distance varies with orbital phase (Kepler), so distance is a function of orbital phase, not a fixed scalar.
+
+The heat path's "no authored per-material curve" is illusory as stated. Dropping a per-material emissivity curve does
+not remove the absorption: it lumps it into the reserved relaxation rate and an UNSPECIFIED flux-to-baseline conversion,
+which makes absorption UNIFORM across ice, rock, water, and an alien crust (a Terran/uniform bake, and uniform thermal
+lag is authored). The insolation-to-baseline conversion must be specified: either a floor radiative-equilibrium map with
+a floor emissivity (a flagged uniform-absorption limit) or, better, per-material absorption/thermal-inertia as material
+DATA so ice and rock and water lag differently and the alien crust is a data row. The diurnal swing and thermal lag then
+EMERGE from relaxation-plus-diffusion, bounded by a MAXIMUM PRINCIPLE (not "energy conservation", which was imprecise),
+conditional on the reserved rates.
+
+Mirror does NOT reduce to today's static field, so this is NOT byte-neutral. Today's light is a static always-on
+latitude map (equator 1 for every tick); the new law cycles every non-polar cell from full at noon to zero at night even
+at the bare default (obliquity 0, one star), because max(0, cos theta_s(t)) is time-varying. So the drive changes the
+reference world's field fundamentally (which is the POINT, the owner wants day-night heating), and a normalization scale
+(the static map was [0,1]; the cycling insolation needs its own scale) is a missing reserved value. Two design choices
+for the gate: on-by-default (every scenario cycles, all four determinism pins re-baseline) versus opt-in (a static
+latitude fallback when the drive is unarmed, so the four pins hold and the diurnal cycle arms per scenario like living).
+And Mirror (Earth's real data) has obliquity ~23.4 degrees, so it is NOT the "tilt 0" bare default: the tilt-0 reference
+row is the minimal default a world that declares nothing gets; Mirror the demo world carries Earth's real tilt (real
+seasons plus day-night). Whether the overnight demo runs Mirror-real-tilt or the tilt-0 clean-diurnal default is a scope
+choice.
+
+Determinism and the firewall. The cos/sin needs a deterministic fixed-point trig primitive. The phase counter should be
+an environ-local unreadable counter (or the canonical tick) that NO behavioural substrate can read, since a controller
+that reads the integer tick computes tick mod rotation and authors a template; the cycling FIELD is itself an entrainment
+clock, but that is the intended emergent signal (beings evolve a rhythm by selection over the physical field), so the
+firewall is on the RAW phase/tick, not the field, and its enforcement is partly a code-review invariant. The
+now-cycling field creates a recompute-order seam for the hydrology and productivity reads that must be pinned. And the
+mandatory pre-cycle audit: every authored threshold in the pre-existing hydrology/productivity consumers that was fitted
+to the STATIC field becomes a de-facto on/off time-gate once the field cycles (authoring a diurnal forcing rhythm one
+level down), so each must be found and shown to be a genuine physical phase boundary (freezing, evaporation onset) or
+replaced with a graded response, BEFORE the field is allowed to cycle.
