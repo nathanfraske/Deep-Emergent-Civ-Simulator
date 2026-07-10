@@ -448,3 +448,29 @@ honest surfacing is therefore not "the change starves the world" but "the world 
 scale, and pricing the producer food at its real derived value without the double-scale deepens the starvation
 component," which is the same owner-gated biosphere-balance calibration, resolved at its true cause and never by
 inflating the food value.
+
+## Corrected Nernst: grounding (the last AbioticField piece, four seams gate-ruled in)
+
+Surface mapped against source before framing. The redox mechanism is entirely in `environ.rs` (my surface):
+`effective_conversion` (the segment-3 core) currently returns `battery_emf(acceptor, donor).max(0) * emf_to_biomass`,
+a flat coupling. The corrected form is the thermodynamic yield `efficiency_lineage * n * F * max(0, E_cell)` with
+`E_cell = E0 - (R*T / (n*F)) * ln(Q)` (Nernst), all four seams ruled in by the gate.
+
+Floor state (grown per Prime Directive 6, gate-authorized): `chem.standard_potential` exists (the donor/acceptor/
+cathode/anode potential, a signed volt window). MISSING and to be grown: a `chem.electron_count` per-substance axis
+(the Nernst `n`, electrons transferred); a UNIVERSAL molar gas constant R (only the SPECIFIC `R_s` exists, inside
+`ideal_gas_density` at laws.rs:1294, not reusable); a Faraday CONSTANT F (note `law.faraday_emf` at em_floor.toml:325
+is electromagnetic INDUCTION, flux-linkage and the Lenz sign, a naming collision to avoid, NOT the electrochemical
+F = 96485 C/mol); an ACTIVITY law with an activity coefficient gamma for the reaction quotient Q; and a Nernst law
+kernel in `laws.rs`. Each new axis/constant/kernel reaches `PHYSICS_FLOOR_REGISTRY.md` via `gen_floor_registry.py`.
+
+Two couplings to resolve in framing. First, TEMPERATURE: the `R*T` term needs `T` at the `effective_conversion` call
+site (the productivity Pass 1/2 at environ.rs:1161/1193), which today takes only `&binding`; `T` must be threaded
+(stored on `EnvironFields` or passed), byte-neutral by defaulting the redox path off (Earth declares no redox source).
+Second, and emergence-critical, PER-LINEAGE EFFICIENCY: `effective_conversion` is ENVIRONMENTAL (a per-cell source
+yield), not per-being, so where the evolved per-lineage efficiency enters is a real design question (an environmental
+per-couple yield that is the thermodynamic maximum, with efficiency a downstream CONSUMER trait applied where a being
+draws on the source; versus a per-lineage term folded into the cell yield). This wires through the genome/selection
+substrate, so it MUST be framed blind (section-11 then section-10) and its surface-disjointness from Agent A
+(learn/runner/evolve) and Agent B (affordance/composition) confirmed BEFORE any code. That framing is the next step;
+no code until the gate rules on it.
