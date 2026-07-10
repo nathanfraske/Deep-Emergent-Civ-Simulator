@@ -99,7 +99,7 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
     HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
-    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, STRIKE, TEMPERATURE,
 };
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
@@ -5693,6 +5693,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -5754,6 +5755,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
