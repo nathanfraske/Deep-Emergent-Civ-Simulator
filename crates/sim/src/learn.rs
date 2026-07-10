@@ -39,6 +39,9 @@ use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_world::Coord3;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::perception_percept::{sense, ChannelTransduction};
+use crate::perception_reach::Reach;
+
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
@@ -653,6 +656,121 @@ pub fn being_signal_reward_observation(
     }
 }
 
+/// Perceive a being-signal from one emitter's resolved [`Reach`] and mint the belief subject the perceiver
+/// keys its valence on, or `None` if the signal does not clear the perceiver's OWN detection threshold (the
+/// emitter is out of reach, occluded by the strata, or too faint for this perceiver's sense). The
+/// being-percept keystone, step 3a: the alien-clean consumption of the reach (slice 1) and the
+/// sensorium-gated percept (slice 2). The received magnitude is the geometrically-spread reach attenuated by
+/// the medium's Beer-Lambert transmittance `exp(-optical_depth)`, the transcendental
+/// [`crate::perception_reach::Reach`] reports-then-defers to its consumer, so a strongly absorbing medium
+/// (rock between the two) drives the transmittance toward zero and the emitter is not perceived: occlusion
+/// emerges from the strata, no authored line-of-sight. [`sense`] transduces that magnitude through the
+/// PERCEIVER's own channel transduction and gates it on the perceiver's own threshold; the discriminated
+/// bucket keys [`being_signal_subject`]. Keyed on the EMISSION on a channel and the resolved reach, never on
+/// a species, kingdom, trophic role, relatedness, or being-hood of the emitter (the emitter is a source of a
+/// signal, whether a being or a fire). Pure and off the run path (no live caller): the keystone's live wire
+/// (step 6) resolves each emitter's own emitted power and medium ([`crate::perception_reach::resolve_reach`],
+/// where the emission assembly and the material field live) and calls this per perceived emitter and channel,
+/// so this is byte-neutral by construction.
+pub fn perceive_being_signal(
+    reach: Reach,
+    channel: u16,
+    transduction: &ChannelTransduction,
+    activation_max: Fixed,
+) -> Option<StableId> {
+    // The received magnitude is the geometric spread attenuated by the medium's transmittance, the
+    // Beer-Lambert `exp(-optical_depth)` the reach substrate defers to here. The optical depth is
+    // non-negative and capped, so the transmittance is in (0, 1] and the product cannot exceed the spread
+    // nor overflow.
+    let transmittance = (-reach.optical_depth).exp();
+    let magnitude = reach
+        .spread
+        .checked_mul(transmittance)
+        .unwrap_or(Fixed::ZERO);
+    let percept = sense(magnitude, transduction, activation_max)?;
+    Some(being_signal_subject(channel, percept.bucket))
+}
+
+/// The being-directed belief gradient (the being-percept keystone, step 3b): over the perceived emitters
+/// (each a position and the [`being_signal_subject`] the perceiver formed for it via
+/// [`perceive_being_signal`]), the summed inverse-distance vector over every emitter the perceiver holds the
+/// committed belief `committed` about on attribute `attr`, pointing AWAY from each such emitter when `toward`
+/// is false (avoidance) and TOWARD it when true (attraction). A nearer emitter contributes harder (weight
+/// `1/d`); a perceiver that believes nothing of the kind nearby gets a zero gradient. The being-directed
+/// mirror of the material [`avoidance_gradient`] / [`attraction_gradient`], keyed on the perceived signal's
+/// LEARNED belief, never on a species, kingdom, trophic role, relatedness, or being-hood. The horizontal
+/// `(x, y)` direction only, matching the 2D heading the controller moves by (the reach already accounted for
+/// the vertical separation in perceptibility). Pure and RNG-free.
+fn being_directed_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    attr: AttrKindId,
+    committed: ValueId,
+    toward: bool,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    for &(pos, subject) in perceived {
+        if mind.belief(subject, attr, params) != Some(committed) {
+            continue;
+        }
+        let dx = pos.x - here.x;
+        let dy = pos.y - here.y;
+        // Skip a co-located emitter (no direction) and a separation whose square overflows i32: an emitter
+        // that far has negligible reach and would not clear the threshold to be perceived anyway.
+        let d2i = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+        if d2i == 0 || d2i > i32::MAX as i64 {
+            continue;
+        }
+        let d2 = Fixed::from_int(d2i as i32);
+        // `(dx, dy)/d2` points TOWARD the emitter, `(-dx, -dy)/d2` AWAY; weighted by inverse distance.
+        let (sx, sy) = if toward { (dx, dy) } else { (-dx, -dy) };
+        if let (Some(cx), Some(cy)) = (
+            Fixed::from_int(sx).checked_div(d2),
+            Fixed::from_int(sy).checked_div(d2),
+        ) {
+            ax = ax.saturating_add(cx);
+            ay = ay.saturating_add(cy);
+        }
+    }
+    (ax, ay)
+}
+
+/// The being-directed expected-HARM avoidance gradient (the being-percept keystone, step 3b): the
+/// being-directed mirror of [`avoidance_gradient`], the raw inverse-distance sum pointing away from every
+/// perceived emitter the perceiver holds a committed `HARMS` belief about. This is a PERCEPT, not a heading:
+/// the runner feeds it into the controller's direction slot, and only a heritable FREELY-SIGNED weight lifted
+/// off founder-zero by selection turns it into avoidance (a positive weight, fleeing a believed-harmful
+/// emitter) or approach (a negative weight, a being drawn to a harm-predicting emitter, a parasite or
+/// scavenger), so the approach/avoid SIGN emerges rather than being authored (Principle 9). The caller
+/// normalises the raw sum to a unit percept, exactly as the material gradient is normalised.
+pub fn being_avoidance_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, HARM_ATTR, HARMS, false, params)
+}
+
+/// The being-directed expected-REWARD attraction gradient (the being-percept keystone, step 3b, the PREDATION
+/// pole): the being-directed mirror of [`attraction_gradient`], the raw inverse-distance sum pointing toward
+/// every perceived emitter the perceiver holds a committed `REWARDS` belief about. A PERCEPT, not a heading,
+/// the exact behavioural mirror of [`being_avoidance_gradient`]: only a heritable freely-signed weight off
+/// founder-zero turns it into approach (a positive weight, pursuing a believed-rewarding emitter, predation)
+/// or avoidance (a negative weight), so the sign emerges (Principle 9). The caller normalises the raw sum to
+/// a unit percept.
+pub fn being_attraction_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, REWARD_ATTR, REWARDS, true, params)
+}
+
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
 /// in its degenerate single-tick form): one per PRESENT feature of the cell it stands on (a channel whose
 /// amount is positive), toward `REWARDS` if it felt a supra-recovery reserve RISE this tick and `NEUTRAL`
@@ -1053,6 +1171,141 @@ mod tests {
         assert!(
             being_signal_subject(u16::MAX, i64::MAX).0 < (1 << 63),
             "stays below the reserved-high landmark ids, exactly as the feature and sequence bands do"
+        );
+    }
+
+    #[test]
+    fn perceive_being_signal_gates_on_the_perceivers_threshold_and_occlusion() {
+        use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
+        // A perceiver whose channel transduces linearly at unit gain, with a detection threshold of 10.
+        let transduction = ChannelTransduction {
+            response: ResponseLaw::Linear,
+            gain: Fixed::ONE,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::from_int(10),
+        };
+        let cap = Fixed::from_int(1_000_000);
+        // A strong, unoccluded reach (spread 100, no optical depth) clears the threshold and mints the
+        // subject in the being-signal band, keyed on the channel and the discriminated bucket.
+        let clear = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ZERO,
+        };
+        let expected_bucket = sense(Fixed::from_int(100), &transduction, cap)
+            .expect("an unoccluded strong signal is sensed")
+            .bucket;
+        assert_eq!(
+            perceive_being_signal(clear, 5, &transduction, cap),
+            Some(being_signal_subject(5, expected_bucket)),
+            "an above-threshold reach mints the being-signal subject on its channel and bucket"
+        );
+        // The SAME emission behind a strongly-absorbing medium (a large optical depth) is attenuated below
+        // the threshold by the Beer-Lambert transmittance, so occlusion emerges and the emitter is not
+        // perceived, with no authored line-of-sight rule.
+        let occluded = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::from_int(20),
+        };
+        assert_eq!(
+            perceive_being_signal(occluded, 5, &transduction, cap),
+            None,
+            "a strongly occluded emitter falls below the perceiver's threshold"
+        );
+        // A faint emission below the threshold is not perceived either.
+        let faint = Reach {
+            spread: Fixed::from_int(1),
+            optical_depth: Fixed::ZERO,
+        };
+        assert_eq!(
+            perceive_being_signal(faint, 5, &transduction, cap),
+            None,
+            "a sub-threshold emission is not perceived"
+        );
+    }
+
+    #[test]
+    fn the_being_directed_gradients_point_by_the_learned_belief_and_are_zero_without_it() {
+        let subject = being_signal_subject(5, 3);
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        let perceived = [(east, subject)];
+        // A perceiver with NO belief reads a zero gradient on both poles: founder-inert until a belief forms
+        // and an evolved weight lifts it (Principle 9).
+        let blank = Mind::new(StableId(20), Fixed::ONE);
+        assert_eq!(
+            being_avoidance_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no avoidance without a harm belief"
+        );
+        assert_eq!(
+            being_attraction_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction without a reward belief"
+        );
+        // A perceiver that has learned this signal HARMS it: the avoidance gradient points WEST (away from
+        // the emitter to its east, negative x), and the attraction gradient stays zero.
+        let mut fearful = Mind::new(StableId(21), Fixed::ONE);
+        let harm_calib = HarmLearningCalib::dev_default();
+        for _ in 0..5 {
+            fearful.consider(
+                subject,
+                HARM_ATTR,
+                [HARMS, BENIGN],
+                HARMS,
+                harm_calib.observation_weight(),
+                fearful.id,
+            );
+        }
+        assert_eq!(
+            fearful.belief(subject, HARM_ATTR, &params()),
+            Some(HARMS),
+            "committed the harm belief"
+        );
+        let (ax, ay) = being_avoidance_gradient(&fearful, here, &perceived, &params());
+        assert!(
+            ax < Fixed::ZERO,
+            "avoidance points away from the due-east emitter (west, negative x)"
+        );
+        assert_eq!(
+            ay,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        assert_eq!(
+            being_attraction_gradient(&fearful, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction while the belief is harm"
+        );
+        // A perceiver that has learned this signal REWARDS it: the attraction gradient points EAST (toward
+        // the emitter, positive x), the predation pole; the sign a being ACTS on is still the evolved weight.
+        let mut hungry = Mind::new(StableId(22), Fixed::ONE);
+        let reward_calib = RewardLearningCalib::dev_default();
+        for _ in 0..5 {
+            hungry.consider(
+                subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                reward_calib.observation_weight(),
+                hungry.id,
+            );
+        }
+        assert_eq!(
+            hungry.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "committed the reward belief"
+        );
+        let (bx, by) = being_attraction_gradient(&hungry, here, &perceived, &params());
+        assert!(
+            bx > Fixed::ZERO,
+            "attraction points toward the due-east emitter (positive x), the predation pole"
+        );
+        assert_eq!(
+            by,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
         );
     }
 
