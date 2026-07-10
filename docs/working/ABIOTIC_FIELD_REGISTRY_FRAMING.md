@@ -295,6 +295,45 @@ spontaneous positive control; an unset coupling fails loud), full sim suite gree
 section-9 five-lens audit was run, its findings verified against source and hardened (the precedence and
 EMF-zero-boundary tests, and the standard-state and folded-`n` honest limits surfaced at the site).
 
+## Nernst extension: blind framing found four seams in the owner's spec (verified, for the gate/owner)
+
+The owner ruled full-Nernst and gave a derive-clean spec. Before building, I framed the Nernst kernel blind
+(section-11 smoke then a six-panelist section-10 panel). All six returned significant-flaw-fixable, convergent on
+four seams the owner's spec still carries, each verified against source (Prime Directive 1: do not assume the
+owner is right):
+
+1. ACTIVITY, not concentration. The real Nernst quotient is in ACTIVITIES; forming `Q` from raw concentrations
+   silently sets the activity coefficient gamma to 1, the ideal-dilute AQUEOUS convention of Terran textbook
+   electrochemistry, an authored value outside the floor. Fix: form `Q` from activities through a floor activity
+   LAW (activity = concentration / c_standard times gamma), with gamma = 1 the EXPLICITLY-selected reserved
+   default (surfaced with basis), overridable by a world activity model keyed on the medium; a brine, molten, or
+   mana medium with gamma far from 1 becomes a data row.
+2. `n` is a per-SUBSTANCE floor fact, not a per-source knob. The electrons transferred is a fixed chemical fact
+   of the couple's substances (like the standard potential the floor already carries), not a free per-organism
+   trait; parking it on the source lets two sources sharing a couple disagree. Fix: a `chem.electron_count`
+   per-substance floor axis (same treatment as `chem.standard_potential`), `n` derived by charge and mass balance
+   over the substances; the source carries only which substances it uses.
+3. The yield drops `n` from the energy MAGNITUDE. `dG = -n*F*E`, but scaling biomass by EMF in VOLTS puts `n` in
+   the Nernst term and drops it from the scale, so two couples with equal EMF but different `n` give identical
+   biomass. Reusing the core's `emf_to_biomass` (whose own doc says it already folds `n*F`) while ALSO putting `n`
+   in the Nernst term DOUBLE-COUNTS. Fix: energy = `n * F * max(0, E_nernst)`, `n` consistent in both places, F a
+   new reserved CODATA constant (the existing `gas_constant` is the SPECIFIC `R_s` of `ideal_gas_density`,
+   laws.rs:1294, not the universal molar R, so Nernst needs a new molar R too).
+4. Metabolic efficiency should EMERGE, not be authored. Biomass = energy times an efficiency (biomass per JOULE),
+   and efficiency is a biological trait that should evolve per lineage under selection (P8), not a single
+   reserved floor global. Fix: per-source/per-lineage world data, reserving only a thermodynamic-efficiency
+   CEILING (with basis) that mutation and selection push against.
+
+The corrected yield: biomass = efficiency_per_lineage times `n * F * max(0, E° - (R*T)/(n*F) * ln(Q_activities))`,
+with `n` from `chem.electron_count` (floor, derived), R and F reserved CODATA floor constants, T the temperature
+field, the activity law and its gamma reserved-and-overridable, and efficiency an evolvable per-lineage trait.
+
+This substantially exceeds the owner's spec and grows the floor (a `chem.electron_count` axis, an activity law,
+the molar R and F constants) and makes efficiency emergent. It is squarely an owner decision. Surfaced to the
+gate with the recommendation; holding at doc-only for Nernst until the gate/owner rules. The T-access construction
+detail (store the stepped temperature in `EnvironFields` so the frozen-signature `extract_producers` can read it,
+byte-neutral) stands ready regardless of the ruling.
+
 ## Files
 
 - Edit surface: `crates/sim/src/environ.rs` (the enum, the two matches, the `EnvironFields` struct, tests).
