@@ -557,6 +557,13 @@ pub struct Walker {
     /// directly (a static derived body), so its effect on the run folds only through the dynamic state it
     /// drives (position, reserves), the same as the catalog body.
     pub structure: Option<Structure>,
+    /// The accumulated WHOLE-BODY wound damage of a CATALOG being (predation-integration slice): the coarse
+    /// branch of the unified wound law, for a being that carries no grown `Structure` (so a per-Segment
+    /// `Segment.damage` has nowhere to land). A strike adds a wound fraction here; the being's whole-body
+    /// integrity is one minus this (clamped), set into the INTEGRITY axis so the SAME one unified cull removes
+    /// it, no new death path. ZERO by default and only ever nonzero under an armed predator, so a being that is
+    /// never struck folds nothing into `state_hash` (opt-in, hash-neutral by default), exactly like `structure`.
+    pub whole_body_damage: Fixed,
     /// The homeostatic reserves: the being's needs as physical states of its body.
     pub homeostasis: Homeostasis,
     /// The consumer physiology the ingest measure reads: its per-class requirement and assimilation
@@ -707,6 +714,7 @@ impl Walker {
             y: Fixed::from_int(tile.y) + HALF,
             body,
             structure: None,
+            whole_body_damage: Fixed::ZERO,
             homeostasis,
             physiology,
             controller,
