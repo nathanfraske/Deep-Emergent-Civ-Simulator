@@ -733,6 +733,27 @@ impl AffordanceRegistry {
         reg
     }
 
+    /// A DEVELOPMENT FIXTURE for a world that carries BOTH mineral-eaters and a striking predator: move,
+    /// ingest, geophage (the unconditional consume-the-matter-underfoot of [`dev_geophage`]), and strike
+    /// (gated on the PIERCE capability of [`dev_predator`]). Composed because the two live capabilities of the
+    /// predation-integration world are disjoint in the existing fixtures: [`dev_geophage`] carries no STRIKE
+    /// and [`dev_predator`] carries no GEOPHAGE, yet the world needs the grazer/scavenger GEOPHAGE (for every
+    /// prey and for a predator sustaining on a corpse) AND STRIKE (for a PIERCE-bearing predator). The
+    /// affordance set is shared across one embodiment, so a body that reads no PIERCE still cannot strike
+    /// (the capability gate, not a role tag), and a body that never decides GEOPHAGE never eats: membership is
+    /// the affordance FLOOR, the body and the controller decide what is used (Principle 8).
+    pub fn dev_predator_geophage() -> AffordanceRegistry {
+        let mut reg = AffordanceRegistry::dev_geophage();
+        reg.affordances.push(AffordanceDef {
+            id: STRIKE,
+            name: "strike".to_string(),
+            requires: Some(FunctionLawRegistry::ID_PIERCE),
+            min_capability: Fixed::ZERO,
+            param: AffordanceParam::Directional,
+        });
+        reg
+    }
+
     /// A DEVELOPMENT FIXTURE for a tool-making world: move, ingest, extract, and craft (material-substrate
     /// arc, cascade item 4, the knapping that shapes a tool from mined stone). A toolmaker can mine stone
     /// (EXTRACT) and shape its carried stone into a wielded tool (CRAFT), the two halves of the recursive

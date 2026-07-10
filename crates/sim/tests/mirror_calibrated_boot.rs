@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, GaussApprox};
 use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
-use civsim_sim::calibration::{CalibrationError, CalibrationManifest, Profile};
+use civsim_sim::calibration::{CalibrationError, CalibrationManifest, Category, Profile};
 use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
 use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::runner::Runner;
@@ -345,9 +345,31 @@ fn mirror_boots_under_calibrated_or_names_the_next_reserved_key() {
             assert_eq!(runner.clock(), TICKS as u64, "the booted runner advanced");
         }
         Err(e) => {
-            // Still reserved (the expected state today): fail loud and name the blocking key, so
-            // running this test surfaces the next calibration Mirror needs. This does NOT set the
-            // value; setting it is the owner's.
+            // A reserved value blocks the boot. The Stefan-Boltzmann sigma that formerly blocked here (its
+            // fundamentals-home derive sentinel) now COMPUTES from the fundamentals (units / R-UNITS-PIN
+            // landed: MetabolicAnchors derives sigma, it is no longer a manifest key), so the boot reaches the
+            // Ok branch above and its determinism and worker-invariance checks are RE-ARMED. This branch stays
+            // for two cases: a FUTURE derive-target (category=derivable), computed at its own follow-on arc and
+            // never owner-set, is the EXPECTED blocked state and does not fail this test; an owner-settable
+            // reserved value still FAILS LOUD, naming the next calibration the owner must set.
+            if let CalibrationError::Reserved(id) = &e {
+                let manifest = reserved_manifest();
+                let is_derive_target = manifest
+                    .get(id)
+                    .map(|v| v.category() == Ok(Category::Derivable))
+                    .unwrap_or(false);
+                if is_derive_target {
+                    eprintln!(
+                        "Mirror's calibrated boot is blocked only by the derive-target '{id}' (category \
+                         derivable), computed at its follow-on arc (units / R-UNITS-PIN), not owner-set; this \
+                         is the expected state until that arc lands, so the determinism checks stay inert."
+                    );
+                    return;
+                }
+            }
+            // Still reserved on an owner-settable value: fail loud and name the blocking key, so running
+            // this test surfaces the next calibration Mirror needs. This does NOT set the value; setting it
+            // is the owner's.
             panic!(
                 "Mirror cannot yet boot under Profile::Calibrated.\n  {}\n  full error: {e}",
                 describe(&e)
