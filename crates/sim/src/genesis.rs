@@ -325,8 +325,9 @@ impl LivingWorld {
     /// prey-eating autotroph is still a producer here. The composition is the fixed per-unit-biomass density
     /// vector; the standing biomass VOLUME it scales is the environ's logistic productivity stock, so grazing
     /// draws the volume and the composition rides fixed (the read-back stays a single volume, not N stocks).
-    /// The consumer of this ([`crate::environ::EnvironFields::set_producer_food`]) normalises it to a nutrient
-    /// simplex. Deterministic canonical order; a cell with two producer occupants keeps the last (as
+    /// The consumer of this ([`crate::environ::EnvironFields::set_producer_food`]) carries it at its REAL per-axis
+    /// magnitudes (CORRECTED-T3), no longer a sum-to-one simplex, so an energy-dense plant feeds more than a woody
+    /// one. Deterministic canonical order; a cell with two producer occupants keeps the last (as
     /// `set_producer_food` overwrites). Mirrors [`Self::consumer_bodies`].
     pub fn producer_compositions(
         &self,
