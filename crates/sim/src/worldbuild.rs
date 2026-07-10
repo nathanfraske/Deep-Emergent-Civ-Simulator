@@ -456,13 +456,16 @@ pub fn build_dawn_runner(
         // armed this registry before, only the run_world example did.
         runner.set_abiotic_sources(living.abiotic.clone());
         // T3 (standing food as the producer's OWN composition) MECHANISM is built and proven
-        // (`environ.set_producer_food` + the regrow volume read-back + the environ falsifier), but wiring it
-        // here is OWNER-GATED: seeding `living.producer_compositions()` normalises each plant to a nutrient
-        // simplex, so a structurally-dominated plant carries little digestible energy per biomass and the
-        // grazers starve (measured: the full run collapses from ~25 to ~1) until the owner sets the food-VALUE
-        // axis-conversion reserved calibration (how much biomass a unit of standing food represents, and the
-        // per-axis assimilation), which no autonomous value may fabricate. Left unwired so the demo stays
-        // byte-identical and alive; the call to arm it is `environ.set_producer_food(&living.producer_compositions())`.
+        // (`environ.set_producer_food` carries the plant's REAL per-axis composition magnitudes, CORRECTED-T3, no
+        // longer a sum-to-one simplex; the base-liveliness INGEST supersedes the `food_energy_density` anchor per
+        // cell where a real composition stands, so food value is the plant's own `bio.energy_density`). Wiring it
+        // in the canonical path here stays OWNER-GATED, now on the biosphere-BALANCE calibration rather than a
+        // missing mechanism: the real `bio.energy_density` scale (kJ/g, [0, 38]) is far below the placeholder
+        // `food_energy_density` (3000) the reserve/Kleiber-drain was calibrated against, so a grazer starves until
+        // the owner recalibrates the reserve-drain scale to the real food scale (measured in `--scenario living`:
+        // it collapses by starvation; surfaced, never tuned, as no autonomous value may author the survival
+        // outcome). Left unwired so the canonical demo stays byte-identical and alive; the call to arm it is
+        // `environ.set_producer_food(&living.producer_compositions())`.
     }
     runner.set_environ(environ, EnvironCalib::from_manifest(manifest)?);
     // Arm the base-level liveliness surfacing policy (the arc-promotion magnitudes), fail-loud from the

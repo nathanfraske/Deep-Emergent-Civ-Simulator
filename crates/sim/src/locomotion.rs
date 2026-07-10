@@ -252,6 +252,20 @@ pub struct ResourceField {
     /// before any `set_dims`). Empty on every canonical armed run, so it costs no tree descent there; it
     /// keeps the field total for the nominally 2.5D `Coord3` and for the tests that seed sparse coords.
     overflow: BTreeMap<Coord3, Composition>,
+    /// The per-ground-cell REAL-COMPOSITION marker (CORRECTED-T3), keyed PER CLASS: the set of nutrient classes on
+    /// this cell whose standing supply is a real producer-composition magnitude (already the physical content at the
+    /// plant's own per-substance density), as opposed to the abstract climate-productivity default the forage INGEST
+    /// bridges to physical content through the reserved `food_energy_density` anchor. Set each tick by
+    /// [`crate::environ::EnvironFields::regrow_supply`] to the cell's producer-composition axes (the `producer_food`
+    /// keys), which EXCLUDES the always-written water mirror and the salinity dose, so those non-composition axes keep
+    /// the anchor bridge on a producer cell exactly as on a bare cell (the §9 correctness lens caught that a per-cell
+    /// bool over-scoped the supersession onto the water axis). INGEST reads it per class: a class in the set is eaten
+    /// at `content = supply` directly; any other class (water, or a class the composition does not carry) keeps the
+    /// anchor. NOT folded into the state hash (a per-tick derived read of the environ's producer_food, whose effect
+    /// enters through the hashed supply values it does not itself change): an all-empty marker (every cell on a run
+    /// that seeds no producer food) leaves the INGEST path byte-identical, so the four tracked scenarios hold.
+    /// Sparse-safe: an off-grid or unsized read carries no class, so it takes the anchor branch.
+    real_composition: Vec<Vec<String>>,
 }
 
 impl ResourceField {
@@ -273,6 +287,7 @@ impl ResourceField {
         self.height = height;
         let n = (width.max(0) as usize) * (height.max(0) as usize);
         self.dense = (0..n).map(|_| None).collect();
+        self.real_composition = vec![Vec::new(); n];
         let migrate: Vec<Coord3> = self
             .overflow
             .keys()
@@ -321,6 +336,29 @@ impl ResourceField {
             Some(i) => self.dense[i].get_or_insert_with(Composition::default),
             None => self.overflow.entry(coord).or_default(),
         }
+    }
+
+    /// Set a ground cell's REAL-COMPOSITION class set (CORRECTED-T3): the nutrient classes whose standing supply is
+    /// a real producer-composition magnitude on this cell, so the forage INGEST eats each of them at
+    /// `content = supply` rather than bridging through the `food_energy_density` anchor. Set each tick by
+    /// `regrow_supply` to the cell's `producer_food` axes (empty for a bare cell), which excludes the water mirror and
+    /// salinity dose, so those keep the anchor. An off-grid or unsized cell is ignored (its read carries no class).
+    pub fn set_real_composition(&mut self, coord: Coord3, classes: impl Iterator<Item = String>) {
+        if let Some(i) = self.dense_index(coord) {
+            if i < self.real_composition.len() {
+                self.real_composition[i].clear();
+                self.real_composition[i].extend(classes);
+            }
+        }
+    }
+
+    /// Whether a ground cell's standing supply of `class` is a real producer-composition magnitude (CORRECTED-T3).
+    /// `false` for an off-grid, unsized, or unmarked cell, or for a class the cell's composition does not carry (the
+    /// water mirror and any non-composition axis), so those keep the anchor bridge.
+    pub fn is_real_composition(&self, coord: Coord3, class: &str) -> bool {
+        self.dense_index(coord)
+            .and_then(|i| self.real_composition.get(i))
+            .is_some_and(|cs| cs.iter().any(|c| c == class))
     }
 
     /// A mutable handle to an EXISTING tile's composition, without creating one: the graze draw, so a
@@ -1246,12 +1284,27 @@ pub fn step_with_field_dirs<T: Terrain>(
                                     if supply <= Fixed::ZERO {
                                         continue; // the tile is no source of this axis
                                     }
-                                    // The food's PHYSICAL content on the class: the standing supply times its
-                                    // energy content per unit (R-UNITS-PIN; a real producer's own axis value
-                                    // supersedes this per cell once T3 wires the food composition).
-                                    let content = supply
-                                        .checked_mul(p.food_energy_density)
-                                        .unwrap_or(Fixed::MAX);
+                                    // The food's PHYSICAL content on the class (CORRECTED-T3), decided PER CLASS.
+                                    // Where THIS class's supply on the cell is a real producer-composition
+                                    // magnitude, its supply is ALREADY the physical content at the plant's OWN
+                                    // per-substance density (the seeding side carries the real magnitude), so eat
+                                    // it at `content = supply` directly: the real plant value SUPERSEDES the
+                                    // uniform `food_energy_density` anchor, as that anchor's own contract promised.
+                                    // Any other class (the always-written water mirror, or a class this cell's
+                                    // composition does not carry) keeps the reserved anchor bridge to physical
+                                    // content, on a producer cell exactly as on a bare cell (the per-class marker
+                                    // is what confines the supersession to the food axes; a per-cell flag would
+                                    // wrongly strip the anchor off the water axis too). Skipping the multiply for a
+                                    // composition class removes the double-scale; it lowers that axis's absolute
+                                    // food scale to the real density, an owner-gated biosphere-balance question
+                                    // surfaced, never tuned here.
+                                    let content = if resources.is_real_composition(here, class) {
+                                        supply
+                                    } else {
+                                        supply
+                                            .checked_mul(p.food_energy_density)
+                                            .unwrap_or(Fixed::MAX)
+                                    };
                                     let body_c = storage.get(class).copied().unwrap_or(Fixed::ZERO);
                                     let room = w.homeostasis.capacity(axis.id)
                                         - w.homeostasis.amount(axis.id);
@@ -1267,10 +1320,18 @@ pub fn step_with_field_dirs<T: Terrain>(
                                         continue;
                                     }
                                     // Remove the standing supply the eaten content came from (content back to
-                                    // supply units), so the tile depletes by exactly what the being took.
-                                    let eaten_supply = eaten_content
-                                        .checked_div(p.food_energy_density)
-                                        .unwrap_or(eaten_content);
+                                    // supply units), so the tile depletes by exactly what the being took. The
+                                    // inverse of the content bridge above (CORRECTED-T3), PER CLASS: a
+                                    // real-composition class's content IS its supply, so it depletes one-for-one; any
+                                    // other class divides back out the food_energy_density anchor.
+                                    let eaten_supply = if resources.is_real_composition(here, class)
+                                    {
+                                        eaten_content
+                                    } else {
+                                        eaten_content
+                                            .checked_div(p.food_energy_density)
+                                            .unwrap_or(eaten_content)
+                                    };
                                     resources.take(here, class, eaten_supply);
                                     w.homeostasis.ingest(axis.id, gain);
                                 }
