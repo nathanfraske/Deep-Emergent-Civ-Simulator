@@ -43,14 +43,14 @@ use civsim_physics::laws;
 
 /// The transfer-law kernel a contact channel delivers energy by. The kernel SET is fixed Rust code (the
 /// mechanism); which kernel a channel uses is data (the registry row). [`TransferKernel::Kinetic`] (the rigid
-/// `F d`) and [`TransferKernel::ElasticRecoil`] (the elastic strain-energy release) are the two members of the
-/// SHARED-METABOLIC-SOURCE mechanical family: a segment's delivered mechanical energy is the run-all-gate-to-zero
-/// MAX over them (both draw the one muscle-work source, so which contributes DERIVES from the segment's own
-/// continuous grown axes, never a selector; see [`resolve_delivered_energy`]). A non-mechanical channel (an
-/// electrical discharge, a chemical or thermal touch, a mana coupling) drawing a SEPARATE independent reserve is
-/// the flagged floor extension, so a new VARIANT here is a deliberate floor addition with its own law AND its own
-/// combine (additive across independent reserves, not folded into the mechanical MAX), never an authored
-/// per-channel branch.
+/// `F d`), [`TransferKernel::ElasticRecoil`] (the elastic strain-energy release), and [`TransferKernel::Hydraulic`]
+/// (the fluid-pressure `P dV`) are the three members of the SHARED-METABOLIC-SOURCE mechanical family: a segment's
+/// delivered mechanical energy is the run-all-gate-to-zero MAX over them (all draw the one metabolic work source,
+/// so which contributes DERIVES from the segment's own continuous grown axes, never a selector; see
+/// [`resolve_delivered_energy`]). A non-mechanical channel (an electrical discharge, a chemical or thermal touch, a
+/// mana coupling) drawing a SEPARATE independent reserve is the flagged floor extension, so a new VARIANT there is
+/// a deliberate floor addition with its own law AND its own combine (additive across independent reserves, not
+/// folded into the mechanical MAX), never an authored per-channel branch.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TransferKernel {
     /// The RIGID mechanical path: the delivered energy is the ACTUATOR WORK that brought the acting part to speed
@@ -68,6 +68,19 @@ pub enum TransferKernel {
     /// falls back to the rigid limit. Shares the metabolic source with [`Self::Kinetic`] (a spring's stored energy
     /// IS the muscle work that loaded it), so the two aggregate by MAX, never SUM.
     ElasticRecoil,
+    /// The HYDRAULIC mechanical path: the delivered energy is the pressure-over-volume-change work `integral P dV`
+    /// of a working-fluid actuator (a muscular hydrostat, an octopus arm, a spider's hydraulic leg, a water jet).
+    /// For an INCOMPRESSIBLE fluid at a constant driving pressure this integral COMPOSES from the existing floor
+    /// laws with NO new kernel: `P dV = P (A d) = (P A) d = F d`, the actuator work of the force `F = P A`, where
+    /// `P` is the part's `fluid.driving_pressure` (a pressure the megapascal-to-newton bridge promotes over the
+    /// piston cross-section exactly as it promotes a material strength, [`laws::stress_force`]) and `d` the stroke.
+    /// So this member is [`laws::actuator_work`] of [`laws::stress_force`] read off the FLUID driving pressure
+    /// rather than a solid strength, keyed on the part's own axes. A part with no driving pressure delivers zero and
+    /// this path self-gates. Shares the metabolic source with [`Self::Kinetic`] (the fluid charge IS the work that
+    /// pressurized it), so it aggregates by MAX, never SUM. The COMPRESSIBLE case (a gas expanding as it drives, so
+    /// `P` falls over the stroke, the true varying-`P` integral reading `fluid.bulk_modulus` and an equation of
+    /// state) does NOT reduce to `F d` and is the flagged FUTURE kernel, a genuine new floor law.
+    Hydraulic,
 }
 
 /// One contact channel's transfer binding as data: the law its energy delivers by (dispatched by this kernel
@@ -114,6 +127,17 @@ pub struct ContactTransfer {
     /// directly is the reserved-with-basis REFINEMENT for a world whose element volume diverges from its sweep,
     /// surfaced not authored, not built now.
     pub elastic_modulus_axis: String,
+    /// The physics-floor pressure axis id the acting part's HYDRAULIC DRIVING PRESSURE is read from (the working
+    /// fluid's imposed pressure, a Terran actuator names `fluid.driving_pressure`). Named as DATA so a hydrostat
+    /// alien names its own pressure axis (Principle 11). The hydraulic delivered energy `integral P dV` COMPOSES
+    /// from the existing laws with no new kernel: for an incompressible fluid at constant pressure it is the
+    /// actuator work of the force `P A`, this pressure over the piston cross-section (`cross_section_axis`, reused
+    /// as the piston area) promoted to newtons by [`civsim_physics::laws::stress_force`], over the stroke
+    /// (`stroke_axis`). A part with no driving pressure delivers no hydraulic blow and this path self-gates to
+    /// zero (the absence convention), so a non-fluid actuator reads exactly the rigid `F d`. Reusing the piston
+    /// cross-section is a PROXY (a dedicated `fluid.channel_radius`-derived piston area is the reserved-with-basis
+    /// refinement); the COMPRESSIBLE gas-expansion case is the flagged future kernel (see [`TransferKernel::Hydraulic`]).
+    pub pressure_axis: String,
 }
 
 /// The set of contact-transfer bindings a world runs, keyed by [`ContactChannelId`] in canonical (ascending)
@@ -177,6 +201,10 @@ impl ContactTransferRegistry {
             // Terran actuator grows no yield or modulus, so the elastic path reads zero and the rigid `F d` stands.
             yield_axis: "mat.yield_strength".to_string(),
             elastic_modulus_axis: "mat.elastic_modulus".to_string(),
+            // The Terran working fluid: the hydraulic path reads the driving pressure off the floor's own fluid
+            // axis (over the shared cross-section as the piston area, over the shared stroke). A Terran actuator
+            // with no working fluid grows no driving pressure, so the hydraulic path reads zero.
+            pressure_axis: "fluid.driving_pressure".to_string(),
         });
         reg
     }
@@ -198,14 +226,18 @@ pub struct ContactChannelId(pub u16);
 ///
 /// RUN-ALL-GATE-TO-ZERO (the stroke-rate step-2 substrate, gate-signed-off, owner-decisions R15): the delivered
 /// mechanical energy is resolved over the SHARED-METABOLIC-SOURCE mechanical kernel family (the rigid `F d`
-/// [`TransferKernel::Kinetic`] and the elastic recoil [`TransferKernel::ElasticRecoil`]), each member contributing
-/// the energy its own grounded floor law delivers and reading ZERO where the part carries none of that law's axes
-/// (the absence convention). So which member contributes DERIVES from the part's continuous grown physics, never a
-/// grown categorical actuation-kind selector and never an authored threshold: a rigid lever and an elastic recoil
-/// differ only in which continuous axes are nonzero (strength and stroke, or yield and modulus), an emergent
+/// [`TransferKernel::Kinetic`], the elastic recoil [`TransferKernel::ElasticRecoil`], and the hydraulic `P dV`
+/// [`TransferKernel::Hydraulic`]), each member contributing the energy its own grounded floor law delivers and
+/// reading ZERO where the part carries none of that law's axes (the absence convention). So which member
+/// contributes DERIVES from the part's continuous grown physics, never a grown categorical actuation-kind selector
+/// and never an authored threshold: a rigid lever, an elastic recoil, and a hydraulic jet differ only in which
+/// continuous axes are nonzero (strength and stroke, or yield and modulus, or driving pressure), an emergent
 /// DESCRIPTION of where a part lands in axis space, mirroring how [`civsim_compose::derive_capabilities`] already
 /// runs every capability law blind to id and zeroes the inapplicable. `energy_max` is the floor representability
-/// cap each law saturates at.
+/// cap each law saturates at. The hydraulic member adds NO new law: for an incompressible fluid at constant
+/// pressure `integral P dV = F d` COMPOSES from the existing [`laws::stress_force`] and [`laws::actuator_work`]
+/// (the driving pressure over the piston cross-section is the force), so the family grows without a new grounded
+/// law; the compressible gas-expansion case is the flagged future kernel that would need one.
 ///
 /// AGGREGATION is the MAX over the family (the gate's slice-3 ruling, confirmed): the members are alternative
 /// delivery PATHS for ONE metabolically-sourced energy (a spring's stored recoil energy IS the muscle work that
@@ -241,14 +273,16 @@ pub fn resolve_delivered_energy(
 ) -> Fixed {
     // The channel's kernel names its delivery FAMILY (its representative member); the resolve runs the whole
     // family's run-all-gate-to-zero, not the one named member, so which law contributes derives from the grown
-    // axes, never this tag. Today the two members are the one shared-metabolic-source mechanical family, so the
-    // resolve is MAX over the rigid `F d` and the elastic recoil. A future independent-reserve variant would fall
-    // outside this arm and fail to compile until its additive cross-family combine is chosen (the flagged coupling).
+    // axes, never this tag. Today the three members are the one shared-metabolic-source mechanical family, so the
+    // resolve is MAX over the rigid `F d`, the elastic recoil, and the hydraulic `P dV`. A future independent-reserve
+    // variant would fall outside this arm and fail to compile until its additive cross-family combine is chosen (the
+    // flagged coupling).
     match row.kernel {
-        TransferKernel::Kinetic | TransferKernel::ElasticRecoil => {
+        TransferKernel::Kinetic | TransferKernel::ElasticRecoil | TransferKernel::Hydraulic => {
             let rigid = kinetic_delivered_energy(geo, mat, row, energy_max);
             let elastic = elastic_recoil_delivered_energy(geo, mat, row, energy_max);
-            rigid.max(elastic)
+            let hydraulic = hydraulic_delivered_energy(geo, mat, row, energy_max);
+            rigid.max(elastic).max(hydraulic)
         }
     }
 }
@@ -308,6 +342,41 @@ fn elastic_recoil_delivered_energy(
     )
 }
 
+/// The HYDRAULIC delivered-energy law (the hydraulic member of the shared-source mechanical family): the
+/// pressure-over-volume-change work `integral P dV` of a working-fluid actuator. For an incompressible fluid at a
+/// constant driving pressure this COMPOSES from the existing floor laws with NO new kernel: `P dV = P (A d) = (P A)
+/// d = F d`, so the delivered energy is [`laws::actuator_work`] of the force `F = P A`, where the piston force is
+/// the part's `row.pressure_axis` driving pressure over its cross-section (`row.cross_section_axis`, reused as the
+/// piston area) promoted to newtons by [`laws::stress_force`] (the driving pressure is megapascal-stored, so the
+/// same megapascal-to-newton bridge the rigid strength uses applies), over the stroke (`row.stroke_axis`). This is
+/// the SAME two laws the rigid [`kinetic_delivered_energy`] uses, keyed on the FLUID driving pressure rather than a
+/// solid strength, so a hydrostat actuator is a data row, not a new law. A part with no driving pressure delivers
+/// zero (the absence convention, [`laws::stress_force`] returns zero force), so this member self-gates and the
+/// mechanical MAX falls back to the rigid `F d`. Reads only the part's own grown axes named as data on the row.
+///
+/// Reusing the piston cross-section is a PROXY for the fluid's own channel cross-section, exact where they
+/// correlate; a dedicated `fluid.channel_radius`-derived piston area is the reserved-with-basis REFINEMENT. The
+/// COMPRESSIBLE gas-expansion case (a gas expanding as it drives, so the pressure falls over the stroke, the true
+/// varying-pressure integral reading `fluid.bulk_modulus` and an equation of state) does NOT reduce to `F d` and is
+/// the flagged FUTURE kernel, a genuine new floor law, not built now.
+fn hydraulic_delivered_energy(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    row: &ContactTransfer,
+    energy_max: Fixed,
+) -> Fixed {
+    // The hydraulic piston force: the driving pressure over the piston cross-section, promoted to newtons by the
+    // same megapascal-to-newton bridge the rigid path uses (the driving pressure is megapascal-stored like a
+    // material strength). Then the actuator work over the stroke. A part with no driving pressure reads a zero
+    // force and so a zero blow (the absence convention), so a non-fluid actuator self-gates.
+    let force = laws::stress_force(
+        mat(&row.pressure_axis),
+        geo(&row.cross_section_axis),
+        energy_max,
+    );
+    laws::actuator_work(force, geo(&row.stroke_axis), energy_max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +403,7 @@ mod tests {
         assert_eq!(kinetic.stroke_axis, "mech.stroke_length");
         assert_eq!(kinetic.yield_axis, "mat.yield_strength");
         assert_eq!(kinetic.elastic_modulus_axis, "mat.elastic_modulus");
+        assert_eq!(kinetic.pressure_axis, "fluid.driving_pressure");
         assert!(reg.get(ContactChannelId(99)).is_none());
     }
 
@@ -348,6 +418,7 @@ mod tests {
             stroke_axis: "a".to_string(),
             yield_axis: "a".to_string(),
             elastic_modulus_axis: "a".to_string(),
+            pressure_axis: "a".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: ContactChannelId(1),
@@ -357,6 +428,7 @@ mod tests {
             stroke_axis: "b".to_string(),
             yield_axis: "b".to_string(),
             elastic_modulus_axis: "b".to_string(),
+            pressure_axis: "b".to_string(),
         });
         let ids: Vec<u16> = reg.iter().map(|(c, _)| c.0).collect();
         assert_eq!(ids, vec![1, 2], "canonical ascending channel id order");
@@ -373,6 +445,7 @@ mod tests {
             stroke_axis: "first".to_string(),
             yield_axis: "first".to_string(),
             elastic_modulus_axis: "first".to_string(),
+            pressure_axis: "first".to_string(),
         });
         reg.insert(ContactTransfer {
             channel: DEV_KINETIC,
@@ -382,6 +455,7 @@ mod tests {
             stroke_axis: "second".to_string(),
             yield_axis: "second".to_string(),
             elastic_modulus_axis: "second".to_string(),
+            pressure_axis: "second".to_string(),
         });
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
         assert_eq!(reg.get(DEV_KINETIC).unwrap().stroke_axis, "second");
@@ -575,6 +649,66 @@ mod tests {
     }
 
     #[test]
+    fn a_hydraulic_part_delivers_its_pressure_work_which_composes_from_the_rigid_laws() {
+        // Slice-4 core (the composition proof): the hydraulic member delivers `integral P dV` = `F d` with the force
+        // `F = driving_pressure * cross_section`, which COMPOSES from the SAME `stress_force` + `actuator_work` the
+        // rigid path uses, keyed on the FLUID driving pressure, so no new law is needed. The adversarial probe: a
+        // fluid part with NO solid strength and no springy tissue (only a driving pressure) delivers a positive blow
+        // a rigid-only revert reads zero, and it EQUALS the composed actuator work.
+        let row = ContactTransferRegistry::dev_terran()
+            .get(DEV_KINETIC)
+            .expect("kinetic row")
+            .clone();
+        let cap = Fixed::from_int(1_000_000);
+        let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
+                                                                 // A fluid part: a driving pressure on `fluid.driving_pressure`, a piston cross-section and a stroke, and
+                                                                 // NO solid strength and NO springy tissue, so only the hydraulic member fires.
+        let fluid_geo = |a: &str| match a {
+            "mech.cross_section_area" => m(1),
+            "mech.stroke_length" => Fixed::from_int(1),
+            _ => Fixed::ZERO,
+        };
+        let fluid_mat = |a: &str| match a {
+            "fluid.driving_pressure" => Fixed::from_int(200), // MPa, an imposed hydraulic driving pressure
+            _ => Fixed::ZERO,
+        };
+        let delivered = resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, cap);
+        // The composition: the hydraulic blow EQUALS the actuator work of the pressure force (driving pressure over
+        // the piston cross-section), the same two laws the rigid path uses. This is the derive-first proof, as code.
+        let pressure_force = laws::stress_force(Fixed::from_int(200), m(1), cap);
+        let composed = laws::actuator_work(pressure_force, Fixed::from_int(1), cap);
+        assert_eq!(
+            delivered, composed,
+            "the hydraulic blow is the actuator work of the driving-pressure force (P dV = F d, no new law)"
+        );
+        assert!(
+            delivered > Fixed::ZERO,
+            "a fluid part with no solid strength delivers a positive hydraulic blow (a rigid-only revert reads zero): {delivered:?}"
+        );
+        // A stronger driving pressure delivers more (linear in pressure), keyed on the part's own fluid.
+        let stronger_mat = |a: &str| match a {
+            "fluid.driving_pressure" => Fixed::from_int(400),
+            _ => Fixed::ZERO,
+        };
+        assert!(
+            resolve_delivered_energy(&fluid_geo, &stronger_mat, &row, cap) > delivered,
+            "a higher driving pressure delivers more hydraulic energy"
+        );
+        // No driving pressure: the hydraulic member self-gates, so a non-fluid actuator reads zero from it.
+        let dry_mat = |_: &str| Fixed::ZERO;
+        assert_eq!(
+            resolve_delivered_energy(&fluid_geo, &dry_mat, &row, cap),
+            Fixed::ZERO,
+            "no driving pressure, no strength, no tissue: no blow (run-all-gate-to-zero)"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(
+            delivered,
+            resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, cap)
+        );
+    }
+
+    #[test]
     fn the_impact_grade_binding_and_the_delivery_row_name_the_same_axes_in_lockstep() {
         // The grade/delivery LOCKSTEP the gate ruled (slice-3 ruling iv), PINNED by a test (a section-9
         // correctness/steering-lens catch: the two paths coincide only BY CONSTRUCTION today, the grade path
@@ -582,10 +716,10 @@ mod tests {
         // (`ContactTransfer`), with nothing in code linking them, so a reorder of either could silently desync the
         // grade from the delivery with no compile error). This test fails if the IMPACT kernel's positional axis
         // contract or the canonical delivery row's named axes drift apart, so the by-convention lockstep is no
-        // longer untested. The role map: grade `material_axes` [strength, yield, modulus] and `geometry_axes`
-        // [cross_section, stroke] must name the delivery row's `strength_axis` / `yield_axis` /
-        // `elastic_modulus_axis` / `cross_section_axis` / `stroke_axis`. The full named-vs-positional UNIFICATION
-        // (so the lockstep is mechanically enforced, not test-pinned) stays the gate-deferred follow-on.
+        // longer untested. The role map: grade `material_axes` [strength, yield, modulus, driving_pressure] and
+        // `geometry_axes` [cross_section, stroke] must name the delivery row's `strength_axis` / `yield_axis` /
+        // `elastic_modulus_axis` / `pressure_axis` / `cross_section_axis` / `stroke_axis`. The full named-vs-positional
+        // UNIFICATION (so the lockstep is mechanically enforced, not test-pinned) stays the gate-deferred follow-on.
         use civsim_compose::{CapabilityKernel, FunctionLawDef, FunctionLawRegistry};
         let grade = FunctionLawDef::new(
             FunctionLawRegistry::ID_IMPACT,
@@ -620,6 +754,11 @@ mod tests {
             grade.material_axes.get(2).map(String::as_str),
             Some(row.elastic_modulus_axis.as_str()),
             "grade modulus axis (material_axes[2]) matches the delivery row elastic_modulus_axis"
+        );
+        assert_eq!(
+            grade.material_axes.get(3).map(String::as_str),
+            Some(row.pressure_axis.as_str()),
+            "grade driving-pressure axis (material_axes[3]) matches the delivery row pressure_axis"
         );
     }
 }
