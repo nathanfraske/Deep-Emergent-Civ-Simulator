@@ -1989,6 +1989,105 @@ pub fn battery_emf(cathode: Fixed, anode: Fixed) -> Fixed {
     sat_sub(cathode, anode)
 }
 
+/// The NERNST-adjusted galvanic EMF (V): the standard cell EMF corrected for the couple's ACTUAL activities,
+/// `E = E_standard + (RT/(nF)) * (ln a_donor + ln a_acceptor)`, so a redox source's drive FALLS as its donor
+/// and acceptor deplete and crosses zero at (and would reverse below) the couple's OWN equilibrium, rather
+/// than reading spontaneity forever at the standard state (the concentration-independent defect of the bare
+/// `battery_emf`). `standard_emf` is `battery_emf(acceptor, donor)`; `thermal_voltage` is the floor `RT/F`
+/// and `electrons` the couple's electron count `n`, so `RT/(nF) = thermal_voltage / n`; the activities are
+/// the located concentrations relative to the standard state (unit activity is the standard state). At unit
+/// activities (`ln 1 = 0`) this reduces exactly to the standard EMF. A depleted species (non-positive
+/// activity) has no real log and no free energy: the drive collapses to a strongly negative EMF the caller's
+/// zero-clamp reads as no yield. Deterministic fixed-point (`Fixed::ln`, integer-only and pinned, so the
+/// redox yield replays bit-identically and is worker-invariant).
+pub fn nernst_emf(
+    standard_emf: Fixed,
+    donor_activity: Fixed,
+    acceptor_activity: Fixed,
+    thermal_voltage: Fixed,
+    electrons: Fixed,
+) -> Fixed {
+    if electrons <= ZERO || thermal_voltage <= ZERO {
+        return standard_emf; // no electron transfer or no thermal scale: no concentration adjustment
+    }
+    let rt_nf = match thermal_voltage.checked_div(electrons) {
+        Some(x) => x,
+        None => return standard_emf,
+    };
+    // A depleted species (non-positive activity) has no reactant and so no drive: collapse the EMF well
+    // below any equilibrium, so the zero-clamped yield reads no life. Basis: -ln(activity) diverges as the
+    // stock vanishes; a fixed strong-negative floor stands in for the divergence without an authored curve.
+    if donor_activity <= ZERO || acceptor_activity <= ZERO {
+        return sat_sub(ZERO, thermal_voltage);
+    }
+    // E = E_standard + (RT/nF) * (ln a_donor + ln a_acceptor).
+    let ln_sum = donor_activity.ln().saturating_add(acceptor_activity.ln());
+    let adj = rt_nf.checked_mul(ln_sum).unwrap_or_else(|| {
+        if ln_sum < ZERO {
+            sat_sub(ZERO, thermal_voltage)
+        } else {
+            thermal_voltage
+        }
+    });
+    standard_emf.saturating_add(adj)
+}
+
+/// The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
+/// saturating Hill term times the reversible thermodynamic drive,
+/// `v = Vmax * (S^h / (Km^h + S^h)) * drive`, with `drive = 1 - exp(-n E / (RT/F))` the free-energy factor of
+/// the couple's EMF `E` (`dG = -nFE`): forward (`drive` toward one) when the reaction releases free energy
+/// (`E > 0`), zero at equilibrium (`E = 0`), and negative below it, so a source powers NO life below its own
+/// (Nernst-shifted) equilibrium. The STRUCTURAL conservation clamp `min(v, S)` is applied here (a draw never
+/// exceeds the present stock, `v <= S` is not free), and the flux is floored at zero (no reverse uptake). The
+/// Hill exponent `h` is the cooperativity (`h = 1` the plain Monod `S/(Km+S)`); `Vmax` the maximum specific
+/// uptake and `Km` the half-saturation stock are per-source-class kinetics data. Deterministic fixed-point
+/// (`Fixed::powf`/`exp`, integer-only and pinned).
+pub fn reversible_uptake_flux(
+    stock: Fixed,
+    vmax: Fixed,
+    km: Fixed,
+    hill: Fixed,
+    emf: Fixed,
+    thermal_voltage: Fixed,
+    electrons: Fixed,
+) -> Fixed {
+    if stock <= ZERO || vmax <= ZERO {
+        return ZERO;
+    }
+    // The Hill-saturating substrate term S^h / (Km^h + S^h), in [0, 1). A zero stock is zero (no draw).
+    let sh = stock.powf(hill);
+    let kmh = km.powf(hill);
+    let denom = kmh.saturating_add(sh);
+    let saturation = if denom > ZERO {
+        sh.checked_div(denom).unwrap_or(ZERO)
+    } else {
+        ZERO
+    };
+    // The reversible thermodynamic drive 1 - exp(-n E / (RT/F)): one far forward, zero at equilibrium,
+    // negative below it (floored to zero by the clamp: no life below the couple's own equilibrium).
+    let drive = if thermal_voltage > ZERO && electrons > ZERO {
+        let scaled = electrons
+            .checked_mul(emf)
+            .and_then(|ne| ne.checked_div(thermal_voltage));
+        match scaled {
+            Some(s) => ONE - (ZERO - s).exp(),
+            // An overflowing exponent means an enormous forward drive: saturate to one.
+            None => ONE,
+        }
+    } else if emf > ZERO {
+        ONE // no thermal scale given: forward at full when the standard drive is spontaneous
+    } else {
+        ZERO
+    };
+    let raw = vmax
+        .checked_mul(saturation)
+        .unwrap_or(vmax)
+        .checked_mul(drive)
+        .unwrap_or(ZERO);
+    // min(v, S) conservation clamp plus the no-reverse-uptake floor.
+    raw.clamp(ZERO, stock)
+}
+
 /// Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
 /// a vanishing cross-section is an open (the cap).
 pub fn resistance(resistivity: Fixed, length: Fixed, area: Fixed, r_max: Fixed) -> Fixed {
@@ -3458,5 +3557,112 @@ mod tests {
         let b = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
         let c = harmony_tilt(Fixed::from_ratio(6, 10), temp, cap);
         assert!(a < b && b < c, "a larger avoided cost earns a larger tilt");
+    }
+
+    // --- Nernst EMF and reversible uptake flux (redox depth extension) ---
+
+    #[test]
+    fn nernst_emf_reduces_to_standard_at_unit_activity_and_falls_as_the_couple_depletes() {
+        // The Nernst EMF corrects the standard cell EMF for the couple's actual activities. At unit activity
+        // (the standard state, ln 1 = 0) it is exactly the standard EMF; as the donor and acceptor deplete
+        // below the standard state their logs go negative, so the drive falls and eventually crosses zero
+        // (no life below the couple's own equilibrium), rather than the concentration-independent standard EMF.
+        let e_std = Fixed::from_ratio(8, 10); // +0.8 V standard cell EMF
+        let v_th = Fixed::from_ratio(257, 10_000); // RT/F ~ 0.0257 V at 298 K
+        let n = Fixed::ONE;
+        // Unit activities: exactly the standard EMF.
+        let at_standard = nernst_emf(e_std, Fixed::ONE, Fixed::ONE, v_th, n);
+        assert_eq!(
+            at_standard, e_std,
+            "at unit activity the Nernst EMF is the standard EMF, got {at_standard:?}"
+        );
+        // Depleted below standard: the EMF falls (the drive weakens as the stock is consumed).
+        let depleted = nernst_emf(
+            e_std,
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(1, 100),
+            v_th,
+            n,
+        );
+        assert!(
+            depleted < at_standard,
+            "a depleted couple drives less than the standard state (depleted {depleted:?}, standard {at_standard:?})"
+        );
+        // Richer than standard (activity above one): the EMF rises above the standard EMF.
+        let rich = nernst_emf(e_std, Fixed::from_int(10), Fixed::from_int(10), v_th, n);
+        assert!(
+            rich > at_standard,
+            "a couple richer than standard drives more (rich {rich:?}, standard {at_standard:?})"
+        );
+        // A fully depleted species (zero activity) collapses the drive below zero: no reactant, no life.
+        let empty = nernst_emf(e_std, Fixed::ZERO, Fixed::ONE, v_th, n);
+        assert!(
+            empty < Fixed::ZERO,
+            "an empty donor collapses the drive below equilibrium, got {empty:?}"
+        );
+    }
+
+    #[test]
+    fn reversible_uptake_flux_saturates_in_stock_drives_with_emf_and_conserves() {
+        // The reversible Michaelis-Menten flux saturates in the substrate (Hill/Monod), scales with the
+        // thermodynamic drive of the EMF, is floored at zero below equilibrium, and never exceeds the present
+        // stock (the structural min(v, S) conservation clamp).
+        let v_th = Fixed::from_ratio(257, 10_000);
+        let n = Fixed::ONE;
+        let vmax = Fixed::from_int(2);
+        let km = Fixed::ONE;
+        let h = Fixed::ONE; // plain Monod S/(Km+S)
+        let e_fwd = Fixed::from_ratio(8, 10); // strongly spontaneous
+
+        // Monotone rising in the stock (more substrate, more flux), up to Vmax*drive.
+        let low = reversible_uptake_flux(Fixed::from_ratio(1, 2), vmax, km, h, e_fwd, v_th, n);
+        let high = reversible_uptake_flux(Fixed::from_int(100), vmax, km, h, e_fwd, v_th, n);
+        assert!(
+            high > low && low > Fixed::ZERO,
+            "the flux rises and saturates with the stock (low {low:?}, high {high:?})"
+        );
+        // Drive: a stronger EMF pulls a larger flux at the same stock; a zero EMF (at equilibrium) pulls none.
+        let weak = reversible_uptake_flux(
+            Fixed::from_int(100),
+            vmax,
+            km,
+            h,
+            Fixed::from_ratio(1, 100),
+            v_th,
+            n,
+        );
+        assert!(
+            high > weak,
+            "a stronger EMF drives a larger flux (strong {high:?}, weak {weak:?})"
+        );
+        let at_equil =
+            reversible_uptake_flux(Fixed::from_int(100), vmax, km, h, Fixed::ZERO, v_th, n);
+        assert_eq!(
+            at_equil,
+            Fixed::ZERO,
+            "at equilibrium (zero EMF) the flux is zero, got {at_equil:?}"
+        );
+        // Below equilibrium (negative EMF): no reverse uptake, floored at zero.
+        let below = reversible_uptake_flux(
+            Fixed::from_int(100),
+            vmax,
+            km,
+            h,
+            Fixed::from_ratio(-5, 10),
+            v_th,
+            n,
+        );
+        assert_eq!(
+            below,
+            Fixed::ZERO,
+            "below its equilibrium the source powers no life, got {below:?}"
+        );
+        // Conservation: with a small stock the draw is capped at the stock (min(v, S)), never more.
+        let tiny_stock = Fixed::from_ratio(1, 100);
+        let capped = reversible_uptake_flux(tiny_stock, vmax, km, h, e_fwd, v_th, n);
+        assert!(
+            capped <= tiny_stock,
+            "the flux never exceeds the present stock (flux {capped:?}, stock {tiny_stock:?})"
+        );
     }
 }
