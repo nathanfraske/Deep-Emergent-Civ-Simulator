@@ -159,6 +159,17 @@ impl SubstanceMix {
             .unwrap_or(Fixed::ZERO)
     }
 
+    /// The intensive volume-weighted mean of ANY named floor axis over the cell's mixture, for a reader
+    /// outside this module. Modality-agnostic: it reads whatever axis the caller names, on any substance.
+    /// Its first caller is the reach substrate ([`crate::perception_reach`]), which samples a cell's bulk
+    /// absorption on a channel's own absorption axis along a signal's path (a strongly-absorbing cell
+    /// occludes, an empty cell is transparent), but nothing here is specific to that axis or that use. An
+    /// empty cell reads zero (the absence convention). Delegates to the internal bulk mean, so the
+    /// derivation stays in one place.
+    pub fn bulk_axis(&self, reg: &PhysicsRegistry, axis: &str) -> Fixed {
+        self.bulk(reg, axis)
+    }
+
     /// The total mass of matter in the cell: the sum over substances of volume times the substance's
     /// [`AXIS_DENSITY`], read from the registry. This is the load an extraction yields and a carry
     /// weighs (through `laws::weight`). Derived, never stored (Principle 11).

@@ -397,6 +397,34 @@ pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixe
         .unwrap_or(Fixed::ZERO)
 }
 
+/// The perceptible optical SIGNAL power a being emits from its own body heat (the being-percept keystone,
+/// step 6, the emitter side): its blackbody radiant flux off its body temperature
+/// ([`civsim_physics::laws::radiant_emission`], the same Stefan-Boltzmann law the thermoregulation term
+/// reads) scaled by a reserved per-being emission `coefficient`. Derived from the being's OWN body
+/// temperature, never an authored per-species signature: a warmer body emits a stronger thermal signature
+/// its perceivers sense, a body at absolute zero emits nothing, and a cold or photosynthetic alien differs
+/// by its own temperature, not by kingdom (Principle 9, admit-the-alien). `t_cold` is zero because the
+/// SIGNAL is the being's ABSOLUTE radiance (what a perceiver's sensorium transduces), unlike the net thermal
+/// balance against ambient the resting heat-loss path ([`base_drain_from`]) computes.
+///
+/// The `coefficient` is RESERVED (the being-percept feature's own calibration, surfaced with basis, never
+/// fabricated): its basis is the body's covering emissivity times its radiating area, folded into one lever
+/// until a per-body material-and-area vector exists on the run path to split it into emissivity times area
+/// (the gate-ruled follow-on). It enters as the emissivity-times-area term of `radiant_emission`, so the
+/// [`FLUX_MAX`] representability cap applies to the final emission, matching the ruled
+/// `radiant_emission(body_temp) * coefficient` (emissivity is that law's linear scale, so folding the
+/// coefficient into it is that product with the cap correctly on the result). Pure and RNG-free.
+pub fn being_signal_emission(body_temp: Fixed, coefficient: Fixed, sigma: Fixed) -> Fixed {
+    laws::radiant_emission(
+        coefficient,
+        Fixed::ONE,
+        body_temp,
+        Fixed::ZERO,
+        sigma,
+        FLUX_MAX,
+    )
+}
+
 /// The derived resting drain FRACTION of the energy reserve per tick, composing the physics laws: the
 /// Kleiber basal rate over the body mass plus the thermoregulatory heat loss over the whole-body surface
 /// (the body held at its resting set point against the ambient medium), bridged to a fraction of the
@@ -674,6 +702,52 @@ mod tests {
     use super::*;
     use crate::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
     use crate::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
+
+    #[test]
+    fn being_signal_emission_derives_from_body_temperature_not_a_species_label() {
+        // The emitter side of the being-percept keystone: a being's perceptible signal is its own thermal
+        // self-emission (Stefan-Boltzmann off its body temperature) times a reserved coupling coefficient,
+        // so it keys on the being's OWN temperature, never a per-species signature.
+        let sigma = MetabolicAnchors::dev_fixture().sigma;
+        let coeff = Fixed::from_ratio(1, 2);
+
+        // A body at absolute zero emits nothing: no thermal signal to perceive (a cold ambusher, a corpse
+        // that has cooled to ambient-zero). The signal is the being's own radiance, so zero temperature is
+        // zero emission.
+        assert_eq!(
+            being_signal_emission(Fixed::ZERO, coeff, sigma),
+            Fixed::ZERO,
+            "a body at absolute zero emits no thermal signal"
+        );
+
+        // A warmer body emits a stronger signal than a cooler one (the T^4 dependence): a warm predator is
+        // more perceptible than a cool one, and this divergence is temperature alone, no label.
+        let cool = being_signal_emission(Fixed::from_int(280), coeff, sigma);
+        let warm = being_signal_emission(Fixed::from_int(310), coeff, sigma);
+        assert!(
+            warm > cool && cool > Fixed::ZERO,
+            "a warmer body emits a stronger thermal signal (T^4 dependence)"
+        );
+
+        // The reserved coefficient is the emission lever: a larger coupling yields a stronger signal at the
+        // same temperature (monotone in the coefficient), so the reserved value means what its basis says.
+        // Monotone rather than exact-double because a half-scale fixed-point multiply truncates by up to one
+        // ULP; the lever's DIRECTION is the load-bearing property, not bit-exact linearity.
+        let quarter = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 4), sigma);
+        let half = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 2), sigma);
+        assert!(
+            half > quarter && quarter > Fixed::ZERO,
+            "a larger reserved coefficient yields a stronger emission (the coupling lever)"
+        );
+
+        // Deterministic: identical inputs give the identical bit-exact emission (Principle 3), the run path's
+        // requirement for a reproducible perceive phase.
+        assert_eq!(
+            being_signal_emission(Fixed::from_int(305), coeff, sigma),
+            being_signal_emission(Fixed::from_int(305), coeff, sigma),
+            "the emission is a pure deterministic read of temperature and the coefficient"
+        );
+    }
 
     #[test]
     fn felt_salience_folds_reserve_deltas_alien_clean_with_no_axis_or_pole() {

@@ -29,7 +29,7 @@ use civsim_sim::homeostasis::{
 use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::scenario::Scenario;
+use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
@@ -2043,6 +2043,86 @@ fn a_fully_grown_bodys_derived_physiology_is_read_from_its_grown_tissue() {
         survivors(true),
         0,
         "the same race whose genome grows an exchange surface pays the thermoregulatory drain the run reads off that grown tissue, and does not outlast the run"
+    );
+}
+
+#[test]
+fn arming_being_percept_wires_the_being_block_changes_the_run_and_replays() {
+    // The being-percept keystone, step 6 (the live wire): a scenario that declares `being_percept` arms the
+    // being-directed perception on the embodiment fail-loud from the manifest, so a being perceives other
+    // beings and can steer toward or away from them through its founder-zero freely-signed weight. This proves
+    // three things: the feature ARMS the controller being block (the layout carries it, off does not), it is
+    // NOT a no-op (an armed run's state diverges from an unarmed one), and it REPLAYS bit-for-bit (determinism,
+    // Principle 3). The 12-member co-located band means the founders emit and perceive each other's thermal
+    // signal, so the perceive and learn wire is exercised end to end, not merely present.
+    let manifest = manifest();
+    let map = a_map(0xB0);
+
+    let on = Scenario::from_toml_str(
+        "[scenario]\nid = \"w\"\nname = \"W\"\n[features]\nbeing_percept = true\n",
+    )
+    .unwrap()
+    .resolve(&manifest)
+    .unwrap();
+    let off = a_scenario(None).resolve(&manifest).unwrap();
+
+    let build = |res: &ScenarioResolution| {
+        build_dawn_runner(
+            &manifest,
+            &channels(),
+            Profile::Development,
+            res,
+            &map,
+            &embodied_peoples(),
+            0x2E,
+        )
+        .expect("the embodied dawn assembles")
+    };
+
+    // The feature ARMS the controller being block when declared, and leaves it absent when not (the opt-in
+    // that keeps a feature-off world byte-identical to the pre-keystone build).
+    let runner_on = build(&on);
+    let runner_off = build(&off);
+    assert!(
+        runner_on
+            .embodiment_layout()
+            .expect("the armed embodiment carries a layout")
+            .n_being()
+            > 0,
+        "declaring being_percept arms the controller being block"
+    );
+    assert_eq!(
+        runner_off
+            .embodiment_layout()
+            .expect("the embodiment carries a layout")
+            .n_being(),
+        0,
+        "a world that does not declare being_percept carries no being block"
+    );
+
+    // The armed run is NOT a no-op: its state after a run of ticks diverges from the unarmed run (the being
+    // block widens the controller and the perceive/learn wire fires on the co-located band).
+    let hash_after = |res: &ScenarioResolution, ticks: usize| -> u128 {
+        let mut r = build(res);
+        for _ in 0..ticks {
+            r.step();
+        }
+        r.state_hash()
+    };
+    const TICKS: usize = 30;
+    let armed = hash_after(&on, TICKS);
+    let unarmed = hash_after(&off, TICKS);
+    assert_ne!(
+        armed, unarmed,
+        "arming being-percept changes the run (the wire is live, not inert)"
+    );
+
+    // Determinism: the armed run replays bit-for-bit from one seed (the perceive and learn wire draws no RNG
+    // and folds deterministically).
+    assert_eq!(
+        hash_after(&on, TICKS),
+        armed,
+        "the armed being-percept run replays bit-for-bit from one seed"
     );
 }
 

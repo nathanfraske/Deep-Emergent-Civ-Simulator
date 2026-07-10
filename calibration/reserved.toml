@@ -2310,6 +2310,22 @@ value = ""
 unit = "ratio_per_tick"
 source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
 
+[[reserved]]
+id = "harm.eligibility_decay"
+basis = "the temporal-difference lambda the being-signal HARM eligibility trace decays by each tick (learn::EligibilityTrace::decay on the being-percept harm path), so a being-signal perceived some ticks before a harm still credits the signal that preceded it (the predator-approach-then-harm cue). Set at the interoceptive lag between perceiving a being-signal and the harm that follows, bounded by the retention window the belief substrate forgets on; the harm sibling of reward.eligibility_decay, set relative to it. In (0, 1): nearer one credits a longer-lagged cue, nearer zero only the immediately-preceding one. It enters through the existing observation weight, so it fabricates no new engine constant"
+status = "reserved"
+value = ""
+unit = "ratio_per_tick"
+source = "being-percept keystone step 6; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "being_percept.emission_coefficient"
+basis = "the per-being emission coupling coefficient the emitter's thermal self-emission is scaled by (physiology::being_signal_emission = radiant_emission(body_temp) times this coefficient), the fraction of a being's blackbody radiant power that couples into the perceptible signal channel. Basis: the body's covering emissivity times its radiating area, folded into one lever until a per-body material-and-area vector exists on the run path to split it into emissivity (a chem/optics-floor material property) times area (from the BodyPlan). Dimensionless, at least zero (a body that couples nothing emits no perceptible signal); it enters as the emissivity-times-area term of radiant_emission, so the FLUX_MAX representability cap bounds the emission"
+status = "reserved"
+value = ""
+unit = "dimensionless"
+source = "being-percept keystone step 6; crates/sim/src/physiology.rs; crates/sim/src/learn.rs"
+
 # --- ideation / experiential-discovery arc, piece 2 (action-as-hypothesis): the affordance-percept
 # derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
 # when the affordance-percept block is wired onto the run path. Each is a physics reference scale, not a

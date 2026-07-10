@@ -186,8 +186,20 @@ pub struct ControllerLayout {
     /// weight off zero: whether and how a conviction sways action EMERGES rather than being authored (Principle
     /// 8). Keys on the axis id, never a named institution or religion (the Steering Audit bites here).
     n_conviction: usize,
+    /// The width of the BEING-DIRECTED input block (the being-percept keystone, step 6): FOUR when the world
+    /// opts into the being-percept (the being-avoidance direction `(dx, dy)` and the being-attraction
+    /// direction `(dx, dy)` over the perceived emitters), else zero. The avoidance pair points away from the
+    /// bulk of believed-harmful perceived emitters, the attraction pair toward the believed-rewarding ones
+    /// ([`crate::learn::being_avoidance_gradient`] / [`crate::learn::being_attraction_gradient`]). Zero yields
+    /// an input vector, weight count, and genome expression identical to a world without it, so it is OPT-IN
+    /// and hash-neutral by default, the same discipline as the earlier blocks. The block sits AFTER the
+    /// conviction block and before the bias, so every earlier base and the bias-as-last convention hold
+    /// unchanged. A founder expresses zero for the being weights, and the controller weight is FREELY SIGNED,
+    /// so whether a being approaches or avoids a perceived emitter emerges from selection (Principle 9): a
+    /// negative weight inverts the direction, so approach-to-a-harm (a parasite, a scavenger) is reachable.
+    n_being: usize,
     /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction +
-    /// n_conviction + 1` for the bias).
+    /// n_conviction + n_being + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -227,6 +239,35 @@ impl ControllerLayout {
         hidden: usize,
     ) -> ControllerLayout {
         ControllerLayout::with_percepts_and_appetitive(homeo, afford, percept, false, hidden)
+    }
+
+    /// As [`with_percepts`], plus the being-directed input block when `being` is true (the being-percept
+    /// keystone, step 6): the percept layout with no appetitive, material, attraction, or conviction block
+    /// but with the being block. A harness that seeds a genome against a layout (a flat `o * n_in + i`
+    /// weight index, [`taxis_move_weights`]) must build that layout at the SAME width the run embodiment
+    /// expresses against, or the seeded weights land in the wrong slots. An embodiment that arms only the
+    /// being block ([`crate::runner::Embodiment::set_being_percept`], with no appetitive, material,
+    /// attraction, or conviction block) rebuilds its layout through the full builder with exactly those
+    /// flags, so this convenience builds the matching layout for the seeding side. Delegates to the full
+    /// builder; a `being = false` call is identical to [`with_percepts`].
+    pub fn with_percepts_and_being(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        being: bool,
+        hidden: usize,
+    ) -> ControllerLayout {
+        ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
+            homeo,
+            afford,
+            percept,
+            false,
+            &MaterialPerceptRegistry::empty(),
+            false,
+            &ConvictionPerceptRegistry::empty(),
+            being,
+            hidden,
+        )
     }
 
     /// Build a layout that also feeds an APPETITIVE belief block, one channel per affordance in canonical
@@ -313,6 +354,7 @@ impl ControllerLayout {
             material,
             attraction,
             &ConvictionPerceptRegistry::empty(),
+            false,
             hidden,
         )
     }
@@ -340,6 +382,7 @@ impl ControllerLayout {
         material: &MaterialPerceptRegistry,
         attraction: bool,
         conviction: &ConvictionPerceptRegistry,
+        being: bool,
         hidden: usize,
     ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
@@ -350,6 +393,9 @@ impl ControllerLayout {
         let n_attraction = if attraction { 2 } else { 0 };
         // One conviction channel per exposed conviction axis, or none when the world exposes no conviction.
         let n_conviction = conviction.len();
+        // The being-directed block is four components (the being-avoidance direction dx, dy and the
+        // being-attraction direction dx, dy), or none when the world does not enable the being-percept.
+        let n_being = if being { 4 } else { 0 };
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         // One appetitive channel per affordance (aligned to the output slots below), or none when the
@@ -361,6 +407,7 @@ impl ControllerLayout {
             + n_material
             + n_attraction
             + n_conviction
+            + n_being
             + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
@@ -381,6 +428,7 @@ impl ControllerLayout {
             n_material,
             n_attraction,
             n_conviction,
+            n_being,
             n_in,
             n_out,
             hidden,
@@ -485,6 +533,25 @@ impl ControllerLayout {
             + self.n_appetitive
             + self.n_material
             + self.n_attraction
+    }
+
+    /// The width of the being-directed input block (four when the world enables the being-percept, else zero;
+    /// the being-percept keystone, step 6).
+    pub fn n_being(&self) -> usize {
+        self.n_being
+    }
+
+    /// The input-vector index where the being-directed block begins: after the per-axis blocks and the
+    /// feature, appetitive, material, attraction, and conviction blocks, before the bias. A caller writing the
+    /// being directions reads this so it never hardcodes the block's position, which the earlier block widths
+    /// set.
+    pub fn being_input_base(&self) -> usize {
+        INPUTS_PER_AXIS * self.axes.len()
+            + self.n_features
+            + self.n_appetitive
+            + self.n_material
+            + self.n_attraction
+            + self.n_conviction
     }
 
     /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
@@ -639,6 +706,7 @@ impl ControllerLayout {
             material,
             attraction,
             &[],
+            &[],
         )
     }
 
@@ -663,6 +731,7 @@ impl ControllerLayout {
         material: &[Fixed],
         attraction: &[Fixed],
         conviction: &[Fixed],
+        being: &[Fixed],
     ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
@@ -697,6 +766,10 @@ impl ControllerLayout {
         let cbase = self.conviction_input_base();
         for (k, &c) in conviction.iter().enumerate().take(self.n_conviction) {
             v[cbase + k] = c;
+        }
+        let bbase = self.being_input_base();
+        for (k, &b) in being.iter().enumerate().take(self.n_being) {
+            v[bbase + k] = b;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
@@ -1149,6 +1222,7 @@ mod tests {
             &material,
             false,
             &ConvictionPerceptRegistry::empty(),
+            false,
             0,
         );
         assert_eq!(off, plain, "the conviction-empty layout is byte-identical");
@@ -1165,6 +1239,7 @@ mod tests {
             &material,
             false,
             &convictions,
+            false,
             0,
         );
         assert_eq!(on.n_conviction(), 2);
@@ -1188,6 +1263,7 @@ mod tests {
             &[],
             &[],
             &stances,
+            &[],
         );
         let cbase = on.conviction_input_base();
         assert_eq!(
@@ -1219,6 +1295,7 @@ mod tests {
             &[],
             &[],
             &[Fixed::ZERO; 2],
+            &[],
         );
         let (lit_out, _) = founder.evaluate(&input, &[]);
         let (dark_out, _) = founder.evaluate(&dark, &[]);

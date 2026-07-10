@@ -8,6 +8,271 @@ entry using a derived or dev-set value.
 
 ## Open
 
+R7. **The world is 3D (`Coord3`), not 2D; perception must key on it. OWNER DIRECTIVE + CORRECTION 2026-07-09.**
+While framing the reach wire (Arc 3 slice 1), I stated the world was a 2D grid and proposed a 2D `1/r` falloff.
+The owner corrected it: the world should be 2.5D minimum (space above) with subsurface (things in the ground).
+Verified in source: the world coordinate is `Coord3 { x, y, z }` (`locomotion.rs:698`), z vertical, the material
+field carrying subsurface strata at negative z (`material.rs`, hematite at z:-2); a being carries a `Coord3`.
+The 2D I saw is only the perception/place projection: the perception path keys on an opaque flat `PlaceId`
+(`world.rs:83`), and the environmental fields are a 2D surface grid. Consequence: `inverse_square_falloff`'s
+`P/(4*pi*r^2)` is the correct 3D law over the 3D `Coord3` separation, so the reach wire keys distance on `Coord3`
+directly and bypasses `PlaceId`. Owner ruling: build the perception-substrate framework out first with the reach
+wire scoped on `Coord3` directly (the small change), and SCOPE the 3D perception-place lift (raise the whole
+perception place model from `PlaceId` to `Coord3`) now and do it NEXT after the framework. Captured in
+`PERCEPTION_SUBSTRATE_ARC_PLAN.md` (slice 1 and the sequence section).
+
+RESOLVED slice-1 (reach wire) framing, 2026-07-09 (blind section-11 then section-10 panel, 6/6
+significant-flaw-fixable, unanimous; gate accepted fork (a)). The reach wire is: for a signal on channel c
+from a source `Coord3` to a perceiver `Coord3`, a received physical scalar computed as a general
+dimensionality-parameterized geometric-spreading kernel (D derives from the traversed path/medium geometry,
+3D bulk to `1/d^2`, a 2D surface to `1/d`, a duct to no spreading; D reserved fail-loud with its geometry
+basis where it cannot yet derive, never fabricated) applied to the emitted power and the 3D separation, then
+attenuated by the medium's own `opt.absorption_coefficient` sampled along the `Coord3` segment (so occlusion
+emerges from the strata, no authored line-of-sight). Channel c is a data-registry row naming its kernel and
+axis ids (dispatch by named id, never a code branch on channel identity). The received value is a pure
+per-perceiver read (P10). Five build conditions from the gate: D derives or is reserved fail-loud; the general
+kernel is byte-identical to `inverse_square_falloff` at D=3; absorption reads the medium axis, never a label;
+the registry dispatches by id; the non-geometric propagation-law-as-data stays flagged as the deeper
+substrate. The general geometric-spreading kernel at any integer dimensionality is legitimate floor authoring
+(physics is an authored floor input, Principle 9), subsuming inverse-square. Section-11 caveat: an earlier
+frequency clause over-committed (stated body-resonance as settled); the body-resonance-reserved ruling for the
+acoustic frequency stands, judged alien-safe on the clean axis.
+
+BUILT + AUDITED slice-1 (reach wire), 2026-07-09 (Agent A, PR #109 `claude/liveliness-arc`). The reach wire
+is built in four byte-neutral off-path segments: the general `geometric_spread` kernel (`physics/laws.rs`,
+byte-identical to `inverse_square_falloff` at D=3, proven by test), the channel reach registry
+(`perception_reach.rs`, dispatch by the row's named kernel id, never channel identity), the reach read
+(`received_reach`: 3D `Coord3` separation with the vertical z, structural dimensionality, medium-sampled
+optical depth), and the run-path resolver (`resolve_reach`/`absorption_along`: reads the row, samples the
+medium's own absorption along the `Coord3` line, dispatches by kernel id). All four run_world pins hold
+bit-exact (default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82), corroborated by a caller
+sweep (zero run-path callers). The mandatory section-9 five-lens audit ran (6 blind panelists across 3 types
+and 3 models, adversarial per-finding verify): 13 findings, all verified against source and hardened. The one
+MAJOR: `resolve_reach` silently ignored the row's `frequency_dependent` field, so the acoustic dev row would
+resolve to a frequency-independent read of the OPTICAL absorption axis. Hardened to implement the framing's
+already-approved "reserved fail-loud": `resolve_reach` now asserts a row is not `frequency_dependent` (the
+emitter body-resonance frequency source and the acoustic-law application are a reserved follow-on, not wired
+in slice 1), so a frequency-dependent row fails loudly rather than reading the medium axis as if it were
+frequency-independent; no shipped row sets the flag; a `#[should_panic]` test proves the fail-loud. The nits
+hardened: `MAX_REPRESENTABLE_SEP2` derived from the `i32` cast bound rather than a magic `1<<30` (and the
+comment corrected: the guard is a representability clamp, and the D=3 kernel already overflows its own
+denominator to zero far below it, so it clips no result); the optical-depth accumulator uses `saturating_add`
+before the cap (an unchecked `Fixed +` could overflow a large `tau_max`); the medium-aggregation is flagged
+as the volume-mean-only limit with the aggregation-kernel-as-data follow-on named; the fluid-medium limit
+reworded medium-agnostic (a fluid-dweller's dominant occluder); the endpoint sampling convention documented
+and pinned by test; two doc precisions (byte-neutrality is from the absent caller, not the D=3 identity; the
+`bulk_axis` doc de-Terran-ised). Reserved for calibration, surfaced not fabricated: the acoustic absorption
+axis the floor does not yet carry (the dev acoustic row reuses the optical axis as a labelled stand-in, a
+flagged floor gap); the confinement substrate that would set D below 3 (the geometric kernel already handles
+D=2/D=1); the frequency-dependent absorption path and its body-resonance frequency source.
+
+FRAMED slice-2 (sensorium-gated magnitude percept), 2026-07-09 (Agent A, PENDING gate ruling). Blind
+section-11 smoke test caught my first construction BIASED (a "carries no valence, category, label, or
+meaning" clause pre-answered the panel, when the just-noticeable-difference quantization the clause called
+category-free is the operation that mints the downstream belief-category grid, verified at
+`percept.rs::feature_bucket`; and I had scoped out the transduction-derivation risk the arc plan names as the
+slice's real risk). Rebuilt, section-11 re-run cleared it MINOR_ISSUES, the three named fixes applied. The
+section-10 blind panel (6 seats, 5 valid, Fable errored on safeguards) returned 5/5 significant-flaw-fixable,
+UNANIMOUS on the class: the framing authored the transduction and quantization SHAPE (linear scale, uniform
+absolute quantization step, no detection threshold) into fixed mechanism code, when the value-authoring line
+(Principle 6/11) and admit-the-alien require it to be per-being DATA, so a logarithmic, power-law, thresholded,
+or Weber-scaled sense is a data row rather than a code rewrite. Verified against source: the existing perceive
+beat scales salience by acuity linearly (`world.rs`), `feature_bucket` quantizes at an absolute step
+(`percept.rs`), and the floor carries no parameterizable transduction primitive, so the concern is grounded.
+The corrected framing (my synthesis, for the gate to rule): a being forms a percept on channel c when the
+received magnitude m, mapped through a general monotone transduction PRIMITIVE parameterized by the being's
+OWN response parameters (a gain, and where its body carries them a compression parameter and a detection
+threshold), clears the being's own threshold; the percept is then quantized by the being's OWN discrimination
+law (absolute or magnitude-relative) into the bucket that keys belief-minting. Linear gain, no threshold, and
+a uniform absolute step are degenerate DEFAULTS of the family, never the fixed form. Perceptibility is one
+being-derived quantity (the read/not-read gate and the sensitivity collapse into the threshold, absence
+meaning zero sensitivity, the pre-sensorium default-open convention a distinct explicit case, folding
+panelist plan-sonnet's two-gates catch). The transduction parameters and discrimination law DERIVE from the
+being's genome and anatomy via the same expression machinery that produces `mind.acuity`; until that
+derivation and the floor transduction primitive are built, they are authored per-being data flagged reserved.
+Build dependencies surfaced: a new floor transduction primitive (a parameterized monotone response law); the
+percept-class-to-channel binding; the anatomy-to-sense transduction generalized beyond optical. Posted to the
+gate for its ruling before any code.
+
+BUILT + AUDITED slice-2 (sensorium-gated magnitude percept), 2026-07-09 (Agent A, gate ACCEPTED the framing
+under 5 conditions and signed off to build). Built in four byte-neutral off-path segments: the transduction
+and discrimination floor family (`physics/laws.rs`: `ResponseLaw {Linear, Power, LogCompressive}` +
+`transduce`, `DiscriminationLaw {AbsoluteStep, WeberRelative}` + `discriminate`, the Linear/AbsoluteStep
+defaults byte-identical to `m*gain`/`feature_bucket`, condition 1); the percept module (`perception_percept.rs`:
+`sense` = transduce then threshold then discriminate, `perceive` folding the read/not-read gate into the one
+being-derived threshold, condition 3); the derivation (the optical gain derives from the eye's REFRACT
+focusing capability, non-optical reserved fail-loud, no placeholder borrow, condition 2); the
+percept-class-to-channel binding keyed on the stable class string (condition 4). All four run_world pins hold
+bit-exact (default 2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The mandatory section-9
+five-lens audit (6 blind panelists) returned 9 findings, all verified against source and hardened: two majors
+(the binding keyed on the POSITIONAL `PerceptId` rather than the stable class string, re-keyed on the class;
+the optical derivation equated light-sensing with a refracting lens, reworded to the honest lens-eye limit
+with lensless light detection a data row and a light-absorption floor capability the flagged deeper build);
+and minors/nits flagged (the monotone-only response family with saturating Naka-Rushton/Hill and non-monotone
+tuned responses named as floor-extension follow-ons; the class->channel binding a world-data interim that
+should derive from the substance's per-channel floor coupling; the single-valued/global binding
+multiplicity limit; a test gap filled).
+
+The gate ruled fork (a) for the KEYSTONE (not slice 2): the optical-vs-reserved distinction becomes an
+explicit per-sense transduction-KIND marker on the anatomy as DATA (`Optical` / `ReservedKernel` / ...), the
+harden-to-registry pattern, retiring the `opt.refractive_index = 1.05` placeholder borrow on non-optical
+senses. Two keystone conditions the gate set: it edits `anatomy.rs` (a shared file, sequence the ADD with
+Agent B's lifespan arc #113); and retiring the placeholder must be byte-neutral or a stated hash change
+(verify no live consumer reads the non-optical senses' placeholder index).
+
+Reserved for calibration, surfaced with basis, never fabricated (`ReservedSenseParams`, the per-sense params
+the anatomy does not yet derive; the anatomy derives only the optical gain today): the `response` law a
+sense's transduction follows (basis: the modality's established psychophysics); the `shape` exponent or
+compression (basis: the modality's measured response curve); the `discrimination` law (basis: Weber's law
+holds across most senses, so magnitude-relative is the usual case); the `step` just-noticeable difference
+(basis: the sensorium's per-channel resolution, once it derives from anatomy); the `threshold` detection
+floor (basis: the organ's noise floor). The deeper derive targets flagged to the owner: the per-channel
+anatomy-transduction kernel (would derive these five from the body); a light-absorption floor capability
+(would derive lensless and absorptive optical sensing); the substance-per-channel coupling (would derive
+the class->channel binding); the saturating and non-monotone response laws (would extend the family). One
+item surfaced to the gate for its ruling: whether to add the saturating Naka-Rushton/Hill response law to
+the floor family now (the dominant real transducer nonlinearity) or defer it as a flagged follow-on; the
+gate registered the floor-growth pattern (this arc adds the spreading law and the transduction family) in
+the owner-blocker register for the owner's awareness.
+
+FRAMED slice-3 (receiver-side valence learner), 2026-07-10 (Agent A, PENDING gate ruling). Blind section-11
+smoke test caught my first construction BIASED (a false-settled: I stated the noise floor "derives from a
+per-axis baseline" when it is a flat authored scalar today; an overstated "harm or benefit" when the harm
+learner is harms/benign and reward is a separate pole; a suppressed deception case: a being-signal is
+agent-emitted and manipulable unlike a substance). Rebuilt, section-11 re-run cleared it MINOR_ISSUES, and I
+folded its one new catch (the same-tick vs predictive-lag structure: the harm path carries no eligibility
+trace while the reward pole does, verified at `learn.rs`). The section-10 blind panel (6 seats) returned 6/6
+significant-flaw-fixable, UNANIMOUS: the template-case CORE is sound (it correlates a low-level (channel,
+bucket) key with a low-level reserve-fall proxy, never branching on "this is a being"), but two authored
+seams must move to derived. Verified against source: the two likelihoods `p_harm_given_harms`/`p_harm_given_benign`
+are reserved-from-manifest fixed scalars (defaults 9/10, 1/10, `learn.rs:288-289,304-305`); the floor
+dose-response harm law `harm_class` (integer-Hill, `laws.rs:132`), the per-axis drain baseline `DerivedDrain`
+(`homeostasis.rs:251`), and the harm bit `is_harm_tick` (`homeostasis.rs:1089`) all exist; the reward pole
+carries `eligibility_decay` (`learn.rs:356-362`) the harm pole lacks. The corrected framing (my synthesis, for
+the gate to rule): keep the template-case correlation core, and (1) the evidence weight DERIVES per-being and
+per-(channel, bucket) as the weight-of-evidence of P(harm-bit given the feature harms) and P(harm-bit given
+benign), each ESTIMATED from the being's own `harm_class` dose-response crossed with its own reserve-delta
+noise distribution, so an alien with a different dose-response gets a different weight, RESERVED with basis
+until the estimator is built, never a fixed global 0.9/0.1; (2) the noise floor DERIVES per-axis from
+`DerivedDrain`, and the interoceptive outcome is per-axis (a signal harmful on one reserve and beneficial on
+another can be learned); (3) the harm path carries the eligibility-decay trace the reward pole already has, so
+a lagged co-occurrence is credited and same-tick stops being an authored ceiling; (4) referential meaning (a
+signal predicting harm elsewhere or to another) is a flagged explicit open limit. The scope fork for the gate:
+how much to build in slice 3 (the likelihood estimator is the deepest design work; the per-axis noise floor
+and the eligibility trace are smaller wires) versus reserve with basis. Convergence flag (as the gate
+directed): the learner keys on `feature_subject(channel, bucket)`, the belief-subject key shared with Agent B's
+affordance composer and the owner-held `SEQ_FIELD_BITS` packing; slice 3 consumes the existing per-feature key
+without re-encoding, and whether a `SenseChannelId` fits the channel field is a packing question flagged, not
+decided. Posted to the gate for its ruling before any code.
+
+BUILT + AUDITED slice-3 (receiver-side valence learner core), 2026-07-10 (Agent A, gate ACCEPTED the framing
+and ruled the scope: build the byte-neutral valence CORE, reserve the four derive targets). Built as one
+byte-neutral off-path function, `learn::being_signal_observation(channel, bucket, harm, plasticity, calib)`:
+a being correlates a perceived being-signal (keyed by `feature_subject` on its sense channel and discriminated
+bucket) with its own interoceptive harm bit, minting one weight-of-evidence observation toward HARMS or BENIGN
+through the SHARED `observation_toward` minting the environmental-feature learner also uses, never branched on
+as "a being", so a signal's valence emerges receiver-side. All four run_world pins hold bit-exact (default
+2b7e1035, full 1873c44e, discovery 4eea5d06, viability bae5a82). The mandatory section-9 five-lens audit (6
+blind panelists) confirmed the core clean across all five lenses and returned 8 findings, all minor/nit, all
+verified against source and hardened: the subject-namespace collision (the core had no channel-base offset, so
+a being-signal would alias an environmental biology feature, flagged as a keystone-wiring seam the keystone
+resolves with the owner's packing ruling); the "identical learner" copy (extracted a shared `observation_toward`
+helper, byte-neutral, so identity is structural); the reserved likelihood basis mis-aim (corrected: a
+being-signal is a harm PREDICTOR not a CAUSE, so its likelihood is the receiver's own empirical co-occurrence
+reliability, not `harm_class` which is the basis for an environmental harm-cause); and the alien granularity
+limit (the reserved per-axis-outcome item).
+
+Reserved for calibration, surfaced with basis, deferred by the gate to their own builds (all four are keystone
+or shared builds, so this core moves no pin): the per-being LIKELIHOOD estimator (the empirical co-occurrence
+reliability for a being-signal, `harm_class` crossed with the reserve-noise for an environmental harm-cause; a
+build SHARED with Agent B's affordance composer, framed and sequenced separately); the per-axis NOISE FLOOR
+(from `DerivedDrain`) and the per-axis outcome (a live-learner behaviour change that moves the pins, reserved
+for the keystone); the harm-path ELIGIBILITY TRACE (the reward pole's `eligibility_decay`, which credits a
+lagged co-occurrence, load-bearing for the predation payoff, a live behaviour change reserved for the
+keystone); REFERENTIAL meaning (a flagged open limit); and the SUBJECT-NAMESPACE offset plus whether a
+`SenseChannelId` fits the 16-bit channel field (the owner-held `SEQ_FIELD_BITS`/belief-subject-hash packing
+decision, resolved for both Agent A and B together once the owner rules).
+
+With slice 3 built and audited, the perception-substrate arc (slices 1 through 3) is complete and presented
+for the gate's whole-arc gate. The being-percept keystone that wires the percept live (and does the reserved
+estimator, the per-axis noise floor, the eligibility trace, and the packing offset, sequenced with Agent B) is
+the payoff follow-on that unblocks predation on the run path.
+
+FRAMED being-percept keystone (the payoff arc: wire the percept live so predation and fleeing emerge),
+2026-07-10 (Agent A, PENDING gate ruling). Framed blind before any code. The section-11 input-bias smoke test
+(strongest model, fail-closed) BLOCKED my construction four times, each a real source-verified seam on a
+distinct axis (a whole-loop emergence claim scoped over receiver-only facts; the emitter curated alien-clean
+when a non-Terran channel is a missing-physics substrate; a symmetric receiver alien over-claim introduced
+while fixing the second; predation and fleeing framed as symmetric when only the harm pole had a substrate),
+and cleared the fifth. The section-10 blind panel (6 diverse panelists across 3 agent types and 3 models, 5
+returned, the 6th hit an infrastructure safeguard) came back 5/5 significant-flaw-fixable on two seams.
+SEAM 1 (unanimous strongest): the being-directed gradient's away-from-harm / toward-reward SIGN is an authored
+valence-to-direction coupling that forecloses approach-to-a-harm (a parasite, a scavenger, mobbing). REFUTED
+at source (Prime Directive 1: a unanimous panel is a lead generator, not a verdict): the controller weight is
+expressed from the genome UNCLAMPED (`GeneSet::express`, genome.rs:404-426, a sum of signed `genotypic.mul(weight)`
+terms with no clamp; contrast `express_unit`, genome.rs:435-437, which clamps to [0,1] and is used only for
+propensity channels, never for controller weights, which use `express` at controller.rs:942), and a working
+taxis test uses a -1 weight (controller.rs:1488). So the weight is FREELY SIGNED and founder-zero: selection
+lifts it positive (follow the percept) or negative (invert it), so a negative being-avoidance weight yields
+approach-to-a-harm-believed emitter and the full approach/avoid space is spanned, with harm and reward as
+separate percepts under independent weights. The panel reasoned correctly from my framing; my fact-3 phrasing
+("only a heritable weight lifted off founder-zero turns it into avoidance or approach", "the fixed sign is an
+open seam") MIS-STATED the mechanism, so the fix is a framing correction (state the weight is freely signed,
+the approach/avoid sign emerges, retract the open seam), never a mechanism change. The panel's proposed
+single-signed-percept would AUTHOR the reward-minus-harm combination, the less-emergent choice, so it is
+declined. SEAM 2 (valid, verified): the build list omitted the subject-namespace offset, a LIVE wiring
+requirement; `being_signal_observation` (learn.rs:583) keys `feature_subject(channel, bucket)` with no
+channel-base offset while the material `reward_observations` (learn.rs:610) takes a `channel_base`, so without
+the offset a being-signal aliases the environmental biology feature at the same index under HARM_ATTR (P11);
+the fix sequences the offset FIRST. Folded-in completeness: the named limits carry both alien gaps (receiver
+fail-loud on a non-optical channel, emitter alien emission a flagged floor extension) and the bootstrap
+precondition (an out-of-loop first contact and a survivable sublethal harm to have an outcome to learn from),
+and the being-directed gradient keys on perceived EMITTERS on a channel (any source, being or material),
+never on being-hood. THE RESOLVED FRAMING (survives my own check): a being passively emits on a channel from
+its own material (a Terran channel reads an existing floor source-power axis, a non-Terran channel's axis and
+law are a flagged missing-physics extension); the emission reaches another attenuated by geometry and the
+medium, and is threshold-gated into a percept (the receiver data-defined and fail-loud on a non-optical
+channel); the receiver-side learner correlates it (same-tick today, a keystone-built harm-path eligibility
+trace, its latency a reserved calibration, credits a lagged outcome) into a harm belief (the built core) or a
+reward belief (a keystone-built reward-frame counterpart) on a subject offset into its own namespace band; the
+evolved controller reads a being-directed geometric-direction gradient over those beliefs through a
+founder-zero FREELY-SIGNED weight, so approach (predation) and avoidance (fleeing) emerge from selection, with
+no mechanism reading a species, kingdom, trophic role, relatedness, named state, or being-hood. The keystone
+builds, in order: the subject-namespace offset (P11, first); the being-signal reward-frame counterpart core;
+the two being-directed gradients (consuming the reach and percept substrate); the harm-path eligibility trace;
+the per-being likelihood estimator (shared with Agent B's composer); the live wire (behaviour-changing, a
+stated hash change re-baselining the four pins). Flagged follow-ons: a discretionary emit affordance and
+referential meaning (an alarm call is both, so alarm is dropped from the keystone, narrowing the gate's
+predation/hunting/fleeing/alarm charge under Prime Directive 5); alien-channel emission and reception. THE
+SCOPE FORK for the gate: (A) build both poles now (reward core plus both being-directed gradients plus the
+eligibility trace), so predation and fleeing both emerge, my recommendation, since both poles need the
+being-directed gradient anyway and the reward core is a small mirror of the built material reward core; or
+(B) scope the keystone to fleeing (the built harm core plus a being-avoidance gradient plus the eligibility
+trace) and flag predation's reward core and attraction gradient as the next sub-slice. Reserved and
+owner-held, surfaced not fabricated: the belief-subject packing (the subject-namespace offset and whether a
+`SenseChannelId` fits the 16-bit channel field, the `SEQ_FIELD_BITS` / belief-subject-hash decision the gate
+surfaced to the owner); the per-being likelihood estimator (a build shared with Agent B, sequenced by the
+gate); the eligibility-trace latency and the per-axis noise floor (reserved calibrations with basis). Posted
+to the gate for its ruling before any keystone code.
+
+GATE RULED 2026-07-10 (on #116): the framing is signed off (the gate verified the Seam-1 refutation against
+source itself and confirmed it holds). The scope fork is ruled (A) BOTH POLES: build the six-step sequence,
+each step gated. The alarm DROP is accepted under Prime Directive 5, so the honest keystone charge is
+PREDATION, HUNTING, and FLEEING, with alarm (a discretionary emit plus referential meaning, both flagged
+follow-ons) named as the next substrate. The belief-subject packing is ruled to the HYBRID (an exact widened
+pack in-envelope plus a hash on overflow), which Agent B builds as the shared belief-subject key, so step 1's
+being-signal band is COORDINATED with Agent B as three disjoint top-level bands: environmental features at
+bit 62 (existing), sequences and conjunctions at bits 62 and 61 (Agent B's existing), being-signals proposed
+at `(1<<62) | (1<<60)` (a new `being_signal_subject`, disjoint from both, so the slice-3 aliasing seam is
+closed by construction), with the `SenseChannelId`-fits question falling out of Agent B's hybrid encoding
+within the being-signal band. Sequencing: build steps 1-4 now (independent of Agent B); sequence step 5 (the
+per-being likelihood estimator, shared with Agent B's composer) with the gate when Agent B frees; step 6 (the
+live wire) last. Route every re-pin (step 6, and step 4 if its eligibility trace touches the live
+environmental harm path rather than staying scoped to the dead being-signal path) through the gate; each
+re-pins once and the gate sequences them against Agent B's and Agent C's re-pins on the four tracked pins.
+The eligibility-trace latency and the per-axis noise floor stay reserved-with-basis (owner-set). Building on
+`claude/being-percept-keystone` (#116), each step pushed for the gate's per-step review.
+
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band
    spawning on a dry corner far from water starves) and surfaced "habitability-aware placement" as a candidate

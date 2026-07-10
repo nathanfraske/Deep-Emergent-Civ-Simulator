@@ -102,10 +102,12 @@ use crate::homeostasis::{
     GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
-    feature_observations, reward_observations, sequence_subject, step_belief_subject,
-    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR,
-    MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
+    being_avoidance_gradient, being_signal_reward_for, being_signal_trace_observations,
+    builtin_reachable_relations, feature_observations, perceive_being_signal, reward_observations,
+    sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
+    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
+    NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -118,6 +120,7 @@ use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
+use crate::perception_reach::{received_reach, resolve_reach};
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, felt_salience, whole_body_composition_vector, MetabolicAnchors,
@@ -200,6 +203,16 @@ const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
 /// substance accrues both observations toward one "this signature rewards" belief; the disjoint ordinal
 /// bands keep the two tick inputs from aliasing while the shared subject keeps the belief one fact.
 const NUTRITION_REWARD_LEARN_ORDINAL_BASE: u32 = 4_000_000;
+/// The base tick-input ordinal a BEING-SIGNAL harm credit carries (the being-percept keystone, step 6), one
+/// per subject in the perceiver's harm-eligibility trace, disjoint from and above the reward bands so a
+/// being-signal harm observation never collides with a feature, sequence, material, or nutrition observation
+/// for the same being in the same tick on the mind-then-ordinal sort.
+const BEING_HARM_LEARN_ORDINAL_BASE: u32 = 5_000_000;
+/// The base tick-input ordinal a BEING-SIGNAL reward credit carries (the being-percept keystone, step 6, the
+/// predation pole), one per being-signal the perceiver formed this tick, disjoint from and above
+/// [`BEING_HARM_LEARN_ORDINAL_BASE`] so a being-signal reward observation never collides with the harm one
+/// or any other observation for the same being in the same tick.
+const BEING_REWARD_LEARN_ORDINAL_BASE: u32 = 6_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -1049,6 +1062,24 @@ pub struct Embodiment {
     /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
     /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
     attraction: bool,
+    /// Whether the controller feeds the BEING-DIRECTED input block (the being-percept keystone, step 6): a
+    /// being perceives OTHER beings (their thermal/optical emission reaching it above its own sensory
+    /// threshold) and senses the direction toward believed-rewarding emitters and away from believed-harmful
+    /// ones. FALSE by default, so the layout carries no being block and every run hash is unchanged; the
+    /// world-build opts in ([`Embodiment::set_being_percept`], which rebuilds the layout). When true, the
+    /// runner writes each being's unit being-avoidance and being-attraction directions into the block each
+    /// tick, and only a heritable FREELY-SIGNED weight lifted off founder-zero by selection turns it into
+    /// approach (predation) or avoidance (fleeing), so the approach/avoid sign emerges (Principle 9).
+    being_percept: bool,
+    /// The being-percept feature's run-path configuration (the being-percept keystone, step 6): the sense
+    /// channel a being emits and is perceived on, its reach binding, the perceiver's transduction, the physics
+    /// reach caps, the sensorium activation cap, and the two RESERVED values (the emission coupling coefficient
+    /// and the harm eligibility-trace decay). `None` by default, so the perceive-phase being-directed wire and
+    /// the being-signal learning are inert and every run hash is unchanged; the world-build installs it
+    /// ([`Embodiment::set_being_field`]) alongside enabling the `being_percept` flag, reading the reserved
+    /// values fail-loud from the manifest at the feature arming. Never folded into `state_hash` (it is
+    /// configuration); the behaviour it drives (movement and belief) is what the hash folds when the flag is on.
+    being_field: Option<BeingPerceptField>,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1257,6 +1288,8 @@ impl Embodiment {
             material_percepts: MaterialPerceptRegistry::empty(),
             conviction_percepts: ConvictionPerceptRegistry::empty(),
             attraction: false,
+            being_percept: false,
+            being_field: None,
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -1328,6 +1361,29 @@ impl Embodiment {
     pub fn set_attraction(&mut self, enabled: bool) {
         self.attraction = enabled;
         self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the BEING-DIRECTED input block in the controller layout (the being-percept
+    /// keystone, step 6), so a being can sense the direction toward believed-rewarding perceived emitters and
+    /// away from believed-harmful ones and evolve to approach (predation) or avoid (fleeing) them. Set BEFORE
+    /// the embodiment's beings are built, exactly like [`set_attraction`], because the beings' controllers are
+    /// expressed against [`Embodiment::layout`], so a block added after they exist would leave their weight
+    /// vectors the wrong length. FALSE (the default) leaves the layout and every run hash unchanged (opt-in).
+    /// The new being weights a founder expresses are zero (unseeded, freely-signed channels), so the gradient
+    /// moves no behaviour until selection lifts a weight either way.
+    pub fn set_being_percept(&mut self, enabled: bool) {
+        self.being_percept = enabled;
+        self.rebuild_layout();
+    }
+
+    /// Install the being-percept feature's run-path configuration (the being-percept keystone, step 6): the
+    /// channel, reach binding, transduction, reach caps, activation cap, and the two reserved values the
+    /// perceive-phase being-directed wire and the being-signal learning read. `None` (the default) leaves the
+    /// wire inert, so this is opt-in and adds no controller block (no layout rebuild): the wire is separately
+    /// gated by the `being_percept` flag ([`set_being_percept`]), and a world arms both together at the feature
+    /// arming, reading the reserved values fail-loud from the manifest before installing the field.
+    pub fn set_being_field(&mut self, field: Option<BeingPerceptField>) {
+        self.being_field = field;
     }
 
     /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
@@ -1479,6 +1535,7 @@ impl Embodiment {
             &self.material_percepts,
             self.attraction,
             &self.conviction_percepts,
+            self.being_percept,
             self.layout.hidden(),
         );
     }
@@ -2857,6 +2914,15 @@ pub struct Runner {
     /// as the thermal state the field drives; the body-arc harm mapping from a temperature outside a
     /// race's comfort band is a reserved consumer (the two-sided band the body arc deferred).
     body_temp: BTreeMap<StableId, Fixed>,
+    /// The being-signal subjects each perceiver formed of the OTHER beings it perceived THIS tick (the
+    /// being-percept keystone, step 6), keyed by perceiver id. A within-tick scratchpad rebuilt each tick in
+    /// [`step_embodiment`]'s perceive phase (before movement, so the learning correlates the SAME perception
+    /// the being acted on) and consumed by the being-signal learning ([`advance_eligibility_traces`] records
+    /// them into the harm-eligibility trace, [`couple_conversation`] credits them). NOT folded into
+    /// `state_hash` (it is a derived per-tick read, like the percept-direction maps); the behaviour and belief
+    /// it drives is what the hash folds. Empty unless the being-percept feature is armed, so an unarmed run
+    /// never populates it and is byte-identical.
+    perceived_beings: BTreeMap<StableId, Vec<StableId>>,
     /// The per-being DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
     /// ([`crate::physiology::derive_body_exchange_rate`]), when the caller has supplied it. A being with
     /// an entry couples to its cell at its own derived rate (a high-surface, low-thermal-mass body
@@ -3006,6 +3072,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
@@ -3058,6 +3125,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
@@ -3128,6 +3196,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate,
             world: None,
             embodiment: Some(embodiment),
@@ -3221,6 +3290,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate,
             world: Some(world),
             embodiment: Some(embodiment),
@@ -4104,6 +4174,35 @@ impl Runner {
                 }
             }
         }
+        // The being-signal HARM eligibility trace (the being-percept keystone, step 6): the same
+        // decay-then-record TD-lambda order, keyed on the being-signals the perceiver formed THIS tick (from
+        // the perceive-phase scratchpad), so a being-signal perceived this tick earns full credit for a harm
+        // felt this same tick (`couple_conversation` credits the trace) and decays from there, crediting a
+        // distal predator-approach cue perceived some ticks before the harm. World-independent (reads only the
+        // being-percept field's reserved decay and the perceived-signal scratchpad), so it runs in the
+        // embodiment phase on both entry points, byte-identical when the feature is off (the trace stays
+        // empty, hash-skipped). Refreshing a re-perceived signal to full eligibility, exactly as the reward
+        // trace refreshes a re-executed action.
+        let harm_decay = self.embodiment.as_ref().and_then(|emb| {
+            if emb.being_percept {
+                emb.being_field.as_ref().map(|f| f.harm_eligibility_decay)
+            } else {
+                None
+            }
+        });
+        if let Some(decay) = harm_decay {
+            let perceived = &self.perceived_beings;
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.harm_eligibility_trace.decay(decay);
+                    if let Some(subjects) = perceived.get(&w.id) {
+                        for &subject in subjects {
+                            w.harm_eligibility_trace.record(subject);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Snapshot each being's reserve levels BEFORE the embodiment step when the felt-conviction learner is
@@ -4323,6 +4422,41 @@ impl Runner {
                         },
                     });
                 }
+                // The being-signal HARM credit (the being-percept keystone, step 6, the fleeing pole): the
+                // being learns "this being-signal predicts harm" from its OWN felt harm, feature-keyed on the
+                // being-signals in its harm-eligibility trace. A signal perceived THIS tick sits at full
+                // eligibility (the same-tick co-occurrence, the exact weight a same-tick observation carries),
+                // one perceived some ticks before sits at decayed eligibility (the lagged distal
+                // predator-approach cue), each toward HARMS on a harm tick and BENIGN otherwise, through the
+                // SAME Observe path on HARM_ATTR the environmental-feature learner uses. Nothing reads a species,
+                // trophic role, relatedness, or being-hood: the sign is the reserve falling, the subject a
+                // perceived being-signal, so "this emitter predicts harm" emerges from the correlation
+                // (Principles 8, 9). Gated on the being-percept flag; off, the trace is never populated, so the
+                // observation list is empty and the run is byte-identical.
+                if emb.being_percept {
+                    for (k, obs) in being_signal_trace_observations(
+                        &w.harm_eligibility_trace,
+                        harm,
+                        plasticity,
+                        &harm_learn,
+                    )
+                    .into_iter()
+                    .enumerate()
+                    {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: BEING_HARM_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: obs.subject,
+                                attr: HARM_ATTR,
+                                hyps: vec![HARMS, BENIGN],
+                                toward: obs.toward,
+                                weight: obs.weight,
+                                from: w.id,
+                            },
+                        });
+                    }
+                }
                 // Appetitive reward credit (ideation / experiential-discovery arc, piece 1, slice 1c): the
                 // being learns which ACTION pays off. It felt reward this tick if any reserve ROSE beyond the
                 // recovery noise floor (its own interoceptive delta, the sign complement of the harm bit).
@@ -4437,6 +4571,40 @@ impl Runner {
                                     from: w.id,
                                 },
                             });
+                        }
+                    }
+                    // The being-signal REWARD credit (the being-percept keystone, step 6, the predation pole):
+                    // the being learns "this being-signal predicts reward" from its OWN felt reward, feature-keyed
+                    // on the being-signals it perceived THIS tick (perceiving a being while the perceiver's own
+                    // reserves rise, catching prey). Each toward REWARDS on a reward tick and NEUTRAL otherwise,
+                    // through the SAME Observe path on REWARD_ATTR the material reward learner uses, on the
+                    // being-signal's OWN subject (disjoint from the harm frame by attribute). Which pole a being
+                    // later acts on emerges from its own outcomes and the freely-signed controller weight.
+                    // Same-tick (the built substrate carries no lagged reward trace; a distal-prey-cue reward
+                    // trace is the symmetric predation follow-on). Gated on the being-percept flag; off,
+                    // `perceived_beings` is empty, so no observation is pushed and the run is byte-identical.
+                    if emb.being_percept {
+                        if let Some(subjects) = self.perceived_beings.get(&w.id) {
+                            for (k, &subject) in subjects.iter().enumerate() {
+                                let obs = being_signal_reward_for(
+                                    subject,
+                                    reward,
+                                    plasticity,
+                                    &reward_learn,
+                                );
+                                env_inputs.push(TickInput {
+                                    mind: w.id,
+                                    ordinal: BEING_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                    stim: Stimulus::Observe {
+                                        subject: obs.subject,
+                                        attr: REWARD_ATTR,
+                                        hyps: vec![REWARDS, NEUTRAL],
+                                        toward: obs.toward,
+                                        weight: obs.weight,
+                                        from: w.id,
+                                    },
+                                });
+                            }
                         }
                     }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
@@ -5075,6 +5243,127 @@ impl Runner {
             },
             _ => BTreeMap::new(),
         };
+        // (0b'''') The BEING-DIRECTED percept (the being-percept keystone, step 6, the live wire): each being
+        // perceives the OTHER beings whose own thermal emission reaches it above its own detection threshold,
+        // and senses the unit direction AWAY from every emitter it holds a committed HARMS belief about and
+        // TOWARD every one it holds a committed REWARDS belief about, the being-directed mirror of the material
+        // avoidance/attraction gradients. Present only when the embodiment arms the being-percept flag AND
+        // installs the being-percept field AND carries the physiology (for the Stefan-Boltzmann sigma the
+        // emission reads); off, both maps are empty and every run hash is unchanged. For each perceiver, the
+        // per-emitter chain is: the emitter's own thermal-signal emission (`being_signal_emission`, a warm body
+        // emits a stronger signature), the reach to this perceiver attenuated by geometry and (where a material
+        // registry is installed) the medium's absorption along the 3D path so occlusion emerges from the
+        // strata, then the perceiver's OWN threshold-gated transduction into a being-signal subject. Nothing
+        // reads a species, kingdom, trophic role, relatedness, named state, or being-hood; the perceived list
+        // keys on EMISSION on a channel and the gradient on the perceiver's LEARNED belief. Read before the
+        // mutable embodiment borrow, drawing no RNG. The direction is a PERCEPT, not a heading: only the
+        // controller's founder-zero FREELY-SIGNED weight, lifted by selection, turns it into approach
+        // (predation) or avoidance (fleeing), so the approach/avoid sign emerges (Principle 9). The perceived
+        // subjects are also stashed for the being-signal learning below, so the learner correlates the SAME
+        // perception the being acted on.
+        //
+        // Honest limit (flagged): the per-perceiver emitter scan is O(N^2) in the located population, gated by
+        // the reach threshold rather than a spatial index; a located-index range query is the optimization
+        // follow-on, not built here.
+        let body_temps = &self.body_temp;
+        let (being, perceived_beings): (
+            BTreeMap<StableId, Vec<Fixed>>,
+            BTreeMap<StableId, Vec<StableId>>,
+        ) = match (self.embodiment.as_ref(), self.world.as_ref()) {
+            (Some(emb), Some(world))
+                if emb.being_percept && emb.being_field.is_some() && emb.physiology.is_some() =>
+            {
+                let field = emb.being_field.as_ref().unwrap();
+                let sigma = emb.physiology.as_ref().unwrap().anchors.sigma;
+                let registry_opt = emb.material_registry.as_ref();
+                // Parallel (arc 4): each perceiver's perceived list and its two gradients are pure reads of the
+                // immutable population, its beliefs, and the body temperatures, keyed by w.id and drawing no
+                // RNG; the collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
+                let collected: BTreeMap<StableId, (Vec<Fixed>, Vec<StableId>)> = emb
+                    .walkers
+                    .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
+                    .filter_map(|w| {
+                        let mind = world.mind(w.id)?;
+                        let here = w.coord();
+                        let mut perceived: Vec<(Coord3, StableId)> = Vec::new();
+                        for other in &emb.walkers {
+                            if other.id == w.id {
+                                continue;
+                            }
+                            let src = other.coord();
+                            let body_temp =
+                                body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                            let emission = physiology::being_signal_emission(
+                                body_temp,
+                                field.emission_coefficient,
+                                sigma,
+                            );
+                            if emission <= Fixed::ZERO {
+                                continue;
+                            }
+                            // Occlusion emerges from the medium when a material registry is installed; without
+                            // one the reach is geometric-only (a transparent path), so the feature still runs.
+                            let reach = match registry_opt {
+                                Some(reg) => resolve_reach(
+                                    &field.row,
+                                    emission,
+                                    src,
+                                    here,
+                                    &emb.material,
+                                    reg,
+                                    field.bounds,
+                                ),
+                                None => received_reach(emission, src, here, field.bounds, &[]),
+                            };
+                            if let Some(subject) = perceive_being_signal(
+                                reach,
+                                field.channel_u16(),
+                                &field.transduction,
+                                field.activation_max,
+                            ) {
+                                perceived.push((src, subject));
+                            }
+                        }
+                        if perceived.is_empty() {
+                            return None;
+                        }
+                        let params = world.belief_params();
+                        let av = being_avoidance_gradient(mind, here, &perceived, params);
+                        let at = being_attraction_gradient(mind, here, &perceived, params);
+                        let (ax, ay) = unit(av.0, av.1);
+                        let (rx, ry) = unit(at.0, at.1);
+                        // Distinct perceived subjects for the learner (deduped and canonically ordered): two
+                        // emitters that map to the SAME being-signal bucket are one perceived KIND, so they
+                        // earn one belief update, not two (the harm trace's BTreeMap dedups by construction, and
+                        // this keeps the reward pole consistent with it). The GRADIENT above still reads the
+                        // full per-emitter list, so two distinct emitters both pull on the direction.
+                        let subjects: Vec<StableId> = perceived
+                            .iter()
+                            .map(|&(_, s)| s)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .into_iter()
+                            .collect();
+                        Some((w.id, (vec![ax, ay, rx, ry], subjects)))
+                    })
+                    .collect();
+                let mut being_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
+                let mut perceived_map: BTreeMap<StableId, Vec<StableId>> = BTreeMap::new();
+                for (id, (grad, subjects)) in collected {
+                    // Keep a gradient in the controller map only when it is non-zero (a being with no committed
+                    // belief about any perceived emitter reads zero, the exact founder-zero convention the
+                    // material attraction block uses); keep every perceived subject for the learner regardless,
+                    // so a being still LEARNS about an emitter it holds no belief about yet.
+                    if grad.iter().any(|&c| c != Fixed::ZERO) {
+                        being_map.insert(id, grad);
+                    }
+                    perceived_map.insert(id, subjects);
+                }
+                (being_map, perceived_map)
+            }
+            _ => (BTreeMap::new(), BTreeMap::new()),
+        };
+        self.perceived_beings = perceived_beings;
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -5425,6 +5714,7 @@ impl Runner {
             &appetitive,
             &attraction,
             &conviction,
+            &being,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -6101,6 +6391,13 @@ impl Runner {
                 // leaves an opted-out run's hash unchanged.
                 if !w.eligibility_trace.is_empty() {
                     w.eligibility_trace.hash_into(&mut h);
+                }
+                // The HARM eligibility trace (the being-percept keystone, step 6): new per-being dynamic state,
+                // folded after the reward eligibility trace in the same canonical order. Empty for a being in a
+                // world with the being-percept off (never recorded), so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.harm_eligibility_trace.is_empty() {
+                    w.harm_eligibility_trace.hash_into(&mut h);
                 }
                 // The conviction-experience record (Branch 1 of the learned experience-to-conviction coupling,
                 // OWNER_DECISIONS_LOG R2/R4): new per-being dynamic state, folded after the eligibility trace in

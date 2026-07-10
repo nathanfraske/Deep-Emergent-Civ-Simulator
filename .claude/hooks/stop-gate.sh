@@ -59,9 +59,11 @@ if [ -f "$roadmap_file" ]; then
 fi
 
 # Floor-registry gate. The physics floor registry (docs/working/PHYSICS_FLOOR_REGISTRY.md) is the
-# enforced reference for the derive-vs-author line: the generated list of every authored floor axis.
-# It is generated from the floor data, so if it is stale (a floor axis or the generator changed and
-# the registry was not regenerated) the reference is wrong and an audit against it is unsound. The
+# enforced reference for the derive-vs-author line and the physics-substrate map: the generated list of
+# every authored floor axis and substance AND every law kernel (declared in the floor data or direct in
+# laws.rs), each with file:line. It is generated from the floor data and laws.rs, so if it is stale (a
+# floor axis, a law kernel, or the generator changed and the registry was not regenerated) the reference
+# is wrong and an audit against it is unsound. The
 # gate regenerates to a temp and compares, never touching the working tree. Inert until both the
 # generator and the registry exist.
 reg="docs/working/PHYSICS_FLOOR_REGISTRY.md"
@@ -71,7 +73,7 @@ if [ -f "$ROOT/$gen" ] && [ -f "$ROOT/$reg" ]; then
   if python3 "$ROOT/$gen" "$tmpreg" >/dev/null 2>&1; then
     if ! diff -q "$tmpreg" "$ROOT/$reg" >/dev/null 2>&1; then
       rm -f "$tmpreg"
-      echo "stop-gate: the physics floor registry is stale (a floor axis or the generator changed but it was not regenerated)." >&2
+      echo "stop-gate: the physics floor registry is stale (a floor axis, a laws.rs kernel, or the generator changed but it was not regenerated)." >&2
       echo "Run: python3 scripts/gen_floor_registry.py   then commit docs/working/PHYSICS_FLOOR_REGISTRY.md. The registry is the enforced derive-vs-author reference; a stale one is a wrong reference." >&2
       exit 2
     fi

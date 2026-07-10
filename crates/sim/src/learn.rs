@@ -36,8 +36,14 @@
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
 use civsim_world::Coord3;
 use std::collections::{BTreeMap, BTreeSet};
+
+use crate::perception_percept::{sense, ChannelTransduction};
+use crate::perception_reach::{
+    ChannelReach, ChannelReachRegistry, Reach, ReachBounds, DEV_OPTICAL,
+};
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -47,6 +53,7 @@ use crate::locomotion::ResourceField;
 use crate::material::MaterialField;
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
+use crate::sensorium::SenseChannelId;
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -142,6 +149,33 @@ pub const MATERIAL_FEATURE_CHANNEL_BASE: u16 = 1 << 15;
 pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
     let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
     StableId(FEATURE_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
+}
+
+/// The reserved base of the per-BEING-SIGNAL belief-subject band (the being-percept keystone, step 1): a
+/// perceived being-signal, keyed by its sense channel and discriminated bucket, mints its harm or reward
+/// belief subject HERE, in its OWN top-level band, disjoint from every environmental-feature subject and
+/// every sequence subject. It sets bit 60 as well as bit 62, so a being-signal subject is DISJOINT from a
+/// feature subject (whose payload stays in the low 48 bits, leaving bit 60 clear) and from a sequence subject
+/// (which sets bit 61, clear here), and stays below `1 << 63` (below the reserved-high landmark ids). So a
+/// being-signal on sense channel c never aliases the environmental biology feature at index c under the same
+/// attribute (the slice-3 subject-namespace seam), closed by construction rather than by a
+/// [`MATERIAL_FEATURE_CHANNEL_BASE`]-style channel offset (which would not fit the `u16` channel field, since
+/// biology and material features already split it at `1 << 15`). The bit-60 placement is coordinated with the
+/// affordance composer's hybrid belief-subject key as one of three disjoint top-level bands (features,
+/// sequences and conjunctions, being-signals); if the hybrid claims bit 60 the base retargets to another free
+/// bit, a one-line change, and this band is byte-neutral until the keystone's live wire consumes it.
+const BEING_SIGNAL_SUBJECT_BASE: u64 = (1 << 62) | (1 << 60);
+
+/// Mint the belief subject for a perceived being-signal: the `(channel, bucket)` pair packed into the
+/// reserved being-signal band ([`BEING_SIGNAL_SUBJECT_BASE`]), the sibling of [`feature_subject`]'s
+/// per-feature band. Two perceived beings whose signal on the same sense channel lands in the same bucket
+/// mint the SAME subject (the generalisation the quantization buys), so a valence learned about one applies
+/// to another emitting the same signal; a different channel or a different bucket is a different subject. The
+/// bucket is clamped non-negative and into the 32-bit field, so the packing never overflows the band, exactly
+/// as [`feature_subject`] does.
+pub fn being_signal_subject(channel: u16, bucket: i64) -> StableId {
+    let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
+    StableId(BEING_SIGNAL_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
 }
 
 /// The reserved base of the per-SEQUENCE belief-subject band (ideation / experiential-discovery arc, piece
@@ -494,6 +528,19 @@ pub struct FeatureObservation {
     pub weight: Fixed,
 }
 
+/// Mint one observation on a belief subject: the SHARED minting the environmental-feature learner and the
+/// being-signal learner both call, so a being-signal is minted by the IDENTICAL code path (not a copy),
+/// and the no-special-casing property (Principle 8) holds structurally, not by two inline duplicates
+/// staying in sync. The direction is `HARMS` on a harm tick and `BENIGN` otherwise; nothing but the subject,
+/// the felt sign, and the weight enters.
+fn observation_toward(subject: StableId, harm: bool, weight: Fixed) -> FeatureObservation {
+    FeatureObservation {
+        subject,
+        toward: if harm { HARMS } else { BENIGN },
+        weight,
+    }
+}
+
 /// The observations a being makes this tick: one per PRESENT feature of the cell it stands on
 /// (a channel whose amount is positive), toward `HARMS` if it felt harm this tick and `BENIGN`
 /// otherwise, each weighted by the reserved observation weight scaled by the being's belief plasticity
@@ -509,20 +556,377 @@ pub fn feature_observations(
 ) -> Vec<FeatureObservation> {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
-    let toward = if harm { HARMS } else { BENIGN };
     features
         .iter()
         .enumerate()
         .filter(|(_, &amount)| amount > Fixed::ZERO)
         .map(|(channel, &amount)| {
             let bucket = feature_bucket(amount, calib.feature_granularity);
-            FeatureObservation {
-                subject: feature_subject(channel as u16, bucket),
-                toward,
-                weight,
-            }
+            observation_toward(feature_subject(channel as u16, bucket), harm, weight)
         })
         .collect()
+}
+
+/// The valence observation a being makes of a perceived BEING-SIGNAL (perception-substrate arc, slice 3, the
+/// receiver-side valence learner core): the being correlates the signal, keyed by [`feature_subject`] on the
+/// sense channel and discriminated bucket it perceived, with its own interoceptive harm bit, minting one
+/// weight-of-evidence observation toward [`HARMS`] or [`BENIGN`] through the SHARED [`observation_toward`]
+/// minting the environmental-feature learner also uses. The being-signal is never branched on as "a being",
+/// so a signal's valence emerges receiver-side from the receiver's own correlated outcomes and is never
+/// stamped at the emitter. A being learns another's alarm call means harm because perceiving it correlated
+/// with its own reserves falling, exactly as it learns salty ground harms it. Pure and OFF the run path (no
+/// live caller): the being-percept keystone consumes it, so this is byte-neutral by construction. The
+/// (channel, bucket) come from the sensorium-gated magnitude percept
+/// ([`crate::perception_percept::MagnitudePercept`]); the harm bit is the being's own
+/// [`crate::homeostasis::is_harm_tick`] read; the weight is the existing learner's observation weight scaled
+/// by the being's plasticity.
+///
+/// Scope of "identical": the MINTING is shared and bit-identical for a given (channel, bucket, harm,
+/// weight). PRESENCE is NOT this core's job: [`feature_observations`] filters absent features (nothing to
+/// correlate), whereas this core mints for whatever (channel, bucket) it is handed, delegating presence to
+/// the upstream percept gate ([`crate::perception_percept::sense`] returns `None` below the being's detection
+/// threshold, so silence and absence do not reach here). The keystone that wires this must pass only a
+/// present, above-threshold percept.
+///
+/// RESERVED derive targets and keystone-wiring seams, surfaced with basis, deferred by the gate to their own
+/// builds (this core reuses the existing learner and reserves them, so it moves no pin):
+/// - SUBJECT NAMESPACE (RESOLVED by the keystone, step 1; was a section-9-caught seam): this mints into the
+///   being-signal's OWN band through [`being_signal_subject`] ([`BEING_SIGNAL_SUBJECT_BASE`]), disjoint from
+///   every environmental-feature subject and every sequence subject, so a being-signal on sense channel c no
+///   longer aliases the environmental biology feature at index c under the same `HARM_ATTR`. The band bit is
+///   coordinated with the affordance composer's hybrid belief-subject key as one of three disjoint top-level
+///   bands, and the `SenseChannelId`-fits-the-channel-field question falls out of that hybrid encoding within
+///   the being-signal band (the gate's packing ruling).
+/// - The evidence WEIGHT's two likelihoods are the existing reserved `p_harm_given_harms`/`p_harm_given_benign`
+///   (never the fixed dev 0.9/0.1). Their per-being derived form is the deepest derive target, a build shared
+///   with the affordance composer, framed and sequenced separately. Basis, corrected by the section-9 catch:
+///   a being-signal is a harm PREDICTOR, not a harm CAUSE (the predator harms, not the alarm call), so its
+///   likelihood is NOT a dose-response of the signal (the signal has no dose): it is the receiver's own
+///   EMPIRICAL co-occurrence reliability, the base rate the evidence engine already accumulates. The
+///   [`civsim_physics::laws::harm_class`] dose-response crossed with the reserve-delta noise distribution is
+///   the basis for an environmental harm-CAUSE's detection reliability, a distinct case.
+/// - The harm bit's NOISE FLOOR is a flat authored scalar today; deriving it per-axis from
+///   [`crate::homeostasis::DerivedDrain`], and making the outcome per-axis (so a signal harmful on one reserve
+///   and beneficial on another, and an alien with heterogeneous reserves, are distinguished), is a
+///   LIVE-learner behaviour change (it moves the pins), reserved for the keystone or its own stated-hash piece.
+/// - The correlation is SAME-TICK: the harm path carries no eligibility trace. The reward pole's
+///   `eligibility_decay` on the harm path, which credits a LAGGED co-occurrence (the predator-approach-then-harm
+///   alarm cue, load-bearing for the predation payoff), is a live behaviour change reserved for the keystone.
+/// - REFERENTIAL meaning (a signal predicting harm elsewhere or to another, not the receiver's own harm) is a
+///   flagged open limit: the outcome the learner correlates against is the receiver's own reserve fall.
+pub fn being_signal_observation(
+    channel: u16,
+    bucket: i64,
+    harm: bool,
+    plasticity: Fixed,
+    calib: &HarmLearningCalib,
+) -> FeatureObservation {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    observation_toward(being_signal_subject(channel, bucket), harm, weight)
+}
+
+/// The LAGGED-credit harm observations a being makes on a harm tick (the being-percept keystone, step 4, the
+/// harm-path eligibility trace): one being-signal harm observation per subject still remembered in the
+/// perceiver's harm-eligibility [`EligibilityTrace`], each toward `HARMS` on a harm tick and `BENIGN`
+/// otherwise, weighted by the reserved harm observation weight scaled by the being's plasticity AND the
+/// subject's decayed eligibility. So a being-signal perceived several ticks BEFORE the harm still earns
+/// partial credit, falling with the ticks since it was perceived (the trace's decay), which is what lets a
+/// predator-approach cue perceived at a distance be credited to the harm that follows: the lagged distal
+/// association the same-tick [`being_signal_observation`] cannot form, load-bearing for the predation payoff.
+/// The trace is the perceiver's OWN (recording the being-signals it perceived); the harm bit is its own
+/// [`crate::homeostasis::is_harm_tick`]; nothing reads a species, trophic role, or being-hood. Pure and OFF
+/// the run path (no live caller): the keystone's live wire (step 6) records each perceived being-signal into
+/// the harm-eligibility trace, decays it each tick by the reserved harm eligibility latency, and calls this
+/// on the being's harm bit, so this is byte-neutral by construction. The environmental-feature harm path
+/// ([`feature_observations`]) is UNCHANGED and stays same-tick: only the being-signal path carries the trace.
+pub fn being_signal_trace_observations(
+    trace: &EligibilityTrace,
+    harm: bool,
+    plasticity: Fixed,
+    calib: &HarmLearningCalib,
+) -> Vec<FeatureObservation> {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    trace
+        .entries()
+        .map(|(&subject, &eligibility)| {
+            let credited = weight.checked_mul(eligibility).unwrap_or(Fixed::ZERO);
+            observation_toward(subject, harm, credited)
+        })
+        .collect()
+}
+
+/// The REWARD-frame counterpart of [`being_signal_observation`] (the being-percept keystone, step 2, the
+/// PREDATION pole's learner): a being correlates a perceived being-signal, keyed by its sense `channel` and
+/// discriminated `bucket`, with its OWN reward bit that tick ([`crate::homeostasis::is_reward_tick`], whether
+/// any reserve ROSE beyond the noise floor), minting one observation toward `REWARDS` on a reward tick and
+/// `NEUTRAL` otherwise, on the SAME [`being_signal_subject`] the harm core uses but fed into the disjoint
+/// `(subject, REWARD_ATTR)` frame. So perceiving a being that correlates with the perceiver's own reserves
+/// RISING (it ate) mints a reward belief on that being-signal, the substrate the predation pole rests on;
+/// perceiving a being that correlates with reserves FALLING mints the harm belief through
+/// [`being_signal_observation`]. Which belief forms, and so which pole a being later acts on, emerges from
+/// the being's own outcomes, never from a species, trophic role, or being-hood read.
+///
+/// Minted INLINE toward `REWARDS`/`NEUTRAL`, exactly as [`reward_observations`] does for a material feature,
+/// because the shared [`observation_toward`] helper is hardwired to the harm frame (`HARMS`/`BENIGN`) and a
+/// reward observation points the other way. The weight is the reserved reward observation weight scaled by
+/// the being's plasticity, reusing the existing reward likelihoods, never a new fabricated weight. Pure and
+/// OFF the run path (no live caller): the keystone's live wire consumes it, so this is byte-neutral by
+/// construction. The reserved derive targets and the eligibility-trace latency are the same ones
+/// [`being_signal_observation`] documents; they are shared, not re-listed here.
+pub fn being_signal_reward_observation(
+    channel: u16,
+    bucket: i64,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
+    being_signal_reward_for(
+        being_signal_subject(channel, bucket),
+        reward,
+        plasticity,
+        calib,
+    )
+}
+
+/// The being-signal REWARD observation for an ALREADY-PERCEIVED subject (the being-percept keystone, step 6,
+/// the live-wire reward pole): the subject-taking core of [`being_signal_reward_observation`], for the run
+/// path where the perceiver already holds the [`being_signal_subject`] it formed via
+/// [`perceive_being_signal`] rather than the raw channel and bucket. It mints a reward belief on that subject
+/// toward `REWARDS` on a reward tick and `NEUTRAL` otherwise, weighted by the reserved reward observation
+/// weight scaled by the being's plasticity, the reward-frame sibling of the harm-frame [`observation_toward`]
+/// (which is hardwired to `HARMS`/`BENIGN`), reusing the existing reward likelihoods, never a fabricated
+/// weight.
+pub fn being_signal_reward_for(
+    subject: StableId,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    FeatureObservation {
+        subject,
+        toward: if reward { REWARDS } else { NEUTRAL },
+        weight,
+    }
+}
+
+/// Perceive a being-signal from one emitter's resolved [`Reach`] and mint the belief subject the perceiver
+/// keys its valence on, or `None` if the signal does not clear the perceiver's OWN detection threshold (the
+/// emitter is out of reach, occluded by the strata, or too faint for this perceiver's sense). The
+/// being-percept keystone, step 3a: the alien-clean consumption of the reach (slice 1) and the
+/// sensorium-gated percept (slice 2). The received magnitude is the geometrically-spread reach attenuated by
+/// the medium's Beer-Lambert transmittance `exp(-optical_depth)`, the transcendental
+/// [`crate::perception_reach::Reach`] reports-then-defers to its consumer, so a strongly absorbing medium
+/// (rock between the two) drives the transmittance toward zero and the emitter is not perceived: occlusion
+/// emerges from the strata, no authored line-of-sight. [`sense`] transduces that magnitude through the
+/// PERCEIVER's own channel transduction and gates it on the perceiver's own threshold; the discriminated
+/// bucket keys [`being_signal_subject`]. Keyed on the EMISSION on a channel and the resolved reach, never on
+/// a species, kingdom, trophic role, relatedness, or being-hood of the emitter (the emitter is a source of a
+/// signal, whether a being or a fire). Pure and off the run path (no live caller): the keystone's live wire
+/// (step 6) resolves each emitter's own emitted power and medium ([`crate::perception_reach::resolve_reach`],
+/// where the emission assembly and the material field live) and calls this per perceived emitter and channel,
+/// so this is byte-neutral by construction.
+pub fn perceive_being_signal(
+    reach: Reach,
+    channel: u16,
+    transduction: &ChannelTransduction,
+    activation_max: Fixed,
+) -> Option<StableId> {
+    // The received magnitude is the geometric spread attenuated by the medium's transmittance, the
+    // Beer-Lambert `exp(-optical_depth)` the reach substrate defers to here. The optical depth is
+    // non-negative and capped, so the transmittance is in (0, 1] and the product cannot exceed the spread
+    // nor overflow.
+    let transmittance = (-reach.optical_depth).exp();
+    let magnitude = reach
+        .spread
+        .checked_mul(transmittance)
+        .unwrap_or(Fixed::ZERO);
+    let percept = sense(magnitude, transduction, activation_max)?;
+    Some(being_signal_subject(channel, percept.bucket))
+}
+
+/// The being-directed belief gradient (the being-percept keystone, step 3b): over the perceived emitters
+/// (each a position and the [`being_signal_subject`] the perceiver formed for it via
+/// [`perceive_being_signal`]), the summed inverse-distance vector over every emitter the perceiver holds the
+/// committed belief `committed` about on attribute `attr`, pointing AWAY from each such emitter when `toward`
+/// is false (avoidance) and TOWARD it when true (attraction). A nearer emitter contributes harder (weight
+/// `1/d`); a perceiver that believes nothing of the kind nearby gets a zero gradient. The being-directed
+/// mirror of the material [`avoidance_gradient`] / [`attraction_gradient`], keyed on the perceived signal's
+/// LEARNED belief, never on a species, kingdom, trophic role, relatedness, or being-hood. The horizontal
+/// `(x, y)` direction only, matching the 2D heading the controller moves by (the reach already accounted for
+/// the vertical separation in perceptibility). Pure and RNG-free.
+fn being_directed_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    attr: AttrKindId,
+    committed: ValueId,
+    toward: bool,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    for &(pos, subject) in perceived {
+        if mind.belief(subject, attr, params) != Some(committed) {
+            continue;
+        }
+        let dx = pos.x - here.x;
+        let dy = pos.y - here.y;
+        // Skip a co-located emitter (no direction) and a separation whose square overflows i32: an emitter
+        // that far has negligible reach and would not clear the threshold to be perceived anyway.
+        let d2i = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+        if d2i == 0 || d2i > i32::MAX as i64 {
+            continue;
+        }
+        let d2 = Fixed::from_int(d2i as i32);
+        // `(dx, dy)/d2` points TOWARD the emitter, `(-dx, -dy)/d2` AWAY; weighted by inverse distance.
+        let (sx, sy) = if toward { (dx, dy) } else { (-dx, -dy) };
+        if let (Some(cx), Some(cy)) = (
+            Fixed::from_int(sx).checked_div(d2),
+            Fixed::from_int(sy).checked_div(d2),
+        ) {
+            ax = ax.saturating_add(cx);
+            ay = ay.saturating_add(cy);
+        }
+    }
+    (ax, ay)
+}
+
+/// The being-directed expected-HARM avoidance gradient (the being-percept keystone, step 3b): the
+/// being-directed mirror of [`avoidance_gradient`], the raw inverse-distance sum pointing away from every
+/// perceived emitter the perceiver holds a committed `HARMS` belief about. This is a PERCEPT, not a heading:
+/// the runner feeds it into the controller's direction slot, and only a heritable FREELY-SIGNED weight lifted
+/// off founder-zero by selection turns it into avoidance (a positive weight, fleeing a believed-harmful
+/// emitter) or approach (a negative weight, a being drawn to a harm-predicting emitter, a parasite or
+/// scavenger), so the approach/avoid SIGN emerges rather than being authored (Principle 9). The caller
+/// normalises the raw sum to a unit percept, exactly as the material gradient is normalised.
+pub fn being_avoidance_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, HARM_ATTR, HARMS, false, params)
+}
+
+/// The being-directed expected-REWARD attraction gradient (the being-percept keystone, step 3b, the PREDATION
+/// pole): the being-directed mirror of [`attraction_gradient`], the raw inverse-distance sum pointing toward
+/// every perceived emitter the perceiver holds a committed `REWARDS` belief about. A PERCEPT, not a heading,
+/// the exact behavioural mirror of [`being_avoidance_gradient`]: only a heritable freely-signed weight off
+/// founder-zero turns it into approach (a positive weight, pursuing a believed-rewarding emitter, predation)
+/// or avoidance (a negative weight), so the sign emerges (Principle 9). The caller normalises the raw sum to
+/// a unit percept.
+pub fn being_attraction_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, REWARD_ATTR, REWARDS, true, params)
+}
+
+/// The being-percept feature's run-path configuration (the being-percept keystone, step 6, the live wire):
+/// everything the perceive phase needs to run the being-directed perception and learning for one world. The
+/// SUBSTRATE bindings are labelled dev fixtures and floor data (the sense channel a being emits and is
+/// perceived on, its reach binding, the perceiver's transduction, the physics reach caps, and the sensorium
+/// activation cap), and the two RESERVED values are the owner's, surfaced with basis and read fail-loud from
+/// the manifest at the feature arming, never fabricated (Principle 11): the emission coupling coefficient
+/// (`physiology::being_signal_emission`'s lever) and the harm eligibility-trace decay lambda. A world that
+/// does not arm being-percept carries `None` and is byte-identical.
+///
+/// Honest limit (flagged, not a defect): the substrate bindings are labelled fixtures for the payoff, not
+/// per-being anatomy-derived. The perceiver transduction is a single world-global fixture rather than each
+/// being's own [`crate::perception_percept::derive_optical_transduction`] over its evolved eye, and the
+/// channel and reach binding are the dev-fixture optical pair. Deriving the transduction per being from its
+/// anatomy (slice 2's reserved-sense-params kernel) and binding the channel from the world's sensorium data
+/// is the flagged follow-on; the reserved emission coupling and eligibility lag are the owner's calibration
+/// the payoff needs first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeingPerceptField {
+    /// The sense channel a being emits on and is perceived on (the thermal/optical channel today; a
+    /// non-optical channel is the flagged alien follow-on the receiver reserves fail-loud).
+    pub channel: SenseChannelId,
+    /// The channel's reach binding: the spreading law and the medium absorption axis the signal attenuates by
+    /// along the path, so occlusion emerges from the strata rather than an authored line-of-sight rule.
+    pub row: ChannelReach,
+    /// The perceiver's transduction on the channel: its response law and gain, its discrimination law and
+    /// step, and its detection threshold (the sole perceptibility gate, slice 2's condition 3).
+    pub transduction: ChannelTransduction,
+    /// The physics reach caps: the geometric sphere coefficient for the derived dimensionality, the irradiance
+    /// cap the spread saturates at, and the optical-depth cap the medium attenuation saturates at (the
+    /// occlusion limit). Engine-mechanics representability bounds, not owner values.
+    pub bounds: ReachBounds,
+    /// The sensorium activation cap the transduced percept saturates at. Engine-mechanics.
+    pub activation_max: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the per-being emission coupling
+    /// coefficient the emitter's [`crate::physiology::being_signal_emission`] scales its blackbody radiant
+    /// flux by. Basis: the body's covering emissivity times its radiating area, folded into one lever until a
+    /// per-body material-and-area vector exists on the run path to split it (the gate-ruled follow-on).
+    pub emission_coefficient: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the temporal-difference lambda the
+    /// being-signal HARM eligibility trace decays by each tick. Basis: the interoceptive lag between
+    /// perceiving a being-signal (a predator approaching) and the harm that follows; the harm sibling of the
+    /// reward pole's `reward.eligibility_decay`, set relative to it. In (0, 1).
+    pub harm_eligibility_decay: Fixed,
+}
+
+impl BeingPerceptField {
+    /// A labelled DEVELOPMENT FIXTURE, not owner data: the dev optical channel and its reach binding, a linear
+    /// perceiver transduction with a modest gain, a small detection threshold, and a unit discrimination step,
+    /// the D=3 physics reach caps (the sphere coefficient `4*pi` derived from `Fixed::PI`, not a truncated
+    /// literal), and the two reserved values at their dev-fixture defaults. The real substrate is the world's
+    /// data and the reserved values are the owner's; this stands up the harness and test paths.
+    pub fn dev_fixture() -> BeingPerceptField {
+        let row = ChannelReachRegistry::dev_terran()
+            .get(DEV_OPTICAL)
+            .expect("the dev optical reach row is present")
+            .clone();
+        let sphere_coeff = Fixed::from_int(4)
+            .checked_mul(Fixed::PI)
+            .expect("4*pi is representable");
+        BeingPerceptField {
+            channel: DEV_OPTICAL,
+            row,
+            transduction: ChannelTransduction {
+                response: ResponseLaw::Linear,
+                gain: Fixed::ONE,
+                shape: Fixed::ZERO,
+                discrimination: DiscriminationLaw::AbsoluteStep,
+                step: Fixed::ONE,
+                threshold: Fixed::from_ratio(1, 1_000_000),
+            },
+            bounds: ReachBounds {
+                sphere_coeff,
+                irrad_max: Fixed::from_int(1_000_000),
+                tau_max: Fixed::from_int(1_000),
+            },
+            activation_max: Fixed::from_int(1_000_000),
+            emission_coefficient: Fixed::from_ratio(1, 2),
+            harm_eligibility_decay: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// The being-percept field read at the feature arming: the labelled fixture substrate bindings with the
+    /// two RESERVED values read fail-loud from the manifest (Principle 11). A world that arms being-percept
+    /// under `Profile::Calibrated` refuses while either reserved value is unset rather than fabricating one,
+    /// exactly the gated-feature-calib pattern the reward and conviction learners follow (the value refuses AT
+    /// the feature arming, not at an earlier always-on gate).
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<BeingPerceptField, CalibrationError> {
+        let mut field = BeingPerceptField::dev_fixture();
+        field.emission_coefficient = m.require_fixed("being_percept.emission_coefficient")?;
+        field.harm_eligibility_decay = m.require_fixed("harm.eligibility_decay")?;
+        Ok(field)
+    }
+
+    /// The channel id as the 16-bit channel field the being-signal subject packs (the subject band's channel
+    /// slot). The dev optical channel is `1`, well within the field; a world whose channel id exceeds the
+    /// field is the reserved widened-pack the gate ruled to Agent B's hybrid encoding.
+    pub fn channel_u16(&self) -> u16 {
+        self.channel.0 as u16
+    }
 }
 
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
@@ -814,6 +1218,370 @@ mod tests {
         assert_eq!(benign[0].subject, harm[0].subject);
         // A cell with no present feature yields nothing to correlate.
         assert!(feature_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+    }
+
+    #[test]
+    fn a_being_signal_earns_a_valence_observation_pointed_by_the_harm_bit() {
+        // Slice 3 core: a perceived being-signal (channel, bucket) correlated with the being's own harm bit
+        // mints one observation toward HARMS on a harm tick, BENIGN otherwise, on its own subject.
+        let calib = HarmLearningCalib::dev_default();
+        let harm = being_signal_observation(2, 7, true, Fixed::ONE, &calib);
+        assert_eq!(harm.toward, HARMS, "a harm tick points toward HARMS");
+        assert_eq!(
+            harm.subject,
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal's own band"
+        );
+        assert!(harm.weight > Fixed::ZERO, "positive evidence weight");
+        let benign = being_signal_observation(2, 7, false, Fixed::ONE, &calib);
+        assert_eq!(
+            benign.toward, BENIGN,
+            "a harm-free tick points toward BENIGN"
+        );
+        assert_eq!(
+            benign.subject, harm.subject,
+            "the same signal is the same subject"
+        );
+    }
+
+    #[test]
+    fn a_being_signal_is_learned_through_the_same_learner_on_its_own_disjoint_subject() {
+        // The being-signal is fed through the exact same LEARNER: for the same channel, bucket, harm bit, and
+        // plasticity, the valence direction and evidence weight match what the environmental learner mints, so
+        // no "communication" path is special-cased and the valence emerges receiver-side from correlation
+        // alone. But the SUBJECT is disjoint (the keystone step-1 namespace fix): a being-signal on channel c
+        // mints in the being-signal band, never the environmental-feature band, so the two beliefs never
+        // alias even at the same channel and bucket.
+        let calib = HarmLearningCalib::dev_default();
+        // An environmental feature whose amount buckets to a known bucket on channel 0.
+        let amount = Fixed::from_int(2);
+        let bucket = feature_bucket(amount, calib.feature_granularity);
+        let env = feature_observations(true, &[amount], Fixed::ONE, &calib);
+        let sig = being_signal_observation(0, bucket, true, Fixed::ONE, &calib);
+        assert_eq!(sig.toward, env[0].toward, "same valence direction");
+        assert_eq!(
+            sig.weight, env[0].weight,
+            "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, env[0].subject,
+            "disjoint from the environmental-feature subject at the same channel and bucket"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_weight_scales_by_plasticity() {
+        // The weight is the existing learner's observation weight scaled by the being's plasticity (a
+        // keener learner extracts more evidence per observation), reusing the reserved likelihoods.
+        let calib = HarmLearningCalib::dev_default();
+        let base = being_signal_observation(1, 3, true, Fixed::ONE, &calib);
+        let keen = being_signal_observation(1, 3, true, Fixed::from_int(2), &calib);
+        assert_eq!(base.weight, calib.observation_weight());
+        assert!(
+            keen.weight > base.weight,
+            "a higher plasticity extracts more evidence"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_band_is_disjoint_from_the_feature_and_sequence_bands() {
+        // Keystone step 1: a being-signal subject sets bit 60 (with bit 62), so it never equals a feature
+        // subject (bit 60 clear, its payload in the low 48 bits) nor a sequence subject (bit 61 set, clear
+        // here), whatever the channel and bucket, so a being's learned valence about a perceived signal never
+        // aliases a belief about a standing-on feature or a discovered action, even at the same channel and
+        // bucket (the section-9 slice-3 aliasing seam, closed by construction).
+        for ch in 0..8u16 {
+            for bk in 0..8i64 {
+                assert_ne!(
+                    being_signal_subject(ch, bk).0,
+                    feature_subject(ch, bk).0,
+                    "disjoint from the feature band at the same channel and bucket"
+                );
+            }
+        }
+        // The band markers: the being-signal band sets bit 60 and clears bit 61; the feature band clears bit
+        // 60; the sequence band sets bit 61. So the three bands are pairwise disjoint by their marker bits.
+        assert_eq!(
+            being_signal_subject(0, 0).0 & (1 << 60),
+            1 << 60,
+            "being-signal band marker (bit 60) set"
+        );
+        assert_eq!(
+            being_signal_subject(u16::MAX, i64::MAX).0 & (1 << 61),
+            0,
+            "being-signal band leaves bit 61 clear, disjoint from the sequence band"
+        );
+        assert_eq!(
+            feature_subject(0, 0).0 & (1 << 60),
+            0,
+            "feature band leaves bit 60 clear"
+        );
+        assert_eq!(
+            SEQUENCE_SUBJECT_BASE & (1 << 61),
+            1 << 61,
+            "sequence band sets bit 61"
+        );
+        assert!(
+            being_signal_subject(u16::MAX, i64::MAX).0 < (1 << 63),
+            "stays below the reserved-high landmark ids, exactly as the feature and sequence bands do"
+        );
+    }
+
+    #[test]
+    fn perceive_being_signal_gates_on_the_perceivers_threshold_and_occlusion() {
+        use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
+        // A perceiver whose channel transduces linearly at unit gain, with a detection threshold of 10.
+        let transduction = ChannelTransduction {
+            response: ResponseLaw::Linear,
+            gain: Fixed::ONE,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::from_int(10),
+        };
+        let cap = Fixed::from_int(1_000_000);
+        // A strong, unoccluded reach (spread 100, no optical depth) clears the threshold and mints the
+        // subject in the being-signal band, keyed on the channel and the discriminated bucket.
+        let clear = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ZERO,
+        };
+        let expected_bucket = sense(Fixed::from_int(100), &transduction, cap)
+            .expect("an unoccluded strong signal is sensed")
+            .bucket;
+        assert_eq!(
+            perceive_being_signal(clear, 5, &transduction, cap),
+            Some(being_signal_subject(5, expected_bucket)),
+            "an above-threshold reach mints the being-signal subject on its channel and bucket"
+        );
+        // The SAME emission behind a strongly-absorbing medium (a large optical depth) is attenuated below
+        // the threshold by the Beer-Lambert transmittance, so occlusion emerges and the emitter is not
+        // perceived, with no authored line-of-sight rule.
+        let occluded = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::from_int(20),
+        };
+        assert_eq!(
+            perceive_being_signal(occluded, 5, &transduction, cap),
+            None,
+            "a strongly occluded emitter falls below the perceiver's threshold"
+        );
+        // A faint emission below the threshold is not perceived either.
+        let faint = Reach {
+            spread: Fixed::from_int(1),
+            optical_depth: Fixed::ZERO,
+        };
+        assert_eq!(
+            perceive_being_signal(faint, 5, &transduction, cap),
+            None,
+            "a sub-threshold emission is not perceived"
+        );
+    }
+
+    #[test]
+    fn the_being_directed_gradients_point_by_the_learned_belief_and_are_zero_without_it() {
+        let subject = being_signal_subject(5, 3);
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        let perceived = [(east, subject)];
+        // A perceiver with NO belief reads a zero gradient on both poles: founder-inert until a belief forms
+        // and an evolved weight lifts it (Principle 9).
+        let blank = Mind::new(StableId(20), Fixed::ONE);
+        assert_eq!(
+            being_avoidance_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no avoidance without a harm belief"
+        );
+        assert_eq!(
+            being_attraction_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction without a reward belief"
+        );
+        // A perceiver that has learned this signal HARMS it: the avoidance gradient points WEST (away from
+        // the emitter to its east, negative x), and the attraction gradient stays zero.
+        let mut fearful = Mind::new(StableId(21), Fixed::ONE);
+        let harm_calib = HarmLearningCalib::dev_default();
+        for _ in 0..5 {
+            fearful.consider(
+                subject,
+                HARM_ATTR,
+                [HARMS, BENIGN],
+                HARMS,
+                harm_calib.observation_weight(),
+                fearful.id,
+            );
+        }
+        assert_eq!(
+            fearful.belief(subject, HARM_ATTR, &params()),
+            Some(HARMS),
+            "committed the harm belief"
+        );
+        let (ax, ay) = being_avoidance_gradient(&fearful, here, &perceived, &params());
+        assert!(
+            ax < Fixed::ZERO,
+            "avoidance points away from the due-east emitter (west, negative x)"
+        );
+        assert_eq!(
+            ay,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        assert_eq!(
+            being_attraction_gradient(&fearful, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction while the belief is harm"
+        );
+        // A perceiver that has learned this signal REWARDS it: the attraction gradient points EAST (toward
+        // the emitter, positive x), the predation pole; the sign a being ACTS on is still the evolved weight.
+        let mut hungry = Mind::new(StableId(22), Fixed::ONE);
+        let reward_calib = RewardLearningCalib::dev_default();
+        for _ in 0..5 {
+            hungry.consider(
+                subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                reward_calib.observation_weight(),
+                hungry.id,
+            );
+        }
+        assert_eq!(
+            hungry.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "committed the reward belief"
+        );
+        let (bx, by) = being_attraction_gradient(&hungry, here, &perceived, &params());
+        assert!(
+            bx > Fixed::ZERO,
+            "attraction points toward the due-east emitter (positive x), the predation pole"
+        );
+        assert_eq!(
+            by,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+    }
+
+    #[test]
+    fn the_harm_eligibility_trace_credits_each_remembered_subject_by_its_decayed_eligibility() {
+        let calib = HarmLearningCalib::dev_default();
+        let recent = being_signal_subject(3, 1);
+        let older = being_signal_subject(3, 2);
+        let mut trace = EligibilityTrace::new();
+        trace.record(older); // perceived first
+        trace.decay(Fixed::from_ratio(1, 2)); // and one tick older now, decayed to 1/2
+        trace.record(recent); // perceived this tick, full eligibility one
+        let base = calib.observation_weight();
+        // On a HARM tick, each remembered being-signal earns a harm observation weighted by base times its
+        // decayed eligibility: the just-perceived signal earns full credit, the distal one less, so a
+        // predator-approach cue perceived a tick before the harm is still credited (the lagged association).
+        let obs = being_signal_trace_observations(&trace, true, Fixed::ONE, &calib);
+        assert_eq!(obs.len(), 2, "one observation per remembered being-signal");
+        assert!(
+            obs.iter().all(|o| o.toward == HARMS),
+            "a harm tick credits toward HARMS"
+        );
+        let recent_obs = obs
+            .iter()
+            .find(|o| o.subject == recent)
+            .expect("recent credited");
+        let older_obs = obs
+            .iter()
+            .find(|o| o.subject == older)
+            .expect("older credited");
+        assert_eq!(
+            recent_obs.weight, base,
+            "the just-perceived signal earns full credit"
+        );
+        assert_eq!(
+            older_obs.weight,
+            base.checked_mul(Fixed::from_ratio(1, 2)).unwrap(),
+            "the distal signal earns decayed credit"
+        );
+        assert!(
+            older_obs.weight < recent_obs.weight,
+            "a more distal perception earns less credit"
+        );
+        // On a harm-free tick the same subjects are credited toward BENIGN.
+        let benign = being_signal_trace_observations(&trace, false, Fixed::ONE, &calib);
+        assert!(
+            benign.iter().all(|o| o.toward == BENIGN),
+            "a harm-free tick credits toward BENIGN"
+        );
+        // An empty trace credits nothing (the byte-neutral opt-out state).
+        assert!(
+            being_signal_trace_observations(&EligibilityTrace::new(), true, Fixed::ONE, &calib)
+                .is_empty(),
+            "an empty trace credits nothing"
+        );
+    }
+
+    #[test]
+    fn a_being_signal_earns_a_reward_observation_pointed_by_the_reward_bit() {
+        // Keystone step 2 (the predation pole): a perceived being-signal correlated with the being's own
+        // reward bit mints one observation toward REWARDS on a reward tick, NEUTRAL otherwise, on the SAME
+        // being-signal subject the harm core uses (disjoint frames by attribute), so a perceived being carries
+        // both a harm belief and a reward belief that emerge from the perceiver's own outcomes.
+        let calib = RewardLearningCalib::dev_default();
+        let rewarded = being_signal_reward_observation(2, 7, true, Fixed::ONE, &calib);
+        assert_eq!(
+            rewarded.toward, REWARDS,
+            "a reward tick points toward REWARDS"
+        );
+        assert_eq!(
+            rewarded.subject,
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal band"
+        );
+        assert!(rewarded.weight > Fixed::ZERO, "positive evidence weight");
+        let neutral = being_signal_reward_observation(2, 7, false, Fixed::ONE, &calib);
+        assert_eq!(
+            neutral.toward, NEUTRAL,
+            "a reward-free tick points toward NEUTRAL"
+        );
+        // The reward core and the harm core share the SAME subject (one perceived signal, two disjoint belief
+        // frames), so a being's harm and reward beliefs about a signal never split across subjects.
+        let hcalib = HarmLearningCalib::dev_default();
+        let harm = being_signal_observation(2, 7, true, Fixed::ONE, &hcalib);
+        assert_eq!(
+            rewarded.subject, harm.subject,
+            "harm and reward beliefs share the being-signal subject"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_reward_core_mints_inline_like_the_material_reward_core() {
+        // The being-signal reward core is fed through the same INLINE reward mint the material reward learner
+        // uses: for the same channel, bucket, reward bit, and plasticity, the valence direction and evidence
+        // weight match reward_observations, so no being path is special-cased; only the SUBJECT differs (the
+        // disjoint being-signal band), so a being-signal reward belief never aliases a material one.
+        let calib = RewardLearningCalib::dev_default();
+        let amount = Fixed::from_int(2);
+        let bucket = feature_bucket(amount, calib.feature_granularity);
+        let mat = reward_observations(true, &[amount], Fixed::ONE, &calib, 0);
+        let sig = being_signal_reward_observation(0, bucket, true, Fixed::ONE, &calib);
+        assert_eq!(
+            sig.toward, mat[0].toward,
+            "same valence direction (REWARDS)"
+        );
+        assert_eq!(
+            sig.weight, mat[0].weight,
+            "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, mat[0].subject,
+            "disjoint from the material-feature reward subject"
+        );
     }
 
     #[test]

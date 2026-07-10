@@ -636,6 +636,22 @@ unit = "ratio_per_tick"
 source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
 
 [[reserved]]
+id = "harm.eligibility_decay"
+basis = "FIXTURE placeholder; the temporal-difference lambda the being-signal harm eligibility trace decays by each tick, so a being-signal perceived some ticks before a harm still credits it (the predator-approach cue)"
+status = "set"
+value = "0.5"
+unit = "ratio_per_tick"
+source = "being-percept keystone step 6; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "being_percept.emission_coefficient"
+basis = "FIXTURE placeholder; the per-being emission coupling coefficient the emitter's thermal self-emission is scaled by (radiant_emission(body_temp) times this), the fraction of a being's blackbody radiant power that couples into the perceptible signal channel"
+status = "set"
+value = "0.5"
+unit = "dimensionless"
+source = "being-percept keystone step 6; crates/sim/src/physiology.rs; crates/sim/src/learn.rs"
+
+[[reserved]]
 id = "discovery.exploration_floor"
 basis = "FIXTURE placeholder; the baseline probability of trying a non-top-belief binding, so a being still explores when it already has a rewarded habit (the exploration-versus-exploitation floor)"
 status = "set"
