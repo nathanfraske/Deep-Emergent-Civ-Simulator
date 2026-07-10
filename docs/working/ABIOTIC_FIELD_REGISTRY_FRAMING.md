@@ -427,7 +427,7 @@ writes on every cell and which `set_producer_food` explicitly excludes from the 
 producer-food cell the marker also stripped the `food_energy_density` anchor off the water axis, scaling water intake
 there differently from a bare cell (by the anchor factor), a consequence the cell-level ruling did not intend: the
 anchor is a food-content bridge, and water is not a producer-composition axis. The fix keys the marker PER CLASS: it
-carries the set of nutrient classes the cell's `producer_food` actually holds (the food axes), so the supersession
+carries the set of nutrient classes the cell's `producer_food` holds (the food axes), so the supersession
 applies only to those, and the water mirror and any non-composition axis keep the anchor on a producer cell exactly as
 on a bare cell. Verified byte-neutral: the four pins hold bit-exact (2b7e1035 / 1873c44e / 4eea5d06 / bae5a82), and
 `--scenario living` is ALSO byte-identical (final hash 07d867a5 unchanged), because the leak was unreachable in the
@@ -490,3 +490,55 @@ Two cross-surface touchpoints with Agent A, so the Nernst is NOT a solo build an
 The environ side (`effective_conversion`, the redox binding, temperature access) is mine. The floor DATA growth (the
 `chem.electron_count` axis in the chem floor toml, the universal R and F constants) is floor data, to place where the
 existing constants live. Surfacing this to the gate with the framing result; no edit to A's files until it sequences.
+
+## Corrected-Nernst blind framing: the section-10 panel result (surfaced to the gate, no code until it rules)
+
+The section-10 blind framing panel (five diverse lenses, behind a section-11 smoke test that failed closed four
+times until the statement was neutral and the three efficiency architectures symmetric) returned a decisive set of
+findings. The load-bearing ones are verified against source. This reshapes the Nernst well beyond the four seams
+originally ruled, so it goes to the gate before any code.
+
+Efficiency placement (the emergence-critical crux). Two lenses independently rule architecture B out: folding a
+per-lineage efficiency scalar into the per-cell ENVIRONMENTAL yield makes an abiotic source's output depend on WHICH
+lineage draws on it, so on a cell two lineages share the environmental field has no single value, breaking observer
+independence (Principle 10) and writing a biological outcome into an abiotic field (Principle 9). Verified against
+source: `effective_conversion` is per-cell environmental (feeds the cell's biomass capacity), so B is a defect, not a
+neutral option. Between A (environment = thermodynamic maximum, efficiency a downstream consumer scalar) and C (no
+authored scalar, throughput emerges from the being's modeled metabolic machinery), the panel ranks C over A: an
+efficiency SCALAR authors the FUNCTIONAL FORM of extraction, not merely a value, since `realized = efficiency *
+ceiling` imposes linear proportionality where real throughput saturates and is kinetically governed. C lets both the
+value and the form emerge and supplies the intrinsic cost that A lacks. A is a defensible interim (it keeps the floor
+clean and matches the existing observer-independent food-path separation, `physical_intake` folding a consumer's
+own assimilation over an environmental content), but only if two defects are fixed: the efficiency cap belongs in the
+floor as a conservation constant (efficiency <= 1, since efficiency > 1 manufactures energy, so it is NOT an
+owner-reserved genome-range convention), and without an antagonistic cost a free efficiency good ramps under selection
+straight to its bound, so the realized value is just the authored ceiling.
+
+Physics and floor-integrity seams, verified against source. The Nernst core computes an ENERGY (n*F*E, joules), but
+`effective_conversion` returns a biomass-per-stock, so the energy-to-biomass stoichiometric bridge (the current
+`emf_to_biomass`) does NOT go away: the design's premise that n*F*E replaces it is wrong, and a carbon-fixation-style
+energy-to-biomass conversion is still required. The RT/nF term reduces algebraically to (k_B/e)(T/n), so the
+Avogadro/mole convention folded into R and F individually cancels: the floor already carries the elementary charge
+(`elec.charge`, unit C) but not Boltzmann k_B, so deriving from k_B and the carrier charge is cleaner and more general
+than authoring both a molar R and a Faraday F (and it avoids hardcoding the Terran electron as the charge carrier).
+The Nernst potential is an EQUILIBRIUM state function (zero net current), so multiplying it by n*F with no kinetic or
+rate-limiting term (exchange current, catalytic turnover, diffusion flux) omits what sets a per-tick yield.
+E0 (`battery_emf`) is treated as temperature-invariant, omitting dE0/dT, the real temperature dependence of the
+standard potential itself. The per-couple `max(0, E_cell)` clamp forecloses emergent energy COUPLING (a lineage
+running a thermodynamically uphill couple by coupling it to a downhill one, which real chemolithotrophs do): the
+correct clamp is on the NET free energy across coupled reactions, so the defect is the per-couple GRANULARITY, not the
+clamp itself. The activity coefficient gamma defaulting to 1 silently bakes the Terran ideal-dilute-aqueous reference
+state into every world, and the activity law is not shown to be a data-defined extensible registry (the generalization
+seam the resolution workflow exists to catch). The existing `law.faraday_emf` (electromagnetic induction) and a new
+electrochemical Faraday would collide on the name (a floor-integrity hygiene risk), and the existing per-substance R_s
+should derive from a universal R and molar mass rather than stand as its own authored value (a prior floor seam this
+exposes). Determinism: the cross-tick stock-depletion-to-Q feedback and the temperature-field read both have
+field-step-order hazards with no specified deterministic resolution protocol, and ln(Q) diverges to minus infinity as
+Q approaches zero (a normal early-reaction state), overflowing E_cell before the clamp, so the guard must bound it.
+
+Net: the corrected Nernst is a larger design than the four seams ruled. The gate and owner decisions surfaced: the
+efficiency architecture (C emergent-machinery versus A downstream-scalar-with-floor-cap-and-cost, B ruled out); the
+energy-to-biomass bridge stays as a stoichiometric conversion; whether to derive the thermodynamic term from k_B and
+the carrier charge rather than authoring R and F; whether to add a kinetic rate term; the coupling GRANULARITY of the
+clamp; the gamma registry and its non-Terran default; dE0/dT; and the determinism protocols. Surfaced, not decided;
+no code until the gate rules.
