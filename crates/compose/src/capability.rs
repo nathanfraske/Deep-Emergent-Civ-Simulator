@@ -141,7 +141,11 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => &["opt.refractive_index"],
             CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
             CapabilityKernel::Crush => &["mat.compressive_strength"],
-            CapabilityKernel::Impact => &[],
+            CapabilityKernel::Impact => &[
+                "mat.fracture_strength",
+                "mech.cross_section_area",
+                "mech.stroke_length",
+            ],
         }
     }
 
@@ -161,7 +165,7 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => refract(mat, refs),
             CapabilityKernel::Shear => shear(geo, mat, refs, caps),
             CapabilityKernel::Crush => crush(geo, mat, refs, caps),
-            CapabilityKernel::Impact => impact(geo, refs),
+            CapabilityKernel::Impact => impact(geo, mat, refs),
         }
     }
 }
@@ -381,19 +385,23 @@ fn crush(
     )
 }
 
-/// The IMPACT read: is the part a percussion tool, and how good a one, from its MASS (the made-world arc,
-/// Section G, the mass payoff). The part's mass (exposed as `mech.mass`, its retained volume times its
-/// density, the extensive datum only a carried object supplies) swung at the reserved reference speed is a
-/// kinetic energy ([`laws::kinetic_energy`], on the kilojoule scale the law reports); if that energy clears
-/// the reserved reference strike energy (on the same kilojoule scale) the part strikes, graded above the
-/// threshold. A HEAVY part reads a high impact where a light one reads none, the distinction the
-/// geometry-and-stress contacts (pierce/shear/crush) cannot make. A massless part reads zero.
-fn impact(geo: &dyn Fn(&str) -> Fixed, refs: &CapabilityRefs) -> Fixed {
-    let mass = geo("mech.mass");
-    if mass <= Fixed::ZERO {
-        return Fixed::ZERO; // no mass exposed, no blow
-    }
-    let delivered = laws::kinetic_energy(mass, refs.reference_swing_velocity, ENERGY_GUARD);
+/// The IMPACT read: is the part a percussion tool, and how good a one, from its ACTUATOR WORK (the made-world
+/// arc, Section G). The part's actuating force (its strength stress `mat.fracture_strength` over its
+/// cross-section `mech.cross_section_area`, an N) over its own grown stroke `mech.stroke_length` is the energy
+/// it delivers ([`laws::actuator_work`], `F d`, a J); if that clears the reserved reference strike energy (on
+/// the same joule scale) the part strikes, graded above the threshold. A STRONG, thick, long-stroked part reads
+/// a high impact where a weak or short-stroked one reads none, the distinction derived from the part's own body
+/// rather than a world-global swing speed. A part with no actuating strength or no stroke reads zero.
+fn impact(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+) -> Fixed {
+    let force = match mat("mat.fracture_strength").checked_mul(geo("mech.cross_section_area")) {
+        Some(f) => f,
+        None => return Fixed::ONE, // an unrepresentably large force reads a full impact
+    };
+    let delivered = laws::actuator_work(force, geo("mech.stroke_length"), ENERGY_GUARD);
     normalize(
         sat_sub(delivered, refs.reference_strike_energy),
         refs.reference_strike_energy,
@@ -465,16 +473,11 @@ pub struct CapabilityRefs {
     /// compressive sibling of `reference_shear_resistance`; the capability is the face's deliverable stress
     /// over this reference, clamped to one. Surfaced reserved-with-basis, never fabricated.
     pub reference_compressive_resistance: Fixed,
-    /// The reference SWING SPEED (m/s) a percussion tool is graded at (`capability.swing_velocity`). Basis:
-    /// the tip speed a muscle-driven blow reaches (a mining or knapping strike), a kinematics datum set from
-    /// the being's limb-length and stroke rate; the impact kinetic energy is proportional to its square.
-    /// Surfaced reserved-with-basis, never fabricated.
-    pub reference_swing_velocity: Fixed,
     /// The reference STRIKE ENERGY a percussion tool must deliver to read as fully capable
-    /// (`capability.strike_energy`, on the KILOJOULE scale the kinetic-energy law reports). Basis: the kinetic
-    /// energy that fractures the reference target (its Griffith energy over the struck area), the energy a
-    /// fully-capable blow lands; the capability is the tool's delivered energy over this reference, clamped to
-    /// one. Surfaced reserved-with-basis, never fabricated.
+    /// (`capability.strike_energy`, on the JOULE scale the actuator-work law reports, `F d`). Basis: the energy
+    /// that fractures the reference target (its Griffith energy over the struck area), the energy a fully-capable
+    /// blow lands; the capability is the tool's delivered actuator work over this reference, clamped to one.
+    /// Surfaced reserved-with-basis, never fabricated.
     pub reference_strike_energy: Fixed,
 }
 
@@ -497,8 +500,7 @@ impl CapabilityRefs {
             reference_optical_contrast: dec("0.3"), // a lens-to-air index step that focuses (n~1.3)
             reference_shear_resistance: dec("3"), // MPa, soft-tissue/fibre shear strength a sever parts
             reference_compressive_resistance: dec("5"), // MPa, the compressive strength a crush must fail
-            reference_swing_velocity: dec("10"),        // m/s, a muscle-driven blow's tip speed
-            reference_strike_energy: dec("0.1"), // kJ (100 J), the energy a fully-capable blow lands
+            reference_strike_energy: dec("100"), // J, the actuator work a fully-capable blow lands
         }
     }
 }
@@ -872,42 +874,57 @@ mod tests {
     }
 
     #[test]
-    fn a_heavy_part_reads_an_impact_capability_a_light_or_massless_one_does_not() {
-        // The made-world arc, Section G, the mass payoff: the IMPACT kernel reads whether a part is a
-        // percussion tool, from its MASS alone (exposed as mech.mass). A heavy part swung at the reference
-        // speed delivers a kinetic energy above the reference strike energy and reads a full impact; a light
-        // one of the same swing delivers too little and reads zero; a massless part reads zero. This is the
-        // distinction the geometry-and-stress contacts cannot make: two identically-shaped parts differing
-        // only in mass read different impact.
+    fn a_strong_long_stroked_part_reads_an_impact_a_weak_or_strengthless_one_does_not() {
+        // The made-world arc, Section G: the IMPACT kernel reads whether a part is a percussion tool, from its
+        // ACTUATOR WORK (its strength stress over its cross-section, over its own grown stroke, F d), not its
+        // mass. A strong, long-stroked part delivers energy above the reference strike energy and reads a full
+        // impact; a weak one of the same geometry delivers too little and reads zero; a strengthless part, or one
+        // with no grown stroke, reads zero. The per-body strength, cross-section, and stroke replace the retired
+        // world-global swing speed.
         let fns = FunctionLawRegistry::dev_seed();
-        let refs = CapabilityRefs::dev_refs(); // swing 10 m/s, reference strike energy 0.1 kJ
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
         let caps = test_caps();
-        // mech.mass is the extensive datum the runner exposes (volume x density); here the test supplies it
-        // directly. A heavy 8 kg part delivers 0.4 kJ (above the 0.1 kJ reference); a light 0.8 kg part
-        // delivers 0.04 kJ (below it).
-        let heavy = geo_of([("mech.mass", "8")].into_iter().collect());
-        let light = geo_of([("mech.mass", "0.8")].into_iter().collect());
-        let none = mat_of(BTreeMap::new());
+        // The actuating geometry: a cross-section the force acts over and a grown stroke it acts across.
+        let geo = geo_of(
+            [
+                ("mech.cross_section_area", "1"),
+                ("mech.stroke_length", "1"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        // A STRONG actuator (fracture_strength 200): force 200 N over a 1 m stroke delivers 200 J, above the
+        // 100 J reference. A WEAK one (0.1): 0.1 J, below it.
+        let strong = mat_of([("mat.fracture_strength", "200")].into_iter().collect());
+        let weak = mat_of([("mat.fracture_strength", "0.1")].into_iter().collect());
+        let strengthless = mat_of(BTreeMap::new());
 
-        let impact_of = |geo: &dyn Fn(&str) -> Fixed| {
-            derive_capabilities(&fns, geo, &none, &refs, &caps)
-                .score(FunctionLawRegistry::ID_IMPACT)
+        let impact_of = |mat: &dyn Fn(&str) -> Fixed| {
+            derive_capabilities(&fns, &geo, mat, &refs, &caps).score(FunctionLawRegistry::ID_IMPACT)
         };
 
         assert!(
-            impact_of(&heavy) > Fixed::ZERO,
-            "a heavy part reads a percussion impact: {:?}",
-            impact_of(&heavy)
+            impact_of(&strong) > Fixed::ZERO,
+            "a strong long-stroked part reads a percussion impact: {:?}",
+            impact_of(&strong)
         );
         assert_eq!(
-            impact_of(&light),
+            impact_of(&weak),
             Fixed::ZERO,
-            "a light part of the same swing delivers too little energy and reads no impact"
+            "a weak actuator of the same geometry delivers too little energy and reads no impact"
         );
         assert_eq!(
-            impact_of(&geo_of(BTreeMap::new())),
+            impact_of(&strengthless),
             Fixed::ZERO,
-            "a massless part delivers no blow"
+            "a strengthless part delivers no blow"
+        );
+        // A part with no grown stroke reads no impact even when strong (the absence convention).
+        let no_stroke = geo_of([("mech.cross_section_area", "1")].into_iter().collect());
+        assert_eq!(
+            derive_capabilities(&fns, &no_stroke, &strong, &refs, &caps)
+                .score(FunctionLawRegistry::ID_IMPACT),
+            Fixed::ZERO,
+            "a part with no grown stroke delivers no blow"
         );
     }
 

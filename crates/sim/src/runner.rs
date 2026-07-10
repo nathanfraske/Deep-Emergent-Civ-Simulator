@@ -2340,6 +2340,36 @@ impl Embodiment {
         freed
     }
 
+    /// The actuating FORCE and STROKE the ACTING SYSTEM brings to a strike on `row`'s channel. For a BARE
+    /// strike (step 1, byte-neutral) this reads the acting Segment's OWN grown body: the force is its strength
+    /// stress (`row.strength_axis`) over its cross-section (`row.cross_section_axis`), an N, and the stroke is its
+    /// own grown `mech.stroke_length` (`row.stroke_axis`), the distance the force acts over. Both are per-body
+    /// grown data, so the delivered actuator work (`F d`) carries no world-global swing speed and no free mass
+    /// term (the stroke-rate substrate).
+    ///
+    /// Factored as ONE read over the acting SYSTEM so the DERIVED TOOL-GEOMETRY mass-payoff (the arc's follow-on
+    /// (b), the honest "heavier or longer tool hits harder") drops in ADDITIVELY here, coupled to the
+    /// wielded-tool / made-world path: a longer wielded tool extends the effective `stroke` and a heavier one the
+    /// sustainable `force`, an additive read on the SAME `F d` law and the same stroke-distance axis, never a
+    /// re-foundation. The substrate is shaped to admit it (the do-not-forbid-the-follow-on discipline); the free
+    /// tool-mass term the old form carried is not restored, the founded coupling is. `cap` is the representability
+    /// ceiling an unrepresentable force saturates to.
+    fn acting_force_and_stroke(
+        seg: &crate::morphogen::Segment,
+        row: &crate::contact_transfer::ContactTransfer,
+        cap: Fixed,
+    ) -> (Fixed, Fixed) {
+        let force = seg
+            .mat(&row.strength_axis)
+            .checked_mul(seg.geo(&row.cross_section_axis))
+            .unwrap_or(cap);
+        let stroke = seg.geo(&row.stroke_axis);
+        // Follow-on (b), the derived tool-geometry mass-payoff: when a tool is wielded, add its stroke extension
+        // to `stroke` and its sustainable-force contribution to `force` HERE (an additive read on the same law),
+        // coupled to the wielded-tool path. Bare-limb reads only for step 1 (byte-neutral).
+        (force, stroke)
+    }
+
     /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff):
     /// swing the WIELDED tool and fracture the matter underfoot with the blow's kinetic energy. The tool's own
     /// MASS (its retained volume times its substance density, [`WieldedTool::mass`], the extensive datum only
@@ -2365,25 +2395,44 @@ impl Embodiment {
         else {
             return Fixed::ZERO;
         };
+        // The channel the strike delivers through: the first registered contact-transfer row, whose kernel drives
+        // the actuator-work resolve. An empty registry declares no channel, so no strike fires (the opt-in absence).
+        let Some((_, row)) = self.contact_transfer.iter().next() else {
+            return Fixed::ZERO;
+        };
+        let row = row.clone();
         let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
             return Fixed::ZERO;
         };
         let coord = w.coord();
         let Some(tool) = w.wielded.as_ref() else {
-            return Fixed::ZERO; // a strike needs a tool to swing (a bare being does not afford it)
+            return Fixed::ZERO; // a strike needs a tool to make contact with the matter underfoot
         };
-        let mass = tool.mass(reg);
-        if mass <= Fixed::ZERO {
-            return Fixed::ZERO; // a massless tool (no density or no volume) delivers no blow
+        let crack_area = tool.contact_area; // the struck face the tool concentrates the blow over
+                                            // The delivered energy is the WIELDER's greatest ACTUATOR WORK among its grown Structure Segments (its
+                                            // strength stress over its cross-section, over its own grown stroke), dispatched by the channel's kernel to
+                                            // the actuator-work law, on the JOULE scale the Griffith fracture energy (`mat.fracture_energy`, J/m^2, over
+                                            // the struck area) is on, so the comparison is on one scale with no kilojoule bridge. The tool concentrates
+                                            // the blow but delivers no work of its own (an inert tool carries no actuator): the mass a tool carries sets
+                                            // its tip speed, not the delivered energy (the gate-ruled drop of the free mass term; the tool-reach-to-stroke
+                                            // coupling is the flagged future). A blow beyond the representable range saturates to the ceiling.
+        let delivered_energy = {
+            let mut delivered = Fixed::ZERO;
+            if let Some(structure) = w.structure.as_ref() {
+                for seg in &structure.segments {
+                    let (force, stroke) =
+                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
+                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    if work > delivered {
+                        delivered = work;
+                    }
+                }
+            }
+            delivered
+        };
+        if delivered_energy <= Fixed::ZERO {
+            return Fixed::ZERO; // no actuating part with strength and stroke: no blow (the absence convention)
         }
-        let crack_area = tool.contact_area; // the struck face, the area the blow lands over
-                                            // The kinetic energy the blow delivers, on the law's KILOJOULE scale, then scaled to the JOULE scale
-                                            // the Griffith fracture energy is on (`mat.fracture_energy` is J/m^2), so the energy comparison is on
-                                            // one scale. A swing beyond the representable range saturates to the ceiling.
-        let ke_kj = laws::kinetic_energy(mass, params.swing_velocity, params.energy_max);
-        let delivered_energy = ke_kj
-            .checked_mul(Fixed::from_int(1000))
-            .unwrap_or(params.energy_max);
         // The cell's constituents the blow FRACTURES: each whose Griffith energy over the struck face the
         // delivered energy exceeds, in canonical id order (snapshot before the mutable take). Uses the energy
         // limb of `fracture_onset` (a zero applied stress, so only the Griffith energy criterion fires): a
@@ -2476,43 +2525,35 @@ impl Embodiment {
             return Fixed::ZERO;
         };
         let row = row.clone();
-        // The acting part's delivery MASS, off the being's OWN apparatus: the part with the greatest `mech.mass`
-        // among its wielded tool and its grown Structure Segments (the one delivering the most kinetic energy).
-        // Reads only the part's own physics, never a race or role. Scoped so the acting walker's borrow ends
-        // before the target search.
-        let (coord, acting_mass) = {
+        // The energy the blow delivers, off the being's OWN apparatus: the greatest ACTUATOR WORK among its
+        // grown Structure Segments. For each, the actuating force (its strength stress over its cross-section,
+        // read off the axes the channel's row DECLARES, data-defined per Principle 11) over its own grown stroke
+        // distance, dispatched by the row's kernel to the actuator-work law (force times stroke, the delivered
+        // energy directly, retiring the world-global swing speed). A wielded inert tool carries no actuator of
+        // its own (its strength is not a muscle), so it delivers no work here; its reach-extending contribution
+        // to the stroke is the flagged future derived coupling. Reads only the part's own physics, never a race
+        // or role. Scoped so the acting walker's borrow ends before the target search.
+        let (coord, delivered_energy) = {
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return Fixed::ZERO;
             };
             let coord = w.coord();
-            let mut acting_mass = Fixed::ZERO;
-            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
-                let m = tool.mass(reg);
-                if m > acting_mass {
-                    acting_mass = m;
-                }
-            }
+            let mut delivered = Fixed::ZERO;
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
-                    // The delivery mass is read off the axis the channel's row DECLARES (row.source_axis),
-                    // data-defined per Principle 11, never a hardcoded axis id: a Terran channel names the
-                    // extensive `mech.mass`, an alien body its own mass source.
-                    let m = seg.geo(&row.source_axis);
-                    if m > acting_mass {
-                        acting_mass = m;
+                    let (force, stroke) =
+                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
+                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    if work > delivered {
+                        delivered = work;
                     }
                 }
             }
-            (coord, acting_mass)
+            (coord, delivered)
         };
-        if acting_mass <= Fixed::ZERO {
-            return Fixed::ZERO; // a part with no mass delivers no blow (the absence convention)
+        if delivered_energy <= Fixed::ZERO {
+            return Fixed::ZERO; // no actuating part with strength and stroke: no blow (the absence convention)
         }
-        // The energy the blow delivers, dispatched by the channel's kernel over the acting part's own mass and
-        // the reserved swing speed (piece 1). The scale bridge to Agent B's `Segment.damage` accumulator
-        // convention is reconciled at the held write (piece 4), not baked here.
-        let delivered_energy =
-            resolve_transfer(&row, acting_mass, params.swing_velocity, params.energy_max);
         // The TARGET: another being CO-LOCATED in the same cell, found by iterating the beings (this method
         // cannot reach the runner's located index). The first in id order is the deterministic pick; an
         // area-weighted stochastic scatter over co-located targets is the flagged follow-on.
@@ -7413,13 +7454,23 @@ source = "test"
         emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
         let layout = emb.layout().clone();
 
-        // A segment carrying a delivery mass, a presented contact area, and a fracture resistance.
+        // A segment carrying a presented contact area, a fracture resistance, and a fixed ACTUATOR (a strength
+        // stress over a cross-section, over a stroke) so it can deliver a strike's energy under the stroke-rate
+        // substrate: force = 200 * (1/100) = 2 N over a 1 m stroke delivers 2 J of actuator work, the mass a
+        // part carries no longer entering the delivered energy. The `mass` arg is retained for the target's
+        // presented mass but is not read for the delivered energy.
         let seg = |mass: Fixed, area: Fixed, fe: Fixed| {
             let mut geometry = BTreeMap::new();
             geometry.insert("mech.mass".to_string(), mass);
             geometry.insert("mech.contact_area".to_string(), area);
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_ratio(1, 100),
+            );
+            geometry.insert("mech.stroke_length".to_string(), Fixed::from_int(1));
             let mut material = BTreeMap::new();
             material.insert("mat.fracture_energy".to_string(), fe);
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(200));
             Segment {
                 parent: None,
                 depth: 0,
@@ -7478,7 +7529,12 @@ source = "test"
             .get(DEV_KINETIC)
             .unwrap()
             .clone();
-        let energy = resolve_transfer(&row, Fixed::from_int(5), Fixed::from_int(10), cap);
+        // The striker delivers its actuator work: force = strength (200) over cross-section (1/100) = 2 N, over
+        // its 1 m stroke, so 2 J (the mass a part carries no longer enters the delivered energy).
+        let force = Fixed::from_int(200)
+            .checked_mul(Fixed::from_ratio(1, 100))
+            .unwrap();
+        let energy = resolve_transfer(&row, force, Fixed::from_int(1), cap);
         let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
         assert_eq!(
             wound, expected,
