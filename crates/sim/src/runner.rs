@@ -5552,9 +5552,73 @@ impl Runner {
             let fns = FunctionLawRegistry::dev_seed();
             let refs = &emb.params.capability_refs;
             let caps = &emb.params.capability_caps;
+            // (1a-aging) R-AGING (c) route (i), the first-passage death path: before the viability read,
+            // advance each grown being's per-segment aging damage one tick from its OWN locomotor load
+            // (its whole-body muscle force over the ground distance it slides this tick) against its own
+            // tissue, minus the tissue-turnover repair its own energy budget funds. A worn segment then
+            // reads a reduced capability in the aged viability below, so a body worn down dies through the
+            // SAME reserve-floor cull, with no vital-part predicate (Principle 8). Opt-in with the cull and
+            // further gated on the physiology, the wear caps, AND the material registry: the wear coefficient
+            // is read off each segment's own grown material at the registry's declared storage scale, so the
+            // scale must come from the same registry (never a silent fallback that would read a scaled
+            // coefficient as un-scaled), mirroring the tool-wear precondition. A segment with no fracture-
+            // energy tolerance does not age (the absence convention), so every current scenario (no INTEGRITY
+            // axis, no armed wear tissue) is byte-identical.
+            let energy_axis = emb
+                .homeo
+                .axes
+                .iter()
+                .find(|a| a.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY))
+                .map(|a| a.id);
+            if let (Some(phys), Some(wear), Some(mat_reg), Some(energy_axis)) = (
+                emb.physiology.as_ref(),
+                emb.wear,
+                emb.material_registry.as_ref(),
+                energy_axis,
+            ) {
+                if let Some(coefficient_scale) = mat_reg
+                    .axis("mat.wear_coefficient")
+                    .map(|a| a.storage_scale())
+                {
+                    for w in emb.walkers.iter_mut() {
+                        let force = being_muscle_force(w, phys);
+                        let Some(s) = w.structure.as_ref() else {
+                            continue;
+                        };
+                        let velocity = locomotion::locomotion_speed_structure(
+                            s,
+                            w.body.temperament.activity,
+                            Fixed::ONE,
+                            &emb.params,
+                        );
+                        let distance = velocity
+                            .checked_mul(phys.tick_seconds)
+                            .unwrap_or(Fixed::ZERO);
+                        // The being's own metabolic budget, keyed on the axis backed by the energy-density
+                        // class (data, not the hardcoded ENERGY id), so an alien whose energy reserve sits on
+                        // another axis funds its repair off its own budget rather than reading zero.
+                        let energy_available = w.homeostasis.amount(energy_axis);
+                        if let Some(s) = w.structure.as_mut() {
+                            let demand = s.maintenance_demand();
+                            let funded = crate::insult::maintenance_funded_fraction(
+                                energy_available,
+                                demand,
+                            );
+                            s.accrue_aging(
+                                force,
+                                distance,
+                                coefficient_scale,
+                                funded,
+                                wear.wear_max,
+                                STRESS_GUARD,
+                            );
+                        }
+                    }
+                }
+            }
             for w in emb.walkers.iter_mut() {
                 if let Some(s) = w.structure.as_ref() {
-                    let viability = s.whole_body_viability(&fns, refs, caps);
+                    let viability = s.whole_body_viability_aged(&fns, refs, caps);
                     w.homeostasis.set_level(INTEGRITY, viability);
                 }
             }
