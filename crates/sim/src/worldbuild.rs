@@ -55,7 +55,7 @@ use crate::langmod::{
 use crate::language::{
     DriftParams, FeatureDimId, FormSystem, LangId, Language, LanguageParams, ProductionModalityId,
 };
-use crate::learn::{HarmLearningCalib, RewardLearningCalib};
+use crate::learn::{BeingPerceptField, HarmLearningCalib, RewardLearningCalib};
 use crate::locomotion::{LocomotionParams, Walker};
 use crate::morphogen::{express_program, grow};
 use crate::percept::PerceptRegistry;
@@ -412,8 +412,16 @@ pub fn build_dawn_runner(
     // runner exactly as before.
     let mut runner = match &peoples.embodiment {
         Some(genesis) => {
-            let (embodiment, kit) =
-                assemble_dawn_embodiment(&world, map, peoples, &founders, genesis, manifest, seed)?;
+            let (embodiment, kit) = assemble_dawn_embodiment(
+                &world,
+                map,
+                peoples,
+                &founders,
+                genesis,
+                manifest,
+                seed,
+                resolution.features.being_percept,
+            )?;
             let mut runner = Runner::with_world_and_embodiment(field, calib, world, embodiment);
             // Arm the lifecycle pairing (real-world unification, step 3c): a World birth now mints a
             // paired body and a death retires it, so a multi-generation embodied run keeps minds and
@@ -537,6 +545,7 @@ fn assemble_dawn_embodiment(
     genesis: &EmbodimentGenesis,
     manifest: &CalibrationManifest,
     seed: u64,
+    being_percept: bool,
 ) -> Result<(Embodiment, LifecycleKit), CalibrationError> {
     // The reserved comfort band every founder's thermoregulation reads (fail-loud while reserved). The
     // spawn temperature is the set point (a founder is born at its comfort centre; physical state, not
@@ -571,6 +580,20 @@ fn assemble_dawn_embodiment(
     // A world with no declared toxins declares no percepts, so the layout is unchanged and the run is
     // byte-identical.
     emb.set_percepts(PerceptRegistry::from_tolerances(&genesis.tolerances));
+    // Arm the BEING-PERCEPT feature (the being-percept keystone, step 6), when the scenario declares it: a
+    // being perceives other beings and senses the direction toward believed-rewarding emitters and away from
+    // believed-harmful ones, so predation and fleeing can emerge through the controller's founder-zero
+    // freely-signed weight. This MUST precede the layout clone below, exactly like `set_percepts` above,
+    // because `set_being_percept` rebuilds the controller layout to carry the being block, and the founder
+    // controllers are expressed against `layout`: a layout cloned before this call would express them at the
+    // wrong width. The reserved emission coupling and harm eligibility decay are read fail-loud from the
+    // manifest here at the feature arming, so a world arming being-percept under Calibrated refuses while
+    // either is unset rather than fabricating one. A world that does not declare the feature leaves the layout
+    // unchanged and the run byte-identical.
+    if being_percept {
+        emb.set_being_field(Some(BeingPerceptField::from_manifest(manifest)?));
+        emb.set_being_percept(true);
+    }
     let layout = emb.layout().clone();
     // The per-band spawn map the lifecycle pairing reads to place a newborn at its band's frozen dawn
     // site (real-world unification, step 3c). The grouping filters bands whose race is registered in the

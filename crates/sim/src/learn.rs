@@ -36,8 +36,14 @@
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
 use civsim_world::Coord3;
 use std::collections::{BTreeMap, BTreeSet};
+
+use crate::perception_percept::{sense, ChannelTransduction};
+use crate::perception_reach::{
+    ChannelReach, ChannelReachRegistry, Reach, ReachBounds, DEV_OPTICAL,
+};
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -47,6 +53,7 @@ use crate::locomotion::ResourceField;
 use crate::material::MaterialField;
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
+use crate::sensorium::SenseChannelId;
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -144,6 +151,33 @@ pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
     StableId(FEATURE_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
 }
 
+/// The reserved base of the per-BEING-SIGNAL belief-subject band (the being-percept keystone, step 1): a
+/// perceived being-signal, keyed by its sense channel and discriminated bucket, mints its harm or reward
+/// belief subject HERE, in its OWN top-level band, disjoint from every environmental-feature subject and
+/// every sequence subject. It sets bit 60 as well as bit 62, so a being-signal subject is DISJOINT from a
+/// feature subject (whose payload stays in the low 48 bits, leaving bit 60 clear) and from a sequence subject
+/// (which sets bit 61, clear here), and stays below `1 << 63` (below the reserved-high landmark ids). So a
+/// being-signal on sense channel c never aliases the environmental biology feature at index c under the same
+/// attribute (the slice-3 subject-namespace seam), closed by construction rather than by a
+/// [`MATERIAL_FEATURE_CHANNEL_BASE`]-style channel offset (which would not fit the `u16` channel field, since
+/// biology and material features already split it at `1 << 15`). The bit-60 placement is coordinated with the
+/// affordance composer's hybrid belief-subject key as one of three disjoint top-level bands (features,
+/// sequences and conjunctions, being-signals); if the hybrid claims bit 60 the base retargets to another free
+/// bit, a one-line change, and this band is byte-neutral until the keystone's live wire consumes it.
+const BEING_SIGNAL_SUBJECT_BASE: u64 = (1 << 62) | (1 << 60);
+
+/// Mint the belief subject for a perceived being-signal: the `(channel, bucket)` pair packed into the
+/// reserved being-signal band ([`BEING_SIGNAL_SUBJECT_BASE`]), the sibling of [`feature_subject`]'s
+/// per-feature band. Two perceived beings whose signal on the same sense channel lands in the same bucket
+/// mint the SAME subject (the generalisation the quantization buys), so a valence learned about one applies
+/// to another emitting the same signal; a different channel or a different bucket is a different subject. The
+/// bucket is clamped non-negative and into the 32-bit field, so the packing never overflows the band, exactly
+/// as [`feature_subject`] does.
+pub fn being_signal_subject(channel: u16, bucket: i64) -> StableId {
+    let bucket = (bucket.max(0) as u64) & FEATURE_BUCKET_MASK;
+    StableId(BEING_SIGNAL_SUBJECT_BASE | ((channel as u64) << FEATURE_CHANNEL_SHIFT) | bucket)
+}
+
 /// The reserved base of the per-SEQUENCE belief-subject band (ideation / experiential-discovery arc, piece
 /// 1, slice 1b): a discovered ACTION is a wildcard template over a primitive sequence, and this band mints
 /// the belief subject it is keyed on, the sibling of [`feature_subject`]'s per-feature band. It sets bit 61
@@ -152,30 +186,40 @@ pub fn feature_subject(channel: u16, bucket: i64) -> StableId {
 /// reserved-high landmark ids), exactly as the feature band does. So two beings that execute the SAME
 /// affordance-typed sequence mint the IDENTICAL subject, and a gossiped belief about it does not diverge.
 const SEQUENCE_SUBJECT_BASE: u64 = (1 << 62) | (1 << 61);
-/// The most sequence steps packed into one subject. A longer sequence truncates to its first steps (the
-/// honest first-cut bound; a wider or hashed key is the refinement if discovered actions grow past this).
+/// The packed-vs-hashed marker WITHIN the sequence band (R-DEEPTECH-COMPOSE hybrid belief-subject key):
+/// bit 60. Clear = the EXACT widened pack (the common case, collision-free); set = the HASH-on-overflow
+/// sub-band (a rare beyond-envelope sequence). Both keep bit 61 set (the sequence-band marker), so they stay
+/// disjoint from Agent A's being-signal band (`(1 << 62) | (1 << 60)`, bit 61 clear) and the feature band
+/// (bit 62 only): the four bands partition the `{60, 61}` pair under bit 62 (feature 00, being-signal 01,
+/// sequence-exact 10, sequence-hash 11), collision-free and below the reserved-high landmark ids (bit 63).
+const SEQ_HASH_MARKER: u64 = 1 << 60;
+/// The most sequence steps the EXACT pack holds. A longer sequence mints via the hash sub-band, so an
+/// arbitrary conjunction is still representable (the composer's need) with no truncation, never the old
+/// prefix-truncation bound.
 const SEQ_MAX_STEPS: usize = 4;
-/// The bit width of each packed step field (the primitive id, the target-affordance bucket, the param
-/// bucket). A field value wider than this clamps to the field maximum (the honest bound; the reserved
-/// quantization keeps the buckets small, so the clamp does not bite in practice).
-///
-/// FLAGGED BOUND (deep audit, social-learning arc piece 3): four bits caps EACH field at 16 distinct
-/// values, so the belief-subject packing distinguishes at most 16 PRIMITIVES, 16 target CHANNELS, and 16
-/// target-VALUE buckets; anything above saturates to 15 and MERGES with its neighbours (an over-merge, not a
-/// mask, since the clamp is applied identically at write and read). This is currently LATENT: the affordance
-/// alphabet is 10 primitives (ids 0..9), the demonstrations perceive one or two channels, and hard-vs-soft
-/// needs two value buckets, all well under 16. It WILL bite as the affordance set grows (arc 3, the made
-/// world, adds tool-use and composition primitives), at which point distinct primitives above 15 would share
-/// one reward belief even in the non-granular default. The refinement is the owner's call and is NOT
-/// byte-neutral (widening the field or hashing changes every existing belief subject), so it is surfaced
-/// here rather than changed: widen `SEQ_FIELD_BITS` (a `u32` step is already 12 bits, with room to grow the
-/// primitive field to the affordance `u16`), or mint the subject by a collision-resistant hash of the full
-/// step, before the primitive alphabet crosses 16.
-const SEQ_FIELD_BITS: u32 = 4;
-/// The bit width of one packed step (its three fields).
-const SEQ_STEP_BITS: u32 = SEQ_FIELD_BITS * 3;
-/// The mask for one packed field.
-const SEQ_FIELD_MASK: u64 = (1 << SEQ_FIELD_BITS) - 1;
+/// The exact-pack field widths. These are an ENGINE ENCODING-CAPACITY budget, NOT a value the owner sets:
+/// the hash sub-band preserves the subject's identity and determinism at ANY width (two beings executing the
+/// same sequence mint the identical subject regardless), so the widths steer only which sequences take the
+/// exact path versus the hash path, never which affordances share a belief nor any emergent outcome, and
+/// there is no physics-floor basis for a bit count. They are chosen, with a rationale: the PRIMITIVE field is
+/// widened most (6 bits, 64 primitives) because it is the one that bites as the made-world affordance
+/// alphabet grows past the old 4-bit / 16-value cap the FLAGGED BOUND named; the target-affordance and param
+/// buckets take 3 bits (8 buckets each), NARROWER than the old uniform 4-bit / 16-value field, because the
+/// exact tier only needs to cover the common few-channel, coarse-bucket case and the hash sub-band covers the
+/// rest FULLY and deterministically (a rich-sensorium being's many-channel or fine-discrimination steps hash,
+/// never lossily merge). Four steps of `SEQ_STEP_BITS` (12) plus a 3-bit count is 51 bits, inside the 60-bit
+/// sequence-band envelope with headroom. Widening the exact tier later is a perf/exposure tuning (one more
+/// re-pin), not a world call.
+const SEQ_PRIMITIVE_BITS: u32 = 6;
+const SEQ_TARGET_BITS: u32 = 3;
+const SEQ_PARAM_BITS: u32 = 3;
+/// The bit width of one packed step (its three fields) and each field's exact-pack maximum.
+const SEQ_STEP_BITS: u32 = SEQ_PRIMITIVE_BITS + SEQ_TARGET_BITS + SEQ_PARAM_BITS;
+const SEQ_PRIMITIVE_MAX: u64 = (1 << SEQ_PRIMITIVE_BITS) - 1;
+const SEQ_TARGET_MAX: u64 = (1 << SEQ_TARGET_BITS) - 1;
+const SEQ_PARAM_MAX: u64 = (1 << SEQ_PARAM_BITS) - 1;
+/// The hash sub-band payload mask: the low 60 bits (0..=59), below bit 60's marker.
+const SEQ_HASH_PAYLOAD_MASK: u64 = SEQ_HASH_MARKER - 1;
 
 /// One step of an executed primitive sequence (ideation arc, piece 1, slice 1b): the PRIMITIVE the being
 /// enacted (an affordance id), the quantized TARGET-AFFORDANCE bucket of the matter it acted on (the raw
@@ -198,24 +242,66 @@ pub struct SequenceStep {
 /// the sibling of [`feature_subject`]. Two beings that execute the SAME sequence of primitives against the
 /// SAME affordance-and-param kinds mint the IDENTICAL subject (so a belief that "grasp(sharp),
 /// actuate(fracturable) pays off" generalises across matter of the same kind and gossips without
-/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. Each field
-/// is clamped into [`SEQ_FIELD_BITS`] and the sequence into [`SEQ_MAX_STEPS`] (the honest bounds), so the
-/// pack never overflows the band, and the step COUNT is packed above the steps so a prefix is not confused
-/// with the full sequence.
+/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. The hybrid
+/// key packs a sequence WITHIN the envelope (at most [`SEQ_MAX_STEPS`] steps, each field within its widened
+/// width) EXACTLY, with no clamping and no over-merge, and routes any sequence beyond it to the hash
+/// sub-band ([`sequence_subject_hashed`]) instead of truncating or merging it, so the pack never overflows
+/// the band and no distinct sequence is silently conflated. The step COUNT is packed above the steps so a
+/// prefix is not confused with the full sequence.
 pub fn sequence_subject(steps: &[SequenceStep]) -> StableId {
-    let n = steps.len().min(SEQ_MAX_STEPS);
+    // The hybrid key: a sequence WITHIN the envelope (at most SEQ_MAX_STEPS steps, every field within its
+    // widened width) mints the EXACT pack (bit 60 clear), collision-free; any sequence BEYOND the envelope
+    // (more steps, or a field value past its width) mints via the hash sub-band (bit 60 set), so an
+    // arbitrary conjunction is still representable without the common-case collision a pure hash would incur.
+    // A negative target/param bucket clamps to zero (a bucket is non-negative) and is not itself overflow.
+    let over_envelope = steps.len() > SEQ_MAX_STEPS
+        || steps.iter().any(|s| {
+            (s.primitive as u64) > SEQ_PRIMITIVE_MAX
+                || (s.target_bucket.max(0) as u64) > SEQ_TARGET_MAX
+                || (s.param_bucket.max(0) as u64) > SEQ_PARAM_MAX
+        });
+    if over_envelope {
+        return sequence_subject_hashed(steps);
+    }
+    let n = steps.len();
     let mut payload: u64 = 0;
-    for (i, step) in steps.iter().take(SEQ_MAX_STEPS).enumerate() {
-        let primitive = (step.primitive as u64).min(SEQ_FIELD_MASK);
-        let target = (step.target_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
-        let param = (step.param_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
-        let packed_step = primitive | (target << SEQ_FIELD_BITS) | (param << (SEQ_FIELD_BITS * 2));
+    for (i, step) in steps.iter().enumerate() {
+        // Every field is within its width here (the envelope check above guarantees it).
+        let primitive = step.primitive as u64;
+        let target = step.target_bucket.max(0) as u64;
+        let param = step.param_bucket.max(0) as u64;
+        let packed_step = primitive
+            | (target << SEQ_PRIMITIVE_BITS)
+            | (param << (SEQ_PRIMITIVE_BITS + SEQ_TARGET_BITS));
         payload |= packed_step << (i as u32 * SEQ_STEP_BITS);
     }
-    // The step count, packed above the four step fields (bits 48..), so a 2-step prefix of a 3-step
-    // sequence mints a different subject than the 3-step sequence itself.
+    // The step count, packed above the step fields (bits 48..), so a 2-step prefix of a 3-step sequence
+    // mints a different subject than the 3-step sequence itself.
     payload |= (n as u64) << (SEQ_MAX_STEPS as u32 * SEQ_STEP_BITS);
     StableId(SEQUENCE_SUBJECT_BASE | payload)
+}
+
+/// The HASH sub-band of the sequence-subject band (the hybrid key's overflow path): a beyond-envelope
+/// sequence (more than [`SEQ_MAX_STEPS`] steps, or a field past its widened width) mints its subject by a
+/// canonical RNG-free [`StateHasher`] digest of the FULL step sequence, folded into the low 60 payload bits
+/// and marked by bit 60 (`SEQ_HASH_MARKER`), so an arbitrary conjunction is representable. Any collision is
+/// confined to this rare overflow (a birthday collision in `2^60`), never the common in-envelope case, which
+/// is exact. Deterministic (`StateHasher` is RNG-free, Principle 3): the same sequence hashes identically
+/// wherever recomputed, so a gossiped belief about an over-envelope action does not diverge.
+fn sequence_subject_hashed(steps: &[SequenceStep]) -> StableId {
+    let mut h = StateHasher::new();
+    h.write_u64(steps.len() as u64);
+    for step in steps {
+        // Clamp the non-negative buckets exactly as the exact-pack path and the over-envelope detector do
+        // (`target_bucket.max(0)`), so the two branches agree on the "a negative bucket is the zero bucket"
+        // convention: an over-envelope sequence with a negative bucket mints the same subject the same
+        // sequence with a zero bucket would, matching the exact tier and the sibling feature band.
+        h.write_u32(step.primitive as u32);
+        h.write_i64(step.target_bucket.max(0));
+        h.write_i64(step.param_bucket.max(0));
+    }
+    let payload = (h.finish() as u64) & SEQ_HASH_PAYLOAD_MASK;
+    StableId(SEQUENCE_SUBJECT_BASE | SEQ_HASH_MARKER | payload)
 }
 
 /// The belief subject one executed step keys on, at the caller's GRANULARITY (social-learning arc, piece 3,
@@ -556,13 +642,13 @@ pub fn feature_observations(
 ///
 /// RESERVED derive targets and keystone-wiring seams, surfaced with basis, deferred by the gate to their own
 /// builds (this core reuses the existing learner and reserves them, so it moves no pin):
-/// - SUBJECT NAMESPACE (a keystone-wiring seam, section-9 catch): this mints into the SAME `feature_subject`
-///   band with NO channel-base offset, so a being-signal on sense channel c aliases the environmental biology
-///   feature at index c under the same `HARM_ATTR`, silently merging two distinct HARM beliefs. Environmental
-///   material features already avoid this by offsetting through [`MATERIAL_FEATURE_CHANNEL_BASE`]; the keystone
-///   must offset the being-signal into its OWN disjoint band the same way. Whether a `SenseChannelId` fits the
-///   16-bit channel field, and the offset itself, is the owner-held belief-subject packing decision
-///   (`SEQ_FIELD_BITS` / the belief-subject hash the gate surfaced), so it is flagged here, not decided.
+/// - SUBJECT NAMESPACE (RESOLVED by the keystone, step 1; was a section-9-caught seam): this mints into the
+///   being-signal's OWN band through [`being_signal_subject`] ([`BEING_SIGNAL_SUBJECT_BASE`]), disjoint from
+///   every environmental-feature subject and every sequence subject, so a being-signal on sense channel c no
+///   longer aliases the environmental biology feature at index c under the same `HARM_ATTR`. The band bit is
+///   coordinated with the affordance composer's hybrid belief-subject key as one of three disjoint top-level
+///   bands, and the `SenseChannelId`-fits-the-channel-field question falls out of that hybrid encoding within
+///   the being-signal band (the gate's packing ruling).
 /// - The evidence WEIGHT's two likelihoods are the existing reserved `p_harm_given_harms`/`p_harm_given_benign`
 ///   (never the fixed dev 0.9/0.1). Their per-being derived form is the deepest derive target, a build shared
 ///   with the affordance composer, framed and sequenced separately. Basis, corrected by the section-9 catch:
@@ -589,7 +675,412 @@ pub fn being_signal_observation(
 ) -> FeatureObservation {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
-    observation_toward(feature_subject(channel, bucket), harm, weight)
+    observation_toward(being_signal_subject(channel, bucket), harm, weight)
+}
+
+/// The LAGGED-credit harm observations a being makes on a harm tick (the being-percept keystone, step 4, the
+/// harm-path eligibility trace): one being-signal harm observation per subject still remembered in the
+/// perceiver's harm-eligibility [`EligibilityTrace`], each toward `HARMS` on a harm tick and `BENIGN`
+/// otherwise, weighted by the reserved harm observation weight scaled by the being's plasticity AND the
+/// subject's decayed eligibility. So a being-signal perceived several ticks BEFORE the harm still earns
+/// partial credit, falling with the ticks since it was perceived (the trace's decay), which is what lets a
+/// predator-approach cue perceived at a distance be credited to the harm that follows: the lagged distal
+/// association the same-tick [`being_signal_observation`] cannot form, load-bearing for the predation payoff.
+/// The trace is the perceiver's OWN (recording the being-signals it perceived); the harm bit is its own
+/// [`crate::homeostasis::is_harm_tick`]; nothing reads a species, trophic role, or being-hood. Pure and OFF
+/// the run path (no live caller): the keystone's live wire (step 6) records each perceived being-signal into
+/// the harm-eligibility trace, decays it each tick by the reserved harm eligibility latency, and calls this
+/// on the being's harm bit, so this is byte-neutral by construction. The environmental-feature harm path
+/// ([`feature_observations`]) is UNCHANGED and stays same-tick: only the being-signal path carries the trace.
+pub fn being_signal_trace_observations(
+    trace: &EligibilityTrace,
+    harm: bool,
+    plasticity: Fixed,
+    calib: &HarmLearningCalib,
+) -> Vec<FeatureObservation> {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    trace
+        .entries()
+        .map(|(&subject, &eligibility)| {
+            let credited = weight.checked_mul(eligibility).unwrap_or(Fixed::ZERO);
+            observation_toward(subject, harm, credited)
+        })
+        .collect()
+}
+
+/// The REWARD-frame counterpart of [`being_signal_observation`] (the being-percept keystone, step 2, the
+/// PREDATION pole's learner): a being correlates a perceived being-signal, keyed by its sense `channel` and
+/// discriminated `bucket`, with its OWN reward bit that tick ([`crate::homeostasis::is_reward_tick`], whether
+/// any reserve ROSE beyond the noise floor), minting one observation toward `REWARDS` on a reward tick and
+/// `NEUTRAL` otherwise, on the SAME [`being_signal_subject`] the harm core uses but fed into the disjoint
+/// `(subject, REWARD_ATTR)` frame. So perceiving a being that correlates with the perceiver's own reserves
+/// RISING (it ate) mints a reward belief on that being-signal, the substrate the predation pole rests on;
+/// perceiving a being that correlates with reserves FALLING mints the harm belief through
+/// [`being_signal_observation`]. Which belief forms, and so which pole a being later acts on, emerges from
+/// the being's own outcomes, never from a species, trophic role, or being-hood read.
+///
+/// Minted INLINE toward `REWARDS`/`NEUTRAL`, exactly as [`reward_observations`] does for a material feature,
+/// because the shared [`observation_toward`] helper is hardwired to the harm frame (`HARMS`/`BENIGN`) and a
+/// reward observation points the other way. The weight is the reserved reward observation weight scaled by
+/// the being's plasticity, reusing the existing reward likelihoods, never a new fabricated weight. Pure and
+/// OFF the run path (no live caller): the keystone's live wire consumes it, so this is byte-neutral by
+/// construction. The reserved derive targets and the eligibility-trace latency are the same ones
+/// [`being_signal_observation`] documents; they are shared, not re-listed here.
+pub fn being_signal_reward_observation(
+    channel: u16,
+    bucket: i64,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
+    being_signal_reward_for(
+        being_signal_subject(channel, bucket),
+        reward,
+        plasticity,
+        calib,
+    )
+}
+
+/// The being-signal REWARD observation for an ALREADY-PERCEIVED subject (the being-percept keystone, step 6,
+/// the live-wire reward pole): the subject-taking core of [`being_signal_reward_observation`], for the run
+/// path where the perceiver already holds the [`being_signal_subject`] it formed via
+/// [`perceive_being_signal`] rather than the raw channel and bucket. It mints a reward belief on that subject
+/// toward `REWARDS` on a reward tick and `NEUTRAL` otherwise, weighted by the reserved reward observation
+/// weight scaled by the being's plasticity, the reward-frame sibling of the harm-frame [`observation_toward`]
+/// (which is hardwired to `HARMS`/`BENIGN`), reusing the existing reward likelihoods, never a fabricated
+/// weight.
+pub fn being_signal_reward_for(
+    subject: StableId,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    FeatureObservation {
+        subject,
+        toward: if reward { REWARDS } else { NEUTRAL },
+        weight,
+    }
+}
+
+/// Perceive a being-signal from one emitter's resolved [`Reach`] and mint the belief subject the perceiver
+/// keys its valence on, or `None` if the signal does not clear the perceiver's OWN detection threshold (the
+/// emitter is out of reach, occluded by the strata, or too faint for this perceiver's sense). The
+/// being-percept keystone, step 3a: the alien-clean consumption of the reach (slice 1) and the
+/// sensorium-gated percept (slice 2). The received magnitude is the geometrically-spread reach attenuated by
+/// the medium's Beer-Lambert transmittance `exp(-optical_depth)`, the transcendental
+/// [`crate::perception_reach::Reach`] reports-then-defers to its consumer, so a strongly absorbing medium
+/// (rock between the two) drives the transmittance toward zero and the emitter is not perceived: occlusion
+/// emerges from the strata, no authored line-of-sight. [`sense`] transduces that magnitude through the
+/// PERCEIVER's own channel transduction and gates it on the perceiver's own threshold; the discriminated
+/// bucket keys [`being_signal_subject`]. Keyed on the EMISSION on a channel and the resolved reach, never on
+/// a species, kingdom, trophic role, relatedness, or being-hood of the emitter (the emitter is a source of a
+/// signal, whether a being or a fire). Pure and off the run path (no live caller): the keystone's live wire
+/// (step 6) resolves each emitter's own emitted power and medium ([`crate::perception_reach::resolve_reach`],
+/// where the emission assembly and the material field live) and calls this per perceived emitter and channel,
+/// so this is byte-neutral by construction.
+pub fn perceive_being_signal(
+    reach: Reach,
+    channel: u16,
+    transduction: &ChannelTransduction,
+    activation_max: Fixed,
+) -> Option<StableId> {
+    // The received magnitude is the geometric spread attenuated by the medium's transmittance, the
+    // Beer-Lambert `exp(-optical_depth)` the reach substrate defers to here. The optical depth is
+    // non-negative and capped, so the transmittance is in (0, 1] and the product cannot exceed the spread
+    // nor overflow.
+    let transmittance = (-reach.optical_depth).exp();
+    let magnitude = reach
+        .spread
+        .checked_mul(transmittance)
+        .unwrap_or(Fixed::ZERO);
+    let percept = sense(magnitude, transduction, activation_max)?;
+    Some(being_signal_subject(channel, percept.bucket))
+}
+
+/// Perceive a being-signal's MAGNITUDE (the perceiver's own transduced activation) from one emitter's resolved
+/// [`Reach`], or `None` if it does not clear the perceiver's own detection threshold. The creature-tier sibling
+/// of [`perceive_being_signal`]: where that mints the belief SUBJECT (channel and bucket) the founder keys its
+/// learned valence on, this returns the transduced ACTIVATION the mind-less creature's
+/// [`creature_being_direction`] weights its toward-pull by (mechanism B3, no belief, no bucket-keyed subject, no
+/// channel). The received magnitude is the same geometrically-spread reach attenuated by the medium's
+/// Beer-Lambert transmittance, transduced through the SUPPLIED channel transduction and gated on its threshold,
+/// so occlusion and perceptibility key on that transduction exactly as the founder's perception does. The caller
+/// passes the world's DECLARED transduction (a per-species/per-world datum, matching the founder path); deriving
+/// it per creature from its sensory anatomy is the flagged shared follow-on, so "the creature's own sense" is
+/// per-species declared data today, not yet per-creature-derived. Pure and RNG-free.
+pub fn perceive_being_magnitude(
+    reach: Reach,
+    transduction: &ChannelTransduction,
+    activation_max: Fixed,
+) -> Option<Fixed> {
+    let transmittance = (-reach.optical_depth).exp();
+    let magnitude = reach
+        .spread
+        .checked_mul(transmittance)
+        .unwrap_or(Fixed::ZERO);
+    sense(magnitude, transduction, activation_max).map(|percept| percept.activation)
+}
+
+/// The being-directed belief gradient (the being-percept keystone, step 3b): over the perceived emitters
+/// (each a position and the [`being_signal_subject`] the perceiver formed for it via
+/// [`perceive_being_signal`]), the summed inverse-distance vector over every emitter the perceiver holds the
+/// committed belief `committed` about on attribute `attr`, pointing AWAY from each such emitter when `toward`
+/// is false (avoidance) and TOWARD it when true (attraction). A nearer emitter contributes harder (weight
+/// `1/d`); a perceiver that believes nothing of the kind nearby gets a zero gradient. The being-directed
+/// mirror of the material [`avoidance_gradient`] / [`attraction_gradient`], keyed on the perceived signal's
+/// LEARNED belief, never on a species, kingdom, trophic role, relatedness, or being-hood. The horizontal
+/// `(x, y)` direction only, matching the 2D heading the controller moves by (the reach already accounted for
+/// the vertical separation in perceptibility). Pure and RNG-free.
+fn being_directed_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    attr: AttrKindId,
+    committed: ValueId,
+    toward: bool,
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    let mut ax = Fixed::ZERO;
+    let mut ay = Fixed::ZERO;
+    for &(pos, subject) in perceived {
+        if mind.belief(subject, attr, params) != Some(committed) {
+            continue;
+        }
+        let dx = pos.x - here.x;
+        let dy = pos.y - here.y;
+        // Skip a co-located emitter (no direction) and a separation whose square overflows i32: an emitter
+        // that far has negligible reach and would not clear the threshold to be perceived anyway.
+        let d2i = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+        if d2i == 0 || d2i > i32::MAX as i64 {
+            continue;
+        }
+        let d2 = Fixed::from_int(d2i as i32);
+        // `(dx, dy)/d2` points TOWARD the emitter, `(-dx, -dy)/d2` AWAY; weighted by inverse distance.
+        let (sx, sy) = if toward { (dx, dy) } else { (-dx, -dy) };
+        if let (Some(cx), Some(cy)) = (
+            Fixed::from_int(sx).checked_div(d2),
+            Fixed::from_int(sy).checked_div(d2),
+        ) {
+            ax = ax.saturating_add(cx);
+            ay = ay.saturating_add(cy);
+        }
+    }
+    (ax, ay)
+}
+
+/// The being-directed expected-HARM avoidance gradient (the being-percept keystone, step 3b): the
+/// being-directed mirror of [`avoidance_gradient`], the raw inverse-distance sum pointing away from every
+/// perceived emitter the perceiver holds a committed `HARMS` belief about. This is a PERCEPT, not a heading:
+/// the runner feeds it into the controller's direction slot, and only a heritable FREELY-SIGNED weight lifted
+/// off founder-zero by selection turns it into avoidance (a positive weight, fleeing a believed-harmful
+/// emitter) or approach (a negative weight, a being drawn to a harm-predicting emitter, a parasite or
+/// scavenger), so the approach/avoid SIGN emerges rather than being authored (Principle 9). The caller
+/// normalises the raw sum to a unit percept, exactly as the material gradient is normalised.
+pub fn being_avoidance_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, HARM_ATTR, HARMS, false, params)
+}
+
+/// The being-directed expected-REWARD attraction gradient (the being-percept keystone, step 3b, the PREDATION
+/// pole): the being-directed mirror of [`attraction_gradient`], the raw inverse-distance sum pointing toward
+/// every perceived emitter the perceiver holds a committed `REWARDS` belief about. A PERCEPT, not a heading,
+/// the exact behavioural mirror of [`being_avoidance_gradient`]: only a heritable freely-signed weight off
+/// founder-zero turns it into approach (a positive weight, pursuing a believed-rewarding emitter, predation)
+/// or avoidance (a negative weight), so the sign emerges (Principle 9). The caller normalises the raw sum to
+/// a unit percept.
+pub fn being_attraction_gradient(
+    mind: &Mind,
+    here: Coord3,
+    perceived: &[(Coord3, StableId)],
+    params: &InferenceParams,
+) -> (Fixed, Fixed) {
+    being_directed_gradient(mind, here, perceived, REWARD_ATTR, REWARDS, true, params)
+}
+
+/// The CREATURE-tier being-directed percept (creatures-react arc, mechanism B3, the magnitude-graded raw
+/// direction). A mind-less creature (an Arc-7 `Walker` absent from the mind registry) cannot run the
+/// belief-reading [`being_directed_gradient`] the founder tier uses; instead its toward/away disposition rides
+/// on the RAW perceived signal with NO belief and NO committed valence category. Over the beings it perceives
+/// (each an emitter position and the creature's OWN transduced magnitude for it, the perceiver-keyed sense the
+/// build constraint requires), this sums the UNIT toward-direction of each emitter SCALED by that magnitude.
+/// The magnitude is the SOLE distance factor: the reach already attenuated the signal with distance before it
+/// was transduced, so a nearer, bigger, or warmer emitter reads a larger magnitude and pulls harder, and no
+/// geometric `1/d` is applied on top (that would double-count distance). The summed vector's LENGTH is clamped
+/// to the unit disc (scaled down preserving its direction, never per-component, which would rotate it), so it
+/// lands in the same `[-1, 1]`-magnitude range the founder's unit percept does. Only the horizontal `(x, y)`
+/// heading is produced, matching the 2D heading the controller moves by; the vertical separation already
+/// entered the perceptibility through the reach that produced the magnitude, exactly as the founder gradient
+/// treats z. It is a PERCEPT, not a heading: only the creature's OWN heritable FREELY-SIGNED weight, set by
+/// selection off founder-zero, turns it into approach (a positive weight, hunting) or flight (a negative
+/// weight, fleeing), so the toward/away SIGN emerges rather than being authored (Principle 9), keyed only on
+/// the emitted signal and the creature's own sense, never on the emitter's species, kind, trophic role,
+/// relatedness, or being-hood. Its honest limit (mechanism B3): the discrimination runs along MAGNITUDE alone,
+/// so two same-magnitude emitters of different kind read alike; the per-bucket block (mechanism B2) is the
+/// fuller follow-on. Pure and RNG-free; no valence, no belief, no category.
+pub fn creature_being_direction(here: Coord3, perceived: &[(Coord3, Fixed)]) -> (Fixed, Fixed) {
+    let mut dx = Fixed::ZERO;
+    let mut dy = Fixed::ZERO;
+    for &(pos, magnitude) in perceived {
+        if magnitude <= Fixed::ZERO {
+            continue; // nothing perceived from this emitter (sub-threshold or absent), no pull
+        }
+        // The coordinate deltas in i64 so the subtraction cannot overflow i32 for far-apart raw coordinates;
+        // the sum-of-squares guard below bounds each delta to `sqrt(i32::MAX)` (< i32::MAX) before any cast.
+        let ex = pos.x as i64 - here.x as i64;
+        let ey = pos.y as i64 - here.y as i64;
+        // Skip a co-located emitter (no direction) and a separation whose square overflows i32, exactly as
+        // the founder gradient does; such an emitter is too far to clear the threshold and be perceived anyway.
+        let d2i = ex * ex + ey * ey;
+        if d2i == 0 || d2i > i32::MAX as i64 {
+            continue;
+        }
+        let dist = Fixed::from_int(d2i as i32).sqrt(); // |d| > 0 here, exact and deterministic
+                                                       // The UNIT toward-direction `(ex, ey) / |d|` scaled by the perceived magnitude (the sole distance
+                                                       // factor). An overflow in either step drops this emitter's contribution rather than fabricating one.
+        let contribute = |num: i64| -> Fixed {
+            Fixed::from_int(num as i32) // safe: |num| <= sqrt(i32::MAX) after the guard above
+                .checked_div(dist)
+                .and_then(|unit| unit.checked_mul(magnitude))
+                .unwrap_or(Fixed::ZERO)
+        };
+        dx = dx.saturating_add(contribute(ex));
+        dy = dy.saturating_add(contribute(ey));
+    }
+    // Clamp the vector LENGTH to the unit disc, preserving direction (a per-component clamp would rotate a
+    // diagonal pull toward an axis). A strong aggregate pull saturates at unit length, a weak one stays
+    // proportional, so the length carries the graded pull strength in the founder's `[-1, 1]` percept range.
+    match (dx.checked_mul(dx), dy.checked_mul(dy)) {
+        (Some(x2), Some(y2)) => {
+            let len2 = x2.saturating_add(y2);
+            if len2 > Fixed::ONE {
+                let len = len2.sqrt(); // > ONE here, so the divide scales the vector down to unit length
+                (
+                    dx.checked_div(len).unwrap_or(Fixed::ZERO),
+                    dy.checked_div(len).unwrap_or(Fixed::ZERO),
+                )
+            } else {
+                (dx, dy)
+            }
+        }
+        // Overflow of a component's square is UNREACHABLE for any realistic perceived population (a component
+        // would need magnitude > ~46000, tens of thousands of emitters pulling one way; the O(N^2) perceive scan
+        // is separately capped upstream). In that impossible case direction-preservation is moot, so the
+        // last-resort caps each component to the unit box: it trades the length-clamp's direction-preservation
+        // for a guaranteed bound and no panic. This is the ONLY path that clamps per-component; every reachable
+        // input takes the length-clamp above, which preserves direction.
+        _ => (
+            dx.clamp(-Fixed::ONE, Fixed::ONE),
+            dy.clamp(-Fixed::ONE, Fixed::ONE),
+        ),
+    }
+}
+
+/// The being-percept feature's run-path configuration (the being-percept keystone, step 6, the live wire):
+/// everything the perceive phase needs to run the being-directed perception and learning for one world. The
+/// SUBSTRATE bindings are labelled dev fixtures and floor data (the sense channel a being emits and is
+/// perceived on, its reach binding, the perceiver's transduction, the physics reach caps, and the sensorium
+/// activation cap), and the two RESERVED values are the owner's, surfaced with basis and read fail-loud from
+/// the manifest at the feature arming, never fabricated (Principle 11): the emission coupling coefficient
+/// (`physiology::being_signal_emission`'s lever) and the harm eligibility-trace decay lambda. A world that
+/// does not arm being-percept carries `None` and is byte-identical.
+///
+/// Honest limit (flagged, not a defect): the substrate bindings are labelled fixtures for the payoff, not
+/// per-being anatomy-derived. The perceiver transduction is a single world-global fixture rather than each
+/// being's own [`crate::perception_percept::derive_optical_transduction`] over its evolved eye, and the
+/// channel and reach binding are the dev-fixture optical pair. Deriving the transduction per being from its
+/// anatomy (slice 2's reserved-sense-params kernel) and binding the channel from the world's sensorium data
+/// is the flagged follow-on; the reserved emission coupling and eligibility lag are the owner's calibration
+/// the payoff needs first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeingPerceptField {
+    /// The sense channel a being emits on and is perceived on (the thermal/optical channel today; a
+    /// non-optical channel is the flagged alien follow-on the receiver reserves fail-loud).
+    pub channel: SenseChannelId,
+    /// The channel's reach binding: the spreading law and the medium absorption axis the signal attenuates by
+    /// along the path, so occlusion emerges from the strata rather than an authored line-of-sight rule.
+    pub row: ChannelReach,
+    /// The perceiver's transduction on the channel: its response law and gain, its discrimination law and
+    /// step, and its detection threshold (the sole perceptibility gate, slice 2's condition 3).
+    pub transduction: ChannelTransduction,
+    /// The physics reach caps: the geometric sphere coefficient for the derived dimensionality, the irradiance
+    /// cap the spread saturates at, and the optical-depth cap the medium attenuation saturates at (the
+    /// occlusion limit). Engine-mechanics representability bounds, not owner values.
+    pub bounds: ReachBounds,
+    /// The sensorium activation cap the transduced percept saturates at. Engine-mechanics.
+    pub activation_max: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the per-being emission coupling
+    /// coefficient the emitter's [`crate::physiology::being_signal_emission`] scales its blackbody radiant
+    /// flux by. Basis: the body's covering emissivity times its radiating area, folded into one lever until a
+    /// per-body material-and-area vector exists on the run path to split it (the gate-ruled follow-on).
+    pub emission_coefficient: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the temporal-difference lambda the
+    /// being-signal HARM eligibility trace decays by each tick. Basis: the interoceptive lag between
+    /// perceiving a being-signal (a predator approaching) and the harm that follows; the harm sibling of the
+    /// reward pole's `reward.eligibility_decay`, set relative to it. In (0, 1).
+    pub harm_eligibility_decay: Fixed,
+}
+
+impl BeingPerceptField {
+    /// A labelled DEVELOPMENT FIXTURE, not owner data: the dev optical channel and its reach binding, a linear
+    /// perceiver transduction with a modest gain, a small detection threshold, and a unit discrimination step,
+    /// the D=3 physics reach caps (the sphere coefficient `4*pi` derived from `Fixed::PI`, not a truncated
+    /// literal), and the two reserved values at their dev-fixture defaults. The real substrate is the world's
+    /// data and the reserved values are the owner's; this stands up the harness and test paths.
+    pub fn dev_fixture() -> BeingPerceptField {
+        let row = ChannelReachRegistry::dev_terran()
+            .get(DEV_OPTICAL)
+            .expect("the dev optical reach row is present")
+            .clone();
+        let sphere_coeff = Fixed::from_int(4)
+            .checked_mul(Fixed::PI)
+            .expect("4*pi is representable");
+        BeingPerceptField {
+            channel: DEV_OPTICAL,
+            row,
+            transduction: ChannelTransduction {
+                response: ResponseLaw::Linear,
+                gain: Fixed::ONE,
+                shape: Fixed::ZERO,
+                discrimination: DiscriminationLaw::AbsoluteStep,
+                step: Fixed::ONE,
+                threshold: Fixed::from_ratio(1, 1_000_000),
+            },
+            bounds: ReachBounds {
+                sphere_coeff,
+                irrad_max: Fixed::from_int(1_000_000),
+                tau_max: Fixed::from_int(1_000),
+            },
+            activation_max: Fixed::from_int(1_000_000),
+            emission_coefficient: Fixed::from_ratio(1, 2),
+            harm_eligibility_decay: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// The being-percept field read at the feature arming: the labelled fixture substrate bindings with the
+    /// two RESERVED values read fail-loud from the manifest (Principle 11). A world that arms being-percept
+    /// under `Profile::Calibrated` refuses while either reserved value is unset rather than fabricating one,
+    /// exactly the gated-feature-calib pattern the reward and conviction learners follow (the value refuses AT
+    /// the feature arming, not at an earlier always-on gate).
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<BeingPerceptField, CalibrationError> {
+        let mut field = BeingPerceptField::dev_fixture();
+        field.emission_coefficient = m.require_fixed("being_percept.emission_coefficient")?;
+        field.harm_eligibility_decay = m.require_fixed("harm.eligibility_decay")?;
+        Ok(field)
+    }
+
+    /// The channel id as the 16-bit channel field the being-signal subject packs (the subject band's channel
+    /// slot). The dev optical channel is `1`, well within the field; a world whose channel id exceeds the
+    /// field is the reserved widened-pack the gate ruled to Agent B's hybrid encoding.
+    pub fn channel_u16(&self) -> u16 {
+        self.channel.0 as u16
+    }
 }
 
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
@@ -892,8 +1383,8 @@ mod tests {
         assert_eq!(harm.toward, HARMS, "a harm tick points toward HARMS");
         assert_eq!(
             harm.subject,
-            feature_subject(2, 7),
-            "keyed on channel and bucket"
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal's own band"
         );
         assert!(harm.weight > Fixed::ZERO, "positive evidence weight");
         let benign = being_signal_observation(2, 7, false, Fixed::ONE, &calib);
@@ -908,21 +1399,32 @@ mod tests {
     }
 
     #[test]
-    fn a_being_signal_is_learned_identically_to_an_environmental_feature() {
-        // The being-signal is fed through the exact same learner: for the same channel, bucket, harm bit,
-        // and plasticity, the observation matches what the environmental learner mints, so no "communication"
-        // path is special-cased and the valence emerges receiver-side from correlation alone.
+    fn a_being_signal_is_learned_through_the_same_learner_on_its_own_disjoint_subject() {
+        // The being-signal is fed through the exact same LEARNER: for the same channel, bucket, harm bit, and
+        // plasticity, the valence direction and evidence weight match what the environmental learner mints, so
+        // no "communication" path is special-cased and the valence emerges receiver-side from correlation
+        // alone. But the SUBJECT is disjoint (the keystone step-1 namespace fix): a being-signal on channel c
+        // mints in the being-signal band, never the environmental-feature band, so the two beliefs never
+        // alias even at the same channel and bucket.
         let calib = HarmLearningCalib::dev_default();
         // An environmental feature whose amount buckets to a known bucket on channel 0.
         let amount = Fixed::from_int(2);
         let bucket = feature_bucket(amount, calib.feature_granularity);
         let env = feature_observations(true, &[amount], Fixed::ONE, &calib);
         let sig = being_signal_observation(0, bucket, true, Fixed::ONE, &calib);
-        assert_eq!(sig.subject, env[0].subject, "same subject minting");
         assert_eq!(sig.toward, env[0].toward, "same valence direction");
         assert_eq!(
             sig.weight, env[0].weight,
             "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, env[0].subject,
+            "disjoint from the environmental-feature subject at the same channel and bucket"
         );
     }
 
@@ -937,6 +1439,492 @@ mod tests {
         assert!(
             keen.weight > base.weight,
             "a higher plasticity extracts more evidence"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_band_is_disjoint_from_the_feature_and_sequence_bands() {
+        // Keystone step 1: a being-signal subject sets bit 60 (with bit 62), so it never equals a feature
+        // subject (bit 60 clear, its payload in the low 48 bits) nor a sequence subject (bit 61 set, clear
+        // here), whatever the channel and bucket, so a being's learned valence about a perceived signal never
+        // aliases a belief about a standing-on feature or a discovered action, even at the same channel and
+        // bucket (the section-9 slice-3 aliasing seam, closed by construction).
+        for ch in 0..8u16 {
+            for bk in 0..8i64 {
+                assert_ne!(
+                    being_signal_subject(ch, bk).0,
+                    feature_subject(ch, bk).0,
+                    "disjoint from the feature band at the same channel and bucket"
+                );
+            }
+        }
+        // The band markers: the being-signal band sets bit 60 and clears bit 61; the feature band clears bit
+        // 60; the sequence band sets bit 61. So the three bands are pairwise disjoint by their marker bits.
+        assert_eq!(
+            being_signal_subject(0, 0).0 & (1 << 60),
+            1 << 60,
+            "being-signal band marker (bit 60) set"
+        );
+        assert_eq!(
+            being_signal_subject(u16::MAX, i64::MAX).0 & (1 << 61),
+            0,
+            "being-signal band leaves bit 61 clear, disjoint from the sequence band"
+        );
+        assert_eq!(
+            feature_subject(0, 0).0 & (1 << 60),
+            0,
+            "feature band leaves bit 60 clear"
+        );
+        assert_eq!(
+            SEQUENCE_SUBJECT_BASE & (1 << 61),
+            1 << 61,
+            "sequence band sets bit 61"
+        );
+        assert!(
+            being_signal_subject(u16::MAX, i64::MAX).0 < (1 << 63),
+            "stays below the reserved-high landmark ids, exactly as the feature and sequence bands do"
+        );
+    }
+
+    #[test]
+    fn perceive_being_signal_gates_on_the_perceivers_threshold_and_occlusion() {
+        use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
+        // A perceiver whose channel transduces linearly at unit gain, with a detection threshold of 10.
+        let transduction = ChannelTransduction {
+            response: ResponseLaw::Linear,
+            gain: Fixed::ONE,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::from_int(10),
+        };
+        let cap = Fixed::from_int(1_000_000);
+        // A strong, unoccluded reach (spread 100, no optical depth) clears the threshold and mints the
+        // subject in the being-signal band, keyed on the channel and the discriminated bucket.
+        let clear = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ZERO,
+        };
+        let expected_bucket = sense(Fixed::from_int(100), &transduction, cap)
+            .expect("an unoccluded strong signal is sensed")
+            .bucket;
+        assert_eq!(
+            perceive_being_signal(clear, 5, &transduction, cap),
+            Some(being_signal_subject(5, expected_bucket)),
+            "an above-threshold reach mints the being-signal subject on its channel and bucket"
+        );
+        // The SAME emission behind a strongly-absorbing medium (a large optical depth) is attenuated below
+        // the threshold by the Beer-Lambert transmittance, so occlusion emerges and the emitter is not
+        // perceived, with no authored line-of-sight rule.
+        let occluded = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::from_int(20),
+        };
+        assert_eq!(
+            perceive_being_signal(occluded, 5, &transduction, cap),
+            None,
+            "a strongly occluded emitter falls below the perceiver's threshold"
+        );
+        // A faint emission below the threshold is not perceived either.
+        let faint = Reach {
+            spread: Fixed::from_int(1),
+            optical_depth: Fixed::ZERO,
+        };
+        assert_eq!(
+            perceive_being_signal(faint, 5, &transduction, cap),
+            None,
+            "a sub-threshold emission is not perceived"
+        );
+    }
+
+    #[test]
+    fn perceive_being_magnitude_returns_the_transduced_activation_and_shares_the_founder_threshold()
+    {
+        use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
+        // The creature-tier magnitude perceiver reads the SAME reach through the SAME transduction the founder
+        // subject perceiver uses, but returns the transduced ACTIVATION (the creature's pull weight) rather than
+        // the belief subject. Same perceptibility gate (threshold, occlusion), no belief.
+        let transduction = ChannelTransduction {
+            response: ResponseLaw::Linear,
+            gain: Fixed::ONE,
+            shape: Fixed::ZERO,
+            discrimination: DiscriminationLaw::AbsoluteStep,
+            step: Fixed::ONE,
+            threshold: Fixed::from_int(10),
+        };
+        let cap = Fixed::from_int(1_000_000);
+        let clear = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ZERO,
+        };
+        // The returned magnitude is exactly the transduced activation the shared `sense` produces, so the
+        // creature and the founder read one magnitude from one reach and differ only in what they key on.
+        let expected_activation = sense(Fixed::from_int(100), &transduction, cap)
+            .expect("an unoccluded strong signal is sensed")
+            .activation;
+        assert_eq!(
+            perceive_being_magnitude(clear, &transduction, cap),
+            Some(expected_activation),
+            "an above-threshold reach returns the transduced activation, the creature's pull weight"
+        );
+        // Occlusion emerges the same way: a strongly absorbing medium attenuates it below threshold, no percept.
+        let occluded = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::from_int(20),
+        };
+        assert_eq!(
+            perceive_being_magnitude(occluded, &transduction, cap),
+            None,
+            "a strongly occluded emitter falls below the creature's threshold (no pull)"
+        );
+        // A sub-threshold emission is not perceived, so it contributes no magnitude.
+        let faint = Reach {
+            spread: Fixed::from_int(1),
+            optical_depth: Fixed::ZERO,
+        };
+        assert_eq!(
+            perceive_being_magnitude(faint, &transduction, cap),
+            None,
+            "a sub-threshold emission returns no magnitude"
+        );
+        // INTERMEDIATE attenuation (0 < transmittance < 1): a partly-absorbing medium reduces the magnitude
+        // below the unoccluded value but keeps it above threshold, so the attenuation arithmetic itself is
+        // exercised (not just the full-pass and total-kill extremes). A wrong-sign or mis-scaled transmittance
+        // would land on a different activation and fail here.
+        let partial = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ONE, // transmittance = exp(-1) ~ 0.368, so magnitude ~ 36.8, above threshold
+        };
+        let partial_mag = perceive_being_magnitude(partial, &transduction, cap)
+            .expect("a partly-attenuated strong signal is still above threshold");
+        assert!(
+            partial_mag < expected_activation && partial_mag > Fixed::ZERO,
+            "partial occlusion reduces the magnitude below the unoccluded value but keeps it perceptible"
+        );
+        // It equals the transduced value of the explicitly attenuated magnitude, pinning the exact arithmetic.
+        let attenuated = Fixed::from_int(100)
+            .checked_mul((-Fixed::ONE).exp())
+            .unwrap();
+        assert_eq!(
+            perceive_being_magnitude(partial, &transduction, cap),
+            sense(attenuated, &transduction, cap).map(|p| p.activation),
+            "the perceived magnitude is the transduced spread times the Beer-Lambert transmittance"
+        );
+        // The magnitude perceiver and the founder subject perceiver share ONE perceptibility gate: on any reach
+        // where one perceives, so does the other, and where one is gated out, so is the other (they differ only
+        // in what they key on, the activation versus the channel-and-bucket subject).
+        for reach in [clear, occluded, faint, partial] {
+            assert_eq!(
+                perceive_being_magnitude(reach, &transduction, cap).is_some(),
+                perceive_being_signal(reach, 5, &transduction, cap).is_some(),
+                "the creature magnitude and the founder subject share the same perceptibility gate"
+            );
+        }
+    }
+
+    #[test]
+    fn the_being_directed_gradients_point_by_the_learned_belief_and_are_zero_without_it() {
+        let subject = being_signal_subject(5, 3);
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        let perceived = [(east, subject)];
+        // A perceiver with NO belief reads a zero gradient on both poles: founder-inert until a belief forms
+        // and an evolved weight lifts it (Principle 9).
+        let blank = Mind::new(StableId(20), Fixed::ONE);
+        assert_eq!(
+            being_avoidance_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no avoidance without a harm belief"
+        );
+        assert_eq!(
+            being_attraction_gradient(&blank, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction without a reward belief"
+        );
+        // A perceiver that has learned this signal HARMS it: the avoidance gradient points WEST (away from
+        // the emitter to its east, negative x), and the attraction gradient stays zero.
+        let mut fearful = Mind::new(StableId(21), Fixed::ONE);
+        let harm_calib = HarmLearningCalib::dev_default();
+        for _ in 0..5 {
+            fearful.consider(
+                subject,
+                HARM_ATTR,
+                [HARMS, BENIGN],
+                HARMS,
+                harm_calib.observation_weight(),
+                fearful.id,
+            );
+        }
+        assert_eq!(
+            fearful.belief(subject, HARM_ATTR, &params()),
+            Some(HARMS),
+            "committed the harm belief"
+        );
+        let (ax, ay) = being_avoidance_gradient(&fearful, here, &perceived, &params());
+        assert!(
+            ax < Fixed::ZERO,
+            "avoidance points away from the due-east emitter (west, negative x)"
+        );
+        assert_eq!(
+            ay,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        assert_eq!(
+            being_attraction_gradient(&fearful, here, &perceived, &params()),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no attraction while the belief is harm"
+        );
+        // A perceiver that has learned this signal REWARDS it: the attraction gradient points EAST (toward
+        // the emitter, positive x), the predation pole; the sign a being ACTS on is still the evolved weight.
+        let mut hungry = Mind::new(StableId(22), Fixed::ONE);
+        let reward_calib = RewardLearningCalib::dev_default();
+        for _ in 0..5 {
+            hungry.consider(
+                subject,
+                REWARD_ATTR,
+                [REWARDS, NEUTRAL],
+                REWARDS,
+                reward_calib.observation_weight(),
+                hungry.id,
+            );
+        }
+        assert_eq!(
+            hungry.belief(subject, REWARD_ATTR, &params()),
+            Some(REWARDS),
+            "committed the reward belief"
+        );
+        let (bx, by) = being_attraction_gradient(&hungry, here, &perceived, &params());
+        assert!(
+            bx > Fixed::ZERO,
+            "attraction points toward the due-east emitter (positive x), the predation pole"
+        );
+        assert_eq!(
+            by,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+    }
+
+    #[test]
+    fn the_creature_being_direction_is_belief_free_magnitude_graded_and_points_toward_the_emitter()
+    {
+        // Creatures-react arc, mechanism B3. The mind-less creature path takes only positions and the
+        // creature's own perceived magnitudes, no Mind, no belief, no valence.
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        // Empty perception (or an all-sub-threshold read) is a zero direction: a creature that perceives
+        // nothing has no pull, the true null before any weight acts.
+        assert_eq!(
+            creature_being_direction(here, &[]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "no perception, no pull"
+        );
+        assert_eq!(
+            creature_being_direction(here, &[(east, Fixed::ZERO)]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a zero-magnitude (sub-threshold) emitter contributes nothing"
+        );
+        // The direction points TOWARD the due-east emitter (positive x, zero y). The sign the creature ACTS
+        // on (approach vs flee) is the controller weight's, not this percept's: this always points toward.
+        let (px, py) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 4))]);
+        assert!(
+            px > Fixed::ZERO,
+            "points toward the east emitter (positive x)"
+        );
+        assert_eq!(
+            py,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        // Magnitude grading: a stronger signal from the SAME position pulls harder (a larger x component),
+        // below the saturation bound.
+        let (weak_x, _) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 8))]);
+        let (strong_x, _) = creature_being_direction(here, &[(east, Fixed::from_ratio(1, 2))]);
+        assert!(
+            strong_x > weak_x,
+            "a stronger perceived magnitude pulls harder (B3 magnitude grading)"
+        );
+        // Distance is NOT double-counted: the perceived magnitude is the sole distance factor (the reach
+        // already attenuated it), so at EQUAL magnitude a near and a far due-east emitter pull IDENTICALLY.
+        // A closer emitter pulls harder only because its perceived magnitude is higher (attenuation, upstream).
+        let near = Coord3::ground(2, 0);
+        let far = Coord3::ground(8, 0);
+        assert_eq!(
+            creature_being_direction(here, &[(near, Fixed::from_ratio(1, 4))]),
+            creature_being_direction(here, &[(far, Fixed::from_ratio(1, 4))]),
+            "equal magnitude, different distance: identical pull (distance enters only through magnitude)"
+        );
+        // A DIAGONAL emitter yields a diagonal direction, both components toward it (positive), so the percept
+        // is not an x-axis artefact of the earlier cases.
+        let ne = Coord3::ground(3, 4);
+        let (nx, ny) = creature_being_direction(here, &[(ne, Fixed::from_ratio(1, 4))]);
+        assert!(
+            nx > Fixed::ZERO && ny > Fixed::ZERO,
+            "points toward a north-east emitter on both axes"
+        );
+        // Multi-emitter summation: an emitter due-east and one due-north of equal magnitude sum to a north-east
+        // pull (both components positive and, by symmetry, equal).
+        let north = Coord3::ground(4, 0); // reuse magnitude symmetry via mirrored positions
+        let east4 = Coord3::ground(0, 4);
+        let (mx, my) = creature_being_direction(
+            here,
+            &[
+                (north, Fixed::from_ratio(1, 4)),
+                (east4, Fixed::from_ratio(1, 4)),
+            ],
+        );
+        assert!(
+            mx > Fixed::ZERO && my > Fixed::ZERO,
+            "two orthogonal emitters sum to a diagonal pull"
+        );
+        assert_eq!(
+            mx, my,
+            "symmetric orthogonal emitters give an equal-component diagonal"
+        );
+        // A co-located emitter has no direction and is skipped (no divide, no pull).
+        assert_eq!(
+            creature_being_direction(here, &[(here, Fixed::ONE)]),
+            (Fixed::ZERO, Fixed::ZERO),
+            "a co-located emitter contributes no direction"
+        );
+        // Saturation preserves DIRECTION (length-clamp, not per-component): a very strong diagonal pull clamps
+        // to unit length while keeping its 45-degree heading (equal components), never rotated toward an axis.
+        let diag = Coord3::ground(1, 1);
+        let (sx, sy) = creature_being_direction(here, &[(diag, Fixed::from_int(100))]);
+        assert_eq!(
+            sx, sy,
+            "a saturated diagonal pull keeps equal components (direction preserved)"
+        );
+        assert!(
+            sx > Fixed::ZERO,
+            "the saturated diagonal still points toward the emitter"
+        );
+        // and its length is at the unit bound (within a fixed-point tie), never past it.
+        let len2 = sx
+            .checked_mul(sx)
+            .unwrap()
+            .saturating_add(sy.checked_mul(sy).unwrap());
+        assert!(
+            len2 <= Fixed::ONE,
+            "the clamped length never exceeds the unit disc"
+        );
+    }
+
+    #[test]
+    fn the_harm_eligibility_trace_credits_each_remembered_subject_by_its_decayed_eligibility() {
+        let calib = HarmLearningCalib::dev_default();
+        let recent = being_signal_subject(3, 1);
+        let older = being_signal_subject(3, 2);
+        let mut trace = EligibilityTrace::new();
+        trace.record(older); // perceived first
+        trace.decay(Fixed::from_ratio(1, 2)); // and one tick older now, decayed to 1/2
+        trace.record(recent); // perceived this tick, full eligibility one
+        let base = calib.observation_weight();
+        // On a HARM tick, each remembered being-signal earns a harm observation weighted by base times its
+        // decayed eligibility: the just-perceived signal earns full credit, the distal one less, so a
+        // predator-approach cue perceived a tick before the harm is still credited (the lagged association).
+        let obs = being_signal_trace_observations(&trace, true, Fixed::ONE, &calib);
+        assert_eq!(obs.len(), 2, "one observation per remembered being-signal");
+        assert!(
+            obs.iter().all(|o| o.toward == HARMS),
+            "a harm tick credits toward HARMS"
+        );
+        let recent_obs = obs
+            .iter()
+            .find(|o| o.subject == recent)
+            .expect("recent credited");
+        let older_obs = obs
+            .iter()
+            .find(|o| o.subject == older)
+            .expect("older credited");
+        assert_eq!(
+            recent_obs.weight, base,
+            "the just-perceived signal earns full credit"
+        );
+        assert_eq!(
+            older_obs.weight,
+            base.checked_mul(Fixed::from_ratio(1, 2)).unwrap(),
+            "the distal signal earns decayed credit"
+        );
+        assert!(
+            older_obs.weight < recent_obs.weight,
+            "a more distal perception earns less credit"
+        );
+        // On a harm-free tick the same subjects are credited toward BENIGN.
+        let benign = being_signal_trace_observations(&trace, false, Fixed::ONE, &calib);
+        assert!(
+            benign.iter().all(|o| o.toward == BENIGN),
+            "a harm-free tick credits toward BENIGN"
+        );
+        // An empty trace credits nothing (the byte-neutral opt-out state).
+        assert!(
+            being_signal_trace_observations(&EligibilityTrace::new(), true, Fixed::ONE, &calib)
+                .is_empty(),
+            "an empty trace credits nothing"
+        );
+    }
+
+    #[test]
+    fn a_being_signal_earns_a_reward_observation_pointed_by_the_reward_bit() {
+        // Keystone step 2 (the predation pole): a perceived being-signal correlated with the being's own
+        // reward bit mints one observation toward REWARDS on a reward tick, NEUTRAL otherwise, on the SAME
+        // being-signal subject the harm core uses (disjoint frames by attribute), so a perceived being carries
+        // both a harm belief and a reward belief that emerge from the perceiver's own outcomes.
+        let calib = RewardLearningCalib::dev_default();
+        let rewarded = being_signal_reward_observation(2, 7, true, Fixed::ONE, &calib);
+        assert_eq!(
+            rewarded.toward, REWARDS,
+            "a reward tick points toward REWARDS"
+        );
+        assert_eq!(
+            rewarded.subject,
+            being_signal_subject(2, 7),
+            "keyed on channel and bucket in the being-signal band"
+        );
+        assert!(rewarded.weight > Fixed::ZERO, "positive evidence weight");
+        let neutral = being_signal_reward_observation(2, 7, false, Fixed::ONE, &calib);
+        assert_eq!(
+            neutral.toward, NEUTRAL,
+            "a reward-free tick points toward NEUTRAL"
+        );
+        // The reward core and the harm core share the SAME subject (one perceived signal, two disjoint belief
+        // frames), so a being's harm and reward beliefs about a signal never split across subjects.
+        let hcalib = HarmLearningCalib::dev_default();
+        let harm = being_signal_observation(2, 7, true, Fixed::ONE, &hcalib);
+        assert_eq!(
+            rewarded.subject, harm.subject,
+            "harm and reward beliefs share the being-signal subject"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_reward_core_mints_inline_like_the_material_reward_core() {
+        // The being-signal reward core is fed through the same INLINE reward mint the material reward learner
+        // uses: for the same channel, bucket, reward bit, and plasticity, the valence direction and evidence
+        // weight match reward_observations, so no being path is special-cased; only the SUBJECT differs (the
+        // disjoint being-signal band), so a being-signal reward belief never aliases a material one.
+        let calib = RewardLearningCalib::dev_default();
+        let amount = Fixed::from_int(2);
+        let bucket = feature_bucket(amount, calib.feature_granularity);
+        let mat = reward_observations(true, &[amount], Fixed::ONE, &calib, 0);
+        let sig = being_signal_reward_observation(0, bucket, true, Fixed::ONE, &calib);
+        assert_eq!(
+            sig.toward, mat[0].toward,
+            "same valence direction (REWARDS)"
+        );
+        assert_eq!(
+            sig.weight, mat[0].weight,
+            "same evidence weight (the shared reserved likelihoods)"
+        );
+        assert_eq!(
+            sig.subject,
+            being_signal_subject(0, bucket),
+            "minted in the being-signal band"
+        );
+        assert_ne!(
+            sig.subject, mat[0].subject,
+            "disjoint from the material-feature reward subject"
         );
     }
 
@@ -1138,7 +2126,7 @@ mod tests {
         // a different subject.
         assert_eq!(sequence_subject(&seq), s);
         assert_ne!(sequence_subject(&[step(3, 1, 0), step(5, 2, 1)]), s); // different primitive
-        assert_ne!(sequence_subject(&[step(3, 9, 0), step(4, 2, 1)]), s); // different target kind
+        assert_ne!(sequence_subject(&[step(3, 6, 0), step(4, 2, 1)]), s); // different target kind (in-envelope)
         assert_ne!(sequence_subject(&[step(4, 2, 1), step(3, 1, 0)]), s); // reversed order
         assert_ne!(sequence_subject(&[step(3, 1, 0)]), s); // a prefix is not the whole sequence
                                                            // Disjoint from the feature band: a sequence subject (bit 61 set) never equals a feature subject
@@ -1154,6 +2142,93 @@ mod tests {
                 assert_ne!(s.0, feature_subject(ch, bk).0);
             }
         }
+    }
+
+    #[test]
+    fn the_hybrid_key_dissolves_the_cap_in_envelope_and_hashes_on_overflow() {
+        // R-DEEPTECH-COMPOSE hybrid belief-subject key: the exact widened pack distinguishes every primitive
+        // within its widened field (dissolving the old 16-value cap, so 20 and 21 no longer over-merge), and
+        // a beyond-envelope sequence (more steps, or a field past its width) mints via the hash sub-band (bit
+        // 60), disjoint from the exact pack (bit 60 clear), from Agent A's being-signal band (bit 61 clear),
+        // and from the feature band, so an arbitrary conjunction is representable without the common-case
+        // collision a pure hash would incur, and it stays deterministic.
+        let step = |p: u16, t: i64, q: i64| SequenceStep {
+            primitive: p,
+            target_bucket: t,
+            param_bucket: q,
+        };
+        // In-envelope: the widened primitive field distinguishes ids the old 4-bit cap merged.
+        let a = sequence_subject(&[step(20, 1, 0)]);
+        let b = sequence_subject(&[step(21, 1, 0)]);
+        assert_ne!(
+            a, b,
+            "primitives 20 and 21 mint distinct subjects (the cap is dissolved)"
+        );
+        // Both in-envelope subjects are EXACT (bit 60 clear).
+        assert_eq!(a.0 & SEQ_HASH_MARKER, 0);
+        assert_eq!(b.0 & SEQ_HASH_MARKER, 0);
+        // Over-envelope by STEP COUNT: five steps exceed SEQ_MAX_STEPS, so it hashes (bit 60 set).
+        let long = [
+            step(1, 0, 0),
+            step(2, 0, 0),
+            step(3, 0, 0),
+            step(4, 0, 0),
+            step(5, 0, 0),
+        ];
+        let h = sequence_subject(&long);
+        assert_eq!(
+            h.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "an over-length sequence hashes"
+        );
+        // Over-envelope by FIELD WIDTH: a primitive past the 6-bit width hashes.
+        let wide = sequence_subject(&[step(1000, 0, 0)]);
+        assert_eq!(
+            wide.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a too-wide field hashes"
+        );
+        // The other two width disjuncts of the envelope check, exercised so no field's overflow branch is
+        // untested: a target bucket past the 3-bit width, and a param bucket past the 3-bit width, each
+        // hashes. These are the fields the widening narrowed most (three bits), so their overflow is the
+        // one most reached in practice.
+        let wide_target = sequence_subject(&[step(1, SEQ_TARGET_MAX as i64 + 1, 0)]);
+        assert_eq!(
+            wide_target.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a target bucket past its width hashes"
+        );
+        let wide_param = sequence_subject(&[step(1, 0, SEQ_PARAM_MAX as i64 + 1)]);
+        assert_eq!(
+            wide_param.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a param bucket past its width hashes"
+        );
+        // A field exactly AT its width stays exact (the boundary is inclusive), so the hash path is entered
+        // only past the envelope, never one step early.
+        let at_edge = sequence_subject(&[step(
+            SEQ_PRIMITIVE_MAX as u16,
+            SEQ_TARGET_MAX as i64,
+            SEQ_PARAM_MAX as i64,
+        )]);
+        assert_eq!(
+            at_edge.0 & SEQ_HASH_MARKER,
+            0,
+            "every field exactly at its width still packs exactly"
+        );
+        // The hash sub-band stays in the sequence band (bits 62 and 61 set) and below the landmark ids.
+        assert_eq!(h.0 & SEQUENCE_SUBJECT_BASE, SEQUENCE_SUBJECT_BASE);
+        assert!(h.0 < 1u64 << 63);
+        // Disjoint from Agent A's being-signal band (bits 62+60, bit 61 clear): the hash sets bit 61.
+        assert_ne!(
+            h.0 & (1u64 << 61),
+            0,
+            "the sequence-hash band sets bit 61, being-signal leaves it clear"
+        );
+        // Deterministic: the same over-envelope sequence hashes to the same subject.
+        assert_eq!(sequence_subject(&long), h);
+        // Disjoint from the exact pack: an in-envelope and an over-envelope sequence never collide.
+        assert_ne!(h, a);
     }
 
     #[test]

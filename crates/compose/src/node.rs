@@ -14,9 +14,12 @@
 
 //! The composition node: a design as a tree over the form-and-join floor and the material substrate.
 //!
-//! A [`CompositionNode`] is either a [`NodeBody::Leaf`] (geometric primitives of one material, joined
-//! one way) or a [`NodeBody::Composite`] (child designs, referenced by content id, assembled with an
-//! assembly material and join). Its [`CompositionNode::content_id`] is PURE-CONTENT: a `StateHasher`
+//! A [`CompositionNode`] is a [`NodeBody::Leaf`] (geometric primitives of one material, joined
+//! one way), a [`NodeBody::Composite`] (child designs, referenced by content id, assembled with an
+//! assembly material and join), or a [`NodeBody::Transduction`] (an OPAQUE, domain-serialized
+//! primitive: `compose` does not interpret its bytes, it only content-addresses them so a distinct
+//! transduction mints a distinct node that is promoted, folded, and selected through discovery like
+//! any design). Its [`CompositionNode::content_id`] is PURE-CONTENT: a `StateHasher`
 //! digest over the canonical body (the sorted primitive and child ids, the material content ids, the
 //! form and join ids, the transforms and overrides, and the params in fixed order), with the
 //! `master_seed` OMITTED. This matches the physics [`Substance`](civsim_physics::Substance) content-id
@@ -76,6 +79,26 @@ pub enum NodeBody {
         assembly_material: u128,
         /// The join binding the children.
         assembly_join: JoinId,
+    },
+    /// A transduction: an OPAQUE, domain-serialized primitive affordance. The `compose` substrate is
+    /// domain-agnostic and never interprets these bytes; it folds them whole into the content id so a
+    /// distinct transduction mints a distinct content-addressed node and CAN be promoted, folded, and
+    /// selected through discovery like any other design node. This is the SUBSTRATE for a multi-axis
+    /// affordance (a `compose` tree of transduction leaves); the bundling of leaves into a purpose-laden
+    /// affordance is left to EMERGE through the discovery loop under selection, not authored or proven
+    /// here (the Tier-C seam, see `civsim-sim`'s affordance-percept module). The domain (`civsim-sim`)
+    /// serializes its affordance transduction
+    /// into these canonical bytes; the serialization is the domain's contract and MUST be deterministic
+    /// and stable (fixed field order, fixed-point-exact, no map-iteration-order dependence) so identical
+    /// transductions mint identical ids across runs and workers, the same discipline `state_hash`
+    /// holds. `compose` asserts nothing about a sensor's physical fitness: the physics evaluator returns
+    /// an empty interface vector and the zero-load structural viability (a safety of one, the
+    /// unconstrained maximum, because a sensor bears no structural load), so the structural promotion
+    /// gate never rejects it AS a structure; its sensory fitness is evaluated in the domain, not here.
+    Transduction {
+        /// The domain's canonical serialization of the transduction. Never interpreted by `compose`;
+        /// folded whole (length-prefixed) into the content id.
+        canonical: Vec<u8>,
     },
 }
 
@@ -169,6 +192,14 @@ fn compute_content_id(body: &NodeBody, param: &[Fixed]) -> u128 {
             h.write_u64(u64::MAX); // separator
             write_u128(&mut h, *assembly_material);
             h.write_u32(assembly_join.0);
+        }
+        NodeBody::Transduction { canonical } => {
+            h.write_u32(3); // transduction tag
+                            // Length-prefix the opaque bytes so the byte stream is unambiguous (no two
+                            // distinct byte strings share a fold), then fold them verbatim. compose does
+                            // not parse them; the domain's canonical serialization carries the meaning.
+            h.write_u64(canonical.len() as u64);
+            h.write_bytes(canonical);
         }
     }
     h.write_u64(u64::MAX); // param separator
@@ -271,5 +302,50 @@ mod tests {
     fn the_material_content_ids_are_unaffected_by_the_leaf_helper() {
         // A sanity anchor so the fixtures are meaningful: two leaves of different material differ.
         assert_ne!(leaf(1).content_id(), leaf(2).content_id());
+    }
+
+    fn transduction(canonical: Vec<u8>) -> CompositionNode {
+        CompositionNode::new(
+            IntentRef(0),
+            NodeBody::Transduction { canonical },
+            PortVector::from_slots(vec![]),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn distinct_transduction_bytes_mint_distinct_ids_and_identical_bytes_agree() {
+        // The content-addressing contract: a distinct opaque serialization is a distinct node, and the
+        // same bytes (the domain's stable canonical form) recompute to the same id.
+        let a = transduction(vec![1, 2, 3]);
+        let b = transduction(vec![1, 2, 4]);
+        assert_ne!(
+            a.content_id(),
+            b.content_id(),
+            "different bytes, different id"
+        );
+        assert_eq!(
+            a.content_id(),
+            transduction(vec![1, 2, 3]).content_id(),
+            "identical bytes recompute to the identical id"
+        );
+        assert_eq!(a.id, a.content_id(), "stored id matches recomputed");
+    }
+
+    #[test]
+    fn the_length_prefix_disambiguates_byte_boundaries() {
+        // Length-prefixing the opaque bytes means no two distinct serializations can collide by sharing
+        // a fold: [1] followed by [2,3] cannot masquerade as [1,2] followed by [3]. Distinct byte
+        // strings mint distinct ids even when a naive concatenation would run together.
+        let ab = transduction(vec![1, 2, 3]);
+        let cd = transduction(vec![1, 2, 3, 0]);
+        assert_ne!(ab.content_id(), cd.content_id());
+    }
+
+    #[test]
+    fn a_transduction_leaf_never_collides_with_a_geometric_leaf() {
+        // The tag byte partitions the three bodies: an empty-byte transduction and a geometric leaf are
+        // distinct designs even though both are "leaves", because tag 3 differs from tag 1.
+        assert_ne!(transduction(vec![]).content_id(), leaf(0).content_id());
     }
 }

@@ -8,6 +8,10 @@ entry using a derived or dev-set value.
 
 ## Open
 
+R12. **Creatures-react being-percept: the frame-blind revised the mechanism. Resolved framing surfaced for the gate 2026-07-10 (Agent B).** The arc was queued as "give the creature a lighter being-percept path so it forms a predator/prey belief like the founder." The frame-blind (section-11 smoke, five rounds to CLEAR; section-10 panel, five of five returning convergent, verified against source) revised it: REJECT mechanism (i), transplanting the founder belief path onto the creature, on two grounds, that installing a within-life belief store into a definitionally non-learning tier is a rewrite not data (admit-the-alien), and that committing a labelled valence {harmful, benign, rewarding, neutral} and reading that committed category to produce the movement is the template-case authoring pattern plus a closed-enum (P8); ADOPT mechanism (ii) as the base, the raw perceived signal (channel plus the creature's own discrimination bucket, no valence, no belief) into a controller direction slot through a heritable freely-signed weight, the toward/away coupling set by cross-generational selection, the template-case cure native to the creature's genome-expressed controller; FOLD in within-life plasticity (iii) as a heritable genome-expressed plasticity coefficient on the same weight, defaulting to zero so it reduces to (ii), with the plasticity direction itself a heritable freely-signed parameter whose sign selection sets, so whether and which way a lineage learns is a selected emergent trait (P9). The decisive shared site, the magnitude bucket, is VERIFIED clean in the existing substrate (the bucket derives from the perceiver's own discrimination step, `perception_percept.rs:70,89`, not a global grid); the build constraint is that the creature carries its own transduction. Full detail and the source citations are in `docs/working/CREATURES_REACT_ARC_PLAN.md`. Gate to rule the framing before code (PR off `main`, the bridge rule for merging #115).
+
+R13. **Inherited founder-path question, flagged by the creatures-react panel (Agent B, 2026-07-10).** Two blind panelists observed that the existing, gate-signed founder being-percept path commits a labelled valence from a closed set and reads that committed category to produce the gradient, the same pattern mechanism (i) is rejected for. Whether this is a real defect turns on whether "a reserve fell, therefore harmful" is a floor-level primitive (harm as reserve loss is near-definitional, an authored floor value the value-authoring line permits) or a cultural outcome that must emerge. Surfaced for the gate to decide whether to open a separate audit of the founder path; NOT changed by the creatures-react arc.
+
 R7. **The world is 3D (`Coord3`), not 2D; perception must key on it. OWNER DIRECTIVE + CORRECTION 2026-07-09.**
 While framing the reach wire (Arc 3 slice 1), I stated the world was a 2D grid and proposed a 2D `1/r` falloff.
 The owner corrected it: the world should be 2.5D minimum (space above) with subsurface (things in the ground).
@@ -197,6 +201,137 @@ With slice 3 built and audited, the perception-substrate arc (slices 1 through 3
 for the gate's whole-arc gate. The being-percept keystone that wires the percept live (and does the reserved
 estimator, the per-axis noise floor, the eligibility trace, and the packing offset, sequenced with Agent B) is
 the payoff follow-on that unblocks predation on the run path.
+
+FRAMED hunt-kill strike (the contact physics that completes predation: an approaching predator wounds prey on
+the run path), 2026-07-10 (Agent A, PR #117, PENDING gate ruling). Framed blind before any code. The section-11
+input-bias smoke test (fail-closed) BLOCKED my packet four times, each a real leak where I pre-supplied the
+derive-clean verdict (outright emergence/authoring assertions; then founder-zero and physics-floor honorifics
+with a one-axis-only defense; then law and heritable category labels; then no-run-path-code-does-X wiring
+disclosures implying the machinery was disconnected), and cleared the fifth. The section-10 blind panel (6
+panelists across 3 agent types and 3 models, 4 returned; plan-opus a transient server error, claude-fable
+safeguard-flagged the combat content) came back 4/4 significant-flaw-fixable, converging on FOUR distinct
+authoring seams my clean framing hid, each verified against source. (1) The death rule (my cumulative-damage
+accumulator plus a structural-failure threshold) is a hidden hit-point system: an authored body-level value
+outside the floor that flattens the Structure-of-Segments body into one scalar and adds a second death path.
+CORRECTED: the wound degrades the struck region's own material, impairs the physiology that region sustains,
+the reserve falls, and the ONE existing reserve-cull removes the being (matching the gate's one-currency,
+death-through-the-reserve-cull model). (2) `kinetic_energy` hardcodes the wound channel (verified: `body::strike`
+computes energy only through it), so a non-kinetic contact attack needs a rewrite. CORRECTED: an axis-dispatched
+contact-energy-transfer law selected by the acting part's own energy/material axis, kinetic the first instance,
+so a new channel is a data row. (3) The damage mode reads as a categorical dispatch (verified: `DamageModeRegistry`
+CUT/PIERCE/BLUNT/BURN passed to `apply_insult`). CORRECTED: derive the contact area and mode from the acting
+part's own geometry, so the wound-shape emerges continuously. (4) "Targeting a body" classifies the occupant as
+a `body::Body` (parts and tissues), a second body model beside the run-path `Structure` of Segments (verified:
+the Walker carries `body: BodyPlan` plus `structure: Option<Structure>`, not `body::Body`). CORRECTED: one strike
+primitive over whatever Segments occupy the cell (terrain, matter, or a being uniform), "this was combat" a
+description not a branch, with the deeper `body::Body`-to-Structure unification flagged as coupled to the
+plant-as-a-body / composition arcs, not this arc. Unchanged and sound: the strike decision is the emergent
+controller (the keystone being-percept gradient plus a founder-zero freely-signed strike-affordance weight), so
+nothing reads a species, role, or relatedness. Couples to Agent B's run-path damage state (sequence with B).
+Posted to the gate on #117 (comment 4932785384) for its ruling before any strike code.
+
+GATE RULED 2026-07-10 (on #117): framing SIGNED OFF, build it. The gate verified all four seams at source
+itself (seam 2 at body.rs:1077/912 and laws.rs:337; seam 3 at body.rs:205-213; seam 4 at locomotion.rs:512/521;
+seam 1 sharpened against runner.rs:5545-5556). Corrections 1-3 adopted with two precisions. SEAM 1 death path
+made exact (the cross-arc coupling): no new reserve mechanic; the wound writes Agent B's `Segment.damage`,
+`whole_body_viability_aged` reads it, the INTEGRITY axis reflects it (runner.rs:5551-5556 sets INTEGRITY to
+`whole_body_viability` over the struck Structure), and the ONE unified cull (`is_alive` over every axis then
+`reconcile_lifecycle`, no morphology predicate, P8) removes the being when any axis floors; the strike is the
+fast-increment sibling of B's slow aging accrual on the SAME `Segment.damage -> whole_body_viability_aged ->
+INTEGRITY -> unified cull` chain (a vital-Segment wound floors INTEGRITY fast, a non-vital one degrades slower).
+SEAM 3 pushed to a DESCRIPTION not a dispatch: the physical quantity is pressure = delivered energy / contact
+area against the struck Segment's own material strength, and CUT/PIERCE/BLUNT/BURN are labels for regions of
+that continuum, never a per-part selector (derive the mode from geometry if the floor law needs one, never pass
+it in). SEAM 4 scope RULED to the HONEST FIRST CUT: one strike primitive over the run-path Structure's Segments
+(reads whatever Segments occupy the cell, computes the wound from the floor laws against the Segment's own
+material, writes `Segment.damage`, identical for terrain/matter/being), NOT routed through `body::Body`/`apply_insult`
+(which stay for their uses); the deep `body::Body`-to-Structure unification is its own arc sequenced with the
+plant-as-a-body / composition arcs, and the bridge is flagged as the named limit, do NOT fold it in here. UNITS:
+write `Segment.damage` in B's exact accrual convention (delivered energy commensurate with `failure_tolerance =
+fracture_energy * contact_area`, the units B's slice-3 section-9 hardened by removing the erroneous `* 1000`), so
+a discrete strike is a large one-tick increment to the same fraction accumulator, one currency, no double-count.
+SEQUENCING: build everything that does NOT touch the accumulator NOW (the contact-energy-transfer law, the
+geometry-derived contact area, the strike affordance off founder-zero, the controller consumption) against the
+Structure/Segment surface already on main; hold ONLY the final `Segment.damage` write until the gate lands B's
+#113 (which puts `Segment.damage` + `whole_body_viability_aged` on main) and clears the damage-write onto the
+merged accumulator, so Agent A does not branch against an unmerged surface. Acknowledged on #117 (comment
+4932824584) with the build order. Building on `claude/hunt-kill-strike` (#117), each step frame-blind-clean and
+posted for the gate's review, section-9 lens audit over the arc before the accumulator write.
+
+FRAMED being-percept keystone (the payoff arc: wire the percept live so predation and fleeing emerge),
+2026-07-10 (Agent A, PENDING gate ruling). Framed blind before any code. The section-11 input-bias smoke test
+(strongest model, fail-closed) BLOCKED my construction four times, each a real source-verified seam on a
+distinct axis (a whole-loop emergence claim scoped over receiver-only facts; the emitter curated alien-clean
+when a non-Terran channel is a missing-physics substrate; a symmetric receiver alien over-claim introduced
+while fixing the second; predation and fleeing framed as symmetric when only the harm pole had a substrate),
+and cleared the fifth. The section-10 blind panel (6 diverse panelists across 3 agent types and 3 models, 5
+returned, the 6th hit an infrastructure safeguard) came back 5/5 significant-flaw-fixable on two seams.
+SEAM 1 (unanimous strongest): the being-directed gradient's away-from-harm / toward-reward SIGN is an authored
+valence-to-direction coupling that forecloses approach-to-a-harm (a parasite, a scavenger, mobbing). REFUTED
+at source (Prime Directive 1: a unanimous panel is a lead generator, not a verdict): the controller weight is
+expressed from the genome UNCLAMPED (`GeneSet::express`, genome.rs:404-426, a sum of signed `genotypic.mul(weight)`
+terms with no clamp; contrast `express_unit`, genome.rs:435-437, which clamps to [0,1] and is used only for
+propensity channels, never for controller weights, which use `express` at controller.rs:942), and a working
+taxis test uses a -1 weight (controller.rs:1488). So the weight is FREELY SIGNED and founder-zero: selection
+lifts it positive (follow the percept) or negative (invert it), so a negative being-avoidance weight yields
+approach-to-a-harm-believed emitter and the full approach/avoid space is spanned, with harm and reward as
+separate percepts under independent weights. The panel reasoned correctly from my framing; my fact-3 phrasing
+("only a heritable weight lifted off founder-zero turns it into avoidance or approach", "the fixed sign is an
+open seam") MIS-STATED the mechanism, so the fix is a framing correction (state the weight is freely signed,
+the approach/avoid sign emerges, retract the open seam), never a mechanism change. The panel's proposed
+single-signed-percept would AUTHOR the reward-minus-harm combination, the less-emergent choice, so it is
+declined. SEAM 2 (valid, verified): the build list omitted the subject-namespace offset, a LIVE wiring
+requirement; `being_signal_observation` (learn.rs:583) keys `feature_subject(channel, bucket)` with no
+channel-base offset while the material `reward_observations` (learn.rs:610) takes a `channel_base`, so without
+the offset a being-signal aliases the environmental biology feature at the same index under HARM_ATTR (P11);
+the fix sequences the offset FIRST. Folded-in completeness: the named limits carry both alien gaps (receiver
+fail-loud on a non-optical channel, emitter alien emission a flagged floor extension) and the bootstrap
+precondition (an out-of-loop first contact and a survivable sublethal harm to have an outcome to learn from),
+and the being-directed gradient keys on perceived EMITTERS on a channel (any source, being or material),
+never on being-hood. THE RESOLVED FRAMING (survives my own check): a being passively emits on a channel from
+its own material (a Terran channel reads an existing floor source-power axis, a non-Terran channel's axis and
+law are a flagged missing-physics extension); the emission reaches another attenuated by geometry and the
+medium, and is threshold-gated into a percept (the receiver data-defined and fail-loud on a non-optical
+channel); the receiver-side learner correlates it (same-tick today, a keystone-built harm-path eligibility
+trace, its latency a reserved calibration, credits a lagged outcome) into a harm belief (the built core) or a
+reward belief (a keystone-built reward-frame counterpart) on a subject offset into its own namespace band; the
+evolved controller reads a being-directed geometric-direction gradient over those beliefs through a
+founder-zero FREELY-SIGNED weight, so approach (predation) and avoidance (fleeing) emerge from selection, with
+no mechanism reading a species, kingdom, trophic role, relatedness, named state, or being-hood. The keystone
+builds, in order: the subject-namespace offset (P11, first); the being-signal reward-frame counterpart core;
+the two being-directed gradients (consuming the reach and percept substrate); the harm-path eligibility trace;
+the per-being likelihood estimator (shared with Agent B's composer); the live wire (behaviour-changing, a
+stated hash change re-baselining the four pins). Flagged follow-ons: a discretionary emit affordance and
+referential meaning (an alarm call is both, so alarm is dropped from the keystone, narrowing the gate's
+predation/hunting/fleeing/alarm charge under Prime Directive 5); alien-channel emission and reception. THE
+SCOPE FORK for the gate: (A) build both poles now (reward core plus both being-directed gradients plus the
+eligibility trace), so predation and fleeing both emerge, my recommendation, since both poles need the
+being-directed gradient anyway and the reward core is a small mirror of the built material reward core; or
+(B) scope the keystone to fleeing (the built harm core plus a being-avoidance gradient plus the eligibility
+trace) and flag predation's reward core and attraction gradient as the next sub-slice. Reserved and
+owner-held, surfaced not fabricated: the belief-subject packing (the subject-namespace offset and whether a
+`SenseChannelId` fits the 16-bit channel field, the `SEQ_FIELD_BITS` / belief-subject-hash decision the gate
+surfaced to the owner); the per-being likelihood estimator (a build shared with Agent B, sequenced by the
+gate); the eligibility-trace latency and the per-axis noise floor (reserved calibrations with basis). Posted
+to the gate for its ruling before any keystone code.
+
+GATE RULED 2026-07-10 (on #116): the framing is signed off (the gate verified the Seam-1 refutation against
+source itself and confirmed it holds). The scope fork is ruled (A) BOTH POLES: build the six-step sequence,
+each step gated. The alarm DROP is accepted under Prime Directive 5, so the honest keystone charge is
+PREDATION, HUNTING, and FLEEING, with alarm (a discretionary emit plus referential meaning, both flagged
+follow-ons) named as the next substrate. The belief-subject packing is ruled to the HYBRID (an exact widened
+pack in-envelope plus a hash on overflow), which Agent B builds as the shared belief-subject key, so step 1's
+being-signal band is COORDINATED with Agent B as three disjoint top-level bands: environmental features at
+bit 62 (existing), sequences and conjunctions at bits 62 and 61 (Agent B's existing), being-signals proposed
+at `(1<<62) | (1<<60)` (a new `being_signal_subject`, disjoint from both, so the slice-3 aliasing seam is
+closed by construction), with the `SenseChannelId`-fits question falling out of Agent B's hybrid encoding
+within the being-signal band. Sequencing: build steps 1-4 now (independent of Agent B); sequence step 5 (the
+per-being likelihood estimator, shared with Agent B's composer) with the gate when Agent B frees; step 6 (the
+live wire) last. Route every re-pin (step 6, and step 4 if its eligibility trace touches the live
+environmental harm path rather than staying scoped to the dead being-signal path) through the gate; each
+re-pins once and the gate sequences them against Agent B's and Agent C's re-pins on the four tracked pins.
+The eligibility-trace latency and the per-axis noise floor stay reserved-with-basis (owner-set). Building on
+`claude/being-percept-keystone` (#116), each step pushed for the gate's per-step review.
 
 R1. **Founder band placement is an AUTHORED gameplay input, NOT an engine-solved cultural outcome. RESOLVED
    by the owner 2026-07-08.** The CONTINUED-4 living-world finding reported a seed-dependent collapse (a band

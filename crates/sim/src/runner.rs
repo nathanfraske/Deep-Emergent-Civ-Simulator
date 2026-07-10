@@ -88,6 +88,8 @@ use crate::affordance_percept::{
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::axiom::AxiomAxisId;
 use crate::calibration::{CalibrationError, CalibrationManifest};
+use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry};
+use crate::contact_wound::{presented_contact_area, wound_fraction, FRACTURE_ENERGY_AXIS};
 use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::FeltConvictionCalib;
 use crate::conviction_percept::ConvictionPerceptRegistry;
@@ -99,13 +101,15 @@ use crate::environ::{EnvironCalib, EnvironFields};
 use crate::homeostasis::{
     is_harm_tick, is_reward_tick, AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis,
     HomeostaticAxisId, HomeostaticRegistry, CONDITION, CRAFT, CRUSH, CUT, DIG, ENERGY, EXTRACT,
-    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, TEMPERATURE,
+    GEOPHAGE, GRASP, INTEGRITY, POUND, RELEASE, RESPIRATION, SHELTER, STRIKE, TEMPERATURE,
 };
 use crate::learn::{
-    appetitive_salience, attraction_gradient, avoidance_gradient, builtin_reachable_relations,
-    feature_observations, reward_observations, sequence_subject, step_belief_subject,
-    HarmLearningCalib, RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR,
-    MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
+    being_avoidance_gradient, being_signal_reward_for, being_signal_trace_observations,
+    builtin_reachable_relations, creature_being_direction, feature_observations,
+    perceive_being_magnitude, perceive_being_signal, reward_observations, sequence_subject,
+    step_belief_subject, BeingPerceptField, HarmLearningCalib, RewardLearningCalib, SequenceStep,
+    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -118,6 +122,7 @@ use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
 use crate::percept::PerceptRegistry;
+use crate::perception_reach::{received_reach, resolve_reach};
 use crate::physiology::{
     self, base_drain_from, body_exchange_rate_from, derive_body_exchange_rate,
     derive_exertion_coupling, felt_salience, whole_body_composition_vector, MetabolicAnchors,
@@ -200,6 +205,16 @@ const MATERIAL_REWARD_LEARN_ORDINAL_BASE: u32 = 3_000_000;
 /// substance accrues both observations toward one "this signature rewards" belief; the disjoint ordinal
 /// bands keep the two tick inputs from aliasing while the shared subject keeps the belief one fact.
 const NUTRITION_REWARD_LEARN_ORDINAL_BASE: u32 = 4_000_000;
+/// The base tick-input ordinal a BEING-SIGNAL harm credit carries (the being-percept keystone, step 6), one
+/// per subject in the perceiver's harm-eligibility trace, disjoint from and above the reward bands so a
+/// being-signal harm observation never collides with a feature, sequence, material, or nutrition observation
+/// for the same being in the same tick on the mind-then-ordinal sort.
+const BEING_HARM_LEARN_ORDINAL_BASE: u32 = 5_000_000;
+/// The base tick-input ordinal a BEING-SIGNAL reward credit carries (the being-percept keystone, step 6, the
+/// predation pole), one per being-signal the perceiver formed this tick, disjoint from and above
+/// [`BEING_HARM_LEARN_ORDINAL_BASE`] so a being-signal reward observation never collides with the harm one
+/// or any other observation for the same being in the same tick.
+const BEING_REWARD_LEARN_ORDINAL_BASE: u32 = 6_000_000;
 
 // The arc-scoped, default-generous promotion policy (base-level liveliness §4): promotion is the
 // RESOLUTION KNOB on the story, not a scarce optimization, so it defaults GENEROUS. A being whose
@@ -1102,6 +1117,38 @@ pub struct Embodiment {
     /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
     /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
     attraction: bool,
+    /// Whether the controller feeds the BEING-DIRECTED input block (the being-percept keystone, step 6): a
+    /// being perceives OTHER beings (their thermal/optical emission reaching it above its own sensory
+    /// threshold) and senses the direction toward believed-rewarding emitters and away from believed-harmful
+    /// ones. FALSE by default, so the layout carries no being block and every run hash is unchanged; the
+    /// world-build opts in ([`Embodiment::set_being_percept`], which rebuilds the layout). When true, the
+    /// runner writes each being's unit being-avoidance and being-attraction directions into the block each
+    /// tick, and only a heritable FREELY-SIGNED weight lifted off founder-zero by selection turns it into
+    /// approach (predation) or avoidance (fleeing), so the approach/avoid sign emerges (Principle 9).
+    being_percept: bool,
+    /// The being-percept feature's run-path configuration (the being-percept keystone, step 6): the sense
+    /// channel a being emits and is perceived on, its reach binding, the perceiver's transduction, the physics
+    /// reach caps, the sensorium activation cap, and the two RESERVED values (the emission coupling coefficient
+    /// and the harm eligibility-trace decay). `None` by default, so the perceive-phase being-directed wire and
+    /// the being-signal learning are inert and every run hash is unchanged; the world-build installs it
+    /// ([`Embodiment::set_being_field`]) alongside enabling the `being_percept` flag, reading the reserved
+    /// values fail-loud from the manifest at the feature arming. Never folded into `state_hash` (it is
+    /// configuration); the behaviour it drives (movement and belief) is what the hash folds when the flag is on.
+    being_field: Option<BeingPerceptField>,
+    /// Whether a MIND-LESS creature (an Arc-7 `Walker` absent from the mind registry) runs the belief-free
+    /// CREATURE being-directed percept (creatures-react arc, mechanism B3). FALSE by default, so no creature
+    /// contributes a being-block entry and every run hash is unchanged (the four canonical pins carry no
+    /// creatures anyway; this keeps `full --creatures` unchanged too until the world-build arms it). When true,
+    /// AND `being_field` is installed, the runner computes each creature's magnitude-graded toward-direction
+    /// ([`crate::learn::creature_being_direction`]) over the beings it perceives through the declared
+    /// transduction and writes it into the creature's controller being block; only the creature's OWN heritable
+    /// freely-signed weight, set by selection, turns it into approach (hunting) or flight (fleeing), so the
+    /// disposition emerges (Principle 9), keyed only on the emitted signal and the creature's own sense, never on
+    /// species, kind, trophic role, or relatedness. A creature forms NO belief (it has no mind); its reaction is
+    /// pure selection on the raw percept, the gate-ruled mechanism (ii)+B3. The perceiver transduction is the
+    /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
+    /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
+    creature_being_percept: bool,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1218,6 +1265,13 @@ pub struct Embodiment {
     /// fractures the matter underfoot whose Griffith energy the blow exceeds. So a HEAVY tool shatters rock a
     /// light one cannot, the payoff of carrying the tool's mass. Opt-in via [`Embodiment::set_strike`].
     strike: Option<StrikeParams>,
+    /// The contact-transfer registry the being-vs-being STRIKE delivers its energy through (hunt-kill strike
+    /// arc): which contact channels exist and which physics-floor transfer kernel each delivers by
+    /// ([`crate::contact_transfer`]). EMPTY by default, so a world that declares no channel delivers no strike
+    /// energy and every existing scenario is byte-identical (the opt-in empty-default); the STRIKE affordance is
+    /// itself afforded only by a PIERCE-bearing body, so no run_world scenario reaches the strike at all.
+    /// Populated by the world-build ([`Embodiment::set_contact_transfer`]).
+    contact_transfer: ContactTransferRegistry,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1310,6 +1364,9 @@ impl Embodiment {
             material_percepts: MaterialPerceptRegistry::empty(),
             conviction_percepts: ConvictionPerceptRegistry::empty(),
             attraction: false,
+            being_percept: false,
+            being_field: None,
+            creature_being_percept: false,
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -1325,6 +1382,7 @@ impl Embodiment {
             wear: None,
             breakage: false,
             strike: None,
+            contact_transfer: ContactTransferRegistry::empty(),
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -1381,6 +1439,42 @@ impl Embodiment {
     pub fn set_attraction(&mut self, enabled: bool) {
         self.attraction = enabled;
         self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the BEING-DIRECTED input block in the controller layout (the being-percept
+    /// keystone, step 6), so a being can sense the direction toward believed-rewarding perceived emitters and
+    /// away from believed-harmful ones and evolve to approach (predation) or avoid (fleeing) them. Set BEFORE
+    /// the embodiment's beings are built, exactly like [`set_attraction`], because the beings' controllers are
+    /// expressed against [`Embodiment::layout`], so a block added after they exist would leave their weight
+    /// vectors the wrong length. FALSE (the default) leaves the layout and every run hash unchanged (opt-in).
+    /// The new being weights a founder expresses are zero (unseeded, freely-signed channels), so the gradient
+    /// moves no behaviour until selection lifts a weight either way.
+    pub fn set_being_percept(&mut self, enabled: bool) {
+        self.being_percept = enabled;
+        self.rebuild_layout();
+    }
+
+    /// Install the being-percept feature's run-path configuration (the being-percept keystone, step 6): the
+    /// channel, reach binding, transduction, reach caps, activation cap, and the two reserved values the
+    /// perceive-phase being-directed wire and the being-signal learning read. `None` (the default) leaves the
+    /// wire inert, so this is opt-in and adds no controller block (no layout rebuild): the wire is separately
+    /// gated by the `being_percept` flag ([`set_being_percept`]), and a world arms both together at the feature
+    /// arming, reading the reserved values fail-loud from the manifest before installing the field.
+    pub fn set_being_field(&mut self, field: Option<BeingPerceptField>) {
+        self.being_field = field;
+    }
+
+    /// Enable (or disable) the MIND-LESS creature being-directed percept (creatures-react arc, mechanism B3):
+    /// when true, a creature (a `Walker` absent from the mind registry) computes a magnitude-graded
+    /// toward-direction over the beings it perceives and writes it into its controller being block, so its
+    /// approach/flight toward a perceived emitter emerges from its own heritable freely-signed weight under
+    /// selection. FALSE (the default) leaves creatures byte-identical (no creature contributes a being-block
+    /// entry). This reuses the EXISTING being block, so it adds NO controller block and needs NO layout rebuild;
+    /// it requires the being-percept feature to be armed (which builds the block and installs the field), so the
+    /// perceive branch is additionally gated on `being_field` being present. A creature forms no belief; the
+    /// reaction is pure selection on the raw percept.
+    pub fn set_creature_being_percept(&mut self, enabled: bool) {
+        self.creature_being_percept = enabled;
     }
 
     /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
@@ -1532,6 +1626,7 @@ impl Embodiment {
             &self.material_percepts,
             self.attraction,
             &self.conviction_percepts,
+            self.being_percept,
             self.layout.hidden(),
         );
     }
@@ -1753,6 +1848,14 @@ impl Embodiment {
     /// its kinetic energy fractures the matter underfoot whose Griffith energy the blow exceeds.
     pub fn set_strike(&mut self, params: StrikeParams) {
         self.strike = Some(params);
+    }
+
+    /// Install the contact-transfer registry the being-vs-being STRIKE delivers energy through (hunt-kill strike
+    /// arc): the channels a world runs and the physics-floor transfer kernel each delivers by. Opt-in; without it
+    /// (the empty default) a strike finds no channel and delivers no wound, so every existing scenario is
+    /// byte-identical. Kinetic is the first (Terran) channel; a non-kinetic contact attack is a data row.
+    pub fn set_contact_transfer(&mut self, registry: ContactTransferRegistry) {
+        self.contact_transfer = registry;
     }
 
     /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
@@ -2316,6 +2419,168 @@ impl Embodiment {
             freed += self.pick_up(walker_id, coord, s, want);
         }
         freed
+    }
+
+    /// Enact a being's decided STRIKE (hunt-kill strike arc, the emergent predation payoff): the acting being
+    /// wounds the Segments of another being CO-LOCATED in its cell, delivering its striking part's energy against
+    /// the struck part's own material, computed from the physics floor. This is the being-vs-being sibling of
+    /// [`Embodiment::strike_underfoot`] (which fractures the MATTER underfoot): WHO strikes is the emergent
+    /// controller decision (the keystone being-percept gradient plus a founder-zero freely-signed STRIKE weight),
+    /// so nothing reads a species, role, or relatedness (Principle 8), and the primitive reads whatever Segments
+    /// occupy the cell, the occupant-agnostic form.
+    ///
+    /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
+    /// delivery mass (the wielded tool's, or the largest-mass grown Segment's, read off the axis the channel's
+    /// row DECLARES via `source_axis`, a Terran channel naming the extensive `mech.mass`) at the reserved swing
+    /// speed, dispatched by the registered channel's kernel, so a non-kinetic contact attack is a data row. The
+    /// struck part is the target's LARGEST-PRESENTED Segment (the greatest `mech.contact_area`), a derive-first
+    /// PROXY that reads only the target's own geometry to CHOOSE where a blind blow lands, never `failure_tolerance`,
+    /// so it is not weak-point targeting. The wound is [`crate::contact_wound::wound_fraction`] (piece 2) of the
+    /// delivered energy against that struck Segment's OWN `failure_tolerance = mat.fracture_energy * mech.contact_area`
+    /// (its Griffith reserve), so a big tough Segment (a large reserve) takes a small wound and armor emerges.
+    ///
+    /// The wound is WRITTEN to Agent B's `Segment.damage` accumulator in B's exact convention (piece 4, the
+    /// sequencing hold cleared): the wound fraction is added to the struck Segment's normalized damage, saturating
+    /// then clamping to `[0, ONE]` exactly as [`crate::morphogen::Structure::accrue_aging`], so a strike is a large
+    /// one-tick increment on the SAME currency aging accrues by, NO `* 1000`, no double-count.
+    /// `whole_body_viability_aged` reads the Segment's `integrity()` (one minus this damage), the INTEGRITY axis
+    /// reflects it, and the ONE unified cull removes the being when any axis floors: one currency, one death path,
+    /// no morphology predicate. STRIKE is afforded only by a PIERCE-bearing body, decided by no run_world scenario,
+    /// and the transfer registry is empty by default, so the write is armed only for a striking predator body and
+    /// every run_world pin is unmoved (byte-neutral). A part with no declared mass, an empty registry, no
+    /// co-located target, or a target with no Structure all deliver no wound (the absence conventions). It returns
+    /// the wound fraction it applied. Deterministic: the target is the first co-located other being in id order (the
+    /// walkers are id-sorted once per tick), and the struck Segment the FIRST of the greatest contact area (a
+    /// deterministic placeholder that ALWAYS strikes the single largest-presented part, not yet the stochastic
+    /// "most likely the biggest" scatter).
+    ///
+    /// FLAGGED FOLLOW-ONS (surfaced by the section-9 audit):
+    /// (1) the swing speed is the world-global reserved `StrikeParams::swing_velocity`, applied uniformly, while
+    /// mass and area emerge per-being; its own basis names per-being limb-length and stroke rate, so it should be
+    /// DERIVED from the acting part's own limb geometry times a stroke-rate substrate (a new floor axis), a
+    /// pre-existing seam shared with [`Embodiment::strike_underfoot`], not a per-strike fix;
+    /// (2) the caller assembles KINETIC inputs (mass, velocity) and gates on a positive mass, so adding a
+    /// non-kinetic floor kernel reworks this assembly, not just a data row (per-part channel SELECTION is the
+    /// same follow-on);
+    /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
+    /// coupled to the spatial-body-layout arc.
+    pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {
+        let Some(params) = self.strike else {
+            return Fixed::ZERO; // strike unarmed: no swing kinematics
+        };
+        // The channel the strike delivers through: the first registered contact-transfer row, whose kernel
+        // drives resolve_transfer. An empty registry declares no channel, so no strike fires (the opt-in
+        // absence). The per-part channel SELECTION (an acting part choosing among several channels by its own
+        // data) is the flagged follow-on; the first cut delivers through the world's registered channel.
+        let Some((_, row)) = self.contact_transfer.iter().next() else {
+            return Fixed::ZERO;
+        };
+        let row = row.clone();
+        // The acting part's delivery MASS, off the being's OWN apparatus: the part with the greatest `mech.mass`
+        // among its wielded tool and its grown Structure Segments (the one delivering the most kinetic energy).
+        // Reads only the part's own physics, never a race or role. Scoped so the acting walker's borrow ends
+        // before the target search.
+        let (coord, acting_mass) = {
+            let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
+                return Fixed::ZERO;
+            };
+            let coord = w.coord();
+            let mut acting_mass = Fixed::ZERO;
+            if let (Some(tool), Some(reg)) = (w.wielded.as_ref(), self.material_registry.as_ref()) {
+                let m = tool.mass(reg);
+                if m > acting_mass {
+                    acting_mass = m;
+                }
+            }
+            if let Some(structure) = w.structure.as_ref() {
+                for seg in &structure.segments {
+                    // The delivery mass is read off the axis the channel's row DECLARES (row.source_axis),
+                    // data-defined per Principle 11, never a hardcoded axis id: a Terran channel names the
+                    // extensive `mech.mass`, an alien body its own mass source.
+                    let m = seg.geo(&row.source_axis);
+                    if m > acting_mass {
+                        acting_mass = m;
+                    }
+                }
+            }
+            (coord, acting_mass)
+        };
+        if acting_mass <= Fixed::ZERO {
+            return Fixed::ZERO; // a part with no mass delivers no blow (the absence convention)
+        }
+        // The energy the blow delivers, dispatched by the channel's kernel over the acting part's own mass and
+        // the reserved swing speed (piece 1). The scale bridge to Agent B's `Segment.damage` accumulator
+        // convention is reconciled at the held write (piece 4), not baked here.
+        let delivered_energy =
+            resolve_transfer(&row, acting_mass, params.swing_velocity, params.energy_max);
+        // The TARGET: another being CO-LOCATED in the same cell, found by iterating the beings (this method
+        // cannot reach the runner's located index). The first in id order is the deterministic pick; an
+        // area-weighted stochastic scatter over co-located targets is the flagged follow-on.
+        let Some(target_idx) = self
+            .walkers
+            .iter()
+            .position(|other| other.id != walker_id && other.coord() == coord)
+        else {
+            return Fixed::ZERO; // nothing co-located to strike
+        };
+        // The struck Segment INDEX: the target's LARGEST-PRESENTED (greatest `mech.contact_area`), the
+        // derive-first proxy for where a blind blow lands. Reads geometry, never `failure_tolerance`. The first
+        // segment of the greatest area wins (strictly-greater updates keep the earlier on a tie), deterministic.
+        let struck_idx = {
+            let Some(structure) = self.walkers[target_idx].structure.as_ref() else {
+                // The target presents no run-path Segments (the deep `body::Body`-to-Structure bridge is the
+                // flagged separate arc): nothing to wound here.
+                return Fixed::ZERO;
+            };
+            let mut best: Option<usize> = None;
+            let mut best_area = Fixed::ZERO;
+            for (i, seg) in structure.segments.iter().enumerate() {
+                let area = presented_contact_area(seg);
+                if best.is_none() || area > best_area {
+                    best_area = area;
+                    best = Some(i);
+                }
+            }
+            match best {
+                Some(i) => i,
+                None => return Fixed::ZERO, // a Structure with no Segments
+            }
+        };
+        // The wound in Agent B's EXACT accrual convention: the fraction of the struck segment's OWN
+        // `failure_tolerance = fracture_energy * mech.contact_area` (its Griffith reserve, the same product
+        // `Segment::failure_tolerance` and `accrue_aging` use) the delivered energy reaches, NO `* 1000`, so a
+        // strike is a large one-tick increment on the SAME currency aging accrues by. A big tough segment (a
+        // large tolerance) takes a small wound, armor emerging; the acting part's concentration (the
+        // pierce-versus-blunt sub-cell wound shape) is the flagged follow-on coupled to the spatial-body-layout
+        // arc. Computed under an immutable borrow that ends before the write.
+        let wound = {
+            let struck = &self.walkers[target_idx]
+                .structure
+                .as_ref()
+                .expect("structure present (checked above)")
+                .segments[struck_idx];
+            wound_fraction(
+                delivered_energy,
+                presented_contact_area(struck),
+                struck.mat(FRACTURE_ENERGY_AXIS),
+                params.energy_max,
+            )
+        };
+        // WRITE Agent B's `Segment.damage` accumulator (piece 4, the sequencing hold now cleared): add the wound
+        // fraction to the struck segment's normalized damage, saturating on the bits then clamping to `[0, ONE]`,
+        // exactly as `Structure::accrue_aging` advances aging damage, so wounds and aging compose on ONE
+        // accumulator with no double-count. `whole_body_viability_aged` reads the segment's `integrity()` (one
+        // minus this damage), the INTEGRITY axis reflects it, and the ONE unified cull removes the being when any
+        // axis floors: one currency, one death path, no morphology predicate (Principle 8). Armed only for a
+        // STRIKE-deciding body, so no run_world scenario reaches it (byte-neutral).
+        let struck = &mut self.walkers[target_idx]
+            .structure
+            .as_mut()
+            .expect("structure present (checked above)")
+            .segments[struck_idx];
+        struck.damage = Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
+            .clamp(Fixed::ZERO, Fixed::ONE);
+        wound
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -2910,6 +3175,15 @@ pub struct Runner {
     /// as the thermal state the field drives; the body-arc harm mapping from a temperature outside a
     /// race's comfort band is a reserved consumer (the two-sided band the body arc deferred).
     body_temp: BTreeMap<StableId, Fixed>,
+    /// The being-signal subjects each perceiver formed of the OTHER beings it perceived THIS tick (the
+    /// being-percept keystone, step 6), keyed by perceiver id. A within-tick scratchpad rebuilt each tick in
+    /// [`step_embodiment`]'s perceive phase (before movement, so the learning correlates the SAME perception
+    /// the being acted on) and consumed by the being-signal learning ([`advance_eligibility_traces`] records
+    /// them into the harm-eligibility trace, [`couple_conversation`] credits them). NOT folded into
+    /// `state_hash` (it is a derived per-tick read, like the percept-direction maps); the behaviour and belief
+    /// it drives is what the hash folds. Empty unless the being-percept feature is armed, so an unarmed run
+    /// never populates it and is byte-identical.
+    perceived_beings: BTreeMap<StableId, Vec<StableId>>,
     /// The per-being DERIVED body-to-medium exchange rate `h * A / (m * c)` per tick
     /// ([`crate::physiology::derive_body_exchange_rate`]), when the caller has supplied it. A being with
     /// an entry couples to its cell at its own derived rate (a high-surface, low-thermal-mass body
@@ -3059,6 +3333,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate: BTreeMap::new(),
             world: None,
             embodiment: None,
@@ -3111,6 +3386,7 @@ impl Runner {
             calib,
             index: LocationIndex::new(),
             body_temp: BTreeMap::new(),
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate: BTreeMap::new(),
             world: Some(world),
             embodiment: None,
@@ -3181,6 +3457,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate,
             world: None,
             embodiment: Some(embodiment),
@@ -3274,6 +3551,7 @@ impl Runner {
             calib,
             index,
             body_temp,
+            perceived_beings: BTreeMap::new(),
             body_exchange_rate,
             world: Some(world),
             embodiment: Some(embodiment),
@@ -4171,6 +4449,35 @@ impl Runner {
                 }
             }
         }
+        // The being-signal HARM eligibility trace (the being-percept keystone, step 6): the same
+        // decay-then-record TD-lambda order, keyed on the being-signals the perceiver formed THIS tick (from
+        // the perceive-phase scratchpad), so a being-signal perceived this tick earns full credit for a harm
+        // felt this same tick (`couple_conversation` credits the trace) and decays from there, crediting a
+        // distal predator-approach cue perceived some ticks before the harm. World-independent (reads only the
+        // being-percept field's reserved decay and the perceived-signal scratchpad), so it runs in the
+        // embodiment phase on both entry points, byte-identical when the feature is off (the trace stays
+        // empty, hash-skipped). Refreshing a re-perceived signal to full eligibility, exactly as the reward
+        // trace refreshes a re-executed action.
+        let harm_decay = self.embodiment.as_ref().and_then(|emb| {
+            if emb.being_percept {
+                emb.being_field.as_ref().map(|f| f.harm_eligibility_decay)
+            } else {
+                None
+            }
+        });
+        if let Some(decay) = harm_decay {
+            let perceived = &self.perceived_beings;
+            if let Some(emb) = self.embodiment.as_mut() {
+                for w in emb.walkers.iter_mut() {
+                    w.harm_eligibility_trace.decay(decay);
+                    if let Some(subjects) = perceived.get(&w.id) {
+                        for &subject in subjects {
+                            w.harm_eligibility_trace.record(subject);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Snapshot each being's reserve levels BEFORE the embodiment step when the felt-conviction learner is
@@ -4390,6 +4697,41 @@ impl Runner {
                         },
                     });
                 }
+                // The being-signal HARM credit (the being-percept keystone, step 6, the fleeing pole): the
+                // being learns "this being-signal predicts harm" from its OWN felt harm, feature-keyed on the
+                // being-signals in its harm-eligibility trace. A signal perceived THIS tick sits at full
+                // eligibility (the same-tick co-occurrence, the exact weight a same-tick observation carries),
+                // one perceived some ticks before sits at decayed eligibility (the lagged distal
+                // predator-approach cue), each toward HARMS on a harm tick and BENIGN otherwise, through the
+                // SAME Observe path on HARM_ATTR the environmental-feature learner uses. Nothing reads a species,
+                // trophic role, relatedness, or being-hood: the sign is the reserve falling, the subject a
+                // perceived being-signal, so "this emitter predicts harm" emerges from the correlation
+                // (Principles 8, 9). Gated on the being-percept flag; off, the trace is never populated, so the
+                // observation list is empty and the run is byte-identical.
+                if emb.being_percept {
+                    for (k, obs) in being_signal_trace_observations(
+                        &w.harm_eligibility_trace,
+                        harm,
+                        plasticity,
+                        &harm_learn,
+                    )
+                    .into_iter()
+                    .enumerate()
+                    {
+                        env_inputs.push(TickInput {
+                            mind: w.id,
+                            ordinal: BEING_HARM_LEARN_ORDINAL_BASE + k as u32,
+                            stim: Stimulus::Observe {
+                                subject: obs.subject,
+                                attr: HARM_ATTR,
+                                hyps: vec![HARMS, BENIGN],
+                                toward: obs.toward,
+                                weight: obs.weight,
+                                from: w.id,
+                            },
+                        });
+                    }
+                }
                 // Appetitive reward credit (ideation / experiential-discovery arc, piece 1, slice 1c): the
                 // being learns which ACTION pays off. It felt reward this tick if any reserve ROSE beyond the
                 // recovery noise floor (its own interoceptive delta, the sign complement of the harm bit).
@@ -4504,6 +4846,40 @@ impl Runner {
                                     from: w.id,
                                 },
                             });
+                        }
+                    }
+                    // The being-signal REWARD credit (the being-percept keystone, step 6, the predation pole):
+                    // the being learns "this being-signal predicts reward" from its OWN felt reward, feature-keyed
+                    // on the being-signals it perceived THIS tick (perceiving a being while the perceiver's own
+                    // reserves rise, catching prey). Each toward REWARDS on a reward tick and NEUTRAL otherwise,
+                    // through the SAME Observe path on REWARD_ATTR the material reward learner uses, on the
+                    // being-signal's OWN subject (disjoint from the harm frame by attribute). Which pole a being
+                    // later acts on emerges from its own outcomes and the freely-signed controller weight.
+                    // Same-tick (the built substrate carries no lagged reward trace; a distal-prey-cue reward
+                    // trace is the symmetric predation follow-on). Gated on the being-percept flag; off,
+                    // `perceived_beings` is empty, so no observation is pushed and the run is byte-identical.
+                    if emb.being_percept {
+                        if let Some(subjects) = self.perceived_beings.get(&w.id) {
+                            for (k, &subject) in subjects.iter().enumerate() {
+                                let obs = being_signal_reward_for(
+                                    subject,
+                                    reward,
+                                    plasticity,
+                                    &reward_learn,
+                                );
+                                env_inputs.push(TickInput {
+                                    mind: w.id,
+                                    ordinal: BEING_REWARD_LEARN_ORDINAL_BASE + k as u32,
+                                    stim: Stimulus::Observe {
+                                        subject: obs.subject,
+                                        attr: REWARD_ATTR,
+                                        hyps: vec![REWARDS, NEUTRAL],
+                                        toward: obs.toward,
+                                        weight: obs.weight,
+                                        from: w.id,
+                                    },
+                                });
+                            }
                         }
                     }
                     // The being's SURPRISE (ideation arc, piece 3, slice 3b): score the forward model's
@@ -5142,6 +5518,218 @@ impl Runner {
             },
             _ => BTreeMap::new(),
         };
+        // (0b'''') The BEING-DIRECTED percept (the being-percept keystone, step 6, the live wire): each being
+        // perceives the OTHER beings whose own thermal emission reaches it above its own detection threshold,
+        // and senses the unit direction AWAY from every emitter it holds a committed HARMS belief about and
+        // TOWARD every one it holds a committed REWARDS belief about, the being-directed mirror of the material
+        // avoidance/attraction gradients. Present only when the embodiment arms the being-percept flag AND
+        // installs the being-percept field AND carries the physiology (for the Stefan-Boltzmann sigma the
+        // emission reads); off, both maps are empty and every run hash is unchanged. For each perceiver, the
+        // per-emitter chain is: the emitter's own thermal-signal emission (`being_signal_emission`, a warm body
+        // emits a stronger signature), the reach to this perceiver attenuated by geometry and (where a material
+        // registry is installed) the medium's absorption along the 3D path so occlusion emerges from the
+        // strata, then the perceiver's OWN threshold-gated transduction into a being-signal subject. Nothing
+        // reads a species, kingdom, trophic role, relatedness, named state, or being-hood; the perceived list
+        // keys on EMISSION on a channel and the gradient on the perceiver's LEARNED belief. Read before the
+        // mutable embodiment borrow, drawing no RNG. The direction is a PERCEPT, not a heading: only the
+        // controller's founder-zero FREELY-SIGNED weight, lifted by selection, turns it into approach
+        // (predation) or avoidance (fleeing), so the approach/avoid sign emerges (Principle 9). The perceived
+        // subjects are also stashed for the being-signal learning below, so the learner correlates the SAME
+        // perception the being acted on.
+        //
+        // Honest limit (flagged): the per-perceiver emitter scan is O(N^2) in the located population, gated by
+        // the reach threshold rather than a spatial index; a located-index range query is the optimization
+        // follow-on, not built here.
+        let body_temps = &self.body_temp;
+        let (mut being, perceived_beings): (
+            BTreeMap<StableId, Vec<Fixed>>,
+            BTreeMap<StableId, Vec<StableId>>,
+        ) = match (self.embodiment.as_ref(), self.world.as_ref()) {
+            (Some(emb), Some(world))
+                if emb.being_percept && emb.being_field.is_some() && emb.physiology.is_some() =>
+            {
+                let field = emb.being_field.as_ref().unwrap();
+                let sigma = emb.physiology.as_ref().unwrap().anchors.sigma;
+                let registry_opt = emb.material_registry.as_ref();
+                // Parallel (arc 4): each perceiver's perceived list and its two gradients are pure reads of the
+                // immutable population, its beliefs, and the body temperatures, keyed by w.id and drawing no
+                // RNG; the collect into a BTreeMap is order-free, so it is bit-identical at any thread count.
+                let collected: BTreeMap<StableId, (Vec<Fixed>, Vec<StableId>)> = emb
+                    .walkers
+                    .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
+                    .filter_map(|w| {
+                        let mind = world.mind(w.id)?;
+                        let here = w.coord();
+                        let mut perceived: Vec<(Coord3, StableId)> = Vec::new();
+                        for other in &emb.walkers {
+                            if other.id == w.id {
+                                continue;
+                            }
+                            let src = other.coord();
+                            let body_temp =
+                                body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                            let emission = physiology::being_signal_emission(
+                                body_temp,
+                                field.emission_coefficient,
+                                sigma,
+                            );
+                            if emission <= Fixed::ZERO {
+                                continue;
+                            }
+                            // Occlusion emerges from the medium when a material registry is installed; without
+                            // one the reach is geometric-only (a transparent path), so the feature still runs.
+                            let reach = match registry_opt {
+                                Some(reg) => resolve_reach(
+                                    &field.row,
+                                    emission,
+                                    src,
+                                    here,
+                                    &emb.material,
+                                    reg,
+                                    field.bounds,
+                                ),
+                                None => received_reach(emission, src, here, field.bounds, &[]),
+                            };
+                            if let Some(subject) = perceive_being_signal(
+                                reach,
+                                field.channel_u16(),
+                                &field.transduction,
+                                field.activation_max,
+                            ) {
+                                perceived.push((src, subject));
+                            }
+                        }
+                        if perceived.is_empty() {
+                            return None;
+                        }
+                        let params = world.belief_params();
+                        let av = being_avoidance_gradient(mind, here, &perceived, params);
+                        let at = being_attraction_gradient(mind, here, &perceived, params);
+                        let (ax, ay) = unit(av.0, av.1);
+                        let (rx, ry) = unit(at.0, at.1);
+                        // Distinct perceived subjects for the learner (deduped and canonically ordered): two
+                        // emitters that map to the SAME being-signal bucket are one perceived KIND, so they
+                        // earn one belief update, not two (the harm trace's BTreeMap dedups by construction, and
+                        // this keeps the reward pole consistent with it). The GRADIENT above still reads the
+                        // full per-emitter list, so two distinct emitters both pull on the direction.
+                        let subjects: Vec<StableId> = perceived
+                            .iter()
+                            .map(|&(_, s)| s)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .into_iter()
+                            .collect();
+                        Some((w.id, (vec![ax, ay, rx, ry], subjects)))
+                    })
+                    .collect();
+                let mut being_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
+                let mut perceived_map: BTreeMap<StableId, Vec<StableId>> = BTreeMap::new();
+                for (id, (grad, subjects)) in collected {
+                    // Keep a gradient in the controller map only when it is non-zero (a being with no committed
+                    // belief about any perceived emitter reads zero, the exact founder-zero convention the
+                    // material attraction block uses); keep every perceived subject for the learner regardless,
+                    // so a being still LEARNS about an emitter it holds no belief about yet.
+                    if grad.iter().any(|&c| c != Fixed::ZERO) {
+                        being_map.insert(id, grad);
+                    }
+                    perceived_map.insert(id, subjects);
+                }
+                (being_map, perceived_map)
+            }
+            _ => (BTreeMap::new(), BTreeMap::new()),
+        };
+        // Creatures-react arc (mechanism B3, the live wire): a MIND-LESS creature (a `Walker` absent from the
+        // mind registry) runs the BELIEF-FREE being-directed percept. Gated on the creature feature AND the
+        // being-percept substrate (which built the being block the creature's controller reuses and installed
+        // the declared field/transduction), so a creature is armed only where the founder path already is. Each
+        // creature perceives the beings whose signal reaches it, through the declared transduction, and its
+        // magnitude-graded toward-direction ([`creature_being_direction`]) is written into the ATTRACTION pair
+        // of its being block (the avoidance pair stays zero, since a creature has no avoid/attract belief split);
+        // only the creature's OWN heritable freely-signed weight, set by selection, turns it into approach
+        // (hunting) or flight (fleeing), so the disposition emerges (Principle 9). A creature forms NO belief and
+        // is absent from `perceived_beings` (no learner), keyed only on the emitted signal and its own sense.
+        // OFF (the default) inserts nothing, so it is byte-identical; the four canonical pins carry no creatures
+        // regardless, and this leaves `full --creatures` unchanged until the world-build arms the flag.
+        // Shared limit (flagged, not introduced here): the creature perceives on the ONE world-declared channel
+        // and transduction the `BeingPerceptField` carries, so a creature whose sensory modality is non-thermal
+        // (electroreception, chemoreception, a mana channel) cannot yet sense as a data row; this is the SAME
+        // single-channel limit the founder path carries (see `BeingPerceptField`'s flagged per-channel and
+        // per-being follow-on), a shared substrate upgrade, not a creature-specific defect.
+        if let (Some(emb), Some(world)) = (self.embodiment.as_ref(), self.world.as_ref()) {
+            // Armed only where the founder path is: the creature feature on, the being block built
+            // (`being_percept`), and the declared field and physiology present (the `if let` binds both).
+            if let (true, Some(field), Some(phys)) = (
+                emb.creature_being_percept && emb.being_percept,
+                emb.being_field.as_ref(),
+                emb.physiology.as_ref(),
+            ) {
+                let sigma = phys.anchors.sigma;
+                let registry_opt = emb.material_registry.as_ref();
+                let creature_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
+                    .walkers
+                    .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
+                    .filter_map(|w| {
+                        if world.mind(w.id).is_some() {
+                            return None; // a founder: handled by the belief-reading branch above
+                        }
+                        let here = w.coord();
+                        let mut perceived: Vec<(Coord3, Fixed)> = Vec::new();
+                        for other in &emb.walkers {
+                            if other.id == w.id {
+                                continue;
+                            }
+                            let src = other.coord();
+                            let body_temp =
+                                body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                            let emission = physiology::being_signal_emission(
+                                body_temp,
+                                field.emission_coefficient,
+                                sigma,
+                            );
+                            if emission <= Fixed::ZERO {
+                                continue;
+                            }
+                            let reach = match registry_opt {
+                                Some(reg) => resolve_reach(
+                                    &field.row,
+                                    emission,
+                                    src,
+                                    here,
+                                    &emb.material,
+                                    reg,
+                                    field.bounds,
+                                ),
+                                None => received_reach(emission, src, here, field.bounds, &[]),
+                            };
+                            if let Some(magnitude) = perceive_being_magnitude(
+                                reach,
+                                &field.transduction,
+                                field.activation_max,
+                            ) {
+                                perceived.push((src, magnitude));
+                            }
+                        }
+                        if perceived.is_empty() {
+                            return None;
+                        }
+                        let (dx, dy) = creature_being_direction(here, &perceived);
+                        // Keep only a non-zero direction (a creature that perceives no one, or a net-zero pull,
+                        // reads the founder-zero default), exactly as the founder branch gates its gradient.
+                        if dx == Fixed::ZERO && dy == Fixed::ZERO {
+                            return None;
+                        }
+                        // The toward-direction fills the ATTRACTION pair `[.., .., rx, ry]`; the avoidance pair
+                        // stays zero. The creature's freely-signed weight on the attraction slots sets the sign.
+                        Some((w.id, vec![Fixed::ZERO, Fixed::ZERO, dx, dy]))
+                    })
+                    .collect();
+                for (id, dir) in creature_dirs {
+                    being.insert(id, dir);
+                }
+            }
+        }
+        self.perceived_beings = perceived_beings;
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -5330,9 +5918,73 @@ impl Runner {
             let fns = FunctionLawRegistry::dev_seed();
             let refs = &emb.params.capability_refs;
             let caps = &emb.params.capability_caps;
+            // (1a-aging) R-AGING (c) route (i), the first-passage death path: before the viability read,
+            // advance each grown being's per-segment aging damage one tick from its OWN locomotor load
+            // (its whole-body muscle force over the ground distance it slides this tick) against its own
+            // tissue, minus the tissue-turnover repair its own energy budget funds. A worn segment then
+            // reads a reduced capability in the aged viability below, so a body worn down dies through the
+            // SAME reserve-floor cull, with no vital-part predicate (Principle 8). Opt-in with the cull and
+            // further gated on the physiology, the wear caps, AND the material registry: the wear coefficient
+            // is read off each segment's own grown material at the registry's declared storage scale, so the
+            // scale must come from the same registry (never a silent fallback that would read a scaled
+            // coefficient as un-scaled), mirroring the tool-wear precondition. A segment with no fracture-
+            // energy tolerance does not age (the absence convention), so every current scenario (no INTEGRITY
+            // axis, no armed wear tissue) is byte-identical.
+            let energy_axis = emb
+                .homeo
+                .axes
+                .iter()
+                .find(|a| a.backing_component.as_deref() == Some(physiology::ENERGY_DENSITY))
+                .map(|a| a.id);
+            if let (Some(phys), Some(wear), Some(mat_reg), Some(energy_axis)) = (
+                emb.physiology.as_ref(),
+                emb.wear,
+                emb.material_registry.as_ref(),
+                energy_axis,
+            ) {
+                if let Some(coefficient_scale) = mat_reg
+                    .axis("mat.wear_coefficient")
+                    .map(|a| a.storage_scale())
+                {
+                    for w in emb.walkers.iter_mut() {
+                        let force = being_muscle_force(w, phys);
+                        let Some(s) = w.structure.as_ref() else {
+                            continue;
+                        };
+                        let velocity = locomotion::locomotion_speed_structure(
+                            s,
+                            w.body.temperament.activity,
+                            Fixed::ONE,
+                            &emb.params,
+                        );
+                        let distance = velocity
+                            .checked_mul(phys.tick_seconds)
+                            .unwrap_or(Fixed::ZERO);
+                        // The being's own metabolic budget, keyed on the axis backed by the energy-density
+                        // class (data, not the hardcoded ENERGY id), so an alien whose energy reserve sits on
+                        // another axis funds its repair off its own budget rather than reading zero.
+                        let energy_available = w.homeostasis.amount(energy_axis);
+                        if let Some(s) = w.structure.as_mut() {
+                            let demand = s.maintenance_demand();
+                            let funded = crate::insult::maintenance_funded_fraction(
+                                energy_available,
+                                demand,
+                            );
+                            s.accrue_aging(
+                                force,
+                                distance,
+                                coefficient_scale,
+                                funded,
+                                wear.wear_max,
+                                STRESS_GUARD,
+                            );
+                        }
+                    }
+                }
+            }
             for w in emb.walkers.iter_mut() {
                 if let Some(s) = w.structure.as_ref() {
-                    let viability = s.whole_body_viability(&fns, refs, caps);
+                    let viability = s.whole_body_viability_aged(&fns, refs, caps);
                     w.homeostasis.set_level(INTEGRITY, viability);
                 }
             }
@@ -5428,6 +6080,7 @@ impl Runner {
             &appetitive,
             &attraction,
             &conviction,
+            &being,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -5470,6 +6123,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -5531,6 +6185,7 @@ impl Runner {
                                 | DIG
                                 | RELEASE
                                 | SHELTER
+                                | STRIKE
                         );
                         if fired && matter_primitive {
                             deferred_actions.insert(w.id, (primitive, Fixed::ONE));
@@ -5602,6 +6257,15 @@ impl Runner {
                     }
                     SHELTER => {
                         emb.deposit_overhead(id);
+                    }
+                    STRIKE => {
+                        // The hunt-kill strike (the emergent-predation payoff): wound a co-located being's
+                        // largest-presented Segment with the acting part's delivered energy (the piece-1 transfer
+                        // and piece-2 wound), writing Agent B's `Segment.damage` in B's accrual convention so the
+                        // wound degrades that region's integrity and the ONE unified INTEGRITY cull removes the
+                        // being when it floors. Armed only for a STRIKE-deciding PIERCE-bearing body, so no
+                        // run_world scenario reaches it (byte-neutral). The returned wound fraction is unused here.
+                        emb.strike_occupant(id);
                     }
                     _ => {}
                 }
@@ -6104,6 +6768,13 @@ impl Runner {
                 // leaves an opted-out run's hash unchanged.
                 if !w.eligibility_trace.is_empty() {
                     w.eligibility_trace.hash_into(&mut h);
+                }
+                // The HARM eligibility trace (the being-percept keystone, step 6): new per-being dynamic state,
+                // folded after the reward eligibility trace in the same canonical order. Empty for a being in a
+                // world with the being-percept off (never recorded), so it folds nothing and leaves an
+                // opted-out run's hash unchanged.
+                if !w.harm_eligibility_trace.is_empty() {
+                    w.harm_eligibility_trace.hash_into(&mut h);
                 }
                 // The conviction-experience record (Branch 1 of the learned experience-to-conviction coupling,
                 // OWNER_DECISIONS_LOG R2/R4): new per-being dynamic state, folded after the eligibility trace in
@@ -6689,6 +7360,241 @@ source = "test"
             half_band: Fixed::from_int(8),
             initial_temp: Fixed::from_int(37),
         }
+    }
+
+    #[test]
+    fn a_strike_wounds_the_targets_largest_presented_segment_by_geometry_not_weak_point() {
+        use crate::anatomy::{Part, Temperament};
+        use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry, DEV_KINETIC};
+        use crate::contact_wound::wound_fraction;
+        use crate::homeostasis::HomeostaticAxisDef;
+        use crate::material::StrikeParams;
+        use crate::morphogen::{Segment, Structure};
+
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+            }],
+        };
+        let bp = || BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        emb.set_strike(StrikeParams::dev_fixture());
+        emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        let layout = emb.layout().clone();
+
+        // A segment carrying a delivery mass, a presented contact area, and a fracture resistance.
+        let seg = |mass: Fixed, area: Fixed, fe: Fixed| {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), mass);
+            geometry.insert("mech.contact_area".to_string(), area);
+            let mut material = BTreeMap::new();
+            material.insert("mat.fracture_energy".to_string(), fe);
+            Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }
+        };
+
+        // The striker: one mass-bearing part at a small (concentrated) contact patch.
+        let striker = Structure {
+            segments: vec![seg(
+                Fixed::from_int(5),
+                Fixed::from_ratio(1, 100),
+                Fixed::ZERO,
+            )],
+        };
+        // The target: a BIG-area TOUGH Segment (index 0) and a SMALL-area SOFT one. The largest-presented is
+        // the big tough Segment, so a blind blow lands there (geometry), and the wound reads the TOUGH material,
+        // never the weak point: armor emerges.
+        // The big segment is tough enough (a large fracture energy) that the blow only PARTIALLY wounds it, so
+        // the armor comparison below is a real inequality rather than two saturated full wounds.
+        let big_area = Fixed::from_ratio(1, 2);
+        let small_area = Fixed::from_ratio(1, 100);
+        let big_tough_fe = Fixed::from_int(100_000);
+        let soft_fe = Fixed::from_int(1);
+        let target = Structure {
+            segments: vec![
+                seg(Fixed::ZERO, big_area, big_tough_fe),
+                seg(Fixed::ZERO, small_area, soft_fe),
+            ],
+        };
+
+        let coord = Coord3::ground(3, 3);
+        let mk = |id: u64, structure: Structure| {
+            Walker::new(
+                StableId(id),
+                coord,
+                bp(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(&layout),
+            )
+            .with_structure(structure)
+        };
+        emb.add(mk(1, striker), band());
+        emb.add(mk(2, target), band());
+
+        let wound = emb.strike_occupant(StableId(1));
+
+        // The wound is exactly the piece-1 delivered energy over the LARGEST-PRESENTED (big tough) Segment's OWN
+        // failure tolerance (its own `mat.fracture_energy * mech.contact_area`, Agent B's convention): the
+        // largest-presented was struck, and the wound reads that struck Segment's own geometry and material.
+        let cap = Fixed::from_int(1_000_000);
+        let row = ContactTransferRegistry::dev_terran()
+            .get(DEV_KINETIC)
+            .unwrap()
+            .clone();
+        let energy = resolve_transfer(&row, Fixed::from_int(5), Fixed::from_int(10), cap);
+        let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
+        assert_eq!(
+            wound, expected,
+            "the wound reads the largest-presented (big tough) Segment's OWN tolerance"
+        );
+        assert!(
+            wound > Fixed::ZERO && wound < Fixed::ONE,
+            "a real, partial wound"
+        );
+
+        // The write LANDED on the struck (largest-presented, index 0) Segment in Agent B's damage accumulator,
+        // and the un-struck Segment stays whole: the wound degraded the struck region's integrity.
+        let target = emb.walkers()[1].structure.as_ref().unwrap();
+        assert_eq!(
+            target.segments[0].damage, wound,
+            "the struck Segment's damage rose by the wound (B's accumulator)"
+        );
+        assert_eq!(
+            target.segments[1].damage,
+            Fixed::ZERO,
+            "the un-struck Segment is unwounded"
+        );
+
+        // The tough largest-presented Segment PROTECTS: its own large tolerance takes a lesser wound than the
+        // soft small Segment's tiny tolerance would, so armor emerges from geometry plus material.
+        let soft = wound_fraction(energy, small_area, soft_fe, cap);
+        assert!(
+            wound < soft,
+            "a big tough surface takes a lesser wound than the soft part (armor emerges, not weak-point targeting)"
+        );
+
+        // The DEATH LINKAGE: a blow past the struck Segment's own tolerance fully wounds it, so its damage
+        // saturates to ONE and its integrity() FLOORS to ZERO, the input `whole_body_viability_aged` (and thus
+        // the INTEGRITY axis and the one unified cull) reads: a vital wound kills through the SAME reserve cull
+        // aging kills through, one death path. A being whose only Segment is fragile (a tiny failure tolerance)
+        // is struck dead in one blow.
+        let mut lethal = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        lethal.set_strike(StrikeParams::dev_fixture());
+        lethal.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        lethal.add(
+            mk(
+                1,
+                Structure {
+                    segments: vec![seg(Fixed::from_int(5), small_area, Fixed::ONE)],
+                },
+            ),
+            band(),
+        );
+        // The prey: one fragile Segment (a tiny fracture energy over a tiny area, so its failure tolerance is
+        // far below the delivered energy).
+        lethal.add(
+            mk(
+                2,
+                Structure {
+                    segments: vec![seg(Fixed::ZERO, small_area, Fixed::from_ratio(1, 1000))],
+                },
+            ),
+            band(),
+        );
+        let lethal_wound = lethal.strike_occupant(StableId(1));
+        assert_eq!(
+            lethal_wound,
+            Fixed::ONE,
+            "a blow past the Segment's tolerance is a full wound"
+        );
+        let prey = lethal.walkers()[1].structure.as_ref().unwrap();
+        assert_eq!(
+            prey.segments[0].damage,
+            Fixed::ONE,
+            "the wound saturates the damage accumulator"
+        );
+        assert_eq!(
+            prey.segments[0].integrity(),
+            Fixed::ZERO,
+            "a fully-wounded Segment has zero integrity, flooring whole_body_viability and the unified INTEGRITY cull"
+        );
+
+        // No co-located other being: no target, no wound (the absence convention). Move the target away.
+        let mut lone = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0x57A1,
+        );
+        lone.set_strike(StrikeParams::dev_fixture());
+        lone.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        lone.add(
+            Walker::new(
+                StableId(1),
+                coord,
+                bp(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(&layout),
+            )
+            .with_structure(Structure {
+                segments: vec![seg(
+                    Fixed::from_int(5),
+                    Fixed::from_ratio(1, 100),
+                    Fixed::ZERO,
+                )],
+            }),
+            band(),
+        );
+        assert_eq!(
+            lone.strike_occupant(StableId(1)),
+            Fixed::ZERO,
+            "no co-located being to strike delivers no wound"
+        );
     }
 
     #[test]
