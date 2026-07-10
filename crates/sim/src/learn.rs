@@ -305,14 +305,6 @@ pub struct HarmLearningCalib {
     /// engine's log-odds clamp (`evidence.log_odds_clamp`), set equal to it so a single correlation
     /// observation cannot exceed the engine's maximum admissible certainty.
     pub certainty_clamp: Fixed,
-    /// The temporal-difference lambda the being-signal HARM eligibility trace decays by each tick (the
-    /// being-percept keystone, step 6). RESERVED. Basis: the interoceptive lag between perceiving a
-    /// being-signal (a predator approaching) and the harm that follows, so a distal cue perceived some ticks
-    /// before the harm still earns credit, bounded by the retention window the belief substrate forgets on;
-    /// the harm sibling of the reward pole's `reward.eligibility_decay`, set relative to it. In (0, 1): nearer
-    /// one credits a longer-lagged cue, nearer zero only the immediately-preceding one. It enters through the
-    /// existing observation weight, so it fabricates no new engine constant.
-    pub harm_eligibility_decay: Fixed,
 }
 
 impl HarmLearningCalib {
@@ -326,7 +318,6 @@ impl HarmLearningCalib {
             p_harm_given_harms: m.require_fixed("harm.p_harm_given_harms")?,
             p_harm_given_benign: m.require_fixed("harm.p_harm_given_benign")?,
             certainty_clamp: m.require_fixed("evidence.log_odds_clamp")?,
-            harm_eligibility_decay: m.require_fixed("harm.eligibility_decay")?,
         })
     }
 
@@ -343,7 +334,6 @@ impl HarmLearningCalib {
             p_harm_given_harms: Fixed::from_ratio(9, 10),
             p_harm_given_benign: Fixed::from_ratio(1, 10),
             certainty_clamp: Fixed::from_int(50),
-            harm_eligibility_decay: Fixed::from_ratio(1, 2),
         }
     }
 
