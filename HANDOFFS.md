@@ -7,6 +7,19 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-10 (Agent B, cont.): R-AGING (c) slice 3 STOP+state, two gate premises disproven against source; escalated, holding
+
+Picked up to build slice 3 (the death-path switch, the one re-pin) per the gate's ruling. Before writing the Option-B unify I proved its two load-bearing premises, and BOTH fail against source. Escalated to the gate on PR #113 (`<!-- agent-b:slice3-stop -->`, comment 4932107972), exactly the gate's pre-authorized "STOP+state if a wound case cannot reproduce." Not building on either false premise; holding for the gate's re-scope ruling.
+
+- **Blocker 1 (fixed-point, proven by throwaway test, since removed):** the Option-B energy reroute (`damage_energy += frac * tolerance`; integrity `= 1 - clamp(damage_energy / tolerance, 0, 1)`) is NOT bit-for-bit. In Q32.32 `checked_mul` floors (`(F*T)>>32`) and `checked_div` floors (`(D<<32)/T`), so `(frac*tol)/tol` floors to `frac - 1 ULP` on any remainder, amplified by a small tolerance. Swept the dev tissue tolerances against a frac range: 559 mismatches, worst 980 ULP. The cancellation holds in real arithmetic, never in fixed point.
+- **Blocker 2 (structural, the larger one, verified against every caller):** `crate::body::Body`/`BodyPart`/`apply_insult`/`strike` are exercised ONLY by tests (body.rs `strike` at 1116, the `#[cfg(test)]` block at 1145+, and `tests/embodiment.rs`). `runner.rs`/`locomotion.rs` never construct, step, or wound a `Body`; the run path drives `Walker::body: BodyPlan` and `Walker::structure: Structure`, and homeostasis references `Body::integrity` only in doc comments. So rerouting `body.rs` is byte-neutral by construction and switches NO death path in the simulation. The "one re-pin" has no run-path accumulator home; slice 3 as scoped is test-only cleanup, not the death-path switch.
+- **Recommended re-scope (two rulings asked of the gate):** (a) put the first-passage accumulator on the body the run path steps (the `BodyPlan` organs / `Walker`/`Structure` segments the embodiment tick drives at `runner.rs step_embodiment` / `locomotion.rs`), where per-tick load-grounded insult minus funded repair accrues and the run-path INTEGRITY/death reads first passage; (b) store the damage as a normalized FRACTION rather than the lossy energy reroute (a wound adds `frac` directly; aging normalizes its per-tick net energy delta by tolerance once). Proved the fraction store bit-for-bit vs the current `sub_floor` chain (throwaway test, 0 mismatches over over-kill/tiny-ULP/long sequences, since removed).
+- **Ready to stage wherever the accumulator lands:** the three tissue fields (`wear_coefficient` + scale, `turnover_rate`), each a reserved-with-basis dev fixture; the scout's full slice-3 source map is in the task output. Held (clippy -D blocks unused fields, so they land with their consumer).
+
+Slices 1 and 2 remain pushed and gate-signed. Tree clean at HEAD c34781e; the re-pin stays held pending Agent A's keystone regardless.
+
+---
+
 ## 2026-07-10 (Agent B, cloud worker under the gate agent): R-AGING resolved as (c) first-passage, reframed and build-planned; composer/hash paused
 
 Agent B operating as a cloud worker on the multi-agent flow (gate agent mediates/manages, Agent A on perception, Agent C on environ). Branch state: `claude/lifespan-from-anatomy` (#113) carries the (c) build plan; `claude/affordance-composer` (#115) carries the composer/hash opener, PAUSED.
