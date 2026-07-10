@@ -1603,6 +1603,88 @@ mod tests {
     }
 
     #[test]
+    fn a_being_attraction_weight_steers_the_move_heading_toward_or_away_by_its_sign() {
+        // Creatures-react (mechanism B3), the CI-verified movement proof (the watchable is
+        // examples/creatures_react_demo.rs). The creature's being block carries a magnitude-graded
+        // toward-direction (its attraction pair); a heritable freely-signed weight turns it into approach
+        // (positive) or flight (negative). The SIGN is what selection sets in the world; both are checked here
+        // to prove the wire yields movement either way, and founder-zero is the inert null (neither sign
+        // privileged, Principle 9).
+        let homeo_reg = HomeostaticRegistry::dev_grazer();
+        let l = ControllerLayout::with_percepts_and_being(
+            &homeo_reg,
+            &AffordanceRegistry::dev_default(),
+            &PerceptRegistry::empty(),
+            true,
+            0,
+        );
+        let n_in = l.n_in();
+        let being_base = l.being_input_base();
+        // MOVE is output 0 (activation), heading dx/dy at outputs 1 and 2; a reaction-norm weight feeding
+        // output `o` from input `i` is at flat index `o * n_in + i`.
+        let build = |gain: Fixed| -> Controller {
+            let mut w = vec![Fixed::ZERO; l.weight_count()];
+            w[n_in - 1] = Fixed::ONE; // MOVE activation from the bias: the creature wants to move
+            w[n_in + (being_base + 2)] = gain; // MOVE heading dx follows the being-attraction dx
+            w[2 * n_in + (being_base + 3)] = gain; // MOVE heading dy follows the being-attraction dy
+            Controller::from_weights(l.n_in(), l.n_out(), l.hidden(), w)
+        };
+        let homeo = Homeostasis::from_mass(&homeo_reg, Fixed::ONE);
+        // A perceived being due EAST: the being block's attraction pair points east (dx = +1, dy = 0).
+        let being = [Fixed::ZERO, Fixed::ZERO, Fixed::ONE, Fixed::ZERO];
+        let input = l.build_input_full_with_conviction(
+            &homeo,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &being,
+        );
+        // A POSITIVE weight steers the MOVE heading TOWARD the east emitter.
+        let (out_pos, _) = build(Fixed::from_int(4)).evaluate(&input, &[]);
+        let d_pos = l
+            .decide(&out_pos, &[MOVE, INGEST])
+            .expect("the body affords MOVE");
+        assert_eq!(d_pos.affordance, MOVE, "the creature decides to move");
+        let (hx_pos, hy_pos) = d_pos.heading.expect("MOVE carries a heading");
+        assert!(
+            hx_pos > Fixed::ZERO,
+            "a positive being-weight steers TOWARD the east emitter (hunting)"
+        );
+        assert_eq!(
+            hy_pos,
+            Fixed::ZERO,
+            "no north-south component for a due-east emitter"
+        );
+        // A NEGATIVE weight steers AWAY (west) from the IDENTICAL percept: only the sign differs.
+        let (out_neg, _) = build(Fixed::from_int(-4)).evaluate(&input, &[]);
+        let d_neg = l
+            .decide(&out_neg, &[MOVE, INGEST])
+            .expect("the body affords MOVE");
+        let (hx_neg, _) = d_neg.heading.expect("MOVE carries a heading");
+        assert!(
+            hx_neg < Fixed::ZERO,
+            "a negative being-weight steers AWAY (west, fleeing) from the same percept"
+        );
+        // Founder-zero is inert: with no being-weight the heading carries no eastward pull (the null, so
+        // neither approach nor flight is privileged until selection lifts a weight).
+        let (out_zero, _) = build(Fixed::ZERO).evaluate(&input, &[]);
+        if let Some(d_zero) = l.decide(&out_zero, &[MOVE, INGEST]) {
+            if let Some((hx_zero, _)) = d_zero.heading {
+                assert_eq!(
+                    hx_zero,
+                    Fixed::ZERO,
+                    "founder-zero being-weight steers neither way (the true null)"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_controller_ingests_the_water_underfoot_when_dry() {
         let l = layout(0);
         let c = taxis_controller(&l);
