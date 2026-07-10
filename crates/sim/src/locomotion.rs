@@ -1134,6 +1134,7 @@ pub fn step_with_field_dirs<T: Terrain>(
             &material,
             attract,
             convict,
+            &[],
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;

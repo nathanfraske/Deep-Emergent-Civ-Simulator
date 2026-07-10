@@ -1049,6 +1049,15 @@ pub struct Embodiment {
     /// [`crate::learn::attraction_gradient`] into the block each tick, and only a heritable weight lifted off
     /// founder-zero by selection turns it into approach (Principle 9), the positive mirror of harm avoidance.
     attraction: bool,
+    /// Whether the controller feeds the BEING-DIRECTED input block (the being-percept keystone, step 6): a
+    /// being perceives OTHER beings (their thermal/optical emission reaching it above its own sensory
+    /// threshold) and senses the direction toward believed-rewarding emitters and away from believed-harmful
+    /// ones. FALSE by default, so the layout carries no being block and every run hash is unchanged; the
+    /// world-build opts in ([`Embodiment::set_being_percept`], which rebuilds the layout). When true, the
+    /// runner writes each being's unit being-avoidance and being-attraction directions into the block each
+    /// tick, and only a heritable FREELY-SIGNED weight lifted off founder-zero by selection turns it into
+    /// approach (predation) or avoidance (fleeing), so the approach/avoid sign emerges (Principle 9).
+    being_percept: bool,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1257,6 +1266,7 @@ impl Embodiment {
             material_percepts: MaterialPerceptRegistry::empty(),
             conviction_percepts: ConvictionPerceptRegistry::empty(),
             attraction: false,
+            being_percept: false,
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -1327,6 +1337,19 @@ impl Embodiment {
     /// harm avoidance.
     pub fn set_attraction(&mut self, enabled: bool) {
         self.attraction = enabled;
+        self.rebuild_layout();
+    }
+
+    /// Enable (or disable) the BEING-DIRECTED input block in the controller layout (the being-percept
+    /// keystone, step 6), so a being can sense the direction toward believed-rewarding perceived emitters and
+    /// away from believed-harmful ones and evolve to approach (predation) or avoid (fleeing) them. Set BEFORE
+    /// the embodiment's beings are built, exactly like [`set_attraction`], because the beings' controllers are
+    /// expressed against [`Embodiment::layout`], so a block added after they exist would leave their weight
+    /// vectors the wrong length. FALSE (the default) leaves the layout and every run hash unchanged (opt-in).
+    /// The new being weights a founder expresses are zero (unseeded, freely-signed channels), so the gradient
+    /// moves no behaviour until selection lifts a weight either way.
+    pub fn set_being_percept(&mut self, enabled: bool) {
+        self.being_percept = enabled;
         self.rebuild_layout();
     }
 
@@ -1479,6 +1502,7 @@ impl Embodiment {
             &self.material_percepts,
             self.attraction,
             &self.conviction_percepts,
+            self.being_percept,
             self.layout.hidden(),
         );
     }
