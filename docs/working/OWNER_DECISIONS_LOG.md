@@ -198,6 +198,34 @@ for the gate's whole-arc gate. The being-percept keystone that wires the percept
 estimator, the per-axis noise floor, the eligibility trace, and the packing offset, sequenced with Agent B) is
 the payoff follow-on that unblocks predation on the run path.
 
+FRAMED hunt-kill strike (the contact physics that completes predation: an approaching predator wounds prey on
+the run path), 2026-07-10 (Agent A, PR #117, PENDING gate ruling). Framed blind before any code. The section-11
+input-bias smoke test (fail-closed) BLOCKED my packet four times, each a real leak where I pre-supplied the
+derive-clean verdict (outright emergence/authoring assertions; then founder-zero and physics-floor honorifics
+with a one-axis-only defense; then law and heritable category labels; then no-run-path-code-does-X wiring
+disclosures implying the machinery was disconnected), and cleared the fifth. The section-10 blind panel (6
+panelists across 3 agent types and 3 models, 4 returned; plan-opus a transient server error, claude-fable
+safeguard-flagged the combat content) came back 4/4 significant-flaw-fixable, converging on FOUR distinct
+authoring seams my clean framing hid, each verified against source. (1) The death rule (my cumulative-damage
+accumulator plus a structural-failure threshold) is a hidden hit-point system: an authored body-level value
+outside the floor that flattens the Structure-of-Segments body into one scalar and adds a second death path.
+CORRECTED: the wound degrades the struck region's own material, impairs the physiology that region sustains,
+the reserve falls, and the ONE existing reserve-cull removes the being (matching the gate's one-currency,
+death-through-the-reserve-cull model). (2) `kinetic_energy` hardcodes the wound channel (verified: `body::strike`
+computes energy only through it), so a non-kinetic contact attack needs a rewrite. CORRECTED: an axis-dispatched
+contact-energy-transfer law selected by the acting part's own energy/material axis, kinetic the first instance,
+so a new channel is a data row. (3) The damage mode reads as a categorical dispatch (verified: `DamageModeRegistry`
+CUT/PIERCE/BLUNT/BURN passed to `apply_insult`). CORRECTED: derive the contact area and mode from the acting
+part's own geometry, so the wound-shape emerges continuously. (4) "Targeting a body" classifies the occupant as
+a `body::Body` (parts and tissues), a second body model beside the run-path `Structure` of Segments (verified:
+the Walker carries `body: BodyPlan` plus `structure: Option<Structure>`, not `body::Body`). CORRECTED: one strike
+primitive over whatever Segments occupy the cell (terrain, matter, or a being uniform), "this was combat" a
+description not a branch, with the deeper `body::Body`-to-Structure unification flagged as coupled to the
+plant-as-a-body / composition arcs, not this arc. Unchanged and sound: the strike decision is the emergent
+controller (the keystone being-percept gradient plus a founder-zero freely-signed strike-affordance weight), so
+nothing reads a species, role, or relatedness. Couples to Agent B's run-path damage state (sequence with B).
+Posted to the gate on #117 (comment 4932785384) for its ruling before any strike code.
+
 FRAMED being-percept keystone (the payoff arc: wire the percept live so predation and fleeing emerge),
 2026-07-10 (Agent A, PENDING gate ruling). Framed blind before any code. The section-11 input-bias smoke test
 (strongest model, fail-closed) BLOCKED my construction four times, each a real source-verified seam on a
