@@ -420,8 +420,19 @@ fn impact(
     // grade-path parallel of the delivery-path contact-transfer row), so an alien actuator names its own axes on
     // both paths in lockstep: the rigid strength is material-axis 0, the cross-section geometry-axis 0, the stroke
     // geometry-axis 1, and the elastic path's yield strength material-axis 1 and elastic modulus material-axis 2
-    // (the order the kernel's contract declares them). A binding that names no such axis reads zero through the
-    // accessor, so the part self-gates (the absence convention), never a hardcoded id and never a fabricated blow.
+    // (the order the kernel's contract declares them, [`CapabilityKernel::material_axes`]). A binding that names no
+    // such axis reads zero through the accessor, so the part self-gates (the absence convention), never a hardcoded
+    // id and never a fabricated blow.
+    //
+    // POSITIONAL-CONTRACT CAVEAT (a section-9 alien-lens catch, flagged for the gate-deferred named-vs-positional
+    // unification): these axes are read by POSITION, so an alien binding MUST list them in the declared order
+    // [strength, yield, modulus] and supply a zero-reading placeholder (or a strength axis it grows zero) at
+    // position 0 for a purely-springy actuator that lacks a rigid strength, NEVER omit it. A binding that omits the
+    // absent strength (writing [yield_id, modulus_id]) is mis-read positionally, yield landing in the strength slot
+    // and fabricating a rigid blow. The delivery-path row uses NAMED fields (`yield_axis`, `elastic_modulus_axis`)
+    // and is immune; unifying the grade path to named fields is the gate-deferred follow-on (fold into lifting the
+    // other five kernels' bindings), which this slice's extension to three positional material axes makes more
+    // pointed.
     let strength = material_axes.first().map(|a| mat(a)).unwrap_or(Fixed::ZERO);
     let cross_section = geometry_axes.first().map(|a| geo(a)).unwrap_or(Fixed::ZERO);
     let stroke = geometry_axes.get(1).map(|a| geo(a)).unwrap_or(Fixed::ZERO);

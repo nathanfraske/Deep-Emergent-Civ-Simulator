@@ -213,12 +213,19 @@ pub struct ContactChannelId(pub u16);
 /// the rigid limit: a part growing only the rigid axes (yield and modulus at floor-low) reads exactly the rigid
 /// `F d`, because the elastic member self-gates to zero and `MAX(F d, 0) = F d`.
 ///
-/// FLAGGED FUTURE COUPLING (the gate's slice-3 ruling, ON RECORD, not folded in): a kernel drawing a SEPARATE,
-/// INDEPENDENT reserve (an electrical discharge fuelled apart from the stroke, a second metabolic store) is
-/// ADDITIVE with the mechanical family rather than a shared path, so the MAX here UNDER-counts it. It is NOT a
-/// mechanical-family member and is NOT MAX-folded; when a world grows one it joins as a new [`TransferKernel`]
-/// variant with an additive cross-family combine, a deliberate decision. The exhaustive match below makes that
-/// unmissable: a new variant outside the mechanical arm fails to compile until its family and combine are chosen.
+/// FLAGGED FUTURE COUPLING (the gate's slice-3 ruling, ON RECORD, not folded in): the exception is keyed on the
+/// energy SOURCE being independent, NOT on the channel being non-mechanical. A kernel drawing a SEPARATE,
+/// INDEPENDENT reserve is ADDITIVE with the mechanical family rather than a shared path, so the MAX here
+/// UNDER-counts it. That independent source can be a non-mechanical channel (an electrical discharge fuelled apart
+/// from the stroke) OR a MECHANICALLY-elastic actuator charged from a pathway that is not the muscle stroke (a
+/// section-9 alien-lens catch): a turgor- or photosynthesis-charged seed-pod spring (Impatiens, the squirting
+/// cucumber), a light- or mana-charged latch, stores elastic strain energy the being did not load with a muscle
+/// stroke, so for it the elastic recoil is a second joule, not the same one the rigid `F d` carries. Such a case
+/// is NOT a shared-source mechanical-family member and is NOT MAX-folded; when a world grows one it joins as a new
+/// [`TransferKernel`] variant with an additive cross-family combine, a deliberate decision. The exhaustive match
+/// below makes that unmissable: a new variant outside the mechanical arm fails to compile until its family and
+/// combine are chosen. (Today the floor models no independent elastic-charging pathway, so the Terran case where a
+/// spring's recoil IS the loading work holds and MAX is correct; the independent-source case is the flagged gap.)
 ///
 /// The DERIVED TOOL-GEOMETRY follow-on (the arc's flagged additive payoff (b), a longer wielded tool extends the
 /// effective stroke and a heavier one the sustainable force) drops in at the CALLER, which holds the wielded
