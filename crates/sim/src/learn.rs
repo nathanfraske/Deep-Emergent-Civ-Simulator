@@ -1896,6 +1896,34 @@ mod tests {
             SEQ_HASH_MARKER,
             "a too-wide field hashes"
         );
+        // The other two width disjuncts of the envelope check, exercised so no field's overflow branch is
+        // untested: a target bucket past the 3-bit width, and a param bucket past the 3-bit width, each
+        // hashes. These are the fields the widening narrowed most (three bits), so their overflow is the
+        // one most reached in practice.
+        let wide_target = sequence_subject(&[step(1, SEQ_TARGET_MAX as i64 + 1, 0)]);
+        assert_eq!(
+            wide_target.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a target bucket past its width hashes"
+        );
+        let wide_param = sequence_subject(&[step(1, 0, SEQ_PARAM_MAX as i64 + 1)]);
+        assert_eq!(
+            wide_param.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a param bucket past its width hashes"
+        );
+        // A field exactly AT its width stays exact (the boundary is inclusive), so the hash path is entered
+        // only past the envelope, never one step early.
+        let at_edge = sequence_subject(&[step(
+            SEQ_PRIMITIVE_MAX as u16,
+            SEQ_TARGET_MAX as i64,
+            SEQ_PARAM_MAX as i64,
+        )]);
+        assert_eq!(
+            at_edge.0 & SEQ_HASH_MARKER,
+            0,
+            "every field exactly at its width still packs exactly"
+        );
         // The hash sub-band stays in the sequence band (bits 62 and 61 set) and below the landmark ids.
         assert_eq!(h.0 & SEQUENCE_SUBJECT_BASE, SEQUENCE_SUBJECT_BASE);
         assert!(h.0 < 1u64 << 63);
