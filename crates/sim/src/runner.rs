@@ -5403,6 +5403,11 @@ impl Runner {
         // is absent from `perceived_beings` (no learner), keyed only on the emitted signal and its own sense.
         // OFF (the default) inserts nothing, so it is byte-identical; the four canonical pins carry no creatures
         // regardless, and this leaves `full --creatures` unchanged until the world-build arms the flag.
+        // Shared limit (flagged, not introduced here): the creature perceives on the ONE world-declared channel
+        // and transduction the `BeingPerceptField` carries, so a creature whose sensory modality is non-thermal
+        // (electroreception, chemoreception, a mana channel) cannot yet sense as a data row; this is the SAME
+        // single-channel limit the founder path carries (see `BeingPerceptField`'s flagged per-channel and
+        // per-being follow-on), a shared substrate upgrade, not a creature-specific defect.
         if let (Some(emb), Some(world)) = (self.embodiment.as_ref(), self.world.as_ref()) {
             // Armed only where the founder path is: the creature feature on, the being block built
             // (`being_percept`), and the declared field and physiology present (the `if let` binds both).

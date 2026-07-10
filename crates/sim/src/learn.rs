@@ -754,9 +754,11 @@ pub fn perceive_being_signal(
 /// learned valence on, this returns the transduced ACTIVATION the mind-less creature's
 /// [`creature_being_direction`] weights its toward-pull by (mechanism B3, no belief, no bucket-keyed subject, no
 /// channel). The received magnitude is the same geometrically-spread reach attenuated by the medium's
-/// Beer-Lambert transmittance, transduced through the perceiver's OWN channel transduction and gated on its own
-/// threshold, so occlusion and perceptibility key on the creature's own sense exactly as the founder's do. Pure
-/// and RNG-free.
+/// Beer-Lambert transmittance, transduced through the SUPPLIED channel transduction and gated on its threshold,
+/// so occlusion and perceptibility key on that transduction exactly as the founder's perception does. The caller
+/// passes the world's DECLARED transduction (a per-species/per-world datum, matching the founder path); deriving
+/// it per creature from its sensory anatomy is the flagged shared follow-on, so "the creature's own sense" is
+/// per-species declared data today, not yet per-creature-derived. Pure and RNG-free.
 pub fn perceive_being_magnitude(
     reach: Reach,
     transduction: &ChannelTransduction,
@@ -915,9 +917,12 @@ pub fn creature_being_direction(here: Coord3, perceived: &[(Coord3, Fixed)]) -> 
                 (dx, dy)
             }
         }
-        // Unreachable for any realistic perceived population (a component would need magnitude > ~46000, tens
-        // of thousands of emitters pulling one way); the safe bounded fallback caps each component to the unit
-        // box rather than panicking. The O(N^2) perceive scan is separately capped upstream.
+        // Overflow of a component's square is UNREACHABLE for any realistic perceived population (a component
+        // would need magnitude > ~46000, tens of thousands of emitters pulling one way; the O(N^2) perceive scan
+        // is separately capped upstream). In that impossible case direction-preservation is moot, so the
+        // last-resort caps each component to the unit box: it trades the length-clamp's direction-preservation
+        // for a guaranteed bound and no panic. This is the ONLY path that clamps per-component; every reachable
+        // input takes the length-clamp above, which preserves direction.
         _ => (
             dx.clamp(-Fixed::ONE, Fixed::ONE),
             dy.clamp(-Fixed::ONE, Fixed::ONE),
@@ -1530,6 +1535,39 @@ mod tests {
             None,
             "a sub-threshold emission returns no magnitude"
         );
+        // INTERMEDIATE attenuation (0 < transmittance < 1): a partly-absorbing medium reduces the magnitude
+        // below the unoccluded value but keeps it above threshold, so the attenuation arithmetic itself is
+        // exercised (not just the full-pass and total-kill extremes). A wrong-sign or mis-scaled transmittance
+        // would land on a different activation and fail here.
+        let partial = Reach {
+            spread: Fixed::from_int(100),
+            optical_depth: Fixed::ONE, // transmittance = exp(-1) ~ 0.368, so magnitude ~ 36.8, above threshold
+        };
+        let partial_mag = perceive_being_magnitude(partial, &transduction, cap)
+            .expect("a partly-attenuated strong signal is still above threshold");
+        assert!(
+            partial_mag < expected_activation && partial_mag > Fixed::ZERO,
+            "partial occlusion reduces the magnitude below the unoccluded value but keeps it perceptible"
+        );
+        // It equals the transduced value of the explicitly attenuated magnitude, pinning the exact arithmetic.
+        let attenuated = Fixed::from_int(100)
+            .checked_mul((-Fixed::ONE).exp())
+            .unwrap();
+        assert_eq!(
+            perceive_being_magnitude(partial, &transduction, cap),
+            sense(attenuated, &transduction, cap).map(|p| p.activation),
+            "the perceived magnitude is the transduced spread times the Beer-Lambert transmittance"
+        );
+        // The magnitude perceiver and the founder subject perceiver share ONE perceptibility gate: on any reach
+        // where one perceives, so does the other, and where one is gated out, so is the other (they differ only
+        // in what they key on, the activation versus the channel-and-bucket subject).
+        for reach in [clear, occluded, faint, partial] {
+            assert_eq!(
+                perceive_being_magnitude(reach, &transduction, cap).is_some(),
+                perceive_being_signal(reach, 5, &transduction, cap).is_some(),
+                "the creature magnitude and the founder subject share the same perceptibility gate"
+            );
+        }
     }
 
     #[test]
